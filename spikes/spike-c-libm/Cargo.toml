@@ -1,0 +1,18 @@
+[package]
+name = "spike-c-libm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libm = "0.2"
+
+[profile.release]
+opt-level = 3
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "spike-c-libm"
+path = "src/main.rs"

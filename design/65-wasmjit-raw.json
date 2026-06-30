@@ -1,0 +1,282 @@
+{
+  "summary": "Spike the wasm-emit JIT / AOT-to-wasm path: generate a wasm module for a hot kernel at runtime, instantiate it in V8 (node+deno), and measure instantiate/codegen overhead, steady-state speedup vs the interpreter, and the crossover point — to decide if wasm-emit JIT is worth building for hot Luau kernels in the browser. Then adversarially verify.",
+  "agentCount": 2,
+  "logs": [
+    "Build done: ok"
+  ],
+  "result": {
+    "build": {
+      "summary": "Built the wasm-emit JIT / AOT-to-wasm path end-to-end for the grabby IAUS argmax kernel (6 actions x 4 considerations, *1.25 momentum, data-dependent inputs via a per-iteration LCG so nothing constant-folds) and measured it 4 ways in wasm-in-V8 (node v25 + deno 2.8, both V8 14.9): (1) a REAL big-match register interpreter — the actual spike-sk-rustia skeleton VM, path-depended — executing the kernel bytecode; (2) the same kernel as a plain Rust fn compiled to wasm32 (the steady-state ceiling); (3) a wasm module GENERATED AT RUNTIME with the wasm-encoder crate, compiled+instantiated in V8 and run; (4) a shared-heap variant whose generated module IMPORTS the host linear memory and routes the inputs array through that heap. All six paths produce a BIT-IDENTICAL FNV checksum (0xd385c5e57bdc3538 for seed 0x12345678) that also matches the native build, and the checksum changes per-seed (data-dependent, not folded). Results: interpreter ~803 ns/op, static-AOT ~3.38 ns/op (237x), runtime-gen naive ~10.0 ns/op (80x), runtime-gen unrolled/kind-specialized ~4.57 ns/op (176x; within 1.35x of LLVM AOT), shared-heap ~4.58 ns/op (no measurable bounds-check penalty). Fixed cost (codegen ~2.5-3.3us + sync compile ~0.65us + sync instantiate ~1.1us) ~= 4.7us. CROSSOVER = ~6 kernel-ops. Verdict: GO for grabby (called tens of millions of times -> ~176x net win, fixed cost amortized after 6 calls); CONDITIONAL for general short-lived scripts (gate JIT on call_count x interp_cost > ~5us standup).",
+      "what_built": "KERNEL: grabby IAUS f64 argmax. Given arr[0..4] in [0,1) and last action index in 0..6, for each of 6 actions compute prod of 4 curves (kind=(a+c)%3: 0=>x*x, 1=>x, 2=>1-x), apply *1.25 if a==last, argmax (strict <, first-wins). Inputs produced per-iteration by an LCG (state=state*6364136223846793005+1442695040888963407; x=(state>>11)*2^-53; last=(state>>32)%6) so the loop cannot be hoisted/constant-folded. Every path folds (best, best_v.bits) into an FNV checksum -> identical across paths == \"same kernel logic\" proof + anti-DCE.\n\nINTERPRETER PATH (1): path-depends on the ACTUAL measured skeleton crate /workspace/src/rustia/spikes/spike-sk-rustia and calls its Vm::run (NaN-boxed Value, fixed-width Instr, one big match->br_table dispatch) on build_argmax_f64() bytecode, FUEL=false (interpreter's best case, conservative for the JIT argument). Compiled to wasm32-unknown-unknown. Not the kernel inlined — a real bytecode VM.\n\nSTATIC-AOT PATH (2): kernel_aot() — the identical kernel as a plain Rust fn, compiled to wasm32 by rustc/LLVM (opt-level 3, lto). The \"ideal compiled code the engine JITs\" ceiling.\n\nRUNTIME-GENERATED PATH (3): emit_module_cfg() in src/lib.rs uses the wasm-encoder crate to BUILD a wasm binary at runtime that contains the identical driver loop + LCG input-gen + argmax kernel + checksum fold, exporting run_gen(iters,seed)->i64. Two emitters: gen_loop (action loop kept, curve-kind chosen via branchless wasm `select`) and gen_opt (both loops unrolled so kind=(a+c)%3 is a codegen-time constant and only the chosen curve is emitted — AOT-to-wasm specialization). codegen runs INSIDE the host wasm module (exported codegen_run/codegen_run_opt), i.e. codegen itself is timed in wasm-in-V8 (the in-browser scenario); it returns (ptr<<32|len) into the host's own linear memory, the JS harness reads the bytes out, then does new WebAssembly.Module(bytes)+new Instance (sync) and await WebAssembly.instantiate (async) with real timing, then runs it. Proven generated-at-runtime: bytes live above __heap_base in the host heap, start with magic 00 61 73 6d v1, WebAssembly.validate=true.\n\nSHARED-HEAP VARIANT (4): emit_module_cfg(shared=true,...) emits a module with an (import \"env\" \"memory\") and, each iteration, f64.store's the 4 generated inputs into the host heap at base+{0,8,16,24} then f64.load's them straight back (bounds-checked round-trip through the VM heap) before the kernel. Instantiated with {env:{memory: host.exports.memory}}; base = host scratch_ptr() (a [f64;16] static in the host heap). run_shared(iters,seed,base).\n\nHARNESS: harness.mjs runs in node v25 and deno (both V8). best-of-9 over ITERS=2,000,000 with 5 warmup calls (TurboFan tier-up); fixed costs are means over 4000 reps (plus best-of-500). src/main.rs is a native sanity bin that confirms interp==aot natively and writes the 4 generated .wasm files to disk.",
+      "numbers": [
+        {
+          "metric": "interp ns/op (wasm-in-V8, real register VM)",
+          "value": "802.7 ns/op",
+          "context": "node v25; best-of-9 over 2,000,000 ops; FUEL off (interpreter best case)"
+        },
+        {
+          "metric": "static-AOT ns/op (Rust->wasm32, ideal compiled)",
+          "value": "3.38 ns/op",
+          "context": "node v25; the steady-state ceiling V8 reaches for LLVM-optimized wasm"
+        },
+        {
+          "metric": "runtime-gen ns/op — UNROLLED (AOT-to-wasm style, shippable)",
+          "value": "4.57 ns/op",
+          "context": "node; emitted by wasm-encoder at runtime; 176x faster than interpreter, 1.35x of static-AOT"
+        },
+        {
+          "metric": "runtime-gen ns/op — LOOPED (naive emit, branchless select)",
+          "value": "10.05 ns/op",
+          "context": "node; 80x faster than interpreter, 2.97x of static-AOT"
+        },
+        {
+          "metric": "shared-heap ns/op (imported host memory, store+load round-trip)",
+          "value": "4.58 ns/op (unrolled) / 10.40 ns/op (looped)",
+          "context": "node; ~identical to pure-compute => NO measurable bounds-check penalty"
+        },
+        {
+          "metric": "codegen time (wasm-encoder INSIDE wasm-in-V8)",
+          "value": "~2.4 us (looped) / ~2.95 us (unrolled) / ~3.2 us (shared)",
+          "context": "node mean over 4000 calls; produces a 618-1054 byte module"
+        },
+        {
+          "metric": "compile (sync new WebAssembly.Module(bytes))",
+          "value": "~0.64-0.79 us",
+          "context": "node mean/4000; module 618-1054 bytes"
+        },
+        {
+          "metric": "instantiate (sync new WebAssembly.Instance(mod))",
+          "value": "~1.0-1.35 us",
+          "context": "node mean/4000"
+        },
+        {
+          "metric": "compile+instantiate (async WebAssembly.instantiate(bytes))",
+          "value": "~9.8-10.3 us",
+          "context": "node; ~2x the whole sync standup due to promise/microtask scheduling -> prefer sync for tiny modules"
+        },
+        {
+          "metric": "instantiate (async WebAssembly.instantiate(precompiled module))",
+          "value": "~0.9-2.0 us",
+          "context": "node"
+        },
+        {
+          "metric": "TOTAL fixed cost (codegen+sync compile+sync instantiate)",
+          "value": "~4.68 us (unrolled) / ~4.15 us (looped) / ~5.2 us (shared)",
+          "context": "one-time per JIT'd function standup"
+        },
+        {
+          "metric": "steady-state speedup interp/AOT",
+          "value": "237x",
+          "context": "node 237.5x, deno 236.8x"
+        },
+        {
+          "metric": "steady-state speedup interp/runtime-gen(unrolled)",
+          "value": "176x",
+          "context": "node 175.7x, deno 174.8x; the shippable AOT-to-wasm path"
+        },
+        {
+          "metric": "gen(unrolled)/AOT ratio",
+          "value": "1.35x",
+          "context": "runtime-gen reaches within 35% of LLVM-optimized AOT; residual = scalar hand-emit vs LLVM autovectorization"
+        },
+        {
+          "metric": "CROSSOVER",
+          "value": "~6 kernel-ops",
+          "context": "node: unrolled 6, looped 6, shared 7; deno: 6/5/7. = fixed_cost / per-op-saving"
+        },
+        {
+          "metric": "deno cross-check (V8 14.9)",
+          "value": "interp 797.5, aot 3.37, gen_opt 4.56, gen_loop 10.17, shared_opt 4.58 ns/op",
+          "context": "deno 2.8.2; within run-to-run noise of node"
+        },
+        {
+          "metric": "native sanity (aarch64 M-series, rustc/LLVM)",
+          "value": "aot ~4.7 ns/op, interp ~785 ns/op",
+          "context": "src/main.rs; cross-reference only, V8 is the deliverable"
+        },
+        {
+          "metric": "checksum (all paths, all runtimes, native)",
+          "value": "0xd385c5e57bdc3538",
+          "context": "interp==aot==gen_loop==gen_opt==shared_loop==shared_opt; node prints BigInt-signed 0x-2c7a3a1a8423cac8 == same u64; per-seed distinct (data-dependent)"
+        },
+        {
+          "metric": "generated-module sizes",
+          "value": "gen_loop 618 B, gen_opt 977 B, shared_loop 695 B, shared_opt 1054 B",
+          "context": "emitted at runtime by wasm-encoder; all WebAssembly.validate=true"
+        }
+      ],
+      "crossover_analysis": "STEADY-STATE SPEEDUP: interpreter 802.7 ns/op vs static-AOT 3.38 ns/op = 237x (the ceiling). The shippable runtime-generated (unrolled, kind-specialized) path is 4.57 ns/op = 176x over the interpreter and only 1.35x off the LLVM-AOT ceiling — i.e. runtime-emitted wasm, once V8 TurboFan-compiles it, reaches essentially compiled native speed. The naive looped emit is 10.05 ns/op = 80x. The 1.35x residual to ideal AOT is the only place gen != aot, and it is attributable to my emitter being scalar (LLVM autovectorizes/regallocs better); a production emitter could close it, but at 176x it is irrelevant to the decision.\n\nTOTAL FIXED COST (one-time per JIT'd function): codegen ~2.95us + sync compile ~0.66us + sync instantiate ~1.08us ~= 4.68us for the unrolled path (4.15us looped, 5.2us shared). Async WebAssembly.instantiate(bytes) is ~10us (worse, scheduling overhead) — for these <1.1KB modules synchronous compile is the right standup path.\n\nCROSSOVER = fixed_cost / per-op-saving. per-op saving = interp - gen = 802.7 - 4.57 = 798.2 ns. crossover = 4680 ns / 798.2 ns = 5.9 -> 6 kernel-ops. (looped: 4147/792.7=5.2->6; shared: 5201/798.2=6.5->7. deno reproduces 5-7.) So after just ~6 invocations the AOT-to-wasm path has paid back its entire codegen+compile+instantiate cost and every subsequent call is pure ~176x profit.\n\nGRABBY (the question that matters): a hot per-agent decision is called MILLIONS of times (e.g. 4000 agents x thousands of ticks = 1e7-1e8 decisions per run). Crossover at 6 means standup is amortized after the first ~microsecond of simulation. Net: for 1e7 decisions, interpreter ~= 8.0 s vs AOT-to-wasm ~= 0.046 s + ~5us standup -> ~174x wall-clock reduction on the selector. Unconditional win.\n\nGENERAL SCRIPTS: the crossover is shockingly low (6) ONLY because this kernel is compute-heavy (~800 ns interpreted). Crossover scales as ~5us / (interp_ns - 5ns). For a trivial function (interp ~20 ns) crossover ~= 5000/15 ~= 330 calls; for a function run once or twice it NEVER pays off, and JIT-ing thousands of cold one-shot functions costs more than it saves. So general scripts are CONDITIONAL: gate JIT emission on (observed call_count x per-call interpreter cost) exceeding the ~5us standup — a trivial hotness counter.",
+      "raw_evidence": "===== node v25.8.1 (out_node.json, abridged) =====\nresults.interp.ns_op       = 802.728   chk 0x-2c7a3a1a8423cac8\nresults.aot.ns_op          = 3.3804\nresults.gen_loop.ns_op     = 10.0539   bytes 618  codegen 2.434us compile_sync 0.638us inst_sync 1.075us inst_async_bytes 10.08us\nresults.gen_opt.ns_op      = 4.5695    bytes 977  codegen 2.951us compile_sync 0.655us inst_sync 1.076us inst_async_bytes 9.78us  inst_async_mod 0.93us\nresults.shared_loop.ns_op  = 10.3959   bytes 695\nresults.shared_opt.ns_op   = 4.5756    bytes 1054 codegen 3.224us compile_sync 0.754us inst_sync 1.223us\ngen_proof = { bytes_ptr_in_host_heap:1116024, heap_base:1054480, ptr_above_heap_base:true, len:618, wasm_magic:\"00 61 73 6d\", wasm_version:1, valid_module:true }\nchecksums = { interp,aot,gen_loop,gen_opt,shared_loop,shared_opt all \"0x-2c7a3a1a8423cac8\", ALL_IDENTICAL:true }\nanalysis = { steady_speedup_interp_over_aot:237.5,\n             gen_opt:{ns_op:4.5695, speedup_vs_interp:175.7, ratio_vs_aot:1.352, fixed_cost_us:4.6815, per_op_saving_ns:798.159, crossover_ops:6},\n             gen_loop:{ns_op:10.0539, speedup_vs_interp:79.8, fixed_cost_us:4.1468, crossover_ops:6},\n             shared_opt:{ns_op:4.5756, speedup_vs_interp:175.4, ratio_vs_aot:1.354, crossover_ops:7} }\n\n===== deno 2.8.2 (v8 14.9.207.2-rusty) =====\nresults_ns = { interp:797.5491, aot:3.3675, gen_loop:10.1723, gen_opt:4.5616, shared_loop:10.7845, shared_opt:4.5822 }\nanalysis   = { steady_speedup_interp_over_aot:236.8, gen_opt:{speedup_vs_interp:174.8, ratio_vs_aot:1.355, crossover_ops:6}, gen_loop:{crossover_ops:5}, shared_opt:{crossover_ops:7} }\nchecksums.ALL_IDENTICAL = true ; gen_proof identical (magic 00 61 73 6d, valid)\n\n===== native sanity (src/main.rs, aarch64) =====\nnative run_aot checksum = 0xd385c5e57bdc3538 ; native run_interp checksum = 0xd385c5e57bdc3538 ; interp==aot: MATCH\nnative aot ns/op = 4.715 ; native interp ns/op = 785.420\nemitted gen_run.wasm 618 | gen_run_opt.wasm 977 | gen_shared.wasm 695 | gen_shared_opt.wasm 1054 bytes\nNOTE: V8 BigInt-signed 0x-2c7a3a1a8423cac8 == unsigned 0xd385c5e57bdc3538 (two's complement) -> node/deno/native agree bit-for-bit.\n\n===== data-dependence + cross-path agreement (multi-seed, N=100000) =====\nseed 00000001 interp 0x775e30ac225d0b16 agree:true\nseed 00000002 interp 0x170c61e69129f3b6 agree:true\nseed 12345678 interp 0x4fe95403befe8f8c agree:true\nseed 0000dead interp 0x7fee8425cc00e783 agree:true\nseed 000f422f interp 0x07785c03dfb707ff agree:true\n(distinct per seed => not constant-folded; interp==aot==gen_opt==shared_opt for every seed)\n\n===== runtime wasm emitter (src/lib.rs, UNROLLED kernel — kind constant-folded at codegen) =====\nfn emit_kernel_unrolled(s, l) {\n  s.i64_const(0).local_set(l.best); s.f64_const(f64c(-1.0)).local_set(l.best_v);\n  for a in 0..N_ACTIONS {                 // 6 actions, fully unrolled\n    s.f64_const(f64c(1.0)).local_set(l.prod);\n    for c in 0..N_CONSID {                // 4 considerations, unrolled\n      let xc = xc_local(l, c); let kind = (a + c) % 3;   // CONSTANT at codegen\n      match kind {\n        0 => { s.local_get(l.prod).local_get(xc).local_get(xc).f64_mul().f64_mul(); }   // prod *= x*x\n        1 => { s.local_get(l.prod).local_get(xc).f64_mul(); }                            // prod *= x\n        _ => { s.local_get(l.prod).f64_const(f64c(1.0)).local_get(xc).f64_sub().f64_mul(); } // prod *= 1-x\n      }\n      s.local_set(l.prod);\n    }\n    // momentum: prod = (a==last)? prod*1.25 : prod   (a constant, last runtime -> select)\n    s.local_get(l.prod).f64_const(f64c(1.25)).f64_mul(); s.local_get(l.prod);\n    s.i64_const(a).local_get(l.last).i64_eq(); s.select(); s.local_set(l.prod);\n    // argmax (branchless)\n    s.local_get(l.best_v).local_get(l.prod).f64_lt().local_set(l.cmp);\n    s.i64_const(a).local_get(l.best).local_get(l.cmp).select().local_set(l.best);\n    s.local_get(l.prod).local_get(l.best_v).local_get(l.cmp).select().local_set(l.best_v);\n  }\n}\n// per-iteration LCG input (identical math in Rust gen_inputs() and emitted wasm):\nfn emit_input(s,l,dst){ s.local_get(l.s).i64_const(LCG_A).i64_mul().i64_const(LCG_C).i64_add()\n  .local_tee(l.s).i64_const(11).i64_shr_u().f64_convert_i64_u().f64_const(f64c(INV_2P53)).f64_mul().local_set(dst); }\n\n===== codegen-in-V8 + real instantiate timing (harness.mjs) =====\nconst cg = microK(() => codegen(), FIXED_K);                 // codegen runs INSIDE wasm; timed in V8\nconst { bytes } = readGen(codegen());                        // read emitted bytes out of HOST heap\nconst cmpSync  = microK(() => { mod = new WebAssembly.Module(bytes); }, FIXED_K);          // sync compile\nconst instSync = microK(() => { new WebAssembly.Instance(mod, imports); }, FIXED_K);       // sync instantiate\nconst instAsyncBytes = await microKAsync(async()=>{ await WebAssembly.instantiate(bytes,imports); },800); // async\nconst run = nsop(inst.exports[runName]);                     // run the JIT'd kernel, best-of-9 over 2e6",
+      "verdict": "GO for grabby; CONDITIONAL for general scripts. CROSSOVER ~= 6 kernel-ops (node: unrolled 6 / looped 6 / shared 7; deno reproduces 5-7). A wasm-emit JIT/AOT IS worth building for hot Luau numeric kernels in the browser: a kernel emitted to wasm at runtime, instantiated in V8 (~4.7us total standup: ~3us codegen via wasm-encoder + ~0.7us sync compile + ~1.1us sync instantiate), runs at 4.57 ns/op — 176x faster than the real register interpreter (802.7 ns/op) and within 1.35x of the LLVM static-AOT ceiling (3.38 ns/op). Because the fixed cost amortizes after just ~6 calls, any function called more than a handful of times nets ahead. For grabby's per-agent decision (called 1e7-1e8 times/run) this is an unconditional ~176x win on the selector with the standup cost vanishing into the noise. For general/short-lived scripts it is CONDITIONAL: the 6-op crossover only holds for compute-heavy kernels; trivial or run-once functions may never repay the ~5us standup, so gate JIT emission behind a hotness counter (emit when observed call_count x per-call interp cost > ~5us). The shared-heap (imported host memory) variant shows JIT'd code can touch the VM heap with NO measurable bounds-check penalty (4.58 vs 4.57 ns/op).",
+      "caveats": [
+        "The 802.7 ns/op interpreter is the REAL spike-sk-rustia VM but run with FUEL OFF (best-case interpreter). With the deterministic fuel meter on it is slower, so the JIT win and crossover are if anything understated — this choice is conservative for the GO verdict.",
+        "runtime-gen(unrolled) is 4.57 ns vs static-AOT 3.38 ns = 1.35x gap; runtime-gen is NOT bit-for-bit as fast as LLVM AOT. Residual is my scalar hand-emitter vs LLVM autovectorization/register allocation. A production emitter could narrow it (e.g. SIMD), but at 176x over the interpreter it does not affect the decision.",
+        "All ns/op include the per-iteration LCG input-gen (~few ns), identical across paths. It cancels in the per-op SAVING (so crossover is unaffected) and only inflates the absolute AOT/gen ns/op slightly (conservative for the speedup ratio).",
+        "Crossover counts ONLY codegen+compile+instantiate. It excludes the engineering cost of building the Luau->wasm compiler, and the runtime cost of hotness detection, type guards, and deopt/bailout. This kernel is monomorphic f64; real Luau is dynamically typed, so a real JIT needs guard+fallback paths that add per-op overhead not modeled here.",
+        "Speedups are representative of NUMERIC hot loops (exactly grabby's IAUS argmax). Polymorphic / table-heavy / string-heavy Luau will not reach 3-5 ns/op and the crossover rises accordingly.",
+        "Synchronous new WebAssembly.Module is ideal here because modules are <1.1 KB; browsers discourage large synchronous main-thread compiles. Async WebAssembly.instantiate(bytes) measured ~10us (2x the sync standup) due to promise scheduling. For big emitted modules, compile off the main thread.",
+        "Measured on Apple M-series under node v25 / deno 2.8 (both V8 14.9). JSC (Safari) and SpiderMonkey (Firefox) will differ in absolute numbers, but the structural result (emitted wasm -> ~native after a ~microsecond standup) is engine-independent.",
+        "The shared-heap variant round-trips inputs through the host heap once per iteration (store+reload, bounds-checked) and showed no penalty; a kernel doing heavy random-access heap traffic could surface a small bounds-check cost not captured by this access pattern."
+      ],
+      "confidence": "high",
+      "artifacts": [
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/src/lib.rs",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/src/main.rs",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/harness.mjs",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/Cargo.toml",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/out_node.json",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/out_deno.json",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/target/wasm32-unknown-unknown/release/spike_wasmjit.wasm",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/gen_run.wasm",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/gen_run_opt.wasm",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/gen_shared.wasm",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/gen_shared_opt.wasm"
+      ]
+    },
+    "verify": {
+      "numbers_verdict": "CONFIRMED",
+      "honesty_check": "REAL interpreter: run_interp_impl (lib.rs:117) runs build_argmax_f64() bytecode through spike_sk_rustia::Vm::run::<false> (spike-sk-rustia/src/lib.rs:416-554) — a genuine register VM with one big `match i.op` dispatch over fixed-width 8-byte Instr and NaN-boxed Value, NOT the kernel inlined as Rust. The bytecode (lib.rs:276-336) realizes the identical kernel as kernel_aot (6 actions x 4 considerations, kind=(a+c)%3 -> {x*x, x, 1-x}, *1.25 if a==last, argmax strict< first-wins). REAL runtime wasm generation: harness.mjs calls host exports codegen_run/codegen_run_opt/codegen_shared(_opt) which run emit_module_cfg (lib.rs:362, wasm-encoder crate) INSIDE the host wasm module, returns (ptr<<32|len) into HX.memory.buffer; harness reads bytes out (readGen), then `new WebAssembly.Module(bytes)` + `new WebAssembly.Instance(mod,imports)` + runs inst.exports[run_gen/run_shared]. emit_module_cfg rebuilds the module from scratch on every call (Module::new + all sections) so codegen cost is genuinely re-incurred each microK iteration. NOT loading a prebuilt .wasm: the only readFileSync in harness.mjs is HOST_WASM (line 31); the on-disk gen_*.wasm files are written solely by main.rs (gencheck bin) for inspection and are never read by the harness. Instantiate timing is real: new WebAssembly.Instance(mod,imports) called in a 4000-rep microK loop (mean) + 500-rep best; async paths via WebAssembly.instantiate. Same kernel + data-dependent across all paths PROVEN by bit-identical FNV checksum 0xd385c5e57bdc3538 across interp/aot/gen_loop/gen_opt/shared_loop/shared_opt AND native (V8 prints BigInt-signed 0x-2c7a3a1a8423cac8; I verified (-0x2c7a3a1a8423cac8)&0xFFFFFFFFFFFFFFFF == 0xd385c5e57bdc3538). Anti-DCE/anti-fold: inputs from per-iteration LCG keyed on runtime seed param (gen_inputs lib.rs:48 and emit_input/emit_last in generated wasm use identical LCG_A/LCG_C/INV_2P53 constants); checksum returned from each fn and stored/printed; black_box wraps native run inputs+outputs (main.rs:26-29). gen_proof confirms generated bytes live above __heap_base, magic 00 61 73 6d, version 1, WebAssembly.validate=true. Inspected: spike-wasmjit/src/lib.rs, src/main.rs, harness.mjs, Cargo.toml, and spike-sk-rustia/src/lib.rs.",
+      "reproduced_numbers": [
+        {
+          "metric": "interp ns/op (node v25, real register VM)",
+          "claimed": "802.7",
+          "reproduced": "805.7 (also 804.5 on a 2nd run)"
+        },
+        {
+          "metric": "static-AOT ns/op (node)",
+          "claimed": "3.38",
+          "reproduced": "3.38"
+        },
+        {
+          "metric": "runtime-gen UNROLLED (gen_opt) ns/op (node)",
+          "claimed": "4.57",
+          "reproduced": "4.56"
+        },
+        {
+          "metric": "runtime-gen LOOPED (gen_loop) ns/op (node)",
+          "claimed": "10.05",
+          "reproduced": "10.14"
+        },
+        {
+          "metric": "shared-heap unrolled ns/op (node)",
+          "claimed": "4.58",
+          "reproduced": "4.58"
+        },
+        {
+          "metric": "steady-state speedup interp/AOT (node)",
+          "claimed": "237x",
+          "reproduced": "236-238x"
+        },
+        {
+          "metric": "speedup interp/gen_opt (node)",
+          "claimed": "176x",
+          "reproduced": "176.1x"
+        },
+        {
+          "metric": "gen_opt/AOT ratio (node)",
+          "claimed": "1.35x",
+          "reproduced": "1.34x"
+        },
+        {
+          "metric": "total fixed cost unrolled (codegen+sync compile+sync inst, node)",
+          "claimed": "~4.68us",
+          "reproduced": "4.72us (codegen 3.00 + compile 0.67 + inst 1.05)"
+        },
+        {
+          "metric": "CROSSOVER ops (node: opt/loop/shared)",
+          "claimed": "6/6/7",
+          "reproduced": "6/6/7"
+        },
+        {
+          "metric": "generated module sizes (bytes)",
+          "claimed": "618/977/695/1054",
+          "reproduced": "618/977/695/1054"
+        },
+        {
+          "metric": "native sanity aot/interp ns/op (aarch64)",
+          "claimed": "4.715 / 785.4",
+          "reproduced": "4.753 / 820.4"
+        },
+        {
+          "metric": "checksum all paths+native",
+          "claimed": "0xd385c5e57bdc3538",
+          "reproduced": "0xd385c5e57bdc3538 (native) == 0x-2c7a3a1a8423cac8 (V8), ALL_IDENTICAL=true"
+        },
+        {
+          "metric": "deno gen_opt ns/op",
+          "claimed": "4.56",
+          "reproduced": "5.24 (higher under my run; crossover still 6)"
+        },
+        {
+          "metric": "deno interp/aot ns/op",
+          "claimed": "797.5 / 3.37",
+          "reproduced": "802.2 / 3.64"
+        }
+      ],
+      "crossover_check": "Re-derived from my reproduced node numbers. per-op saving (unrolled) = interp - gen_opt = 805.7 - 4.56 = 801.1 ns; fixed cost = 4.72us; crossover = 4720/801.1 = 5.9 -> 6 ops. Looped: 805.7 - 10.14 = 795.6 ns saving, fixed 4.22us -> 4216/795.6 = 5.3 -> 6. Shared unrolled: saving ~801 ns, fixed 5.44us -> 6.8 -> 7. Deno reproduced 6/6/7 too (gen_opt slower at 5.24 but saving still ~797, fixed ~4.7 -> still ~6). The ~6-kernel-op crossover and the GO verdict hold. Note crossover is intrinsically driven by the ~800ns interpreted cost of this compute-heavy kernel; it counts only codegen+compile+instantiate and excludes compiler-engineering, hotness detection, and (for real dynamically-typed Luau) guard/deopt overhead — correctly flagged in the spike's own caveats.",
+      "discrepancies": [
+        "deno gen_opt reproduced at 5.24 ns/op vs claimed 4.56 (and shared_opt 5.23 vs 4.58); deno aot 3.64 vs 3.37. Higher under my run, likely background load on the M-series box. Does not change the verdict: deno crossover still 6/6/7, speedup still >150x. Node numbers reproduced essentially exactly.",
+        "Interpreter is measured with FUEL=false (fuel meter off) = interpreter best case. This is conservative for the JIT-wins argument (real fueled interp is slower, so the win/crossover is understated), and is explicitly disclosed in the spike caveats — not a cheat.",
+        "runtime-gen is 1.34-1.35x slower than LLVM static-AOT (scalar hand-emit vs LLVM autovectorization/regalloc); the spike correctly states gen != aot bit-for-bit and that it is irrelevant at 176x. Honest, not a discrepancy in claims.",
+        "Cosmetic: the 4 on-disk gen_*.wasm files could mislead a reader into thinking the harness loads them; it does not (harness only reads HOST_WASM and regenerates bytes in-VM). The .wasm files are inspection artifacts from the gencheck bin."
+      ],
+      "overall": "GO verdict is sound and reproduces. The spike honestly demonstrates that a Luau numeric hot kernel emitted to wasm at runtime (via wasm-encoder, codegen timed inside wasm-in-V8) and instantiated synchronously in V8 reaches ~4.57 ns/op — 176x faster than the real register-VM interpreter (805 ns/op) and within 1.35x of the LLVM static-AOT ceiling (3.38 ns/op) — for a one-time standup of ~4.7us (codegen ~3 + sync compile ~0.7 + sync instantiate ~1.05). Crossover is ~6 kernel-ops, confirmed by my re-derivation on both node and deno. Bit-identical FNV checksum across all 6 paths + native, data-dependent per-seed, is solid proof of same-kernel + anti-DCE. Single most important takeaway for the design: for grabby's per-agent decision (called 1e7-1e8x/run) the ~4.7us standup vanishes after ~6 calls and the wasm-emit JIT is an unconditional ~176x win on the selector; the ONLY load-bearing caveat for the broader Luau target is that this kernel is monomorphic f64 compute — real dynamically-typed Luau needs type guards + deopt/fallback paths whose per-op cost is NOT modeled here, so gate emission behind a hotness counter (call_count x interp_cost > ~5us) and expect the crossover/speedup to degrade for polymorphic/table/string-heavy code."
+    }
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Build"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Verify"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "wasmjit-build",
+      "phaseIndex": 1,
+      "phaseTitle": "Build",
+      "agentId": "a1fb69efc2845e5bf",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782813119589,
+      "queuedAt": 1782813119580,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Built the wasm-emit JIT / AOT-to-wasm path end-to-end for t…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto in the deterministic game sim at\n/workspace/src/grabby-aliens, public-bound at full Luau parity. MEASURED so far: a real interpreter (the\nwalking skeleton at /workspace/src/rustia/spikes/spike-sk-rustia, a NaN/tagged-value big-match->br_table register VM)\nruns grabby IAUS kernel at ~0.93us native / ~0.99us wasm-in-V8 (~5x k…",
+      "lastProgressAt": 1782814435424,
+      "tokens": 152696,
+      "toolCalls": 46,
+      "durationMs": 1315835,
+      "resultPreview": "{\"summary\":\"Built the wasm-emit JIT / AOT-to-wasm path end-to-end for the grabby IAUS argmax kernel (6 actions x 4 considerations, *1.25 momentum, data-dependent inputs via a per-iteration LCG so nothing constant-folds) and measured it 4 ways in wasm-in-V8 (node v25 + deno 2.8, both V8 14.9): (1) a REAL big-match register interpreter — the actual spike-sk-rustia skeleton VM, path-depended — execut…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "wasmjit-verify",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "aef662b7a49b5b254",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782814435434,
+      "queuedAt": 1782814435425,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "CONFIRMED",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto in the deterministic game sim at\n/workspace/src/grabby-aliens, public-bound at full Luau parity. MEASURED so far: a real interpreter (the\nwalking skeleton at /workspace/src/rustia/spikes/spike-sk-rustia, a NaN/tagged-value big-match->br_table register VM)\nruns grabby IAUS kernel at ~0.93us native / ~0.99us wasm-in-V8 (~5x k…",
+      "lastProgressAt": 1782814617202,
+      "tokens": 57005,
+      "toolCalls": 14,
+      "durationMs": 181768,
+      "resultPreview": "{\"numbers_verdict\":\"CONFIRMED\",\"honesty_check\":\"REAL interpreter: run_interp_impl (lib.rs:117) runs build_argmax_f64() bytecode through spike_sk_rustia::Vm::run::<false> (spike-sk-rustia/src/lib.rs:416-554) — a genuine register VM with one big `match i.op` dispatch over fixed-width 8-byte Instr and NaN-boxed Value, NOT the kernel inlined as Rust. The bytecode (lib.rs:276-336) realizes the identica…"
+    }
+  ],
+  "totalTokens": 209701,
+  "totalToolCalls": 60
+}

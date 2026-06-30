@@ -1,0 +1,15 @@
+# Koto equivalent of generic_iteration: for-in over list + map. unit = list(32)+map(5)+list(32) pass.
+export f = |n|
+  acc = 0
+  items = []
+  for i in 1..=32
+    items.push i * i
+  hashmap = {a: 1, b: 2, c: 3, d: 4, e: 5}
+  for _ in 0..n
+    for v in items
+      acc += v
+    for k, v in hashmap
+      acc += v
+    for v in items
+      acc += v
+  acc

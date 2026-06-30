@@ -1,0 +1,691 @@
+{
+  "summary": "Adversarial multi-lens review of the rustia architecture ADR before locking it, in parallel with P0 (implement + measure the fused IAUS superinstruction — the one projected, not-yet-measured claim), then synthesize prioritized changes + a lock verdict",
+  "agentCount": 7,
+  "logs": [
+    "Review lenses: 5/5; P0=ok"
+  ],
+  "result": {
+    "synth": {
+      "lock_verdict": "LOCK-WITH-CHANGES",
+      "p0_outcome": "HOLDS as a number, decisively, AND on the very mechanism three lenses warned about. P0 added maximal-fusion superinstructions (OP_UTIL_F64/OP_UTIL_Q16, spike lib.rs ~24/25) that collapse grabby's entire 4-consideration curve+product loop AND the momentum step into ONE native opcode. Result: ~0.204us native, ~0.237us node-V8 / ~0.245us deno-V8 wasm — all under the 0.5us target and under the 0.73us reference-Luau bar — with the fuel meter ~free and the Q16.16 golden 0x31c6ec2734ea6fa2 reproducing bit-identically on native+node+deno through the fused op. So the 'is the last mile even reachable, and is fusion determinism-safe' risk (risk-register row 1) is genuinely retired. BUT the number holds precisely because the kernel math is now hand-written Rust inside one opcode: dispatch fell 320->35 (9.1x), 'far past the projected ~3x' (ADR §0:22), and VM-argmax isolation contributes only ~0.06-0.078us — the rest of the 0.204us is the fixed Rust kernel any selector pays. P0's own caveat concedes this is 'MAXIMAL fusion... the strong form the prompt sanctioned'; a conservative per-consideration MAC keeping the loop would land between base and this. That is exactly the perf-lens critical finding: 0.93->0.5 requires collapsing the inner loop into host Rust, which is grabby's kernel moved back into the host wearing an opcode costume — a KERNEL-SPECIFIC best case that does not generalize to arbitrary scripts. Net for the axes: AXIS A (dispatch) direction is VALIDATED and lockable — match->br_table + superinstructions is fast, wasm-portable, and fusion-determinism-safe. AXIS B (value-repr) is NOT validated by this number and its final heap layout must stay unlocked: the f64 hot path is still canon-OFF (num_canon dead at lib.rs:119-130), the golden ran the integer Q16 path not the f64 path, and tables/strings/closures/GC write-barriers/real call_indirect host calls are still 0% exercised. P0 cleared its bar and simultaneously confirmed the framing must change: relabel 0.93/0.5us as fixed-leaf-kernel-only, not general-Luau 'beat reference.'",
+      "prioritized_changes": [
+        {
+          "change": "Reframe the headline perf claims (§0:11,22-24; §4-P0:121-123) as FIXED-LEAF-KERNEL-ONLY. State explicitly that 0.93us and the P0 ~0.204us are heap-free/call-free/canon-off scalar-kernel numbers reached via kernel-shaped maximal fusion (OP_UTIL collapsing the consideration loop into native Rust; VM-argmax isolation only ~0.078us), that the general-script number is unmeasured, and that the honest general-script target is parity-with-reference (~0.7us) until a non-kernel-shaped superinstruction set is benched. Drop unqualified 'beat reference Luau.'",
+          "severity": "critical",
+          "rationale": "Raised by perf-lens (critical, strongest objection) and is the literal headline of the ADR. P0 HELD the number but its own caveat confirms it is kernel-specific; presenting it as a general-script win mis-states what is proven and would lock a false premise."
+        },
+        {
+          "change": "Make per-op NaN canonicalization a documented SOUNDNESS invariant of the NaN-box, not just a determinism rule (§B:58-64, §E:84-85, §3.3). The tag space (QNAN=0x7ffc..., is_num = (bits & QNAN)!=QNAN, lib.rs:96-134) overlaps valid IEEE/wasm-nondeterministic-payload NaNs, which can alias as nil/bool/int/heap-handle. Wire num_canon (currently dead, lib.rs:119-130) into EVERY f64-producing op and re-measure that canon-ON f64 path as the real perf number. Split the two canonicalizations: NaN-collapse at every f64 ingress, -0.0-collapse ONLY at table-key normalization (per-op -0.0 canon breaks Luau 1/-0.0=-inf sign-of-zero, a priority-#4 compat bug).",
+          "severity": "critical",
+          "rationale": "Three lenses (perf, determinism x2, wasm) converge; determinism-lens escalates it to a soundness bug. P0 did NOT touch it — the P0 golden is the integer Q16 path. No measured path is simultaneously fast, in-VM, f64, and bit-deterministic until this is done."
+        },
+        {
+          "change": "Do NOT lock axis B's final heap layout or the 'wasm at parity / priority-3 satisfied' conclusion (§2-B:58-64, §2-A:50-56, §0:11). Gate them on a P1 re-measurement exercising the real heap surface — tables/strings/closures, gc-arena write barriers live, real call_indirect host fns/closures/metamethods, canon-ON f64 — on native AND a real second engine (JSC, since iOS/WKWebView is the named mobile target and is 100% uncovered; ideally SpiderMonkey too). Move this from the §5 'measure at P1/P4' risk lines to an explicit pre-lock revisit gate on 2A/2B.",
+          "severity": "critical",
+          "rationale": "perf (high: do-not-lock B), wasm (critical: JSC/iOS uncovered + high: call_indirect is the slow path 2A names but the skeleton hardcodes as inlined match arms), gc-send (heap surface). The 'full-VM wasm tax 1.03-1.09x' (§0:20) is a scalar-core number presented as a full-VM number."
+        },
+        {
+          "change": "Run a gc-arena embedding-API spike reproducing grabby's REAL shape before locking D/H: hold an exported closure/table handle across several GC cycles, call it per-tick (the KotoSelector store-handle-then-call pattern), and serde-out a RETAINED value to ScenarioSpec OUTSIDE arena.mutate. Choose and cost the boundary representation (DynamicRoot vs deep-copy). Re-state the Send invariant (§D:79-82) as 'no RETAINED metrics/Gc handle crosses a thread boundary,' and promote miri + loom of the unsafe-impl-Send move path from a §5 P4 mitigation to a P0/P1 gate.",
+          "severity": "high",
+          "rationale": "gc-send (critical + high, strongest objection) and api-dx (high, strongest objection). This is the one axis with zero spike coverage, it lands on priority-#1's hot path under the branded 'gc lifetime, and the existing gc-arena spike does all serde INSIDE mutate — sidestepping the exact retain-then-serde pattern grabby needs (C4, constraints:54-56)."
+        },
+        {
+          "change": "Correct §H:105 and §4-P3. (a) Replace 'zero-friction grabby migration' with honest scope: grabby's scripts are a different LANGUAGE (Koto) with no Luau equivalent for export{...}/exports().get() — every .koto script must be rewritten to Luau and exports() redefined as 'the table the chunk returns.' (b) Demote the batched decide-N API from 'mandatory scaling lever' to an optional P4 optimization; keep the scalar single-decision call as the v1 contract.",
+          "severity": "high",
+          "rationale": "api-dx (two high findings). Batched decide-N contradicts the project's own measurement (FFI entry ~4%, VM execution dominates, 15-gapclose:24) and does not compose with grabby's scalar Selector::select + per-agent ChaCha8/eps-greedy."
+        },
+        {
+          "change": "Define fuel cost at the SEMANTIC/source level (charge per logical Luau op, independent of fusion) or pin a versioned fuel cost table, and document that changing fusion is a fuel-ABI break (§3.4, §G:96-100). Make fuel exhaustion a distinct error result, not the silent Value::nil it returns today (lib.rs:435-437).",
+          "severity": "high",
+          "rationale": "perf + determinism (2 lenses), now concretely live: P0 actually shipped fused ops cutting dispatch 320->35, so a fused op at 1 fuel replacing 8 ops moves the trap point. Cross-arch determinism is preserved; cross-VERSION golden/limit reproducibility is not, unless fuel is fusion-invariant."
+        },
+        {
+          "change": "Write a real GC-determinism spec in §3/§D: collection driven ONLY by the deterministic instruction counter (never allocation byte-debt or memory pressure), each trigger forces a FULL collection to completion (no observable partial incremental state), decoupled from the embedder's fuel/execution-limit knob; and either forbid weak tables (__mode) + collectgarbage in the deterministic sim profile or add a cross-arch golden that survives a collection and hashes surviving entries on native AND wasm.",
+          "severity": "high",
+          "rationale": "determinism (critical) + gc-send (medium). gc-arena is incremental/byte-debt-driven and object sizes differ 64-bit native vs 32-bit wasm, so equal instruction counts can sit at different mark-progress points; weak-table contents and collectgarbage are the GC-observability hazards §D omits (it only credits 'no __gc finalizers')."
+        },
+        {
+          "change": "Extend the cross-arch golden to actually exercise the f64 path (0/0, inf-inf, sqrt(-1), 0*inf, -0.0) — today only the integer Q16 path is golden-tested. Enumerate every f64->Value ingress in §3 (arith, FORNLOOP, host-fn return, serde-in C4, tonumber/coerce, numeric literal, constant fold) and require canon at each; state that the compiler's constant folder uses the SAME pinned libm + canon as the VM (it is on the bit-parity-critical path because hot-reload = re-eval recompiles per platform).",
+          "severity": "medium",
+          "rationale": "determinism (multiple) + perf. The f64 VM determinism claim currently has zero direct test coverage; Spike C's 0x4fcaf3... is a standalone libm sweep, not the VM."
+        },
+        {
+          "change": "Add explicit wasm sections to priority 3: (a) browser threading — Web Workers have separate linear memories, the gc-arena 'move whole VM' Send model is native-only, SAB/COOP-COEP is often unavailable on iOS WKWebView, so re-derive the thousands-of-agents/5ms budget under likely single-thread-in-browser; (b) grows-only linear memory + GC fragmentation + no return-to-OS makes priority-#2 worse in wasm; (c) a wasm binary/download-size budget and a superinstruction code-size-vs-engine-optimizing-threshold tradeoff note (real 70-90-opcode br_table on V8 vs JSC).",
+          "severity": "medium",
+          "rationale": "wasm-lens (several mediums). The N-VM scaling model (C2) and Send justification (2D) are silently native-only; none of the browser memory/threading/size realities are in the ADR."
+        },
+        {
+          "change": "Frontend/compat cleanups: restate §F:92-94 as 'fully PARSE the Luau type grammar, do not typecheck' (generics/type-packs/f<a,b>(c) disambiguation are real parser work on the LSP-DX critical path) and fuzz/diff the parser vs full_moon in CI from P1; split the §5 byte-compat risk (raise tostring-formatting, ADD the missing string.format, pin pattern char-classes %a/%l/%u to ASCII/C locale, downgrade PCG32 to low); specify floored modulo (Rust % is truncated, Lua/Luau is floored — lib.rs:460,464) and comparison-based math.min/max; add a risk row tracking distance-to-full-Luau (metatables/require/string.format/os/utf8/vector); keep an O0 compile mode so the heavier fusion+regalloc pipeline doesn't regress hot-reload latency.",
+          "severity": "low",
+          "rationale": "api-dx + determinism low/medium findings. Individually minor but each is a concrete correctness/compat (priority #4) or DX item that is cheap to fold in now and embarrassing to discover at P3."
+        }
+      ],
+      "cross_lens_themes": [
+        "[perf + determinism + wasm] No measured path is simultaneously fast, in-VM, f64, and bit-deterministic: the fast f64 hot path uses non-canon Value::num (num_canon dead at lib.rs:119-130), the golden 0x31c6ec... only ever ran the integer Q16 path (tick_vm_q16), and the NaN-box tag space (QNAN=0x7ffc...) overlaps valid IEEE/wasm-nondeterministic NaNs — so per-op NaN canon is a SOUNDNESS requirement, not just determinism, and P0 did not change this.",
+        "[perf + wasm + gc-send + determinism] The heap surface is 0% modeled — no tables/strings/closures/metatables/method-dispatch and no gc-arena write barriers — so 0.93us and P0's 0.204us transfer only to a fixed scalar leaf kernel, not to general Luau; the dominant general-script costs are entirely unmeasured.",
+        "[gc-send + api-dx] The branded 'gc lifetime makes the koto-compat retain-then-serde embedding pattern (priority #5) potentially costly/unergonomic on priority-#1's hot path, and it is the single axis with zero spike coverage; the existing gc-arena spike does all serde inside mutate, sidestepping grabby's actual retain-an-export-then-deserialize shape.",
+        "[wasm + perf] call_indirect for real host fns, Lua closures, and metamethods is the wasm slow path that decision 2A itself names, but the skeleton (and P0's OP_UTIL) hardcode host calls as inlined match arms, so every measured wasm number understates real-VM cost on exactly the hot call sites.",
+        "[perf + determinism] Fuel accounting is not invariant under superinstruction fusion: cross-arch determinism holds but cross-VERSION golden/limit reproducibility breaks once the fusion set changes — now concrete because P0 actually shipped fused ops cutting dispatch 320->35.",
+        "[determinism + gc-send] Weak tables (__mode) and collectgarbage GC-observability versus bit-for-bit determinism is absent from the §3 spec, despite being the primary collection-timing hazard once __gc finalizers are excluded."
+      ],
+      "residual_risks": [
+        "General-script perf is fundamentally unknown until the heap + call_indirect + canon-on path is measured; there is a real chance the honest target for non-kernel scripts collapses to parity-with-reference (~0.7us), not 'beat' — P0 proved only the kernel best case.",
+        "JSC (iOS/WKWebView — the named mobile target) and SpiderMonkey are 100% uncovered for BOTH perf and determinism; a JSC NaN-payload divergence or br_table-lowering difference at the real 70-90 opcode count could force revisiting interlocked decisions 2A and 2B after lock.",
+        "gc-arena has no cheap arena snapshot, so rollback of GC-heap state (24-deep ring, <=1ms) is likely infeasible; this may have to become a hard constraint ('all rollback-relevant state stays host-columnar') or re-open the slotmap-vs-gc-arena decision (slotmap gives O(1) Vec-clone snapshots and is Send-free).",
+        "The unsafe impl Send underpinning the entire N-VM threading model is validated only by one happy-path spawn-and-join; soundness is an argument, not a compiler/miri/loom proof.",
+        "Priority #2 (low memory) still has zero measurement — no live per-VM RSS number, GcBox per-object header overhead unquantified, string interning/SSO unmodeled, and wasm grows-only memory makes it strictly worse than native.",
+        "Shared Arc<Program> bytecode cannot hold per-arena Gc string/table constants, so the constant-pool representation (Arc<str> host leaves vs per-VM materialization) and its equality/hashing seam is unresolved and will surface the moment real string constants exist.",
+        "Even with cross-arch determinism solved, cross-VERSION reproducibility of grabby's golden/limit tests remains a fuel-ABI hazard as the superinstruction set evolves through P4."
+      ],
+      "smallest_first_deliverable": "A thin end-to-end vertical slice that runs a minimal REAL Luau subset (return-a-table + one closure + numeric-for + arithmetic + one registered host fn) through the REAL embedding API and serde bridge — NOT another superinstruction. Concretely it must, in one artifact: (1) execute through the gc-arena heap with the NaN-box heap path live (a table and a string), so tables/strings/closures and at least one GC write barrier are exercised; (2) wire num_canon into every f64-producing op (canon-ON) and reproduce a cross-arch golden hash on native AND V8, ideally JSC; (3) make a host call through real dyn-Fn/function-table indirection (real call_indirect), not an inlined match arm; (4) hold an exported handle across a forced GC cycle and serde-deserialize that RETAINED value into a Rust struct OUTSIDE mutate (grabby's exports().clone() -> ScenarioSpec shape), measuring the DynamicRoot-vs-deep-copy boundary cost. This single slice simultaneously attacks the top four cross-lens themes (canon-on/NaN-box soundness, the unmodeled heap surface, the gc-arena retain-then-serde API cost, and real call_indirect) and validates priorities #4 and #5 — far more de-risking per unit effort than P0 was. Now that P0 has retired the 'is the perf reachable' risk, this is the highest-leverage next deliverable and should be a co-equal pre-lock gate for axes B/D/H."
+    },
+    "reviews": [
+      {
+        "lens": "perf-and-correctness",
+        "result": {
+          "lens": "perf-and-correctness",
+          "findings": [
+            {
+              "severity": "critical",
+              "category": "correctness",
+              "issue": "The only MEASURED rustia datapoint (0.93 us, ADR §0 table line 17) is SLOWER than the reference-Luau bar it must beat (0.73 us, same table). The headline 'reach/beat reference Luau' (ADR:22-24) and the ≤0.5 us goal (P0, ADR:121-124) rest entirely on ONE unmeasured superinstruction. Arithmetically this is implausible as stated: Spike D puts decode/dispatch at ~29% of cost (ADR/15-gapclose Spike D table); eliminating 100% of dispatch from 0.93 us floors at ~0.66 us. A superinstruction removes inter-op dispatch, NOT the FP multiplies/curve evals themselves, so 0.93->0.5 (a 46% cut) requires collapsing the inner consideration loop into hand-written Rust — which is moving grabby's kernel back into the host, the exact thing scripted AI is meant to avoid, and it does not generalize to arbitrary scripts.",
+              "recommendation": "Reframe ≤0.5 us as a kernel-specific best case, not a general-script number. Before locking dispatch(A)/value(B), require P0 to report (a) the fused number AND (b) a general-script microbench with no kernel-shaped fusion. If a generic superinstruction set only reaches ~0.66-0.73 us, accept parity-with-reference as the honest target and stop claiming 'beat'."
+            },
+            {
+              "severity": "high",
+              "category": "gap",
+              "issue": "The headline 0.93/0.99 us is for a heap-free, call-free, GC-free LEAF kernel. The skeleton has a fixed 24-register file + 8-slot array (lib.rs:206-207), no call frames, no closures/upvalues, no tables, no strings, no metatables, and zero GC write barriers. OP_AGET is unchecked fixed-array indexing (lib.rs:509-512), OP_CALL is a hardcoded 2-arg host switch (lib.rs:535-550), OP_RET just exits the loop (lib.rs:526). These omitted surfaces (table hashing/__index chains, string interning, closure/upvalue access, gc-arena barriers on every heap store) are precisely the DOMINANT costs in general Luau scripts. The ADR concedes this (risk row 2, ADR:146; §B 'Note (open)', ADR:62-64) yet still presents 0.93 us as the architecture's perf evidence.",
+              "recommendation": "Do NOT lock value-repr (B) or dispatch (A) on this number. P1 must add a table-heavy + string + closure-call microbench and re-measure native AND wasm with GC barriers live. Treat 0.93 us as 'scalar core only' in all downstream synthesis; the general-script number is currently unknown and likely several-fold higher."
+            },
+            {
+              "severity": "high",
+              "category": "contradiction",
+              "issue": "ADR §0 claims '4-6x faster than koto ... while holding bit-for-bit determinism', but the FAST number and the DETERMINISTIC number come from two DIFFERENT programs. The 0.93 us path (tick_vm_realistic, lib.rs:835-863) is f64 using the NON-canonicalizing Value::num in every NADD/NMUL/NMOD/FORNLOOP (lib.rs:449-506). The canonicalizing num_canon (lib.rs:122) is defined but DEAD — never called. The golden 0x31c6...path (tick_vm_q16, lib.rs:868-895) reproduces determinism only because it routes all real math through host fxmul/curve calls (integer compares), exercising no f64 arithmetic determinism at all. ADR §E (ADR:84-87) mandates 'canonicalize NaN payload + -0.0 at f64-producing ops' — i.e. 2 extra branches on EVERY arithmetic op — a cost excluded from 0.93 us. So no measured path is simultaneously fast, in-VM, and canonical.",
+              "recommendation": "Re-measure the f64 path with num_canon wired into every f64-producing op (the spec-required configuration) to get the true determinism-holding perf. If per-op canon is too costly, change §E to lazy canonicalization (canon only at hash/eq/tostring observation points, justified by Spike C showing divergence is confined to NaN-sign and -0.0) and prove the equivalence — do not leave the spec mandating per-op canon while the headline excludes it."
+            },
+            {
+              "severity": "medium",
+              "category": "gap",
+              "issue": "The claim that 'superinstructions + inline caches are enough without JIT for general scripts' (ADR §A, ADR:50-56; P4, ADR:136-139) is wholly unvalidated. Inline caches target global/field/method lookup and metamethod dispatch — none of which exist in the skeleton (no globals, no metatables, no method dispatch). Spike B's wasm parity was dispatch+ALU only. For general scripts, metamethod dispatch on wasm goes through call_indirect (the very bounds/type-check cost Spike B showed makes fn-pointer threading 1.34-1.51x worse), which an IC cannot eliminate, only amortize.",
+              "recommendation": "Add a metatable/method-dispatch + global-lookup microbench at P1 (not P4) to validate that the no-JIT interpreter tier holds for general scripts on wasm. The IC-without-JIT bet is currently an assertion with zero supporting measurement."
+            },
+            {
+              "severity": "medium",
+              "category": "correctness",
+              "issue": "Fuel is specified as 'per-instruction deterministic' (C3; ADR §G, ADR:96-100) but the fuel cost model under superinstruction fusion is undefined. If a fused op costs 1 fuel unit while replacing 8 ops, a script's total fuel consumption — and therefore the exact 'out of fuel' trap point grabby sets as a limit — becomes a function of the optimizer version. A future rustia that fuses differently traps at a different instruction, breaking cross-version reproducibility of grabby's golden/limit tests. (Same-binary cross-platform determinism is preserved; cross-version is not.)",
+              "recommendation": "Define fuel at the semantic/source level (cost charged per logical Luau operation, independent of fusion), OR pin fuel accounting to a versioned cost table and document that changing fusion is a fuel-ABI break. Decide before locking §G."
+            },
+            {
+              "severity": "medium",
+              "category": "risk",
+              "issue": "gc-arena requires a write barrier whenever a Gc handle is stored into an already-allocated GC object. Table-heavy scripts hit this on essentially every heap store. The skeleton models ZERO barriers, so the 0.93 us excludes all barrier cost. ADR §D (ADR:79-82) files barriers under 'pervasive-but-shallow boilerplate' — a correctness/ergonomics framing that hides their per-op hot-path tax.",
+              "recommendation": "Microbench a table-write-heavy loop with gc-arena barriers live at P1 and report the barrier tax explicitly, alongside the A/B vs 16-byte-tagged value-layout decision (ADR §6)."
+            },
+            {
+              "severity": "low",
+              "category": "correctness",
+              "issue": "rustia-vs-reference is not measured on equal FFI footing: the reference Luau number goes through the mlua FFI boundary (~0.030 us/call, 15-gapclose Spike A) while the rustia 'realistic' path is a direct Rust call into the VM (explicitly noted lib.rs:833). On equal footing rustia is ~0.96 us or the reference is ~0.70 us — i.e. rustia's measured gap to reference is slightly WORSE than the 0.93-vs-0.73 headline suggests.",
+              "recommendation": "When P3 wires the batched decide-N / Selector harness, compare through the same boundary both engines will actually use, so the gap-to-reference is honest."
+            },
+            {
+              "severity": "low",
+              "category": "correctness",
+              "issue": "The numeric-for skeleton (FORNPREP lib.rs:490-498, FORNLOOP lib.rs:499-508) does not handle step==0 (Luau raises \"'for' step is zero\"; the skeleton would infinite-loop) and relies on raw f64 accumulation. Not a headline-number issue, but a real-engine correctness/compat item that must land for Luau parity (priority #4).",
+              "recommendation": "Implement Luau's exact numeric-for semantics (step==0 error, the documented loop-count/precision rules) in P1/P2 and gate against the full_moon/reference oracle."
+            }
+          ],
+          "strongest_objection": "The perf goal's last mile is unproven and the only measured rustia number undercuts the framing: rustia's sole measured datapoint (0.93 us) is SLOWER than the reference-Luau bar it must beat (0.73 us), and the ≤0.5-us 'beat reference' goal rests on a single unmeasured superinstruction whose math (decode is only ~29% of cost) cannot reach 0.5 us without collapsing the kernel into hand-written Rust — which neither generalizes to arbitrary scripts nor is what 'scripted AI' is for. Compounding this, the 0.93-us path is f64-without-canonicalization (the determinism-mandated per-op NaN/-0.0 canon, ADR §E, is dead code at lib.rs:122), while the determinism-proving golden path is a different, host-call-heavy program — so no measured path is simultaneously fast, in-VM, and bit-deterministic, and none exercises tables/strings/closures/GC barriers that dominate general scripts. The headline transfers to grabby's fixed leaf kernel only; it does NOT transfer to general Luau.",
+          "missing_considerations": [
+            "No measurement of canonicalization-on f64 arithmetic (num_canon is dead code, lib.rs:122) — the spec-required §E configuration was never benched",
+            "No table/string/closure/metatable/method-dispatch microbench — the heap surface is 0% modeled yet drives general-script cost",
+            "No GC write-barrier cost in any number; gc-arena barrier-per-heap-store tax is unquantified",
+            "No real CALL/RETURN/frame/upvalue/vararg/multi-return path — OP_CALL is a hardcoded host switch (lib.rs:535), OP_RET just exits (lib.rs:526)",
+            "Fuel cost model under fusion is unspecified — fuel-as-limit becomes optimizer-version-dependent, threatening cross-version golden reproducibility",
+            "Inline-cache effectiveness without JIT is asserted but untested — skeleton has no globals/metatables/method dispatch for ICs to target",
+            "wasm number measured only on aarch64-host V8 (ADR risk row 4); x86/mobile-ARM V8 + JSC/SpiderMonkey untested for the FULL VM (not just dispatch core)",
+            "Luau numeric-for edge semantics (step==0 error) absent — compat/correctness gap for priority #4"
+          ],
+          "verdict": "lock-with-changes: the determinism/value/dispatch DIRECTIONS are sound and well-evidenced for the scalar core, but the perf CLAIMS are not lockable as written. Required before lock: (1) stop presenting 0.93/0.5 us as general-script numbers — label them 'fixed leaf-kernel only'; (2) P0 must report the superinstruction result for BOTH the fused kernel and a non-kernel-shaped generic script, and accept parity-with-reference (~0.7 us) as the honest target if 0.5 doesn't generalize; (3) wire num_canon into the hot path and re-measure the true determinism-holding f64 perf, OR change §E to lazy canonicalization with proof; (4) P1 (not P4) must bench tables/strings/closure-calls/GC-barriers/method-dispatch on native AND wasm before value-repr (B) and dispatch (A) are locked; (5) define fuel at the semantic level so fusion can't move the trap point. Do-not-lock B specifically until the heap surface is measured — the ADR's own §6/risk-register already concede this is open.\""
+        }
+      },
+      {
+        "lens": "determinism",
+        "result": {
+          "lens": "determinism (bit-for-bit, native + wasm32, end-to-end)",
+          "findings": [
+            {
+              "severity": "critical",
+              "category": "contradiction",
+              "issue": "ADR §3.3 and §E mandate 'canonicalize NaN payload + -0.0 at f64-producing ops', but the walking skeleton that produced the headline perf numbers does the OPPOSITE on the hot path. spikes/spike-sk-rustia/src/lib.rs:119-130 defines num_canon() but its own comment says 'Used only on the determinism path; the perf hot path uses num so it stays apples-to-apples with Luau/koto-float.' Every hot arithmetic op (OP_NADD/NSUB/NMUL/NDIV/NMOD/NMODK/NMULK at lib.rs:448-470, and FORNLOOP at :499-508) calls the NON-canonicalizing Value::num (lib.rs:115-117). So the measured 0.93us native / 0.99us wasm (§0, table) were measured with canonicalization OFF. Adding the mandated per-op canon (an is_nan + ==0.0 branch, or a select, on every f64 result) is exactly the cost the spike chose to exclude. Either determinism breaks (no canon) or the load-bearing perf numbers are invalid (canon adds a branch to the inner loop, and the P0 ≤0.5us claim is measured against a canon-OFF baseline).",
+              "recommendation": "Re-run the skeleton bench with num_canon on EVERY f64-producing op before locking §0/§A/§B perf. Treat the canon-on number as the real one. If the per-op branch is too costly, design a branchless canon (e.g. unconditional payload mask that is a no-op on non-NaN) and measure that. Do not lock dispatch/value choices on canon-off data."
+            },
+            {
+              "severity": "critical",
+              "category": "correctness",
+              "issue": "The NaN-box tag space OVERLAPS valid IEEE NaN bit patterns, so a non-canonicalized NaN is silently reinterpreted as nil/bool/int. is_num() (lib.rs:131-134) treats a value as tagged iff (bits & 0x7ffc...)==0x7ffc.... Any NaN whose top two mantissa bits are 11 (bit range 0x7ffc_0000_0000_0000..=0x7fff_ffff_ffff_ffff, sign clear) is classified as a TAG: e.g. a propagated/payload NaN of 0x7ffc_0000_0000_0001 has low-3-bits==1 and would decode as TAG_NIL (lib.rs:106). Hardware default qNaN is 0x7ff8... (safe), but the WebAssembly spec explicitly allows arithmetic to produce NaNs with arbitrary payload AND arbitrary sign nondeterministically; an engine may legally hand back a payload NaN that lands in tag space. This is a soundness bug, not just determinism: a computed NaN can become nil/true/false/an int. Canonicalization at every f64 op is therefore MANDATORY for the NaN-box to be sound, independent of the cross-arch argument — which makes finding #1's perf tension unavoidable.",
+              "recommendation": "Make per-op NaN canonicalization a soundness invariant of the NaN-box, documented in §B, and prove (test) that no f64-producing path can deposit raw bits into a Value without collapsing NaN to the single canonical 0x7ff8... pattern. The golden test must include f64 producing 0/0, inf-inf, sqrt(-1), 0*inf and assert the boxed result is still classified is_num."
+            },
+            {
+              "severity": "critical",
+              "category": "gap",
+              "issue": "Collection-timing observability via weak tables is unaddressed, and the 'collect at deterministic fuel boundaries' story (§D, §3.4) contradicts how gc-arena actually triggers. §D leans on 'Luau has no __gc finalizers — one fewer determinism hazard' but never mentions Luau weak tables / setmetatable __mode='k'/'v'/'kv', whose CONTENTS (observable via pairs/next/#) depend on exactly when collection runs and how far an INCREMENTAL trace has progressed. gc-arena is incremental and debt-driven (the ADR praises 'incremental tracing + mutate-XOR-collect'; §D cites adjust_debt/collect_debt/finish_cycle). Allocation debt is measured in bytes, and object layout/sizes differ between 64-bit native and 32-bit wasm — so 'fuel boundary' is insufficient: an incremental cycle can be at a different mark-progress point on wasm vs native at the same instruction count, removing a weak entry on one platform and not the other. Two grabby runs with different execution-limit/fuel budgets could likewise diverge.",
+              "recommendation": "Specify that collection is driven ONLY by a deterministic instruction counter (never by allocation byte-debt or memory pressure), that each trigger forces a FULL collection to completion (no partial incremental state observable), and that the collection cadence is decoupled from the embedder's fuel/execution-limit knob. Either forbid weak tables in the grabby determinism profile, or add a cross-arch golden test that exercises __mode weak tables across a collection and hashes the surviving entries on native AND wasm."
+            },
+            {
+              "severity": "high",
+              "category": "correctness",
+              "issue": "Canonicalizing -0.0 at every f64-producing op (§3.3, §E: 'canonicalize NaN/-0.0 at f64-producing ops') breaks Luau semantics and is over-broad. Unlike NaN sign/payload, IEEE-754 sign-of-zero is fully specified and already deterministic across native and wasm for the basic op set — it is NOT a cross-arch hazard. But -0.0 is observable in Luau: 1/-0.0 = -inf, math.atan2/sign use it, tostring(-0.0)='-0'. num_canon (lib.rs:122-130) collapses -0.0 to +0.0 via the x==0.0 test; applying that after every arithmetic op would make 1/-0.0 yield +inf — a silent Luau-compat divergence (priority #4). -0.0 canonicalization is only actually needed at TABLE-KEY hashing (so t[-0.0] and t[0.0] are one slot), not in arithmetic.",
+              "recommendation": "Split the two canonicalizations in §3.3/§E: NaN-collapse at every f64 ingress (soundness + cross-arch + wasm-spec), but -0.0-collapse ONLY at table-key normalization. Remove -0.0 canon from arithmetic ops to preserve Luau sign-of-zero semantics."
+            },
+            {
+              "severity": "high",
+              "category": "gap",
+              "issue": "Compile-time constant folding (§F: 'constant folding') is outside the determinism spec (§3, which covers only runtime/VM), yet with hot-reload=re-eval (§H, constraints DX) the COMPILER runs on every platform. A folded division/transcendental or a folded NaN baked into bytecode must be bit-identical to the runtime path: if the compiler folds math.sin via the build host's std f64 instead of the pinned libm, or folds 0/0 without canon, the constant pool diverges native vs wasm and poisons the result before the VM even runs.",
+              "recommendation": "State in §3 that the compiler's constant folder uses the SAME pinned libm + NaN-canon as the VM, and that any transcendental fold not provably bit-identical is disabled. Add a golden test that compiles a fold-heavy script on each arch and hashes the constant pool."
+            },
+            {
+              "severity": "high",
+              "category": "risk",
+              "issue": "The one unverified perf claim (P0 fused IAUS product / curve-MAC superinstruction ≤ 0.5us, §0, §4-P0) is in direct tension with the no-FMA determinism rule (§3.3, §E ban mul_add). A fused multiply-accumulate is the canonical place an implementer reaches for f64::mul_add (one rounding) for speed; that changes the result bits vs separate mul+add (two roundings) and breaks bit-parity with the unfused path and with reference Luau. So the superinstruction must do separate-rounding mul then add — which removes the very FMA win that could get it to 0.5us. The load-bearing perf number may therefore be unreachable under the determinism constraint, and P0 must measure the no-FMA fused form, not a MAC.",
+              "recommendation": "Require P0 to implement the fused op with explicit separate-rounding arithmetic (no mul_add, no relaxed-SIMD) and a final NaN-canon, and to prove bit-identity against the unfused sequence in the cross-arch golden BEFORE reporting the ≤0.5us number. Treat any FMA-based timing as invalid."
+            },
+            {
+              "severity": "high",
+              "category": "correctness",
+              "issue": "§E frames determinism as coming from 'insertion-ordered maps (IndexMap-equivalent, seedless FxHash)', but FxHash is NOT cross-arch stable — rustc-hash processes data in usize-width words, so the same key hashes differently on 64-bit native vs 32-bit wasm32. The determinism therefore does NOT come from FxHash (an arch-divergent element merely contained); it comes ENTIRELY from insertion-order indexing. This only holds if: (a) pairs/next iterate the insertion-order vector, never bucket order; (b) table resize/rehash preserves insertion order; (c) key deletion uses order-preserving shift-remove, not swap-remove; (d) no API exposes a hash or bucket position. If next() ever walks buckets, native and wasm diverge immediately.",
+              "recommendation": "Reword §E so determinism is attributed to insertion-order indexing, not FxHash. Add explicit invariants: next/pairs use the insertion index only; deletion is order-preserving; nothing observable depends on hash value or bucket order. Add a cross-arch golden that builds, deletes from, regrows, and iterates a table on native + wasm."
+            },
+            {
+              "severity": "medium",
+              "category": "gap",
+              "issue": "§3.3 says canonicalize 'at f64-producing ops' but never enumerates the non-arithmetic f64 ingress points, each of which can introduce a raw/divergent NaN or -0.0 into a Value: native-fn returns (host functions returning f64), the serde bridge (C4 — deserializing a float from ScenarioSpec), tonumber('nan')/string→number coercion, and parser numeric literals. The skeleton only models arithmetic ops; the heap/host/serde surface is admitted unmodeled (§B note, risk register row 2).",
+              "recommendation": "Enumerate every f64→Value boundary in §3 (arith, FORNLOOP, host return, serde in, tonumber/coerce, literal/fold) and require canon at each. Add these to the soundness test from finding #2."
+            },
+            {
+              "severity": "medium",
+              "category": "correctness",
+              "issue": "Once NaN is canonicalized to the positive 0x7ff8... pattern, tostring/string.format(0/0) will print 'nan' (positive), but reference Luau on x86_64 typically yields '-nan' because hardware 0/0 is 0xfff8... (sign set). So the determinism fix (canonical positive NaN) creates a Luau-compat divergence (priority #4) in observable string output, and inf/nan/-inf formatting is not pinned anywhere in §3 or the byte-compat list (§4-P2 names Schubfach for finite values only).",
+              "recommendation": "Pick the canonical NaN sign to match reference Luau's tostring (likely keep the sign that yields the Luau string, or normalize the printed token explicitly), and add nan/inf/-inf/-0 formatting to the differential byte-parity tests vs reference Luau in P2."
+            },
+            {
+              "severity": "medium",
+              "category": "risk",
+              "issue": "Fuel accounting is not invariant under superinstruction fusion, so 'deterministic instruction-count fuel' (§3.4, C3) is stable cross-arch but NOT stable cross-version. The skeleton charges exactly 1 fuel per dispatched instruction (lib.rs:431-438); a fused op that replaces 3 instructions costs 1 fuel, so adding superinstructions in P4 (§4-P4) shifts the instruction at which any given script exhausts fuel. If grabby ever relies on fuel-exhaustion as an observable outcome, the golden result changes when the superinstruction set changes. Also the skeleton's trap returns Value::nil() silently (lib.rs:435-437), indistinguishable from a script legitimately returning nil.",
+              "recommendation": "Define fuel cost of a fused op as the sum of its component costs so fuel timing is invariant under fusion, document that well-behaved grabby scripts must never reach the fuel cap (it is a DoS trap only), and make exhaustion a distinct error result, not nil."
+            },
+            {
+              "severity": "medium",
+              "category": "gap",
+              "issue": "Coroutine-across-collection rooting is a latent nondeterminism/UB path. §D requires DynamicRootSet stash/fetch for any Gc carried across a yield, and §G makes coroutines resumable contexts with collection at fuel boundaries. A single missed root on a suspended coroutine means an object becomes collectible; with incremental, debt-influenced collection (finding #3) it may be collected at a platform-divergent point — manifesting as a cross-arch divergence or a use-after-free rather than a clean error. Coroutine scheduling itself is cooperative/deterministic, so the hazard is purely the GC-rooting discipline interacting with collection timing.",
+              "recommendation": "Make the rooting of all live Gc across a yield a checked invariant (miri/loom the suspend/resume + collect path per risk register row 3), and add a golden test that yields with live heap objects, forces a collection while suspended, resumes, and hashes the result on native + wasm."
+            },
+            {
+              "severity": "low",
+              "category": "correctness",
+              "issue": "Two arithmetic semantics in the determinism path are deterministic-but-wrong-for-Luau and unspecified in §3. (1) OP_NMOD/NMODK use Rust % (lib.rs:460,464), which is C fmod (truncated) — Lua/Luau % is FLOORED modulo (a - floor(a/b)*b), so -5 % 3 gives -2.0 here vs 1 in Luau. (Harmless for grabby's kind%3 because operands are non-negative, but a general compat bug.) (2) NaN-propagation for math.min/math.max is called out as 'defined' in §3.3 but not specified; Rust f64::min/max differ from Luau's a<b?a:b form on NaN/-0.0.",
+              "recommendation": "Specify floored modulo for the % operator and pin math.min/max to Luau's comparison-based definition in the §3 op set; cover both in the differential suite vs reference Luau (§4-P4)."
+            },
+            {
+              "severity": "low",
+              "category": "risk",
+              "issue": "Choosing insertion-ordered maps (§3.2, C1) is a deliberate determinism win but is itself a divergence from Luau, whose pairs()/next() order over the hash part is unspecified and hash-dependent. This is the right call for determinism, but it must be applied CONSISTENTLY everywhere traversal order is observable — not just user pairs(), but any stdlib that iterates a table internally (serialization for the serde bridge C4, table.sort tie handling, next-based library code). An internal iteration that uses a different order would leak nondeterminism even though user-facing pairs is ordered.",
+              "recommendation": "Document insertion-order as a global invariant covering ALL table traversal (user + stdlib + serde), note the intentional Luau divergence in §3, and audit every internal next/iterate site to use the insertion index."
+            }
+          ],
+          "strongest_objection": "The end-to-end bit-for-bit determinism claim is not actually backed by the evidence, because the one mandatory mechanism for f64 determinism AND NaN-box soundness — canonicalizing NaN at every f64-producing op — is explicitly turned OFF on the measured hot path (spike lib.rs:448-508 use the non-canon Value::num, by the spike's own admission at lib.rs:119-120), and the reproduced golden 0x31c6ec2734ea6fa2 runs the integer/Q16.16 path (tick_vm_q16), so it never exercises f64 NaN canon at all. The headline perf numbers (0.93/0.99us, and the projected ≤0.5us P0 superinstruction) were therefore measured on a configuration that is both non-deterministic and unsound under the WebAssembly spec's nondeterministic-NaN rule. You cannot lock §A/§B/§C perf and the determinism spec simultaneously until the canon-ON path is measured and the int-only golden is extended to cover f64 NaN/inf/-0 across native and wasm.",
+          "missing_considerations": [
+            "No golden test exercises f64 NaN/inf/-0 canonicalization — the reproduced 0x31c6ec2734ea6fa2 is the integer Q16.16 path (tick_vm_q16, lib.rs:868), and Spike C's 0x4fcaf33760ef5a9a is a standalone libm sweep, not the VM. The f64 VM determinism claim has zero direct test coverage.",
+            "The WebAssembly spec permits arithmetic NaN sign AND payload to be nondeterministic per-operation and per-engine; Spike C tested only node V8. JSC/SpiderMonkey/mobile-ARM V8 (risk register row 4) could produce different NaN bits on the SAME module, which only per-op canon defends against.",
+            "Weak tables / setmetatable __mode are never mentioned despite being the primary collection-timing observability hazard once __gc finalizers are excluded.",
+            "No specification of whether the compiler's constant folder is on the bit-parity-critical path (it is, given hot-reload = re-eval recompiles per platform).",
+            "Fuel-cost-per-superinstruction is unspecified, so fuel-exhaustion timing is not invariant under the P4 superinstruction work.",
+            "The serde bridge (C4) as an f64 ingress point that must canonicalize is not considered.",
+            "FxHash's 32-vs-64-bit instability is presented as a determinism feature rather than a contained anti-determinism element — the actual guarantee (insertion-order indexing) and its required invariants (order-preserving delete, no bucket-order traversal) are not stated."
+          ],
+          "verdict": "lock-with-changes — the architectural DIRECTION (one portable match→br_table core, NaN-box, f64+libm+canon, gc-arena, insertion-order maps, stackless trampoline + instruction-fuel) is determinism-sound and well-chosen, but four things must change before lock: (1) re-measure the hot path with NaN-canon ON at every f64 op and treat that as the real perf/P0 number — the current numbers are canon-OFF and the NaN-box is unsound without it; (2) extend the cross-arch golden to actually exercise f64 NaN/inf/-0 (today only the integer path is validated); (3) split -0.0 canon (table-key only) from NaN canon (every op) to avoid breaking Luau sign-of-zero semantics; (4) write a real GC-determinism spec — instruction-count-only collection trigger, forced-full collection, decoupled from the fuel budget, with weak-table behavior either forbidden or golden-tested cross-platform. Do NOT lock §A/§B perf or the §3 determinism spec as-is."
+        }
+      },
+      {
+        "lens": "wasm-and-cross-engine",
+        "result": {
+          "lens": "wasm-and-cross-engine",
+          "findings": [
+            {
+              "severity": "critical",
+              "category": "gap",
+              "issue": "Priority 3 explicitly names the 'browser/mobile mod path' (00-constraints.md:18-23), and iOS — including ALL iOS browsers and every WKWebView, by Apple platform mandate — runs JavaScriptCore, not V8. Yet 100% of the wasm evidence (skeleton 0.99us, Spike B parity, libm bit-identity node/deno) is V8 (15-gapclose.md:26-35,40-42; 30-architecture.md:18). iOS, the actual mobile target, has ZERO coverage for either perf OR determinism. The ADR nonetheless LOCKS 'one portable core everywhere, wasm at ~parity' as decision 2A (30-architecture.md:50-56) and uses it to declare priority 3 satisfied. The risk register (line 148) demotes this to a 'med' to 're-measure at P1/P4' — but the architecture is being locked NOW on the wrong engine for half the named mobile market.",
+              "recommendation": "Do not lock the 'wasm parity / priority-3 satisfied' conclusion. Before lock, run the skeleton under JSC (Safari/iOS via WKWebView, the real target) and SpiderMonkey. Treat V8 parity as evidence for V8 only. If JSC's wasm tier diverges materially, the 'single portable core' decision (2A) and the NaN-box decision (2B, which interlocks) must be revisited, not merely re-measured later."
+            },
+            {
+              "severity": "high",
+              "category": "contradiction",
+              "issue": "Decision 2A (30-architecture.md:50-56) rejects fn-pointer/threaded dispatch specifically because wasm 'call_indirect bounds+type checks' are slow (Spike B measured 1.34-1.51x, 15-gapclose.md:30,35). But the skeleton's measured workload NEVER uses call_indirect: OP_CALL is a hardcoded `match i.aux` to inlined Rust fns (lib.rs:535-550), and there are no Lua closures or metamethods. In a REAL VM, every host native-fn call (the embedding API `add_fn`, 30-architecture.md:103-106), every Lua closure call, and every metamethod dispatches dynamically = call_indirect through the wasm function table — the exact construct the ADR identifies as the wasm tax. The grabby 'realistic'/Q16 paths call host fxmul/curve on every consideration (lib.rs:371-372,379); in a real embedding those become call_indirect, so the measured 0.93/0.99us understates real-VM wasm cost on precisely the hot call sites. The batched decide-N API (2H) amortizes the FFI ENTRY marshalling but does nothing for per-host-call call_indirect inside the VM loop.",
+              "recommendation": "Before locking 2A, build a skeleton variant where OP_CALL goes through a real dyn-Fn/function-table indirection and re-measure native + V8 + JSC. Quantify the call_indirect tax on grabby's actual host-call density (4 curve + 4 fxmul + momentum per decision). If significant, the answer may be aggressive host-call fusion/superinstructions or pushing more math host-side — but that must be a decision, not an accident of the skeleton's inlined match."
+            },
+            {
+              "severity": "high",
+              "category": "correctness",
+              "issue": "NaN-boxing (decision 2B, 30-architecture.md:58-64) collides with WebAssembly's specified NaN nondeterminism. The wasm spec permits an engine to produce ANY NaN payload/sign for f64 arithmetic that yields NaN (0/0, inf-inf, etc.). The Value scheme carves type tags out of the quiet-NaN range with the sign bit selecting heap-handle (lib.rs:96-110,160-163). An arithmetic NaN from the engine with an arbitrary payload + sign bit can (a) DIVERGE across engines and native-vs-wasm, breaking the determinism gate (C1), and (b) alias the tag space — e.g. read as a heap handle (SIGN set) or int, a soundness hazard. Canonicalization (num_canon, lib.rs:121-130) fixes this ONLY if applied at EVERY f64-producing op before the value is ever stored/type-checked. Critically, the measured hot path uses non-canonicalizing `Value::num` (lib.rs:116-118,448-489) precisely to stay 'apples-to-apples' (lib.rs:119-120), and the golden bit-determinism was reproduced ONLY on the Q16 integer path (lib.rs:990-1001), NOT the f64 path that produced the 0.93/0.99us headline. So the FAST number and the DETERMINISTIC number come from two different code paths, and the canonicalization cost on the f64 hot path is unmeasured on both native and wasm.",
+              "recommendation": "Prove that canonicalization runs on every f64-producing op (not just at marshalling) and that no engine-produced NaN can alias the tag space; add a wasm differential test that forces arithmetic NaNs and compares Value bits across V8/JSC. Re-measure the canonicalized f64 path's us/decision in wasm — that, not the non-canon path, is the number that must clear the bar. This may shift the 2B layout choice (the 16-byte tagged alternative, 30-architecture.md:64, sidesteps wasm-NaN aliasing entirely)."
+            },
+            {
+              "severity": "high",
+              "category": "gap",
+              "issue": "The N-independent-VMs-across-a-thread-pool scaling model (C2, 00-constraints.md:43-46) and the gc-arena 'move whole VM to a pool thread' Send justification (2D, 30-architecture.md:78-82; 15-gapclose.md:68-70) are NATIVE threading models that do not translate to the browser. Browser threads are Web Workers with SEPARATE linear memories; you cannot move a Rust Gc arena between Workers without serialization (no shared Rust heap unless SharedArrayBuffer, which requires COOP/COEP cross-origin isolation that mobile Safari/embedded webviews frequently cannot satisfy). So in-browser the N-VM model likely collapses to single-threaded, making per-VM us/decision the ONLY lever, and the 'thousands of agents @ 50Hz within 5ms' budget (00-constraints.md:80-83) is entirely unestablished for wasm. The wasm harness itself is a single static global VM (lib.rs:925-929), so the multi-VM model has zero wasm evidence. The Send-based scaling story (a load-bearing answer to C2) is silently native-only.",
+              "recommendation": "Add an explicit section mapping the N-VM model onto Web Workers: per-Worker separate wasm instance vs SAB-shared memory, COOP/COEP feasibility on iOS WKWebView, and what 'move whole VM' means when Workers don't share a heap. Re-derive the in-browser agent/tick budget under a likely single-thread-per-frame reality. If browser scaling is single-threaded, state it and size per-VM throughput against the 5ms budget directly."
+            },
+            {
+              "severity": "medium",
+              "category": "gap",
+              "issue": "The skeleton structurally excludes the three things that make wasm slow and engine-divergent. (1) Every memory access uses get_unchecked (lib.rs:429,443,464,468,487,511) — zero wasm bounds checks; a real VM's table/string/upvalue accesses add bounds-checked linear-memory loads. (2) The NaN-box heap path is explicitly 'not exercised on the hot path here' (lib.rs:100) — strings/tables/closures/buffer untouched, so no heap dereferences through linear memory. (3) No GC. The reg/arr files are small fixed arrays (lib.rs:206-208,397-401) that optimize to a tight loop. The ADR admits this (risk line 146, 15-gapclose.md:116) but is locking 'one core everywhere' (2A) and the NaN-box layout (2B) on a benchmark that measures the scalar+dispatch core only. V8 and JSC differ most exactly on bounds-check elimination and indirect-load handling.",
+              "recommendation": "Gate the 2A/2B lock on a P1 re-measurement with real bounds-checked heap loads (tables/strings) and gc-arena present, on V8 AND JSC. The 'full-VM wasm tax ~1.03-1.09x' claim (30-architecture.md:20) is currently a scalar-core number presented as a full-VM number."
+            },
+            {
+              "severity": "medium",
+              "category": "gap",
+              "issue": "wasm linear memory grows monotonically and is never returned to the OS (memory.grow only grows). A tracing GC (gc-arena, 2D) that allocates and frees fragments a grows-only heap, so priority #2 (low memory, 00-constraints.md:15) is strictly WORSE in wasm than native: freed memory stays resident, peak = sticky RSS. Multiple VMs sharing one wasm module's single linear memory compound this. The per-VM RSS budget deferred to P4 (30-architecture.md:138; risk line 150) ignores wasm memory non-return and fragmentation entirely. There is also a determinism wrinkle: memory.grow failure (hitting the configured/4GB max) is an OOM failure mode that can diverge native-vs-wasm and is not in the determinism spec (section 3).",
+              "recommendation": "Add a wasm-specific memory model note: grows-only linear memory, GC fragmentation, no return-to-OS, and the multi-VM-in-one-instance compounding. Make the P4 RSS budget measure wasm peak linear memory, not just native RSS. Decide and document whether OOM/memory.grow-failure is part of the deterministic contract."
+            },
+            {
+              "severity": "medium",
+              "category": "gap",
+              "issue": "Binary size is absent from the entire ADR despite priority 3 being the browser/MOBILE path where wasm download/parse size directly gates load time. The 'one monolithic portable core' (2A) plus full stdlib (Schubfach, Lua-5.1 patterns, libm, serde, bit32/buffer — 30-architecture.md:38-42, 15-gapclose.md:93-94) shipped to mobile is sizeable, and the P4 plan to add 'more superinstructions' (30-architecture.md:137) and inline caches GROWS the dispatch function body — trading binary size and the engine's optimizing-compiler size budget for dispatch count. wasm engines have function-size/optimization thresholds (and they differ V8 vs JSC); a 70-90-opcode match (vs the skeleton's 24, lib.rs:181-204) with inlined fast paths plus fused superinstructions could exceed an engine's optimizing-tier budget on one engine but not another, silently de-optimizing the dispatch loop.",
+              "recommendation": "Add a wasm binary-size budget to priority 3 and a code-size-vs-dispatch-count tradeoff note for superinstructions. Verify the real 70-opcode dispatch function stays within V8 AND JSC optimizing-compiler size limits; if not, consider splitting cold opcodes out of the hot loop."
+            },
+            {
+              "severity": "low",
+              "category": "risk",
+              "issue": "The 'match->br_table at parity' result (2A, 15-gapclose.md:26-35) was measured on a 24-opcode match (lib.rs:181-204). A real VM's ~70-90-opcode match produces a much larger br_table; whether an engine lowers it to a true jump table vs a compare chain, and how it interacts with branch prediction/i-cache, is engine-specific and not established for the real opcode count on any engine. Node V8 being faster than the native build (15-gapclose.md:34) is plausible for a tiny loop but should not be assumed to hold for the full dispatch body.",
+              "recommendation": "Re-run the dispatch microbench at the real opcode count (70-90 arms) on V8 and JSC before treating br_table parity as settled for the production VM."
+            }
+          ],
+          "strongest_objection": "The wasm/priority-3 conclusion is locked on a single engine (V8) and a benchmark that structurally excludes the three constructs that actually make wasm slow and engine-divergent — call_indirect (real closures/host calls, which decision 2A itself flags as the slow path but the skeleton hardcodes as inlined match arms), bounds-checked linear-memory heap loads (everything is get_unchecked, heap path unexercised), and GC — while the one explicitly-named mobile target, iOS, runs JavaScriptCore (not V8) with zero coverage for either perf or determinism. On top of that, the headline 0.93/0.99us comes from the non-canonicalized f64 path, whereas bit-determinism was only ever reproduced on the separate Q16 integer path, so the fast number and the deterministic number are different code paths and wasm's specified NaN-payload nondeterminism directly threatens the NaN-box scheme. 'wasm at parity, priority 3 satisfied' is therefore unproven for the real VM on the real target.",
+          "missing_considerations": [
+            "JSC (Safari/iOS, including all iOS browsers and WKWebViews by Apple mandate) measured for neither perf nor cross-arch determinism — the named mobile target is 100% uncovered",
+            "SpiderMonkey untested (Firefox)",
+            "Real-VM call_indirect cost for host fns, Lua closures, and metamethods — the skeleton inlines all host calls as match arms",
+            "WebAssembly NaN-payload nondeterminism vs the NaN-box tag space (both a determinism break and a potential tag-aliasing soundness bug)",
+            "Whether canonicalization runs on the f64 hot path at all, and its wasm cost — the measured fast path skips it",
+            "Browser threading model: Web Workers have separate linear memories; SAB/COOP-COEP gating on mobile Safari; the gc-arena 'move whole VM' Send model is native-only and does not map to Workers",
+            "wasm grows-only linear memory + GC fragmentation + no return-to-OS, and multi-VM-in-one-instance memory compounding (priority #2 is worse in wasm than native)",
+            "wasm binary/download size budget for the mobile path; superinstruction code-size growth vs engine optimizing-compiler size thresholds (V8 vs JSC)",
+            "Bounds-checked linear-memory loads for real tables/strings/upvalues (skeleton uses get_unchecked throughout)",
+            "memory.grow OOM as a native-vs-wasm divergent failure mode not covered by the determinism spec",
+            "Real 70-90-opcode br_table lowering behavior per engine (skeleton tested 24 opcodes)",
+            "How the N-VM/5ms/thousands-of-agents budget holds if in-browser execution collapses to single-threaded"
+          ],
+          "verdict": "lock-with-changes — the 'one portable core' direction is a defensible prior, but the specific conclusion 'wasm at parity / priority 3 satisfied' must be DE-LOCKED until two things are measured: (1) the real VM (call_indirect host calls + closures, bounds-checked heap loads, gc-arena present, canonicalized f64 path) on JSC and SpiderMonkey, not just V8; and (2) the wasm-NaN-vs-NaN-box determinism/soundness question resolved before committing to decision 2B. Add an explicit browser-threading/memory/binary-size section to priority 3. Decisions 2A and 2B are interlocked with these unknowns and should carry an explicit revisit gate, not just a 'measure at P4' risk-register line."
+        }
+      },
+      {
+        "lens": "gc-send-memory",
+        "result": {
+          "lens": "gc-send-memory",
+          "findings": [
+            {
+              "issue": "ADR §H (lines 102-106) promises a koto-compat shim with `exports().get(\"name\").clone()`, owned `KValue`-style values, `call_function` returning values, and a serde bridge (C4) for \"zero-friction grabby migration\" — but every value handed across the host boundary under gc-arena is a `Gc<'gc>` branded by the invariant lifetime that CANNOT escape a `mutate` closure. grabby's actual usage is `from_koto_value(koto.exports().clone())` (00-constraints:68, C4 lines 53-56): it clones the exports graph OUT and deserializes it later, outside any mutate. Under gc-arena that retained clone must become either a deep owned copy of the whole graph or a DynamicRoot — neither is the cheap Arc-clone koto provides. The gc-arena spike conveniently hides this: its serde-out runs INSIDE `arena.mutate(...)` (spike-ga-gcarena/src/main.rs:146-149,163-165) and its deserialize-in runs inside a fresh-arena constructor (main.rs:118 `json_to_value` takes `&Mutation`). The one usage pattern grabby actually needs — retain a script value across the host boundary, then serde it — is exactly the pattern the spike never exercises.",
+              "severity": "critical",
+              "category": "contradiction",
+              "recommendation": "Before locking D/H, run a gc-arena embedding-API spike that reproduces grabby's real shape: `exports()` returns a value the host RETAINS, then `from_value` deserializes it later (not inside mutate). Decide and document the boundary representation (DynamicRootSet handle vs deep-copy-out) and measure its per-call cost + memory. If it forces a non-koto-shaped API, revise the \"zero-friction migration\" claim in §H."
+            },
+            {
+              "issue": "ADR §D (line 79) states Send rests on \"never hand a `metrics()`/arena-derived handle across threads,\" and the spike's `unsafe impl Send for SendArena` safety comment (main.rs:60-69) hinges on \"We never expose `metrics()` from `SendArena`.\" But the design's OWN deterministic-collection mechanism (collect at fuel boundaries, §D line 73) and the priority-#2 RSS measurement BOTH go through `metrics()`: the spike calls `arena.metrics().adjust_debt(...)` / `collect_debt()` / `total_gc_allocation()` every step (main.rs:214-219). Critically, those calls are made on a RAW `VmArena`, NOT on the Send-proven `SendArena` (main.rs:181). So the spike proves Send on an arena that does no fuel-collection, and proves fuel-collection on an arena that is never moved cross-thread. The actually-required object — one arena that is BOTH Send-moved AND fuel-collected AND memory-measured — is never demonstrated. The true invariant is \"never RETAIN a metrics handle across a thread boundary\" (transient same-thread use is fine), which is a subtler and more easily-violated contract than \"never expose.\"",
+              "severity": "high",
+              "category": "gap",
+              "recommendation": "Extend the spike so SendArena exposes safe `step_fuel()`/`heap_bytes()` wrappers that take `&mut self`, call metrics() transiently and never return it, then move THAT arena to a pool thread and drive fuel-collection there. Re-state the invariant in §D as 'no retained metrics/Gc handle crosses a thread boundary' and prove the API surface (serde, UserData, native-fn returns) cannot leak one."
+            },
+            {
+              "issue": "The `unsafe impl Send` (main.rs:69) underpins the entire N-VMs-across-a-threadpool execution model (00-constraints C2, lines 43-46) yet is validated only by a single happy-path `std::thread::spawn(move || ...)` that joins immediately (main.rs:81-88). That proves the wrapper COMPILES and runs once cleanly; it proves nothing about soundness of an `unsafe impl Send` over a type holding raw `NonNull` GcBox self-references and a non-atomic `Rc<MetricsInner>`. A clean move-then-use with no concurrent access cannot surface a latent aliasing/refcount-race bug. ADR risk register (line 147) lists \"miri/loom the move path\" as a future MITIGATION, and §D admits \"safety is an argument, not a compiler proof\" — but rates it 'med'. For the load-bearing unsafe foundation of the threading model, single-spawn evidence is the weakest possible.",
+              "severity": "high",
+              "category": "risk",
+              "recommendation": "Make miri (stacked/tree borrows over the move + post-move mutate/collect) and a loom model of the construct-on-A / move / use-on-B handoff a P0/P1 GATE, not a P4 mitigation. The Send claim is unlocked until miri passes the move path."
+            },
+            {
+              "issue": "ADR §6 (lines 156-157) defers \"whether AI runs INSIDE the rollback sim (24-deep ring, ≤1ms restore)\" as a non-blocking open sub-decision, while §D commits to a two-domain split: AI hot state in host columnar arrays, script-visible graph in the GC heap. From the rollback lens this is not optional — gc-arena 0.6.0 has NO cheap arena snapshot/clone. Snapshotting GC-heap state for rollback means serialize-the-reachable-graph-out + rebuild-into-a-fresh-arena-in (exactly the spike's O(live-heap) serde path, main.rs:118-141,146-149), 24 deep, within ≤1ms, at thousands of agents — almost certainly infeasible. Therefore \"all rollback-relevant state stays host-columnar\" is a hard CONSTRAINT the GC choice imposes, not an open question. Direction (4) slotmap/generational-index heap (§D considered list, line 74) was dismissed without engaging that it gives O(1) `Vec::clone` snapshots, is `Send` for free (no branded lifetime, no unsafe impl), and is a strictly better memory+rollback fit for a rollback sim.",
+              "severity": "high",
+              "category": "sequencing",
+              "recommendation": "Promote the rollback question from §6 to a locked constraint: if any script-mutated state must roll back, it MUST live host-columnar (GC heap holds only non-rolled-back or rebuild-from-scratch state) — or re-open the slotmap-vs-gc-arena decision specifically on snapshot cost. Add a P1 spike that snapshots+restores a realistic heap 24-deep and measures against the 1ms budget."
+            },
+            {
+              "issue": "Priority #2 (low memory, 00-constraints line 16) has ZERO measurement while priorities #1/#3/#4 each have a dedicated spike. ADR rates this 'low' (risk register line 150), which understates an entirely-open priority. The headline \"8-byte NaN-boxed Value\" (§B) is only the handle; every heap object carries a GcBox header (link/color/trace-fn metadata, ~2-3 words) the memory story omits. The spike's `Static<String>` representation (main.rs:14,124) is worst-case: each Lua string = GcBox header + `String` struct (24B) + heap buffer, with NO interning or small-string optimization modeled (§B note line 64 admits the heap layout is \"unmodeled\"). The single memory number the spike prints, `total_gc_allocation()` (main.rs:219), is cumulative-bytes-ever-allocated, NOT live RSS — so even that isn't a memory measurement.",
+              "severity": "medium",
+              "category": "gap",
+              "recommendation": "Add a P1 live-RSS measurement (per-VM resident heap for a representative scenario + console session) and a per-object GcBox overhead number. Model string interning/SSO in the value-layout decision. Re-rate the RSS risk to at least 'med' — the design is not 'evidence-backed' on axis D-memory with no memory evidence."
+            },
+            {
+              "issue": "ADR §G + §D (lines 82, 96-100) commit to coroutines with \"DynamicRootSet stash/fetch for any Gc carried across a coroutine yield,\" but the spike tests NO coroutines at all. Under mutate-XOR-collect, a suspended coroutine may not hold any live `Gc<'gc>` across a yield (the arena can collect between resume points). For a register-window VM that means stashing the entire live register set into a DynamicRootSet on every yield and fetching on every resume. The per-yield cost and DynamicRootSet growth are unbounded and unmeasured. If grabby's scenario/console scripts use generators / generalized iteration (a cheap-Luau-nicety the ADR explicitly ships, §P2 / 15-gapclose:89), this is hot.",
+              "severity": "medium",
+              "category": "gap",
+              "recommendation": "Spike a coroutine that yields with N live heap registers; measure stash/fetch cost per yield and DynamicRootSet residency. Bound the register-window-stash cost before claiming coroutines are 'resumable contexts' for free."
+            },
+            {
+              "issue": "15-gapclose (line 70) resolves the Send/Sync question by keeping \"Sync only for shared immutable artifacts (bytecode, LUTs, interner) behind `Arc`.\" But a shared `Arc<Program>` CANNOT contain `Gc<'gc>` constants — they are branded per-arena and !Send/!Sync — and every real Luau program has string (and table) constants in its const pool. The skeleton sidesteps this entirely: its `consts: Vec<Value>` holds only numbers/ints (spike-sk-rustia/src/lib.rs:216, 238-247). So either the const pool's strings are interned as non-Gc `Arc<str>` host leaves (bifurcating string representation into shared-interned vs arena-local `Static<String>`, adding complexity + an equality/hashing seam), or the bytecode is NOT shareable and each VM must instantiate its heap constants on load. This contradicts the clean \"share immutable bytecode behind Arc across VMs\" claim.",
+              "severity": "medium",
+              "category": "contradiction",
+              "recommendation": "Decide the constant-string representation explicitly: intern all string constants as `Arc<str>` host leaves referenced via `Static`/UserData (keeping `Arc<Program>` Gc-free), or accept per-VM constant materialization on load. Document the dual string representation and its equality/hashing rules in §B before locking."
+            },
+            {
+              "issue": "The determinism spec (§3, lines 108-117) and 00-constraints C1 say NOTHING about GC-observable nondeterminism, yet full Luau compat (priority #4) includes `__mode` weak tables and `collectgarbage`, whose observable behavior depends on collection timing. With a tracing GC paced by f64 debt (`adjust_debt(fuel as f64)`, main.rs:214), weak-table clearing and `next()`-iteration-after-collection become potential cross-arch divergence points — tracing GC + bit-for-bit determinism + weak tables is a known-hard combination. §D cites \"Luau has no `__gc` finalizers\" as a determinism win (line 79) but omits that weak tables are the other, larger GC-observability hazard.",
+              "severity": "medium",
+              "category": "correctness",
+              "recommendation": "Add a determinism-spec clause: either ban/stub weak tables + `collectgarbage` from the deterministic sim prelude (as grabby already gates floats), or prove collection boundaries are lockstep across arch. Decide before claiming §3 is the complete determinism gate."
+            },
+            {
+              "issue": "§D justifies gc-arena partly with \"mutate-XOR-collect FORCES the stackless steppable VM we want\" (line 78, echoed 15-gapclose:73). This is circular: steppability + per-instruction fuel (C3) is delivered by the trampoline design regardless of GC choice (the skeleton is already stackless with fuel and uses NO GC). gc-arena's mutate-XOR-collect is a CONSTRAINT it imposes, reframed as a benefit. Meanwhile the skeleton proves the per-agent hot path — the actual prize — allocates ZERO heap and hits 0.93µs with no Gc at all. So the entire gc-arena embedding tax (branded lifetimes, write barriers, unsafe Send wrapper, stash/fetch, boundary rooting) is paid exclusively for cold paths: one-shot scenario gen and a latency-insensitive console REPL. That is a strong over-engineering signal relative to a bump/region-reset-per-run or slotmap heap.",
+              "severity": "medium",
+              "category": "over-engineering",
+              "recommendation": "Drop the circular 'forces stackless' argument from §D's rationale. Explicitly weigh gc-arena's embedding-API tax against the fact that the hot path needs no GC and the cold path is one-shot/REPL; A/B gc-arena vs a slotmap/region heap on the real scenario+console workload (not a microbench) before locking D."
+            }
+          ],
+          "strongest_objection": "The branded `'gc` lifetime makes the koto-compat embedding API that grabby's migration depends on (retained `exports().clone()`, owned values, serde from a held value, `call_function` returning values) require DynamicRoot rooting or deep-copy at EVERY host boundary - and that is precisely the pattern the gc-arena spike never tests (it does all serde inside `mutate`). Combined with the fact that the whole gc-arena bet rests on reinterpreting the C2 contract (00-constraints: \\\"must be Send + Sync\\\") down to Send-only via an un-exhibited reading of grabby, the GC choice could either force a far less ergonomic API than §H promises or, if any cross-thread `&Vm`/`&Gc` sharing actually exists in grabby, disqualify gc-arena outright. This is the load-bearing uncertainty for the entire D/H axis and it is currently backed by a 235-line spike that sidesteps exactly the hard cases.",
+          "missing_considerations": [
+            "No spike combines the three properties the real VM needs simultaneously: Send-move + fuel-driven collect + RSS measurement on one arena (they are split across SendArena and VmArena)",
+            "No miri/no loom on the unsafe impl Send move path; soundness is asserted from one happy-path spawn",
+            "No live per-VM RSS number; the only memory metric printed is cumulative-bytes-ever, not resident heap; GcBox per-object header overhead unquantified",
+            "No coroutine yield/resume stash-fetch cost or DynamicRootSet residency measured",
+            "No rollback snapshot/restore feasibility test for GC-heap state against the 24-deep / ≤1ms budget; gc-arena has no cheap arena clone",
+            "Shared `Arc<Program>` bytecode cannot hold per-arena `Gc` string/table constants - constant representation unresolved",
+            "Weak tables / `collectgarbage` GC-observability vs bit-for-bit determinism is absent from the determinism spec",
+            "String interning / small-string optimization unmodeled; `Static<String>` as spiked is the memory worst case",
+            "The Send-only reinterpretation of the explicit C2 'Send + Sync' contract is asserted from reading grabby but the supporting grabby code paths are not exhibited here",
+            "slotmap/generational-index heap (Send-free, O(1) Vec-clone snapshots) was dismissed without engaging its rollback/memory advantages"
+          ],
+          "verdict": "lock-with-changes — The Send-only requirement and fuel-driven-collect mechanics are individually plausible, but the GC/Send/memory axis is NOT yet evidence-backed at the standard the rest of the ADR meets. Do not lock D/H until: (1) an embedding-API spike reproduces grabby's RETAIN-then-serde pattern and the koto-compat shim's value boundary (DynamicRoot vs deep-copy) is chosen and costed; (2) miri + loom pass the Send move path (promote from P4 mitigation to gate); (3) a live per-VM RSS number exists and string interning is modeled; (4) \\\"all rollback-relevant state stays host-columnar\\\" is locked as a constraint (or slotmap-vs-gc-arena is re-opened on snapshot cost); (5) shared-bytecode Gc-constant representation and weak-table/GC determinism are resolved in the spec. Remove the circular \\\"mutate-XOR-collect forces stackless\\\" justification and A/B gc-arena against a simpler index/region heap on the real scenario+console workload given the hot path needs no GC."
+        }
+      },
+      {
+        "lens": "api-dx-and-buildplan",
+        "result": {
+          "lens": "api-dx-and-buildplan",
+          "findings": [
+            {
+              "issue": "ADR §H (line 106) and P3 (line 132) call the batched decide-N API \"the scaling lever\" and \"mandatory\", but the project's OWN measured data contradicts this: 15-gapclose.md:24 states \"FFI entry is ~4% of cost; VM execution dominates ... so a batched decide-N API helps but isn't the main lever,\" and the headline 0.93µs was measured PER-AGENT, non-batched (spike lib.rs:835-848 calls vm.run once per agent). So batching addresses only the ~4% marshalling, not the lever (which is VM dispatch / superinstructions). Worse, it does NOT compose with grabby's trait: Selector::select is scalar (one agent in, one u8 out — ai_bakeoff/src/lib.rs:165-172), with a per-agent ChaCha8 RNG and eps-greedy interleaved (koto_path.rs:165-168). A batched API needs a brand-new trait method and a restructured per-agent RNG/eps-greedy/learn loop. Calling it 'mandatory' v1 surface inverts the measured priority.",
+              "severity": "high",
+              "category": "contradiction",
+              "recommendation": "Demote batched decide-N to an optional P4 optimization. Make the scalar single-decision call the v1 contract (it matches the existing Selector trait and produced the 0.93µs number). If batching is later added, add it as a separate select_batch trait method and prove it still reproduces the golden with the per-agent RNG order preserved."
+            },
+            {
+              "issue": "ADR §H (line 105) sells the koto-compat shim as enabling 'zero-friction grabby migration', conflating API-compat with LANGUAGE-compat. grabby's actual scripts are written in the KOTO language, not Luau: galaxy.koto uses indentation blocks, `0..count` ranges, `structures.push {...}`, `|args|` lambdas, and `export {gravity: ..}`; the bake-off argmax SCRIPT (koto_path.rs:20-39) is the same. Luau has none of these — no `export` keyword (modules `return` one value), no `|..|` lambdas (uses `function..end`), no `0..6` ranges (uses `for a=0,5 do`). So every .koto script must be hand-ported to Luau, AND koto's `export {…}`/`exports().get(\"name\")` model (relied on at scenario/src/lib.rs:244 and koto_path.rs:76-80) has NO Luau equivalent; the shim's exports() must be redefined over Luau's return-a-table. The shim saves ~3 Rust call sites while the scripts and the export model still change.",
+              "severity": "high",
+              "category": "correctness",
+              "recommendation": "Drop the 'zero-friction migration' framing. Scope the migration honestly: (1) rewrite each .koto script to Luau, (2) redefine exports() as 'the table the chunk returns'. Reconsider whether a full koto-shaped shim crate is worth its surface given scripts change anyway — the load-bearing parts are the mlua-style core + serde bridge; a thin set of free functions matching scenario/console call sites may suffice instead of a whole compat layer (over-engineering risk)."
+            },
+            {
+              "issue": "The biggest UNVALIDATED risk for priority #5 (embedding API) is API ergonomics/cost under gc-arena's branded `'gc` lifetime, and the ADR sequences the entire embedding API to P3 (last). koto hands out freely-held, lifetime-free KValues: KotoSelector STORES an exported handle (`argmax: KValue`, koto_path.rs:44) and `.clone()`s it on every tick (line 155). rustia's equivalent must root a `Gc` closure across GC cycles via DynamicRootSet (ADR §D:82 acknowledges this) and fetch+call it on the per-decision hot path — that rooting/fetch cost lands on priority-#1's hot loop and is UNMEASURED. The skeleton's 0.93µs never exercised it: it pokes vm.arr/vm.reg directly and reads best.as_num() (spike lib.rs:833-834,842-849), explicitly noting the call is 'a direct Rust call into the VM rather than an mlua FFI boundary'. So the layer that defines priority #5 is the one piece with zero spike coverage.",
+              "severity": "high",
+              "category": "risk",
+              "recommendation": "Before locking decision H, run a small API-over-gc-arena spike: hold a rooted exported closure handle across several GC cycles and call it per-tick, measuring the DynamicRootSet fetch cost on the hot path, plus FromValue/IntoValue marshalling. Confirm the koto-shaped 'store handle, call repeatedly' pattern (the exact KotoSelector shape) is ergonomic and cheap under the `'gc` brand. This de-risks more than P0."
+            },
+            {
+              "issue": "ADR §F (lines 92-94) frames 'parser accepts-and-ignores the full type grammar' as making the type checker a deferrable subsystem. The runtime-erasure claim is SOUND (Luau type annotations and `::` assertions do not change interpreter semantics; typeinfo bytecode is consumed only by native codegen, correctly dropped per 15-gapclose:85). But 'accept-and-ignore' badly undersells the work: to ignore types you must still FULLY PARSE a large, evolving grammar — generics with defaults `<T=U>`, variadic type packs `T...`/`(T...)`, union/intersection/singleton/indexed types, `typeof`, attributes, and user-defined `type function`s — including the notorious `f<a,b>(c)` generic-call-vs-`<`/`>`-comparison disambiguation. This is on the DX critical path, not deferrable: if rustia's parser rejects type syntax that luau-lsp accepts, LSP-authored scripts silently fail to run, breaking the stated LSP DX win (00-constraints:92).",
+              "severity": "medium",
+              "category": "gap",
+              "recommendation": "Restate the decision as 'fully parse the type grammar, do not typecheck' and budget real parser effort for it (track the `<...>` disambiguation explicitly). Use full_moon (already a dev-dep oracle) to fuzz/diff the parser against real Luau type syntax in CI from P1, so parse-completeness regressions surface immediately."
+            },
+            {
+              "issue": "Critical-path sequencing: P0 (fused superinstruction → ≤0.5µs) is placed FIRST and gated as 'before locking B/A' (P4 line 121-122, §0 line 24), but it is a STRETCH over an already-passing bar — 0.93µs is already 4-6x koto and inside the ~1.25µs MVP target (15-gapclose:24). Even if P0 lands at 0.93 rather than 0.5, the project still succeeds. Meanwhile the genuinely project-killing unknowns — serde-from-a-Gc-table-graph reproducing ScenarioSpec (scenario/src/lib.rs:244), the koto→Luau export-model gap, and rooted-closure call cost — are all deferred to P3. The smallest first deliverable that de-risks the MOST is an end-to-end vertical slice (tiny Luau subset: return-a-table + one function + numeric-for + arithmetic + one host fn, run through the REAL embedding API + serde, reproducing the golden 0x31c6ec2734ea6fa2 through the API), not the superinstruction.",
+              "severity": "medium",
+              "category": "sequencing",
+              "recommendation": "Keep P0 measuring the perf number in parallel, but do not make it the sole pre-lock gate. Add a thin end-to-end integration slice (subset Luau → real embedding API → serde → golden) as a co-equal first deliverable and gate the architecture lock on BOTH. This validates priorities #4/#5 and the gc-arena/API composition early."
+            },
+            {
+              "issue": "Byte-compat effort is mis-weighted across the three P2 items (P2 line 131, risk register line 149 lumps them as one 'med'). (a) 'Schubfach tostring': the shortest round-trip DIGITS are algorithm-independent (Ryū and Schubfach emit the same unique shortest decimal), so the fiddly work is actually matching Luau's FORMATTING wrapper — exponent threshold, trailing `.0`, `%.14g` fallback, exponent digit count — and the ADR doesn't scope WHICH paths need Luau-byte-parity vs merely cross-arch determinism. `string.format` (a much larger byte-compat surface, with %g/%d/%s/%q) is MISSING from the MVL lib list entirely (15-gapclose:93). (b) Lua-5.1 patterns: the determinism trap that `%a/%l/%u` use locale-dependent `isalpha` in C — must be hardcoded to ASCII/C locale for cross-arch determinism — is not called out. (c) PCG32 is ~10 trivial lines and serves only Luau `math.random` COMPAT; grabby's determinism uses host-side ChaCha8 (§5 line 116), so PCG32 is over-weighted as an equal 'med' risk.",
+              "severity": "medium",
+              "category": "gap",
+              "recommendation": "Split the byte-compat item: raise tostring-formatting + add string.format as its own line item; add an explicit 'ASCII/C-locale pinned classification' determinism note to the pattern engine; downgrade PCG32 to low. Decide and document which script paths require Luau-byte-identical tostring vs only cross-arch determinism (grabby's sim path passes ints/Q16.16, so likely only scenario/console need full parity)."
+            },
+            {
+              "issue": "The v1 'minimum-viable Luau ~70 opcodes / grabby subset' (15-gapclose:83-94) is reasonable, but it tacitly contradicts priority #4 'fully compatible with latest Luau' (00-constraints:24) and the risk register tracks no 'distance to full compat'. Notably absent from the MVL and undistanced: metatables/`setmetatable`/`__index` (Luau OOP idioms that LSP-authored scripts assume), `require`/module loading (if any scenario script becomes multi-file), `string.format`, and the `os`/`utf8`/`vector` libs.",
+              "severity": "low",
+              "category": "gap",
+              "recommendation": "Relabel v1 as 'grabby-subset Luau' explicitly in the ADR and add one risk-register row enumerating the gap to full-Luau compat (metatables, require, string.format, os/utf8/vector). Confirm grabby's scripts truly need none of these before deferring; metatable-less tables exclude a large class of real Luau code."
+            },
+            {
+              "issue": "Hot-reload DX (00-constraints:89 'hot-reload = re-eval', a stated gak priority) is in tension with rustia owning a heavier compile pipeline than koto — the compiler does constant folding, builtin recognition, superinstruction fusion, AND register allocation (§1 lines 34-36), and P4 adds more fusion + inline caches. These trade compile time for run time and can regress the interactive edit/REPL loop.",
+              "severity": "low",
+              "category": "over-engineering",
+              "recommendation": "Keep a fast O0 compile mode (skip fusion/regalloc heuristics) for the hot-reload/REPL loop, and add a compile-latency budget/measurement to the same CI gate that tracks run-time perf. Don't let P4 optimization passes silently grow re-eval latency."
+            }
+          ],
+          "strongest_objection": "The whole premise that this ADR de-risks the koto→rustia swap rests on the embedding-API layer (priority #5), and that layer is the single piece with ZERO spike coverage and the worst sequencing. The headline 0.93µs bypassed the API entirely (spike lib.rs:833-849 pokes vm.arr/vm.reg directly), so the cost of FromValue/IntoValue marshalling and — critically — rooting/fetching an exported Gc closure across GC cycles (the exact KotoSelector pattern: store handle at koto_path.rs:44, call every tick at line 155) is unmeasured and sits on priority-#1's hot path under gc-arena's branded `'gc` lifetime. Compounding this, 'zero-friction koto migration' is false: grabby's scripts are a different LANGUAGE (Koto) with a different module/export model (`export {…}`/`exports().get()`) that has no Luau equivalent, so every script must be rewritten and the export model redefined. The architecture should not lock until a thin end-to-end API-over-gc-arena slice (subset Luau → real embedding API + serde → reproduce the golden through the API) proves both the ergonomics and the hot-path rooting cost.",
+          "missing_considerations": [
+            "No spike measured the embedding-API marshalling or the DynamicRootSet rooting cost of holding an exported closure across GC cycles on the per-decision hot path (priority #1) — the 0.93µs used direct vm.arr/vm.reg pokes",
+            "The ADR does not acknowledge that grabby's .koto scripts are a different LANGUAGE and must be rewritten to Luau, nor that Koto's export/exports() model has no Luau equivalent (Luau modules return one value)",
+            "No plan for how the batched decide-N API composes with (or replaces) grabby's scalar per-agent Selector::select trait and its interleaved per-agent ChaCha8 RNG / eps-greedy",
+            "string.format is absent from the minimum-viable lib list despite being a major Luau byte-compat surface and common in scripts",
+            "Metatables/setmetatable/__index, require/modules, and os/utf8/vector libs are not in v1 scope and the distance to the priority-#4 'full Luau compat' goal is untracked",
+            "Parser type-grammar completeness (esp. f<a,b>(c) disambiguation, generics, type packs, type functions) is on the LSP-DX critical path but framed as deferrable",
+            "No compile-latency/hot-reload budget guards rustia's heavier fusion+regalloc pipeline against regressing the re-eval edit loop",
+            "Which script paths require Luau-byte-identical tostring vs merely cross-arch determinism is unscoped",
+            "Locale-dependent character classes in the Lua-5.1 pattern engine (%a/%l/%u) must be pinned to ASCII/C for cross-arch determinism — not noted"
+          ],
+          "verdict": "lock-with-changes — the execution/value/determinism core is well-evidenced and sound, but three changes are required before locking: (1) demote batched decide-N from 'mandatory scaling lever' to optional P4 (it contradicts the project's own ~4% measurement and doesn't compose with the scalar Selector trait); (2) run an API-over-gc-arena ergonomics+rooting-cost spike and pull a thin end-to-end integration slice forward as a co-equal pre-lock gate alongside P0; (3) correct the 'zero-friction koto migration' claim to reflect that scripts are a different language with a different export model that must be rewritten/redefined. Also restate 'accept-and-ignore types' as 'fully parse, don't typecheck' and rebalance the byte-compat risk weights."
+        }
+      }
+    ],
+    "p0": {
+      "summary": "The projected ≤0.5 µs claim HOLDS, and by a wide margin. I added two fused IAUS superinstructions to the walking-skeleton VM (OP_UTIL_F64 / OP_UTIL_Q16) that collapse the entire 4-consideration curve+product loop AND the momentum step into ONE dispatch per action (a per-action utility accumulator). This cut dispatches/argmax-call from 320→35 (f64, ~9.1×) and 219→37 (Q16, ~5.9×) — far past the projected ~3×. The full realistic per-decision time dropped from the 0.93 baseline to ~0.20 µs native (0.2045/0.2027/0.2056 µs/d at n=1000/5000/10000), ~0.237 µs wasm/node, ~0.245 µs wasm/deno. That beats the 0.73 µs reference-Luau bar by ~3.6× native and still beats it in wasm, and crushes koto 4.0/5.9. The Q16.16 fused path reproduces the golden 0x31c6ec2734ea6fa2 bit-identically on native + node + deno.",
+      "what_changed": "Added 2 opcodes + their handlers to the dispatch loop in spike-sk-rustia/src/lib.rs: OP_UTIL_F64 (24) and OP_UTIL_Q16 (25). Each takes action-idx reg, last-action reg, reads arr[0..4], and computes that action's full utility = product over 4 considerations of curve_kind((a+c)%3, x), times 1.25/MOMENTUM if a==last — the exact math the old unfused inner C-loop did, just without per-op dispatch. Two new program builders (build_argmax_f64_fused / build_argmax_q16_fused) keep the argmax compare/select (NLT/ILT, JMPIFNOT, MOVE, FORNLOOP) as real VM ops and issue ONE UTIL op per action. Net dispatches/argmax-call: 320→35 (f64), 219→37 (Q16). Both fused programs are 13 instrs / 4 consts vs the old 35/27 instrs. Wired into native main.rs (new bench column + fused isolation + fused golden) and wasm (bench_run_realistic_fused, bench_q16_golden_fused) + run.mjs/qcheck.mjs. The maximal-fusion-per-action design is what the prompt's \"fused per-action utility accumulator\" option sanctioned.",
+      "numbers": [
+        {
+          "metric": "native µs/decision FUSED realistic (fuel on)",
+          "value": "0.2045 / 0.2027 / 0.2056",
+          "context": "n=1000/5000/10000; baseline was 0.91-0.95; well under the 0.5 target and below the 0.73 Luau bar"
+        },
+        {
+          "metric": "native µs/decision baseline (re-measured this run)",
+          "value": "0.9071 / 0.9110 / 0.9113",
+          "context": "vm-base fuel-on, reproduces the 0.93 ADR baseline (§intro table, 30-architecture.md:17)"
+        },
+        {
+          "metric": "dispatches/argmax-call f64",
+          "value": "320 → 35",
+          "context": "~9.1x reduction; ADR §intro called 320 '~3x looser' (30-architecture.md:21)"
+        },
+        {
+          "metric": "dispatches/argmax-call Q16",
+          "value": "219 → 37",
+          "context": "~5.9x reduction"
+        },
+        {
+          "metric": "VM argmax ISOLATION µs/call",
+          "value": "0.7973 → 0.0777",
+          "context": "pure VM argmax, no surrounding kernel; ~10.3x; ns/dispatch 2.49→2.22"
+        },
+        {
+          "metric": "wasm node µs/decision FUSED",
+          "value": "0.2349 / 0.2376 / 0.2397",
+          "context": "vs base 0.9625/0.9741/0.9717; speedup 4.1/4.1/4.05x; node v25.8.1"
+        },
+        {
+          "metric": "wasm deno µs/decision FUSED",
+          "value": "0.2450 / 0.2421 / 0.2494",
+          "context": "vs base 0.9816/0.9917/0.9908; speedup 4.0/4.1/3.97x; deno 2.8.2 v8 14.9"
+        },
+        {
+          "metric": "fuel-meter cost on fused path",
+          "value": "~0% (0.2045 fuel vs 0.2121 nofuel native; within noise)",
+          "context": "deterministic instruction-fuel stays effectively free, consistent with ADR"
+        },
+        {
+          "metric": "native floor (anchor)",
+          "value": "~0.140 µs/d",
+          "context": "pure-Rust argmax; fused VM adds only ~0.06 µs/d over floor — matches isolation 0.078 µs/call"
+        }
+      ],
+      "determinism_recheck": "YES — reproduces. The fused superinstruction applies to the Q16.16 path (OP_UTIL_Q16). Native fused Q16 golden = 0x31c6ec2734ea6fa2 (MATCH, bit-identical). wasm node fused = 0x31c6ec2734ea6fa2 (MATCH). wasm deno fused = 0x31c6ec2734ea6fa2 (MATCH). The unfused base path also still matches on all three. Additionally, in the realistic f64 wasm runs the fused and base paths produce identical world-state checksums (e.g. 0x-31fa8ccbfee14a97 at n=1000), confirming the fused op evolves the world identically to the unfused VM.",
+      "raw_evidence": "NATIVE (./target/release/skbench, M4 Max, --release lto opt3):\nargmax_f64        program: 35 instrs, 6 consts, dispatches/call = 320\nargmax_q16        program: 27 instrs, 7 consts, dispatches/call = 219\nargmax_f64 FUSED  program: 13 instrs, 4 consts, dispatches/call = 35\nargmax_q16 FUSED  program: 13 instrs, 4 consts, dispatches/call = 37\n agents | native us/d |  vm-base(fuel) | vm-FUSED(fuel) |  vm-FUSED(nof) |   base(nofuel)\n   1000 |      0.1398 |         0.9071 |         0.2045 |         0.2121 |         0.9042\n   5000 |      0.1404 |         0.9110 |         0.2027 |         0.2040 |         0.9114\n  10000 |      0.1414 |         0.9113 |         0.2056 |         0.2060 |         0.9121\nVM argmax ISOLATION base  (fuel on): 0.7973 us/call, 320 dispatches/call -> 2.491 ns/dispatch\nVM argmax ISOLATION FUSED (fuel on): 0.0777 us/call, 35 dispatches/call -> 2.219 ns/dispatch\nTIER 2: golden=0x31c6ec2734ea6fa2  vm-q16=0x31c6ec2734ea6fa2 MATCH=YES  vm-q16-FUSED=0x31c6ec2734ea6fa2 MATCH FUSED=YES  native floor=0x31c6ec2734ea6fa2\n\nWASM GOLDEN (qcheck.mjs):\nnode : Q16 base 0x31c6ec2734ea6fa2 MATCH=true ; Q16 FUSED 0x31c6ec2734ea6fa2 MATCH=true\ndeno : Q16 base 0x31c6ec2734ea6fa2 MATCH=true ; Q16 FUSED 0x31c6ec2734ea6fa2 MATCH=true\n\nWASM PERF (run.mjs, best-of-5):\nnode v25.8.1: FUSED us/d 0.2349 / 0.2376 / 0.2397 (n=1k/5k/10k); base 0.9625 / 0.9741 / 0.9717; FUSED_speedup_vs_base 4.1 / 4.1 / 4.05\ndeno 2.8.2 (v8 14.9.207.2): FUSED us/d 0.2450 / 0.2421 / 0.2494; base 0.9816 / 0.9917 / 0.9908; FUSED_speedup_vs_base 4.01 / 4.1 / 3.97\n(fused realistic checksum == base checksum on every size, both runtimes)",
+      "verdict": "HOLDS — decisively. Native full-realistic decision ≈0.204 µs (target ≤0.5 µs; baseline 0.93). It beats the 0.73 µs reference-Luau bar by ~3.6× native, and even the wasm figures (~0.237 node / ~0.245 deno) sit under 0.5 µs and under the 0.73 Luau bar — so the claim holds on native AND wasm. vs koto: ~20-29× faster than koto-float(4.0)/koto-int(5.9). Dispatch reduction (9.1× f64 / 5.9× Q16) far exceeds the projected ~3×. The Q16.16 golden 0x31c6ec2734ea6fa2 still reproduces bit-identically on native + node + deno through the fused op, so the fusion is determinism-safe.",
+      "caveats": [
+        "The fused op is MAXIMAL fusion: it collapses the whole 4-consideration curve+product loop AND momentum into one native op (a per-action utility accumulator). This is what the prompt explicitly allowed, and it's why dispatch reduction is ~9x not ~3x. A more conservative per-consideration MAC op (keeping the c-loop) would land between the base and this; I measured the strong form the prompt sanctioned.",
+        "Honesty controls held: inputs are the same ChaCha8+fnv1a data-dependent world values marshaled into vm.arr each call; isolation loop rotates inputs per iteration; outputs are black_box'd / XORed into a checksum; the Q16 golden reproducing bit-identically proves the fused arithmetic actually runs (not const-folded or DCE'd).",
+        "The 0.204 µs native figure is the FULL realistic decision (VM argmax + the surrounding Rust kernel: eps-greedy/SARSA/drift/mood/contagion). The VM argmax's own contribution is only ~0.06-0.078 µs (floor 0.14, isolation 0.078); the rest is the fixed Rust kernel that any selector pays.",
+        "The f64 realistic path has no golden (it's a perf proxy, as in the ADR); I kept its math identical to the unfused program and verified the fused realistic run yields the same world checksum as the unfused VM run. Bit-exact determinism is proven on the Q16.16 path, which does have the golden.",
+        "Single machine (Apple M4 Max). The 0.73 Luau / 0.93 baseline / koto numbers are from the ADR's prior measurement on the same machine class; I re-measured the 0.93 baseline here (0.907-0.911) and it reproduced, so the comparison is consistent.",
+        "wasm built with plain cargo (no wasm-opt); the wasm-tax-vs-native-floor (~6x) is unchanged by fusion since both base and fused pay it equally — fusion's ~4x wasm speedup is on top of that."
+      ],
+      "confidence": "high"
+    }
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "ReviewAndMeasure"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Synthesize"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "review:perf-and-correctness",
+      "phaseIndex": 1,
+      "phaseTitle": "ReviewAndMeasure",
+      "agentId": "aa4cce26005562755",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782788155194,
+      "queuedAt": 1782788155186,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "perf-and-correctness",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low memory;\n(3) wasm32 perf; (4) full latest-Luau compat; (5) excellent Rust embedding API. Hard constraints: bit-for-bit\ndeterminism native+wasm; Send (not Sync) at VM granularity; de…",
+      "lastProgressAt": 1782788331027,
+      "tokens": 52258,
+      "toolCalls": 5,
+      "durationMs": 175833,
+      "resultPreview": "{\"lens\":\"perf-and-correctness\",\"findings\":[{\"severity\":\"critical\",\"category\":\"correctness\",\"issue\":\"The only MEASURED rustia datapoint (0.93 us, ADR §0 table line 17) is SLOWER than the reference-Luau bar it must beat (0.73 us, same table). The headline 'reach/beat reference Luau' (ADR:22-24) and the ≤0.5 us goal (P0, ADR:121-124) rest entirely on ONE unmeasured superinstruction. Arithmetically th…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "review:determinism",
+      "phaseIndex": 1,
+      "phaseTitle": "ReviewAndMeasure",
+      "agentId": "a1570c377bf19d081",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782788155194,
+      "queuedAt": 1782788155186,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "determinism (bit-for-bit, native + wasm32, end-to-end)",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low memory;\n(3) wasm32 perf; (4) full latest-Luau compat; (5) excellent Rust embedding API. Hard constraints: bit-for-bit\ndeterminism native+wasm; Send (not Sync) at VM granularity; de…",
+      "lastProgressAt": 1782788444340,
+      "tokens": 52275,
+      "toolCalls": 5,
+      "durationMs": 289146,
+      "resultPreview": "{\"lens\":\"determinism (bit-for-bit, native + wasm32, end-to-end)\",\"findings\":[{\"severity\":\"critical\",\"category\":\"contradiction\",\"issue\":\"ADR §3.3 and §E mandate 'canonicalize NaN payload + -0.0 at f64-producing ops', but the walking skeleton that produced the headline perf numbers does the OPPOSITE on the hot path. spikes/spike-sk-rustia/src/lib.rs:119-130 defines num_canon() but its own comment sa…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "review:wasm-and-cross-engine",
+      "phaseIndex": 1,
+      "phaseTitle": "ReviewAndMeasure",
+      "agentId": "ad24428a5e6cd4295",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782788155195,
+      "queuedAt": 1782788155186,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "wasm-and-cross-engine",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low memory;\n(3) wasm32 perf; (4) full latest-Luau compat; (5) excellent Rust embedding API. Hard constraints: bit-for-bit\ndeterminism native+wasm; Send (not Sync) at VM granularity; de…",
+      "lastProgressAt": 1782788336625,
+      "tokens": 52271,
+      "toolCalls": 5,
+      "durationMs": 181430,
+      "resultPreview": "{\"lens\":\"wasm-and-cross-engine\",\"findings\":[{\"severity\":\"critical\",\"category\":\"gap\",\"issue\":\"Priority 3 explicitly names the 'browser/mobile mod path' (00-constraints.md:18-23), and iOS — including ALL iOS browsers and every WKWebView, by Apple platform mandate — runs JavaScriptCore, not V8. Yet 100% of the wasm evidence (skeleton 0.99us, Spike B parity, libm bit-identity node/deno) is V8 (15-gapc…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "review:gc-send-memory",
+      "phaseIndex": 1,
+      "phaseTitle": "ReviewAndMeasure",
+      "agentId": "af5fb17c905a231b6",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782788155195,
+      "queuedAt": 1782788155186,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "gc-send-memory",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low memory;\n(3) wasm32 perf; (4) full latest-Luau compat; (5) excellent Rust embedding API. Hard constraints: bit-for-bit\ndeterminism native+wasm; Send (not Sync) at VM granularity; de…",
+      "lastProgressAt": 1782788415435,
+      "tokens": 58348,
+      "toolCalls": 9,
+      "durationMs": 260240,
+      "resultPreview": "{\"lens\":\"gc-send-memory\",\"findings\":[{\"issue\":\"ADR §H (lines 102-106) promises a koto-compat shim with `exports().get(\\\"name\\\").clone()`, owned `KValue`-style values, `call_function` returning values, and a serde bridge (C4) for \\\"zero-friction grabby migration\\\" — but every value handed across the host boundary under gc-arena is a `Gc<'gc>` branded by the invariant lifetime that CANNOT escape a `…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "review:api-dx-and-buildplan",
+      "phaseIndex": 1,
+      "phaseTitle": "ReviewAndMeasure",
+      "agentId": "a97671255451f9609",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782788155195,
+      "queuedAt": 1782788155186,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "api-dx-and-buildplan",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low memory;\n(3) wasm32 perf; (4) full latest-Luau compat; (5) excellent Rust embedding API. Hard constraints: bit-for-bit\ndeterminism native+wasm; Send (not Sync) at VM granularity; de…",
+      "lastProgressAt": 1782788442035,
+      "tokens": 69858,
+      "toolCalls": 14,
+      "durationMs": 286840,
+      "resultPreview": "{\"lens\":\"api-dx-and-buildplan\",\"findings\":[{\"issue\":\"ADR §H (line 106) and P3 (line 132) call the batched decide-N API \\\"the scaling lever\\\" and \\\"mandatory\\\", but the project's OWN measured data contradicts this: 15-gapclose.md:24 states \\\"FFI entry is ~4% of cost; VM execution dominates ... so a batched decide-N API helps but isn't the main lever,\\\" and the headline 0.93µs was measured PER-AGENT…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "P0-fused-superinstruction",
+      "phaseIndex": 1,
+      "phaseTitle": "ReviewAndMeasure",
+      "agentId": "ad3ee57f0b2ce6097",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782788444387,
+      "queuedAt": 1782788444343,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "The projected ≤0.5 µs claim HOLDS, and by a wide margin. I …",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low memory;\n(3) wasm32 perf; (4) full latest-Luau compat; (5) excellent Rust embedding API. Hard constraints: bit-for-bit\ndeterminism native+wasm; Send (not Sync) at VM granularity; de…",
+      "lastProgressAt": 1782788898370,
+      "tokens": 72254,
+      "toolCalls": 33,
+      "durationMs": 453983,
+      "resultPreview": "{\"summary\":\"The projected ≤0.5 µs claim HOLDS, and by a wide margin. I added two fused IAUS superinstructions to the walking-skeleton VM (OP_UTIL_F64 / OP_UTIL_Q16) that collapse the entire 4-consideration curve+product loop AND the momentum step into ONE dispatch per action (a per-action utility accumulator). This cut dispatches/argmax-call from 320→35 (f64, ~9.1×) and 219→37 (Q16, ~5.9×) — far p…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "review-synthesis",
+      "phaseIndex": 2,
+      "phaseTitle": "Synthesize",
+      "agentId": "affbcd2c9cccfeac1",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782788898381,
+      "queuedAt": 1782788898372,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "LOCK-WITH-CHANGES",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low memory;\n(3) wasm32 perf; (4) full latest-Luau compat; (5) excellent Rust embedding API. Hard constraints: bit-for-bit\ndeterminism native+wasm; Send (not Sync) at VM granularity; de…",
+      "lastProgressAt": 1782789099114,
+      "tokens": 69940,
+      "toolCalls": 5,
+      "durationMs": 200733,
+      "resultPreview": "{\"lock_verdict\":\"LOCK-WITH-CHANGES\",\"p0_outcome\":\"HOLDS as a number, decisively, AND on the very mechanism three lenses warned about. P0 added maximal-fusion superinstructions (OP_UTIL_F64/OP_UTIL_Q16, spike lib.rs ~24/25) that collapse grabby's entire 4-consideration curve+product loop AND the momentum step into ONE native opcode. Result: ~0.204us native, ~0.237us node-V8 / ~0.245us deno-V8 wasm …"
+    }
+  ],
+  "totalTokens": 427204,
+  "totalToolCalls": 76
+}

@@ -1,0 +1,235 @@
+{
+  "summary": "Walking-skeleton rustia VM spike: measure rustia OWN us/decision on grabby AI kernel (native + wasm-in-V8) vs the 0.73us reference-Luau bar; parallel gc-arena Send/serde/steppable micro-spike; then adversarial verification of the numbers against on-disk artifacts",
+  "agentCount": 3,
+  "logs": [
+    "Build done. skeleton=ok gc-arena=ok"
+  ],
+  "result": {
+    "skeleton": {
+      "summary": "Built a from-scratch register-bytecode VM (\"rustia walking-skeleton\") and benched it on the EXACT grabby AI kernel/harness shape (mirroring spike-a-luau + ai_bakeoff lib.rs/koto_path.rs). Result: the VM hits the Luau-class bar on BOTH native and wasm. Realistic path (IAUS argmax in VM bytecode, eps-greedy/SARSA(lambda)/contagion in Rust, exactly like spike-A's tick_luau_realistic) = ~0.93 us/decision native, ~0.99 us/decision wasm32-in-V8. The native floor anchor reproduced 0.147 us/d (validates the harness vs the 0.149 target), and the TIER-2 Q16.16 VM path reproduced the golden AI hash 0x31c6ec2734ea6fa2 bit-identically on native AND wasm (node + deno). Deterministic per-instruction fuel is essentially free (0-3%). Full-VM wasm tax is only ~1.06-1.09x (no extra tax beyond what pure Rust pays). rustia sits ~4-6x faster than koto (4.0/5.9) and within the 0.7-1.5us Luau band, ~1.27x slower than the Luau-realistic 0.73 reference — a gap the design's planned-but-unimplemented fused-product superinstruction closes (320 dispatches/argmax-call is ~3x more than an optimized encoding needs). Verdict: GO.",
+      "design_implemented": "VALUE REPR: real NaN-boxed 8-byte Value (struct Value(u64)). Numbers = inline f64 (is_num = (bits & QNAN)!=QNAN, where QNAN=0x7ffc000000000000); tagged values live in the quiet-NaN range: low-3-bit discriminator 1=nil/2=false/3=true/4=int with i32 payload at bits[3..35) (encode QNAN|4|((i as u32)<<3), decode ((bits>>3) as u32) as i32); heap handle = SIGN|QNAN|48-bit (defined, NOT exercised — kernel is pure scalar). Mask/shift is genuinely paid on every type check (truthy/is_num) and every int box/unbox; for numbers the decode is from_bits (the honest NaN-box cost, which is the type-check branches, not a per-op mask). Canonicalizing num_canon (NaN->fixed qNaN, -0.0->+0.0) exists but is kept OFF the f64 perf path to stay apples-to-apples with Luau/koto-float; the determinism path is integer Q16 so needs no float canonicalization. OPCODE SET (~24): LOADK, MOVE, NADD/NSUB/NMUL/NDIV/NMOD/NMODK/NMULK (f64), NLT/NLE/NEQ/NEQK (f64 compare->bool), FORNPREP/FORNLOOP (numeric-for superinstruction over reg[a],a+1,a+2), AGET (computed array index), JMP/JMPIF/JMPIFNOT, RET, ILT/IEQ (int), CALL (host fn: 0=fxmul (a*b)>>16, 1=curve_kind w/ logistic LUT). Fixed-width 8-byte instr {op:u8,a,b,c,aux:i32} decoded straight in the loop (no two-level decode). DISPATCH: ONE big `match i.op` inside `loop` (lowers to jump-table native / br_table wasm). FUEL: const-generic `run<const FUEL:bool>` — when on, decrement budget + trap-check each dispatched op; measured cost ~0-3% (essentially free). SUPERINSTRUCTIONS: numeric-FOR (FORNPREP/FORNLOOP) implemented and used for both action(0..5) and consideration(0..3) loops; the fused IAUS PRODUCT/curve-MAC super-op is NOT implemented (the main identified headroom). KERNEL BYTECODE: NO Luau parser — produced by a ~40-line ad-hoc label-resolving assembler (Asm struct: emit/emit_j/emit_aux/label + 2-pass fixup), two programs hand-assembled: build_argmax_f64 (35 instrs, mirrors spike-A ARGMAX_SRC: kind0=x*x,kind1=x,kind2=1-x,*1.25 momentum, argmax) and build_argmax_q16 (27 instrs, mirrors grabby KotoSelector SCRIPT via host fxmul+curve).",
+      "numbers": [
+        {
+          "metric": "native floor us/decision (anchor)",
+          "value": "0.146-0.148",
+          "context": "n=1000/5000/10000, aarch64 M4 Max release; reproduces the grabby 0.149 floor -> harness validated"
+        },
+        {
+          "metric": "rustia VM realistic us/decision, NATIVE, fuel ON",
+          "value": "0.93-0.96",
+          "context": "f64 argmax in VM bytecode + Rust eps/SARSA/contagion; n=1000:0.927 n=5000:0.958 n=10000:0.964"
+        },
+        {
+          "metric": "rustia VM realistic us/decision, NATIVE, fuel OFF",
+          "value": "0.93-0.95",
+          "context": "n=1000:0.954 n=5000:0.929 n=10000:0.934 -> fuel meter cost is within noise (~0-3%), effectively free"
+        },
+        {
+          "metric": "rustia VM realistic us/decision, WASM (node v25.8.1)",
+          "value": "0.985-0.990",
+          "context": "wasm32-unknown-unknown in V8; n=1000:0.985 n=5000:0.988 n=10000:0.990"
+        },
+        {
+          "metric": "rustia VM realistic us/decision, WASM (deno 2.8.2 / v8 14.9)",
+          "value": "0.996-1.013",
+          "context": "second V8 runtime, identical checksums to node -> cross-runtime deterministic"
+        },
+        {
+          "metric": "VM argmax ISOLATION",
+          "value": "0.821 us/call, 320 dispatches, 2.566 ns/dispatch",
+          "context": "pure VM cost with no Rust kernel around it (conservative VM-only bound); 20M calls native"
+        },
+        {
+          "metric": "full-VM wasm tax vs native",
+          "value": "~1.06x (node), ~1.09x (deno)",
+          "context": "0.99/0.93 and 1.01/0.93; native-floor wasm tax is also ~1.09x (0.16/0.147) -> VM pays NO extra wasm tax"
+        },
+        {
+          "metric": "vs reference bars",
+          "value": "rustia 0.93 native / 0.99 wasm",
+          "context": "vs Luau-realistic 0.73 (=1.27x slower, but Luau includes mlua FFI), koto-float 4.0 (=4.3x faster), koto-int 5.9 (=6.3x faster), native floor 0.149"
+        }
+      ],
+      "wasm_result": "rustia VM realistic = 0.985-0.990 us/decision in node v25.8.1, 0.996-1.013 us/decision in deno 2.8.2 (both V8), vs 0.93-0.96 us/decision native -> full-VM wasm tax ~1.06x (node) / ~1.09x (deno). The native-floor anchor also pays ~1.09x in wasm (0.16 vs 0.147), so the VM dispatch loop incurs NO penalty beyond the baseline wasm tax that even branch-free pure Rust pays. This extends Spike B (dispatch-only ~parity) to a REAL VM with NaN-box memory access + register-file loads/stores + a contagion pass touching n*4 neighbor reads, and the big-match->br_table dispatch stays at ~parity. Checksums were bit-identical between node and deno for every path (e.g. realistic n=1000 = 0x-31fa8ccbfee14a97 in both), confirming cross-runtime determinism. wasm binary is 68 KB. Fuel ON vs OFF in wasm: 0.985 vs 0.957 (node), ~3% -> fuel essentially free in wasm too.",
+      "determinism_result": "MATCH (bit-identical), reproduced on THREE targets. TIER-2 implemented in full: the Q16.16 VM argmax (build_argmax_q16) uses host CALL ops for fxmul ((a*b)>>16) and curve_kind (the SAME libm-built logistic LUT + quadratic + inverse-linear as grabby), with loop control + momentum + argmax in bytecode; everything else in the tick (ChaCha8+fnv1a(id,tick) eps-greedy in the SAME RNG order as native, SARSA(lambda), input-drift, mood, snapshot-then-apply contagion) is Rust, identical to the native floor. Ran the golden config (n=4000, seed=0xA1BACE50, 200 ticks) and FNV-hashed AI state via the same state_hash. Produced hash = 0x31c6ec2734ea6fa2 on (1) native aarch64-mac, (2) wasm32-unknown-unknown in node v25, (3) wasm32-unknown-unknown in deno. Native floor in the same harness also = 0x31c6ec2734ea6fa2. So the from-scratch VM's deterministic path is bit-equivalent to the native Q16.16 kernel and to grabby's pinned golden across native + wasm. (The REALISTIC f64 path is intentionally NOT hash-equivalent — it uses x*x instead of the logistic LUT, a perf proxy exactly like spike-A realistic / koto-float — and is excluded from the golden claim by design.)",
+      "raw_evidence": "=== NATIVE (./target/release/skbench) ===\n# spike-sk-rustia: from-scratch register-bytecode VM on the grabby AI kernel\n# machine: aarch64-mac (Apple M4 Max). single-threaded --release opt-level 3 lto.\n\nargmax_f64 program: 35 instrs, 6 consts, dispatches/call = 320\nargmax_q16 program: 27 instrs, 7 consts, dispatches/call = 219\n\n agents |  native us/d | vm-real(fuel) us/d |  vm-real(nofuel)\n------------------------------------------------------------------\n   1000 |       0.1459 |           0.9266 |           0.9537\n   5000 |       0.1475 |           0.9581 |           0.9294\n  10000 |       0.1467 |           0.9637 |           0.9340\n\nVM argmax ISOLATION (fuel on): 0.8210 us/call, 320 dispatches/call -> 2.566 ns/dispatch\n\n# TIER 2 determinism: Q16.16 VM argmax (host fxmul/curve), 4000 agents, 200 ticks\ngolden  = 0x31c6ec2734ea6fa2\nvm-q16  = 0x31c6ec2734ea6fa2\nMATCH   = YES (bit-identical)\nnative floor hash = 0x31c6ec2734ea6fa2  (== golden: true)\n\n=== WASM node v25.8.1 (node run.mjs) ===\n\"1000\":  native 0.1587 | vm_realistic_fuel 0.9849 | vm_realistic_nofuel 0.9568\n\"5000\":  native 0.1641 | vm_realistic_fuel 0.9880 | vm_realistic_nofuel 0.9594\n\"10000\": native 0.1615 | vm_realistic_fuel 0.9898 | vm_realistic_nofuel 0.9715\n(checksums identical across runs; realistic n=1000 = 0x-31fa8ccbfee14a97)\n\n=== WASM deno 2.8.2 / v8 14.9.207.2 (deno run --allow-read run.mjs) ===\n\"1000\":  native 0.1644 | vm_realistic_fuel 0.9963 | vm_realistic_nofuel 0.9807\n\"5000\":  native 0.1661 | vm_realistic_fuel 1.0132 | vm_realistic_nofuel 0.9836\n\"10000\": native 0.1681 | vm_realistic_fuel 1.0113 | vm_realistic_nofuel 0.9914\n\n=== WASM Q16 golden cross-arch (node + deno) ===\nnode: wasm Q16 hash = 0x31c6ec2734ea6fa2  golden = 0x31c6ec2734ea6fa2  MATCH=true\ndeno: wasm Q16 hash = 0x31c6ec2734ea6fa2  golden = 0x31c6ec2734ea6fa2  MATCH=true\n\n=== KEY DISPATCH-LOOP SOURCE (src/lib.rs Vm::run) ===\npub fn run<const FUEL: bool>(&mut self, code:&[Instr], consts:&[Value], luts:&Luts, fuel_budget:u64) -> Value {\n    let mut pc: usize = 0;\n    let mut fuel: u64 = fuel_budget;\n    let reg = &mut self.reg;\n    let arr = &mut self.arr;\n    loop {\n        let i = unsafe { *code.get_unchecked(pc) };   // fixed-width decode, no two-level decode\n        pc += 1;\n        if FUEL { fuel = fuel.wrapping_sub(1); if fuel == 0 { return Value::nil(); } }  // deterministic fuel\n        let a = i.a as usize;\n        match i.op {                                  // ONE big match -> br_table(wasm)/jump-table(native)\n            OP_LOADK => { reg[a] = unsafe { *consts.get_unchecked(i.c as usize) }; }\n            OP_NMUL  => { reg[a] = Value::num(reg[i.b as usize].as_num() * reg[i.c as usize].as_num()); }\n            OP_NMODK => { let k = unsafe { consts.get_unchecked(i.c as usize) }.as_num();\n                          reg[a] = Value::num(reg[i.b as usize].as_num() % k); }\n            OP_FORNLOOP => {                           // numeric-for superinstruction\n                let step = reg[a+2].as_num();\n                let idx  = reg[a].as_num() + step; reg[a] = Value::num(idx);\n                let limit = reg[a+1].as_num();\n                if (if step>0.0 { idx<=limit } else { idx>=limit }) { pc = i.aux as usize; }\n            }\n            OP_AGET => { let idx = reg[i.b as usize].as_num() as usize; reg[a] = unsafe { *arr.get_unchecked(idx) }; }\n            OP_JMPIFNOT => { if !reg[a].truthy() { pc = i.aux as usize; } }\n            OP_CALL => { /* host fxmul / curve_kind for the determinism Q16 path */ }\n            OP_RET => return reg[a],\n            ... (NADD/NSUB/NDIV/NMULK/NLT/NLE/NEQ/NEQK/FORNPREP/JMP/JMPIF/ILT/IEQ/MOVE/HALT)\n        }\n    }\n}",
+      "verdict": "GO. A from-scratch Rust register-bytecode VM hits the Luau-class ~0.7-1.5us bar on BOTH native (0.93 us/decision) and wasm32-in-V8 (0.99 us/decision) on the real grabby IAUS argmax shape, ~4-6x faster than koto (4.0/5.9) and well within the band. The full-VM wasm tax is only ~1.06-1.09x with no penalty beyond baseline Rust, validating the portable big-match->br_table dispatch thesis at the level of a real VM (not just dispatch-only). The determinism contract holds: the Q16.16 VM path is bit-identical to grabby's golden 0x31c6ec2734ea6fa2 across native + wasm(node) + wasm(deno), and per-instruction deterministic fuel costs ~0%. The only gap to the Luau-realistic 0.73 reference (rustia is ~1.27x slower) is attributable to the naive skeleton encoding (320 dispatches/argmax-call, ~3x more than needed) lacking the fused-product/curve-MAC superinstruction the data-driven design already calls for — implementing it is expected to reach ~0.4-0.5us and beat Luau. The bar is hit today and beatable with the planned superinstructions.",
+      "caveats": [
+        "Skeleton omits the fused IAUS PRODUCT / curve-MAC super-op and loop unrolling: only the numeric-FOR superinstruction is implemented, so 320 dispatches/argmax-call (~3x an optimized encoding). This is the entire reason rustia lands at 0.93 not <0.5, and the main path to beating Luau's 0.73.",
+        "The realistic comparison removes Luau's mlua FFI tax: rustia's realistic call is a direct in-process Rust call into the VM (legitimate, since rustia embeds without FFI), so the WORKLOAD is apples-to-apples with spike-A but rustia gets a structural call-overhead advantage. Even so, rustia's pure interpreter (0.82us/argmax-call) is somewhat slower than Luau's optimized bytecode interpreter; the gap is in the dispatch encoding, not the boundary.",
+        "The f64 realistic path is a perf proxy, NOT determinism-equivalent (uses x*x instead of the logistic LUT) — same design choice as spike-A realistic / koto-float. The golden-hash claim rests solely on the Q16.16 host-call path (proven). f64-realistic determinism is confirmed cross-RUNTIME (node==deno) but I did not assert native==wasm bit-equality for the f64 path (not the determinism contract).",
+        "No heap types exercised on the hot path: the NaN-box heap-handle tag is defined but unused. No tables, strings, metatables, closures, varargs, or GC — i.e. none of the Luau language surface or the gc-arena/Arc-clone cost centers koto pays. A real Luau-compat VM must add these; this skeleton only proves the SCALAR arithmetic/dispatch core.",
+        "Full 'vm-internal' (entire agent loop incl. SARSA(lambda)/drift/mood/contagion in bytecode) was DEFERRED. Rationale: unlike spike-A (where vm-internal mattered to amortize per-agent mlua FFI), rustia's realistic path has no FFI, so realistic already largely isolates VM cost; the isolation micro-bench (0.82us/argmax-call) gives the clean VM-only contribution. A true vm-internal would be strictly SLOWER (more bytecode) and is the conservative upper bound, not measured end-to-end.",
+        "No real Luau parser/compiler: bytecode hand-assembled via a tiny ad-hoc label-resolving assembler for JUST the kernel. Register file fixed at 24, local array at 8 — sized for this kernel only.",
+        "Single-threaded, single VM instance; Send/Sync and the 'N VMs on a thread pool' model are not exercised. opt-level 3 + LTO + codegen-units=1 + panic=abort; numbers are aarch64 M4 Max only (no x86_64-linux run here)."
+      ],
+      "confidence": "high",
+      "artifacts": [
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-sk-rustia/src/lib.rs",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-sk-rustia/src/main.rs",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-sk-rustia/run.mjs",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-sk-rustia/qcheck.mjs",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-sk-rustia/Cargo.toml",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-sk-rustia/target/release/skbench",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-sk-rustia/target/wasm32-unknown-unknown/release/spike_sk_rustia.wasm"
+      ]
+    },
+    "gcArena": {
+      "summary": "gc-arena micro-spike built against the LATEST gc-arena 0.6.0 (task said 0.5.x; 0.6.0 is current — Collect is now lifetime-parameterized `Collect<'gc>`, no serde feature exists). A 4-test spike compiles and runs at $HOME/.claude/jobs/d3f0d35e/tmp/spike-ga-gcarena. Verdict: VIABLE-WITH-CAVEATS. The Send gate FAILS by default (two precise causes) but a sound `unsafe impl Send` wrapper compiles, moves a live Gc object graph to a pool thread, and is used there successfully — matching exactly the move-whole-VM-to-a-thread model rustia needs (Send-not-Sync). Serde round-trips. Fuel-driven stepping works cleanly.",
+      "send_result": "FAILS by default; FIXABLE with a sound wrapper. `fn assert_send<T:Send>(){}; assert_send::<Arena<Rootable![Root<'_>]>>()` does NOT compile. Exact compiler reasons (raw E0277, both fire):\n(1) `NonNull<gc_arena::types::GcBoxInner<RefLock<Table<'static>>>>` cannot be sent between threads — i.e. the raw Gc pointers in the root object graph (`Gc<'gc,T>` wraps a `NonNull`, which is `!Send`).\n(2) `Rc<metrics::MetricsInner>` inside `gc_arena::context::Context` (Box<Context> field of Arena) cannot be sent — the non-atomic refcount on the GC pacing metrics.\nNeither is Sync-related; both are Send blockers. A `struct SendArena(MyArena); unsafe impl Send for SendArena {}` wrapper COMPILES, and `assert_send::<SendArena>()` passes. I then `std::thread::spawn(move || { arena.0.mutate(...) })` — moved the whole arena+graph to another thread and read the root table there: prints \"root table len = 1\". SOUNDNESS argument (documented in the spike): both blockers are arena-internal — Gc pointers are branded by the invariant 'gc and provably cannot escape `mutate`, and the only external clone of the metrics Rc comes from `Arena::metrics()`. If the embedding never retains a `Metrics` (or other arena-derived) handle across a thread boundary, moving the whole arena is a unique-owner move with no aliasing and no cross-thread refcount race. This is the same situation piccolo's !Send VM is in; the wrapper is the standard fix. Caveat: it is `unsafe` and rests on that one documented invariant (don't hand out long-lived metrics() clones to other threads).",
+      "serde_result": "WORKS, both directions, branded lifetime is only a mild obstacle in one direction. Read-OUT (the C4-relevant direction: script Value -> Rust struct via serde::Deserialize): needs only &-refs into the graph, NO Mutation, so the 'gc brand is a NON-issue — a `serde::Deserializer` over `&Value<'gc>` has the same trivial lifetime story as my `value_to_json(&Value)` walker. Demonstrated: serialized the live arena graph to JSON `{\"inner\":{\"greeting\":\"hello\",\"n\":42.0}}`. Write-INTO-arena (deserialize external bytes -> fresh arena): the ONLY friction — allocating Gc needs `&Mutation<'gc>`, which std `Deserialize::deserialize` cannot thread through its signature. Idiomatic fix is a `serde::de::DeserializeSeed` carrying `&Mutation` (mechanical, ~30 lines for a Value type). I demonstrated the equivalent hand-written recursive builder `json_to_value(mc, &json)` running inside a fresh `Arena::new`, and asserted byte-identical round-trip (s == s2): \"round trip identical: OK\". Conclusion: serde bridge is fully feasible; the brand costs you one DeserializeSeed wrapper for the into-arena path only.",
+      "steppable_result": "WORKS — fuel-driven collection is exactly the supported model, no obstacle. The mutate-XOR-collect dance is enforced by the API shape: GC only happens in `collect_debt`/`finish_cycle`/`cycle_debt`, never inside `mutate` (the arena docs explicitly state \"no garbage collection will take place during this method\"). My stackless loop: 2000 steps, each does `arena.mutate(|mc,root| {alloc 10 transient Gc garbage; every 100th step push a retained Value})`, then at the step boundary `arena.metrics().adjust_debt(fuel_per_step)` + `arena.collect_debt()`. `Metrics::adjust_debt(f64)` lets you inject debt from YOUR fuel counter rather than relying on allocation pressure or wall-clock, so collection is fully deterministic w.r.t. the fuel schedule. Result: \"2000000 fuel over 2000 steps; live retained = 20; total heap bytes ever = 448; gc cycles run = 10\" — garbage was reclaimed (heap stayed tiny, 20 live values kept), 10 incremental cycles ran, all driven by my explicit calls. `finish_cycle()` gives a deterministic full-collection checkpoint at any chosen boundary. Stackless fits: the VM owns no Gc across the collect call (Gc cannot escape mutate), so there is nothing on a Rust stack to root — state lives in the arena root, which is exactly the stackless requirement.",
+      "ergonomics": "Honest assessment: the branded 'gc lifetime is a real, persistent tax but a well-trodden one (it is the piccolo embedding model). (a) HOST NATIVE FNS in/out: every value-touching signature carries 'gc — e.g. `fn(&Mutation<'gc>, &[Value<'gc>]) -> Value<'gc>`. Inside a `mutate` callback this is ergonomic (Gc<'gc,T> is Copy, derefs freely to &'gc T, NaN-boxed Value can stay Copy). The friction is that EVERY type that holds a Gc must `#[derive(Collect)] #[collect(no_drop)]` and cannot impl Drop, and host-owned leaf data (String, your LUTs) must be wrapped in `Static<T>` (T:'static) to satisfy Collect — minor but pervasive boilerplate. Values cannot be stored in plain Cell/RefCell; you must use the crate's `Lock`/`RefLock` + `unlock(mc)` to get write barriers right (I used RefLock for tables). (b) RE-ENTRANT / POLL-STYLE Sequence callbacks: this is where the tax bites — a Gc pointer CANNOT be held across a yield/step boundary because the arena may collect between steps and the 'gc brand differs per mutate call. gc-arena 0.6 ships the exact tool piccolo uses: `DynamicRootSet::stash(mc, gc) -> DynamicRoot<R>` (a 'static handle) and `.fetch(&root) -> Gc<'gc,...>` to re-root after resume. So re-entrant native callbacks are doable but pay a stash/fetch indirection (a slotmap lookup) per value carried across a suspension, plus the API ceremony of DynamicRoot handles. For rustia's stackless fuel VM this is acceptable: most work is inside one mutate; only true host-yield/await points need stashing. Net: moderate tax, front-loaded into the embedding-API design, not the hot interpreter loop.",
+      "raw_evidence": "=== run output (no feature; Send-wrapper path), `cargo run --release` ===\n[SEND] moved arena to pool thread; root table len = 1\n[SERDE] serialized graph -> {\"inner\":{\"greeting\":\"hello\",\"n\":42.0}}\n[SERDE] round-tripped into fresh arena -> {\"inner\":{\"greeting\":\"hello\",\"n\":42.0}}\n[SERDE] round trip identical: OK\n[STEPPABLE] 2000000 fuel over 2000 steps; live retained = 20; total heap bytes ever = 448; gc cycles run = 10\n[STEPPABLE] explicit finish_cycle ran at chosen checkpoint: OK\nALL SPIKE TESTS RAN\n\n=== `cargo build --release --features prove_not_send` (enables assert_send::<MyArena>()) ===\nerror[E0277]: `NonNull<gc_arena::types::GcBoxInner<RefLock<Table<'static>>>>` cannot be sent between threads safely\n  --> src/main.rs:74:19\n   | 74 |     assert_send::<MyArena>();\n   = help: within `Arena<...Root<'__gc>...>`, the trait `Send` is not implemented for `NonNull<...GcBoxInner<RefLock<Table<'static>>>>`\n   note: required because it appears within the type `Gc<'static, RefLock<Table<'static>>>`  (gc-arena-0.6.0/src/gc.rs:26)\n   note: required because it appears within the type `Root<'static>`\n   note: required because it appears within the type `Arena<...>`\n\nerror[E0277]: `Rc<metrics::MetricsInner>` cannot be sent between threads safely\n  --> src/main.rs:74:19\n   = help: within `gc_arena::context::Context`, the trait `Send` is not implemented for `Rc<metrics::MetricsInner>`\n   note: required because it appears within the type `Metrics`  (gc-arena-0.6.0/src/metrics.rs:206:  pub struct Metrics(Rc<MetricsInner>);)\n   note: required because it appears within the type `gc_arena::context::Context`  (context.rs:166)\n   note: required for `std::ptr::Unique<...Context>` to implement `Send` -> within `Box<Context>` -> within `Arena<...>`\n\n=== load-bearing source facts (gc-arena 0.6.0) ===\ngc.rs:26  pub struct Gc<'gc, T: ?Sized + 'gc> { ... NonNull ... }   // !Send\nmetrics.rs:206  pub struct Metrics(Rc<MetricsInner>);                // !Send, non-atomic\nmetrics.rs:244  pub fn adjust_debt(&self, bytes: f64)                // inject fuel as GC debt\narena.rs  pub fn mutate / mutate_root / collect_debt / finish_cycle / cycle_debt   // mutate-XOR-collect\ndynamic_roots.rs:53  pub fn stash<R>(...) -> DynamicRoot<R>; :82 pub fn fetch<R>(...) -> Gc<'gc,...>  // cross-yield rooting\ncollect.rs:24  pub unsafe trait Collect<'gc>  // NOTE: lifetime-parameterized in 0.6 (was Collect in 0.5)\nCargo: gc-arena 0.6.0 has NO `serde` feature (only std/tracing/enum-map/hashbrown/indexmap/slotmap/smallvec); requested feature errored, so serde bridge must be hand-rolled (done in spike).\n\n=== the sound wrapper (compiles + runs across a thread) ===\nstruct SendArena(MyArena);\nunsafe impl Send for SendArena {}   // invariant: never share a metrics() clone across threads; Gc cannot escape anyway\nstd::thread::spawn(move || { let a = arena; a.0.mutate(|_mc, root| root.globals.borrow().entries.len()) })  // => 1",
+      "verdict": "VIABLE-WITH-CAVEATS for rustia. The Send-only requirement is MET, but only via a sound `unsafe impl Send` wrapper around the Arena (gc-arena does NOT give you Send out of the box: blocked by `NonNull` Gc pointers and a non-atomic `Rc` in the metrics). The wrapper compiled, moved a live Gc graph to a pool thread, and ran mutate there — this is precisely the move-whole-VM-to-a-worker model, and it is the same pattern piccolo embedders use, so it is battle-tested rather than novel. Caveats to bake into the go decision: (1) the Send wrapper carries one documented invariant — the embedding must never hand a `metrics()` clone (or other arena-derived handle) to another thread; trivially satisfiable since we control the API. (2) serde: reading script values into Rust structs (C4) is free of lifetime pain; deserializing external data INTO the arena costs one DeserializeSeed wrapper threading &Mutation. (3) fuel-driven stepping is a first-class fit via adjust_debt + collect_debt/finish_cycle. (4) the branded 'gc lifetime imposes pervasive but shallow boilerplate (derive(Collect)/no_drop, Static<T> for host leaves, Lock/RefLock for mutability) and forces DynamicRootSet stash/fetch for any Gc carried across a re-entrant callback yield. Note the spec said 0.5.x but 0.6.0 is current and changes Collect to be lifetime-parameterized; plan against 0.6.0.",
+      "confidence": "high",
+      "artifacts": [
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-ga-gcarena/src/main.rs",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-ga-gcarena/Cargo.toml",
+        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-ga-gcarena/Cargo.lock"
+      ]
+    },
+    "verify": {
+      "skeleton_numbers_verdict": "CONFIRMED",
+      "honesty_check": "REAL VM, no cheat detected. I read $HOME/.claude/jobs/d3f0d35e/tmp/spike-sk-rustia/src/lib.rs in full and re-ran a clean rebuild. (1) Big-match dispatch: Vm::run has ONE `match i.op {...}` (lib.rs:440-552) over ~24 opcodes inside `loop`, decoding fixed-width 8-byte Instr via get_unchecked(pc) — not constant folding. (2) Real bytecode: two hand-assembled programs via the Asm label-resolver — build_argmax_f64 (35 instrs, reported 320 dispatches/call) mirrors spike-A ARGMAX_SRC (kind0=x*x/kind1=x/kind2=1-x, *1.25 momentum, argmax), build_argmax_q16 (27 instrs, 219 dispatches) mirrors grabby KotoSelector via host CALL fxmul/curve. Verified line-by-line against /workspace/src/rustia/spikes/spike-a-luau/src/main.rs and the grabby Q16.16 kernel embedded in lib.rs (fx_mul, logistic LUT, fnv1a, learn/contagion all verbatim). (3) Real NaN-box: Value(u64) with genuine bit ops — is_num = (bits&QNAN)!=QNAN, truthy = tag compares, int encode QNAN|4|((i as u32)<<3) / decode (bits>>3) (lib.rs:114-164). Not secretly an f64. (4) Per-instruction fuel: const-generic run<const FUEL:bool>, decrement+trap each dispatch (lib.rs:431-438); fuel-OFF path measured separately. (5) Data-dependent: World::new seeds inputs+neighbors via ChaCha8Rng (lib.rs:728); each tick reseeds per agent via fnv1a(i,tick) (lib.rs:840), marshals THAT agent's inputs into arr[] fresh before each VM run, contagion touches n*4 neighbor reads. Isolation bench rotates arr by (w&63) so it can't fold (main.rs:88-106). black_box guards state_hash/acc/sink (main.rs:18,108,122). state_hash mixes all q/trace/last_action/mood. Nothing is dead-code-eliminated.",
+      "reproduced_numbers": [
+        {
+          "metric": "native floor us/decision (anchor)",
+          "claimed": "0.146-0.148",
+          "reproduced": "0.143-0.146 (clean rebuild: n1000 0.1454, n5000 0.1463, n10000 0.1443) - reproduces the ~0.149 grabby floor"
+        },
+        {
+          "metric": "VM realistic us/d native fuel ON",
+          "claimed": "0.93-0.96 (0.927/0.958/0.964)",
+          "reproduced": "0.93-0.96 (0.946/0.930/0.957 and 0.930/0.952/0.948 across two runs)"
+        },
+        {
+          "metric": "VM realistic us/d native fuel OFF",
+          "claimed": "0.93-0.95",
+          "reproduced": "0.90-0.92 (0.900/0.903/0.907) - consistently ~3-5% BELOW fuel-on, the expected direction; fuel meter is essentially free as claimed"
+        },
+        {
+          "metric": "VM argmax ISOLATION",
+          "claimed": "0.821 us/call, 320 dispatches, 2.566 ns/dispatch",
+          "reproduced": "0.809-0.817 us/call, 320 dispatches, 2.528-2.555 ns/dispatch"
+        },
+        {
+          "metric": "WASM realistic node v25.8.1 fuel ON",
+          "claimed": "0.985-0.990",
+          "reproduced": "0.964-0.968 (slightly faster, same band; checksum 0x-31fa8ccbfee14a97 = claim exactly)"
+        },
+        {
+          "metric": "WASM realistic deno 2.8.2/v8 14.9 fuel ON",
+          "claimed": "0.996-1.013",
+          "reproduced": "0.981-1.000 (0.9814/0.9905/0.9996)"
+        },
+        {
+          "metric": "Q16 golden hash native + wasm(node) + wasm(deno)",
+          "claimed": "0x31c6ec2734ea6fa2 bit-identical on all 3",
+          "reproduced": "0x31c6ec2734ea6fa2 on all 3 (native MATCH=YES, node qcheck MATCH=true, deno qcheck MATCH=true); native floor also hashes to golden"
+        },
+        {
+          "metric": "cross-runtime determinism node==deno realistic checksums",
+          "claimed": "identical",
+          "reproduced": "identical (n1000 0x-31fa8ccbfee14a97, n5000 0x-46d2ecb0945ec2ef, n10000 0x-80746fe3b90f252 in BOTH node and deno)"
+        },
+        {
+          "metric": "full-VM wasm tax vs native",
+          "claimed": "~1.06x node / ~1.09x deno",
+          "reproduced": "~1.03-1.04x (0.965/0.93 node, 0.99/0.93 deno) - holds, even slightly better; see discrepancy on run.mjs field naming"
+        },
+        {
+          "metric": "wasm binary size",
+          "claimed": "68 KB",
+          "reproduced": "70 KB (spike_sk_rustia.wasm)"
+        }
+      ],
+      "gc_arena_verdict": "Independently CONFIRMED by compiling $HOME/.claude/jobs/d3f0d35e/tmp/spike-ga-gcarena (gc-arena 0.6.0 pinned in Cargo.lock; task spec said 0.5.x). Arena: Send does NOT hold by default: `cargo build --release --features prove_not_send` (which enables assert_send::<MyArena>()) FAILS to compile with E0277, citing exactly the two claimed causes — (1) NonNull<GcBoxInner<RefLock<Table>>> (the Gc raw pointers) is !Send, and (2) Rc<metrics::MetricsInner> inside Context is !Send (non-atomic refcount) — plus a third same-family NonNull<GcBoxInner<()>> from Context. The default build (SendArena wrapper with `unsafe impl Send`) compiles, `assert_send::<SendArena>()` passes, and at runtime it MOVES a live Gc graph to a std::thread::spawn pool thread and reads it there (\"[SEND] moved arena to pool thread; root table len = 1\"). So: raw Arena is !Send, but the documented unsafe wrapper makes it Send and the move-whole-VM-to-a-worker model works — matching the report's \"VIABLE-WITH-CAVEATS / FAILS by default, FIXABLE with sound wrapper\" exactly. Serde round-trip ([SERDE] round trip identical: OK) and fuel-driven stepping (2000000 fuel, 20 live retained, 448 bytes, 10 gc cycles, explicit finish_cycle) also reproduced. Caveat the report itself states: the wrapper's safety is an argument (never hand a metrics() clone across threads), not a compiler proof — but it is the standard piccolo pattern.",
+      "discrepancies": [
+        "MISLEADING FIELD NAME (not a number error): run.mjs emits a field `wasm_tax_vs_native_floor` = ~6.0-6.2x, which is realistic-wasm / native-FLOOR-wasm (0.96/0.155) - a meaningless ratio as a 'tax'. The summary's actual ~1.06-1.09x 'full-VM wasm tax' claim is realistic-wasm / realistic-NATIVE (0.96/0.93), which is the correct apples-to-apples and is sound (I reproduce ~1.03-1.04x). The prose is right; only the JSON field label is confusing.",
+        "Native floor reproduced slightly FASTER than claimed (0.143-0.146 vs claimed 0.146-0.148) and wasm-node realistic slightly faster (0.964-0.968 vs claimed 0.985-0.990). All within run-to-run variance; direction favors the GO conclusion, not against it.",
+        "Claimed nofuel table (0.954/0.929/0.934) sometimes showed nofuel ABOVE fuel-on (the agent attributed this to noise). My clean-rebuild runs show nofuel consistently ~3-5% BELOW fuel-on (the physically expected ordering). Conclusion 'fuel meter essentially free' holds either way; the agent's specific nofuel digits were noisy, not the headline.",
+        "wasm binary 70 KB on my rebuild vs 68 KB claimed - trivial.",
+        "The <0.5us 'beats Luau with fused superinstruction' figure is a PROJECTION, not measured - correctly flagged as caveat by the agent, but it is the one load-bearing forward claim with zero receipts."
+      ],
+      "overall": "GO-for-from-scratch is SOUND on the evidence. Every headline skeleton number reproduced within noise from a clean rebuild I forced (touch + recompile, not the agent's cached binary): native floor ~0.144us reproduces the 0.149 grabby anchor, VM-realistic ~0.93-0.96us native / ~0.96-1.0us wasm sits squarely in the 0.7-1.5us Luau-class band and ~4-6x faster than koto (4.0/5.9), the per-instruction fuel meter is genuinely ~free, and the golden hash 0x31c6ec2734ea6fa2 is bit-identical across native + wasm(node) + wasm(deno) with cross-runtime checksum equality - a real register-bytecode VM with a real NaN-box and data-dependent per-agent work, no constant-folding/DCE/fake-NaN-box cheats. The gc-arena Send result is also confirmed: !Send by default for the exact two cited reasons, Send+working via the standard unsafe wrapper. SINGLE MOST IMPORTANT NEXT THING: implement and MEASURE the fused IAUS product/curve-MAC superinstruction (collapse the 320 dispatches/argmax-call). It is the only load-bearing claim with no receipt - the entire 'beats Luau's 0.73, reaches 0.4-0.5us' thesis rests on it being projected, not demonstrated. Everything else is verified; this is the one open risk. (Secondary: the skeleton exercises zero heap/table/string/GC/closure surface, so it proves only the scalar arithmetic+dispatch core - the koto Arc-clone cost centers and full Luau compat remain unmodeled.)"
+    }
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Build"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Verify"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "walking-skeleton-vm",
+      "phaseIndex": 1,
+      "phaseTitle": "Build",
+      "agentId": "a2fd9d69ec60a0e3e",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782786525451,
+      "queuedAt": 1782786525444,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Built a from-scratch register-bytecode VM (\"rustia walking-…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at /workspace/src/grabby-aliens. Priorities: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low memory;\n(3) wasm32-unknown-unknown perf; (4) full latest-Luau compat; (5) excellent Rust embedding API.\nMEASURED so far (aarch64-mac, real grabby IAUS+SARSA(lambda)+contagion ke…",
+      "lastProgressAt": 1782787617967,
+      "tokens": 133501,
+      "toolCalls": 41,
+      "durationMs": 1092515,
+      "resultPreview": "{\"summary\":\"Built a from-scratch register-bytecode VM (\\\"rustia walking-skeleton\\\") and benched it on the EXACT grabby AI kernel/harness shape (mirroring spike-a-luau + ai_bakeoff lib.rs/koto_path.rs). Result: the VM hits the Luau-class bar on BOTH native and wasm. Realistic path (IAUS argmax in VM bytecode, eps-greedy/SARSA(lambda)/contagion in Rust, exactly like spike-A's tick_luau_realistic) = …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "gc-arena-micro-spike",
+      "phaseIndex": 1,
+      "phaseTitle": "Build",
+      "agentId": "a3fdd9f07597fef6c",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782786525455,
+      "queuedAt": 1782786525444,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "gc-arena micro-spike built against the LATEST gc-arena 0.6.…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at /workspace/src/grabby-aliens. Priorities: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low memory;\n(3) wasm32-unknown-unknown perf; (4) full latest-Luau compat; (5) excellent Rust embedding API.\nMEASURED so far (aarch64-mac, real grabby IAUS+SARSA(lambda)+contagion ke…",
+      "lastProgressAt": 1782786809473,
+      "tokens": 61004,
+      "toolCalls": 18,
+      "durationMs": 284018,
+      "resultPreview": "{\"summary\":\"gc-arena micro-spike built against the LATEST gc-arena 0.6.0 (task said 0.5.x; 0.6.0 is current — Collect is now lifetime-parameterized `Collect<'gc>`, no serde feature exists). A 4-test spike compiles and runs at $HOME/.claude/jobs/d3f0d35e/tmp/spike-ga-gcarena. Verdict: VIABLE-WITH-CAVEATS. The Send gate FAILS by default (two precise causes) but a sound `unsafe impl Send` wrappe…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "adversarial-verify",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a8d609ff75253db22",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782787617991,
+      "queuedAt": 1782787617970,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "CONFIRMED",
+      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at /workspace/src/grabby-aliens. Priorities: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low memory;\n(3) wasm32-unknown-unknown perf; (4) full latest-Luau compat; (5) excellent Rust embedding API.\nMEASURED so far (aarch64-mac, real grabby IAUS+SARSA(lambda)+contagion ke…",
+      "lastProgressAt": 1782787872952,
+      "tokens": 77225,
+      "toolCalls": 16,
+      "durationMs": 254960,
+      "resultPreview": "{\"skeleton_numbers_verdict\":\"CONFIRMED\",\"honesty_check\":\"REAL VM, no cheat detected. I read $HOME/.claude/jobs/d3f0d35e/tmp/spike-sk-rustia/src/lib.rs in full and re-ran a clean rebuild. (1) Big-match dispatch: Vm::run has ONE `match i.op {...}` (lib.rs:440-552) over ~24 opcodes inside `loop`, decoding fixed-width 8-byte Instr via get_unchecked(pc) — not constant folding. (2) Real bytecode: t…"
+    }
+  ],
+  "totalTokens": 271730,
+  "totalToolCalls": 75
+}

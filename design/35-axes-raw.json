@@ -1,0 +1,624 @@
+{
+  "summary": "Answer gak questions + explore all open axes with spikes: (1) exhaustive Luau scope triage; (2) gc-arena snapshot/rollback options + microbench; (3) axis B value-representation 5-direction + heap-path spike; (4) axis D GC integration 5-direction + write-barrier/retain-serde/miri-Send spike; (5) axis H embedding API 5-direction + vertical-slice spike (honest general-script number)",
+  "agentCount": 5,
+  "logs": [
+    "parallel[1] failed: agent({schema}): StructuredOutput retry cap (5) exceeded — 5 failed calls with no valid output",
+    "5-agent explore done: 4/5 returned"
+  ],
+  "result": {
+    "results": [
+      {
+        "agent": "q1-luau-scope-triage",
+        "result": {
+          "summary": "Scope triage for rustia vs full latest-Luau, anchored to what grabby actually exercises: (1) seed-driven SCENARIO generation that runs once and `export`s a table → serde `ScenarioSpec` (galaxy.koto: numeric-for over ranges, arithmetic, math.cos/sin, arrays+maps, push/insert, host `rand`/`rand_range`); (2) a console REPL (single chunks, print/tostring, string ops, pcall, host fns); (3) the AI-leaf `argmax` closure (numeric-for, arithmetic, comparison, indexing, host Q16.16 helpers fxmul/curve). CLARIFY THE TARGET: rustia targets the Luau LANGUAGE + the open-source luau.org stdlib, NOT the Roblox engine surface (Instance/DataTypes/CFrame/Vector3) and NOT the native-codegen toolchain. IN-MVP = the Lua 5.1 core + the cheap Luau ergonomics + 5 core libs (math/table/string/bit32/coroutine) + a base-globals subset + metatable OOP + type-annotation PARSING (erased, never checked). The gradual TYPE CHECKER is DEFERRED and costs ONLY static/LSP diagnostics — Luau erases types at runtime anyway, so deferring it is runtime-compatible. Biggest DROPS are all either (a) Roblox-engine-only, (b) determinism hazards rustia bans by design (weak tables/__mode, collectgarbage, __gc [Luau already has none], os wall-clock), or (c) sandboxing items Luau itself already removed (io/package/debug-file/loadstring-bytecode/dofile). Luau's own omissions (int64/LUA_TINTEGER, standalone bitwise ops, goto) align with rustia's f64-only Value + bit32 channel. Opcode budget: Luau VM ships ~83 LOP_* opcodes; rustia P2 targets ~70 source-level opcodes + versioned superinstructions. Stdlib surface counted below: base 27, math 40, table 17, string 18, buffer 22, bit32 15, utf8 5, coroutine 8, os 4, debug 2, vector lib 16.",
+          "in_mvp": [
+            "SYNTAX core (Lua 5.1 superset): functions/closures/upvalues, local & global scope, tables (array+hash parts), numeric-for, generic-for, while, repeat-until, if/elseif/else, and/or/not, multiple assignment, varargs (...), multiple return values, method-call sugar (:), string & number literals, length (#), concat (..)",
+            "SYNTAX Luau ergonomics grabby's .koto->.luau rewrites need: string interpolation (backtick `{x}`), `continue`, compound assignment (+= -= *= /= //= %= ^= ..=), floor-division `//`, generalized iteration (`for x in t` + __iter), if-then-else EXPRESSION, hex/binary/underscore numeric literals, \\x/\\u{}/\\z string escapes, `local x = ... :: T` cast syntax",
+            "TYPE GRAMMAR: FULLY PARSE annotations/generics/type packs/unions/intersections/optional `?`/`type` aliases/typeof/function-type-with-named-params and the `f<a,b>(c)` disambiguation (axis F) — then ERASE at runtime; never typecheck",
+            "METATABLES/METAMETHODS: __index, __newindex, __call, __tostring, __eq, __lt, __le, __concat, __len, __unm, __add/__sub/__mul/__div/__mod/__pow, __idiv (Luau floor-div), __iter (generalized iteration), setmetatable/getmetatable/rawget/rawset/rawequal/rawlen — sufficient for metatable-based OOP/'class' scripts",
+            "BASE GLOBALS subset (~20 of 27): print, type, typeof, tostring, tonumber, assert, error, pcall, xpcall, pairs, ipairs, next, select, unpack, rawget, rawset, rawequal, rawlen, setmetatable, getmetatable — pcall/xpcall/error/assert are load-bearing for the console REPL",
+            "math library: ALL 40 fns (abs ceil floor round sign clamp sin cos tan asin acos atan atan2 sinh cosh tanh log log10 exp pow sqrt deg rad fmod modf frexp ldexp lerp map min max random randomseed noise) via pinned pure-Rust libm + per-op canon; min/max comparison-based, fmod floored-aware; random/randomseed deterministic PCG32-seeded",
+            "table library: insert, remove, concat, sort, pack, unpack, getn, maxn, move, find, create, clear, clone, freeze, isfrozen (15 of 17; Koto `push` -> table.insert). foreach/foreachi excluded (deprecated)",
+            "string library core: len, sub, byte, char, rep, reverse, lower, upper, split, format, find, match, gmatch, gsub (Lua-5.1 patterns) — string.format (high-pri P2) + patterns needed by the console; pattern char-classes %a/%l/%u pinned to ASCII/C locale",
+            "bit32 library: ALL 15 fns (band bor bxor bnot btest lshift rshift arshift lrotate rrotate extract replace countlz countrz byteswap) — this IS the exact-integer/Q16.16 channel (axis C) for a pure-Luau float-free AI leaf (replaces host fxmul shift)",
+            "coroutine library: create, resume, yield, wrap, status, running, isyieldable, close (8) — VM models these as resumable trampoline contexts (axis G is LOCKED on this), so low marginal cost even though grabby doesn't use them today",
+            "DETERMINISTIC FUEL + recursion/depth cap as a distinct error result (axis G); execution_limit equivalent to grabby's 5s scenario guard",
+            "SERDE BRIDGE: exports() == 'the table the chunk returns' (Luau has no export{}); from_koto_value-shaped path -> serde::Deserialize -> ScenarioSpec, with NaN canon at serde-in ingress",
+            "Insertion-ordered tables (seedless FxHash IndexMap) for deterministic pairs() iteration (axis E)"
+          ],
+          "deferred": [
+            {
+              "feature": "Gradual TYPE CHECKER (strict + nonstrict inference, type-error diagnostics, the new Luau solver)",
+              "why_deferred": "Types are runtime-erased in real Luau too, so a parse-but-don't-check engine is RUNTIME-compatible; the checker is a large separate subsystem (own solver, ~thousands of LOC) with zero effect on sim execution or determinism. Architecture F locks parse-only.",
+              "cost_to_add_later": "High but isolated: it's a pure static-analysis layer over the already-parsed AST (the type grammar is fully parsed in MVP). Realistically only worth it as an LSP/editor service; the engine never needs it. Deferring it costs ONLY editor diagnostics + autocomplete type info."
+            },
+            {
+              "feature": "buffer library (22 fns: create/fromstring/tostring/len, readi8..readf64, writei8..writef64, readstring/writestring/readbits/writebits/copy/fill)",
+              "why_deferred": "Architecturally part of the exact-integer channel (axis C) but heavier than bit32 (typed linear memory + bounds + endianness); grabby's float-free path uses HOST helpers (fxmul/curve) and bit32 covers the integer math, so buffer isn't on the critical path yet.",
+              "cost_to_add_later": "Low-medium: a Gc-managed byte slab + 14 typed accessors; little determinism risk if all writes go through canon/exact-int (f32/f64 reads must canon NaN). Add when a script needs its own packed state or zero-copy host interop."
+            },
+            {
+              "feature": "vector type + vector library (16 fns: create/zero/one/magnitude/normalize/dot/cross/angle/floor/ceil/abs/sign/clamp/min/max)",
+              "why_deferred": "grabby represents positions as [x,y] arrays/tables, not the native vector value. Adding a first-class vector touches the (unlocked) NaN-box Value layout AND determinism (per-component f64 canon, no-FMA dot/cross/magnitude).",
+              "cost_to_add_later": "Medium-high: it's a new immutable value type in the Value union (competes for NaN-box tag space) plus 16 libm-backed ops each needing canon. Defer until the Value layout (axis B) is locked at P0.5/P1; scripts using `vector(...)` literals won't run until then."
+            },
+            {
+              "feature": "utf8 library (5 fns: offset/codepoint/char/len/codes)",
+              "why_deferred": "Console renders an ASCII FiraMono subset ('On-screen text is ASCII'); scenarios use ASCII identifiers. No current consumer.",
+              "cost_to_add_later": "Low: 5 pure functions over byte strings, deterministic by construction. Add if non-ASCII script text/labels appear."
+            },
+            {
+              "feature": "string.pack / string.packsize / string.unpack",
+              "why_deferred": "Binary (de)serialization format; no grabby consumer (serde bridge handles struct marshalling).",
+              "cost_to_add_later": "Low-medium: format-string interpreter; determinism-safe if integer/endianness only and f32/f64 fields canon on read. Add for binary save/wire formats."
+            },
+            {
+              "feature": "debug library subset (debug.info, debug.traceback)",
+              "why_deferred": "Not required for execution; traceback is a REPL nicety.",
+              "cost_to_add_later": "Low: traceback improves console error UX; debug.info exposes call-frame metadata. Keep output deterministic (no addresses)."
+            },
+            {
+              "feature": "require / module system (multi-file scripts)",
+              "why_deferred": "Scenario + console run as single chunks loaded by the host; the open-source Luau `require` is path/string-based and sandbox-sensitive.",
+              "cost_to_add_later": "Medium: host-mediated module resolver + per-module cache. Add for multi-file scenario libraries; must stay host-controlled (no arbitrary FS) to preserve sandboxing + determinism."
+            },
+            {
+              "feature": "Host-mediated os.clock/os.time/os.date/os.difftime (4 fns) as deterministic stubs",
+              "why_deferred": "Wall-clock is a determinism hazard (banned in the sim profile); a fixed/host-injected clock could be exposed for the console only.",
+              "cost_to_add_later": "Trivial: stub returning host-supplied deterministic values. Never wire real wall-clock into the sim path."
+            },
+            {
+              "feature": "load / loadstring (source only, host-gated)",
+              "why_deferred": "The console REPL compiles fresh chunks via the embedding API, not via in-script load; bytecode loading is dropped (see drops).",
+              "cost_to_add_later": "Low for source-string compilation reusing the compiler; must remain capability-gated. Bytecode/string.dump stays dropped."
+            }
+          ],
+          "dropped": [
+            {
+              "feature": "Roblox engine surface: Instance, DataTypes (CFrame, Vector3, Color3, UDim2, Enum, etc.), the Roblox class/OOP framework, services/events",
+              "why_dropped": "Not part of the Luau LANGUAGE or the open-source luau.org stdlib — it is Roblox-host API. rustia's host surface is grabby's (scenario host fns, console commands, AI helpers).",
+              "consequence": "A Roblox game script will not run unmodified. Nobody in grabby's pipeline notices — grabby was never Roblox. Only relevant if someone expects to paste Roblox code."
+            },
+            {
+              "feature": "Native code generation: @native/@oldsolver attributes as real codegen, the Luau bytecode format (LBC v7) consumption, typeinfo bytecode, string.dump, loadstring-of-bytecode",
+              "why_dropped": "rustia has its OWN bytecode + portable big-match->br_table dispatch + superinstructions (axis A); it compiles from SOURCE. Consuming Luau LBC is explicitly not pursued unless a workflow needs luau-compile interop (axis F).",
+              "consequence": "@native parses as a no-op attribute (no perf delta vs rustia's own fusion). Cannot ingest precompiled .luau bytecode or use Roblox's native-codegen perf path. grabby doesn't ship bytecode, so no impact; revisit only if luau-compile interop is needed."
+            },
+            {
+              "feature": "Gradual-type runtime semantics / type-driven behavior",
+              "why_dropped": "Luau erases types at runtime; there is no runtime type behavior to drop. Listed for completeness.",
+              "consequence": "None at runtime. Combined with the deferred checker: scripts behave identically; only editor-time diagnostics are absent."
+            },
+            {
+              "feature": "Weak tables (__mode) and ephemeron tables",
+              "why_dropped": "Determinism: object-survival across collection is not bit-reproducible native vs wasm (different sizes/mark-progress). §3.5 FORBIDS __mode in the deterministic sim profile.",
+              "consequence": "Scripts relying on weak caches/identity maps for GC-driven eviction won't get eviction. grabby doesn't use them. Could be gated behind a cross-arch golden that hashes survivors, but disallowed by default."
+            },
+            {
+              "feature": "collectgarbage (all modes: collect/count/step/setpause/setstepmul/isrunning) + gcinfo",
+              "why_dropped": "GC is driven ONLY by the deterministic instruction counter (§3.5), never by script or byte-debt; script-visible GC control would break determinism and the rollback model.",
+              "consequence": "Scripts can't force/observe collection. collectgarbage('count') has no stable cross-arch answer anyway (64-bit vs 32-bit sizes). May stub collectgarbage('collect') as a no-op; gcinfo dropped."
+            },
+            {
+              "feature": "__gc finalizers",
+              "why_dropped": "Luau ALREADY has no __gc (sandboxing/perf); rustia inherits this. §3.5 notes it as 'one hazard already gone'.",
+              "consequence": "None vs Luau. No finalizer hooks — fine, since determinism forbids observing GC timing."
+            },
+            {
+              "feature": "int64 / LUA_TINTEGER subtype + standalone bitwise operators (& | ~ << >> as ops) + integer division producing an integer subtype",
+              "why_dropped": "Luau itself omits these (FFlag-off / library-only); rustia's Value is f64-only with bit32 as the integer channel (axis C). Standalone bitwise ops are covered by bit32.",
+              "consequence": "Aligned with Luau — no divergence. Exact >53-bit integer work must flow through bit32/buffer/host fns, never lossy f64 (§3.6). Matches grabby's Q16.16-via-host design."
+            },
+            {
+              "feature": "goto / labels (::label::)",
+              "why_dropped": "Luau itself dropped these (unstructured control flow complicates the compiler). rustia matches.",
+              "consequence": "Aligned with Luau — none. `continue` covers the common case."
+            },
+            {
+              "feature": "io / package libraries, debug filesystem/introspection beyond info+traceback, dofile / loadfile, getfenv / setfenv on threads/functions, newproxy",
+              "why_dropped": "Sandboxing — Luau already removes/restricts all of these (no direct file access). rustia keeps the sandbox.",
+              "consequence": "Aligned with Luau. No filesystem/environment escape; the host provides all I/O via registered fns. getfenv/setfenv/newproxy are restricted in Luau too; grabby uses none."
+            },
+            {
+              "feature": "__namecall metamethod (Roblox method-dispatch optimization)",
+              "why_dropped": "Value-invisible optimization specific to Roblox's object model; rustia implements `obj:method()` via ordinary __index lookup.",
+              "consequence": "None observable — semantics identical. Only a micro-perf detail Roblox uses; rustia's own fusion/inline-cache path covers method-call speed."
+            }
+          ],
+          "determinism_compat_notes": [
+            "COMPAT DIVERGENCE — pairs()/table iteration order: real Luau iteration order is UNSPECIFIED (hash order); rustia FORCES insertion order (seedless FxHash IndexMap, axis E). This is a deterministic SUPERSET — well-written scripts gain a guarantee, but a (bad-practice) script depending on Luau's specific hash order would observe different order. Flag in compat docs.",
+            "SOUNDNESS+determinism — per-op NaN canonicalization to one quiet-NaN at EVERY f64->Value ingress (arith, FORNLOOP, host-fn return, serde-in, tonumber/coercion, numeric literal, constant-fold). Required because NaN-box tag space overlaps IEEE/wasm-nondeterministic NaN payloads (§3.3). A divergence from stock Luau, which does not canon per-op.",
+            "-0.0 -> +0.0 normalization ONLY at table-key normalization, NOT per-op — preserves Luau's 1/-0.0 == -inf sign-of-zero semantics (per-op -0 canon would be a compat bug).",
+            "All transcendentals (incl. the compiler's constant folder) via the SAME pinned pure-Rust libm; no FMA/mul_add/fast-math/relaxed-SIMD (axes C/E). Results may differ in the last ULP from a given Luau build that uses platform libm — rustia's contract is cross-ARCH bit-identity, not bit-identity with reference Luau's transcendentals.",
+            "Floored modulo: Lua/Luau `%` is floored (Rust `%` is truncated) — must implement floored; math.fmod stays C-style. math.min/max must be comparison-based (NaN/-0 tie behavior).",
+            "tostring/number formatting: rustia targets Schubfach (P2 high-pri); reference Luau uses %.14g. Numeric-string output may differ digit-for-digit from a Luau build — a byte-compat item gated by differential tests, and a determinism item (must be identical native vs wasm).",
+            "string pattern char-classes %a/%l/%u/%s etc. pinned to ASCII/C locale (P2 high) — avoids locale-dependent, non-deterministic classification.",
+            "math.random/randomseed: deterministic PCG32 (P2 low). Sequence will NOT match a reference Luau build's RNG unless seeded identically with the same algorithm; grabby's actual RNG is host-side ChaCha8/SplitMix integer streams (exposed via host fns), so script-level math.random is a secondary concern.",
+            "os.time/os.clock/os.date are wall-clock and DROPPED from the sim profile (determinism hazard); only host-injected deterministic stubs may appear in the console profile.",
+            "Fuel charged at the LOGICAL/source-op level (fusion-invariant) or via a versioned cost table; changing the superinstruction set is a FUEL-ABI break (axis G). Cross-version golden reproducibility depends on this.",
+            "Vector type DEFERRED means determinism rules for per-component f64 canon / no-FMA dot/cross/magnitude are not yet exercised; locking it interacts with the unlocked NaN-box Value layout (axis B).",
+            "Type annotations are erased and never checked, so a type-incorrect script that Luau's strict mode would REJECT will RUN in rustia (matching Luau nonstrict/runtime behavior). No runtime divergence; only the static rejection is lost."
+          ],
+          "sources": [
+            "https://luau.org/library (stdlib function inventory: base 27, math 40, table 17, string 18, buffer 22, bit32 15, utf8 5, coroutine 8, os 4, debug 2, vector lib 16)",
+            "https://luau.org/syntax (Luau-over-Lua-5.1 syntax extensions: interpolation, continue, compound assign, //, generalized iteration, if-expr, literals, type-annotation grammar)",
+            "https://luau.org/compatibility (what Luau drops/keeps vs Lua 5.1-5.4: no int64, no standalone bitwise, no goto, no __gc, basic weak tables, io/os/package/debug sandboxing, no loadstring-bytecode/dofile)",
+            "https://luau.org/types (gradual type system; /typecheck redirects here — checker is static, types runtime-erased)",
+            "https://www.lua.org/manual/5.1/manual.html (Lua 5.1 metamethod/metatable event list — baseline Luau extends with __idiv/__iter/__namecall)",
+            "https://github.com/luau-lang/luau (VM opcode set ~83 LOP_*, bytecode/typeinfo format, native codegen) — referenced for opcode/codegen scope",
+            "/workspace/src/rustia/design/30-architecture.md (locked axes A/C/E/F/G; determinism spec §3; build plan P2 '~70 opcodes, 5 core libs + coroutine')",
+            "/workspace/src/grabby-aliens/view/assets/scenarios/galaxy.koto (scenario surface: numeric-for over ranges, arithmetic, .cos/.sin, arrays+maps, push, host rand/rand_range, export-a-table)",
+            "/workspace/src/grabby-aliens/scenario/src/lib.rs (from_koto_seeded: prelude.add_fn/insert, compile_and_run, exports().clone() -> serde -> ScenarioSpec, with_execution_limit fuel)",
+            "/workspace/src/grabby-aliens/ai_bakeoff/src/koto_path.rs (AI-leaf argmax: exported closure, numeric-for, indexing, comparison, host fxmul/curve Q16.16, float-free determinism cross-check)",
+            "/workspace/src/grabby-aliens/view/src/console.rs (console REPL: single-chunk eval, host command fns, print/echo, ASCII-only rendering)"
+          ]
+        }
+      },
+      {
+        "agent": "axisB-value-representation",
+        "result": {
+          "axis": "B — value/heap representation (NaN-box 8B vs tagged 16B vs fat 24B vs pointer-tag vs per-target hybrid)",
+          "directions": [
+            {
+              "direction": "(1) NaN-boxed 8-byte Value — f64 inline, heap via tagged handle in the NaN payload [the current design leaning]",
+              "pros": "Smallest Value (8B; reg[24]=192B; tables store 8B values → best priority-2 memory). Trivially Copy (Send fine). Fastest pure value move/bulk-clone (wasm: 0.59ns/move, 25ns/256-clone). Heap ops (table get/set/intern/eq) are layout-neutral — identical to tagged within noise.",
+              "cons": "LOSES the hot f64 path on BOTH targets: kernel canon-ON 0.96us/d native (vs tagged 0.66, +45%) and 1.09us/d wasm (vs tagged 0.71, +54%); canon-OFF 0.93/0.99 (vs 0.65/0.69). Storing f64 as u64 forces a GP↔FP / i64.reinterpret_f64 domain-cross per arithmetic op and blocks FP-register residency of hot numeric locals. Per-op NaN canon is a SOUNDNESS invariant not just determinism: 512/2048 raw NaN payloads alias as nil/int/heap-handle before canon (0 after) — extra mask/shift + a soundness proof obligation. Highest complexity. canon tax itself is also worst here (+10% wasm).",
+              "verdict": "REJECT as primary. It is speed-last on grabby's hottest (f64-saturated) path on every engine measured; its only wins are memory and raw moves, which are priority-2/secondary. It reproduced the skeleton's exact ~0.93/0.99 numbers, confirming the skeleton silently paid this tax."
+            },
+            {
+              "direction": "(2) 16-byte tagged union — Copy scalars + payload word + separate tag byte, no NaN-box masking",
+              "pros": "FASTEST hot f64 kernel on both targets: 0.66us/d native, 0.71us/d wasm canon-ON (~35-45% faster than NaN-box). The explicit tag lets LLVM/V8 keep hot numeric locals in FP registers (no reinterpret). Determinism CLEAN: golden 0x31c6ec2734ea6fa2 bit-identical native+wasm, and the NaN-box tag-space aliasing concern is ELIMINATED (soundness invariant becomes moot — a real risk/complexity reduction). Trivially Copy → Send-by-move fine. Lowest decode complexity (tag compare, no mask/shift). Heap ops layout-neutral so it never loses to NaN-box anywhere.",
+              "cons": "2x Value memory vs NaN-box (16B; reg[24]=384B; tables store 16B values) — a priority-2 cost. 1.6x bulk-clone bandwidth (41ns vs 25ns/256). Slightly slower pure move (0.66 vs 0.59ns wasm).",
+              "verdict": "RECOMMEND. Dominant on the priority-#1 axis (fast) on both native and wasm, ties the fat layout on speed at 33% less memory, and removes the NaN-box soundness burden entirely. Memory delta is small in absolute terms and ranks below speed."
+            },
+            {
+              "direction": "(3) koto-style 24-byte enum [rejected baseline]",
+              "pros": "As a Copy 24B struct it ties tagged-16B on kernel speed (0.67us/d native, 0.73us wasm) since the hot value is still inline. Simple.",
+              "cons": "Worst memory (24B; reg[24]=576B; bulk-clone 78ns native/59ns wasm). koto's REAL value is non-Copy (Arc-backed): measured Arc clone+drop = 3.27ns native / 2.58ns wasm per move vs 0.94/0.59ns for a Copy handle (~4x) — this is Spike D's ~20% Arc self-time. No speed upside over 16B.",
+              "verdict": "REJECT. No speed gain over tagged-16B, strictly more memory; the Arc-backed reality is the koto tax we are leaving behind."
+            },
+            {
+              "direction": "(4) pointer / low-bit tagging",
+              "pros": "Pointer-width Value; cheap on heap-pointer-dominated workloads; natural on wasm32 (32-bit ptrs).",
+              "cons": "f64 cannot be stored inline in a tagged pointer — every double must be boxed (heap alloc + indirection) or split into SMI+boxed-double. grabby's kernel is f64-saturated (IAUS products are fractional); a boxed double costs ~table-get latency (9-27ns/op measured) vs sub-ns inline — 1-2 orders worse per arithmetic op.",
+              "verdict": "REJECT (disqualified by workload, no spike needed). Pointer-tagging is for SMI/heap-dominated languages, not a numeric sim."
+            },
+            {
+              "direction": "(5) per-target hybrid — NaN-box wasm32, 16-byte native",
+              "pros": "Could in principle pick the best layout per target; might claw back wasm memory.",
+              "cons": "The spike shows NaN-box LOSES the kernel on BOTH targets (native +45%, wasm +54%), so there is no target where NaN-box is the speed winner → hybrid buys zero speed. It doubles the Value-encoding surface: two soundness arguments, two superinstruction lowerings, two determinism goldens, two sets of bugs. The only motive (wasm memory) costs ~35% wasm speed — contradicting priority #1.",
+              "verdict": "REJECT. Pure complexity with no speed payoff; would only make sense if NaN-box won wasm, and it does not."
+            }
+          ],
+          "spike_method": "Copied + extended the walking-skeleton into $HOME/.claude/jobs/d3f0d35e/tmp/spike-b-value: a `VmValue` trait implemented by three layouts (NbValue 8B NaN-box, TagValue 16B tagged, E24 24B fat) driving ONE generic register VM and ONE shared heap (insertion-ordered tables = Vec keys/vals + seedless-FxHash index; interned strings = arena + fnv intern). The heap path the skeleton skipped is now live (string-keyed + int-keyed tables, handle-in-Value). Microbenched table get/set/insert, string intern/eq, value move + bulk-clone, plus the IAUS f64 argmax kernel with const-generic CANON toggling per-op NaN canonicalization on every f64-producing op. Also modeled koto's non-Copy reality with an Arc-backed value (clone=atomic refcount). Verified the NaN-box soundness concern by enumerating 2048 NaN bit-patterns and checking whether they alias the tag space before/after canon. Honest harness: churned LCG/data-dependent inputs, std::hint::black_box on every result, best-of-7, golden-hash anti-DCE. Ran NATIVE (aarch64-mac, --release lto) and WASM32 (node v25 / V8). Cross-check: NaN-box canon-OFF kernel reproduces the skeleton's published ~0.93us native / ~0.99us wasm, validating apples-to-apples.",
+          "spike_numbers": [
+            {
+              "metric": "sizeof(Value) / reg[24] file",
+              "value": "nb=8B/192B, tag=16B/384B, fat=24B/576B",
+              "context": "native+wasm identical; the priority-2 memory axis — NaN-box halves Value bytes"
+            },
+            {
+              "metric": "IAUS kernel us/decision, canon-ON, NATIVE",
+              "value": "nb 0.957-0.964 | tag 0.663-0.698 | fat 0.667-0.687",
+              "context": "4000 agents x200 ticks, fuel ON, best-of-7; tagged ~35-45% faster than NaN-box — the headline"
+            },
+            {
+              "metric": "IAUS kernel us/decision, canon-ON, WASM(V8/node)",
+              "value": "nb 1.09-1.11 | tag 0.67-0.71 | fat 0.73",
+              "context": "same kernel in wasm32; tagged wins on the priority-3 axis too (~35-54% faster than NaN-box)"
+            },
+            {
+              "metric": "IAUS kernel us/decision, canon-OFF",
+              "value": "native nb 0.928/tag 0.65 ; wasm nb 0.94-0.99/tag 0.69",
+              "context": "nb canon-OFF reproduces the skeleton's ~0.93 native/~0.99 wasm → confirms skeleton was NaN-boxed and left ~30% on the table"
+            },
+            {
+              "metric": "per-op NaN canon tax",
+              "value": "native nb +3-4% / tag +2-5%; wasm nb +10% / tag +2%",
+              "context": "canon never changed kernel results (inputs produce no NaN) so this is pure branch overhead; cheap, but heavier on NaN-box/wasm"
+            },
+            {
+              "metric": "NaN-box soundness scan",
+              "value": "2048 NaN payloads: 512 alias-as-tag BEFORE canon, 0 AFTER",
+              "context": "native+wasm identical. 0x7ffc..0001→NIL, sign-set NaN→HEAP HANDLE; CANON_NAN 0x7ff8..→number(safe). Confirms per-op canon is a memory-soundness invariant for layout 1, and a non-issue for tagged"
+            },
+            {
+              "metric": "table get / set / intern / eq (ns/op)",
+              "value": "native ~8.9/10.6/8.6/1.0 ; wasm ~27/29/10/1.05 — within noise across all 3 layouts",
+              "context": "heap structure (hashmap+arena) dominates; Value layout is layout-NEUTRAL on heap ops → tagged never loses to NaN-box here"
+            },
+            {
+              "metric": "value move (reg) ns/op",
+              "value": "native ~0.95 all ; wasm nb 0.59 < tag 0.66 < fat 0.74",
+              "context": "pure-move bandwidth: NaN-box's only micro-win (8B), small absolute (~0.07ns)"
+            },
+            {
+              "metric": "bulk clone [256 Values] ns",
+              "value": "native 32/50/78 ; wasm 25/41/59 (nb/tag/fat)",
+              "context": "clean 8/16/24-byte memcpy ratio — the per-VM snapshot / register-window cost"
+            },
+            {
+              "metric": "koto Arc-value move (clone+drop) ns",
+              "value": "native 3.27 | wasm 2.58",
+              "context": "vs 0.94/0.59ns for a Copy handle (~4x) — quantifies Spike D's ~20% Arc tax; both spiked layouts avoid it (Copy)"
+            },
+            {
+              "metric": "TIER-2 golden 0x31c6ec2734ea6fa2",
+              "value": "bit-identical for BOTH nb and tag, native AND wasm",
+              "context": "determinism preserved across layout; kernel f64 checksum 0xb6ca5f676359a32e identical across nb/tag/fat and canon on/off in wasm"
+            }
+          ],
+          "raw_evidence": "NATIVE (aarch64-mac, ./target/release/bvbench):\n== sizeof ==  nanbox-8B:8  tagged-16B:16  fat-24B:24  reg[24]: nb=192 tag=384 e24=576\n== NaN-box soundness ==  tested:2048  alias BEFORE canon:512  alias AFTER canon:0\n  raw NaN 0x7ffc000000000001 -> NIL (!!); CANON_NAN 0x7ff8.. -> number(safe); sign-set 0xfffc..0002 -> HEAP HANDLE (!!)\n== golden ==  nanbox=0x31c6ec2734ea6fa2 MATCH=true  tagged=0x31c6ec2734ea6fa2 MATCH=true\n== heap microbenches ns (best-of-7) ==\n  table get             nb 8.895 | tag 9.003 | e24 9.338\n  table set (overwrite) nb 10.562| tag 10.758| e24 10.784\n  table insert/grow     nb 27.547| tag 25.372\n  string intern (hit)   nb 8.601 | tag 8.708\n  string eq (interned)  nb 1.006 | tag 1.032\n  value move (reg)      nb 0.939 | tag 0.979 | e24 0.967\n  bulk clone [256]      nb 32.141| tag 50.427| e24 77.994\n  value move (Arc 24B)  3.267  (koto-class non-Copy)\n== IAUS kernel us/decision (fuel ON) ==\n  layout      canon-ON   canon-OFF\n  nanbox-8B   0.9636/0.9574   0.9267/0.9279\n  tagged-16B  0.6629/0.6975   0.6464/0.6613\n  fat-24B     0.6874/0.6670   -\n  canon tax: nb +3.2-4.0%, tag +2.5-5.5%\n\nWASM (node v25, V8; run.mjs):\nsizeof {nanbox_8B:8, tagged_16B:16, fat_24B:24}\nsoundness {tested:2048, alias_before_canon:512, alias_after_canon:0}\ngolden {expected 0x31c6ec2734ea6fa2, nanbox MATCH true, tagged MATCH true}\nmicrobench_ns:\n  table get   {nb 27.17, tag 26.85, e24 26.99}\n  table set   {nb 29.69, tag 29.11, e24 30.66}\n  table insert{nb 24.65, tag 25.95}\n  string intern{nb 10.22, tag 10.21}\n  string eq   {nb 1.08, tag 1.05}\n  value move  {nb 0.59-0.60, tag 0.66, e24 0.74}\n  bulk clone  {nb 25.3-25.8, tag 41.0-41.1, e24 59.4-59.8}\n  Arc move    {arc 2.58-2.59}\nkernel_us (two runs):\n  nanbox_canon   1.0925 / 1.1077    nanbox_nocanon 0.9928 / 0.9366\n  tagged_canon   0.7064 / 0.6724    tagged_nocanon 0.6937 / 0.6828\n  fat_canon      0.7318 / 0.7258\n  all kernel checksums 0xb6ca5f676359a32e (identical across nb/tag/fat AND canon on/off)",
+          "recommendation": "Lock axis B on (2) the 16-byte tagged union, NOT the NaN-box (overturning the design's stated leaning). The spike's decisive finding: on grabby's f64-saturated IAUS kernel — the priority-#1 hot path — tagged-16B is ~35-45% faster than NaN-box on NATIVE (0.66 vs 0.96 us/d) and ~35-54% faster on WASM/V8 (0.71 vs 1.09 us/d). Mechanism: NaN-boxing stores every f64 as a u64, forcing a GP↔FP / i64.reinterpret_f64 domain-cross on every arithmetic op and preventing the optimizer from keeping hot numeric locals in FP registers; the explicit tag byte frees that residency. This is exactly the canon-ON+real-number cost the design flagged as UNMEASURED, and my NaN-box canon-OFF run reproduces the skeleton's published 0.93/0.99 us — proving the skeleton silently paid this tax and would have been ~30% faster with a tag. Tagged also (a) makes table/string/heap ops layout-neutral (it never loses to NaN-box on the heap path), (b) keeps the cross-arch golden 0x31c6ec2734ea6fa2 bit-identical native+wasm, and (c) ELIMINATES the NaN-box tag-space soundness obligation (512/2048 NaN payloads alias before canon; with a tag there is no aliasing at all) — a genuine risk and complexity reduction. The price is memory: 16B vs 8B Value (reg[24] 384 vs 192B; tables store 16B values; bulk-clone 1.6x). Given the locked priority order (FAST #1, memory #2), a 35-45% win on the hottest path dominates a small absolute memory delta. Fat-24B ties on speed but costs more memory and, in its real Arc-backed koto form, pays the 4x clone tax. Hybrid (5) is pointless because NaN-box wins no target. Pointer-tag (4) is disqualified by f64 density. CAVEAT: confirm on JSC (iOS/WKWebView) and SpiderMonkey before final lock — if a JSC reinterpret cost or reg-allocator quirk inverted the result the decision could re-open, but V8 native+wasm agree strongly. Suggest the embedding expose a sealed `Value` newtype so the 8↔16 byte choice stays swappable behind the API through P1.",
+          "open_questions": [
+            "JSC (iOS/WKWebView, the named mobile target) and SpiderMonkey are unmeasured — the 16B-wins result is V8(native+wasm)-only; a JSC reinterpret/reg-alloc quirk is the one thing that could re-open the choice.",
+            "Does the tag's FP-register-residency advantage survive once the VM loop carries real metamethod dispatch / call_indirect host calls / GC write-barriers (P0.5 vertical slice)? Those branches could change register allocation and shrink the 35-45% gap (though heap ops already show layout-neutrality).",
+            "Priority-2 RSS impact of 2x Value memory at thousands of concurrent VMs is unquantified — need the per-VM RSS budget number (tables of 16B values, register windows) to confirm the memory cost is acceptable.",
+            "Workload mix: the kernel is maximally numeric (worst case for NaN-box). General Luau scripts are more string/table/control-heavy where layouts tie — so tagged is a safe dominant choice, but the realized average speedup on real scripts will be between 0% (heap-bound) and 45% (numeric-bound).",
+            "Constant-pool / Gc-string seam (design risk): with a tag, string/table constants are just handles materialized per-VM — confirm equality/hashing and the Arc<Program> vs per-arena handle story at P1."
+          ],
+          "confidence": "high",
+          "artifacts": [
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-value/src/lib.rs",
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-value/src/main.rs",
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-value/run.mjs",
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-value/Cargo.toml",
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-value/target/release/bvbench",
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-value/target/wasm32-unknown-unknown/release/spike_b_value.wasm"
+          ]
+        }
+      },
+      {
+        "agent": "axisD-gc-integration",
+        "result": {
+          "axis": "D — GC integration (memory/collection strategy for the rustia heap)",
+          "directions": [
+            {
+              "direction": "(1) gc-arena 0.6 tracing GC, collected on the deterministic instruction counter (full-collect via finish_cycle())",
+              "pros": "Write barrier is effectively FREE: isolated cost -0.034..+0.019 ns/mut (noise) in the Sleeping phase, and even in the Marked phase mutation is 3.18 ns/mut = same as no-barrier (the #[cold] make_gray_again fires at most once per object per mark-cycle, so worst-case is O(objects-mutated), not O(mutations)). Table-mutation throughput 3.18 ns/op == slotmap 3.14 == plain Vec<Vec> 3.14 (zero tax). finish_cycle() runs a FULL collect to completion -> exactly the deterministic-trigger model the design needs; cost is O(reachable objects+slots) ~10 ns/object, deterministic in object count. Retain pattern works: a DynamicRoot handle survived 1000 forced full collections; fetch() is sub-ns (~0.69 ns incl. the mutate() call). unsafe-impl-Send move path is UB-CLEAN under miri (Stacked AND Tree Borrows), across 2 thread moves + forced GC + DynamicRoot fetch on destination thread. Automatic cycle reclamation (Luau tables cycle), no manual free. ~16 B/object GC header.",
+              "cons": "NO snapshot primitive -> rollback requires deep-flatten + rebuild a fresh arena (1.7-1.9x slower than slotmap clone AND loses object identity/aliasing/cycles). DynamicRoot is !Send (holds Weak<RefCell>) so every retained handle MUST travel inside the same Send unit as its arena (VmCell pattern) — an API encapsulation requirement, not a blocker. gc-arena's byte accounting (total_gc_allocation) counts only GcBox sizes, NOT embedded Vec backing stores, so byte-debt pacing would mis-meter — must drive collection by instruction count (which the design already mandates).",
+              "verdict": "RECOMMENDED as the primary script-heap GC. All four integration risks the design flagged are retired by measurement: barrier-free, retain-cheap, Send-UB-clean, full-collect-deterministic. The only weakness (snapshot) is handled by direction 5, not by switching heaps."
+            },
+            {
+              "direction": "(2) slotmap generational-index heap (Send-free, manual free / periodic sweep)",
+              "pros": "Send by construction (no Rc/NonNull) — no unsafe impl Send needed. True STRUCTURAL snapshot: clone(SlotMap)+clone(roots) preserves keys/identity/cycles and restore is just assign-back; round-trip 8.0/26.7/116 us for 256/1024/4096 tables vs gc-arena's 13.7/51.7/206 us. Mutation throughput identical to gc-arena (3.14 ns/op). Generational keys give safe dangling-handle detection.",
+              "cons": "Snapshot is O(live-heap), NOT the 'O(1)' the prompt hoped — it copies the whole dense arena every snapshot (and the 24-deep ring keeps 24 copies = 24x heap RSS). No automatic cycle collection: Luau tables/closures cycle freely, so you still need a tracing sweep or you leak — i.e. you end up reinventing a GC on top of slotmap. More embedding bookkeeping (every Value::Table is a key resolved through the map on each access).",
+              "verdict": "NOT the main heap, but the right tool for HOST-COLUMNAR rollback state (direction 5). Its structural-snapshot win only matters for the rollback ring, which should live off the GC heap anyway."
+            },
+            {
+              "direction": "(3) hand-rolled incremental non-moving mark&sweep (Luau-style, fuel-paced)",
+              "pros": "Full control over pacing/trigger to match the instruction-counter model exactly; could integrate fuel directly; no external !Send handle types like DynamicRoot.",
+              "cons": "This is precisely what gc-arena 0.6 already is (incremental, non-moving, tri-color, write-barriered) — and gc-arena's barrier already measured free and its Send move already miri-clean. Rebuilding it is months of unsafe code + its own miri/fuzz burden for no measured win.",
+              "verdict": "REJECTED unless a concrete gc-arena compat/snapshot blocker appears at P1. Default to gc-arena; keep this as the fallback if the !Send-handle ergonomics or const-pool seam prove unworkable."
+            },
+            {
+              "direction": "(4) Rc + trial-deletion cycle collector",
+              "pros": "Conceptually simple per-object reclamation; no stop-the-world mark phase.",
+              "cons": "Spike D already measured ~20% self-time as Arc clone/drop in koto — this is the exact thing we are replacing. Rc is !Send and Arc adds atomic-RMW on every refcount (worse on wasm). Trial-deletion cycle collector is as complex as a tracing GC with worse constant factors and reclamation timing that is harder to make instruction-deterministic.",
+              "verdict": "REJECTED. It reintroduces the precise tax that motivated the rewrite."
+            },
+            {
+              "direction": "(5) region / no-GC for the AI kernel (host-columnar) + GC only for general scripts",
+              "pros": "The AI hot/rollback state never touches the GC heap -> rollback becomes a cheap columnar Vec/slotmap snapshot (the dir-2 numbers), GC pauses never see it, and it is trivially Send. Complements gc-arena: gc-arena owns the general-script heap where cycles/closures live; the fixed AI leaf state lives in plain host arrays. Matches the P0 fused-leaf result (the hot path is already monomorphic/columnar).",
+              "cons": "Two memory models to maintain (GC heap + columnar region) and a marshalling seam between them; only works because grabby's rollback-relevant state is a fixed, known shape — if general scripts ever needed to be rolled back, this would not cover them.",
+              "verdict": "RECOMMENDED as the COMPLEMENT to direction 1. This is the resolution of the 'gc-arena has no cheap snapshot' risk: make 'all rollback-relevant state stays host-columnar' a hard constraint, exactly as the design's risk register proposed."
+            }
+          ],
+          "spike_method": "Extended the gc-arena 0.6 micro-spike into $HOME/.claude/jobs/d3f0d35e/tmp/spike-d-gc (own target dir). Built a NaN-box-shaped Value enum (Nil/Num/Str/Table) over Gc<RefLock<GTable{Vec<Value>}>>, plus a parallel slotmap heap (SlotMap<key,STable> + dense roots Vec) and a plain Vec<Vec<f64>> baseline. All loops use a data-dependent xorshift64* PRNG for indices + std::hint::black_box on accumulators/handles to defeat const-fold/DCE; release opt-level=3. Measured: (a) write-barrier isolation — same table-mutation loop with RefLock::unlock(mc) [Gc::write barrier] vs unsafe unlock_unchecked() [no barrier], in the Sleeping phase AND artificially forced into the Marked phase (adjust_debt(1e12)+mark_debt) so the #[cold] make_gray_again path can fire; (b) finish_cycle() full-collect cost swept over live-object count; (c) the RETAIN pattern — stash an exported table as a DynamicRoot, run 1000 ticks each doing finish_cycle()+garbage-alloc+fetch+mutate, then serde a retained value OUT into an owned Rust Mirror struct OUTSIDE mutate (deep-copy-at-boundary, since Gc cannot escape mutate), and a size-swept fetch-vs-deep-copy comparison; (d) snapshot+restore round-trip: slotmap clone+assign-back vs gc-arena flatten-to-owned+rebuild-fresh-arena. Separately, a miri binary (src/miri_send.rs) moves a VmCell{arena, DynamicRoot} across two thread boundaries, forcing full GC cycles and fetching the retained handle on each destination thread; run under cargo +nightly miri with both default Stacked Borrows and -Zmiri-tree-borrows. Read gc-arena 0.6.0 source (dynamic_roots.rs, barrier.rs, context.rs, types.rs) to confirm mechanisms.",
+          "spike_numbers": [
+            {
+              "metric": "write-barrier isolated cost (Sleeping phase)",
+              "value": "-0.034 to +0.019 ns/mut (noise)",
+              "context": "RefLock::unlock(mc) [barrier] vs unlock_unchecked() [no barrier], same 20M-iter table-mutation loop; barrier is a non-taken branch when not marking"
+            },
+            {
+              "metric": "write-barrier cost in Marked phase",
+              "value": "3.18 ns/mut (== no-barrier)",
+              "context": "arena forced into Marked phase; make_gray_again is #[cold] and fires at most once/object/mark-cycle, so cost is O(objects mutated), not O(mutations)"
+            },
+            {
+              "metric": "table mutation throughput",
+              "value": "gc-arena 3.18 ns/op == slotmap 3.14 == plain Vec<Vec> 3.14",
+              "context": "t[i][j]+=1 with data-dependent random indices, 50M iters, 256 tables x16 slots; gc-arena imposes ZERO throughput tax vs slotmap or plain Vec"
+            },
+            {
+              "metric": "full collection (finish_cycle) cost",
+              "value": "~10.0-11.0 ns/live-object (linear)",
+              "context": "64->4096 tables x16 slots: 0.71us/2.6us/11.3us/44.8us; deterministic in object count, the per-collection determinism tax"
+            },
+            {
+              "metric": "full collection cost scales with traced slots",
+              "value": "23.6 ns/object at 64 slots vs 10.9 at 16 slots",
+              "context": "4096 tables: 96.9us (x64) vs 44.8us (x16); trace visits every Vec element -> cost = O(reachable slots), and byte-accounting does NOT count Vec backing -> drive collection by instruction count, never byte-debt"
+            },
+            {
+              "metric": "DynamicRoot fetch (retain pattern)",
+              "value": "~0.69 ns (incl. the mutate() call)",
+              "context": "fetch() is a pointer-compare + transmute; effectively free; constant across table sizes 4->1024"
+            },
+            {
+              "metric": "deep-copy-out vs fetch",
+              "value": "15-196 ns deep-copy vs 0.69 ns fetch = 20x-284x",
+              "context": "serde-OUT cost scales with table size; you pay it ONCE at export, not per-tick — per-tick you only fetch+root"
+            },
+            {
+              "metric": "retain durability",
+              "value": "survived 1000 forced finish_cycle() full collections",
+              "context": "DynamicRoot handle still valid + mutable after 1000 full GC cycles with garbage churn each tick"
+            },
+            {
+              "metric": "DynamicRoot stash (one-time)",
+              "value": "~1.1-1.9 us",
+              "context": "includes first allocation; one-time export cost, not on the per-tick path"
+            },
+            {
+              "metric": "snapshot+restore round-trip",
+              "value": "slotmap 8.0/26.7/116 us vs gc-arena 13.7/51.7/206 us (1.7-1.9x)",
+              "context": "256/1024/4096 tables; BOTH O(heap) (slotmap 'O(1)' assumption is false); gc-arena path also LOSES object identity/aliasing/cycles"
+            },
+            {
+              "metric": "GcBox header overhead",
+              "value": "16 bytes/object (2 pointers: intrusive next + tagged vtable)",
+              "context": "memory priority #2; ~48 B total per Gc<RefLock<GTable>> incl. RefLock lock word; relevant to per-VM RSS"
+            },
+            {
+              "metric": "miri unsafe-impl-Send move path",
+              "value": "CLEAN — no UB, exit 0, under Stacked AND Tree Borrows",
+              "context": "VmCell{arena+DynamicRoot} moved across 2 thread boundaries + forced GC cycles + DynamicRoot fetch on destination threads"
+            }
+          ],
+          "raw_evidence": "NATIVE (aarch64-apple-darwin, release opt-level=3):\n=== Spike D: gc-arena vs slotmap ===\n[a/barrier-isolated] phase=Sleeping iters=20000000\n  with-barrier   = 3.143 ns/mut\n  no-barrier     = 3.177 ns/mut\n  barrier delta  = -0.034 ns/mut\n[a/barrier-marking] phase=Marked iters=2000000  with-barrier = 3.184 ns/mut\n[throughput] iters=50000000 (table[i][j]+=1, data-dep idx)\n  gc-arena unlock  = 3.181 ns/op\n  slotmap index    = 3.142 ns/op\n  plain Vec<Vec>   = 3.144 ns/op\n[b/full-collect] finish_cycle() cost vs live heap size:\n  tables=  64 slots= 16  liveObjs~   66  heap=    3144B  finish_cycle =      706.2 ns  (10.70 ns/liveObj)\n  tables= 256 slots= 16  liveObjs~  258  heap=   12360B  finish_cycle =     2584.8 ns  (10.02 ns/liveObj)\n  tables=1024 slots= 16  liveObjs~ 1026  heap=   49224B  finish_cycle =    11282.7 ns  (11.00 ns/liveObj)\n  tables=4096 slots= 16  liveObjs~ 4098  heap=  196680B  finish_cycle =    44782.7 ns  (10.93 ns/liveObj)\n  tables=4096 slots= 64  liveObjs~ 4098  heap=  196680B  finish_cycle =    96880.8 ns  (23.64 ns/liveObj)\n[c/retain] survived 1000 forced finish_cycle() collections; handle still valid: OK\n  stash (1x)                 = 1125 ns\n  fetch+call per tick (avg)  = 15.6 ns\n  deep-copy OUT (16 f64)     = 375 ns  -> owned Rust struct outside mutate\n  serde_json of owned mirror = 1000 ns (json=89 bytes)\n  --- stash/fetch vs deep-copy-out, by table size ---\n  len=    4: fetch(root)=    0.70 ns   deep-copy-out=   18.05 ns   ratio=25.6x\n  len=   16: fetch(root)=    0.73 ns   deep-copy-out=   15.10 ns   ratio=20.7x\n  len=   64: fetch(root)=    0.65 ns   deep-copy-out=   30.93 ns   ratio=47.4x\n  len=  256: fetch(root)=    0.68 ns   deep-copy-out=   49.78 ns   ratio=72.8x\n  len= 1024: fetch(root)=    0.69 ns   deep-copy-out=  196.17 ns   ratio=284.0x\n[d/snapshot+restore] round-trip for the 24-deep rollback ring:\n  tables= 256 slots= 16: slotmap snap+restore =      8019 ns   gc-arena flatten+rebuild =     13677 ns   (1.7x)\n  tables=1024 slots= 16: slotmap snap+restore =     26680 ns   gc-arena flatten+rebuild =     51743 ns   (1.9x)\n  tables=4096 slots= 16: slotmap snap+restore =    116145 ns   gc-arena flatten+rebuild =    205653 ns   (1.8x)\n[send] moved arena to pool thread; tables=16\n=== done ===\n\nMIRI (cargo +nightly miri run --bin miri_send), Stacked Borrows:\n[miri] thread1 last=14\n[miri] thread2 v=15 live_len=1\n[miri] OK final=15\nMIRI with -Zmiri-tree-borrows:\n[miri] thread1 last=14\n[miri] thread2 v=15 live_len=1\n[miri] OK final=15\n(both: exit code 0, no UB / no borrow-stack / no tree-borrows violation reported)\n\nSOURCE-CONFIRMED MECHANISMS (gc-arena 0.6.0):\n- dynamic_roots.rs: DynamicRoot holds `ptr: Gc<'static>`, `slots: Weak<RefCell<Slots<'static>>>`, `index` => !Send (non-atomic Weak). fetch() = contains() pointer-compare + transmute. stash() invokes backward_barrier.\n- barrier.rs/context.rs: backward_barrier is `if phase==Mark && parent==Black && child==White { #[cold] make_gray_again }` => free outside marking; bounded work during marking.\n- arena.rs: finish_cycle() runs a complete mark+sweep to Sleeping => the deterministic full-collect primitive. collect_debt/mark_debt are the incremental ones (NOT used by the deterministic model).\n- types.rs: GcBoxHeader = { next: Cell<Option<GcBox>>, tagged_vtable: Cell<*const CollectVtable> } = 16 bytes/object.",
+          "recommendation": "GO on gc-arena 0.6 as the rustia script-heap GC (direction 1), paced by the deterministic instruction counter via finish_cycle() (full collect to completion). The three integration risks the architecture flagged for this gate are RETIRED by measurement: (1) the write barrier is free — -0.03 ns/mut isolated, and 3.18 ns/mut even when forced into the Marked phase, identical to no-barrier, because make_gray_again is #[cold] and fires at most once per object per mark-cycle; (2) the RETAIN pattern works and is cheap — a DynamicRoot survived 1000 forced full collections, fetch() is sub-ns (~0.69 ns), and the only real cost (deep-copy a retained value OUT into a Rust struct outside mutate) is a one-time export cost of 15-196 ns that you pay at export, not per tick; (3) the unsafe impl Send move path is UB-clean under miri Stacked AND Tree Borrows across two thread moves with forced GC and on-thread DynamicRoot fetch. Throughput is identical to slotmap and to a plain Vec<Vec> (3.18 vs 3.14 ns/op), so gc-arena costs nothing on the hot table path. NO-GO on adopting slotmap as the MAIN heap: its only advantage is structural snapshot, it is O(heap) not O(1) (the prompt's O(1) premise is false — clone copies the whole dense arena, 8-116 us, and a 24-deep ring is 24x RSS), and it has no cycle reclamation so you would reinvent a tracing GC on top of it. Resolve gc-arena's one genuine weakness — no cheap snapshot (flatten+rebuild is 1.7-1.9x slower than slotmap clone and loses identity/cycles) — with direction 5: make 'all rollback-relevant AI state stays host-columnar (plain Vec/slotmap, off the GC heap)' a HARD CONSTRAINT, so the 24-deep ≤1ms rollback ring never touches the GC heap. Net: gc-arena (general script heap) + host-columnar region (AI/rollback state) is the integration. Two API requirements to lock at P0.5/P1: (i) encapsulate the Send unit so a !Send DynamicRoot can never be separated from its arena (the VmCell pattern — arena and all retained handles move together); (ii) collection trigger MUST be the instruction counter, never gc-arena's byte-debt, because byte-accounting ignores Vec backing stores and object sizes differ 32/64-bit.",
+          "open_questions": [
+            "finish_cycle() at 10 ns/live-object means a 4096-table heap full-collect is ~45us; at 50Hz that is fine if collection is amortized across many ticks, but a full collect EVERY tick on a large heap (e.g. 20k objects = ~200us) eats 1% of a 20ms frame — need a P1 measurement of realistic grabby heap sizes to set the instruction-count collection interval, and confirm the interval reproduces bit-identically native vs wasm.",
+            "Incremental collect_debt would amortize the pause but leaves the heap partially-marked between mutate calls (the design forbids observable partial-incremental state for determinism). Confirm at P1 that full finish_cycle() pauses are acceptable, OR that an incremental schedule keyed strictly to instruction count is still bit-reproducible across arches.",
+            "wasm32 numbers are UNMEASURED here (native aarch64 only). The write-barrier branch and finish_cycle tracing should behave the same, but per-object trace cost and the 16B header overhead need a wasm + JSC re-run at P0.5 (the named iOS target).",
+            "miri does not model true parallelism — it validated the unique-ownership MOVE (no Stacked/Tree-Borrows UB through the raw NonNull/Rc on transfer), not a data race. Since the model is move-not-share, this is the correct check; loom is not directly applicable because there is never concurrent access (a loom test would only confirm 'no two threads touch it at once', which the type system already enforces). State honestly: Send-soundness rests on the move being a unique-owner transfer, which miri confirms UB-free.",
+            "Const-pool / Gc-string seam (design risk): a shared Arc<Program> cannot hold per-arena Gc string constants. Not exercised here (used Static<String> leaves). Needs its own P1 spike for string-constant equality/hashing across the Arc<Program>/per-VM-arena boundary.",
+            "Per-VM RSS: 16B GcBox header + RefLock lock word measured per object, but total per-VM footprint (VM count = thread count) still unquantified — fold into the P1 RSS-budget task."
+          ],
+          "confidence": "high",
+          "artifacts": [
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-d-gc/src/main.rs",
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-d-gc/src/miri_send.rs",
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-d-gc/Cargo.toml",
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-d-gc/target/release/spike"
+          ]
+        }
+      },
+      {
+        "agent": "axisH-embedding-api-vertical-slice",
+        "result": {
+          "axis": "H — embedding API shape (with the honest general-script number from a real gc-arena heap path)",
+          "directions": [
+            {
+              "direction": "(1) koto-SHAPED compat shim: with_settings/prelude().add_fn/insert/compile_and_run/exports().get/clone/call_function",
+              "pros": "Maps 1:1 onto grabby's ACTUAL call sites — I rebuilt Vm::with_settings(Settings{fuel})/add_fn(name,|args|match)/compile_and_run/exports_clone/deserialize and every grabby shape (scenario from_koto, ai_bakeoff KotoSelector::call_function, console REPL) dropped straight in. Host-fn ABI as Box<dyn Fn(&[OwnedValue])->Result<OwnedValue>> is a REAL call_indirect AND keeps gc-arena's invasive 'gc lifetime fully out of the embedder. Best drop-in-fit + DX.",
+              "cons": "Still NOT zero-migration: .koto scripts must be rewritten to Luau and exports() redefined as 'the table the chunk returns' (arch already flagged). The literal exports().clone()->serde pattern forces a deep-copy snapshot (~0.45us, 30-45% of the full call) unless you make the bridge zero-copy.",
+              "verdict": "RECOMMEND as the outer surface. It is the lowest-friction match to the three real grabby call shapes and hides 'gc behind owned handles + internal mutate."
+            },
+            {
+              "direction": "(2) mlua-style UserData/FromValue/IntoValue/Scope",
+              "pros": "FromValue/IntoValue typed-conversion traits are genuinely nicer than ad-hoc match arms and compose with serde. A clean typed core.",
+              "cons": "grabby exposes ZERO native objects to script and uses no Scope/borrow-host-data pattern — UserData+Scope is unused surface and Scope's borrow-during-call model fights gc-arena 'gc + the Send-move-whole-VM constraint. Low drop-in-fit; would force rewriting koto_path.rs/scenario/console.",
+              "verdict": "PARTIAL ADOPT: take FromValue/IntoValue as the internal conversion core; SKIP UserData/Scope until a real host-object need appears."
+            },
+            {
+              "direction": "(3) both layered — koto facade over an mlua-style typed core",
+              "pros": "koto-shaped facade gives grabby drop-in fit; a thin FromValue/IntoValue + serde core under it gives type-safety and future extensibility. Matches the arch's leaning.",
+              "cons": "Two layers to build/maintain; risk of building the mlua core's UserData half speculatively.",
+              "verdict": "RECOMMEND (scoped): koto facade + minimal typed-conversion core + serde bridge. Defer UserData/Scope/native-objects."
+            },
+            {
+              "direction": "(4) trait-based native objects (expose Rust objects as script values via a trait protocol)",
+              "pros": "Powerful for embedding rich host state.",
+              "cons": "grabby exposes none — host fns return numbers/strings and the script returns a plain data table. Pure unused surface; adds a trait-object dispatch path with no consumer.",
+              "verdict": "DEFER — not needed for grabby; revisit only if a workflow exposes live host objects to script."
+            },
+            {
+              "direction": "(5) serde-bridge-centric (serde as the primary boundary)",
+              "pros": "The scenario path (from_koto -> ScenarioSpec) IS serde-shaped and works end-to-end: I deserialized the script's returned table into the real ScenarioSpec/WellSpec shape incl. #[serde(default)] + deny_unknown_fields (typo'd key rejected, matching grabby's koto_typoed_export_key test). serde itself is CHEAP (~0.065-0.18us).",
+              "cons": "Wrong tool for the per-tick AI selector (call_function + scalar return) and the console REPL (value_to_string) — serde-per-call there would be absurd. serde must be ONE facility, not the whole API.",
+              "verdict": "ESSENTIAL sub-facility, not the surface. Critical refinement: implement it ZERO-COPY (serde over live in-arena Value<'gc> inside mutate, hidden behind vm.deserialize_exports::<T>()) — 30% faster than the snapshot-then-serde the literal exports().clone() implies."
+            }
+          ],
+          "spike_method": "Built a complete vertical slice at $HOME/.claude/jobs/d3f0d35e/tmp/spike-h-slice (1513-line lib + native harness + node runner). Hand-compiled bytecode for a SMALL but REAL general-path Luau program (the grabby from_koto scenario-gen shape): `local base=host_base(0.8); local function make_well(i) return {name='well'..i, gravity=base*2, radius=500+i*10} end; local wells={}; for i=0,2 do wells[i+1]=make_well(i) end; return {name='ring', gravity=base, wells=wells}`. It exercises, in ONE artifact, every item the review said was unmodeled: (a) a real gc-arena heap — Gc<RefLock<Table>> tables + Gc<LuaStr> strings + GC write barriers via borrow_mut(mc), with a forced full mark+sweep (finish_cycle) proven to reclaim 520KB of garbage AND a write-barrier-during-Marking test (drive collector to Marked via finish_marking, write a fresh white child into the black exports table through the barrier, finish the cycle, confirm the child survived); (b) canon-ON NaN on EVERY f64-producing op + table-key -0.0 normalization, with a cross-arch golden run on native AND node(V8); (c) host calls through a REAL call_indirect — Box<dyn Fn(&[OwnedValue])->Result<OwnedValue>> table indexed at runtime (#[inline(never)], no devirtualization), not a match arm; (d) the result table serde-Deserialized into a real ScenarioSpec/WellSpec struct (deny_unknown_fields, serde defaults) two ways: deep-copy-snapshot-then-serde-OUTSIDE-mutate (grabby's exports().clone() shape) AND zero-copy serde over live arena values inside mutate. Measured us/run with 2M iterations, /10 warmup, black_box + anti-DCE checksums, data-bearing output; periodic deterministic GC steps; native (Instant) + wasm32 (node V8 performance.now, best-of-5). Also measured DynamicRoot-retained-handle vs deep-copy cost (the axis-D boundary the arch asked for).",
+          "spike_numbers": [
+            {
+              "metric": "HONEST general-script us — run only (VM exec + gc-arena heap, ~18 Gc allocs / 68 dispatches)",
+              "value": "0.95 us native / 0.89 us wasm",
+              "context": "the durable general-path number; ~13.9 ns/dispatch native, 13.1 ns/dispatch wasm. ~parity-to-modestly-above reference Luau's ~0.7us class and ~5x the 0.2us fused kernel — confirms the review's prediction that general script collapses toward parity"
+            },
+            {
+              "metric": "general-script us — full grabby exports().clone()->serde path (run+snapshot+serde)",
+              "value": "1.47 us native / 1.61 us wasm",
+              "context": "this is the literal grabby scenario-gen call cost end-to-end (one-shot, runs once per scenario load — not a per-tick path)"
+            },
+            {
+              "metric": "general-script us — ZERO-COPY bridge (run + deserialize_exports over live arena values)",
+              "value": "1.01 us native / 1.04 us wasm",
+              "context": "recommended bridge; saves ~0.45us native / ~0.58us wasm (30%) vs the snapshot path"
+            },
+            {
+              "metric": "serde cost in isolation (over arena values, no snapshot)",
+              "value": "0.065 us native / 0.18 us wasm",
+              "context": "serde itself is CHEAP; the expensive part of exports().clone() is the deep-copy snapshot OUT of the arena, NOT serde"
+            },
+            {
+              "metric": "deep-copy snapshot (Value<'gc> -> OwnedValue) marshalling cost",
+              "value": "0.44 us native / 0.54 us wasm",
+              "context": "30-45% of the full call; the dominant marshalling tax of the lifetime-free owned-handle boundary; scales with exported-table size"
+            },
+            {
+              "metric": "DynamicRoot fetch+snapshot vs plain deep-copy snapshot",
+              "value": "0.402 us vs 0.403 us (native)",
+              "context": "DynamicRoot retention adds NEGLIGIBLE per-access cost; the cost is the snapshot itself. For the one-shot scenario you don't even need DynamicRoot — just deserialize inside the run's mutate"
+            },
+            {
+              "metric": "cross-arch f64 golden (canon-ON: 0/0, inf-inf, 0*inf, sqrt(-1) via libm, +-inf overflow, 1/-0.0=-inf preserved, -0.0 per-op preserved, -0.0/+0.0 table-key collapse)",
+              "value": "0xa6816bc158ca5244 — bit-identical native + node/V8",
+              "context": "proves canon-ON determinism on the f64 path the prior golden never exercised; -0.0 sign-of-zero preserved per-op while collapsing at table keys, both correct"
+            },
+            {
+              "metric": "wasm tax vs native (full general path)",
+              "value": "0.94x run-only, 1.10x full",
+              "context": "wasm at parity for the general heap+serde path, matching the kernel result — priority-3 (wasm perf) holds beyond the kernel; V8 only, JSC/SpiderMonkey still uncovered"
+            },
+            {
+              "metric": "GC liveness: garbage reclaimed by one full collection",
+              "value": "520144 bytes swept (520912 -> 768)",
+              "context": "real mark+sweep works; one VM + one live scenario = 768 bytes GC heap — tiny per-VM footprint for this workload"
+            },
+            {
+              "metric": "write barrier during Marking — fresh child survival",
+              "value": "Some(true)",
+              "context": "backward barrier (borrow_mut->unlock) correctly re-grays a black parent so a white child written mid-cycle survives the sweep"
+            },
+            {
+              "metric": "embedder-side unsafe in the VM/heap/serde code",
+              "value": "0 lines",
+              "context": "all unsafe is gc-arena-internal or the wasm static-mut export glue; the gc-arena heap path needs no unsafe from the VM author (the only unsafe the design carries is the separately-measured Send wrapper)"
+            },
+            {
+              "metric": "wasm binary size (lib cdylib, lto, opt3)",
+              "value": "128 KB",
+              "context": "includes gc-arena + serde + libm + the VM; a download-size data point for the browser/mobile target (priority-2/3)"
+            }
+          ],
+          "raw_evidence": "############## NATIVE (aarch64-mac, M4 Max) ##############\nscenario chunk: 2 protos, main 20 instrs, make_well 12 instrs, 8 consts, 6 strings\nserde'd ScenarioSpec = ScenarioSpec { name: \"ring\", gravity: 1.6, wells: [\n  WellSpec{name:\"well0\",gravity:3.2,radius:500.0}, WellSpec{name:\"well1\",gravity:3.2,radius:510.0}, WellSpec{name:\"well2\",gravity:3.2,radius:520.0} ] }\nserde round-trip: OK (typed ScenarioSpec matches the script's exported table)\ndeny_unknown_fields rejects a typo'd key: true\n\n=== HONEST GENERAL-SCRIPT NUMBER (native, aarch64) ===\ndispatches per scenario run            : 68\nrun only (VM exec + gc-arena heap)     : 0.9471 us   (13.93 ns/dispatch)\nrun + snapshot(exports -> OwnedValue)  : 1.3858 us   (snapshot = 0.4387 us)\nrun + snapshot + serde -> ScenarioSpec : 1.4675 us   (serde = 0.0817 us)\n  -> marshalling+serde overhead        : 0.5204 us (35% of full)\n=== ZERO-COPY serde bridge (recommended) ===\nrun + deserialize_exports (no snapshot): 1.0118 us\n  -> snapshot deep-copy avoided        : 0.4557 us saved (31%)\n  -> serde-only cost over arena values : 0.0647 us (vs 0.9471 run-only)\n=== retained-handle across forced GC (DynamicRoot) ===\nretain_exports() succeeded            : true ; survived 2 full GC cycles, re-snapshot : true\ndeep-copy snapshot (exports_clone)     : 0.4027 us ; DynamicRoot fetch + snapshot : 0.4017 us\n=== GC liveness (deterministic full collection) ===\ngc objects: start 20, after +10k garbage 10020 ; live bytes: 912 -> 520912 -> 768 (swept 520144)\nwrite barrier during MARKING — fresh child survived full cycle: Some(true)\n=== CROSS-ARCH f64 GOLDEN (canon-ON) ===  golden (native) = 0xa6816bc158ca5244\narena total_allocation after the run loop: 768 bytes (one VM, one scenario live)\n\n############## WASM32 (node v25.8.1 / V8) ##############\ngolden (node/V8) = 0xa6816bc158ca5244 ; golden (native) = 0xa6816bc158ca5244 ; MATCH = YES (bit-identical)\nrun only (VM exec + gc-arena heap)     : 0.8919 us   (13.12 ns/dispatch over 68)\nrun + snapshot + serde -> ScenarioSpec : 1.6137 us   (serde = 0.1834 us, snapshot = 0.5384 us)\nrun + ZERO-COPY deserialize_exports    : 1.0359 us   (saves 0.5778 us vs snapshot path)\n[checksums consistent across runs (anti-DCE): run_only 0x1e8480=2M, run_snap 0x5b8d80=6M]",
+          "recommendation": "Lock axis H as direction (3) SCOPED: a koto-SHAPED outer facade (Vm::with_settings / add_fn(name,|args|) / set_global / compile_and_run / exports / call_function) over a minimal typed-conversion core (FromValue/IntoValue) plus a first-class serde bridge — and DEFER mlua's UserData/Scope and trait-based native objects (zero grabby consumers). The dominant design constraint, confirmed by building it, is that gc-arena's invasive 'gc lifetime must never leak to the embedder: present lifetime-free owned handles and run all heap access inside internal arena.mutate. The host-fn ABI Box<dyn Fn(&[OwnedValue])->Result<OwnedValue>> is both the real call_indirect target set AND the 'gc firewall, and it covers 100% of grabby's actual host fns (rand/rand_range/fxmul/curve/spawn/log/tick/bodies are all scalar-or-string in/out). Make the serde bridge ZERO-COPY (serde directly over live in-arena Value<'gc> inside mutate, hidden behind vm.deserialize_exports::<T>()) rather than literally cloning exports out: serde itself is ~0.07us but the deep-copy snapshot that exports().clone() implies costs ~0.45us (30%). On numbers: the honest general-script figure is ~0.9-1.0us run-only and ~1.0-1.6us through serde, native AND wasm at parity — i.e. ~parity-with-reference-Luau and ~5x the 0.2us fused kernel, exactly as the review predicted; sub-µs remains kernel-specific. The gc-arena heap path is sound (full sweep + write barrier verified) and needs ZERO embedder-side unsafe, so it is a viable base for axis D. This number is the tagged-enum Value path; the NaN-box-8-byte variant is the remaining axis-B question.",
+          "open_questions": [
+            "Value encoding: this measured a piccolo-style 16-byte tagged enum (the arch's named fallback) because gc-arena's tracer needs to SEE Gc pointers and a NaN-box would need a hand-written unsafe Collect over Gc::from_ptr-reconstructed pointers. run-only is allocation-bound (~18 Gc allocs / 68 dispatches), so Value width may move it little — but the NaN-box 8-byte path is an unmeasured axis-B spike.",
+            "Host-fn ABI: the owned-value boundary covers every grabby host fn, but a TABLE-RETURNING host fn (none today) would need an mc-aware context-passing variant. Decide whether to expose that or forbid table-returning host fns.",
+            "The bench resets the string-const intern cache each rerun to model independent runs; a true one-shot from_koto pays string materialization once, and a per-tick selector would intern once at load — steady-state interned numbers would be faster. Pick the cache/interning policy and its cross-arena Gc-string seam (the arch's open med risk).",
+            "JSC (iOS/WKWebView, the named mobile target) and SpiderMonkey are still 100% uncovered — only V8 measured here; re-run the golden + perf there before locking wasm/priority-3.",
+            "Production GC must be driven on the deterministic instruction counter (sec 3.5); the bench drives collect_debt on byte-debt. Wiring, not perf — but it interacts with the embedding API's run/fuel loop.",
+            "call_function (the per-tick AI selector path, KotoSelector shape) was not separately micro-timed here — only the one-shot scenario-export path. A retained-closure-called-per-tick micro-bench is a small follow-up to confirm the call_function boundary cost."
+          ],
+          "confidence": "medium",
+          "artifacts": [
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-h-slice/src/lib.rs",
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-h-slice/src/main.rs",
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-h-slice/run.mjs",
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-h-slice/Cargo.toml",
+            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-h-slice/target/wasm32-unknown-unknown/release/spike_h_slice.wasm"
+          ]
+        }
+      }
+    ]
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "ExploreAndSpike"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "q1-luau-scope-triage",
+      "phaseIndex": 1,
+      "phaseTitle": "ExploreAndSpike",
+      "agentId": "af1c2f4582768cf55",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782793844397,
+      "queuedAt": 1782793844390,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Scope triage for rustia vs full latest-Luau, anchored to wh…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
+      "lastProgressAt": 1782794083394,
+      "tokens": 41790,
+      "toolCalls": 12,
+      "durationMs": 238997,
+      "resultPreview": "{\"summary\":\"Scope triage for rustia vs full latest-Luau, anchored to what grabby actually exercises: (1) seed-driven SCENARIO generation that runs once and `export`s a table → serde `ScenarioSpec` (galaxy.koto: numeric-for over ranges, arithmetic, math.cos/sin, arrays+maps, push/insert, host `rand`/`rand_range`); (2) a console REPL (single chunks, print/tostring, string ops, pcall, host fns); (3) …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "q3-gcarena-snapshot-options",
+      "phaseIndex": 1,
+      "phaseTitle": "ExploreAndSpike",
+      "agentId": "a811a4e389eefc3a0",
+      "model": "claude-opus-4-8[1m]",
+      "state": "error",
+      "startedAt": 1782793844402,
+      "queuedAt": 1782793844390,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Built $HOME/.claude/jobs/d3f0d35e/tmp/spike-snap (4000…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
+      "lastProgressAt": 1782794448213,
+      "error": "agent({schema}): StructuredOutput retry cap (5) exceeded — 5 failed calls with no valid output",
+      "tokens": 75105,
+      "toolCalls": 17,
+      "durationMs": 603811
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "axisB-value-representation",
+      "phaseIndex": 1,
+      "phaseTitle": "ExploreAndSpike",
+      "agentId": "a1c752859bcc0ea17",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782793844409,
+      "queuedAt": 1782793844391,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "B — value/heap representation (NaN-box 8B vs tagged 16B vs …",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
+      "lastProgressAt": 1782794890007,
+      "tokens": 114469,
+      "toolCalls": 22,
+      "durationMs": 1045598,
+      "resultPreview": "{\"axis\":\"B — value/heap representation (NaN-box 8B vs tagged 16B vs fat 24B vs pointer-tag vs per-target hybrid)\",\"directions\":[{\"direction\":\"(1) NaN-boxed 8-byte Value — f64 inline, heap via tagged handle in the NaN payload [the current design leaning]\",\"pros\":\"Smallest Value (8B; reg[24]=192B; tables store 8B values → best priority-2 memory). Trivially Copy (Send fine). Fastest pure value move/b…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "axisD-gc-integration",
+      "phaseIndex": 1,
+      "phaseTitle": "ExploreAndSpike",
+      "agentId": "ad1d685ff43ad9e05",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782793844409,
+      "queuedAt": 1782793844391,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "D — GC integration (memory/collection strategy for the rust…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
+      "lastProgressAt": 1782794496897,
+      "tokens": 99275,
+      "toolCalls": 32,
+      "durationMs": 652487,
+      "resultPreview": "{\"axis\":\"D — GC integration (memory/collection strategy for the rustia heap)\",\"directions\":[{\"direction\":\"(1) gc-arena 0.6 tracing GC, collected on the deterministic instruction counter (full-collect via finish_cycle())\",\"pros\":\"Write barrier is effectively FREE: isolated cost -0.034..+0.019 ns/mut (noise) in the Sleeping phase, and even in the Marked phase mutation is 3.18 ns/mut = same as no-bar…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "axisH-embedding-api-vertical-slice",
+      "phaseIndex": 1,
+      "phaseTitle": "ExploreAndSpike",
+      "agentId": "adf6657c928a677de",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782793844410,
+      "queuedAt": 1782793844391,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "H — embedding API shape (with the honest general-script num…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
+      "lastProgressAt": 1782795211326,
+      "tokens": 193953,
+      "toolCalls": 53,
+      "durationMs": 1366916,
+      "resultPreview": "{\"axis\":\"H — embedding API shape (with the honest general-script number from a real gc-arena heap path)\",\"directions\":[{\"direction\":\"(1) koto-SHAPED compat shim: with_settings/prelude().add_fn/insert/compile_and_run/exports().get/clone/call_function\",\"pros\":\"Maps 1:1 onto grabby's ACTUAL call sites — I rebuilt Vm::with_settings(Settings{fuel})/add_fn(name,|args|match)/compile_and_run/exports_clone…"
+    }
+  ],
+  "totalTokens": 524592,
+  "totalToolCalls": 136
+}

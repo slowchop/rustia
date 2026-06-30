@@ -1,0 +1,165 @@
+{
+  "runtime": "node v25.8.1",
+  "seed": 305419896,
+  "iters": 2000000,
+  "results": {
+    "interp": {
+      "ns_op": 802.728,
+      "best_ms": 1605.456,
+      "chk": "0x-2c7a3a1a8423cac8"
+    },
+    "aot": {
+      "ns_op": 3.3804,
+      "best_ms": 6.761,
+      "chk": "0x-2c7a3a1a8423cac8"
+    },
+    "gen_loop": {
+      "ns_op": 10.0539,
+      "best_ms": 20.108,
+      "chk": "0x-2c7a3a1a8423cac8",
+      "bytes": 618,
+      "codegen_us": {
+        "mean_us": 2.434,
+        "best_us": 2.125
+      },
+      "compile_sync_us": {
+        "mean_us": 0.6377,
+        "best_us": 0.625
+      },
+      "instantiate_sync_us": {
+        "mean_us": 1.0751,
+        "best_us": 0.583
+      },
+      "instantiate_async_bytes_us": {
+        "mean_us": 10.0816
+      },
+      "instantiate_async_module_us": {
+        "mean_us": 1.8274
+      },
+      "fixed_cost_us": 4.1468
+    },
+    "gen_opt": {
+      "ns_op": 4.5695,
+      "best_ms": 9.139,
+      "chk": "0x-2c7a3a1a8423cac8",
+      "bytes": 977,
+      "codegen_us": {
+        "mean_us": 2.9507,
+        "best_us": 2.75
+      },
+      "compile_sync_us": {
+        "mean_us": 0.6552,
+        "best_us": 0.625
+      },
+      "instantiate_sync_us": {
+        "mean_us": 1.0756,
+        "best_us": 0.541
+      },
+      "instantiate_async_bytes_us": {
+        "mean_us": 9.7752
+      },
+      "instantiate_async_module_us": {
+        "mean_us": 0.9297
+      },
+      "fixed_cost_us": 4.6815
+    },
+    "shared_loop": {
+      "ns_op": 10.3959,
+      "best_ms": 20.792,
+      "chk": "0x-2c7a3a1a8423cac8",
+      "bytes": 695,
+      "codegen_us": {
+        "mean_us": 2.444,
+        "best_us": 2.292
+      },
+      "compile_sync_us": {
+        "mean_us": 0.7914,
+        "best_us": 0.708
+      },
+      "instantiate_sync_us": {
+        "mean_us": 1.3452,
+        "best_us": 0.666
+      },
+      "instantiate_async_bytes_us": {
+        "mean_us": 10.0427
+      },
+      "instantiate_async_module_us": {
+        "mean_us": 1.7506
+      },
+      "fixed_cost_us": 4.5806
+    },
+    "shared_opt": {
+      "ns_op": 4.5756,
+      "best_ms": 9.151,
+      "chk": "0x-2c7a3a1a8423cac8",
+      "bytes": 1054,
+      "codegen_us": {
+        "mean_us": 3.2243,
+        "best_us": 3
+      },
+      "compile_sync_us": {
+        "mean_us": 0.7543,
+        "best_us": 0.75
+      },
+      "instantiate_sync_us": {
+        "mean_us": 1.2227,
+        "best_us": 0.625
+      },
+      "instantiate_async_bytes_us": {
+        "mean_us": 10.2628
+      },
+      "instantiate_async_module_us": {
+        "mean_us": 0.8665
+      },
+      "fixed_cost_us": 5.2013
+    },
+    "shared_base": 1053552
+  },
+  "gen_proof": {
+    "bytes_ptr_in_host_heap": 1116024,
+    "heap_base": 1054480,
+    "ptr_above_heap_base": true,
+    "len": 618,
+    "wasm_magic": "00 61 73 6d",
+    "wasm_version": 1,
+    "valid_module": true
+  },
+  "checksums": {
+    "interp": "0x-2c7a3a1a8423cac8",
+    "aot": "0x-2c7a3a1a8423cac8",
+    "gen_loop": "0x-2c7a3a1a8423cac8",
+    "gen_opt": "0x-2c7a3a1a8423cac8",
+    "shared_loop": "0x-2c7a3a1a8423cac8",
+    "shared_opt": "0x-2c7a3a1a8423cac8",
+    "ALL_IDENTICAL": true
+  },
+  "analysis": {
+    "interp_ns_op": 802.728,
+    "aot_ns_op": 3.3804,
+    "steady_speedup_interp_over_aot": 237.5,
+    "gen_opt": {
+      "ns_op": 4.5695,
+      "speedup_vs_interp": 175.7,
+      "ratio_vs_aot": 1.352,
+      "fixed_cost_us": 4.6815,
+      "per_op_saving_ns": 798.159,
+      "crossover_ops": 6
+    },
+    "gen_loop": {
+      "ns_op": 10.0539,
+      "speedup_vs_interp": 79.8,
+      "ratio_vs_aot": 2.974,
+      "fixed_cost_us": 4.1468,
+      "per_op_saving_ns": 792.674,
+      "crossover_ops": 6
+    },
+    "shared_opt": {
+      "ns_op": 4.5756,
+      "speedup_vs_interp": 175.4,
+      "ratio_vs_aot": 1.354,
+      "fixed_cost_us": 5.2013,
+      "per_op_saving_ns": 798.152,
+      "crossover_ops": 7
+    }
+  }
+}

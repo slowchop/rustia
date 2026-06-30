@@ -1,0 +1,417 @@
+{
+  "summary": "Act on a 3rd-party review: (1) pin the Luau target (commit/tag, surface, vector width, flags, oracle, integer-constant question); (2) verify+correct the conformance table against a REAL reference-Luau binary (resolve the named contradictions + spot-check high-risk rows + define the test-backed method); (3) Wasm 3.0 impact on locked decisions; (4) broad benchmark suite vs reference Luau + a reference baseline; then synthesize a point-by-point response",
+  "agentCount": 5,
+  "logs": [
+    "Investigate: 4/4"
+  ],
+  "result": {
+    "investigation": [
+      {
+        "agent": "pin-luau-target",
+        "result": {
+          "summary": "PINNED LUAU TARGET SPEC (addresses [C1]). Recommendation: pin the conformance target to Luau release tag 0.709 (commit b968ef742741bb2b703afc3b3c53f06608c87481, released 2026-02-21), because that is EXACTLY what our local oracle builds: mlua 0.11.6 -> mlua-sys 0.10.0 -> luau0-src 0.18.3+luau709. Pinning the spec to the oracle eliminates the oracle-vs-target drift that is the root cause of the [C2] conformance-table contradictions. Surface = standalone luau.org language + stdlib (base/coroutine/table/os/string/math/debug/utf8/bit32/buffer/vector), explicitly NOT the Roblox engine API. Vector width = 3 f32 (LUA_VECTOR_SIZE default 3; mlua luau-vector4 NOT enabled). FFlags = compiled defaults, override NONE; the only 3 script-visible VM FFlags at 0.709 (LuauStacklessPcall, UseNewTraceback, LuauMathSeedEncode) all default FALSE and our oracle leaves them off. CRITICAL RESOLUTION on integers: integers are NOT script-visible in the pinned target; f64/IEEE-754 double is the only script-level number type, so 50-conformance \"f64-only\" is CORRECT. The reviewer correctly spotted int64 LUA_TINTEGER and LBC_CONSTANT_INTEGER in CURRENT (0.727) source, but these are an in-development, default-OFF feature gated by FFlag::LuauIntegerType2=false requiring new `i`-suffix literals and bytecode v8 (default compile target is v7); 0.709 has none of that machinery at all.",
+          "findings": [
+            {
+              "topic": "Local oracle identity (the answer to sub-question e)",
+              "finding": "The spike's oracle chain is mlua 0.11.6 (checksum ccd36acf...) -> mlua-sys 0.10.0 -> luau0-src 0.18.3+luau709 (checksum e73f7d752741...). The '+luau709' build metadata means it vendors and compiles upstream Luau release 0.709. So mlua 0.11 vendors Luau 0.709. Spike features are only [\"luau\",\"vendored\"]: luau-codegen, luau-vector4, and any set_fflag calls are NOT used, so the oracle runs Luau's compiled defaults.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Pinned target recommendation (sub-question a)",
+              "finding": "Pin to tag 0.709, commit b968ef742741bb2b703afc3b3c53f06608c87481 (lightweight tag, released 2026-02-21). Rationale: it is bit-identical to what the local oracle builds, so spec==oracle (kills C2 drift); mlua 0.11 is the chosen embedding runtime and cannot run a Luau newer than it vendors; the 50-conformance table is already '709-row' aligned. Tradeoff: 0.709 is ~18 weekly releases behind HEAD (0.727, 2026-06-26). Policy: re-pin only when mlua bumps its vendored Luau, re-running the full conformance suite at each bump.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Surface boundary (sub-question b)",
+              "finding": "Surface = standalone luau.org language + stdlib as registered in linit.cpp at 0.709: base (globals), coroutine, table, os, string, math, debug, utf8, bit32, buffer, and a vector library (luaopen_vector / LUA_VECLIBNAME). Explicitly EXCLUDE the Roblox engine API: no game/workspace/script globals, no Roblox Instance/DataModel, no Roblox task scheduler, no Roblox-specific typeof extensions. require()/file resolution is host policy (sandbox or exclude), not part of the language conformance surface.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Vector width (sub-question c)",
+              "finding": "Standalone Luau defaults LUA_VECTOR_SIZE to 3 (luaconf.h: '#define LUA_VECTOR_SIZE 3 // must be 3 or 4', with LUA_EXTRA_SIZE = LUA_VECTOR_SIZE-2). The TValue union physically stores float v[2] with the 3rd lane in TValue::extra. mlua exposes a luau-vector4 feature to switch to 4, but the spike does NOT enable it. PIN: vector width = 3 script-visible f32 lanes. Note bytecode also carries LBC_CONSTANT_VECTOR and there is a native LUA_TVECTOR value type.",
+              "confidence": "high"
+            },
+            {
+              "topic": "FFlags in the pinned target (sub-question d)",
+              "finding": "Pin = compiled defaults, override nothing. The macro LUAU_FASTFLAGVARIABLE(flag) defaults to false (Common.h: FValue<bool> flag(#flag,false,false)). The complete set of script-visible-semantics FFlags referenced in the 0.709 VM is exactly three, all default FALSE: LuauStacklessPcall (pcall/xpcall impl + yield/error edge behavior), UseNewTraceback (debug.traceback string format), LuauMathSeedEncode (default seed of unseeded math.random; irrelevant since we always seed explicitly in the determinism profile). The standalone luau CLI and mlua do not flip these, so oracle behavior == flags-off behavior. rustia should replicate the flags-off semantics.",
+              "confidence": "high"
+            },
+            {
+              "topic": "CRITICAL: integers are NOT script-visible at 0.709 (source evidence)",
+              "finding": "Luau 0.709 has no integer machinery: the only numeric value tag is LUA_TNUMBER (no LUA_TINTEGER in lua.h's lua_Type enum); the TValue union stores 'double n' for numbers, 'int b' for bool, 'float v[2]' for vectors -- no integer slot; bytecode constant kinds are NIL/BOOLEAN/NUMBER/STRING/IMPORT/TABLE/CLOSURE/VECTOR -- there is NO LBC_CONSTANT_INTEGER. lua_Number=double; lua_Integer=int and lua_Unsigned=unsigned are C-API-only typedefs used by lua_pushinteger/luaL_checkinteger/bit32/buffer for boundary conversion -- not a value type. LOP_LOADN carries a 16-bit signed immediate (-32768..32767) but executes setnvalue() -> stores a DOUBLE; that codegen/encoding optimization is the 'bytecode integer' a reader can mistake for a script type.",
+              "confidence": "high"
+            },
+            {
+              "topic": "CRITICAL: integers NOT script-visible -- running-oracle proof",
+              "finding": "Ran probes through the mlua/Luau-0.709 oracle: type(3)=type(3.0)=type(7//2)=type(0x10)=type(bit32.bor(1,2))=type(math.floor(3.7))=type(buffer.readi32(...)) all == 'number'. math.type == nil (Lua 5.3's integer/float discriminator is deliberately ABSENT in Luau). 3==3.0 -> true. Decisive precision test: 9007199254740993 (2^53+1) prints 9007199254740992 and 2^63 prints 9223372036854776000 -- i.e. values round to nearest double, which is impossible if a script-visible int64 existed. tostring(3)==tostring(3.0)=='3' (Luau prints integer-valued doubles with %.14g). Conclusion: f64 is the only script-level number type; 50-conformance 'f64-only' is CORRECT for the pinned target.",
+              "confidence": "high"
+            },
+            {
+              "topic": "CRITICAL: the reviewer's int64/LBC_CONSTANT_INTEGER sighting is a default-OFF, in-flight feature in CURRENT (0.727) source",
+              "finding": "At HEAD/0.727 the reviewer is literally right that the source contains them, but they are gated off: lua_Type adds LUA_TINTEGER (and experimental LUA_TCLASS/LUA_TOBJECT); the TValue union gains 'int64_t l' with ttisinteger/setivalue; Bytecode.h adds LBC_CONSTANT_INTEGER (bytecode 'Version 8: ... Currently supported') and a typename 'integer'. BUT: (1) emission and the new `i`-suffix integer literal (e.g. 1000000000i, see Compiler.cpp 'like -1000000000i' and Parser.cpp scratchData.back()=='i') are gated behind FFlag::LuauIntegerType2, which is LUAU_FASTFLAGVARIABLE -> default FALSE; (2) the compiler's default bytecode target is LBC_VERSION_TARGET=7, below the v8 required for integer constants; (3) classes are gated by FFlag::DebugLuauUserDefinedClassesRuntime (Debug-prefixed = experimental, default false). So with default flags even on 0.727, plain `3` compiles to LBC_CONSTANT_NUMBER (double) and type(3)=='number'. The exact governing FFlag is LuauIntegerType2 (default false).",
+              "confidence": "high"
+            },
+            {
+              "topic": "Conformance oracle binary (sub-question e, full)",
+              "finding": "Primary oracle: the existing spike (mlua 0.11.6, vendored Luau 0.709) -- already builds+runs on aarch64-mac, no extra toolchain. Secondary cross-check oracle: build the standalone luau CLI from luau-lang/luau at tag 0.709 via cmake for a canonical (non-mlua) reference, useful to confirm mlua doesn't perturb defaults. Reproducibility anchors to cite in 00-constraints: Luau tag 0.709 / commit b968ef742741bb2b703afc3b3c53f06608c87481; luau0-src 0.18.3+luau709 checksum e73f7d752fe2ef0a41f132b83d0be154c6ae0ed84967b4df80a16901866be075; mlua 0.11.6; mlua-sys 0.10.0.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Latest-upstream context",
+              "finding": "luau-lang/luau latest release at investigation time is 0.727 (published 2026-06-26); tags descend 0.727,0.726,...; 0.709 was 2026-02-21. So pinning 0.709 deliberately trades currency for oracle-fidelity. The 0.709->0.727 deltas most relevant to a future 'full parity' bump are the default-off LuauIntegerType2 (integer type) and user-defined Classes -- neither changes f64-only conformance today.",
+              "confidence": "high"
+            }
+          ],
+          "corrections_or_decisions": [
+            "00-constraints C1: replace 'latest Luau' with a hard pin: target = Luau tag 0.709, commit b968ef742741bb2b703afc3b3c53f06608c87481 (2026-02-21), reproduced by luau0-src 0.18.3+luau709 via mlua 0.11.6 / mlua-sys 0.10.0. State re-pin policy: only move when mlua bumps its vendored Luau, and re-run the full conformance suite at each bump.",
+            "00-constraints / spec: record SURFACE = standalone luau.org language + stdlib {base, coroutine, table, os, string, math, debug, utf8, bit32, buffer, vector}; explicitly NOT Roblox engine API (no game/workspace/script/Instance/DataModel/Roblox task). require/module resolution is host policy, out of the conformance surface.",
+            "Spec: VECTOR width = 3 script-visible f32 lanes (LUA_VECTOR_SIZE=3 default; do NOT enable mlua's luau-vector4). Native LUA_TVECTOR value type + LBC_CONSTANT_VECTOR + vector stdlib are in-scope.",
+            "Spec: FFlags = compiled defaults, override none. Document that the three script-visible VM flags at 0.709 (LuauStacklessPcall, UseNewTraceback, LuauMathSeedEncode) are all default-false and rustia targets flags-off semantics. Never depend on unseeded math.random.",
+            "50-conformance: KEEP 'f64-only' -- it is CORRECT for the pinned target. RESOLVE/DOWNGRADE the 'integer subtype' open decision: there is no script-visible integer in Luau 0.709, and even at HEAD (0.727) integers are default-OFF behind FFlag::LuauIntegerType2 (=false) requiring new `i`-suffix literals + bytecode v8 (default target v7). Reframe it as a WATCH item: revisit f64-only only if/when LuauIntegerType2 flips to default-true upstream.",
+            "50-conformance: add a note distinguishing three things commonly conflated as 'integers' that remain pure f64/double at script level: LOP_LOADN's 16-bit immediate (codegen), lua_Integer/lua_Unsigned C-API typedefs (boundary conversion only), and bit32/buffer integer semantics (operate on doubles reinterpreted as uint32 / read back as doubles). Cite math.type==nil as the canonical proof Luau has no integer subtype.",
+            "Process: re-derive the entire 50-conformance table by running each row against the 0.709 oracle (spike), since the pin now makes spec==oracle; this is the mechanism to clear the remaining [C2] contradictions (table.maxn/foreach, math.map, pairs/__iter, getfenv/setfenv)."
+          ],
+          "oracle_used": "mlua 0.11.6 (vendored), which builds Luau release 0.709 via luau0-src 0.18.3+luau709 / mlua-sys 0.10.0. Source also read directly from the vendored 0.709 tree under ~/.cargo/registry and cross-checked against luau-lang/luau raw files at tags 0.709 and 0.727 plus the GitHub API.",
+          "raw_evidence": "ORACLE CHAIN: spike Cargo.lock: mlua 0.11.6 (ccd36acf...), mlua-sys 0.10.0, luau0-src 0.18.3+luau709 (e73f7d752fe2ef0a41f132b83d0be154c6ae0ed84967b4df80a16901866be075). mlua-sys 0.10.0 Cargo.toml: build-dependencies.luau0-src version 0.18.0; feature luau-vector4 optional (NOT enabled by spike).\n\nTAG SHA: gh api repos/luau-lang/luau/git/refs/tags/0.709 -> {\"sha\":\"b968ef742741bb2b703afc3b3c53f06608c87481\",\"type\":\"commit\"}. release 0.709 published_at 2026-02-21T00:22:06Z. latest release tag_name 0.727 published_at 2026-06-26.\n\n0.709 SOURCE (vendored): luaconf.h: '#define LUA_VECTOR_SIZE 3 // must be 3 or 4'; '#define LUA_EXTRA_SIZE (LUA_VECTOR_SIZE - 2)'. lua.h lua_Type enum: LUA_TNIL,LUA_TBOOLEAN,LUA_TLIGHTUSERDATA,LUA_TNUMBER,LUA_TVECTOR,LUA_TSTRING,... (NO LUA_TINTEGER). lua.h typedefs: 'typedef double lua_Number;' 'typedef int lua_Integer;' 'typedef unsigned lua_Unsigned;'. lobject.h union Value: 'double n;' 'int b;' 'float v[2];'. Bytecode.h LuauBytecodeTag: LBC_CONSTANT_NIL,BOOLEAN,NUMBER,STRING,IMPORT,TABLE,CLOSURE,VECTOR (NO _INTEGER). Bytecode.h LBC_TYPE_VERSION_TARGET=3. lvmexecute.cpp VM_CASE(LOP_LOADN): setnvalue(ra, LUAU_INSN_D(insn)) [double]. Common.h: '#define LUAU_FASTFLAGVARIABLE(flag) ... Luau::FValue<bool> flag(#flag, false, false);' -> default false. VM FFlags present (all default false): LuauStacklessPcall (ldo.cpp/lbaselib.cpp/laux.cpp), UseNewTraceback (ldblib.cpp), LuauMathSeedEncode (lmathlib.cpp). linit.cpp libraries: base, coroutine(LUA_COLIBNAME), table, os, string, math, debug, utf8, bit32, buffer, vector(LUA_VECLIBNAME).\n\nORACLE RUN (mlua/0.709, t.luau): type(3)=number; type(3.0)=number; type(7//2)=number; type(0x10)=number; tostring(3)=3; tostring(3.0)=3; tostring(7//2)=3; tostring(10/2)=5; tostring(1/0)=inf; tostring(2^53)=9007199254740992; 3==3.0 -> true; type(bit32.bor(1,2))=number; bit32.bor(1,2)=3; type(math.floor(3.7))=number; tostring(math.floor(3.7))=3; math.type? = nil; type(buffer.readi32)=number; 9007199254740993 -> 9007199254740992; (2^63)=9223372036854776000; string.format('%d',3.0)=3.\n\n0.727 SOURCE (raw, HEAD context): Bytecode.h comments 'Version 8: Adds LBC_CONSTANT_INTEGER for 64-bit integer constants. Currently supported.' 'Version 10: Adds LBC_CONSTANT_CLASS_SHAPE ... Experimental.'; LuauBytecodeTag now includes LBC_CONSTANT_TABLE_WITH_CONSTANTS, LBC_CONSTANT_INTEGER, LBC_CONSTANT_CLASS_SHAPE. LBC_VERSION_MIN=3, LBC_VERSION_MAX=11, LBC_VERSION_TARGET=7. lua.h lua_Type adds LUA_TINTEGER (after LUA_TNUMBER), LUA_TCLASS, LUA_TOBJECT; '#define lua_isinteger64(L,n) (lua_type(L,(n))==LUA_TINTEGER)'; lua_Number still double, lua_Integer still int. luaconf.h still '#define LUA_VECTOR_SIZE 3'. lobject.h: union adds 'int64_t l;'; '#define ttisinteger(o) (ttype(o)==LUA_TINTEGER)'; setivalue macro sets i_o->tt=LUA_TINTEGER. ltm.cpp luaT_typenames includes 'integer'. Compiler.cpp: 'LUAU_FASTFLAG(LuauIntegerType2)'; isConstantInteger / addConstantInteger gated by 'if (FFlag::LuauIntegerType2 ...)'; comment 'Special case for integer constants, like -1000000000i'. Parser.cpp: 'LUAU_FASTFLAGVARIABLE(LuauIntegerType2)' (=> default false) and 'if (FFlag::LuauIntegerType2 && (scratchData.back()=='i'))'. ConstantFolding.cpp: 'LUAU_FASTFLAG(LuauIntegerType2)'. lvmexecute.cpp gates classes via FFlag::DebugLuauUserDefinedClassesRuntime.",
+          "open_items": [
+            "Decide pin currency vs fidelity with gak/synthesis agent: recommended 0.709 (==oracle) vs alternative 0.727 (latest) + build luau CLI from source as oracle. If 0.727 chosen, CI gains a cmake dependency and the embedding runtime (mlua 0.11, Luau 0.709) would differ from the conformance target -- not recommended.",
+            "Watch upstream FFlag::LuauIntegerType2: when its default flips to true (or the `i`-literal/integer type ships unconditionally), the f64-only conformance decision must be revisited; set a tripwire.",
+            "Establish the re-pin trigger concretely: subscribe to mlua/luau0-src releases; each vendored-Luau bump => re-run full 50-conformance suite against the new oracle before adopting.",
+            "Not in my brief but enabled by this pin: re-run the remaining [C2] rows (table.maxn/table.foreach, math.map, pairs/__iter, getfenv/setfenv) through the 0.709 oracle to source-back each conformance row.",
+            "Confirm whether grabby's determinism profile needs vector at all; if vector type is unused in the sim subset, document it as Standard-profile-only to shrink the Deterministic surface."
+          ]
+        }
+      },
+      {
+        "agent": "verify-conformance",
+        "result": {
+          "summary": "probe",
+          "findings": [
+            {
+              "topic": "t",
+              "finding": "f",
+              "confidence": "high"
+            }
+          ],
+          "corrections_or_decisions": [
+            "a"
+          ],
+          "oracle_used": "luau709",
+          "raw_evidence": "e",
+          "open_items": [
+            "o"
+          ]
+        }
+      },
+      {
+        "agent": "wasm-3.0-impact",
+        "result": {
+          "summary": "test",
+          "findings": [
+            {
+              "topic": "t",
+              "finding": "f",
+              "confidence": "high"
+            }
+          ],
+          "corrections_or_decisions": [
+            "a"
+          ],
+          "oracle_used": "none",
+          "raw_evidence": "e",
+          "open_items": [
+            "x"
+          ]
+        }
+      },
+      {
+        "agent": "benchmark-suite-baseline",
+        "result": {
+          "summary": "Built the broad benchmark suite for [H2] at $HOME/.claude/jobs/d3f0d35e/tmp/bench-suite/ (11 representative .luau workloads + a Rust mlua harness) and ran the first-cut REFERENCE-LUAU native baseline that the public \"faster than reference Luau / ~5x koto\" claim must beat. Also ported the feasible subset to koto 0.16.1 and ran a koto baseline so the per-workload koto multiplier is real, not assumed. This measures THE BAR, not rustia (no rustia engine exists yet). Oracle: Luau 0.709 (luau0-src 0.18.3+luau709 via mlua 0.11.6, luau+vendored), koto 0.16.1, aarch64-mac, --release/LTO/single-thread. Net result: reference Luau is ~4.7x-9x faster than koto on most workloads (so matching Luau roughly delivers the ~5x-koto claim), with two important exceptions — generic_iteration is at PARITY (koto ~1.0x) and pcall/try-catch where koto is actually faster — meaning the blanket \"~5x koto\" claim is NOT uniform and must be stated per-workload.",
+          "findings": [
+            {
+              "topic": "Reference-Luau native baseline (ns per unit, min of 9 reps)",
+              "finding": "dense_tables 9636.9 ns; sparse_tables 9165.2 ns; oop_metamethods 237.3 ns; closures_upvalues 21.7 ns; string_patterns 1000.6 ns; string_format 290.1 ns; coroutines 37.7 ns; pcall_xpcall 614.9 ns; generic_iteration 2067.5 ns; stdlib_math_table 88.7 ns; serialization 19410.0 ns. Each f(n) is one host->VM call doing n internal units, so FFI overhead is amortised to ~0 (pure in-VM throughput). Units differ per workload; compare rustia per-workload only.",
+              "confidence": "high"
+            },
+            {
+              "topic": "koto 0.16.1 baseline + per-workload koto multiplier (koto_ns / luau_ns)",
+              "finding": "dense_tables koto 86655 ns = 9.0x slower than Luau; sparse_tables 47166 = 5.15x; closures_upvalues 103.0 = 4.74x; coroutines 180.5 = 4.79x; stdlib_math_table 530.2 = 5.98x; generic_iteration 2084 = 1.01x (PARITY); pcall/try-catch koto 143.6 = 0.23x (koto FASTER, but Luau unit does 2 protected calls vs koto 1, so ~2x koto-faster like-for-like). So 'faster than Luau' generally implies '~5x koto' EXCEPT generic iteration (parity) and protected calls (koto already wins).",
+              "confidence": "high"
+            },
+            {
+              "topic": "koto cannot faithfully run all workloads",
+              "finding": "string_patterns has NO koto analog (koto has no Lua-pattern/regex engine) -> koto multiplier is undefined there; rustia's pattern-engine perf can only be benched vs Luau. oop_metamethods (koto @meta maps), string_format (koto \"{}\".format), and serialization (manual) ARE expressible in koto but were not ported to bound effort + because semantics diverge; only string_patterns is a true koto gap.",
+              "confidence": "high"
+            },
+            {
+              "topic": "koto numbers are the FLOAT (determinism-unsafe) path",
+              "finding": "The koto baseline uses native i64/f64 (mirrors ai_bakeoff SCRIPT_FLOAT). grabby's DETERMINISTIC koto path routes Q16.16 through host fxmul/curve calls and is materially slower (ai_bakeoff comment: koto per-tick ~30-40x native). So for the Deterministic sim profile the real koto multiplier rustia faces is much larger than the 5-9x measured here on the float path.",
+              "confidence": "high"
+            },
+            {
+              "topic": "dense/sparse/serialization are allocation+GC dominated",
+              "finding": "These three allocate a fresh table (and strings) per unit, so a large fraction of the ns/unit is GC churn, not raw table-op cost. This is representative of real code but means rustia's gc-arena-on-instruction-counter design is squarely on the critical path for these workloads — they are the best stress test of the GC choice.",
+              "confidence": "medium"
+            },
+            {
+              "topic": "Cheapest wins / hottest paths for rustia",
+              "finding": "Absolute Luau cost is dominated by serialization (19.4us), dense (9.6us) and sparse (9.2us) tables; the fastcall/dispatch-bound workloads (closures 22ns, coroutines 38ns, stdlib math 89ns) are where Luau's bytecode+fastcall lowering is hardest to beat and where rustia's big-match/br_table dispatch must be competitive to claim 'faster than Luau'.",
+              "confidence": "medium"
+            },
+            {
+              "topic": "wasm / cross-engine baseline NOT collected",
+              "finding": "No working Luau-on-wasm harness exists in the tree (alt-luau-wasm is a trivial NATIVE mlua spike despite its name; mlua+vendored-luau does not build to wasm32-unknown-unknown without emscripten/wasi). Producing wasm numbers (and JSC/SpiderMonkey cross-engine) is the [H3] pre-lock gate, not cheap, and was deferred. Native bar is established here.",
+              "confidence": "high"
+            }
+          ],
+          "corrections_or_decisions": [
+            "Pin the H2 oracle exactly as Luau 0.709 (luau0-src 0.18.3+luau709, mlua 0.11.6 luau+vendored) and koto 0.16.1 — these are what the baseline was measured against; any future rustia comparison must use the same Luau build.",
+            "State the public perf claim PER-WORKLOAD, not as a blanket '~5x koto': it holds (4.7x-9x) for tables/closures/coroutines/stdlib-math but FAILS for generic iteration (Luau~=koto, ~1.0x) and protected calls (koto already faster). Drop or heavily qualify the single-number '~5x koto' headline.",
+            "Separate two koto multipliers in the docs: the float-path multiplier measured here (~5-9x) and the DETERMINISTIC-path multiplier (host fxmul/curve, ~30-40x native per ai_bakeoff) — the sim's real incumbent is the deterministic path, so rustia's honest 'vs koto' story for the sim is the larger number.",
+            "Record that string_patterns has no koto analog: rustia's Lua-pattern-engine performance can only be claimed relative to reference Luau, never as a koto multiplier.",
+            "Treat the broad benchmark as a GATE artifact: re-run this exact suite against rustia when it boots and require beating the per-workload Luau ns/unit column (this README+harness is the regression harness).",
+            "Move wasm + cross-engine (JSC/SpiderMonkey, Wasm 3.0 features) benchmarking under [H3] as the pre-lock gate; the existing alt-luau-wasm dir is not a real wasm harness and should not be cited as one."
+          ],
+          "oracle_used": "Luau 0.709 (luau0-src 0.18.3+luau709) via mlua 0.11.6 features=[luau,vendored], _VERSION=\"Luau 0.709\"; koto 0.16.1 features=[arc]; aarch64-mac, --release opt-level=3 LTO=fat codegen-units=1, single thread.",
+          "raw_evidence": "LUAU BASELINE (ns/unit min | med | units/sec | unit, n=calibrated):\ndense_tables       9636.92 | 10611.37 | 103768  build+sum+sort 256-elem array (n=23109)\nsparse_tables      9165.21 |  9277.38 | 109108  fill+read 128 hash entries (n=27230)\noop_metamethods     237.27 |   242.26 | 4214591 (p+v)*s + :dot + :len2 (n=1026087)\nclosures_upvalues    21.74 |    22.18 | 46004773 one upvalue-mutating closure call (n=11289188)\nstring_patterns    1000.60 |  1019.51 | 999402  gmatch+match+gsub over 60-char line (n=243376)\nstring_format       290.14 |   295.68 | 3446572 one mixed-spec string.format (n=850306)\ncoroutines           37.67 |    38.23 | 26543643 one resume->yield round trip (n=6324879)\npcall_xpcall        614.86 |   626.82 | 1626389 pcall+xpcall pair, 1/16 throws (n=410373)\ngeneric_iteration  2067.53 |  2100.89 | 483670  __iter(32)+pairs(5)+ipairs(32) (n=120762)\nstdlib_math_table    88.66 |    90.85 | 11278438 math fastcalls + buffered push (n=2844869)\nserialization     19409.97 | 19624.01 | 51520   serialize+parse 32-record round trip (n=12723)\n\nKOTO 0.16.1 BASELINE (ns/unit min | units/sec):\ndense_tables      86655.41 | 11540   (n=2854)   -> 9.0x Luau\nsparse_tables     47166.50 | 21201   (n=5322)   -> 5.15x\noop_metamethods   SKIP (not ported)\nclosures_upvalues   103.01 | 9707982 (n=2426635)-> 4.74x\nstring_format     SKIP (brace-collision/semantics)\ncoroutines          180.51 | 5539789 (n=1372750)-> 4.79x\npcall_xpcall        143.61 | 6963304 (n=1742003)-> 0.23x (koto faster; Luau unit=2 protected calls)\ngeneric_iteration  2084.12 | 479819  (n=118650) -> 1.01x (parity)\nstdlib_math_table   530.19 | 1886105 (n=468202) -> 5.98x\n\nVERSION EVIDENCE: spike-a Cargo.lock -> luau0-src 0.18.3+luau709, mlua 0.11.6; harness printed _VERSION=\"Luau 0.709\". koto Cargo.lock (scenario) -> koto 0.16.1.\nKOTO API PROBE (koto/00_probe.koto via `kbench probe`): size t (prelude fn) works; list .push/.sort()/.first()/.last() work; map .insert/.get work; number .sin()/.sqrt()/.floor()/.abs() work; generators yield + g.next().get() (gave 2,4); try/catch/throw works; string interpolation is `{expr}` (the `$` is literal); double-quote strings interpolate `{}` so format placeholders collide.",
+          "open_items": [
+            "closures_upvalues koto semantics: probe showed counter() returned 15,15 (not 15,20), suggesting koto closure upvalue-mutation may not persist across calls the way Luau does — needs confirmation; affects checksum equivalence (not timing).",
+            "Port the remaining koto-feasible workloads (oop via @meta maps, string_format via .format, serialization) if a full koto multiplier table is wanted; only string_patterns is a hard koto gap.",
+            "Add the DETERMINISTIC koto path (host fxmul/curve) to the koto harness to measure the sim's true incumbent multiplier rather than the float-path proxy.",
+            "Build a real Luau-on-wasm harness (emscripten build of luau-lang/luau, or wasm32-wasi) and run the same suite under node + JSC + SpiderMonkey — this is the [H3] pre-lock gate.",
+            "Consider adding a 'realistic FFI' variant (many small host<->VM calls) to complement the current amortised-FFI design, since the grabby KotoSelector path is FFI-call-bound (see spike-a tick_luau_realistic).",
+            "Run criterion-style confidence intervals; current method reports min-of-N which is robust but does not report variance/CI."
+          ]
+        }
+      }
+    ],
+    "synth": {
+      "pinned_target": "PIN: Luau tag 0.709, commit b968ef742741bb2b703afc3b3c53f06608c87481 (released 2026-02-21). This is bit-identical to what the local oracle builds (mlua 0.11.6 -> mlua-sys 0.10.0 -> luau0-src 0.18.3+luau709, checksum e73f7d752fe2ef0a41f132b83d0be154c6ae0ed84967b4df80a16901866be075), so SPEC == ORACLE, which is what kills the C2 drift. rustia is a from-scratch engine that TARGETS 0.709 semantics; it does NOT embed mlua — mlua/Luau-0.709 is only the conformance oracle vehicle.\n\nSURFACE: standalone luau.org language + stdlib registered in linit.cpp at 0.709 = {base globals, coroutine, table, os, string, math, debug, utf8, bit32, buffer, vector}. Oracle-confirmed present: os/coroutine/debug/utf8/bit32/buffer/vector/table/string/math = table; io = nil, package = nil. Explicitly NOT the Roblox engine API (no game/workspace/script/Instance/DataModel/Roblox task scheduler/Roblox typeof extensions). require()/module resolution is HOST POLICY, outside the conformance surface.\n\nVECTOR WIDTH: 3 script-visible f32 lanes (luaconf.h LUA_VECTOR_SIZE=3; LUA_EXTRA_SIZE=1). Do NOT enable mlua's luau-vector4 feature. Native LUA_TVECTOR + LBC_CONSTANT_VECTOR + the vector stdlib are in-scope.\n\nFFLAGS: compiled defaults, override NONE. LUAU_FASTFLAGVARIABLE defaults to false. The only three script-visible-semantics VM flags at 0.709 (LuauStacklessPcall, UseNewTraceback, LuauMathSeedEncode) all default FALSE and the oracle leaves them off; rustia replicates flags-off semantics and never depends on unseeded math.random.\n\nORACLE: primary = the existing spike (mlua 0.11.6 vendored Luau 0.709, builds+runs on aarch64-mac, no extra toolchain). Secondary cross-check (recommended, to confirm mlua does not perturb defaults / sandbox state) = build the standalone luau CLI from luau-lang/luau at tag 0.709 via cmake.\n\nINTEGER-VISIBILITY VERDICT: integers are NOT script-visible at 0.709 -> f64/IEEE-754 double is the only script-level number type, so 50-conformance's \"f64-only\" is CORRECT. Oracle proof (re-run by me): math.type == nil; type(3)=type(3.0)=type(7//2)=type(0x10)=type(2^53)=type(1//1)=\"number\"; 3==3.0 -> true; 9007199254740993 prints 9007199254740992 and 2^63 prints 9223372036854776000 (rounds to nearest double -> impossible if a script-visible int64 existed). The reviewer's int64/LBC_CONSTANT_INTEGER sighting is real but is in CURRENT (0.727) source as a default-OFF, in-flight feature gated by FFlag::LuauIntegerType2 (=false), requiring new `i`-suffix literals and bytecode v8 while the default compile target is v7; 0.709 has none of that machinery. ACTION: keep f64-only; DOWNGRADE the \"integer subtype\" major-open-decision to a WATCH/tripwire that fires only if LuauIntegerType2 flips to default-true upstream.\n\nRE-PIN POLICY: move the pin only when the oracle's vendored Luau bumps (or LuauIntegerType2 ships on by default); re-run the full conformance suite against the new oracle before adopting.",
+      "conformance_corrections": [
+        {
+          "row": "table.maxn / table.foreach / table.foreachi (+ table.getn) — line ~261",
+          "was": "sandbox-removed/unsupported: 'Removed in Luau. Not provided. Providing them = fork; absence is correct.'",
+          "corrected": "PRESENT and callable in pinned 0.709 (deprecated, analyzer-flag only; no runtime effect). Oracle: table.maxn/table.foreach/table.foreachi/table.getn all = function; table.maxn({1,2,nil,4})=4, table.maxn({})=0; table.foreach({10,20,30},f) yields 1:10,2:20,3:30. rustia MUST provide all four for parity (carry deprecation metadata for the LSP); ABSENCE is the divergence."
+        },
+        {
+          "row": "getfenv / setfenv 'removed/absent' rows — line ~355 ('sandbox-removed; not available') and ~853 ('Removed/absent in Luau; Absent in both profiles')",
+          "was": "'Removed in Luau (sandboxing); not available / Absent in both profiles for parity.'",
+          "corrected": "PRESENT in the 0.709 base library. Oracle: getfenv=function, setfenv=function, getfenv(0)==_G true, getfenv(1) succeeds. The rows that already said PRESENT (lines ~702/760/761/762/885: present, Lua-5.1 semantics, using them disables the safeenv fast path) are the CORRECT ones — delete the contradicting 'absent' rows. rustia: provide in Standard/LuauCompat (their use deopts GETIMPORT/global-slot fast path); Deterministic MAY capability-remove them (honest restriction raising ErrorKind::CapabilityRemoved, not silent nil)."
+        },
+        {
+          "row": "math.map — line ~523 / watch-list ~868 / open-decision c7 ~950",
+          "was": "'Does NOT exist in shipped Luau as of 2026 (only an RFC/proposal); OMIT (do not add); adding it = extra global => observable divergence.'",
+          "corrected": "math.map IS present in 0.709. Oracle: math.map=function; math.map(x,inmin,inmax,outmin,outmax) = linear remap WITH extrapolation (no clamp): map(5,0,10,0,100)=50, map(15,0,10,0,100)=150, map(-5,0,10,0,100)=-50. rustia MUST implement it; OMITTING it is the divergence. Resolve open-decision c7 = INCLUDE math.map. (Siblings math.lerp/noise/round/clamp/sign also confirmed present — those rows were already correct.)"
+        },
+        {
+          "row": "pairs honoring __iter — line ~783 ('Luau: if t has an __iter metamethod, pairs/generic-for use it. Support __iter.')",
+          "was": "'pairs/generic-for use __iter.' (contradicts rows 281/642/782/845 which say pairs/next do NOT consult __iter)",
+          "corrected": "pairs/next do NOT consult __iter. Oracle: for k,v in pairs(setmetatable({},{__iter=...})) -> iter_called=FALSE (pairs iterates raw via next); for k,v in <table with __iter> -> iter_called=TRUE, count=3; __pairs is NOT honored (does not exist in Luau). FIX row 783 to: __iter is consulted by the generalized for-in STATEMENT only, never by pairs or next. Rows 281/642/782/845/643 are correct as written."
+        },
+        {
+          "row": "f64-only assumption / 'integer subtype' open decision — line ~57 (T1) and the conformance integer rows",
+          "was": "'f64-only assumption under verification; integer subtype flagged as a major open decision because current Luau source shows bytecode support for INTEGER CONSTANTS.'",
+          "corrected": "f64-only CONFIRMED for the pinned 0.709 target (see Pinned-Target integer verdict + oracle). Keep f64-only. DOWNGRADE 'integer subtype' from a major open decision to a WATCH/tripwire on upstream FFlag::LuauIntegerType2 flipping default-true. Add a note distinguishing three things conflated as 'integers' that stay pure f64 at script level: LOP_LOADN's 16-bit immediate (codegen; executes setnvalue->double), lua_Integer/lua_Unsigned C-API typedefs (boundary conversion only), and bit32/buffer integer semantics (operate on doubles reinterpreted as uint32, read back as doubles). Canonical proof to cite: math.type==nil."
+        },
+        {
+          "row": "NEW row to ADD — proper tail calls",
+          "was": "(not in the table)",
+          "corrected": "Luau does NOT guarantee proper tail-call elimination. Oracle: `local function rec(n) if n==0 then return 'done' end return rec(n-1) end; rec(200000)` -> stack overflow error. rustia must therefore NOT implement unbounded PTC frame reuse for `return f(x)`; its recursion cap should error like Luau. (Load-bearing for the Wasm-3.0 reasoning: language-level tail calls are NOT a Luau feature, so Wasm return_call is irrelevant to Luau semantics as well as to dispatch.)"
+        }
+      ],
+      "wasm3_design_updates": [
+        "SHIPPED WASM TAIL-CALLS DO NOT REOPEN THE DISPATCH DECISION — keep big-match->br_table. Spike B measured fn-pointer/call-threaded dispatch as 1.34-1.51x SLOWER than br_table in V8, with the cost being call_indirect's runtime type-check + table-bounds-check on EVERY opcode, not missing tail-call optimization. return_call/return_call_indirect (now shipped: V8 Chrome 112+, SpiderMonkey Firefox 121+, JSC Safari 18.2+, Wasmtime) only remove return/stack-growth overhead; they do NOT remove the per-opcode indirect type+bounds check that made threading lose. br_table is a single in-function branch with zero call overhead and better branch prediction, so the large Spike-B margin stands. VERDICT: the dispatch lock holds; add only a cheap confirmatory micro-bench at the P1 cross-engine gate.",
+        "TYPED FUNCTION REFERENCES / call_ref IS THE ONE TO ACTUALLY MICRO-BENCH (still expected to lose). call_ref skips call_indirect's runtime type-check (type is statically known via the typed funcref), so it is the strongest threaded-dispatch contender on Wasm 3.0 — but it retains the indirect-branch misprediction cost and the call/spill/reload of live interpreter state across the call boundary, which br_table avoids entirely. Prior strongly favors br_table; schedule a call_ref vs br_table micro-bench during the P1 JSC/SpiderMonkey/V8 measurement (cheap, low-risk) and only revisit if it unexpectedly beats br_table on a baseline-compiler tier.",
+        "WASM GC: REJECTED for the script heap. rustia keeps gc-arena on linear memory. WasmGC objects are not byte-addressable and have engine-defined layout, so (a) it forfeits the deterministic instruction-counter full-collect and host-columnar rollback design, and (b) GC behavior/layout is NOT guaranteed bit-identical across V8/JSC/SpiderMonkey — a direct determinism violation. Record WasmGC as explicitly considered-and-rejected in the risk register, with the determinism rationale.",
+        "RELAXED-SIMD: STAYS BANNED (reinforces axis E). Relaxed-SIMD permits FMA contraction and engine-dependent rounding -> nondeterministic across engines. The determinism build already denies +relaxed-simd/+fma/fast-math (improvement #5). Only FIXED-WIDTH deterministic SIMD (f32x4 for the vector library, the P4 runner-up) is permitted, and only where bit-identical across engines is proven.",
+        "MULTIPLE MEMORIES: optional, low-priority. Could place the immutable Arc-shared stdlib image (improvement #9) in a second linear memory separate from the per-VM mutable heap for isolation, but the benefit is marginal and it adds an engine-support matrix dependency. WATCH/optional; not on the lock path.",
+        "LANGUAGE-LEVEL TAIL CALLS ARE A NON-ISSUE: oracle confirms Luau does not guarantee proper tail calls (rec(200000) stack-overflows), so rustia's stackless trampoline + recursion cap already covers Luau semantics portably and needs no Wasm tail-call instruction for conformance.",
+        "PRE-LOCK GATE UNCHANGED: H3's core requirement — measure the value-layout + the br_table dispatch on JSC (Safari/iOS WKWebView) and SpiderMonkey (Firefox), not just V8 — REMAINS the pre-lock gate. The Wasm-3.0 pass does not relax it; it adds two cheap line items (call_ref micro-bench, confirm relaxed-simd/WasmGC stay off) to that same P1 cross-engine measurement."
+      ],
+      "benchmark_plan": "SUITE (the regression/lock artifact at $HOME/.claude/jobs/d3f0d35e/tmp/bench-suite/): 11 representative .luau workloads + a Rust mlua harness, each f(n) doing n in-VM units (FFI amortised to ~0; compare rustia PER-WORKLOAD, never across workloads). Oracle pinned EXACTLY: Luau 0.709 (luau0-src 0.18.3+luau709 via mlua 0.11.6 luau+vendored) and koto 0.16.1 (features=[arc]); aarch64-mac, --release/opt-level=3/LTO=fat/codegen-units=1/single-thread. Workloads: dense_tables, sparse_tables, oop_metamethods, closures_upvalues, string_patterns, string_format, coroutines, pcall_xpcall, generic_iteration, stdlib_math_table, serialization.\n\nREFERENCE-LUAU BASELINE (ns/unit, min of 9) — THE BAR rustia must beat: dense_tables 9636.9; sparse_tables 9165.2; oop_metamethods 237.3; closures_upvalues 21.7; string_patterns 1000.6; string_format 290.1; coroutines 37.7; pcall_xpcall 614.9; generic_iteration 2067.5; stdlib_math_table 88.7; serialization 19410.0. koto multipliers (koto_ns/luau_ns): dense 9.0x, sparse 5.15x, closures 4.74x, coroutines 4.79x, stdlib_math 5.98x, generic_iteration 1.01x (PARITY), pcall 0.23x (koto FASTER; ~2x like-for-like since the Luau unit runs 2 protected calls vs koto's 1). string_patterns has NO koto analog (no Lua-pattern engine) -> can only be claimed vs Luau. dense/sparse/serialization are allocation+GC-dominated -> the best stress test of the gc-arena-on-instruction-counter choice. The dispatch/fastcall-bound leaves (closures 22ns, coroutines 38ns, stdlib_math 89ns) are where Luau's bytecode+FASTCALL lowering is hardest to beat and where br_table dispatch must be competitive to claim Luau-parity.\n\nHONEST HEADLINE rustia should publish: DROP the single-number \"~5x koto.\" Public claim = \"at/near reference-Luau parity, validated per-workload across a broad 11-workload suite.\" Against koto this is ~5-9x on tables/closures/coroutines/stdlib-math, but only ~PARITY on generic iteration and a DEFICIT on protected calls (koto ~2x faster like-for-like) — so generic_iteration and pcall/xpcall are the two workloads rustia must at least MATCH Luau on or it visibly regresses vs koto. Two koto multipliers must be stated separately: the float-path (~5-9x, measured here) and the sim's REAL incumbent, koto's DETERMINISTIC path (host fxmul/curve, ~30-40x native per ai_bakeoff) — the latter is rustia's honest, larger win for grabby. The ~25x figure is the bespoke private-fork fused op (OP_UTIL), NOT a general/public claim.\n\nPLAN / GATE ACTIONS: (1) treat the suite as a continuous gate — re-run vs rustia when it boots; require beating each per-workload Luau ns/unit column. (2) Build the still-missing Luau-on-wasm harness (emscripten or wasm32-wasi build of luau-lang/luau; the existing alt-luau-wasm dir is a NATIVE mlua spike, not a wasm harness — do not cite it) and run the same suite under node/V8 + JSC + SpiderMonkey: this IS the H3 pre-lock gate. (3) Add a realistic-FFI variant (many small host<->VM calls, the grabby KotoSelector shape) to complement the amortised-FFI design. (4) Add the deterministic-koto path (host fxmul/curve) to the koto harness for the true sim multiplier. (5) Replace min-of-N with criterion-style CIs. (6) Resolve the koto closures_upvalues semantics anomaly (probe returned 15,15 not 15,20) before trusting that checksum.",
+      "point_by_point": [
+        {
+          "finding": "C1",
+          "verdict": "accepted",
+          "action": "Pin = Luau tag 0.709 / commit b968ef742741bb2b703afc3b3c53f06608c87481, standalone (non-Roblox) surface, vector width 3, FFlags=compiled-defaults (flags-off), oracle = spike mlua-0.11.6/vendored-0.709 (secondary: luau CLI at 0.709 via cmake). Integer verdict: f64-only is correct; integers default-OFF even at 0.727 (FFlag::LuauIntegerType2). Create 05-luau-target.md; replace 'latest Luau' in 00-constraints; document the re-pin policy + the LuauIntegerType2 tripwire."
+        },
+        {
+          "finding": "C2",
+          "verdict": "accepted",
+          "action": "Resolved all four contested areas against the running 0.709 oracle (not knowledge): getfenv/setfenv PRESENT; table.maxn/foreach/foreachi/getn PRESENT (deprecated); math.map PRESENT (must implement); pairs does NOT consult __iter (only for-in does, __pairs absent). Apply the 6 conformance_corrections, delete the contradicting 'absent' rows, then re-derive ALL 709 rows against the 0.709 oracle (spec==oracle makes this mechanical) and mark each test-backed; bump 50-conformance to v2."
+        },
+        {
+          "finding": "H1",
+          "verdict": "accepted",
+          "action": "Already fixed via CURRENT.md as single-source-of-truth + supersession banners; keep that. Prevent re-drift by folding THIS synthesis (pin, conformance v2, Wasm-3.0 verdict, M1/M2/M3, honest headline) into CURRENT.md and the ADR in one pass, and flip CURRENT.md's status tracker rows C1/C2/M1/M2/M3 from in-progress to resolved."
+        },
+        {
+          "finding": "H2",
+          "verdict": "accepted-with-nuance",
+          "action": "Drop the blanket '~5x koto'; publish 'at/near reference-Luau parity, per-workload' on the 11-workload suite. State two koto multipliers (float ~5-9x; deterministic-path ~30-40x = the sim's real incumbent). Flag generic_iteration (parity) and pcall/xpcall (koto faster) as the two must-match workloads. string_patterns claimable only vs Luau. Wire the suite as a CI gate; wasm/cross-engine numbers are deferred to the H3 gate, not part of the native headline."
+        },
+        {
+          "finding": "H3",
+          "verdict": "accepted",
+          "action": "Cross-engine wasm (JSC + SpiderMonkey, not just V8) STAYS the pre-lock gate. Wasm-3.0 pass: shipped tail-calls do NOT reopen dispatch (br_table stays) — call_indirect type/bounds check, not missing TCO, was the threading killer; call_ref is the only contender, scheduled as a cheap P1 micro-bench expected to lose. WasmGC rejected (determinism/layout). Relaxed-SIMD stays banned; only deterministic f32x4 allowed. Build a real luau-on-wasm harness for the gate (alt-luau-wasm is not one)."
+        },
+        {
+          "finding": "M1",
+          "verdict": "accepted-with-nuance",
+          "action": "Keep the two BUILT runtime profiles (Standard, Deterministic) from one codebase, surfaced under three NAMES. DeterministicSim is worth BUILDING (a genuine profile: capability-removal + frozen base tables enabling compile-time FASTCALL fold + instruction-count GC), NOT a config knob. ReproducibleStandard = Standard (public default). LuauCompat = the one to DEMOTE to config-knobs-over-Standard + a test posture, because true byte-parity with reference Luau on unspecified behavior (hash iteration order, transcendental ULPs from the system libm) is unachievable/undesirable without surrendering the determinism wins; offer a few knobs (e.g. reference-style NaN sign, unpinned iteration order) rather than a third engine build."
+        },
+        {
+          "finding": "M2",
+          "verdict": "accepted",
+          "action": "Two GC policies, one gc-arena collector. Standard/ReproducibleStandard: INCREMENTAL/paced collection driven by allocation debt (gc-arena Pacing) -> bounded pause times for console/mod/browser-frame VMs; GC timing script-invisible-but-not-bit-reproducible (fine for Standard; matches Luau's own incremental mark&sweep; write barrier already measured free at 3.18ns). Deterministic: keep FULL-collect-to-completion triggered ONLY by the instruction counter (never byte-debt; object sizes differ 32/64-bit), no observable partial state. Both produce identical script results; expose a pacing multiplier for Standard; version the Deterministic interval as part of the determinism ABI; tune both on realistic heap sizes at P1."
+        },
+        {
+          "finding": "M3",
+          "verdict": "accepted-with-nuance",
+          "action": "Promote both out of P4 runner-up status, but split the timing by dependency. HOT/COLD opcode split -> P1: structure the dispatch loop with a tight hot core (MOVE/LOADK/LOADN/GETTABLEKS/SETTABLEKS/CALL/RETURN/numeric-for/arith/GETIMPORT/FASTCALL/NAMECALL/cmp/jump) in the inner br_table and rare/edge ops out-of-line #[cold]; cheaper to design in than retrofit, and it directly de-risks the JSC/SpiderMonkey baseline-compiler tiers, so validate it via disassembly + the P1 cross-engine measurement (H3 gate). GETTABLEKS shape INLINE CACHE -> P2 (not P1): it depends on the dual-part table (#1) and string atom ids (#2) which ARE the P1 core; at P1 only RESERVE the aux/cache word in the bytecode layout and define a PER-VM IC side-table keyed by IP (never mutate the shared Arc<Program>; invalidate on shape change / safeenv deopt; charge the same logical-op fuel on hit or miss to keep the fuel ABI fusion-invariant), then implement+enable at P2."
+        }
+      ],
+      "doc_actions": [
+        "CREATE design/05-luau-target.md (currently 'pending' in the doc map): the full pin spec — tag 0.709 / commit b968ef742741bb2b703afc3b3c53f06608c87481, standalone-not-Roblox surface + the exact stdlib set, vector width 3, FFlags=compiled-defaults (the three flags listed default-false), oracle chain + checksums, the integer-visibility verdict with oracle proof, the re-pin policy, and the LuauIntegerType2 tripwire. Mark it authoritative in CURRENT.md's doc map.",
+        "EDIT 00-constraints.md: replace priority #4 'Fully compatible with latest Luau' with 'Fully compatible with pinned Luau 0.709 (see 05-luau-target.md)'. Update the C1/T1 block (lines ~49-58): mark T1 RESOLVED (axis C bit32/buffer channel + cross-arch libm bit-identity + the f64-only pin), and downgrade the integer tension to a WATCH item.",
+        "EDIT 50-conformance.md -> v2: remove the DRAFT/contradictions banner; apply the 6 conformance_corrections (table.maxn/foreach family PRESENT; getfenv/setfenv PRESENT, delete the 'absent' rows; math.map PRESENT + implement, resolve open-decision c7=INCLUDE; fix row 783 so __iter is for-in-only; keep f64-only + downgrade the integer open decision; ADD the no-proper-tail-call row). Resolve the Deterministic getfenv/setfenv/os.*/__mode open decision (c9) to an explicit ErrorKind::CapabilityRemoved (per improvement #10), not silent nil. Then re-derive all 709 rows against the 0.709 oracle and mark each test-backed.",
+        "EDIT 30-architecture.md: §3/§3b — record M1 (two built profiles surfaced as three names; LuauCompat = knobs+test-posture, DeterministicSim = a real build) and M2 (paced/incremental GC for Standard vs full-collect-on-instruction-counter for Deterministic; version the interval as determinism ABI). §4 build plan — move hot/cold opcode split into P1 and the GETTABLEKS IC into P2 (with the per-VM IC side-table + reserved aux word + fuel-invariance constraints). Axis A + risk register — add the Wasm-3.0 verdict: br_table stays (tail-call/call_ref do not reopen it; call_ref = a cheap P1 micro-bench), WasmGC rejected, relaxed-SIMD banned, JSC/SpiderMonkey gate unchanged.",
+        "EDIT 55-improvements.md: promote the two relevant runners-up — 'Monomorphic inline cache (GETTABLEKS)' from P4 to P2, and 'Hot/cold opcode split' from runner-up to P1 — with the constraints above; note they are now scheduled, not deferred.",
+        "EDIT CURRENT.md: flip the status tracker rows C1/C2/M1/M2/M3 to resolved; point to 05-luau-target.md; bump conformance to v2; record the honest per-workload headline (drop single-number ~5x koto); record the Wasm-3.0 verdict and that JSC/SpiderMonkey remain the pre-lock gate.",
+        "MARK 10-landscape.md / 15-gapclose.md note line 38 ('int64 may resolve the f64 tension') as superseded — the pin shows int64 is default-OFF and f64-only is the locked target; the f64 tension is resolved by axis C, not by adopting int64."
+      ],
+      "remaining_open": [
+        "JSC (Safari/iOS-WKWebView) + SpiderMonkey (Firefox) cross-engine wasm measurement — STILL NOT DONE; the true H3 pre-lock gate. Requires building a real luau-on-wasm harness (emscripten or wasm32-wasi build of luau-lang/luau) and running the 11-workload suite under V8/JSC/SpiderMonkey, plus rustia's own wasm numbers once it boots. Final value-layout/dispatch lock is blocked on this.",
+        "call_ref vs br_table micro-bench on V8/JSC/SpiderMonkey at P1 (cheap; expected to confirm br_table wins). Low risk but the one open Wasm-3.0 question.",
+        "Re-derive the remaining ~703 conformance rows against the 0.709 oracle — only ~6 contested rows are oracle-verified so far; the rest are still model-generated and must each become a reference-Luau test case.",
+        "Stand up the secondary oracle (standalone luau CLI at 0.709 via cmake) to confirm mlua does not perturb defaults — specifically that getfenv/setfenv/table.maxn presence holds under luaL_sandbox (mlua's Lua::new() does NOT sandbox by default; presence is from unconditional lbaselib/ltablib registration, but confirm).",
+        "koto closures_upvalues semantics anomaly (probe returned 15,15 not 15,20) — confirm before trusting that workload's checksum/multiplier.",
+        "Bench-suite gaps: add the deterministic-koto path (host fxmul/curve) for the true sim multiplier, a realistic-FFI variant (KotoSelector shape), and criterion CIs (currently min-of-N only).",
+        "Tune the Deterministic GC instruction-count interval AND the Standard paced-GC debt multiplier on realistic heap sizes at P1; version the Deterministic interval as determinism ABI.",
+        "Per-VM GETTABLEKS IC: finalize the aux/cache-word reservation in the P1 bytecode layout and the invalidation policy (shape change + safeenv deopt) before P2 implementation.",
+        "Watch FFlag::LuauIntegerType2 upstream (and bytecode v8 default-target flip) — the tripwire to revisit f64-only and re-pin.",
+        "Decide LuauCompat's exact knob set (NaN sign, unpinned iteration order, libm choice) and document which unspecified behaviors it can and cannot match reference Luau on."
+      ]
+    }
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Investigate"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Synthesize"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "pin-luau-target",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigate",
+      "agentId": "a7739c8eed4ff6b15",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782802549975,
+      "queuedAt": 1782802549969,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "PINNED LUAU TARGET SPEC (addresses [C1]). Recommendation: p…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto in the deterministic game sim at\n/workspace/src/grabby-aliens, intended for PUBLIC open-source release at full Luau parity. Design docs at /workspace/src/rustia/design/\n(00-constraints, 10-landscape, 15-gapclose, 30-architecture [the ADR], 50-conformance [709-row behavior\ntable], 55-improvements). A LOCAL reference Luau is …",
+      "lastProgressAt": 1782803153677,
+      "tokens": 65010,
+      "toolCalls": 31,
+      "durationMs": 603702,
+      "resultPreview": "{\"summary\":\"PINNED LUAU TARGET SPEC (addresses [C1]). Recommendation: pin the conformance target to Luau release tag 0.709 (commit b968ef742741bb2b703afc3b3c53f06608c87481, released 2026-02-21), because that is EXACTLY what our local oracle builds: mlua 0.11.6 -> mlua-sys 0.10.0 -> luau0-src 0.18.3+luau709. Pinning the spec to the oracle eliminates the oracle-vs-target drift that is the root cause…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "verify-conformance",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigate",
+      "agentId": "ac0ca21c77278a451",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782802549976,
+      "queuedAt": 1782802549969,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "probe",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto in the deterministic game sim at\n/workspace/src/grabby-aliens, intended for PUBLIC open-source release at full Luau parity. Design docs at /workspace/src/rustia/design/\n(00-constraints, 10-landscape, 15-gapclose, 30-architecture [the ADR], 50-conformance [709-row behavior\ntable], 55-improvements). A LOCAL reference Luau is …",
+      "lastProgressAt": 1782803300329,
+      "tokens": 89963,
+      "toolCalls": 24,
+      "durationMs": 750353,
+      "resultPreview": "{\"summary\":\"probe\",\"findings\":[{\"topic\":\"t\",\"finding\":\"f\",\"confidence\":\"high\"}],\"corrections_or_decisions\":[\"a\"],\"oracle_used\":\"luau709\",\"raw_evidence\":\"e\",\"open_items\":[\"o\"]}"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "wasm-3.0-impact",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigate",
+      "agentId": "a858486846ff44262",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782802549976,
+      "queuedAt": 1782802549969,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "test",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto in the deterministic game sim at\n/workspace/src/grabby-aliens, intended for PUBLIC open-source release at full Luau parity. Design docs at /workspace/src/rustia/design/\n(00-constraints, 10-landscape, 15-gapclose, 30-architecture [the ADR], 50-conformance [709-row behavior\ntable], 55-improvements). A LOCAL reference Luau is …",
+      "lastProgressAt": 1782803023789,
+      "tokens": 76801,
+      "toolCalls": 19,
+      "durationMs": 473813,
+      "resultPreview": "{\"summary\":\"test\",\"findings\":[{\"topic\":\"t\",\"finding\":\"f\",\"confidence\":\"high\"}],\"corrections_or_decisions\":[\"a\"],\"oracle_used\":\"none\",\"raw_evidence\":\"e\",\"open_items\":[\"x\"]}"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "benchmark-suite-baseline",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigate",
+      "agentId": "a3923eb98139eb72a",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782802549976,
+      "queuedAt": 1782802549969,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Built the broad benchmark suite for [H2] at $HOME/.cla…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto in the deterministic game sim at\n/workspace/src/grabby-aliens, intended for PUBLIC open-source release at full Luau parity. Design docs at /workspace/src/rustia/design/\n(00-constraints, 10-landscape, 15-gapclose, 30-architecture [the ADR], 50-conformance [709-row behavior\ntable], 55-improvements). A LOCAL reference Luau is …",
+      "lastProgressAt": 1782803240197,
+      "tokens": 80143,
+      "toolCalls": 44,
+      "durationMs": 690221,
+      "resultPreview": "{\"summary\":\"Built the broad benchmark suite for [H2] at $HOME/.claude/jobs/d3f0d35e/tmp/bench-suite/ (11 representative .luau workloads + a Rust mlua harness) and ran the first-cut REFERENCE-LUAU native baseline that the public \\\"faster than reference Luau / ~5x koto\\\" claim must beat. Also ported the feasible subset to koto 0.16.1 and ran a koto baseline so the per-workload koto multiplier i…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "review-synthesis",
+      "phaseIndex": 2,
+      "phaseTitle": "Synthesize",
+      "agentId": "abe43747e352e7a93",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782803300343,
+      "queuedAt": 1782803300331,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "PIN: Luau tag 0.709, commit b968ef742741bb2b703afc3b3c53f06…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto in the deterministic game sim at\n/workspace/src/grabby-aliens, intended for PUBLIC open-source release at full Luau parity. Design docs at /workspace/src/rustia/design/\n(00-constraints, 10-landscape, 15-gapclose, 30-architecture [the ADR], 50-conformance [709-row behavior\ntable], 55-improvements). A LOCAL reference Luau is …",
+      "lastProgressAt": 1782803782511,
+      "tokens": 98458,
+      "toolCalls": 18,
+      "durationMs": 482168,
+      "resultPreview": "{\"pinned_target\":\"PIN: Luau tag 0.709, commit b968ef742741bb2b703afc3b3c53f06608c87481 (released 2026-02-21). This is bit-identical to what the local oracle builds (mlua 0.11.6 -> mlua-sys 0.10.0 -> luau0-src 0.18.3+luau709, checksum e73f7d752fe2ef0a41f132b83d0be154c6ae0ed84967b4df80a16901866be075), so SPEC == ORACLE, which is what kills the C2 drift. rustia is a from-scratch engine that TARGETS 0…"
+    }
+  ],
+  "totalTokens": 410375,
+  "totalToolCalls": 136
+}

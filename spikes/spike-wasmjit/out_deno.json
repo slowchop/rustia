@@ -1,0 +1,165 @@
+{
+  "runtime": "deno 2.8.2 (v8 14.9.207.2-rusty)",
+  "seed": 305419896,
+  "iters": 2000000,
+  "results": {
+    "interp": {
+      "ns_op": 797.5491,
+      "best_ms": 1595.098,
+      "chk": "0x-2c7a3a1a8423cac8"
+    },
+    "aot": {
+      "ns_op": 3.3675,
+      "best_ms": 6.735,
+      "chk": "0x-2c7a3a1a8423cac8"
+    },
+    "gen_loop": {
+      "ns_op": 10.1723,
+      "best_ms": 20.345,
+      "chk": "0x-2c7a3a1a8423cac8",
+      "bytes": 618,
+      "codegen_us": {
+        "mean_us": 2.4225,
+        "best_us": 1.875
+      },
+      "compile_sync_us": {
+        "mean_us": 0.6569,
+        "best_us": 0.583
+      },
+      "instantiate_sync_us": {
+        "mean_us": 0.6599,
+        "best_us": 0.5
+      },
+      "instantiate_async_bytes_us": {
+        "mean_us": 19.4974
+      },
+      "instantiate_async_module_us": {
+        "mean_us": 0.7158
+      },
+      "fixed_cost_us": 3.7393
+    },
+    "gen_opt": {
+      "ns_op": 4.5616,
+      "best_ms": 9.123,
+      "chk": "0x-2c7a3a1a8423cac8",
+      "bytes": 977,
+      "codegen_us": {
+        "mean_us": 2.8621,
+        "best_us": 2.583
+      },
+      "compile_sync_us": {
+        "mean_us": 0.6251,
+        "best_us": 0.625
+      },
+      "instantiate_sync_us": {
+        "mean_us": 0.5328,
+        "best_us": 0.458
+      },
+      "instantiate_async_bytes_us": {
+        "mean_us": 17.2823
+      },
+      "instantiate_async_module_us": {
+        "mean_us": 0.6656
+      },
+      "fixed_cost_us": 4.02
+    },
+    "shared_loop": {
+      "ns_op": 10.7845,
+      "best_ms": 21.569,
+      "chk": "0x-2c7a3a1a8423cac8",
+      "bytes": 695,
+      "codegen_us": {
+        "mean_us": 2.3968,
+        "best_us": 2.25
+      },
+      "compile_sync_us": {
+        "mean_us": 0.6909,
+        "best_us": 0.666
+      },
+      "instantiate_sync_us": {
+        "mean_us": 0.7717,
+        "best_us": 0.666
+      },
+      "instantiate_async_bytes_us": {
+        "mean_us": 17.0355
+      },
+      "instantiate_async_module_us": {
+        "mean_us": 1.0869
+      },
+      "fixed_cost_us": 3.8594
+    },
+    "shared_opt": {
+      "ns_op": 4.5822,
+      "best_ms": 9.164,
+      "chk": "0x-2c7a3a1a8423cac8",
+      "bytes": 1054,
+      "codegen_us": {
+        "mean_us": 3.1554,
+        "best_us": 2.917
+      },
+      "compile_sync_us": {
+        "mean_us": 0.7212,
+        "best_us": 0.667
+      },
+      "instantiate_sync_us": {
+        "mean_us": 0.8878,
+        "best_us": 0.625
+      },
+      "instantiate_async_bytes_us": {
+        "mean_us": 18.0683
+      },
+      "instantiate_async_module_us": {
+        "mean_us": 0.8844
+      },
+      "fixed_cost_us": 4.7644
+    },
+    "shared_base": 1053552
+  },
+  "gen_proof": {
+    "bytes_ptr_in_host_heap": 1116024,
+    "heap_base": 1054480,
+    "ptr_above_heap_base": true,
+    "len": 618,
+    "wasm_magic": "00 61 73 6d",
+    "wasm_version": 1,
+    "valid_module": true
+  },
+  "checksums": {
+    "interp": "0x-2c7a3a1a8423cac8",
+    "aot": "0x-2c7a3a1a8423cac8",
+    "gen_loop": "0x-2c7a3a1a8423cac8",
+    "gen_opt": "0x-2c7a3a1a8423cac8",
+    "shared_loop": "0x-2c7a3a1a8423cac8",
+    "shared_opt": "0x-2c7a3a1a8423cac8",
+    "ALL_IDENTICAL": true
+  },
+  "analysis": {
+    "interp_ns_op": 797.5491,
+    "aot_ns_op": 3.3675,
+    "steady_speedup_interp_over_aot": 236.8,
+    "gen_opt": {
+      "ns_op": 4.5616,
+      "speedup_vs_interp": 174.8,
+      "ratio_vs_aot": 1.355,
+      "fixed_cost_us": 4.02,
+      "per_op_saving_ns": 792.987,
+      "crossover_ops": 6
+    },
+    "gen_loop": {
+      "ns_op": 10.1723,
+      "speedup_vs_interp": 78.4,
+      "ratio_vs_aot": 3.021,
+      "fixed_cost_us": 3.7393,
+      "per_op_saving_ns": 787.377,
+      "crossover_ops": 5
+    },
+    "shared_opt": {
+      "ns_op": 4.5822,
+      "speedup_vs_interp": 174.1,
+      "ratio_vs_aot": 1.361,
+      "fixed_cost_us": 4.7644,
+      "per_op_saving_ns": 792.967,
+      "crossover_ops": 7
+    }
+  }
+}

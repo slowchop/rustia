@@ -1,0 +1,15 @@
+[package]
+name = "verify-conf"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+mlua = { version = "0.11", features = ["luau", "vendored"] }
+
+[[bin]]
+name = "verify-conf"
+path = "src/main.rs"
+
+[profile.dev]
+opt-level = 0

@@ -1,0 +1,20 @@
+spike-snap: N_AGENTS=4000, NQ=24, RING=24
+AgentState = 400 bytes; live state = 1562 KiB; full 24-deep ring (eager copy) = 36.62 MiB
+
+(a) host-columnar Vec<AgentState> (clone_from, buffer reuse)
+    tick(mutate 4000):   50.335 us  snapshot:   17.229 us  restore:   18.219 us   => PASS (<=1ms)
+    [snapshot via fresh .clone() incl malloc:   17.419 us]
+
+(b) slotmap SlotMap<DefaultKey, AgentState> (clone_from)
+    tick(mutate 4000):   51.308 us  snapshot:   29.954 us  restore:   29.483 us   => PASS (<=1ms)
+
+(d) persistent im::Vector<AgentState> (O(1) clone snapshot, CoW mutate)
+    tick(mutate 4000):   84.713 us  snapshot:      7.7 ns  restore:      6.6 ns   => PASS (<=1ms)
+    [tick while 1 snapshot retained (full CoW):   83.777 us]
+
+(e) serialize-snapshot (bincode)  encoded size = 1562 KiB
+    snapshot(serialize):   88.555 us  restore(deserialize):  346.051 us   => PASS (<=1ms)
+
+(d') persistent rpds::Vector<AgentState> (O(1) clone snapshot, set_mut CoW)
+    tick(mutate 4000):  202.479 us  snapshot:      2.2 ns  restore:      1.6 ns   => PASS (<=1ms)
+

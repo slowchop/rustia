@@ -1,0 +1,17 @@
+# Koto equivalent of stdlib_math_table: number math methods + list buffer + sort flush.
+export f = |n|
+  acc = 0.0
+  t = []
+  len = 0
+  for i in 1..=n
+    x = i * 0.001
+    acc += x.sin() * x.cos() + x.abs().sqrt()
+    len += 1
+    v = acc.floor() % 997
+    t.push v
+    if len >= 64
+      t.sort()
+      acc += t.first()
+      t = []
+      len = 0
+  acc

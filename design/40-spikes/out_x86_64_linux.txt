@@ -1,0 +1,29 @@
+=== spike-c libm bit-identity report ===
+target_arch=x86_64 pointer_width=64
+--- per-function hashes (canon / raw) ---
+    sin: canon=0x1ccce89d71a6bb03 raw=0xda8a888d329b1d83
+    cos: canon=0x80cf040f6fd5bf47 raw=0x05025caac6838647
+    exp: canon=0x2a787e5f46aae26e raw=0x2a787e5f46aae26e
+     ln: canon=0xcbb1e052e8925eff raw=0x1df5774b0d090a7f
+    pow: canon=0xa25ff2e541648dfe raw=0xfa7d3f016c22d6fe
+   sqrt: canon=0x65558ba5244adfca raw=0x7e3f124602acacca
+   fmod: canon=0x25ce5fb5cc2e5571 raw=0x131aff23f51d9bf1
+    tan: canon=0xbd2400dc012ade9f raw=0xdbc23549f392691f
+  atan2: canon=0xedf1c887aa0ec83f raw=0xb54f89b223cc19bf
+coreops: canon=0x4e0e1345f12b2a74 raw=0x0413c9c9ef72aaf4
+--- combined ---
+combined_canon=0x4fcaf33760ef5a9a
+combined_raw  =0xfbb250793a309b2f
+--- determinism-hostile sample bit patterns (canon_bits / raw_bits) ---
+         0.0/0.0: canon=0x7ff8000000000000 raw=0x7ff8000000000000
+        sqrt(-1): canon=0x7ff8000000000000 raw=0xfff8000000000000
+          ln(-1): canon=0x7ff8000000000000 raw=0x7ff8000000000000
+            -0.0: canon=0x0000000000000000 raw=0x8000000000000000
+            +inf: canon=0x7ff0000000000000 raw=0x7ff0000000000000
+            -inf: canon=0xfff0000000000000 raw=0xfff0000000000000
+         inf-inf: canon=0x7ff8000000000000 raw=0x7ff8000000000000
+           0*inf: canon=0x7ff8000000000000 raw=0x7ff8000000000000
+        pow(0,0): canon=0x3ff0000000000000 raw=0x3ff0000000000000
+     pow(-1,0.5): canon=0x7ff8000000000000 raw=0xfff8000000000000
+ f64::min(NaN,1): canon=0x3ff0000000000000 raw=0x3ff0000000000000
+ f64::max(NaN,1): canon=0x3ff0000000000000 raw=0x3ff0000000000000

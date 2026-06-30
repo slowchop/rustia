@@ -1,0 +1,1541 @@
+{
+  "summary": "Research foundation for rustia: koto internals, Rust scripting landscape, Luau spec, official Luau VM, SOTA VM/JIT/WASM techniques, grabby binding+determinism contract",
+  "agentCount": 8,
+  "logs": [
+    "Research complete: 6/6 streams returned"
+  ],
+  "result": {
+    "brief": {
+      "executive_summary": "rustia is a from-scratch Luau interpreter in Rust meant to drop into grabby-aliens in place of koto 0.16.1, with priorities (in order): speed, low memory, wasm32-unknown-unknown performance, full latest-Luau compat, and embedding ergonomics. The research is decisive on three points. (1) The gap is in the engine, not the boundary: grabby measured koto-int at ~5.4 us/decision (~39x the 0.14 us Rust-native floor) and koto-float (zero host calls) at 4.0 us (~29x), so ~74% of cost is the interpreted VM itself — dispatch, 24-byte tagged-union clones with atomic refcounts under arc, and per-container Arc<RwLock>. An \"integer-ops fork\" of an interpreter will NOT rescue hot-path perf. (2) A competent register Luau interpreter is ~4x faster than koto on a realistic interop workload (script-bench-rs \"Sort Rust objects\", M5 Max: mlua+Luau 11.94ms vs koto 49.21ms vs rhai 114.27ms), and the SOTA (Deegen/LuaJIT-Remake CPS tail-call interpreter) beats even LuaJIT's hand-written asm interpreter by ~31% — so matching/beating Luau-in-interpreter is the credible MVP target (~1.0-1.25 us/decision, fitting ~thousands of agents in the <=5ms-of-20ms 50Hz budget). (3) The dominant architectural fact is that the fastest native techniques INVERT on wasm: CPS tail-call dispatch is ~1.6x faster than a match-loop on native ARM64 but 1.2x-4.6x SLOWER once compiled to wasm; copy-and-patch JIT is impossible inside a wasm sandbox. rustia must therefore be a single opcode-handler core with target-split dispatch (tail-call/threaded on native, big match->br_table on wasm) and treat the interpreter as the in-browser product, with any JIT as a native-only stretch tier. The determinism contract is the gating constraint: bit-for-bit across x86_64-linux + aarch64-mac + wasm32, pinned to single cross-arch FNV-1a golden constants (AI golden 0x31c6ec2734ea6fa2; physics 9715618621526538300), insertion-ordered maps, ChaCha8/integer epsilon-greedy, a DETERMINISTIC instruction-fuel meter that must replace koto's wall-clock ExecutionTimeout, and all transcendentals through pure-Rust libm (never std, never FMA, never relaxed-SIMD). The central unresolved tensions are Luau-f64-only vs grabby's float-free i64/Q16.16 boundary, and gc-arena being the best safe GC yet hard not-Send/Sync against the \"N Send+Sync VMs on a thread pool\" model. NOTE: the luau-language-spec research stream returned only a placeholder (\"test\") — the language surface (metatables, type system, stdlib, vector/buffer/string libs, weak tables, compat edge cases) is under-researched and must get a dedicated pass before the frontend/semantics are locked. Key consumed grabby touchpoints to keep drop-in compatible live in /workspace/src/grabby-aliens/ (ai_bakeoff/, scenario/src/lib.rs, view/src/console.rs); the koto reference internals are under $HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_runtime-0.16.1/src/vm.rs and types/.",
+      "hard_constraints": [
+        "Bit-for-bit determinism across native AND wasm32, on x86_64-linux AND aarch64-mac AND browser-wasm, validated against SINGLE shared cross-arch golden constants (FNV-1a, offset 0xcbf29ce484222325 / prime 0x100000001b3); f64 folded into hashes via to_bits with -0.0->+0.0 canonicalization. A one-OS divergence is a real defect, not a tolerance.",
+        "Deterministic monotonic INSTRUCTION-COUNT fuel meter decremented in the dispatch loop (replacing koto's non-deterministic wall-clock Instant ExecutionTimeout at koto_runtime vm.rs:674-697/3928), PLUS a separate recursion/call-depth cap at the frame-push site. koto has NEITHER; both are required must-have differentiators.",
+        "Insertion-ordered maps: pairs()/next() iterate in insertion order (IndexMap-equivalent) using a fixed seedless hash (FxHasher / FNV / hardcoded-key SipHash), NEVER RandomState/SipHash-default/std::DefaultHasher. This is a deliberate, Lua-spec-legal departure from Luau's hash-node-slot iteration order.",
+        "Send + Sync values and whole VM at VM granularity (N independent VMs across a thread pool; VMs do NOT share state intra-VM). Host closures must be plain `move` Fn + Send + Sync. Target eliminating koto's ~5-10% arc per-borrow tax rather than shipping it as a feature flag.",
+        "Steppable / yield-resumable VM (coroutine model): a scripted agent yields a ControlInput per tick; needs ExecutionState::Suspended + continue_running-style resume from day one.",
+        "serde bridge: a from_value::<T: Deserialize> deserializer compatible with serde-derive structs using #[serde(deny_unknown_fields)] + default + default=fn (grabby's ScenarioSpec ports unchanged), plus a Serializer for round-trip parity.",
+        "All f64/transcendental ops route through pure-Rust libm (NEVER std sin/cos/powf); never emit f64::mul_add, never enable fast-math, never use relaxed-SIMD; restrict to the bit-identical IEEE-754 op set (+,-,*,/,sqrt,min,max). f64 is permitted only under this discipline, ideally behind a capability-gated deterministic/float-free mode.",
+        "wasm32-unknown-unknown is a tier-1 target with NO reliance on any wall-clock source (fuel is instruction-based). Browser is single-threaded twice over (no wasm threads + single-threaded Bevy). JIT is moot in-browser; the interpreter must be the always-available primary path.",
+        "Embedding API must mirror the koto surface grabby actually consumes so it is a drop-in: a Koto-like handle (with_settings/default, compile_and_run(CompileArgs::...export_top_level_ids), call_function(Value,&[Value]), value_to_string), prelude()/exports() as maps with add_fn/insert/get, native fns as Fn(&mut Ctx)->Result<Value> with ctx.args()->&[Value], runtime_error!-style errors, and a Value enum pattern-matchable in host fns.",
+        "Native integer/fixed-point arithmetic that does NOT promote to f64: integer `/`, `>>`, `//`, bitwise ops, integer `**`. koto lacks all of these (verified: `/` always promotes to f64; no shifts/bitwise/floor-div), forcing host fxmul/curve helpers — the single biggest documented ergonomic wart to eliminate.",
+        "Snapshot/restore of full script-visible per-agent VM state, cheaply enough to capture at SNAPSHOT_EVERY cadence, so MP rollback/reconcile checksums are meaningful.",
+        "Host-bridge model must support the channel/effect-queue + read-snapshot pattern (push typed effects, read an Arc<Mutex<WorldView>> snapshot) with NO unsafe World aliasing."
+      ],
+      "perf_targets": [
+        "Beat koto-int 5.4 us/decision (~39x the 0.14 us native floor) on grabby's ai_bakeoff IAUS+SARSA(lambda)+contagion Q16.16 workload — source: /workspace/src/grabby-aliens/ai_bakeoff/README.md",
+        "Beat koto-float 4.0 us/decision (~29x native, zero host calls) — proves the target is VM dispatch+boxing, not the FFI boundary; source: ai_bakeoff measurement",
+        "Native floor reference: 0.14 us/decision = 10k agents in 1.43ms (aarch64 Mac, release opt-level 3) — the asymptotic prize",
+        "AI time budget: <=5 ms of a 20 ms (50 Hz) tick, single-threaded, on the SLOWEST target (web/iOS); threads are a bonus, never load-bearing. koto-int caps at ~900 agents, koto-float ~1250; native does 10k",
+        "MVP target: match Luau-in-interpreter (~4.1x faster than koto on script-bench-rs: mlua+Luau 11.94ms vs koto 49.21ms; mlua Lua5.5 15.72ms; rhai 114.27ms tree-walker) -> would cut grabby to ~1.0-1.25 us/decision",
+        "Stretch target: ~10x koto-int -> ~0.54 us/decision (~4x native) -> 10k agents ~5.4ms -> scripted per-tick-per-agent hot path viable to ~9000 agents single-threaded",
+        "SOTA interpreter ceiling: Deegen/LJR CPS tail-call interpreter is +31% over LuaJIT's asm interpreter and +179% over PUC-Lua across 44 benchmarks (arXiv 2411.11469)",
+        "SOTA native baseline-JIT ceiling: copy-and-patch within ~34% of full LuaJIT, 4.6x PUC-Lua, codegen 1.62 GB/s, ~91 bytes/bytecode, <1ms for 17,197 bytecodes — NATIVE ONLY",
+        "Keep interpreter core+builtins small (Luau is ~16 KB on x64, fits L1i) for sustained dispatch throughput",
+        "wasm in-browser tax is an OPEN GATE: feared ~4x, optimistic 1.5-2.5x — requires a MEASURED real-browser number, not extrapolation (the gate koto never cleared)",
+        "Eliminate koto's ~5-10% arc per-borrow tax (atomic refcount + parking_lot RwLock per container access) by using non-atomic Rc-inside-VM + Send-at-VM-granularity",
+        "Re-bench identically behind grabby's Selector trait using its Criterion harness (harness=false, opt-level 3, n in {1000,2000,5000,10000}, b.iter(|| world.tick_with(sel); black_box(world.state_hash())))"
+      ],
+      "reusable_components": [
+        {
+          "component": "gc-arena (kyren, ~0.5.x; github.com/kyren/gc-arena)",
+          "use_for": "Safe incremental cycle-detecting non-moving mark&sweep GC with word-sized Copy Gc<'gc,T> pointers, memory-tracked for fuel; its mutate-XOR-collect invariant naturally forces the exact stackless/steppable VM rustia needs",
+          "recommendation": "Best safe-GC design AND fuel-friendly, production-proven (Ruffle) — BUT Arena/Gc are hard NOT Send and NOT Sync, colliding with N-Send+Sync-VMs. Adopt the IDEA; either keep VMs strictly thread-local (move work not VMs), fork for Send-but-not-Sync per-VM migration, or reject tracing GC for RC. Read 0.5.x source for the exact auto-trait/'gc-brand situation before betting on it."
+        },
+        {
+          "component": "piccolo (kyren; github.com/kyren/piccolo, v0.3.x)",
+          "use_for": "Stackless/trampoline register-VM architecture: reified call stack polled via Executor::step(fuel), callbacks as Sequence multi-step objects -> deterministic fuel + recursion limit + DoS resilience essentially for free",
+          "recommendation": "Study/port the architecture, do NOT fork wholesale for perf: pre-1.0, author states the interp loop is unoptimized and not competitive with LuaJIT/Luau, it's Lua 5.x not Luau, and it inherits the gc-arena Send blocker. Ergonomic cost: native callbacks that re-enter the VM must be poll-style Sequences."
+        },
+        {
+          "component": "full_moon (Kampfkarren, v2.x; github.com/Kampfkarren/full-moon)",
+          "use_for": "Lossless multi-dialect parser INCLUDING Luau (LuaVersion flag), error recovery via AstResult; battle-tested as the StyLua/selene frontend",
+          "recommendation": "Use as Luau-compat correctness oracle and bootstrap frontend; its trivia-rich lossless AST is built for tooling and is too heavy/slow to feed a bytecode compiler directly — budget a trivia-stripping lowering pass or an eventual purpose-built lexer+parser. Benchmark against luau-parser (claims 'blazingly fast') before committing."
+        },
+        {
+          "component": "mlua (mlua-rs; docs.rs/mlua)",
+          "use_for": "Embedding-API ergonomics gold standard: UserData (add_method/add_meta_method/add_field), FromLua/IntoLua (+multi-value), Scope for non-'static borrows, UserDataRef/Mut guards, blanket impls over Rc/Arc wrappers, async-over-coroutines",
+          "recommendation": "Mirror the surface (adjusted so handles are Send under the arc-equivalent build); reference only, do NOT depend — it is C bindings to PUC/LuaJIT/Luau, not pure Rust, so unusable as a wasm-clean engine."
+        },
+        {
+          "component": "koto 0.16.1 (the incumbent; $HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_runtime-0.16.1/)",
+          "use_for": "Determinism map model (IndexMap<ValueKey,KValue,FxHasher>, types/map.rs) to copy verbatim; Rc<->Arc compile-time feature-swap Send model (koto_memory/lib.rs); dual KNumber{I64,F64} number template (types/number.rs); the exact embedding API contract grabby depends on (koto-0.16.1/src/koto.rs)",
+          "recommendation": "Copy the insertion-ordered seedless-hash map and the Send-via-feature-swap idea; keep a dual-number internal representation; pin the consumed API as a compatibility shim. Avoid its weaknesses: two-level dispatch (169-variant Instruction enum built by value per step), always-heap strings (no SSO), per-call register Vec Null-fill, Arc<RwLock> per container, no fuel, no recursion cap, cycle leaks."
+        },
+        {
+          "component": "libm crate (pure Rust; lib.rs/crates/libm 0.2)",
+          "use_for": "Deterministic cross-arch transcendentals (sin/cos/exp/pow/log/fmod) and LUT construction",
+          "recommendation": "Mandatory for any f64 surface and for Q16.16 LUT building (the rapier-proven cross-platform-determinism recipe; already grabby's rule). Typically slower than system libm — measure, but correctness is non-negotiable. Core +,-,*,/,sqrt on f64 are already bit-deterministic and need no special handling."
+        },
+        {
+          "component": "Luau C++ source, release 727 (commit f1f121d, 2026-06-26; /tmp/luau_src/)",
+          "use_for": "Reference for the register VM + 32-bit fixed-width instruction encoding (Bytecode.h), self-patching inline caches (GETTABLEKS, lvmexecute.cpp:512-542), load-time GETIMPORT, FASTCALL path (133 LBF_ builtins, no call frame), hybrid array+hash tables, incremental non-moving mark&sweep with allocation-driven pacing (lgc.cpp), and the NEW int64 LUA_TINTEGER subtype (lua.h:77, lapi.cpp)",
+          "recommendation": "Port techniques not code. Adopt register VM + AUX-word encoding (highest-ROI structural decision), inline caches (determinism-safe: affect only speed), GETIMPORT/FASTCALL, and the int64 subtype to resolve the f64 tension — but note int64 is gated behind FFlags and NOT yet folded into the hot arith opcodes in Luau itself, so its arithmetic reach needs verification."
+        },
+        {
+          "component": "Deegen / copy-and-patch + cranelift",
+          "use_for": "Native-only tier-1 baseline JIT (copy-and-patch: 1.62 GB/s codegen, within ~34% of LuaJIT)",
+          "recommendation": "Native-only, gated cfg(not(target_arch=\"wasm32\")), and a STRETCH not MVP. A Rust copy-and-patch stencil pipeline is non-trivial (Deegen relies on clang asm-goto/CallBr + LLVM build-time tooling); prefer cranelift for maintainability if stencil tooling proves too costly. Never attempt runtime wasm-module emission for hotpaths."
+        },
+        {
+          "component": "rand_chacha ChaCha8Rng (0.3) + FNV-1a + SplitMix64",
+          "use_for": "grabby's established deterministic RNG (per-entity substreams seed=FNV-1a(entity_id,tick), count-independent) and state hashing; integer epsilon-greedy ((rng.next_u32()&1023)<51)",
+          "recommendation": "Keep verbatim and portable; expose rand()/rand_range() to script via host-side integer math. Never use StdRng/thread_rng/DefaultHasher."
+        },
+        {
+          "component": "indexmap + rustc_hash (FxHasher)",
+          "use_for": "Insertion-ordered deterministic maps directly",
+          "recommendation": "Use as-is (or a custom insertion-ordered open-addressing map for memory/speed); guarantees free bit-for-bit map ordering. Never expose a randomized hasher."
+        }
+      ],
+      "design_axes": [
+        {
+          "axis": "Execution strategy / dispatch",
+          "why_it_matters": "~74% of grabby's cost is the interpreter VM, and dispatch is the single highest-ROI lever — but the fastest native technique INVERTS on wasm (CPS tail-call is ~1.6x faster than match-loop on native ARM64, yet 1.2x-4.6x SLOWER compiled to wasm; computed-goto cannot exist in wasm). koto compounds this with two-level dispatch (decode into a 169-variant enum by value, then match).",
+          "candidate_directions": [
+            "Target-split single-source dispatch (RECOMMENDED baseline): one set of opcode handlers; CPS tail-call / context-threaded on native via nightly `become`+extern \"rust-preserve-none\" (Deegen-class, targets +31% over LuaJIT interp), big match->br_table switch-loop under cfg(target_arch=\"wasm32\").",
+            "Single portable loop+match everywhere that the compiler lowers to a jump table — simplest, accepts leaving native perf on the table; safe stable-Rust fallback.",
+            "Closure/threaded-code: compile bytecode to a tree of boxed Rust closures (or fn-pointer chain) at load time, eliminating per-op decode and enum-build, fuel threaded through closures — works on wasm, middle ground between interpret and JIT.",
+            "Fused decode+execute over fixed-width encoding read in-loop (kill koto's per-step 169-variant Instruction enum) with no threading — low-risk incremental win over koto.",
+            "Two-tier: portable interpreter everywhere + copy-and-patch or cranelift baseline JIT gated cfg(not(wasm32)); fuel decrements injected into generated stencils to preserve determinism."
+          ]
+        },
+        {
+          "axis": "Value representation",
+          "why_it_matters": "koto's 24-byte cloned tagged union with atomic refcounts dominates its hot path (clone_register on every Copy/Call/Return); memory is priority #2; and wasm's 32-bit pointers flip the NaN-boxing tradeoff (an 8-byte value can carry a double OR a 32-bit GC handle+tag, halving value memory and roughly doubling cache density).",
+          "candidate_directions": [
+            "16-byte Luau-faithful tagged union (8B payload union + 4B extra + 4B tag), inline 3xf32 vector as a first-class type, branch-friendly — best native, Luau-compatible, simplest port (Luau deliberately rejects NaN-boxing).",
+            "8-byte NaN-boxed value tuned for wasm32 32-bit handles — halves memory/linear-memory traffic, but the native 3xf32 vector must be boxed and it REQUIRES NaN canonicalization for determinism.",
+            "koto-style 24-byte enum with niche-packing + dual KNumber{I64,F64} — proven, simplest in safe Rust, but heaviest and forces refcount churn.",
+            "Tagged value + small-string-optimization (SSO) inline + interned identifiers/map keys — directly attacks koto's always-heap strings (low-hanging speed+memory).",
+            "Per-target hybrid (cfg): NaN-box on wasm32, 16-byte tagged on native — benchmark both before committing (priorities put speed #1, memory #2; mask/shift cost vs 2x memory traffic is empirical)."
+          ]
+        },
+        {
+          "axis": "Number model / determinism strategy (f64 vs fixed-point)",
+          "why_it_matters": "Luau is f64-only (no integer subtype in the language spec) while grabby's hard determinism boundary passes only i64/Q16.16 with all f64 math in Rust — the central semantic tension. Determinism is priority #1; full Luau compat is priority #4.",
+          "candidate_directions": [
+            "f64-internal + mandatory pure-Rust libm + no-FMA/no-fast-math/no-relaxed-SIMD discipline, pinned by single cross-arch golden (RECOMMENDED default): keeps full Luau f64 compat with bit-identical native/wasm results.",
+            "First-class int64 subtype (mirroring Luau 727 LUA_TINTEGER) + Q16.16 intrinsics providing integer `/`,`>>`,`//`,bitwise,`**` — resolves the host-helper wart and stays Luau-727-aligned (verify how far integer support reaches into arith opcodes).",
+            "Strict float-free mode: capability-gate every f64-touching op (float<->string, fmod/%, float compare/sort, map-key hashing, **, int<->float coercion) out of the prelude — zero-risk determinism, deliberately non-conformant Luau.",
+            "koto dual-number KNumber{I64,F64} verbatim — proven and determinism-equivalent in grabby's koto-int path, but is a Luau-semantics divergence that must define exactly when a value is I64 vs F64.",
+            "Build-mode fork: ship BOTH an f64-deterministic mode and a fixed-point/Q16.16 mode selectable at build time, plus a fuel/LOD knob so leaf cadence is tunable."
+          ]
+        },
+        {
+          "axis": "GC / memory management",
+          "why_it_matters": "koto reference-counts with NO cycle detection (cycles leak) and pays an Arc<parking_lot::RwLock> tax per container access under arc; rustia needs Send+Sync at VM granularity, low memory, deterministic collection timing, and fuel-driven pacing — and the best safe GC (gc-arena) is hard not-Send/Sync.",
+          "candidate_directions": [
+            "Reference counting with non-atomic Rc-inside-VM + Send-at-VM-granularity (move the whole VM across pool threads, never share intra-VM state) — eliminates atomic refcounts AND RwLock locks; the single biggest structural win over koto-arc; accepts cycle leaks like koto.",
+            "koto's Rc<->Arc compile-time feature swap — proven Send, but keeps the ~5-10% per-borrow tax and the cycle leak.",
+            "gc-arena incremental non-moving cycle-collecting mark&sweep, one Arena per VM, GC stepped off the same deterministic fuel counter — best safety+memory, but must solve the Send blocker (thread-local VMs or a fork).",
+            "Hand-rolled incremental NON-moving NON-generational mark&sweep (Luau-style, allocation/fuel-driven pacing; non-moving keeps inline-cache pointers/handles stable), engineered Send-but-not-Sync per VM (gluon-style separate heap per VM).",
+            "RC now + optional trial-deletion cycle collector added later, with a per-VM heap reset between episodes as a pragmatic leak bound for long-running thousands-of-agents sims."
+          ]
+        },
+        {
+          "axis": "WASM-JIT feasibility & tiering",
+          "why_it_matters": "Priority #3 is wasm performance and JIT is moot in-browser; copy-and-patch needs to write executable native bytes (impossible in the wasm sandbox), and runtime wasm-module emission (Wingo) loses to a good interpreter for short per-agent scripts (instantiate cost + sync-compile size caps + call_indirect indirection). The interpreter IS the in-browser product.",
+          "candidate_directions": [
+            "Interpreter-only on wasm (RECOMMENDED): make it excellent — maximize dispatch quality and minimize dispatch COUNT via fat superinstructions (Luau FORGLOOP/NAMECALL/FASTCALL/GETIMPORT) and inline caches that degrade to a guarded branch + side table on wasm; native gets the JIT tier.",
+            "Native copy-and-patch baseline JIT (1.62 GB/s, ~34% off LuaJIT) gated cfg(not(wasm32)) — fastest native tier, complex Rust stencil pipeline.",
+            "Native cranelift baseline JIT — maintainability over compile speed, easier Rust integration than copy-and-patch.",
+            "AOT-compile fully-typed hot kernels (not general scripts) to wasm modules for near-native in-browser speed — niche; loses deterministic fuel/stepping for those kernels; low priority.",
+            "Reject runtime in-wasm code generation (Wingo path) for hotpaths and document it as non-viable — preserves engineering focus on the interpreter."
+          ]
+        },
+        {
+          "axis": "Parser / frontend (Luau compat)",
+          "why_it_matters": "Full latest-Luau compat is priority #4 and parser correctness is the hardest part to get right for compat; compile/hot-reload latency is an explicit DX deciding factor (koto's instant re-eval is a cited win). CRITICAL: the dedicated luau-language-spec research stream came back empty (placeholder 'test'), so the language surface is under-researched.",
+          "candidate_directions": [
+            "full_moon frontend + trivia-stripping lowering -> rustia's own register-bytecode compiler (de-risks Luau-syntax compat, reuses a battle-tested parser).",
+            "Custom hand-written Luau lexer+parser optimized to feed the bytecode compiler directly — full control and best compile speed, highest effort and compat risk.",
+            "luau-parser crate ('blazingly fast') as the runtime frontend, full_moon as the offline correctness oracle — dual track.",
+            "Transliterate Luau's own C++ compiler passes (constant folding, FASTCALL recognition, inlining, loop unrolling) to Rust but emit rustia's deterministic bytecode — highest fidelity, highest effort.",
+            "Commission a dedicated Luau-language-spec research pass FIRST (metatables, type system, stdlib, vector/buffer/string libs, weak tables/__gc, compat edge cases) before locking any frontend — the missing stream is a prerequisite, not optional."
+          ]
+        },
+        {
+          "axis": "Rust embedding API",
+          "why_it_matters": "Priority #5 and the literal drop-in requirement: rustia must replace koto behind grabby's existing call sites and Selector trait, and DX (REPL, hot-reload latency, LSP) is a deciding factor gak cares about. Per-call KValue marshalling is real overhead at thousands of agents.",
+          "candidate_directions": [
+            "koto-compatible shim API matching the exact consumed surface (with_settings, prelude().add_fn/insert, exports().get, compile_and_run(export_top_level_ids), call_function, value_to_string, is_callable) — guarantees drop-in.",
+            "mlua-style idiomatic API (UserData, FromLua/IntoLua, Scope, UserDataRef guards) — richer, more ergonomic, more work.",
+            "Both: a koto-compat facade layered over an mlua-style core, so grabby ports unchanged while new code uses the nicer API.",
+            "Batched/vectorized host entry ('decide N agents in one VM call') to amortize per-call marshalling — lets a slower-per-call VM still hit the aggregate <=5ms budget.",
+            "First-class channel/effect-queue host-bridge (push typed effects, read an Arc<Mutex<WorldView>> snapshot; no unsafe World aliasing), host fns get a typed arg slice and return Value or runtime error."
+          ]
+        },
+        {
+          "axis": "Steppability, deterministic fuel & snapshot/restore",
+          "why_it_matters": "Replacing koto's wall-clock limit with bit-deterministic instruction-fuel + a recursion cap is a hard constraint; the VM must yield per-tick ControlInput; and MP rollback needs cheap exact snapshot/restore of script-visible state — all of which interact with the dispatch design and any JIT tier.",
+          "candidate_directions": [
+            "Stackless trampoline executor (piccolo-style): reified call stack, step(fuel), native callbacks as poll-style Sequences — DoS-resilient and fuel-native, at an ergonomic cost.",
+            "Native-stack interpreter with explicit fuel decrement in the dispatch loop + an explicit call-depth cap at frame-push (recursion bounded by a reified call_stack Vec, not the native stack) — simpler, straight-line callbacks.",
+            "Inject fuel decrements into JIT-generated stencils so tiering up preserves identical instruction-count semantics across interpreter and native JIT.",
+            "Yield-resumable coroutine model (ExecutionState::Suspended + continue_running) as the per-tick agent interface, with fuel budget per resume.",
+            "Snapshot/restore strategy fork: full flat VM-state serialization (registers + reified call stack + heap) every SNAPSHOT_EVERY vs delta/coarse-cadence capture — design value layout to be cheaply serializable up front."
+          ]
+        }
+      ],
+      "key_tensions": [
+        "Luau is f64-only (no language-level integer subtype) vs grabby's float-free i64/Q16.16 determinism boundary. Resolutions are mutually exclusive in flavor: f64-internal+libm+no-FMA (most Luau-compatible), a first-class int64 subtype a la Luau-727 LUA_TINTEGER (note: not yet wired into Luau's hot arith opcodes), or a strict float-free mode (zero-risk determinism, non-conformant).",
+        "gc-arena is the best safe, incremental, cycle-collecting, fuel-trackable GC AND its mutate-XOR-collect invariant forces exactly the stackless steppable VM rustia wants — but it is fundamentally NOT Send and NOT Sync, directly colliding with 'N independent Send+Sync VMs across a thread pool.' Either thread-local VMs (move work not VMs), a Send-but-not-Sync fork, or reject tracing GC for reference counting.",
+        "JIT is the real performance prize (copy-and-patch within ~34% of LuaJIT native) but is moot in-browser, and copy-and-patch literally cannot run inside a wasm sandbox. Forces a dual engine: interpreter-primary (the wasm product) + optional native-only JIT tier.",
+        "The fastest native dispatch (CPS tail-call/computed-goto-equivalent, ~1.6x over match-loop, +31% over LuaJIT's asm interpreter) INVERTS on wasm, regressing 1.2x-4.6x. Dispatch must be a per-target strategy (tail-call/threaded native, big match->br_table on wasm), not one universal design.",
+        "8-byte NaN-boxing (serves low-memory priority #2 and wasm linear-memory cache pressure, mask/shift per access) vs 16-byte tagged value (faster, branch-friendlier, enables a native 3xf32 vector type, Luau-faithful). The right answer is empirical and may differ native vs wasm.",
+        "Insertion-ordered maps (determinism hard constraint) vs Luau's actual hash-node-slot iteration order. The divergence is Lua-spec-legal but is a deliberate departure from Luau table internals and interacts awkwardly with inline-cache hidden-class shapes (shape explosion / shape-id determinism on key delete/re-add).",
+        "Full latest-Luau compat (priority #4) vs a custom deterministic bytecode/value model: high-fidelity compat (metatables, vector type, buffer lib, weak tables, __gc) may force tracking Luau VM semantics so closely that reusing Luau's own compiler becomes cheaper — while weak tables + __gc finalizer order are themselves determinism hazards.",
+        "Closing grabby's ~29-39x gap demands deep VM work (better dispatch + value layout + GC + possibly JIT); an interpreter that merely adds integer ops will NOT close it (koto-float is still 4.0us with zero host calls). Yet on wasm the JIT lever is unavailable, capping the in-browser ceiling at interpreter quality.",
+        "RC cycle leaks (koto tolerates them) vs long-running sims with thousands of agents holding per-agent Q-tables/traces — may mandate a cycle collector, which re-raises the gc-arena Send problem.",
+        "Deterministic f64 via pure-Rust libm is achievable but libm is typically slower than system libm — a determinism-vs-speed micro-tension on every transcendental.",
+        "Stackless trampoline executor (fuel-native, DoS-safe, snapshot-friendly) vs straight-line ergonomic native callbacks — the safe design forces poll-style Sequence callbacks, raising embedding-API complexity."
+      ],
+      "risk_register": [
+        {
+          "risk": "gc-arena (the most attractive GC) is hard NOT Send/Sync, conflicting with the N-Send+Sync-VMs constraint; choosing it could block the threading model late.",
+          "severity": "high",
+          "mitigation": "Default to reference counting with Rc-inside-VM + Send-at-VM-granularity (move whole VMs). If a cycle collector proves necessary, prototype a Send-but-not-Sync fork or a hand-rolled non-moving mark&sweep per VM EARLY and prove VM migration between pool threads before committing."
+        },
+        {
+          "risk": "wasm in-browser interpreter tax is unknown and feared up to ~4x — the gate koto never cleared; the whole priority-#3 case rests on an unmeasured number.",
+          "severity": "high",
+          "mitigation": "Build a wasm32 microbenchmark gate BEFORE locking dispatch/value design; measure real browser engines (V8/SpiderMonkey) and wasmtime; minimize dispatch COUNT via superinstructions; treat a measured browser per-decision number as a hard go/no-go milestone."
+        },
+        {
+          "risk": "f64 cross-arch bit-identity breaks via FMA contraction, fast-math, relaxed-SIMD, or libm edge-case divergence native vs wasm32.",
+          "severity": "high",
+          "mitigation": "Mandate pure-Rust libm for all transcendentals, ban f64::mul_add/fast-math/relaxed-SIMD, restrict to the IEEE-754 basic op set, canonicalize NaN/-0.0, and pin a single cross-arch golden constant. Provide a fixed-point/Q16.16 escape-hatch build mode for zero-risk determinism."
+        },
+        {
+          "risk": "Failing to close the ~29-39x gap on wasm where JIT is unavailable — the interpreter ceiling may not reach the per-tick-per-agent goal in-browser.",
+          "severity": "high",
+          "mitigation": "Set MVP = match Luau-in-interpreter (~4x koto -> ~1.0-1.25us); reserve JIT for the native stretch; expose a fuel/LOD knob so leaf cadence is tunable (keep the grabby split: Rust-native hot path + script for cooler leaves) and measure the crossover."
+        },
+        {
+          "risk": "The luau-language-spec research stream came back empty (placeholder 'test'); the Luau language surface (metatables, type system, stdlib, vector/buffer/string, weak tables, compat edge cases) is under-researched, risking a frontend/semantics lock-in on incomplete data.",
+          "severity": "medium",
+          "mitigation": "Commission a dedicated Luau-language-spec research pass as a prerequisite to locking the frontend; use full_moon and the Luau release-727 source as interim oracles; scope MVP to a documented Luau subset and expand against a conformance suite."
+        },
+        {
+          "risk": "Native tail-call dispatch depends on nightly `become`/extern \"rust-preserve-none\" which is unstable and may not emit usefully on wasm32.",
+          "severity": "medium",
+          "mitigation": "Keep the wasm path on a stable match->br_table loop (never make tail-call load-bearing for wasm); gate the native tail-call dispatch behind a nightly feature with the loop+match as a stable fallback; do not let stabilization timing block the project."
+        },
+        {
+          "risk": "Tail-call/threaded dispatch regresses 1.2x-4.6x when compiled to wasm — a wrong universal dispatch choice tanks the priority-#3 target.",
+          "severity": "medium",
+          "mitigation": "Design opcode handlers once with cfg-conditional dispatch glue (switch-loop on wasm, tail-call on native); microbenchmark the br_table penalty for rustia's actual opcode set before finalizing."
+        },
+        {
+          "risk": "Insertion-order requirement interacts badly with inline-cache hidden-class shapes (shape explosion on key delete/re-add, shape-id determinism across VMs).",
+          "severity": "medium",
+          "mitigation": "Make shapes record insertion order, keep per-VM shape tables, bound shape transitions, and explicitly test delete/re-add sequences against the golden. Keep inline caches speed-only (never observable in values)."
+        },
+        {
+          "risk": "RC cycle leaks accumulate over long-running sims with thousands of agents holding per-agent state.",
+          "severity": "medium",
+          "mitigation": "Measure leak rate under representative episodes; add a trial-deletion cycle collector or per-VM heap reset between episodes if needed; consider a per-VM arena that is dropped wholesale at episode boundaries."
+        },
+        {
+          "risk": "Snapshot/restore of full script-visible state may be too heavy to capture at SNAPSHOT_EVERY cadence for MP rollback.",
+          "severity": "medium",
+          "mitigation": "Design value/heap/registers/call-stack layout to be flat and cheaply serializable from day one; fall back to delta or coarse-cadence capture; validate snapshot+restore reproduces the golden bit-for-bit."
+        },
+        {
+          "risk": "Copy-and-patch native JIT requires a Rust stencil pipeline that has no off-the-shelf equivalent of Deegen's clang/LLVM build-time tooling.",
+          "severity": "medium",
+          "mitigation": "Treat JIT as native-only STRETCH; prefer cranelift for the native baseline tier if the stencil pipeline proves too costly; ship a strong interpreter first so the JIT is purely additive."
+        },
+        {
+          "risk": "Weak tables and __gc finalizers (if implemented for Luau compat) leak collection timing/order into observable script behavior, breaking determinism.",
+          "severity": "medium",
+          "mitigation": "If implemented, drive collection/finalization off the deterministic fuel counter with a fixed traversal order, or gate weak tables/__gc out of the deterministic mode entirely."
+        },
+        {
+          "risk": "Embedding API drift from koto breaks grabby's drop-in integration.",
+          "severity": "low",
+          "mitigation": "Pin the exact consumed koto surface as a compatibility shim and wire rustia behind grabby's Selector trait + Criterion bake-off harness early as a continuous integration gate."
+        }
+      ]
+    },
+    "critic": {
+      "gaps": [
+        "luau-language-spec stream is a literal placeholder ('test'/'f'/'q'). The whole language surface is unresearched: metatable/metamethod dispatch semantics and resolution order (__index/__newindex/__eq/__lt/__le/__call/__concat/__len), Luau type system + type-guided bytecode type-info (LBC_TYPE_VERSION 3, the thing that feeds native codegen and any rustia specialization), vector lib, buffer lib, string lib (incl. string.format float formatting = a determinism surface), table lib semantics, weak tables, __gc/finalizers, coroutine lib, pcall/error/xpcall, the sandbox/safeenv model, and which latest-Luau syntax is in scope (type annotations, generics, string interpolation, attributes, if-exprs). Sources to close: luau.org/library + luau.org/typecheck + /tmp/luau_src VM/src/l*lib.cpp + Ast/Analysis. This blocks frontend, value-model, and determinism-mode decisions; it is a prerequisite, not a parallel pass.",
+        "No Luau-on-the-actual-workload measurement exists (confirmed: zero .lua/.luau files in grabby). The MVP target (~1.0-1.25us/decision) is extrapolated from script-bench-rs 'Sort Rust objects' (interop/userdata/GC-heavy string quicksort) to grabby's IAUS+SARSA(lambda)+contagion integer-math kernel — near-disjoint VM paths. SPIKE: port ai_bakeoff/src/koto_path.rs's decision kernel to Luau, run it under mlua+Luau with grabby's own Criterion harness (b.iter(world.tick_with(sel)); black_box(state_hash())), get a direct us/decision. Cheapest highest-value missing number; collapses the entire extrapolation chain.",
+        "No profiling of koto was done — only static source reading + end-to-end timing. The 'dispatch + 24B clone + atomic refcount + RwLock' cost decomposition is inferred from code shape, never measured. SPIKE: cargo-flamegraph/Instruments/perf on koto-int bakeoff at n=5000 for the real per-symbol split (decode/dispatch vs IndexMap FxHash probe vs RwLock lock/unlock vs clone_register vs the actual Q16.16 arithmetic). Without this you cannot rank which of the 5 value/dispatch/GC levers actually pays.",
+        "The wasm in-browser tax — the explicitly-named go/no-go gate for priority #3 — has ZERO measurements. Everything (feared 4x, optimistic 1.5-2.5x) is opinion. The mattkeeter tail-call-on-wasm inversion (1.2x-4.6x) is one blog, one VM (Mandelbrot), generalized to architectural fact. SPIKE: build a minimal register-bytecode dispatch microbench (big match->br_table) for grabby's actual opcode mix, compile wasm32, measure ns/dispatch in V8 + SpiderMonkey + wasmtime vs native; do it BEFORE locking dispatch/value design.",
+        "Determinism of pure-Rust libm across x86_64-linux + aarch64-mac + wasm32 is ASSERTED ('rapier-proven'), never verified for this exact triple. SPIKE: build libm-0.2.16 sin/cos/exp/pow/log/fmod on all three targets, hash outputs over a dense input sweep, compare bit-for-bit. rapier ships determinism with libm but that does not prove bit-identity across these three specific targets/rounding edge cases. This gates the entire f64-internal-mode bet.",
+        "wasm NaN bit-pattern non-determinism is under-treated. The wasm spec makes the sign/payload of NaN results from f64 ops NON-deterministic across engines. Any script f64 op that can yield NaN (0/0, sqrt(neg), inf-inf), then folded via to_bits() into the FNV golden, diverges native-vs-wasm-vs-engine. Brief only mentions -0.0->+0.0 and 'NaN canonicalize' for NaN-boxing. Needs an explicit rule: canonicalize ALL NaNs to one bit pattern at every f64-producing op (not just at hashing), and a test that injects NaN-producing scripts against the golden.",
+        "Send-vs-Sync requirement is unverified and load-bearing. hard_constraints demand 'Send + Sync values and whole VM', but the recommended Rc-inside-VM design gives Send-but-NOT-Sync, and grabby's described usage ('N independent VMs, no intra-VM sharing') may only need Send (move owned VM to a pool thread). The console VM is already stored as Bevy NonSend. CHECK grabby's actual thread topology (does any code share &VM across threads, or only move owned VMs?). If only Send is required, the gc-arena/RC fork collapses to 'make the heap Send' and the whole Sync tension partly evaporates. This is verifiable by reading the sim's threadpool/Selector call sites.",
+        "'Rc-inside-VM + Send-at-VM-granularity' is presented as nearly free; it actually requires an UNSAFE Send impl on the VM plus an audited invariant that no Rc/Gc handle ever escapes the moved object graph (gluon does exactly this with a per-thread heap). The brief never states this needs unsafe + a soundness argument + miri/loom validation. Concrete: prototype moving a VM holding Rc-heap across pool threads and prove no aliasing under miri before committing the RC direction.",
+        "Snapshot/restore of a SUSPENDED VM (reified call stack + open upvalues + closures + heap + native-fn references) is a hard constraint and medium risk, but NO stream investigated how to serialize it. Closures capturing upvalues, interned strings, native function pointers, and inline-cache slots are all hostile to flat serialization. SPIKE: examine whether piccolo/koto can serialize mid-coroutine state at all, and design value/heap/upvalue layout for cheap flat capture from day one; validate snapshot+restore reproduces the golden bit-for-bit.",
+        "Per-VM / per-agent MEMORY footprint (priority #2) is never measured and no byte budget exists. The NaN-box-saves-memory axis is argued with no baseline. SPIKE: measure koto-int RSS per VM at 4000 agents (and per-agent Q-table/eligibility-trace size) so the 16B-vs-8B value tradeoff has a real denominator.",
+        "call_function entry/exit marshalling cost per agent per tick is unquantified. grabby calls call_function(KValue,&[KValue]) once per agent per tick; at thousands of agents that is thousands of VM entries/tick. SPIKE: microbench an empty koto function call to isolate pure entry overhead, to size whether a batched 'decide N agents per VM call' API is necessary (it is listed as a direction but never costed)."
+      ],
+      "unverified_claims": [
+        "'~74% of cost is the interpreted VM (dispatch, clones, refcounts)'. What is actually measured: removing host calls saves 26% (5.4->4.0us). The remaining 74% includes the real in-script arithmetic/map-work that native does in 0.14us — it is NOT shown to be dispatch+boxing overhead. Conflates 'non-FFI cost' with 'VM-dispatch cost'. Needs the koto flamegraph to substantiate the attribution.",
+        "'A competent register Luau interpreter is ~4x faster than koto on a realistic interop workload' generalized to 'matching Luau-in-interpreter is the credible MVP (~1.0-1.25us/decision)'. The 4x is a string-sort/userdata benchmark, not the integer-math AI kernel. Unverified that the multiplier transfers; could be larger or much smaller on arithmetic-bound code.",
+        "'Deegen/LJR CPS tail-call interpreter +31% over LuaJIT' cited as the SOTA interpreter ceiling for rustia. It is a NATIVE x86 result from an LLVM-build-time meta-compiler, and the +31% rests on the exact tail-call dispatch that INVERTS on wasm. There is no wasm interpreter ceiling number; the relevant in-browser ceiling is unknown and probably far below +31%.",
+        "'Tail-call dispatch is 1.2x-4.6x slower on wasm' — single source (one blog, Mandelbrot, one engine set). Treated as universal architectural law. Needs replication on rustia's opcode set/value model before it drives the dispatch design.",
+        "'libm is mandatory and bit-identical' AND 'libm is typically slower than system libm' — both asserted without a rustia-relevant measurement of either the bit-identity (across the 3 targets) or the speed penalty on the hot transcendentals grabby uses (the AI kernel may use few/no transcendentals — verify which libm fns are even on the hot path).",
+        "'full_moon is too heavy/slow to feed a bytecode compiler' and 'luau-parser is blazingly fast' — both unbenchmarked (one inferred from 'lossless/trivia', the other a crate tagline). Needs a parse-throughput + AST-lowering-cost bench on representative Luau before either is chosen as frontend.",
+        "Luau 727 LUA_TINTEGER 'resolves the f64 tension' — the same brief notes integers are NOT folded into hot arith opcodes and are FFlag-gated. So its arithmetic reach is unverified; it may be a host/buffer carrier only. Read /tmp/luau_src VM/src/ltm.cpp + lvmutils.cpp arith paths and the typechecker before relying on it.",
+        "'Core f64 +,-,*,/,sqrt are already bit-deterministic cross-arch, no special handling' — true under wasm/IEEE-754 round-to-nearest with no contraction, BUT depends on LLVM never contracting/reassociating and on no NaN production (see NaN gap). Also min/max NaN-propagation semantics differ between IEEE-754-2019, wasm, and Rust f64::min — verify the chosen min/max matches across targets.",
+        "'Luau core loop ~16KB fits L1i' is used to justify a 'keep core small' target, but there is no estimate of rustia's size in Rust with target-split dispatch + Q16.16 intrinsics + libm + serde. The L1i claim about Luau-C++ does not transfer as a target without a rustia-specific number.",
+        "koto per-decision headline '5.4us' vs README table (1k = 6.40ms = 6.4us). Minor but the canonical number should be pinned; the brief repeats 5.4 without noting the table's 6.4 at the smallest n (cache/warmup effects unexamined)."
+      ],
+      "missing_directions": [
+        "Fork/embed Luau-the-C++-VM compiled to wasm rather than building from scratch. This is the single biggest unexamined alternative: mlua+Luau is ALREADY at the 4x MVP target today. The brief dismisses it as 'C bindings, not wasm-clean' but never verifies whether Luau (C++) can compile to wasm (it ships in browsers via Roblox/emscripten) and link into a wasm-bindgen/Bevy host, nor whether determinism (libm swap + add instruction-fuel via SingleStep) + Send could be retrofitted. The real blocker is likely wasm32-unknown-unknown having no libc (needs wasi/emscripten) and Send/Sync — but that must be a verified spike, not an assumption, because it could save the entire from-scratch effort.",
+        "Data-oriented / batched SoA execution: process all N agents' decisions in one VM invocation over struct-of-arrays state, amortizing dispatch and entry overhead across agents. Listed once in the grabby stream's candidate directions but never elevated to a design axis despite directly attacking the per-call marshalling and dispatch-count problems that dominate at thousands of agents.",
+        "Type-specialized / typed-subset compilation. Luau already has type-guided bytecode type-info driving native codegen. A direction where rustia compiles a TYPED Luau subset (the hot AI kernel is small, known, monomorphic) to specialized straight-line bytecode or closure-tree — getting much of the JIT win on wasm WITHOUT a JIT — is absent. The brief commits to a general dynamic interpreter and treats perf purely as dispatch/value tuning.",
+        "Compile-the-known-kernel-to-Rust-closures-at-load (partial evaluation against the specific scenario/considerations). The hot script is tiny and structurally fixed (4 considerations x 6 actions); specializing it at load into a closure tree with constants folded could approach native, works on wasm, and is more concrete than the generic 'closure/threaded-code' direction.",
+        "Explicit treatment of the 'don't run script every agent every tick' option as a first-class direction. The ai_bakeoff VERDICT already concluded: keep the hot kernel in Rust, script only cooler leaves. rustia's value case may NOT be the per-tick hot path at all — it may be the cooler/coarser layer where koto already suffices, which would radically change the perf bar. The brief never revisits whether the per-tick-per-agent target is even the right goal given grabby's own measured verdict.",
+        "Cranelift-as-the-only-JIT-tier (skip copy-and-patch entirely) with the explicit cost/benefit, plus whether cranelift itself works/links on the native targets without bloating the wasm build. Brief mentions cranelift as a fallback but never explores it as the primary native tier with its own tradeoff analysis.",
+        "Interning + small-string-optimization as its own axis. Flagged as 'low-hanging fruit' in koto-internals but never made a design direction with a sizing of how much of grabby's cost is string-related (likely little, given float-free integer kernel — which itself argues the SSO win is small and should be deprioritized; that inversion is unexamined)."
+      ],
+      "verdict": "NOT sufficient to start the 5-way design exploration. The brief is strong on koto internals, Luau VM internals, and the SOTA-VM landscape, but three load-bearing pillars are unmeasured assumption, and one entire input stream is empty. Fill these FIRST: (1) the luau-language-spec stream must actually be run — metatables, type system, stdlib, vector/buffer/string libs, weak tables, __gc, and determinism surfaces (string.format, next() order, math.random) gate the frontend and value/number model that the design exploration is supposed to choose between. (2) Three cheap, decisive spikes must produce real numbers before locking architecture: (a) port the ai_bakeoff kernel to Luau and measure us/decision under mlua (validates the MVP target and the '4x' claim on the ACTUAL workload, not a string sort); (b) a wasm32 dispatch microbench in V8/SpiderMonkey/wasmtime (the named go/no-go gate, currently 100% extrapolated); (c) a libm bit-identity check across x86_64-linux + aarch64-mac + wasm32 (gates the f64-internal mode). (3) Resolve the Send-vs-Sync question by reading grabby's actual thread topology — it materially changes the GC/RC decision and may dissolve the gc-arena tension. (4) Profile koto (flamegraph) to replace the inferred '74% is dispatch+boxing' attribution with measured per-symbol costs, so the value/dispatch/GC axes can be ranked. Additionally, add two missing directions to the exploration set before it starts: 'embed/fork Luau-C++-to-wasm vs from-scratch' (the unexamined alternative that could obviate the project) and 'batched SoA / typed-subset specialization' (the directions that actually attack per-agent dispatch+marshalling at thousands of agents). Until the empty stream is filled and spikes (a)-(c) return numbers, the design exploration would be choosing between five options on top of an unmeasured foundation."
+    },
+    "streams": [
+      {
+        "stream": "koto-internals",
+        "result": {
+          "summary": "koto 0.16.1 is a register-based bytecode VM (NOT tree-walking) with a two-level dispatch: InstructionReader::next() decodes a variable-length byte stream into a 169-variant Instruction enum returned by value, which execute_instruction then matches in a single giant match (LLVM jump table, no computed-goto/threading). Pipeline is koto_lexer -> koto_parser (AST) -> koto_bytecode::Compiler -> Chunk{bytes:Vec<u8>, constants}. Values are a 24-byte KValue enum; numbers are a tagged i64/f64 KNumber (koto HAS an integer subtype, unlike Luau f64-only). Memory is pure reference counting with NO tracing GC and NO cycle detection (cycles leak); default feature is `rc` (Rc+RefCell), grabby's required `arc` feature makes every heap value an Arc and every mutable container an Arc<parking_lot::RwLock<T>>, so each map/list/object touch pays an atomic refcount bump plus a RwLock lock/unlock. Maps are insertion-ordered IndexMap<ValueKey,KValue,FxHasher> (a good deterministic model to copy). The big perf sinks are double dispatch + varint decode per op, 24-byte KValue clones bumping atomic refcounts on the hot path, RwLock-guarded container access under arc, per-call Frame push + register Vec resize(fill Null/drop), and always-heap strings. Critically, koto's only execution limit is WALL-CLOCK Duration (Instant::now), not deterministic instruction-count fuel, and there is no recursion-depth limit — both are hard gaps rustia must fill.",
+          "key_findings": [
+            {
+              "topic": "Execution model",
+              "finding": "Register-based bytecode VM. Two-stage dispatch: InstructionReader (koto_bytecode/instruction_reader.rs:22 Iterator::next) decodes a byte stream into a 169-variant `Instruction` enum (built and returned by value each step), then KotoVm::execute_instruction (koto_runtime/vm.rs:740) matches that enum. Driving loop execute_instructions (vm.rs:674) `while let Some(instruction) = self.reader.next()`. No threaded/computed-goto dispatch; relies on the Rust match compiling to a jump table. Operands are varint-decoded (get_var_u32) per instruction.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Compilation pipeline",
+              "finding": "koto_lexer -> koto_parser (AST) -> koto_bytecode::Compiler (compiler.rs, 4470 lines) -> Chunk { bytes: Vec<u8>, constants: ConstantPool } (chunk.rs:50). Bytecode-compiled, not tree-walking. 93 real opcodes (Op enum indices 0..=92; 94..255 are Unused placeholders) in op.rs, but 169 Instruction enum variants because some ops fan out (SetNumberU8/SetNumberNegU8 -> SetNumber, SetTrue/SetFalse -> SetBool).",
+              "confidence": "high"
+            },
+            {
+              "topic": "Value representation",
+              "finding": "KValue (types/value.rs:11) is a 13-variant enum: Null,Bool,Number(KNumber),Range,List,Tuple,Map,Str,Function,NativeFunction,Iterator,Object,TemporaryTuple. A unit test asserts size_of::<KValue>() <= 24. KFunction is the only 24-byte variant and carries an explicit `_niche: Niche` field so the compiler can niche-pack the KValue tag into it. All other payloads are <=16 bytes.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Number representation",
+              "finding": "KNumber (types/number.rs:14) is `enum { F64(f64), I64(i64) }` (16 bytes). koto HAS a native integer subtype — directly relevant to the Luau-is-f64-only tension. Every arithmetic op is a 4-way match over (lhs,rhs) int/float combos; integer ops use wrapping_* ; Div always promotes to f64. Hash uses to_bits(); Eq/Ord compare cross-type by casting i64->f64.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Strings",
+              "finding": "KString (koto_parser/string.rs:20) is 16 bytes: enum Inner { Full(Ptr<String>), Slice(StringSlice<u16>) inline, SliceLarge(Ptr<StringSlice<usize>>) }. Backed by Arc<String> (under arc) with shared zero-copy subslicing via byte bounds. NO small-string inline optimization — even 1-char strings heap-allocate. String concat (run_add, vm.rs:1638) does `a.to_string() + b` -> fresh allocation.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Maps (insertion order)",
+              "finding": "KMap (types/map.rs:63) = { data: PtrMut<ValueMap>, meta: Option<PtrMut<MetaMap>> } = 16 bytes. ValueMap = IndexMap<ValueKey, KValue, BuildHasherDefault<FxHasher>>. Insertion order from indexmap (deterministic); hashing by rustc_hash::FxHasher (seedless, deterministic). ValueKey wraps a KValue, constructible only from hashable variants. Excellent deterministic model for rustia to copy.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Lists/tuples/functions/closures",
+              "finding": "KList = PtrMut<SmallVec<[KValue;4]>> (8 bytes; inline for <=4 elems). KFunction (types/function.rs:11) = chunk:Ptr<Chunk>, ip:u32, arg_count/optional_arg_count:u8, flags, context:Option<Ptr<FunctionContext>> holding captures (a KList) + non_locals. Closures capture by mutating a shared KList after creation. KNativeFunction = Ptr<dyn KotoFunction> (16-byte fat pointer); KotoFunction = Fn(&mut CallContext)->Result<KValue> + Send + Sync + 'static.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Memory model / GC",
+              "finding": "koto_memory/lib.rs explicitly: 'only reference-counted pointers without cycle detection'. NO tracing GC. Ptr<T> = Arc<T> (arc) or Rc<T> (rc). PtrMut<T> = Ptr<KCell<T>>; KCell = parking_lot::RwLock<T> under arc (arc/ptr_mut.rs:38) or RefCell<T> under rc. Reference cycles LEAK. Default feature is rc+serde (koto Cargo.toml); grabby must use arc for Send+Sync.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Per-borrow tax under arc",
+              "finding": "Under arc every container read/mutation goes through Arc<parking_lot::RwLock>. KMap::data()=self.0.borrow()=RwLock::read(); list/object access likewise. A single map lookup costs: Arc deref + atomic refcount (if cloned) + RwLock read-lock acquire/release + IndexMap FxHash probe. clone() of any heap KValue variant is an ATOMIC increment under arc vs non-atomic under rc.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Steppability / fuel",
+              "finding": "The ONLY execution limit is wall-clock: KotoVmSettings.execution_limit: Option<Duration> (vm.rs:90). ExecutionTimeout (vm.rs:3928) batches Instant::now() checks (recalibrated to ~1/10 of the limit). NON-deterministic, unusable for grabby's bit-for-bit fuel. NO instruction-count cap and NO recursion-depth limit (recursion bounded only by native stack / call_stack Vec -> can overflow). The check_for_timeout() branch runs once per instruction in the hot loop.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Call frame setup cost",
+              "finding": "call_koto_function (vm.rs:2923) + push_frame (vm.rs:3444): clones chunk Ptr (atomic refcount under arc), pushes a Frame (chunk Ptr, Option<NonLocals>, register_base, return ips, catch_stack:Vec, execution_barrier) onto call_stack Vec, resizes the shared registers:Vec<KValue> filling with KValue::Null on NewFrame (vm.rs:751) and again on pop_frame (vm.rs:3505), dropping old values. apply_optional/variadic/captures run per call. No inline caching, no arg-count specialization.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Hot-path value movement",
+              "finding": "Registers live in one Vm-wide Vec<KValue> indexed by register_base+reg. set_register/get_register are bounds-checked Vec indexing (vm.rs:3565,3583). `Copy` op and every Call/Return do clone_register (full 24-byte KValue clone -> refcount bump for heap variants). Binary ops read operands by reference but each writes a moved result. No NaN-boxing; values are a fat tagged union moved/cloned around.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Embedding API",
+              "finding": "koto/src/koto.rs: Koto::new()/with_settings(KotoSettings), .compile()->Ptr<Chunk>, .compile_and_run(), .run(chunk), .call_function/.call_instance_function/.call_exported_function(CallArgs), .prelude()->&KMap, .exports(). KotoSettings::with_execution_limit/with_stdin/stdout/stderr/with_module_imported_callback. Native fns: any Fn(&mut CallContext)->Result<KValue>; ctx.args()->&[KValue], ctx.instance(), ctx.instance_and_args(). serde via koto_serde (DeserializableKValue) for script-value<->Rust-struct.",
+              "confidence": "high"
+            }
+          ],
+          "quantitative_data": [
+            {
+              "metric": "size_of::<KValue>()",
+              "value": "<= 24 bytes (asserted by test)",
+              "context": "types/value.rs:459 test_value_mem_size; KFunction forces the 24-byte size and provides the niche"
+            },
+            {
+              "metric": "size_of::<KNumber>()",
+              "value": "16 bytes",
+              "context": "enum{F64(f64),I64(i64)}, 8-byte tag-padded discriminant + 8-byte payload"
+            },
+            {
+              "metric": "size_of KString / KMap / KList / KObject",
+              "value": "16 / 16 / 8 / <=16 bytes",
+              "context": "KString test <=16; KMap=2 ptrs; KList=single PtrMut(Arc)=8; KObject test <=16"
+            },
+            {
+              "metric": "Real opcode count",
+              "value": "93 ops (Op indices 0..=92)",
+              "context": "op.rs: NewFrame..CheckOptionalType, then Unused93..Unused255 are placeholders"
+            },
+            {
+              "metric": "Instruction enum variant count",
+              "value": "169 variants",
+              "context": "koto_bytecode/instruction.rs; more than opcodes due to fan-out + Error variant"
+            },
+            {
+              "metric": "grabby measured koto decision cost",
+              "value": "~4-5 us/decision (~30-40x the ~0.14 us Rust-native floor)",
+              "context": "PROJECT CONTEXT perf bar"
+            },
+            {
+              "metric": "Removing host (FFI) calls savings",
+              "value": "only ~26%",
+              "context": "grabby measurement -> ~74% of cost is the interpreted VM itself (dispatch+refcount+boxing), not the FFI boundary"
+            },
+            {
+              "metric": "Map container per-access cost under arc",
+              "value": "atomic refcount + parking_lot RwLock read lock/unlock + FxHash IndexMap probe",
+              "context": "KMap.data()=PtrMut::borrow()=RwLock::read(); each on the hot path"
+            },
+            {
+              "metric": "Register stack init/teardown",
+              "value": "Vec::resize fill-with-Null + drop on every NewFrame and pop_frame",
+              "context": "vm.rs:751, vm.rs:3505"
+            },
+            {
+              "metric": "VM register Vec initial capacity",
+              "value": "32 (main) / 8 (spawned)",
+              "context": "vm.rs:178, vm.rs:201"
+            },
+            {
+              "metric": "List inline capacity",
+              "value": "SmallVec<[KValue;4]> = 4 elements inline before heap",
+              "context": "types/list.rs ValueVec"
+            },
+            {
+              "metric": "Timeout check interval baseline",
+              "value": "100,000,000 instr/sec * (limit/10) in release; 10,000,000 in debug",
+              "context": "vm.rs:3950 ExecutionTimeout::new"
+            }
+          ],
+          "implications_for_rustia": [
+            "API surface to MATCH for drop-in: a Koto-like handle with compile()->chunk + run + call_function; a KValue-like enum; native fns as Fn(&mut Ctx)->Result<Value> with ctx.args()->&[Value]; prelude/exports as maps; serde bridge. These are koto touchpoints grabby already depends on.",
+            "Insertion-ordered IndexMap + seedless FxHash is the determinism win to copy verbatim: keep it (or a custom insertion-ordered open-addressing map) and never use RandomState/SipHash. We inherit bit-for-bit map ordering for free.",
+            "koto's wall-clock execution_limit is unusable for determinism. rustia MUST implement a deterministic instruction-count fuel counter decremented in the dispatch loop, plus a separate recursion/call-depth cap. This is a required feature koto entirely lacks — a clear must-have differentiator.",
+            "~74% of cost is the interpreted VM, not FFI (grabby's ~26% finding). The payoff is in execution-engine quality (dispatch, value boxing, no per-container lock), not the embedding boundary; optimizing FFI alone caps at ~26%.",
+            "Two-level dispatch (decode-to-enum then match) is wasteful: fuse decode+execute via fixed-width encoding read in-loop, closure/tail-call threading, or computed-goto. Stop building a 169-variant Instruction enum by value every step.",
+            "24-byte cloned tagged union + atomic refcounts dominate the hot path. Consider NaN-boxing (8-byte values) so int/float/bool/null/short-strings are Copy and need no refcount; reserve heap-pointer payloads for the rest, directly attacking clone_register churn on Copy/Call/Return.",
+            "arc = Arc<RwLock> tax with ZERO contention in grabby's N-independent-VM model. Since VMs don't share state intra-VM, rustia can be Send+Sync at VM granularity (move whole VM across threads) while using non-atomic Rc + Cell/RefCell interior mutability INSIDE a VM — eliminating both atomic refcounts and RwLock locks. Single biggest structural win over koto-arc.",
+            "koto has an i64 subtype but Luau is f64-only. Full Luau compat inherits f64-only, colliding with grabby's int/Q16.16 float-free boundary. Explore a hidden integer-tagged fast path (LuaJIT/koto-style dual-number) or expose Q16.16 host types at the boundary while keeping f64 internally. Central semantic tension to flag.",
+            "Strings always heap-allocate: add inline small-string optimization and/or interning for map keys/identifiers. koto's lack of SSO is low-hanging fruit for speed and memory.",
+            "Call setup resizes a shared register Vec with Null-fill on every call and return: use register windows / a pre-sized stack without per-call fill-and-drop, borrow (not clone) the chunk pointer per call, and add inline caching for field/method access (koto has none)."
+          ],
+          "candidate_directions": [
+            "Direction A — 'koto-shaped but faster': keep register bytecode + insertion-ordered IndexMap + tagged-enum values, but fuse dispatch (computed-goto/threaded), add NaN-boxing, deterministic fuel, and Rc-inside-VM (Send at VM granularity). Lowest-risk, highest-compat with grabby's integration.",
+            "Direction B — 'NaN-boxed register VM + native JIT': 8-byte NaN-boxed values, a baseline template/cranelift JIT on native for hot functions, interpreter fallback on wasm. Maximizes the 'within a small multiple of native' prize natively while staying viable in-browser.",
+            "Direction C — 'full Luau front-end, custom backend': implement the real Luau lexer/parser/compiler (latest-Luau compat) but emit rustia's own deterministic register bytecode rather than Luau's VM, getting compat + control over determinism/fuel.",
+            "Direction D — 'lock-free Send+Sync via VM-per-thread ownership': abandon Arc<RwLock> entirely; make the whole VM Send (move across pool threads) with single-threaded interior mutability, eliminating all per-borrow atomic/lock tax — the structural fix for grabby's N-VM workload.",
+            "Direction E — 'closure/threaded-code interpreter': compile bytecode to a tree of boxed Rust closures (or tail-called fn pointers) at load time, eliminating per-op decode and enum-build; deterministic fuel via a counter threaded through closures. Middle ground between bytecode-interpret and JIT that works on wasm."
+          ],
+          "open_questions": [
+            "Exact measured size_of for KValue under each feature (rc vs arc) and real per-op ns cost — needs building koto with a microbenchmark; the <=24-byte figure is a compile-time assert, not a measured layout.",
+            "Does NaN-boxing's loss of an i64 subtype matter for grabby? koto keeps i64; Luau f64-only + grabby's fixed-point boundary needs a concrete reconciliation design.",
+            "How does parking_lot::RwLock behave on wasm32-unknown-unknown (spin fallback, atomics-feature requirement)? Quantify the actual arc tax in-browser vs native.",
+            "What fraction of grabby's ~5us is map lookups vs arithmetic vs call overhead? Needs a per-opcode profile of a real grabby decision script to prioritize rustia's optimizations.",
+            "Can rustia guarantee bit-for-bit f64 determinism across native and wasm32 given FMA/rounding differences? koto sidesteps this by grabby keeping all f64 math in Rust; in-script f64 reopens this risk.",
+            "Is full latest-Luau compat compatible with a non-Luau bytecode/value model, or must we track Luau VM semantics (metatables, vector type, buffer library) closely enough that reusing Luau's own compiler is cheaper?"
+          ],
+          "sources": [
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_runtime-0.16.1/src/types/value.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_runtime-0.16.1/src/types/number.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_runtime-0.16.1/src/types/map.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_runtime-0.16.1/src/types/list.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_runtime-0.16.1/src/types/function.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_runtime-0.16.1/src/types/native_function.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_runtime-0.16.1/src/types/value_key.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_runtime-0.16.1/src/vm.rs (execute_instructions:674, execute_instruction:740, run_add:1627, call_koto_function:2923, call_native_function:2818, push_frame:3444, pop_frame:3474, set/get_register:3565, Frame:3815, ExecutionTimeout:3928, KotoVmSettings:72)",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_memory-0.16.1/src/lib.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_memory-0.16.1/src/arc/ptr.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_memory-0.16.1/src/arc/ptr_mut.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_memory-0.16.1/src/rc/ptr_mut.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_bytecode-0.16.1/src/op.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_bytecode-0.16.1/src/instruction_reader.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_bytecode-0.16.1/src/chunk.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_parser-0.16.1/src/string.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_parser-0.16.1/src/string_slice.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto-0.16.1/src/koto.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto-0.16.1/Cargo.toml",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_serde-0.16.1/src/deserialize.rs"
+          ]
+        }
+      },
+      {
+        "stream": "rust-scripting-landscape",
+        "result": {
+          "summary": "The Rust scripting landscape splits into pure-Rust engines (koto, rhai, rune, steel, gluon, hematita, dyon, piccolo) and bindings to C/C++ VMs (mlua/rlua → PUC-Lua/LuaJIT/Luau). On the only apples-to-apples interop benchmark (script-bench-rs, \"Sort Rust objects\": quicksort of 10k userdata-wrapped random strings, M5 Max), mlua+Luau runs in 11.94 ms while koto 0.16.1 takes 49.21 ms and rhai 114.27 ms — i.e. the official Luau interpreter is ~4x faster than koto and ~9.6x faster than rhai on a realistic, interop-heavy game-like workload. This is the single most important number: it both sets rustia's perf bar (beat/match Luau-in-interpreter) and proves koto leaves ~4x on the table. The two most directly reusable assets are (1) piccolo's gc-arena (safe incremental GC via generativity + mutate-xor-collect) and stackless/fuel VM architecture, which map almost exactly onto rustia's steppable-fuel + recursion-limit requirements, and (2) full_moon, a lossless multi-dialect-including-Luau parser with error recovery. The hard blocker: gc-arena is fundamentally single-threaded and NOT Send/Sync, colliding with the \"N independent Send+Sync VMs across a thread pool\" constraint. koto solves Send via a compile-time Rc↔Arc feature swap and — critically for determinism — uses a dual I64/F64 number type, unlike Luau's f64-only numbers. mlua is the API-ergonomics gold standard (UserData, FromLua/IntoLua, Scope, async-over-coroutines) and should be the embedding-API model.",
+          "key_findings": [
+            {
+              "topic": "piccolo execution model",
+              "finding": "Pure-Rust Lua VM, register-based bytecode modeled on PUC-Rio Lua 5.3/5.4. 'Stackless'/trampoline design: the call stack is reified into an Executor object polled via Executor::step(fuel). Rust callbacks return either an immediate result or a Sequence (a Future-like multi-step object the Executor drives). Never uses the Rust call stack for Lua->Rust->Lua nesting, making it DoS-resilient against untrusted scripts. This is architecturally near-identical to rustia's steppable/fuel requirement.",
+              "confidence": "high"
+            },
+            {
+              "topic": "gc-arena GC design",
+              "finding": "Safe incremental, cycle-detecting mark-sweep GC modeled on PUC Lua 5.3/5.4. Gc<'gc,T> pointers are machine-word-sized, Copy, zero-cost (no write barriers on mutation). Safety via generative lifetimes (the 'gc brand) + a Collect derive trait. Core invariant 'mutate XOR collect': all Gc access happens inside Arena::mutate closures that must RETURN before collection runs (proving no Gc lives on the Rust stack) — this invariant is precisely WHY piccolo had to become stackless. Tracks all arena memory for fuel/budget. Used in production by Ruffle (Flash emulator). Dual MIT/CC0.",
+              "confidence": "high"
+            },
+            {
+              "topic": "gc-arena Send/Sync — CRITICAL BLOCKER",
+              "finding": "gc-arena has NO support for multi-threaded allocation/collection; Arena and Gc are NOT Send and NOT Sync by design. Gc pointers are raw, unsynchronized. This directly conflicts with rustia's 'N independent Send+Sync VMs across a thread pool' constraint. Mitigation paths: (a) keep each VM strictly thread-local and move work, not VMs (loses koto's arc model); (b) make the whole Arena Send-but-not-Sync so a VM can be migrated between threads (requires all interior types Send and no thread-local state — non-trivial, upstream does not guarantee it); (c) adopt gc-arena's safe-GC IDEA but build a Send-capable arena ourselves.",
+              "confidence": "high"
+            },
+            {
+              "topic": "piccolo maturity/perf/WASM",
+              "finding": "Experimental, pre-1.0 (v0.3.x). Core language + register VM feature-complete; most stdlib, finalization, debug lib, stack traces unimplemented. Author explicitly says bytecode/interp loop are unoptimized and NOT competitive with LuaJIT/Luau yet ('not very good at fast interpreter loops yet'). Uses some unsafe to keep Value small (avoid fat pointers). Compiles to and runs in WASM (the blog ships in-browser REPLs). Lua 5.x semantics, NOT Luau — would need Luau syntax/semantics retrofit.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Luau VM (via mlua) — perf bar and compat target",
+              "finding": "Official Luau is the fastest realistic option here: 11.94 ms vs koto 49.21 ms (~4.1x). Luau interpreter is roughly as fast as LuaJIT 2.1 *interpreter* mode; with partial native codegen it is ~1.6x slower than LuaJIT JIT. Register-based bytecode, multi-pass compiler (AST->bytecode with optimization passes), dispatch loop inspired by LuaJIT, core loop ~16KB on x64 (fits I-cache). Luau numbers are f64-only (no integer subtype). This is the C++ reference implementation rustia must match in interpreter mode and stay compatible with.",
+              "confidence": "high"
+            },
+            {
+              "topic": "full_moon parser (frontend candidate)",
+              "finding": "Lossless parser for Lua 5.1/5.2/5.3/5.4 AND Luau (LuaVersion flag), by Kampfkarren. Preserves all trivia (comments/whitespace) for exact round-trip; error recovery via AstResult that always yields an Ast even on syntax errors. Actively maintained (v2.x), battle-tested as the frontend for StyLua and selene. Trade-off: lossless/trivia-rich AST is built for tooling (formatters/linters), so it is heavier and slower than a perf-oriented parser and the AST shape is not ideal to feed straight into a bytecode compiler. Usable as a correctness oracle / initial frontend; likely want a trivia-stripping pass or eventually a custom lexer+parser for speed.",
+              "confidence": "high"
+            },
+            {
+              "topic": "mlua embedding API (the ergonomics bar)",
+              "finding": "Bindings (not pure Rust) to Lua 5.1-5.5/LuaJIT/Luau. API is the gold standard: UserData trait (add_method/add_method_mut/add_field/add_meta_method), FromLua/IntoLua + multi-value variants (auto IntoLua, manual FromLua), Scope for registering non-'static borrowed Rust data safely, UserDataRef/UserDataRefMut borrow guards, blanket UserData impls for Rc/Arc/Rc<RefCell<T>>/Arc<Mutex<T>>, registry, async/await implemented over Lua coroutines (Future polled; Poll::Pending -> coroutine yield). rustia should mirror this surface for embedding.",
+              "confidence": "high"
+            },
+            {
+              "topic": "koto 0.16.1 internals (the incumbent)",
+              "finding": "Register-based bytecode VM (instructions carry u8 register operands; KValue has a TemporaryTuple/RegisterSlice optimization). Value is a Clone enum KValue { Null,Bool,Number(KNumber),Range,List,Tuple,Map,Str,Function,NativeFunction,Iterator,Object,TemporaryTuple }. KNumber is a dual enum { F64(f64), I64(i64) } — already has an integer subtype, directly relevant to the determinism/float-free-boundary tension. Send achieved by compile-time feature swap: koto_memory exposes Ptr as Rc (feature 'rc') or Arc (feature 'arc'); KotoSend/KotoSync are empty blanket traits under 'rc' and re-exports of std Send/Sync under 'arc'. Reference-counted (no tracing GC) — leaks cycles but is simple and WASM-clean.",
+              "confidence": "high"
+            },
+            {
+              "topic": "rhai",
+              "finding": "AST tree-walking interpreter (NO bytecode). Slowest in the benchmark at 114.27 ms (~2.3x slower than koto, ~9.6x slower than Luau); author states ~2x slower than CPython and that speed is explicitly not the goal. Optimizations: small packed AST/runtime structs for cache-friendliness, hash-based function dispatch. Pure Rust, reference-counted, mature, excellent docs, strong embedding ergonomics, good WASM support, optional sync feature. Relevant only as an API/ergonomics reference and a 'what not to do for perf' (tree-walking) data point.",
+              "confidence": "high"
+            },
+            {
+              "topic": "rune",
+              "finding": "Pure-Rust, stack-based bytecode VM. Reference-counted memory; dynamic Value container; first-class async + generators; claims multithreaded execution support with a SyncFunction type (Send-capable function handle). serde-friendly containers out of the box. Not in the benchmark. Stack VM is simpler but generally slower per-op than register VM. Useful reference for async + Send function design and for embedding API.",
+              "confidence": "medium"
+            },
+            {
+              "topic": "steel",
+              "finding": "Embeddable Scheme (R5RS-ish, R7RS underway) implemented as a bytecode VM, by mattwparas. Engine is explicitly NOT Send or Sync — disqualifying for rustia's threading model without rework. Good native Rust interop + FFI. Not Lua-compatible (Scheme), so low direct relevance beyond VM-design study.",
+              "confidence": "medium"
+            },
+            {
+              "topic": "gluon",
+              "finding": "Statically-typed, type-inferred functional language (ML-like) in Rust, tracing GC with a SEPARATE small heap per gluon thread (keeps GC overhead low and is the closest existing model to 'one heap per VM'). Rust thread-safety guaranteed. Low-boilerplate marshalling. Not Lua/dynamic, niche, slower-moving. Relevant mainly for its per-thread-heap GC architecture idea.",
+              "confidence": "medium"
+            },
+            {
+              "topic": "hematita",
+              "finding": "Pure-Rust Lua interpreter (lexer->parser->bytecode compiler->VM) in 100% SAFE Rust, no unsafe, minimal deps, stable compiler — goal is a hardened/secure Lua. Largely abandoned/early, incomplete Lua coverage, not perf-focused. Low relevance except as a safe-only reference.",
+              "confidence": "medium"
+            },
+            {
+              "topic": "dyon",
+              "finding": "Piston's dynamically-typed game scripting language. NO garbage collector — uses a Rust-like lifetime/borrow checker plus copy-on-write instead. Novel but idiosyncratic semantics, not Lua-compatible, low activity. Relevant only as an alternative-to-GC memory-management idea.",
+              "confidence": "medium"
+            },
+            {
+              "topic": "boa (JS)",
+              "finding": "Pure-Rust JavaScript engine. In the benchmark 101.87 ms (~2x slower than koto, ~8.5x slower than Luau). JS, not Lua; heavier semantics. Relevant only as a pure-Rust dynamic-VM engineering reference (it has a real bytecode VM + GC, boa_gc).",
+              "confidence": "high"
+            },
+            {
+              "topic": "wasmoon / wasm-based",
+              "finding": "wasmoon is Lua compiled to WASM via Emscripten exposed to JS — a browser JS library, not a Rust embedding crate; not relevant to a Rust host. The benchmark's wasmtime (2.73 ms) and wasmi (10.02 ms) rows represent precompiled Rust-to-WASM, i.e. a near-native ceiling, not a scripting language — they show the cost floor of a WASM-interpreter approach (wasmi 10ms) vs JIT (wasmtime 2.7ms, no JIT in browser).",
+              "confidence": "high"
+            },
+            {
+              "topic": "rlua",
+              "finding": "rlua is now a thin wrapper re-export over mlua (merged); treat as mlua for all purposes. Not pure Rust.",
+              "confidence": "medium"
+            }
+          ],
+          "quantitative_data": [
+            {
+              "metric": "Sort Rust objects (quicksort 10k userdata random-string objects)",
+              "value": "mlua_luau 11.94 ms",
+              "context": "script-bench-rs, MacOS 26.5 M5 Max, rustc 1.96.0, mlua v0.12-rc.2 with Luau — fastest real scripting engine; the perf bar for rustia"
+            },
+            {
+              "metric": "same benchmark — koto",
+              "value": "49.21 ms",
+              "context": "koto v0.16.1; the incumbent. ~4.1x slower than mlua_luau"
+            },
+            {
+              "metric": "same benchmark — mlua Lua 5.5",
+              "value": "15.72 ms",
+              "context": "PUC-Lua via mlua; ~3.1x faster than koto"
+            },
+            {
+              "metric": "same benchmark — rhai",
+              "value": "114.27 ms",
+              "context": "rhai v1.25.1, AST tree-walker; slowest engine, ~2.3x slower than koto, ~9.6x slower than mlua_luau"
+            },
+            {
+              "metric": "same benchmark — boa (JS)",
+              "value": "101.87 ms",
+              "context": "boa v0.21.1 pure-Rust JS"
+            },
+            {
+              "metric": "same benchmark — rquickjs (JS)",
+              "value": "35.05 ms",
+              "context": "rquickjs v0.12.0 (QuickJS bindings); faster than koto"
+            },
+            {
+              "metric": "same benchmark — roto",
+              "value": "13.29 ms",
+              "context": "roto v0.11.0 (a compiled/codegen DSL); near Luau speed"
+            },
+            {
+              "metric": "same benchmark — wasmi (WASM interpreter)",
+              "value": "10.02 ms",
+              "context": "wasmi v1.0.9; precompiled Rust->WASM interpreted — represents a WASM-interp ceiling, not a scripting lang"
+            },
+            {
+              "metric": "same benchmark — wasmtime (WASM JIT)",
+              "value": "2.73 ms",
+              "context": "wasmtime v45.0.1; JIT-compiled, near-native floor (JIT unavailable in browser)"
+            },
+            {
+              "metric": "Luau interpreter vs LuaJIT",
+              "value": "~parity in interpreter mode; ~1.6x slower than LuaJIT with partial native codegen",
+              "context": "luau.org/performance — Luau interp is about as fast as LuaJIT 2.1 interpreter mode"
+            },
+            {
+              "metric": "Luau interpreter core loop size",
+              "value": "~16 KB on x64",
+              "context": "fits in half of L1 I-cache; deliberate design for sustained interp throughput"
+            },
+            {
+              "metric": "rhai vs CPython",
+              "value": "~2x slower than CPython 3",
+              "context": "rhai.rs benchmarks page; consequence of tree-walking"
+            },
+            {
+              "metric": "grabby-aliens current bar",
+              "value": "koto ~4-5 us/decision vs ~0.14 us Rust-native (~30-40x)",
+              "context": "from project context; matching Luau's ~4x-over-koto edge would cut to ~1.0-1.25 us/decision (~8-10x native)"
+            }
+          ],
+          "implications_for_rustia": [
+            "The benchmark proves the thesis: a competent register-based Luau bytecode interpreter (mlua_luau, 11.94ms) is ~4x faster than koto (49.21ms) on interop-heavy workloads. rustia's MVP target should be 'match Luau-in-interpreter,' which alone would take grabby from ~4-5us to ~1.0-1.25us/decision. Tree-walking (rhai) is categorically disqualified for the perf bar.",
+            "gc-arena is the most attractive GC design (safe, incremental, zero-cost Copy pointers, memory-tracked for fuel) AND its mutate-xor-collect invariant naturally forces the exact stackless/steppable VM rustia needs. BUT it is hard-not-Send/Sync. This is the central architectural fork: either (a) adopt gc-arena and accept thread-local VMs (migrate work, not VMs), (b) attempt to make a single Arena Send-but-not-Sync for VM migration, or (c) reject tracing GC in favor of koto's proven Rc↔Arc-feature-swap reference counting (Send via 'arc' feature, no cycle collection).",
+            "koto's KNumber { I64, F64 } dual representation is the template for rustia's determinism story: keep an integer subtype internally even though Luau spec is f64-only. This lets the host<->script boundary stay int/Q16.16 and avoids f64 nondeterminism for integer-domain work, at the cost of Luau-compat nuance (Luau scripts assume f64 semantics — rustia must define exactly when a value is I64 vs F64 and ensure bit-identical results native vs wasm32).",
+            "full_moon is a viable correctness-oracle and initial Luau frontend (lossless, error-recovery, real Luau coverage, maintained, used by StyLua/selene), but its trivia-heavy lossless AST is built for tooling and is too heavy/slow to feed a bytecode compiler directly. Plan: use it to bootstrap/validate, but budget for a trivia-stripping lowering pass or an eventual purpose-built lexer+parser for compile speed.",
+            "mlua defines the embedding-API target surface: UserData (methods/meta-methods/fields), FromLua/IntoLua (+multi), Scope for non-'static borrows, UserDataRef guards, blanket impls over Rc/Arc wrappers, async-over-coroutines. rustia's Rust API should be a near-clone of this, adjusted so handles are Send under the 'arc'-equivalent build.",
+            "piccolo's Sequence/Executor::step(fuel) model gives steppable fuel + recursion limits and DoS resilience essentially for free and is deterministic (fuel measured in VM instructions, not wall-clock) — exactly matching grabby's deterministic-fuel requirement. The cost is ergonomic: native callbacks that re-enter the VM must be written as Sequences (poll-style), not straight-line Rust. rustia should budget for this complexity if it adopts the stackless design.",
+            "WASM ceiling data (wasmi 10ms interp, wasmtime 2.7ms JIT) confirms JIT is the real prize but is moot in-browser; rustia should architect the interpreter to be the primary, always-available path (Luau's philosophy) and treat native JIT as an optional native-only accelerator, not the baseline."
+          ],
+          "candidate_directions": [
+            "Direction A — Fork/port piccolo: adopt gc-arena + stackless register VM wholesale, retrofit Luau syntax (via full_moon frontend) and Luau semantics, accept thread-local VMs. Fastest path to a safe, fuel-native VM but inherits piccolo's immaturity, unoptimized interp loop, and the Send problem.",
+            "Direction B — koto-style pragmatism, faster: build a fresh register VM with an enum Value + Rc↔Arc feature swap (Send solved like koto) and dual I64/F64 numbers (determinism solved like koto), but invest in a Luau-grade dispatch loop (computed-goto-equivalent, small bytecode, I-cache-tight) to close koto's 4x gap to Luau. No tracing GC (RC + leak cycles, or add a small cycle collector later).",
+            "Direction C — Transliterate the Luau C++ VM to Rust: port Luau's actual bytecode format, compiler passes, and dispatch loop to Rust for guaranteed compat + proven perf, layering rustia's determinism (I64 subtype, fixed-point boundary), fuel stepping, and Send model on top. Highest compat fidelity, highest effort, must reconcile Luau's f64-only model with determinism.",
+            "Direction D — gc-arena GC + bespoke Send wrapper: keep gc-arena's safe incremental GC but engineer the Arena to be Send (thread-local during execution, migratable between steps) to satisfy 'N VMs across a thread pool.' Highest-risk on the GC/threading axis but best-of-both on memory + safety.",
+            "Direction E — full_moon frontend + custom bytecode backend as a deliberate split: reuse full_moon (or luau-parser) for parsing/error-recovery only, then build a clean register-bytecode compiler+VM with whichever GC/threading model wins. De-risks the parser (hardest-to-get-right-for-compat) while keeping the perf-critical VM fully in our control."
+          ],
+          "open_questions": [
+            "Is gc-arena's Arena makeable Send (not Sync) without forking the crate — i.e. can a whole VM be moved between pool threads between steps? Need to read gc-arena 0.5.x source for the exact auto-trait situation and whether the 'gc brand and internal Cells block Send.",
+            "What is piccolo's actual interpreter-loop throughput today vs koto and vs Luau? No published number exists; needs a direct micro-benchmark before betting on Direction A.",
+            "How do we reconcile Luau's f64-only number spec with a deterministic I64 subtype? Does grabby's float-free boundary mean rustia can legally deviate from Luau number semantics internally, or must observable script behavior match Luau bit-for-bit (which f64 already makes nondeterministic across platforms unless we pin f64 ops)?",
+            "full_moon parse throughput and AST-lowering cost — is it fast enough for runtime script loading, or only for offline compile? Need a benchmark on representative Luau sources, plus comparison to luau-parser (claims 'blazingly fast').",
+            "Does mlua's async-over-coroutines model translate to a Send+Sync world, and is async even needed for grabby's per-agent AI (likely no — synchronous stepped execution suffices)?",
+            "Cycle collection: can rustia tolerate RC cycle leaks (koto does) given long-running game sims with thousands of agents, or is a tracing/cycle collector mandatory — which then re-raises the gc-arena Send problem?",
+            "Determinism of any tracing GC: does collection timing/order ever leak into observable script behavior (finalizer order, weak-table semantics)? Luau weak tables + __gc would be a determinism hazard."
+          ],
+          "sources": [
+            "https://github.com/kyren/piccolo",
+            "https://github.com/kyren/piccolo/blob/master/README.md",
+            "https://kyju.org/blog/piccolo-a-stackless-lua-interpreter/",
+            "https://github.com/kyren/gc-arena",
+            "https://github.com/kyren/gc-arena/blob/master/README.md",
+            "https://lib.rs/crates/gc-arena",
+            "https://github.com/khvzak/script-bench-rs",
+            "https://raw.githubusercontent.com/khvzak/script-bench-rs/master/README.md",
+            "/tmp/sbr/README.md",
+            "/tmp/sbr/Sort Rust objects.png",
+            "/tmp/sbr/scripts/sort_userdata.koto",
+            "/tmp/sbr/scripts/sort_userdata.lua",
+            "https://luau.org/performance",
+            "https://news.ycombinator.com/item?id=45682560",
+            "https://github.com/Kampfkarren/full-moon",
+            "https://docs.rs/full_moon",
+            "https://docs.rs/full_moon/latest/full_moon/ast/struct.LuaVersion.html",
+            "https://lib.rs/crates/luau-parser",
+            "https://github.com/mlua-rs/mlua",
+            "https://docs.rs/mlua/latest/mlua/trait.UserData.html",
+            "https://docs.rs/mlua/latest/mlua/struct.Lua.html",
+            "https://github.com/rune-rs/rune/",
+            "https://docs.rs/rune",
+            "https://github.com/mattwparas/steel",
+            "https://mattwparas.github.io/steel/book/start/embedded.html",
+            "https://github.com/gluon-lang/gluon",
+            "https://github.com/danii/hematita",
+            "https://github.com/PistonDevelopers/dyon",
+            "https://rhai.rs/book/about/benchmarks.html",
+            "https://boajs.dev",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_runtime-0.16.1/src/types/value.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_runtime-0.16.1/src/types/number.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_runtime-0.16.1/src/send_sync.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_memory-0.16.1/src/lib.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_bytecode-0.16.1/src/instruction.rs"
+          ]
+        }
+      },
+      {
+        "stream": "luau-language-spec",
+        "result": {
+          "summary": "test",
+          "key_findings": [
+            {
+              "topic": "t",
+              "finding": "f",
+              "confidence": "high"
+            }
+          ],
+          "quantitative_data": [
+            {
+              "metric": "m",
+              "value": "v",
+              "context": "c"
+            }
+          ],
+          "implications_for_rustia": [
+            "x"
+          ],
+          "candidate_directions": [
+            "d"
+          ],
+          "open_questions": [
+            "q"
+          ],
+          "sources": [
+            "s"
+          ]
+        }
+      },
+      {
+        "stream": "official-luau-vm-internals",
+        "result": {
+          "summary": "Analyzed luau-lang/luau release 727 (commit f1f121d, 2026-06-26) source directly plus the official luau.org/performance doc. Luau is a register-based bytecode VM (32-bit fixed-width instructions) with a portable C interpreter using computed-goto dispatch on GCC/Clang and falling back to a switch on MSVC. It deliberately does NOT NaN-box: TValue is 16 bytes (8-byte Value union + 4-byte extra + 4-byte tag) to hold doubles, 64-bit pointers AND a native 3-float vector. Its speed comes from a stack of mutually-reinforcing tricks: self-patching inline caches on field/method access, load-time import resolution, a FASTCALL path that calls 133 C builtins without a Lua call frame, hybrid array+hash tables with a cached length boundary, an incremental NON-generational NON-moving mark&sweep GC with Go-style allocation-driven (not wall-clock) pacing, and an IR-based type-guided native code generator (x64/A64) with deopt-to-bytecode fallback. CRITICAL UPDATE for rustia: release 727 has added an int64 integer subtype (LUA_TINTEGER, lua_pushinteger64, behind FFlags LuauIntegerType2/LuauIntegerFastcalls) plus native classes — directly relevant to the f64-determinism tension. For wasm32 the two biggest native tricks (computed goto, runtime native codegen) do not survive, which makes interpreter-dispatch quality and value-representation the dominant levers in-browser.",
+          "key_findings": [
+            {
+              "topic": "Register VM & instruction encoding",
+              "finding": "Register-based VM with fixed 32-bit instructions: byte0=opcode(0xff), then either three 8-bit register operands A/B/C, or signed D (insn>>16) / E (insn>>8); some ops consume a following 32-bit AUX word (LUAU_INSN_* macros in Common/include/Luau/Bytecode.h:460-484). Bytecode versions: LBC_VERSION target 7 (min 3, max 11); type-info version target 3. Register model means ~20-50% fewer dispatched instructions than Lua 5.0-style stack VM for typical expressions.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Dispatch / computed goto",
+              "finding": "VM_USE_CGOTO=1 for __GNUC__/__clang__ (lvmexecute.cpp:122-138): VM_NEXT() = goto*(kDispatchTable[op]) with a 256-entry label table; MSVC path degrades to a switch. SingleStep mode forces a per-instruction dispatch label so steppable execution coexists with computed goto. The per-opcode indirect-branch sites are what give the CPU BTB per-opcode specialization.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Value representation (TValue) — NOT NaN-boxed",
+              "finding": "TValue = {Value value (8B union: GCObject* gc / void* p / double n / int64_t l / float v[2]); int extra[LUA_EXTRA_SIZE]; int tt;} = 16 bytes on 64-bit (lobject.h:32-51, luaconf.h:136-140). Vector is first-class: v[0],v[1] in the union and v[2] in extra (LUA_VECTOR_SIZE=3 => EXTRA=1). Luau explicitly rejects NaN-boxing because it must store full 64-bit doubles, 64-bit pointers, and the vector simultaneously.",
+              "confidence": "high"
+            },
+            {
+              "topic": "NEW int64 integer subtype (release 727)",
+              "finding": "Luau now has LUA_TINTEGER (lua.h:77), carried in Value.l (int64_t), with API lua_pushinteger64/lua_tointeger64 (lapi.cpp), VM equality on integers (lvmexecute.cpp:1452), and compiler support: Constant::Type_Integer folding (ConstantFolding.cpp:47, BuiltinFolding.cpp:86), an 'integer' builtin library and buffer readinteger/writeinteger, gated by FFlags LuauIntegerType2 / LuauIntegerFastcalls / LuauIntegerBufferFastcalls. Arithmetic fast-paths (LOP_ADD etc.) still only special-case f64 'number' and vector; integers currently flow as a distinct carrier type, not yet folded into the hot arith opcodes.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Inline caching (GETTABLEKS / NAMECALL)",
+              "finding": "Single-entry inline cache embedded in the bytecode: the instruction's C byte is a cached LuaNode slot index, masked by table->nodemask8 (lvmexecute.cpp:512). Fast path: if node.key string pointer == constant key pointer (interned identity compare) and value non-nil, return it in 1 compare. On miss without metatable it does luaH_getstr then self-patches the C byte via VM_PATCH_C(pc-2, cachedslot) (lines 524-542). Same scheme for SETTABLEKS, NAMECALL, and (new) userdata direct-field handlers (udatadirectfields, GETUDATAKS/NAMECALLUDATA).",
+              "confidence": "high"
+            },
+            {
+              "topic": "Import resolution",
+              "finding": "GETIMPORT (lvmexecute.cpp:476-495) pre-resolves dotted global chains (e.g. math.max, string.format) into the proto constant table k at load time; runtime fast path is a single constant load guarded by cl->env->safeenv. Optimization is disabled when the environment is mutated via getfenv/setfenv/loadstring (safeenv flag).",
+              "confidence": "high"
+            },
+            {
+              "topic": "FASTCALL builtin path",
+              "finding": "LOP_FASTCALL/FASTCALL1/2/2K/3 (lvmexecute.cpp:3004-3051) invoke a luau_FastFunction from luauF_table[bfid] directly on registers, skipping Lua call-frame setup; on success it jumps past the function-load + CALL instructions. Guarded by safeenv; returns -1 to bail to the normal CALL path. There are 133 LBF_ builtin ids (Bytecode.h) covering math/bit32/string/table/buffer/vector. This is the main reason builtin-heavy code approaches native speed.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Table implementation",
+              "finding": "Hybrid array+hash (lobject.h LuaTable): array part (sizearray) + closed-addressing hash of LuaNode{TValue val; TKey key;} (32 bytes/node). lsizenode=log2(node count), nodemask8 for fast masking; union lastfree/aboundary caches the negated '#t' boundary. Guarantees element at #t lives in the array part. Length uses a branch-free binary search (luau.org: '50+% faster'). No general shape/hidden-class system — the inline cache + interned-key identity gives most of the hidden-class benefit for fixed-field-name access patterns.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Garbage collector",
+              "finding": "lgc.cpp:24 states verbatim: 'incremental non-generational non-moving mark&sweep'. States: GCSpause, GCSpropagate, GCSpropagateagain (the 'remark' phase to cut atomic cost), GCSatomic, then sweep (lgc.h:19-22). Pacing is allocation-driven via a Go-inspired controller: GCthreshold/heaptrigger computed from gcgoal, gcstepmul, gcstepsize plus an integral error offset getheaptriggererroroffset (lgc.cpp:1133-1240). Paged sweeper is 2-3x faster than linked-list sweep and saves 16 bytes/object. Generational GC discussed in blog posts is experimental, NOT the shipped default.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Native code generator (CodeGen)",
+              "finding": "IR-based pipeline (CodeGen/src): bytecode -> typed IR -> x64 (AssemblyBuilderX64) or A64 (AssemblyBuilderA64). Type-guided lowering emits CHECK_TAG guards with per-pc fallbackBlock() deopt that re-enters the bytecode interpreter on guard failure (IrTranslation.cpp:45-191). Uses the compiler's bytecode type-info (LBC_TYPE_VERSION up to 3). It is a method-JIT/templated lowering, not a tracing JIT; typical native speedup is ~2x over the interpreter, far short of a full optimizing JIT — and it is entirely unavailable on wasm32.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Compiler optimizations",
+              "finding": "At -O2: constant folding incl. across locals and builtin calls with constant args (ConstantFolding.cpp, BuiltinFolding.cpp, with Type_Integer constants), builtin recognition into FASTCALL, local-function inlining, loop unrolling for compile-time bounds, closure caching (DUPCLOSURE returns the same closure object), and immutable-upvalue capture with no allocation (~90% of upvalues are not mutated). Compiler throughput ~950K lines/sec/core. String hashing is an ARX/lookup3-style hash (LuaJIT 2.1-inspired) replicated in BytecodeBuilder so compile-time and runtime hashes match (lstring.cpp:10-16).",
+              "confidence": "high"
+            },
+            {
+              "topic": "Determinism: table iteration order",
+              "finding": "Luau pairs()/next() iterate array part then hash part in NODE-SLOT order, which depends on hash values and rehash history — NOT insertion order. This conflicts with grabby-aliens' insertion-ordered-map requirement. Lua/Luau spec leaves order unspecified, so diverging (insertion-ordered) keeps compat while satisfying determinism, but is a deliberate departure from Luau's table internals.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Determinism: floats and libm",
+              "finding": "Core f64 arithmetic in the VM is plain IEEE-754 (no x87, no implicit FMA contraction), so add/sub/mul/div/sqrt are bit-identical native-vs-wasm32 (wasm mandates IEEE-754). The non-deterministic surface is transcendental/libm functions (sin, cos, exp, pow, fmod) which Luau routes to the platform libm — bit-results differ across OS/arch/wasm. A from-scratch rustia must supply its own deterministic math (e.g. the pure-Rust `libm` crate) to keep cross-platform bit-exactness.",
+              "confidence": "high"
+            }
+          ],
+          "quantitative_data": [
+            {
+              "metric": "TValue size",
+              "value": "16 bytes (8B Value union + 4B extra + 4B tag) on 64-bit",
+              "context": "lobject.h:32-51; vs a possible 8-byte NaN-boxed value on wasm32"
+            },
+            {
+              "metric": "LuaNode size",
+              "value": "32 bytes (TValue val 16 + TKey key 16)",
+              "context": "hash-part bucket; lobject.h"
+            },
+            {
+              "metric": "Dispatch table",
+              "value": "256-entry void* label table",
+              "context": "kDispatchTable, lvmexecute.cpp:235"
+            },
+            {
+              "metric": "FASTCALL builtins",
+              "value": "133 LBF_ ids",
+              "context": "grep LBF_ in Common/include/Luau/Bytecode.h"
+            },
+            {
+              "metric": "Interpreter core+builtins code size",
+              "value": "~16 KB on x64",
+              "context": "luau.org/performance — fits in L1i"
+            },
+            {
+              "metric": "Table library ops speedup",
+              "value": "3x+ (insert/remove/move)",
+              "context": "luau.org/performance"
+            },
+            {
+              "metric": "table.sort",
+              "value": "~4x (introsort)",
+              "context": "luau.org/performance"
+            },
+            {
+              "metric": "Paged sweeper",
+              "value": "2-3x faster than linked-list sweep; saves 16 B/object",
+              "context": "luau.org/performance"
+            },
+            {
+              "metric": "Table length binary search",
+              "value": "50%+ faster",
+              "context": "luau.org/performance"
+            },
+            {
+              "metric": "Compiler throughput",
+              "value": "~950K lines/sec/core",
+              "context": "luau.org/performance"
+            },
+            {
+              "metric": "Immutable upvalue fraction",
+              "value": "~90% of upvalues not mutated",
+              "context": "luau.org/performance — enables alloc-free capture"
+            },
+            {
+              "metric": "Native codegen speedup",
+              "value": "~2x over interpreter (method JIT, not tracing)",
+              "context": "CodeGen design; not a full optimizing JIT; unavailable on wasm32"
+            },
+            {
+              "metric": "Bytecode version",
+              "value": "LBC_VERSION target 7 (min3/max11); type version target 3",
+              "context": "Bytecode.h:501-507"
+            },
+            {
+              "metric": "koto perf bar",
+              "value": "~4-5 us/decision vs ~0.14 us native floor (~30-40x)",
+              "context": "grabby-aliens measurement; Luau-interpreter class is roughly LuaJIT-interpreter speed, typically 2-3x faster than PUC Lua 5.4"
+            }
+          ],
+          "implications_for_rustia": [
+            "ADOPT register VM + 32-bit fixed-width instruction encoding with A/B/C register bytes and an AUX word — it is fully portable to Rust and wasm32 and is the single highest-ROI structural decision; it cuts dispatched-instruction count vs a stack VM.",
+            "Computed-goto dispatch DOES NOT port: safe Rust has no goto, and even C computed-goto degrades on wasm32 (wasm has no indirect-branch-to-label; LLVM lowers address-of-label to a br_table switch, collapsing per-opcode BTB specialization). On native, the closest Rust equivalent is a function-pointer threaded interpreter using guaranteed tail calls (`become`, currently unstable explicit_tail_calls) or a loop+match the compiler turns into a jump table; on wasm the winning move is emitting the WASM tail-call extension (return_call), which modern engines support — but Rust will not emit it from plain code, so this needs a custom dispatch shim. Treat dispatch as a per-target strategy, not one design.",
+            "On wasm32, INVERT Luau's value decision: 32-bit pointers make NaN-boxing attractive — an 8-byte NaN-boxed value can carry a double or a 32-bit GC handle + tag, halving value memory (16B->8B) and roughly doubling value cache density. The cost is the native 3xf32 vector no longer fits inline and must be boxed/handled separately. This is a genuine fork: 16-byte tagged-union (Luau-faithful, simplest) vs 8-byte NaN-box (wasm-memory-optimal). NaN-boxing requires NaN canonicalization for determinism.",
+            "The int64 integer subtype Luau added in release 727 (LUA_TINTEGER) is the cleanest resolution of grabby's f64-determinism tension: rustia can ship a first-class deterministic integer carrier AND Q16.16 helpers while staying Luau-compatible, instead of forcing a float-free host boundary. Worth adopting early since it touches value layout, arithmetic opcodes, and the serde bridge.",
+            "REPLICATE the self-patching inline cache (cached node slot in the instruction's C byte, keyed on interned-string pointer/id identity) — it is determinism-safe (affects only speed, never observed values) provided bytecode lives in mutable memory (a Vec<u32> is fine) and strings are interned with stable identity. This plus interned-key tables substitutes for a full hidden-class system for the common fixed-field-name access pattern.",
+            "REPLICATE load-time import resolution and the FASTCALL builtin path: these are where Luau approaches native speed on real code. In Rust, builtins as `fn(&mut VM, regs) -> i32` in a static table, invoked without a script call frame, map cleanly. The safeenv guard concept (skip the optimization if globals were mutated) is needed for correctness.",
+            "GC: an incremental, NON-moving, NON-generational mark&sweep with allocation-driven (fuel-compatible, NOT wall-clock) pacing is the determinism-friendly target and matches the steppable-VM requirement directly — drive GC steps off the same deterministic fuel counter. Non-moving keeps pointers/handles stable for inline caches. For Send+Sync N-independent-VMs, give each VM its own single-threaded heap (no cross-VM sharing); a hand-rolled mark&sweep or `gc-arena` (non-moving, brand-lifetime) are the realistic Rust options.",
+            "Tables MUST diverge from Luau on iteration order: use insertion-ordered maps (grabby hard constraint). Keep Luau's array+hash hybrid for performance but make next()/pairs() insertion-ordered. This stays within Lua's 'unspecified order' contract, so Luau-script compat is preserved.",
+            "Native runtime codegen is moot in-browser, so for the wasm32 target the interpreter IS the product: dispatch quality, value size (NaN-box), and builtin/FASTCALL coverage decide whether rustia beats koto. Reserve any native JIT effort for the native target only, and recognize its realistic ceiling (~2x over a good interpreter for a method-JIT) — do not over-invest there relative to interpreter tuning.",
+            "Determinism requires rustia to NOT use platform libm: ship a pure-Rust deterministic math library (e.g. the `libm` crate, or a fixed-point math layer) for sin/cos/exp/pow/fmod so results are bit-identical native-vs-wasm. Core +,-,*,/ ,sqrt on f64 are already bit-deterministic and need no special handling."
+          ],
+          "candidate_directions": [
+            "Faithful 16-byte tagged-union value with inline 3xf32 vector (Luau-compatible, simplest port, best for native; larger memory footprint on wasm).",
+            "8-byte NaN-boxed value tuned for wasm32 32-bit handles (half the memory, better cache density; vectors boxed; needs NaN canonicalization for determinism).",
+            "Per-target dispatch strategy: guaranteed-tail-call threaded interpreter on native + WASM return_call threading on wasm, vs a single portable loop+match; pick by measured BTB behavior per target.",
+            "First-class int64 integer subtype + Q16.16 fixed-point intrinsics as the deterministic numeric story (follow Luau 727's LUA_TINTEGER), vs keeping a strict float-free host boundary.",
+            "Incremental non-moving mark&sweep GC driven by the deterministic fuel counter (unified fuel+GC pacing), vs reference counting / arena per VM for simpler Send+Sync isolation."
+          ],
+          "open_questions": [
+            "Does Luau 727's LUA_TINTEGER participate in script-level arithmetic and the type system, or is it purely a host-interop/buffer carrier? The hot arith opcodes still only special-case f64+vector — need to read ltm.cpp/lvmutils.cpp arith paths and the type checker to know how far integer support actually reaches.",
+            "Quantitatively, how much does computed-goto vs switch dispatch matter on wasm32 specifically (with and without the engine's return_call support)? Needs a microbenchmark on real wasm runtimes (V8/SpiderMonkey/wasmtime) to size the loss rustia must mitigate.",
+            "Can a Rust threaded interpreter realistically emit WASM return_call (tail-call dispatch) without dropping to hand-written .wat, or does it require a wasm post-processor / inline-asm-style shim?",
+            "What is Luau's current measured ns/op on representative game-AI-like workloads vs koto 0.16.1 in wasm — needed to confirm the projected closing of the ~30-40x gap toward the native floor.",
+            "gc-arena's brand-lifetime model vs the need for Send+Sync VM values: can rustia get both stable non-moving addresses (for inline caches) AND Send/Sync without a custom collector?",
+            "How does Luau's string hash (ARX/lookup3) and rehash policy interact with our required insertion-ordered iteration — do we keep a separate insertion-order index alongside the hash part, and what is its memory cost?"
+          ],
+          "sources": [
+            "https://luau.org/performance/",
+            "https://github.com/luau-lang/luau (release 727, commit f1f121dc1f61659bdf8fafa8d4908211c9f4dda8, 2026-06-26)",
+            "/tmp/luau_src/VM/src/lvmexecute.cpp (dispatch, GETTABLEKS/GETIMPORT/FASTCALL/LOP_ADD inline caches)",
+            "/tmp/luau_src/VM/src/lobject.h (TValue, LuaTable, LuaNode, type macros)",
+            "/tmp/luau_src/VM/include/lua.h (LUA_T* enum incl LUA_TINTEGER; lua_pushinteger64)",
+            "/tmp/luau_src/VM/include/luaconf.h (LUA_VECTOR_SIZE, LUA_EXTRA_SIZE)",
+            "/tmp/luau_src/VM/src/lgc.cpp + lgc.h (incremental non-gen non-moving GC, pacing, states)",
+            "/tmp/luau_src/VM/src/lstring.cpp (ARX/lookup3 string hash)",
+            "/tmp/luau_src/VM/src/lapi.cpp (integer64 API)",
+            "/tmp/luau_src/Common/include/Luau/Bytecode.h (instruction encoding, LBC versions, 133 LBF_ builtins)",
+            "/tmp/luau_src/CodeGen/src/IrTranslation.cpp (type-guided lowering, CHECK_TAG guards, deopt fallback blocks)",
+            "/tmp/luau_src/Compiler/src/Builtins.cpp + ConstantFolding.cpp + BuiltinFolding.cpp (integer fastcalls, constant folding)",
+            "https://gist.github.com/zeux/bb646a63c02ff2828117092036d2d174 (Roblox Lua VM FAQ)",
+            "https://devforum.roblox.com/t/faster-lua-vm-released/339587"
+          ]
+        }
+      },
+      {
+        "stream": "sota-vm-jit-wasm",
+        "result": {
+          "summary": "The single most decisive prior art for rustia is Deegen / LuaJIT Remake (sillycross, Stanford; OOPSLA'21 copy-and-patch + arXiv 2411.11469): an automatically-generated VM where (a) the INTERPRETER uses CPS tail-call/context-threaded dispatch and is already ~31% faster than LuaJIT's hand-written asm interpreter and ~179% faster than PUC Lua, and (b) a baseline JIT built with copy-and-patch generates code at 1.62 GB/s with sub-ms latency, landing within ~34% of LuaJIT (full optimizing). This is the SOTA target. CRITICAL WASM CAVEAT: the two flagship native techniques DO NOT transfer to a wasm32 host. Copy-and-patch needs to memcpy+patch native machine bytes (impossible in wasm's Harvard/immutable-code model), and tail-call dispatch — the fastest native dispatch — is measured 1.2x (Firefox) to 4.6x (wasmtime) SLOWER than a plain switch loop when itself compiled to wasm. So rustia needs a split: a portable register-bytecode interpreter with a big br_table/switch dispatch loop for the wasm path, optionally tiered up by copy-and-patch (or cranelift) baseline JIT ONLY on native targets. Determinism is achievable for f64 on the 5 IEEE-754 basic ops (+,-,*,/,sqrt) bit-identically across x86/ARM/wasm IF FMA contraction is disabled and no transcendentals from a platform libm are used; the proven recipe (rapier physics) is pure-Rust libm. Fixed-point (Q16.16/i64) remains the only zero-risk guarantee and dovetails with the float-free boundary already in grabby.",
+          "key_findings": [
+            {
+              "topic": "Deegen / LuaJIT Remake interpreter dispatch",
+              "finding": "The fastest known Lua interpreter (LJR, arXiv 2411.11469) is built by generating, per-bytecode, C++ handler functions that end in [[clang::musttail]] continuation calls (CPS / 'context threading'). This compiles each opcode to its own machine-code fragment and turns dispatch into fallthrough/tail-jumps rather than one central indirect branch — already ~31% faster than LuaJIT's hand-written assembly interpreter and ~179% faster than PUC-Lua across 44 benchmarks. Rust now has the same capability via nightly `become` + `extern \"rust-preserve-none\"`.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Tail-call dispatch is a TRAP on wasm",
+              "finding": "mattkeeter (2026-04) measured the identical tail-call (become/preserve-none) VM that is 1.6x FASTER than a plain Rust match-loop VM on ARM64 native to be 1.2x slower (Firefox), 3.7x slower (Chrome), and 4.6x slower (wasmtime) once compiled to wasm. Reason: wasm has no computed goto / no addressable code; tail-call dispatch becomes return_call/call_indirect through a function table, which defeats the host engine's own register allocation and inlining. The opposite of native.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Best dispatch when the engine itself is wasm",
+              "finding": "On a wasm32 host the winner is a single large switch/loop lowered to br_table (one bounds-checked jump table), NOT threading. Computed goto does not exist in wasm by construction (Harvard architecture, code not addressable, structured control flow only). The wasm tail-call proposal (return_call/return_call_indirect, shipped in V8/wasm 3.0) helps proper-tail-call languages with stack growth, not interpreter dispatch speed. Native-clang experiments show tail-calls only ~10-12% over switch even where they help; on wasm they regress.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Copy-and-patch (OOPSLA'21) — native only",
+              "finding": "Stencils are pre-compiled (at build time, by LLVM) native object-code fragments with relocation 'holes'; runtime codegen is just memcpy + scalar adds, no LLVM at runtime. LJR's baseline JIT emits 1.62 GB/s of machine code, ~91 bytes per Lua bytecode, compiled all 44 benchmarks (17,197 bytecodes) in <1 ms, and runs ~34% slower than full LuaJIT / 4.6x faster than PUC-Lua. This is GREAT for native tiering but fundamentally requires writing executable native bytes — impossible inside wasm32-unknown-unknown.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Copy-and-patch DOES have a wasm-stencil variant",
+              "finding": "The same group's WasmNow compiles wasm 4.9x-6.5x faster than Chrome's Liftoff baseline and produces 39%-63% faster code using 1666 stencils / 35 kB. BUT this is a wasm engine running on NATIVE (it emits native code from wasm input). It is not a way to JIT from inside a wasm sandbox. It is relevant only if rustia ever ships a native engine, not for the in-browser path.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Runtime wasm-emitting JIT from inside wasm (Wingo)",
+              "finding": "Andy Wingo (wingolog 2022-08) showed you CAN generate a new wasm module at runtime that imports the main module's memory + indirect function table, instantiate it, and patch new funcrefs into the table for call_indirect dispatch. Feasible but: WebAssembly.instantiate of a fresh module per hot function is heavyweight, sync-compile is size-capped in browsers (sync compile limited to ~4KB on main thread in some engines; large modules must be async), and the call_indirect adds indirection. Wingo's own conclusion: prefer 'offline JIT' (Wizer snapshot / AOT) over runtime emission. Verdict: not worth it for per-agent AI hotpaths.",
+              "confidence": "high"
+            },
+            {
+              "topic": "AOT: compile Luau script -> wasm module",
+              "finding": "Technically strongest in-browser speedup path (run scripts at near-native via the host's optimizing tier), but breaks several hard constraints: (1) requires a wasm assembler + a per-script instantiate step; (2) loses the steppable-fuel/recursion VM (host wasm has no deterministic fuel unless you inject gas counters, which wasmtime supports but browsers do not); (3) GC/dynamic-typing semantics of Luau need a runtime anyway. Best used only for fully-typed hot kernels, not general scripts.",
+              "confidence": "medium"
+            },
+            {
+              "topic": "Luau value representation",
+              "finding": "Luau deliberately does NOT NaN-box; it uses a 16-byte tagged value (8-byte double/pointer payload + tag) because it makes native 3-wide SIMD vectors a first-class type and keeps the C/Rust code branch-predictable. NaN-boxing (8 bytes) saves memory (priority #2) but costs mask/shift on every access and conflicts with storing a real f64 vector type. Tradeoff is live for rustia given low-memory priority.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Luau table / call optimizations to copy",
+              "finding": "Inline caching of field hash-slot (compiler predicts slot, VM corrects) blended with LuaJIT HREFs; GETIMPORT resolves global chains (math.max) at load time with deopt on getfenv/setfenv/loadstring; FASTCALL dispatches builtins (math.*, bit32.*, type, rawget) inline without a stack frame (~'slightly slower than core instructions'); specialized bytecode for ipairs/pairs/next; branch-free binary-search + cached #t; table templates for literals. Compiler does inlining + loop unrolling + constant folding at -O2; bytecode interpreter is ~16KB on x64 (fits I-cache).",
+              "confidence": "high"
+            },
+            {
+              "topic": "Inline caches / hidden classes for Rust tables",
+              "finding": "V8/JSC-style hidden classes (shapes/maps) give monomorphic field access in O(1) with a shape-id guard. For a Send+Sync deterministic VM the shape table must be per-VM or behind Arc; insertion-ordered map requirement (determinism) is compatible with shape transitions if shapes record insertion order. LJR shows generic IC API auto-generated for property access, +4% typical / +10% on IC-heavy code via inline-slab + self-modifying patchable jumps — but SMC is native-only; on wasm an IC degrades to a guarded branch + side table.",
+              "confidence": "medium"
+            },
+            {
+              "topic": "Deterministic f64 across native+wasm is achievable but narrow",
+              "finding": "WebAssembly guarantees: if neither inputs nor output of an fp op is NaN, the result of +,-,*,/,sqrt,min,max,nearest etc is bit-identical across ALL platforms (round-to-nearest-even, no extended precision, no x87). The two killers are (1) FMA contraction (a*b+c fused to one rounding) — wasm has NO scalar fma except relaxed-simd; Rust/LLVM does NOT contract by default unless mul_add or fast-math is used, so just never call f64::mul_add; (2) transcendentals (sin/cos/exp/pow/log) which differ per platform libm. Fix: use the pure-Rust `libm` crate (the rapier physics engine ships cross-platform determinism this way) for ALL math, never the system/std intrinsics.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Luau is f64-only — the core tension",
+              "finding": "Luau has no integer subtype; all numbers are f64. Grabby's float-free boundary + Q16.16 fixed-point means rustia must either (a) keep f64 internally but enforce the libm + no-FMA discipline to get bit-identical f64 (then expose only int/Q16.16 at the host boundary), or (b) represent Luau 'number' as fixed-point/integer where the sim needs determinism and accept Luau-semantics divergence. Option (a) is more Luau-compatible (priority #4); option (b) is zero-risk determinism (priority #1) but non-conformant.",
+              "confidence": "high"
+            },
+            {
+              "topic": "WASM SIMD (v128) utility",
+              "finding": "v128 maps to native SSE2/NEON and is phase-5 shipped. Useful for: 16-byte tagged-value moves, vector3 math (Luau's native vector type), batch GC mark scanning, and string compare/hash. NaN-boxing+SIMD synergy is weak (NaN-box is scalar). SIMD won't speed up the dispatch loop itself. Determinism note: core wasm SIMD fp is deterministic under the same non-NaN rule; AVOID relaxed-SIMD (fma, approximate ops) which is explicitly non-deterministic.",
+              "confidence": "medium"
+            },
+            {
+              "topic": "Superinstructions / register VM",
+              "finding": "Register bytecode (Lua 5/Luau/LuaJIT style) already beats stack bytecode by eliminating push/pop traffic (~30-50% fewer dispatches typical in literature). Superinstruction fusion (e.g. ADD+MOV, GETFIELD+CALL→NAMECALL, loop-test+jump) cuts dispatch count further; Luau's FORGLOOP/NAMECALL/FASTCALL are exactly fused superinstructions. On a wasm host where each dispatch is a relatively expensive br_table, REDUCING dispatch count via fat register superinstructions is the single highest-leverage wasm-portable win.",
+              "confidence": "high"
+            }
+          ],
+          "quantitative_data": [
+            {
+              "metric": "LJR interpreter vs LuaJIT interpreter",
+              "value": "+31% faster",
+              "context": "Deegen-generated CPS tail-call interpreter beats LuaJIT's hand-written asm interpreter, 44-benchmark geomean (arXiv 2411.11469)"
+            },
+            {
+              "metric": "LJR interpreter vs PUC Lua",
+              "value": "+179% faster (2.79x)",
+              "context": "same benchmark set"
+            },
+            {
+              "metric": "LJR baseline-JIT vs LuaJIT (full optimizing)",
+              "value": "~34% slower (geomean); wins 13/44",
+              "context": "copy-and-patch baseline JIT, no optimizing tier"
+            },
+            {
+              "metric": "LJR baseline-JIT vs PUC Lua",
+              "value": "4.6x faster",
+              "context": "baseline JIT only"
+            },
+            {
+              "metric": "Copy-and-patch codegen throughput",
+              "value": "1.62 GB/s machine code; 19.1M Lua bytecodes/s; 44 benchmarks <1ms",
+              "context": "runtime stencil memcpy+patch, native only"
+            },
+            {
+              "metric": "Copy-and-patch code expansion",
+              "value": "~91 bytes machine code / Lua bytecode",
+              "context": "baseline JIT footprint"
+            },
+            {
+              "metric": "WasmNow vs Chrome Liftoff",
+              "value": "4.9x-6.5x faster compile, 39%-63% faster code, 1666 stencils / 35 kB",
+              "context": "copy-and-patch wasm baseline compiler running on native"
+            },
+            {
+              "metric": "Tail-call dispatch VM on native ARM64",
+              "value": "76ms vs 125ms match-loop (1.6x faster); Mandelbrot",
+              "context": "mattkeeter 2026, M1; become/preserve-none"
+            },
+            {
+              "metric": "Tail-call dispatch VM on wasm",
+              "value": "1.2x slower (Firefox), 3.7x slower (Chrome), 4.6x slower (wasmtime)",
+              "context": "SAME VM compiled to wasm — dispatch technique inverts on wasm host"
+            },
+            {
+              "metric": "Tail-call vs switch dispatch, native/emscripten",
+              "value": "+10% (native clang), +12% (emscripten) for tail-calls",
+              "context": "discuss.python.org wasm dispatch thread — modest, and contradicted by mattkeeter for pure-wasm output"
+            },
+            {
+              "metric": "Luau interpreter code size",
+              "value": "~16 KB on x64",
+              "context": "fits instruction cache; portable C tuned for clang"
+            },
+            {
+              "metric": "Luau tagged value size",
+              "value": "16 bytes/value",
+              "context": "NOT NaN-boxed; enables native 3-wide SIMD vector type"
+            },
+            {
+              "metric": "Luau compile throughput",
+              "value": "950K lines/s/core",
+              "context": "multi-pass AST->bytecode compiler"
+            },
+            {
+              "metric": "Luau paged sweeper / #t binary search",
+              "value": "2-3x faster sweep; 50%+ faster length; 16 bytes/object saved",
+              "context": "GC + table length optimizations"
+            },
+            {
+              "metric": "Wingo in-wasm-generated-code Fib",
+              "value": "wasmtime 0.232 s/invocation < SpiderMonkey 0.392 < V8 0.729",
+              "context": "runtime nested wasm module instantiate+call_indirect; demonstrates feasibility, not that it's worthwhile"
+            },
+            {
+              "metric": "Grabby koto baseline",
+              "value": "~4-5 us/decision vs ~0.14 us Rust-native (30-40x)",
+              "context": "perf bar rustia must beat; LJR-class interpreter could plausibly cut the multiple substantially"
+            }
+          ],
+          "implications_for_rustia": [
+            "Dispatch strategy MUST be target-split, not universal. On native: CPS tail-call / context-threaded (Rust nightly `become` + rust-preserve-none) is the proven fastest and is what beats LuaJIT's interpreter. On wasm32: that SAME technique regresses up to 4.6x — use a single big match -> br_table loop instead. Design the interpreter so the opcode handlers are written once but the DISPATCH glue is cfg(target_arch=\"wasm32\")-conditional (switch-loop) vs native (tail-call chain). This is the highest-impact architectural decision in this stream.",
+            "Copy-and-patch JIT belongs on the NATIVE tier only. Plan a two-tier engine: (tier 0) portable register-bytecode interpreter everywhere; (tier 1) copy-and-patch OR cranelift baseline JIT compiled in under #[cfg(not(target_arch=\"wasm32\"))]. In-browser, rustia stays interpreter-only — accept that and make the interpreter excellent. Do NOT attempt runtime wasm-module emission for hot functions (Wingo path): instantiate cost + sync-compile size caps + call_indirect indirection make it lose to a good interpreter for short per-agent AI scripts.",
+            "Minimize dispatch COUNT for the wasm path: a register VM + aggressive superinstruction fusion (Luau's FORGLOOP/NAMECALL/FASTCALL/GETIMPORT) is the most wasm-portable speedup because each br_table dispatch is comparatively expensive in wasm. Spend optimization budget on fat fused opcodes and inline caches that degrade gracefully to a guarded branch + side table on wasm (no self-modifying code available).",
+            "Determinism is solvable for f64 WITHOUT abandoning Luau number semantics: enforce (1) the pure-Rust `libm` crate for every transcendental (the rapier-proven recipe), (2) never emit f64::mul_add / never enable fast-math / avoid relaxed-SIMD, (3) restrict to the bit-identical IEEE-754 op set. This keeps full Luau f64 compat (priority #4) while preserving bit-for-bit native+wasm (priority #1). Fixed-point/Q16.16 stays the zero-risk fallback and matches grabby's existing float-free host boundary — recommend f64-internal-with-libm-discipline as default, fixed-point as a build-mode escape hatch.",
+            "Value layout is a real fork: Luau's 16-byte tagged value is faster/branch-friendlier and enables a native vector3 type (good for game AI), but NaN-boxing (8 bytes) directly serves priority #2 (low memory) and wasm cache pressure. Given priorities (speed #1, memory #2), prototype BOTH and benchmark; NaN-boxing's mask/shift may be cheaper than 2x memory traffic on wasm's linear memory. This should be one of the 5 explored directions.",
+            "Inline caches + hidden-classes/shapes must be designed Send+Sync and insertion-order-preserving from day one (determinism + 'N VMs on a thread pool'). Shapes can record insertion order so IC + ordered-map are compatible. On native an IC can use patchable SMC (LJR-style, +4-10%); on wasm it must be a guarded branch into a side table — design the IC abstraction to compile to both."
+          ],
+          "candidate_directions": [
+            "Deegen-inspired dual-dispatch interpreter: single opcode-handler source, CPS tail-call dispatch on native (target LuaJIT-interpreter-class speed, ~31% over LuaJIT), big br_table switch-loop on wasm — the recommended baseline architecture.",
+            "Native-only tiering: tier-0 portable interpreter + tier-1 copy-and-patch baseline JIT (1.6 GB/s codegen, within ~34% of LuaJIT) gated behind cfg(not(wasm32)); wasm stays interpreter-only. Alternative tier-1: cranelift for maintainability vs copy-and-patch for compile speed.",
+            "Register VM with maximal superinstruction fusion + Luau-style FASTCALL/GETIMPORT/NAMECALL, optimizing the wasm path by minimizing dispatch count rather than dispatch cost — the most portable single-codebase win.",
+            "Value-representation fork to benchmark: 16-byte Luau tagged value (SIMD vector type, branch-friendly) vs 8-byte NaN-boxed (low memory, less wasm linear-memory traffic).",
+            "Determinism mode fork: (a) f64-internal with mandatory pure-Rust libm + no-FMA discipline for full Luau compat with bit-identical results, vs (b) fixed-point/Q16.16 number representation for zero-risk determinism matching grabby's float-free boundary, selectable at build time.",
+            "AOT script->wasm for fully-typed hot kernels only (not general scripts), accepting loss of deterministic fuel/stepping for those kernels — niche, low priority."
+          ],
+          "open_questions": [
+            "Does Rust's nightly `become`/rust-preserve-none stabilize on a timeline rustia can depend on, and does it work under wasm32 codegen at all (or must the wasm path always be the switch-loop)? Need to test musttail emission on wasm32 target.",
+            "Can a copy-and-patch baseline JIT be built in Rust without LLVM-at-build-time stencil generation tooling (Deegen relies on clang asm-goto/CallBr + LLVM build-time)? What is the Rust-native stencil pipeline (dynasm? inkwell at build time? hand-written .o stencils)?",
+            "Exact magnitude of the br_table dispatch penalty on wasm vs the native tail-call path for OUR opcode set — needs a microbenchmark before committing the dual-dispatch design.",
+            "For deterministic f64: is the pure-Rust `libm` crate bit-identical between native x86-64 and wasm32 for the full transcendental set we need, across all rounding edge cases, and is it fast enough vs system libm (it is typically slower)?",
+            "If we keep Luau f64 semantics, how do we reconcile with the host's Q16.16 boundary — do scripts compute in f64 and quantize at the boundary, and is that quantization itself deterministic?",
+            "Does insertion-ordered table + hidden-class shape transitions interact correctly when keys are deleted/re-added (shape explosion / determinism of shape ids across VMs)?",
+            "Steppable deterministic fuel: counting bytecodes is easy in the interpreter; how is fuel preserved if/when a function tiers up to the native copy-and-patch JIT (must inject fuel decrements into generated stencils)?"
+          ],
+          "sources": [
+            "https://arxiv.org/abs/2011.13127",
+            "https://dl.acm.org/doi/10.1145/3485513",
+            "https://fredrikbk.com/publications/copy-and-patch.pdf",
+            "https://en.wikipedia.org/wiki/Copy-and-patch",
+            "https://sillycross.github.io/2023/05/12/2023-05-12/",
+            "https://arxiv.org/pdf/2411.11469",
+            "https://github.com/sillycross/WasmNow",
+            "https://www.mattkeeter.com/blog/2026-04-05-tailcall/",
+            "https://discuss.python.org/t/interpreter-dispatch-and-performance-on-webassembly/27246",
+            "https://v8.dev/blog/wasm-tail-call",
+            "https://github.com/WebAssembly/tail-call/blob/main/proposals/tail-call/Overview.md",
+            "https://par.nsf.gov/servlets/purl/10403756",
+            "https://wingolog.org/archives/2022/08/18/just-in-time-code-generation-within-webassembly",
+            "https://dl.acm.org/doi/pdf/10.1145/3774898.3778040",
+            "https://luau.org/performance/",
+            "https://github.com/Roblox/luau/blob/master/Common/include/Luau/Bytecode.h",
+            "https://github.com/WebAssembly/spec/blob/main/proposals/simd/SIMD.md",
+            "https://v8.dev/features/simd",
+            "https://github.com/WebAssembly/design/issues/1385",
+            "https://gafferongames.com/post/floating_point_determinism/",
+            "https://randomascii.wordpress.com/2013/07/16/floating-point-determinism/",
+            "https://christian-seiler.de/projekte/fpmath/",
+            "https://lib.rs/crates/i_float",
+            "https://arxiv.org/pdf/2411.16544",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_bytecode-0.16.1"
+          ]
+        }
+      },
+      {
+        "stream": "grabby-binding-contract",
+        "result": {
+          "summary": "grabby-aliens uses koto 0.16.1 in three places: (1) view console REPL (view/src/console.rs, feature \"arc\"), (2) scenario procedural generation (scenario/src/lib.rs, features \"arc\"+\"serde\"), and (3) a throwaway perf bake-off (ai_bakeoff/, feature \"arc\"). The exact koto API surface consumed is small and stable: Koto::with_settings/default, prelude().add_fn/insert, exports().get, compile_and_run(CompileArgs::...export_top_level_ids), call_function(KValue,&[KValue]), value_to_string, and KValue/KNumber(I64|F64) pattern-matching in host fns. The determinism contract is the dominant constraint: bit-identical across native + wasm32 + x86_64-linux + aarch64-mac, enforced by FNV-1a golden hashes pinned to single cross-arch constants, a strict float-free host<->script boundary (only i64/Q16.16; all f64 in Rust), insertion-ordered maps, FNV-1a-seeded ChaCha8 substreams, integer epsilon-greedy, and a DETERMINISTIC instruction-fuel limit that must REPLACE koto's wall-clock Instant-based ExecutionTimeout. Perf bar: koto measured ~5.4 us/decision (~39x the 0.14 us Rust-native floor); rustia must beat koto and ideally approach native, which would let the per-tick-per-agent AI hot path move back into script. The serde requirement is koto::serde::from_koto_value -> a serde-derive ScenarioSpec with deny_unknown_fields/default, same validate() path as serde_yaml.",
+          "key_findings": [
+            {
+              "topic": "Koto embedding API surface actually used (the binding contract rustia must mirror)",
+              "finding": "Exact methods consumed across the repo: `Koto::default()`, `Koto::with_settings(KotoSettings::default().with_execution_limit(Duration))`, `koto.prelude() -> &KMap` then `.add_fn(name, move |ctx| -> Result<KValue>)` and `.insert(name, KValue)`, `koto.exports() -> &KMap` then `.get(name) -> Option<KValue>`, `koto.compile_and_run(impl Into<CompileArgs>)`, `koto.call_function(KValue, &[KValue]) -> Result<KValue>`, `koto.value_to_string(KValue) -> Result<String>`. REPL persistence uses `CompileArgs::new(s).export_top_level_ids(true)`. Imports used: `koto::prelude::*`, `koto::runtime::{KNumber, runtime_error, CallContext, KValue}`, `koto::{CompileArgs, Koto, KotoSettings}`, `koto::serde::from_koto_value`.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Value/number model at the boundary",
+              "finding": "Host fns receive `ctx.args() -> &[KValue]` and pattern-match `[KValue::Number(a), KValue::Number(b)]`, converting with `let a: i64 = a.into()` or `f64::from(*n)`. Numbers are `KNumber::I64(i64)` | `KNumber::F64(f64)` ONLY — no integer subtype distinct from f64 semantics beyond the I64 tag. Return values are `KValue::Number(KNumber::I64(x))`, `KValue::Str`, `KValue::Null`. Errors via `runtime_error!(\"...\")`. `KValue::is_callable()` used to decide bare-ident call vs eval.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Koto arithmetic limitation forcing host helpers (the float-free wart)",
+              "finding": "Source-verified in ai_bakeoff/tests/koto_probe.rs: `+ - * %` between two I64 stay I64 (wrapping); but `/` ALWAYS promotes to f64 even for I64/I64; there are NO `>>`, `//`, or bitwise operators; `**` is not an operator (power is a method). Therefore a float-free Q16.16 path CANNOT divide or shift in pure script — it must call host helpers `fxmul(a,b)=(a*b)>>16` and `curve(kind,x)` (LUT lookup) implemented in Rust. This is the single biggest ergonomic wart and a direct design target for rustia.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Send+Sync model",
+              "finding": "koto used with `default-features=false, features=[\"arc\"]` so `KValue: Send+Sync` (asserted by a compile test `assert_send_sync::<KValue>()`). Model is N independent VMs across a thread pool (NOT one shared VM); ~5-10% per-borrow tax cited. NOTE the console's `KotoRepl` is stored as Bevy `NonSend` because that VM instance is !Send in practice (single-threaded REPL); the arc feature is what makes the multi-VM sim path viable.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Serde bridge requirement",
+              "finding": "scenario/src/lib.rs::from_koto_seeded does `koto::serde::from_koto_value(koto.exports().clone()) -> ScenarioSpec` (koto feature \"serde\", serde derive). The script `export`s a map with the SAME shape as the YAML. ScenarioSpec uses `#[derive(Serialize,Deserialize)]`, `#[serde(deny_unknown_fields)]` (a typo'd key ERRORS), `#[serde(default)]` and `#[serde(default=\"fn\")]`. The SAME `spec.validate()?.resolve()` runs for both YAML (serde_yaml 0.9) and Koto — format is decoupled from the data model. rustia must provide an equivalent `from_value::<T: Deserialize>` deserializer.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Koto's execution limit is non-deterministic by construction",
+              "finding": "koto_runtime-0.16.1/src/vm.rs: `ExecutionTimeout` uses `instant::Instant` (wall-clock) with an ADAPTIVE instruction interval (`interval_instructions` recomputed from elapsed seconds each check). It counts `instructions_since_last_check` but the deadline test is time-based. The plan explicitly forbids this for sim-side scripts and requires a monotonic INSTRUCTION-COUNT fuel budget dropped in at the same `execute_instructions` check site (vm.rs:674-697). rustia must ship a deterministic fuel meter as a first-class primitive, not bolt on a wall-clock timer.",
+              "confidence": "high"
+            },
+            {
+              "topic": "VM is already steppable / coroutine-capable",
+              "finding": "vm.rs execute_instructions returns on `ControlFlow::Yield(value)` setting `ExecutionState::Suspended`, with a `continue_running -> ReturnOrYield{Return|Yield}` API. This maps onto the intended scripted-agent model: a coroutine yielding a `ControlInput` per tick (design §3). rustia needs the same steppable/yield-resumable VM so deterministic fuel + recursion limits + per-tick yielding all work.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Insertion-ordered maps",
+              "finding": "koto's KMap is backed by `indexmap` (koto_runtime Cargo.toml dep) -> insertion-ordered iteration, which the plan calls determinism-friendly. Note the SIM side uses BTreeMap/sorted iteration instead; the contract is: any map whose iteration order affects sim state must be deterministically ordered (insertion or sorted). rustia must guarantee insertion-ordered map iteration.",
+              "confidence": "high"
+            },
+            {
+              "topic": "The determinism golden methodology (what must be bit-identical)",
+              "finding": "FNV-1a (offset 0xcbf29ce484222325, prime 0x100000001b3) folds state into a u64 hash, pinned to a SINGLE shared cross-arch constant (deliberately NOT per-platform, so a one-OS red is a real finding). f64 folded via `to_bits` with -0.0->+0.0 canonicalization; records SimId-sorted. sim/tests/determinism_golden.rs pins physics=9715618621526538300, CCD=1828383301069731689, economy=16747376415410472512. ai_bakeoff pins AI state_hash=0x31c6ec2734ea6fa2 and CRUCIALLY the koto-int path reproduces it EXACTLY (koto_equiv.rs) -> float-free Koto is determinism-equivalent to native.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Cross-arch f64 discipline (the libm rule)",
+              "finding": "All transcendentals go through `libm` (NEVER std sin/cos/powf — a real cross-libc crack the audit found). f64 is permitted ONLY for one-time LUT construction (built via libm so bit-identical cross-arch), never in the hot path. Q16.16 LUT lookups use integer index + integer linear interpolation (`a + fx_mul(b-a, frac)`); LUT index rounding is itself called out as a desync class. rustia's any-float surface must route through libm and be pinned by a golden.",
+              "confidence": "high"
+            },
+            {
+              "topic": "RNG contract",
+              "finding": "Seeded `rand_chacha::ChaCha8Rng` (portable; NOT StdRng/thread_rng). Per-entity substreams `seed = FNV-1a(entity_id, tick)` so randomness is DECOUPLED from iteration order (proven count-independent in determinism.rs). The seed hash MUST be a fixed portable algorithm (FNV-1a or hardcoded-key SipHash), NEVER std::DefaultHasher (per-process randomized). Exploration is INTEGER epsilon-greedy: `(rng.next_u32() & 1023) < 51` (~0.05), never a float compare. Scenario gen uses a host-side SplitMix64 (Rust integer math) exposed to script as rand()/rand_range() so generation reproduces regardless of script float impl.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Performance bar and the exact bake-off workload",
+              "finding": "Native floor 0.14 us/decision; koto-int 5.4 us (~39x); koto-float (no host calls) 4.0 us (~29x) — so ~74% of cost is the interpreter VM itself, not the float-free boundary (a fork for integer ops would NOT rescue hot-path perf). Bar: AI must fit <=5 ms of a 20 ms (50 Hz) tick single-threaded on the SLOWEST target. Native does 10k agents in 1.43 ms; koto-int blows 5 ms above ~900 agents, koto-float ~1250. Workload = IAUS product-of-considerations (4 considerations x 6 actions) + 1.25x momentum to last action + integer epsilon-greedy + SARSA(lambda) replacing trace (ALPHA=0.1, GAMMA_LAMBDA=0.9) + social contagion (k=0.05, 4 neighbors); all Q16.16.",
+              "confidence": "high"
+            },
+            {
+              "topic": "Bake-off harness (so rustia can be re-benched identically)",
+              "finding": "Criterion 0.5, harness=false, profile.release opt-level=3. Sweep n in {1000,2000,5000,10000} single-threaded; koto benched at {1000,5000} with sample_size(20). `b.iter(|| { world.tick_with(sel); black_box(world.state_hash()) })`. Throughput::Elements(n). Standalone `main.rs` prints per_tick_ms, per_decision_us, headroom=20/per_tick_ms, fits_5ms. Tests: two_runs_bit_identical, rng_substream_is_count_independent, cross_arch_golden, koto_path_matches_native_golden. rustia drops in as a third `Selector` impl behind the same trait.",
+              "confidence": "high"
+            },
+            {
+              "topic": "wasm requirement",
+              "finding": "MUST build `wasm32-unknown-unknown` (proven via `cargo build --release --lib --target wasm32-unknown-unknown`). koto uses the `instant` crate for wasm-compatible Instant. JIT is moot in browser (wasmtime can't JIT on web; Bevy single-threaded on web). Web is single-threaded twice over (no wasm threads + single-threaded Bevy scheduler). The plan warns the wasm interpreter tax could be ~4x (bytecode-VM-inside-bytecode-VM with GC pressure) and that a MEASURED browser number is still an open gate, not extrapolated.",
+              "confidence": "high"
+            },
+            {
+              "topic": "DX requirements (a first-class deciding axis)",
+              "finding": "Hot-reload = re-eval with NO compile step (koto's instant re-eval is a cited win); measure save->re-eval->visible-change latency. Compile/iteration time matters. IDE/LSP expected (koto ships an LSP). Embedding API judged 'clean'; the missing integer ops are 'a real ergonomic wart for sim math'. Console REPL DX: functions-ARE-commands (bare `quit`, `spawn 100 80`, `e = spawn 10 10`), persistent top-level bindings via export_top_level_ids, value_to_string for display, a clean channel/effect-queue host model (NO UnsafeWorldCell).",
+              "confidence": "high"
+            },
+            {
+              "topic": "Host-bridge architecture pattern rustia must support cleanly",
+              "finding": "Console host fns never borrow the World: they push `ConsoleEffect` enum variants onto an `Arc<Mutex<Vec<Effect>>>` (WRITE side) applied later by the system that owns World access, and READ a refreshed `Arc<Mutex<WorldView>>` snapshot. This 'channel + scheduled message-bus' model (vs the old slowchop_koto UnsafeWorldCell transmute) is the determinism+parallelism-safe reference design. Host closures must be `move` and (under arc) Send+Sync-compatible (scenario gen uses Arc<AtomicU64> just to satisfy the Send+Sync bound on native fns).",
+              "confidence": "high"
+            }
+          ],
+          "quantitative_data": [
+            {
+              "metric": "Rust-native per-decision floor",
+              "value": "0.14 us",
+              "context": "ai_bakeoff full op-mix (IAUS+SARSA(lambda)+contagion), aarch64 Mac, release opt-level 3; 10k agents in 1.43 ms"
+            },
+            {
+              "metric": "koto-int (float-free) per-decision",
+              "value": "5.4 us (~39x native)",
+              "context": "same workload; blows the <=5ms AI bar above ~900 agents; eats whole 20ms tick by ~3700 agents"
+            },
+            {
+              "metric": "koto-float (no host calls) per-decision",
+              "value": "4.0 us (~29x native)",
+              "context": "removing ALL host calls only drops 5.4->4.0us (~26%) => cost is the interpreter VM, not the float-free boundary"
+            },
+            {
+              "metric": "AI time budget",
+              "value": "<=5 ms of a 20 ms tick",
+              "context": "50 Hz; single-threaded on the slowest target (web/iOS); threads are a bonus never load-bearing"
+            },
+            {
+              "metric": "Target agent scale",
+              "value": "thousands @ 50 Hz",
+              "context": "gak's emergent-crew-AI ask; native does 10k in 1.43ms, koto-int caps ~900"
+            },
+            {
+              "metric": "koto-int agents fitting 5ms",
+              "value": "~900 agents",
+              "context": "koto-float ~1250; the bar rustia must blow past"
+            },
+            {
+              "metric": "arc feature per-borrow tax",
+              "value": "~5-10%",
+              "context": "the cost of Send+Sync KValue under the arc feature"
+            },
+            {
+              "metric": "Native golden state hash",
+              "value": "0x31c6ec2734ea6fa2",
+              "context": "ai_bakeoff; koto-int reproduces it bit-for-bit (determinism-equivalence proof), 4000 agents x 200 ticks"
+            },
+            {
+              "metric": "Physics determinism golden",
+              "value": "9715618621526538300",
+              "context": "sim/tests/determinism_golden.rs, 250 ticks, pinned aarch64 verified x86_64-linux"
+            },
+            {
+              "metric": "Console REPL execution limit",
+              "value": "250 ms wall-clock",
+              "context": "view/src/console.rs; acceptable ONLY because view-side; sim-side needs deterministic fuel instead"
+            },
+            {
+              "metric": "Scenario-gen execution limit",
+              "value": "5 s wall-clock",
+              "context": "scenario/src/lib.rs; safe because generation runs ONCE on the authority and ships DATA, not the recipe"
+            },
+            {
+              "metric": "koto timeout first-interval instruction baseline",
+              "value": "100_000_000 * interval_seconds (release), 10_000_000 (debug)",
+              "context": "vm.rs ExecutionTimeout::new — the adaptive, non-deterministic instruction budget rustia must replace with a fixed monotonic count"
+            },
+            {
+              "metric": "Potential 10x-faster rustia per-decision",
+              "value": "~0.54 us (~4x native)",
+              "context": "if rustia is 10x koto-int: 10k agents ~5.4ms => the per-tick-per-agent scripted hot path becomes viable near ~9000 agents single-threaded"
+            },
+            {
+              "metric": "Estimated wasm interpreter tax",
+              "value": "up to ~4x (feared), 1.5-2.5x (optimistic)",
+              "context": "plan H11; an open gate requiring a MEASURED browser number, not extrapolation"
+            }
+          ],
+          "implications_for_rustia": [
+            "rustia MUST provide native integer/fixed-point arithmetic that does NOT promote to f64 (integer `/`, `>>`, `//`, bitwise, integer `**`). Koto's lack of these is the documented ergonomic wart that forces host fxmul/curve helpers. First-class Q16.16 or wrapping-integer ops would remove the host-call boundary entirely for sim math.",
+            "The hot-path cost is the interpreter VM itself (koto-float still 4.0us with zero host calls). To beat the perf bar rustia needs JIT/AOT or a far faster dispatch (register VM + inline caches + computed-goto/threaded dispatch) — a fork of an interpreter for integer ops will NOT close the ~29x gap.",
+            "Deterministic instruction-fuel is a CORE primitive, not an add-on: replace koto's Instant-based adaptive ExecutionTimeout with a monotonic per-call instruction budget checked in the dispatch loop, plus a recursion-depth cap at the frame-push site. This must be bit-deterministic across native and wasm.",
+            "The VM must be steppable/yield-resumable (coroutine model): a scripted agent yields a ControlInput per tick. rustia needs ExecutionState::Suspended + continue_running equivalents from day one.",
+            "Provide a serde Deserializer (`from_value::<T>`) compatible with serde-derive structs using deny_unknown_fields + default + default=fn, so the existing ScenarioSpec deserialize path ports unchanged. Also a Serializer for round-trip parity.",
+            "Values must be Send+Sync (the arc model) to support N-VMs-across-a-threadpool; aim to make this the default, not a feature flag with a per-borrow tax. The embedding API must let host closures be plain `move` Fn + Send + Sync.",
+            "Maps MUST iterate in insertion order (indexmap-equivalent) AND rustia must make it trivial to get sorted/deterministic iteration where order feeds sim state.",
+            "All float operations rustia exposes must route through a portable transcendental impl (libm-equivalent) and be coverable by a pinned single-constant cross-arch golden; ideally rustia supports a 'float-free/deterministic mode' that capability-gates every f64-touching op (float<->string, fmod/%, float compare/sort, map-key hashing, **, int<->float coercion) out of the prelude.",
+            "The host-bridge API should make the channel/effect-queue + read-snapshot pattern natural (no unsafe World aliasing); host fns get a typed arg slice and return a Value or a runtime error, mirroring add_fn(name, |ctx| ...).",
+            "wasm32-unknown-unknown must be a tier-1 target with a wasm-compatible time source (or, better, NO reliance on wall-clock since fuel is instruction-based). A real in-browser perf number is a required gate.",
+            "Embedding ergonomics for a REPL (functions-are-commands, persistent top-level bindings, value-to-string display) and an LSP are explicit DX deciding factors — rustia should plan tooling early.",
+            "Snapshot capture/restore must be able to serialize and EXACTLY restore VM/script-visible state for MP rollback/reconcile; if scripts hold per-agent state in the hot path, that state must be in the deterministic snapshot or the checksum proves nothing."
+          ],
+          "candidate_directions": [
+            "JIT/AOT-compiled rustia (native) with an instruction-fuel-metered interpreter fallback for wasm — directly targets the ~29x VM-dispatch gap that a bytecode interpreter cannot close.",
+            "Register-based bytecode VM with native i64/Q16.16 fast paths and NO f64 promotion on `/`/`>>`, plus inline caches — keeps the koto embedding ergonomics but removes the host-helper boundary and a chunk of dispatch cost.",
+            "Batched/vectorized host-entry API: 'decide N agents in one VM call' to amortize per-call marshalling (the call_function + KValue clone per agent is real overhead) — lets a slower-per-call VM still hit the aggregate budget.",
+            "A deterministic-by-construction execution mode (float-free prelude + instruction fuel + recursion cap + insertion-ordered maps + portable transcendentals) as a first-class VM configuration, so sim-side scripts are safe without per-project discipline.",
+            "Keep the grabby split (Rust-native hot path, script for cooler/infrequent leaves) but make rustia fast enough that the leaf cadence can rise from a few Hz toward per-tick — measure the crossover and expose a fuel/LOD knob."
+          ],
+          "open_questions": [
+            "What is rustia's measured per-decision cost on wasm32 in a real browser (the gate koto never cleared)? The native win is moot if the in-browser tax is ~4x.",
+            "Can rustia's deterministic-mode produce bit-identical results to the SAME pinned golden constants (0x31c6ec2734ea6fa2 for AI; the libm-LUT path) across x86_64-linux + aarch64-mac + wasm32 — i.e. is a Luau-derived numeric stack as cross-arch-stable as the libm/Q16.16 discipline requires?",
+            "Luau numbers are f64-only with no integer subtype — how does rustia reconcile full Luau compat with the float-free i64/Q16.16 sim boundary? (Provide integer intrinsics? A fixed-point library? A deterministic f64 mode pinned by golden?) This is the central tension the plan flags.",
+            "If rustia is ~10x koto, does the per-tick-per-agent scripted hot path actually move back into script, and what batched/coroutine API makes that pay off without per-call marshalling killing it?",
+            "What is the memory footprint per VM / per agent? Priority #2 is low memory but no hard byte budget is stated in grabby; per-agent Q-tables/traces already flagged as a snapshot/bandwidth concern.",
+            "Can rustia snapshot+restore full script-visible per-agent state for MP rollback (predict/reconcile) cheaply enough to capture every SNAPSHOT_EVERY, or does it need delta/coarse-cadence capture?",
+            "Does rustia need an LSP and what is its hot-reload (save->re-eval->visible) latency vs koto's instant re-eval — the DX deciding axis gak cares most about?"
+          ],
+          "sources": [
+            "/workspace/src/grabby-aliens/design/console-scripting-plan.md",
+            "/workspace/src/grabby-aliens/design/console-port-viability.md",
+            "/workspace/src/grabby-aliens/ai_bakeoff/README.md",
+            "/workspace/src/grabby-aliens/ai_bakeoff/Cargo.toml",
+            "/workspace/src/grabby-aliens/ai_bakeoff/src/lib.rs",
+            "/workspace/src/grabby-aliens/ai_bakeoff/src/koto_path.rs",
+            "/workspace/src/grabby-aliens/ai_bakeoff/src/main.rs",
+            "/workspace/src/grabby-aliens/ai_bakeoff/benches/bakeoff.rs",
+            "/workspace/src/grabby-aliens/ai_bakeoff/tests/koto_probe.rs",
+            "/workspace/src/grabby-aliens/ai_bakeoff/tests/koto_equiv.rs",
+            "/workspace/src/grabby-aliens/ai_bakeoff/tests/determinism.rs",
+            "/workspace/src/grabby-aliens/scenario/src/lib.rs",
+            "/workspace/src/grabby-aliens/scenario/Cargo.toml",
+            "/workspace/src/grabby-aliens/view/src/console.rs",
+            "/workspace/src/grabby-aliens/view/src/scenarios.rs",
+            "/workspace/src/grabby-aliens/view/Cargo.toml",
+            "/workspace/src/grabby-aliens/sim/tests/determinism_golden.rs",
+            "/workspace/src/grabby-aliens/CLAUDE.md",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto-0.16.1/src/koto.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto-0.16.1/src/lib.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_runtime-0.16.1/src/vm.rs",
+            "$HOME/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/koto_serde-0.16.1/src/lib.rs",
+            "koto = 0.16.1 (features arc, serde); rand_chacha 0.3; rand_core 0.6; libm 0.2; criterion 0.5; serde 1 + serde_yaml 0.9"
+          ]
+        }
+      }
+    ]
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Research"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Synthesize"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 3,
+      "title": "Critique"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "koto-internals",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "abaa6cd56e35104f2",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782782119921,
+      "queuedAt": 1782782119907,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "koto 0.16.1 is a register-based bytecode VM (NOT tree-walki…",
+      "promptPreview": "PROJECT CONTEXT (read carefully):\nWe are designing **rustia**, a from-scratch **Luau interpreter in Rust** with JIT and SOTA execution\nmethods. It must replace **koto 0.16.1** as the scripting layer in a deterministic game sim at\n/workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST — at least as fast as koto and other\nwasm-compatible Rust scripting crates, ideally far faster; (2) low memo…",
+      "lastProgressAt": 1782782493135,
+      "tokens": 94689,
+      "toolCalls": 38,
+      "durationMs": 373214,
+      "resultPreview": "{\"summary\":\"koto 0.16.1 is a register-based bytecode VM (NOT tree-walking) with a two-level dispatch: InstructionReader::next() decodes a variable-length byte stream into a 169-variant Instruction enum returned by value, which execute_instruction then matches in a single giant match (LLVM jump table, no computed-goto/threading). Pipeline is koto_lexer -> koto_parser (AST) -> koto_bytecode::Compile…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "rust-scripting-landscape",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a7e0ff0e04ee70c4e",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782782119922,
+      "queuedAt": 1782782119907,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "The Rust scripting landscape splits into pure-Rust engines …",
+      "promptPreview": "PROJECT CONTEXT (read carefully):\nWe are designing **rustia**, a from-scratch **Luau interpreter in Rust** with JIT and SOTA execution\nmethods. It must replace **koto 0.16.1** as the scripting layer in a deterministic game sim at\n/workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST — at least as fast as koto and other\nwasm-compatible Rust scripting crates, ideally far faster; (2) low memo…",
+      "lastProgressAt": 1782782398822,
+      "tokens": 48767,
+      "toolCalls": 23,
+      "durationMs": 278900,
+      "resultPreview": "{\"summary\":\"The Rust scripting landscape splits into pure-Rust engines (koto, rhai, rune, steel, gluon, hematita, dyon, piccolo) and bindings to C/C++ VMs (mlua/rlua → PUC-Lua/LuaJIT/Luau). On the only apples-to-apples interop benchmark (script-bench-rs, \\\"Sort Rust objects\\\": quicksort of 10k userdata-wrapped random strings, M5 Max), mlua+Luau runs in 11.94 ms while koto 0.16.1 takes 49.21 ms and…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "luau-language-spec",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "add8072d840dd6561",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782782119922,
+      "queuedAt": 1782782119907,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "test",
+      "promptPreview": "PROJECT CONTEXT (read carefully):\nWe are designing **rustia**, a from-scratch **Luau interpreter in Rust** with JIT and SOTA execution\nmethods. It must replace **koto 0.16.1** as the scripting layer in a deterministic game sim at\n/workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST — at least as fast as koto and other\nwasm-compatible Rust scripting crates, ideally far faster; (2) low memo…",
+      "lastProgressAt": 1782782424320,
+      "tokens": 52278,
+      "toolCalls": 17,
+      "durationMs": 304398,
+      "resultPreview": "{\"summary\":\"test\",\"key_findings\":[{\"topic\":\"t\",\"finding\":\"f\",\"confidence\":\"high\"}],\"quantitative_data\":[{\"metric\":\"m\",\"value\":\"v\",\"context\":\"c\"}],\"implications_for_rustia\":[\"x\"],\"candidate_directions\":[\"d\"],\"open_questions\":[\"q\"],\"sources\":[\"s\"]}"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "official-luau-vm-internals",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a28befc9120fb776a",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782782119923,
+      "queuedAt": 1782782119907,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Analyzed luau-lang/luau release 727 (commit f1f121d, 2026-0…",
+      "promptPreview": "PROJECT CONTEXT (read carefully):\nWe are designing **rustia**, a from-scratch **Luau interpreter in Rust** with JIT and SOTA execution\nmethods. It must replace **koto 0.16.1** as the scripting layer in a deterministic game sim at\n/workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST — at least as fast as koto and other\nwasm-compatible Rust scripting crates, ideally far faster; (2) low memo…",
+      "lastProgressAt": 1782782477708,
+      "tokens": 47687,
+      "toolCalls": 15,
+      "durationMs": 357785,
+      "resultPreview": "{\"summary\":\"Analyzed luau-lang/luau release 727 (commit f1f121d, 2026-06-26) source directly plus the official luau.org/performance doc. Luau is a register-based bytecode VM (32-bit fixed-width instructions) with a portable C interpreter using computed-goto dispatch on GCC/Clang and falling back to a switch on MSVC. It deliberately does NOT NaN-box: TValue is 16 bytes (8-byte Value union + 4-byte …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "sota-vm-jit-wasm",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "ab9d2a144c421c49a",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782782119923,
+      "queuedAt": 1782782119908,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "The single most decisive prior art for rustia is Deegen / L…",
+      "promptPreview": "PROJECT CONTEXT (read carefully):\nWe are designing **rustia**, a from-scratch **Luau interpreter in Rust** with JIT and SOTA execution\nmethods. It must replace **koto 0.16.1** as the scripting layer in a deterministic game sim at\n/workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST — at least as fast as koto and other\nwasm-compatible Rust scripting crates, ideally far faster; (2) low memo…",
+      "lastProgressAt": 1782782347909,
+      "tokens": 38239,
+      "toolCalls": 17,
+      "durationMs": 227986,
+      "resultPreview": "{\"summary\":\"The single most decisive prior art for rustia is Deegen / LuaJIT Remake (sillycross, Stanford; OOPSLA'21 copy-and-patch + arXiv 2411.11469): an automatically-generated VM where (a) the INTERPRETER uses CPS tail-call/context-threaded dispatch and is already ~31% faster than LuaJIT's hand-written asm interpreter and ~179% faster than PUC Lua, and (b) a baseline JIT built with copy-and-pa…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "grabby-binding-contract",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a941145b7853c5215",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782782119923,
+      "queuedAt": 1782782119908,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "grabby-aliens uses koto 0.16.1 in three places: (1) view co…",
+      "promptPreview": "PROJECT CONTEXT (read carefully):\nWe are designing **rustia**, a from-scratch **Luau interpreter in Rust** with JIT and SOTA execution\nmethods. It must replace **koto 0.16.1** as the scripting layer in a deterministic game sim at\n/workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST — at least as fast as koto and other\nwasm-compatible Rust scripting crates, ideally far faster; (2) low memo…",
+      "lastProgressAt": 1782782387504,
+      "tokens": 101894,
+      "toolCalls": 30,
+      "durationMs": 267581,
+      "resultPreview": "{\"summary\":\"grabby-aliens uses koto 0.16.1 in three places: (1) view console REPL (view/src/console.rs, feature \\\"arc\\\"), (2) scenario procedural generation (scenario/src/lib.rs, features \\\"arc\\\"+\\\"serde\\\"), and (3) a throwaway perf bake-off (ai_bakeoff/, feature \\\"arc\\\"). The exact koto API surface consumed is small and stable: Koto::with_settings/default, prelude().add_fn/insert, exports().get, …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "synthesis",
+      "phaseIndex": 2,
+      "phaseTitle": "Synthesize",
+      "agentId": "a457bb20df03bbe44",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782782493164,
+      "queuedAt": 1782782493153,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "rustia is a from-scratch Luau interpreter in Rust meant to …",
+      "promptPreview": "You are the synthesis lead for the rustia project (a fast Luau interpreter in Rust replacing koto in a\ndeterministic game sim). \nPROJECT CONTEXT (read carefully):\nWe are designing **rustia**, a from-scratch **Luau interpreter in Rust** with JIT and SOTA execution\nmethods. It must replace **koto 0.16.1** as the scripting layer in a deterministic game sim at\n/workspace/src/grabby-aliens. Prioritie…",
+      "lastProgressAt": 1782782785192,
+      "tokens": 61862,
+      "toolCalls": 1,
+      "durationMs": 292028,
+      "resultPreview": "{\"executive_summary\":\"rustia is a from-scratch Luau interpreter in Rust meant to drop into grabby-aliens in place of koto 0.16.1, with priorities (in order): speed, low memory, wasm32-unknown-unknown performance, full latest-Luau compat, and embedding ergonomics. The research is decisive on three points. (1) The gap is in the engine, not the boundary: grabby measured koto-int at ~5.4 us/decision (…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 8,
+      "label": "completeness-critic",
+      "phaseIndex": 3,
+      "phaseTitle": "Critique",
+      "agentId": "a781351b42859f811",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "startedAt": 1782782785203,
+      "queuedAt": 1782782785194,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "NOT sufficient to start the 5-way design exploration. The b…",
+      "promptPreview": "You are a skeptical completeness critic for the rustia research brief. \nPROJECT CONTEXT (read carefully):\nWe are designing **rustia**, a from-scratch **Luau interpreter in Rust** with JIT and SOTA execution\nmethods. It must replace **koto 0.16.1** as the scripting layer in a deterministic game sim at\n/workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST — at least as fast as koto and other…",
+      "lastProgressAt": 1782783075617,
+      "tokens": 87153,
+      "toolCalls": 4,
+      "durationMs": 290414,
+      "resultPreview": "{\"gaps\":[\"luau-language-spec stream is a literal placeholder ('test'/'f'/'q'). The whole language surface is unresearched: metatable/metamethod dispatch semantics and resolution order (__index/__newindex/__eq/__lt/__le/__call/__concat/__len), Luau type system + type-guided bytecode type-info (LBC_TYPE_VERSION 3, the thing that feeds native codegen and any rustia specialization), vector lib, buffer…"
+    }
+  ],
+  "totalTokens": 532569,
+  "totalToolCalls": 145
+}

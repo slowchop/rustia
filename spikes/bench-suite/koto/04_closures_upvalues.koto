@@ -1,0 +1,18 @@
+# Koto equivalent of closures_upvalues. unit = one captured-closure call.
+# NOTE: koto closure upvalue-mutation semantics differ from Luau; timing of call+add is the comparable part.
+export f = |n|
+  make = |start, step|
+    c = start
+    ||
+      c += step
+      c
+  counters = []
+  for i in 1..=8
+    cc = make i, i
+    counters.push cc
+  acc = 0
+  for i in 0..n
+    idx = i % 8
+    c = counters[idx]
+    acc += c()
+  acc

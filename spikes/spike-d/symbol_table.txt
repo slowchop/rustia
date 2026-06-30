@@ -1,0 +1,62 @@
+# koto-int self-time symbol table (samply 2kHz, 24587 samples, 5000 agents x 400 ticks)
+#   self%  samples  symbol
+   29.31     7207  <koto_bytecode::instruction_reader::InstructionReader as core::iter::traits::iterator::Iterator>::next
+   12.59     3096  core::ptr::drop_in_place$LT$koto_runtime::types::value::KValue>
+    9.14     2248  koto_runtime::vm::KotoVm::execute_instructions
+    7.84     1927  <koto_runtime::types::value::KValue as core::clone::Clone>::clone
+    5.57     1370  koto_runtime::vm::KotoVm::run_iterator_next
+    4.66     1145  koto_runtime::vm::KotoVm::call_native_function
+    2.79      685  ai_bakeoff::koto_path::KotoSelector::new::_{{closure}}
+    2.77      682  alloc::vec::Vec$LT$T,A>::resize
+    2.51      618  koto_runtime::types::range::KRange::pop_front
+    2.48      610  koto_runtime::types::map::KMap::get
+    1.98      488  koto_runtime::vm::KotoVm::call_callable
+    1.91      469  <rand_core::block::BlockRng$LT$R> as rand_core::RngCore>::next_u32
+    1.79      441  indexmap::inner::Core$LT$K,V>::get_index_of
+    1.52      373  indexmap::map::IndexMap$LT$K,V,S>::get
+    1.47      362  koto_runtime::vm::KotoVm::run_remainder
+    1.37      336  koto_runtime::vm::KotoVm::run_add
+    1.35      333  koto_runtime::vm::KotoVm::run_index
+    0.96      235  koto_runtime::vm::KotoVm::unpack_packed_arguments
+    0.95      233  koto_runtime::vm::Frame::non_local
+    0.83      204  koto_runtime::types::native_function::CallContext::args
+    0.78      191  koto_runtime::vm::KotoVm::call_and_run_function
+    0.70      173  koto_parser::string::KString::as_str
+    0.62      152  koto_parser::constant_pool::ConstantPool::get_str_bounds
+    0.41      102  koto_runtime::vm::KotoVm::run_make_range
+    0.30       73  koto_runtime::vm::KotoVm::run_make_iterator
+    0.26       64  [libsystem_platform.dylib] 0x1014
+    0.25       61  koto_runtime::vm::KotoVm::run_equal
+    0.21       52  koto_runtime::vm::KotoVm::run_greater
+    0.21       51  [libsystem_platform.dylib] 0xf9c
+    0.19       47  [libsystem_platform.dylib] 0x1020
+    0.18       44  <koto_runtime::types::tuple::KTuple as core::ops::deref::Deref>::deref
+    0.17       43  [libsystem_platform.dylib] 0xfb8
+    0.17       42  ai_bakeoff::World::tick_with
+    0.16       40  DYLD-STUB$$memcmp
+    0.16       39  [libsystem_platform.dylib] 0x1028
+    0.13       32  koto_runtime::types::value::KValue::is_callable
+    0.13       32  [libsystem_platform.dylib] 0xf10
+    0.11       26  koto_runtime::vm::KotoVm::run_sequence_push
+    0.10       25  [libsystem_platform.dylib] 0x3030
+    0.09       23  [libsystem_malloc.dylib] 0x2a0d4
+    0.09       21  alloc::sync::Arc$LT$T,A>::drop_slow
+    0.08       19  rand_core::SeedableRng::seed_from_u64
+    0.08       19  <ai_bakeoff::koto_path::KotoSelector as ai_bakeoff::Selector>::select
+    0.07       16  koto_runtime::vm::apply_captures_and_temp_tuple_values
+    0.04       11  [libsystem_malloc.dylib] 0x2b088
+    0.03        7  koto_runtime::vm::apply_optional_arguments
+    0.03        7  [libsystem_malloc.dylib] 0x2a8c8
+    0.03        7  koto_runtime::vm::KotoVm::push_frame
+    0.02        6  [libsystem_malloc.dylib] 0x2b06c
+    0.02        6  rand_chacha::guts::read_u32le
+    0.02        6  koto_runtime::vm::KotoVm::pop_frame
+    0.02        5  DYLD-STUB$$free
+    0.02        5  [libsystem_platform.dylib] 0x1010
+    0.02        5  [libsystem_malloc.dylib] 0x2b68c
+    0.02        5  [libsystem_malloc.dylib] 0x2a1a8
+    0.02        4  [libsystem_platform.dylib] 0x3144
+    0.02        4  [libsystem_malloc.dylib] 0x3a044
+    0.02        4  [libsystem_malloc.dylib] 0x2a944
+    0.01        3  [libsystem_malloc.dylib] 0x3acb8
+    0.01        3  [libsystem_malloc.dylib] 0x2a8e0

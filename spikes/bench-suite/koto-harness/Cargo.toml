@@ -1,0 +1,17 @@
+[package]
+name = "koto-harness"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+koto = { version = "0.16", default-features = false, features = ["arc"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[[bin]]
+name = "kbench"
+path = "src/main.rs"

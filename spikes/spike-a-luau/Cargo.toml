@@ -1,0 +1,18 @@
+[package]
+name = "spike-a-luau"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+mlua = { version = "0.11", features = ["luau", "vendored"] }
+libm = "0.2"
+rand_chacha = "0.3"
+rand_core = "0.6"
+
+[profile.release]
+opt-level = 3
+
+[[bin]]
+name = "spike"
+path = "src/main.rs"
