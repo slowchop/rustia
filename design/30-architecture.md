@@ -197,6 +197,28 @@ minimal locked-down sandbox/wasm build.
    49 µs) — so host-columnar `Vec` wins for grabby's mutate-heavy/snapshot-light cadence.
 7. Exact-integer work via `bit32`/`buffer` or host fns — never lossy f64 round-trips. RNG/hashing via grabby's
    recipe (ChaCha8, FNV-1a, integer ε-greedy).
+8. **JIT determinism contract (the wasm-emit JIT is a new determinism surface).** On the authoritative
+   (`DeterministicSim`) path the JIT is allowed ONLY under a **JIT≡interpreter equivalence guarantee**: the
+   interpreter is the deterministic ORACLE, and a JIT'd function is trusted on the golden only if proven
+   bit-identical to interpreting it (a differential check). It emits under the **same f64 discipline as the
+   interpreter — scalar or strict *fixed-reduction-order* SIMD only; NO autovectorized reductions, NO FMA, NO
+   relaxed-SIMD; canonical NaN/`-0`.** The hotness trigger runs off **deterministic state** (call/instruction
+   count, never wall-clock) so the JIT *decision* is lockstep-identical, and codegen is deterministic (same
+   bytecode → same bytes). Given equivalence, JIT timing/presence is determinism-IRRELEVANT (a peer interpreting
+   vs a peer that has JIT'd the same function get identical bits). Anything not provably equivalent (e.g.
+   autovectorized reductions chased for speed) is fenced to `ReproducibleStandard`/view-side, off the golden.
+   *(Measurement honesty: our f64 bit-identity results — Spike C, the interpreter golden, the shipped
+   runtime-gen JIT — were all SCALAR; the only SIMD that may have appeared was LLVM autovectorizing the
+   static-AOT speed reference. SIMD determinism is NOT proven; it is handled by the discipline above + the oracle.)*
+9. **Cross-tick authoritative state MUST be host-columnar, never the GC heap / Lua globals / upvalues** (the
+   rollback invariant, from the parallelism agent). Any script state that persists across ticks and affects the
+   sim lives in host-provided **typed slots in the captured columnar arrays**; the GC heap stays
+   transient/reconstructable, out of the 24-deep rollback ring. A script stashing persistent decision state in a
+   global/upvalue = an un-captured authoritative-state leak → replay desync. `DeterministicSim` enforces this.
+10. **Effect-merge / tick-phase contract (the host-bridge):** scripted leaves run in the parallel-solve phase,
+    read ONLY the frozen previous-tick snapshot (never another lane's this-tick writes), and emit into a per-lane
+    typed effect-queue; the host commits effects single-threaded, sorted by **(emitter SimId, intra-agent
+    emit-seq)** — deterministic regardless of lane/worker/timing. No `&World`/`&mut` sharing.
 
 ## 4. Build plan
 
