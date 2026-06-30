@@ -4,3 +4,4 @@ Cargo.lock
 .fastembed_cache/
 *.profraw
 .claude/worktrees/
+private/

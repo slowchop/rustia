@@ -64,3 +64,14 @@ serves them.
 ## Coherence rule (the meta-principle)
 Code is ground truth for "what's BUILT"; `design/` is intent; they must agree. Touch an area → reconcile its
 doc + tests in the same change. `design/CURRENT.md` wins on any disagreement and must be kept current.
+
+## Where things live (public vs private boundary)
+- **This repo `rustia` (public-bound):** code + `design/` (the spec) + public GitHub Issues. **Nothing secret
+  or infra-identifying ever lands here** (no runner hostnames/IPs/config, no credentials).
+- **`private/` — the `rustia-ops` private sibling repo, git-ignored mount** (separate git history → the
+  self-hosted CI/infra can never appear in public history by construction). Holds private notes, the CI-runner
+  setup, and private tasks as plain markdown. Present only when cloned. Put anything not-for-public **here**.
+- **Claude memory** (`MEMORY.md` + `memory/*.md`, outside the repo) — cross-session agent context.
+- **Tasks:** public bugs/features = GitHub Issues on this repo; private/infra tasks = files (or Issues) in
+  `rustia-ops`. **No Linear** (the private repo covers it).
+- Self-hosted CI is referenced in public workflows ONLY by a generic label (e.g. `[self-hosted, bench]`).
