@@ -54,3 +54,19 @@ convention. (Scenario run-once + console use are separate paths, not this hot lo
 `SetNavGoal{target:FixedVec2}` · `Move{dir:FixedVec2}` · `Fire{weapon:u8, aim:i32}` ·
 `Interact{target:SimId, kind:InteractKind}` · `Damage{target:SimId, amount:Fixed}` ·
 `Spawn{template:TemplateId, at:FixedVec2}` (no id) · `SetSlot{slot:u8, value:i64}`.
+
+## Slot properties + the per-decision-pure-function consequence (round 4, locked)
+- **Slot indices are append-only and part of the golden/protocol contract** (like the `Effect` schema version
+  and the bytecode version): never renumber an existing `slot:u8` — that breaks replay/golden. A new persistent
+  AI field = next free index + a new column in the captured array + a map entry, **all grabby-side**.
+- **The columnar slot array is captured in the rollback ring** (it *is* the persistent AI state) → the `i64`s
+  are in the snapshot and restore on rollback/reconcile (a Q16.16 field is stored as its `i64` bit pattern).
+- **The authoritative AI leaf is a PER-DECISION PURE FUNCTION** (a direct consequence of the scratch-heap reset):
+  it **cannot be a coroutine that suspends across ticks** — its continuation state would be exactly the
+  un-captured cross-tick state the reset forbids. Multi-tick / temporal behaviour ("wait N ticks", "phase 2 of a
+  plan") is expressed via **`SetSlot` columnar state** (a captured countdown / phase index), never a suspended
+  coroutine. **Nuance:** rustia *does* implement coroutines (axis G) — they work fine *within a single decision*
+  and suspend normally on the **scenario-run-once + console paths** (`ReproducibleStandard`, persistent VM, no
+  per-decision reset). The restriction is *only* the `DeterministicSim` per-agent AI leaf. (This supersedes
+  grabby's old `console-scripting-plan.md` §3/§6 `yield wait_ticks(n)` model *for the hot AI leaf* — that
+  coroutine model belongs to scenario/console.)
