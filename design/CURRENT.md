@@ -13,6 +13,29 @@ wasm-in-V8, deterministic across Linux-x86/Mac-ARM/Chrome-wasm. All 8 architectu
 ([`50-conformance.md`](50-conformance.md)), and 10 conformance-verified improvements are adopted
 ([`55-improvements.md`](55-improvements.md)). A 3rd-party review (below) is being actioned.
 
+## 🚀 Next actions (cold-start handoff — do in this order)
+**Read order for a fresh agent:** `CLAUDE.md` (auto-loaded) → **this file** → [`30-architecture.md`](30-architecture.md) (the ADR)
+→ the doc for your task. (A fresh Claude session in this repo also auto-loads the project memory.)
+
+**Action queue:**
+1. **P1 — build the engine core** (main path). Build to the LOCKED decisions ([`30-architecture.md`](30-architecture.md) §1–§4):
+   16-byte **tagged** `Value` (sealed newtype — keep swappable until the gate below), one portable
+   big-`match`→`br_table` dispatch + generic superinstructions, **gc-arena** GC on the instruction counter,
+   own hand-written recursive-descent **parser** (parse types, don't typecheck), per-instruction **fuel**,
+   f64 + pure-Rust **libm** + per-op NaN/`-0` canon. Wire the cross-arch golden + conformance + bench gates into
+   CI from day one. Much of P1 (lexer/parser/compiler/VM scaffold) is NOT gated → can start now.
+2. **Build the `bench/` crate** (framework + native baseline engines; wasm/JSC P1-gated) — [`80-bench-suite.md`](80-bench-suite.md).
+   Fully self-hosted (iai-callgrind + criterion + github-action-benchmark). Runs in parallel with P1.
+3. **Set up the EPYC self-hosted runner** — see `private/ops/ci-security.md` (the `rustia-ops` PRIVATE sibling;
+   the split-runner security model). Infra notes live there, NEVER in this public repo.
+
+**Pre-P1-LOCK gates** (finalizing the value-layout/dispatch waits on these — build behind the sealed `Value`
+meanwhile): see the "What's next" section below for the full list (JSC/Firefox wasm re-measure, `call_ref` bench,
+conformance re-derive, GC tuning, `LuauIntegerType2` watch).
+
+**Project setup facts:** dual `MIT OR Apache-2.0` (holder Gak Dev Pty Ltd); the public/private boundary +
+`private/` mount are in [`CLAUDE.md`](../CLAUDE.md); ops/notes/infra live in the private `rustia-ops` sibling; no Linear.
+
 ## Canonical claims (corrected — supersede any stronger wording elsewhere)
 - **Perf — state it PER-WORKLOAD, not as a blanket "~5× koto"** (review H2, now measured on an 11-workload
   reference-Luau baseline). Reference Luau is **~4.7–9× faster than koto** on tables/closures/coroutines/
@@ -62,11 +85,12 @@ wasm-in-V8, deterministic across Linux-x86/Mac-ARM/Chrome-wasm. All 8 architectu
 | [`50-conformance.md`](50-conformance.md) | per-behavior conformance table | **v1.1** — 6 rows oracle-corrected; ~703 pending P1 (C2) |
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative** ✅ |
+| [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design (some decisions pending) | **authoritative** ✅ |
 | [`00-constraints.md`](00-constraints.md) | the contract + target matrix (§C0) | authoritative (target pinned to 0.709) |
 | [`15-gapclose.md`](15-gapclose.md), [`10-landscape.md`](10-landscape.md) | earlier snapshots | **superseded** by 20/30/50/55 + this file |
 
 ## 3rd-party review (2026-06-30) — status tracker
-All 8 findings assessed **VALID**. Workflow `weyerks3n` is actioning C1/C2/H2/H3-wasm3 + reasoning M1/M2/M3.
+All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 
 | # | finding | status |
 |---|---|---|
