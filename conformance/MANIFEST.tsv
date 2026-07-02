@@ -645,10 +645,10 @@ upstream.luau-0-709.closure	core-language	upstream.luau-0-709.closure	Reproducib
 upstream.luau-0-709.constructs	core-language	upstream.luau-0-709.constructs,stdlib.string-gsub-whitespace-plus	ReproducibleStandard	luau-0.709	string:OK	conformance/upstream/luau-0.709/tests/conformance/constructs.luau
 upstream.luau-0-709.coroutine	runtime	upstream.luau-0-709.coroutine	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/coroutine.luau
 upstream.luau-0-709.coverage	api-native	upstream.luau-0-709.coverage	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/coverage.luau
-upstream.luau-0-709.cyield	api-native	upstream.luau-0-709.cyield	ReproducibleStandard	pending-impl	pass	conformance/upstream/luau-0.709/tests/conformance/cyield.luau
+upstream.luau-0-709.cyield	api-native	upstream.luau-0-709.cyield	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/cyield.luau
 upstream.luau-0-709.datetime	stdlib	upstream.luau-0-709.datetime	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/datetime.luau
 upstream.luau-0-709.debug	api-native	upstream.luau-0-709.debug	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/debug.luau
-upstream.luau-0-709.debugger	api-native	upstream.luau-0-709.debugger	ReproducibleStandard	pending-impl	pass	conformance/upstream/luau-0.709/tests/conformance/debugger.luau
+upstream.luau-0-709.debugger	api-native	upstream.luau-0-709.debugger	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/debugger.luau
 upstream.luau-0-709.errors	runtime	upstream.luau-0-709.errors	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/errors.luau
 upstream.luau-0-709.events	runtime	upstream.luau-0-709.events	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/events.luau
 upstream.luau-0-709.exceptions	runtime	upstream.luau-0-709.exceptions	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/exceptions.luau
@@ -661,7 +661,7 @@ upstream.luau-0-709.literals	core-language	upstream.luau-0-709.literals	Reproduc
 upstream.luau-0-709.locals	core-language	upstream.luau-0-709.locals,stdlib.setfenv-function-env,stdlib.setfenv-stack-level,stdlib.setfenv-thread-env-loadstring	ReproducibleStandard	luau-0.709	string:OK	conformance/upstream/luau-0.709/tests/conformance/locals.luau
 upstream.luau-0-709.math	stdlib	upstream.luau-0-709.math	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/math.luau
 upstream.luau-0-709.move	core-language	upstream.luau-0-709.move	ReproducibleStandard	luau-0.709	string:OK	conformance/upstream/luau-0.709/tests/conformance/move.luau
-upstream.luau-0-709.native	api-native	upstream.luau-0-709.native	ReproducibleStandard	pending-impl	pass	conformance/upstream/luau-0.709/tests/conformance/native.luau
+upstream.luau-0-709.native	api-native	upstream.luau-0-709.native	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/native.luau
 upstream.luau-0-709.native-integer-spills	api-native	upstream.luau-0-709.native-integer-spills	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/native_integer_spills.luau
 upstream.luau-0-709.native-types	api-native	upstream.luau-0-709.native-types	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/native_types.luau
 upstream.luau-0-709.native-userdata	api-native	upstream.luau-0-709.native-userdata	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/native_userdata.luau

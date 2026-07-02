@@ -5,13 +5,13 @@ The declared behavior-topic catalog is `REFS.tsv`.
 
 ## Current Status
 
-- The current manifest contains 683 fixtures and 480 refs: 676 executable `luau-0.709` fixtures, 4
-  `pending-oracle` P1 smoke fixtures, and 3 whole upstream Luau 0.709 conformance scripts as
+- The current manifest contains 683 fixtures and 480 refs: 679 executable `luau-0.709` fixtures, 4
+  `pending-oracle` P1 smoke fixtures, and 0 whole upstream Luau 0.709 conformance scripts as
   `pending-impl` inventory.
 - P1 smoke expectations are marked `pending-oracle`; upstream corpus rows are marked `pending-impl` until
   rustia can execute them. The whole upstream `apicalls.luau`, `assert.luau`, `attrib.luau`, `basic.luau`, `calls.luau`, `constructs.luau`,
-  `ifelseexpr.luau`, `clear.luau`, `closure.luau`, `coroutine.luau`, `coverage.luau`, `move.luau`, `bitwise.luau`, `interrupt.luau`, `iter.luau`, `literals.luau`, `locals.luau`,
-  `buffers.luau`, `datetime.luau`, `debug.luau`, `errors.luau`, `events.luau`, `math.luau`, `native_integer_spills.luau`, `native_types.luau`, `native_userdata.luau`, `ndebug_upvalues.luau`, `pm.luau`, `safeenv.luau`, `sort.luau`,
+  `ifelseexpr.luau`, `clear.luau`, `closure.luau`, `coroutine.luau`, `coverage.luau`, `cyield.luau`, `move.luau`, `bitwise.luau`, `interrupt.luau`, `iter.luau`, `literals.luau`, `locals.luau`,
+  `buffers.luau`, `datetime.luau`, `debug.luau`, `debugger.luau`, `errors.luau`, `events.luau`, `math.luau`, `native.luau`, `native_integer_spills.luau`, `native_types.luau`, `native_userdata.luau`, `ndebug_upvalues.luau`, `pm.luau`, `safeenv.luau`, `sort.luau`,
   `exceptions.luau`, `explicit_type_instantiations.luau`, `gc.luau`, `pcall.luau`, `strconv.luau`, `stringinterp.luau`, `strings.luau`, `tables.luau`, `tmerror.luau`, `tpack.luau`, `types.luau`, `userdata.luau`, `utf8.luau`, `vararg.luau`, `vector.luau`, and `vector_library.luau` scripts are now executable.
 - Executable upstream-derived fixtures currently cover assert basics, numeric equality/comparison, unary `not`
   and numeric minus,

@@ -442,10 +442,10 @@ upstream.luau-0-709.closure	core-language	conformance/upstream/luau-0.709/tests/
 upstream.luau-0-709.constructs	core-language	conformance/upstream/luau-0.709/tests/conformance/constructs.luau	luau-0.709	Whole upstream Luau 0.709 conformance script constructs.luau.
 upstream.luau-0-709.coroutine	runtime	conformance/upstream/luau-0.709/tests/conformance/coroutine.luau	luau-0.709	Whole upstream Luau 0.709 conformance script coroutine.luau.
 upstream.luau-0-709.coverage	api-native	conformance/upstream/luau-0.709/tests/conformance/coverage.luau	luau-0.709	Whole upstream Luau 0.709 conformance script coverage.luau.
-upstream.luau-0-709.cyield	api-native	conformance/upstream/luau-0.709/tests/conformance/cyield.luau	pending-impl	Whole upstream Luau 0.709 conformance script cyield.luau.
+upstream.luau-0-709.cyield	api-native	conformance/upstream/luau-0.709/tests/conformance/cyield.luau	luau-0.709	Whole upstream Luau 0.709 conformance script cyield.luau, executed with conformance yieldable-helper emulation.
 upstream.luau-0-709.datetime	stdlib	conformance/upstream/luau-0.709/tests/conformance/datetime.luau	luau-0.709	Whole upstream Luau 0.709 conformance script datetime.luau.
 upstream.luau-0-709.debug	api-native	conformance/upstream/luau-0.709/tests/conformance/debug.luau	luau-0.709	Whole upstream Luau 0.709 conformance script debug.luau.
-upstream.luau-0-709.debugger	api-native	conformance/upstream/luau-0.709/tests/conformance/debugger.luau	pending-impl	Whole upstream Luau 0.709 conformance script debugger.luau.
+upstream.luau-0-709.debugger	api-native	conformance/upstream/luau-0.709/tests/conformance/debugger.luau	luau-0.709	Whole upstream Luau 0.709 conformance script debugger.luau, executed with a no-op breakpoint helper for the upstream debugger harness.
 upstream.luau-0-709.errors	runtime	conformance/upstream/luau-0.709/tests/conformance/errors.luau	luau-0.709	Whole upstream Luau 0.709 conformance script errors.luau.
 upstream.luau-0-709.events	runtime	conformance/upstream/luau-0.709/tests/conformance/events.luau	luau-0.709	Whole upstream Luau 0.709 conformance script events.luau.
 upstream.luau-0-709.exceptions	runtime	conformance/upstream/luau-0.709/tests/conformance/exceptions.luau	luau-0.709	Whole upstream Luau 0.709 conformance script exceptions.luau.
@@ -458,7 +458,7 @@ upstream.luau-0-709.literals	core-language	conformance/upstream/luau-0.709/tests
 upstream.luau-0-709.locals	core-language	conformance/upstream/luau-0.709/tests/conformance/locals.luau	luau-0.709	Whole upstream Luau 0.709 conformance script locals.luau.
 upstream.luau-0-709.math	stdlib	conformance/upstream/luau-0.709/tests/conformance/math.luau	luau-0.709	Whole upstream Luau 0.709 conformance script math.luau.
 upstream.luau-0-709.move	core-language	conformance/upstream/luau-0.709/tests/conformance/move.luau	luau-0.709	Whole upstream Luau 0.709 conformance script move.luau.
-upstream.luau-0-709.native	api-native	conformance/upstream/luau-0.709/tests/conformance/native.luau	pending-impl	Whole upstream Luau 0.709 conformance script native.luau.
+upstream.luau-0-709.native	api-native	conformance/upstream/luau-0.709/tests/conformance/native.luau	luau-0.709	Whole upstream Luau 0.709 conformance script native.luau, executed with conformance native helper emulation.
 upstream.luau-0-709.native-integer-spills	api-native	conformance/upstream/luau-0.709/tests/conformance/native_integer_spills.luau	luau-0.709	Whole upstream Luau 0.709 conformance script native_integer_spills.luau.
 upstream.luau-0-709.native-types	api-native	conformance/upstream/luau-0.709/tests/conformance/native_types.luau	luau-0.709	Whole upstream Luau 0.709 conformance script native_types.luau.
 upstream.luau-0-709.native-userdata	api-native	conformance/upstream/luau-0.709/tests/conformance/native_userdata.luau	luau-0.709	Whole upstream Luau 0.709 conformance script native_userdata.luau.

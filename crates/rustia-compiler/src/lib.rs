@@ -4283,9 +4283,11 @@ impl Compiler {
         if args.len() != 1 {
             return Err(CompileError::at("unsupported type arity", span));
         }
-        self.compile_expr_to(&args[0], target)?;
+        self.ensure_register_window_len(target, 1, span)?;
+        let value_register = self.compile_expr(&args[0])?;
         self.code
-            .push(Instruction::new(Opcode::TypeOf, target, target, 0));
+            .push(Instruction::new(Opcode::TypeOf, target, value_register, 0));
+        self.free_register(value_register);
         Ok(())
     }
 
@@ -6153,6 +6155,14 @@ mod tests {
             ("return typeof(5)", "number"),
             ("return typeof(nil)", "nil"),
             ("return typeof({})", "table"),
+            (
+                "local function f(a) return type(math.modf(a)) end return f(2)",
+                "number",
+            ),
+            (
+                "local function f(a) return typeof(math.modf(a)) end return f('2')",
+                "number",
+            ),
         ];
 
         for (source, expected) in cases {

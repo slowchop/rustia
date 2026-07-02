@@ -8006,7 +8006,7 @@ impl Vm {
     }
 
     fn native_typeof(&mut self, args: &[Value]) -> Result<Value> {
-        validate_native_arity(args, 1, 1, "type argument")?;
+        validate_native_arity(args, 1, usize::MAX, "type argument")?;
         let atom = self.heap.intern_string(self.luau_type_name(args[0]));
         Ok(Value::string_atom(atom))
     }

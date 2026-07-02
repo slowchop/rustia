@@ -257,9 +257,6 @@ fn pending_manifest_rows_match_explicit_allowlist() {
             "pending-oracle\tp1.string.literal_raw_newline_error\tconformance/fixtures/p1-smoke/string_literal_raw_newline_error.luau\tstring.short-string-newline-error",
             "pending-oracle\tp1.numeric.mod_negative_zero\tconformance/fixtures/p1-smoke/mod_negative_zero.luau\tnumber.mod-negative-zero,number.sign-of-zero",
             "pending-oracle\tp1.types.erased\tconformance/fixtures/p1-smoke/types_erased.luau\ttype.alias,type.union,type.runtime-erased",
-            "pending-impl\tupstream.luau-0-709.cyield\tconformance/upstream/luau-0.709/tests/conformance/cyield.luau\tupstream.luau-0-709.cyield",
-            "pending-impl\tupstream.luau-0-709.debugger\tconformance/upstream/luau-0.709/tests/conformance/debugger.luau\tupstream.luau-0-709.debugger",
-            "pending-impl\tupstream.luau-0-709.native\tconformance/upstream/luau-0.709/tests/conformance/native.luau\tupstream.luau-0-709.native",
         ]
     );
 }
@@ -288,39 +285,24 @@ fn pending_ref_catalog_rows_match_explicit_allowlist() {
             "pending-oracle\tstring.invalid-short-escape\tdesign/50-conformance.md",
             "pending-oracle\tstring.short-string-newline-error\tdesign/50-conformance.md",
             "pending-oracle\ttype.union\tdesign/50-conformance.md",
-            "pending-impl\tupstream.luau-0-709.cyield\tconformance/upstream/luau-0.709/tests/conformance/cyield.luau",
-            "pending-impl\tupstream.luau-0-709.debugger\tconformance/upstream/luau-0.709/tests/conformance/debugger.luau",
-            "pending-impl\tupstream.luau-0-709.native\tconformance/upstream/luau-0.709/tests/conformance/native.luau",
         ]
     );
 }
 
 #[test]
-fn pending_impl_forced_failures_match_current_missing_harnesses() {
+fn pending_impl_inventory_is_empty() {
     let repo = repository_from_crate_manifest(PathBuf::from(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let pending_impl = list_repository_pending(&repo)
+        .unwrap()
+        .into_iter()
+        .filter(|case| case.oracle == "pending-impl")
+        .map(|case| case.id)
+        .collect::<Vec<_>>();
 
-    for (selector, expected) in [
-        (
-            "upstream.luau-0-709.cyield",
-            "cyield.luau:6: type error: expected function",
-        ),
-        (
-            "upstream.luau-0-709.debugger",
-            "debugger.luau:11: attempt to call a nil value",
-        ),
-        (
-            "upstream.luau-0-709.native",
-            "native.luau:536: attempt to call a nil value",
-        ),
-    ] {
-        let error = run_repository_case(&repo, selector)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            error.contains(expected),
-            "{selector} forced failure changed; expected to find {expected:?}, got {error:?}"
-        );
-    }
+    assert!(
+        pending_impl.is_empty(),
+        "new pending-impl rows need an explicit forced-failure allowlist: {pending_impl:?}"
+    );
 }
 
 #[test]

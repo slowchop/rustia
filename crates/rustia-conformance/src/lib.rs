@@ -571,6 +571,9 @@ fn compile_and_run_luau_conformance(
             enable_conformance_native_type_checks: is_upstream_0709_fixture(
                 harness_path,
                 "native_types.luau",
+            ) || is_upstream_0709_fixture(
+                harness_path,
+                "native.luau",
             ),
             enable_conformance_pcall_helpers: is_upstream_0709_fixture(harness_path, "pcall.luau")
                 || is_derived_0709_fixture(harness_path, "pcall_cxxthrow_helper.luau")
@@ -624,6 +627,46 @@ fn luau_conformance_prelude_source(source_name: &str) -> Vec<u8> {
     }
     if is_upstream_0709_fixture(source_name, "gc.luau") {
         source.extend_from_slice(b"function setblockallocations(_) end\n");
+    }
+    if is_upstream_0709_fixture(source_name, "debugger.luau") {
+        source.extend_from_slice(b"function breakpoint(_, _) end\n");
+    }
+    if is_upstream_0709_fixture(source_name, "cyield.luau") {
+        source.extend_from_slice(
+            br#"
+function singleYield()
+    coroutine.yield(2)
+    return 4
+end
+
+function multipleYields(x)
+    coroutine.yield(x + 1)
+    coroutine.yield(12)
+    coroutine.yield(13)
+    return 14
+end
+
+function multipleYieldsWithNestedCall(x, nested)
+    if nested then
+        coroutine.yield(x + 95)
+        coroutine.yield(x + 105)
+    else
+        coroutine.yield(x + 100)
+    end
+    coroutine.yield(210)
+    return 220
+end
+
+function passthroughCall(f, ...)
+    return f(...)
+end
+
+passthroughCallMoreResults = passthroughCall
+passthroughCallArgReuse = passthroughCall
+passthroughCallVaradic = passthroughCall
+passthroughCallWithState = passthroughCall
+"#,
+        );
     }
     source
 }
@@ -988,6 +1031,52 @@ mod tests {
             Profile::ReproducibleStandard,
         )
         .expect("non-vector native probe should run");
+
+        assert_eq!(output.string.as_deref(), Some(&b"nil"[..]));
+    }
+
+    #[test]
+    fn debugger_prelude_installs_breakpoint_helper() {
+        let output = compile_and_run_luau_conformance(
+            b"breakpoint(8) breakpoint(16, false) return type(breakpoint)",
+            "debugger.luau",
+            "conformance/upstream/luau-0.709/tests/conformance/debugger.luau",
+            Profile::ReproducibleStandard,
+        )
+        .expect("debugger breakpoint probe should run");
+
+        assert_eq!(output.string.as_deref(), Some(&b"function"[..]));
+
+        let output = compile_and_run_luau_conformance(
+            b"return type(breakpoint)",
+            "debugger.luau",
+            "conformance/fixtures/p1-smoke/debugger.luau",
+            Profile::ReproducibleStandard,
+        )
+        .expect("non-debugger breakpoint probe should run");
+
+        assert_eq!(output.string.as_deref(), Some(&b"nil"[..]));
+    }
+
+    #[test]
+    fn cyield_prelude_installs_yieldable_helpers() {
+        let output = compile_and_run_luau_conformance(
+            b"local co = coroutine.wrap(singleYield) return co() * 10 + co()",
+            "cyield.luau",
+            "conformance/upstream/luau-0.709/tests/conformance/cyield.luau",
+            Profile::ReproducibleStandard,
+        )
+        .expect("cyield helper probe should run");
+
+        assert_eq!(output.value.as_number(), Some(24.0));
+
+        let output = compile_and_run_luau_conformance(
+            b"return type(singleYield)",
+            "cyield.luau",
+            "conformance/fixtures/p1-smoke/cyield.luau",
+            Profile::ReproducibleStandard,
+        )
+        .expect("non-cyield helper probe should run");
 
         assert_eq!(output.string.as_deref(), Some(&b"nil"[..]));
     }
