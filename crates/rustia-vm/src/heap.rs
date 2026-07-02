@@ -124,6 +124,7 @@ pub enum FunctionKind {
     DynamicMain {
         program: u32,
     },
+    Host(u32),
     Native(NativeFunction),
 }
 
@@ -543,6 +544,20 @@ impl VmCell {
             let handle = u32::try_from(root.functions.len()).ok()?;
             root.functions.push(FunctionData {
                 kind: FunctionKind::Native(native),
+                upvalues: Vec::new(),
+                environment,
+            });
+            Some(handle)
+        })
+    }
+
+    pub fn alloc_host_function(&mut self, host: u32, environment: u32) -> Option<u32> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            root.tables.get(environment as usize)?;
+            let handle = u32::try_from(root.functions.len()).ok()?;
+            root.functions.push(FunctionData {
+                kind: FunctionKind::Host(host),
                 upvalues: Vec::new(),
                 environment,
             });

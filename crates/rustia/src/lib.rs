@@ -1,11 +1,24 @@
-use rustia_compiler::CompileError;
+mod extension_api;
+mod function;
+mod macros;
+mod serde_value;
+mod value;
+
+use function::IntoHostFunction;
+use rustia_compiler::{compile_with_options, CompileError, CompileOptions};
 use rustia_parser::SourceError;
-use rustia_vm::Vm;
+use rustia_vm::{Program, Vm};
 use std::fmt;
 
+pub use extension_api::{RustiaBuilder, RustiaExtension};
+pub use function::{Exports, Function};
 pub use rustia_vm::{
-    Error as VmError, ErrorKind as VmErrorKind, ExtensionHandler, ExtensionOp, OpCapability,
-    Profile, Value, ValueKind, VmSettings,
+    Error as VmError, ErrorKind as VmErrorKind, ExtensionHandler, ExtensionOp, HostFunctionOp,
+    OpCapability, Profile, Value, ValueKind, VmSettings,
+};
+pub use serde_value::SerdeValueError;
+pub use value::{
+    FromRustia, FromRustiaMulti, IntoRustia, IntoRustiaMulti, OwnedKey, OwnedTable, OwnedValue,
 };
 
 pub struct Rustia {
@@ -13,6 +26,10 @@ pub struct Rustia {
 }
 
 impl Rustia {
+    pub fn builder() -> RustiaBuilder {
+        RustiaBuilder::new()
+    }
+
     pub fn new(profile: Profile) -> Self {
         Self {
             vm: Vm::new(profile),
@@ -29,6 +46,85 @@ impl Rustia {
         let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
         let program = rustia_compiler::compile(&chunk).map_err(Error::Compile)?;
         self.vm.run(&program).map_err(Error::Vm)
+    }
+
+    pub fn compile_and_run_exports(&mut self, source: &str) -> Result<Exports> {
+        self.compile_and_run(source).map(Exports::new)
+    }
+
+    pub fn run_owned(&mut self, source: &str) -> Result<OwnedValue> {
+        let value = self.compile_and_run(source)?;
+        value::snapshot_value(&mut self.vm, value)
+    }
+
+    pub fn insert_global<T>(&mut self, name: impl AsRef<str>, value: T) -> Result<()>
+    where
+        T: IntoRustia,
+    {
+        let value = value.into_rustia();
+        let value = value::load_owned_value(&mut self.vm, &value)?;
+        self.vm.set_global_value(name, value).map_err(Error::Vm)
+    }
+
+    pub fn insert_serde<T>(&mut self, name: impl AsRef<str>, value: &T) -> Result<()>
+    where
+        T: serde::Serialize + ?Sized,
+    {
+        let value = OwnedValue::from_serialize(value)?;
+        let value = value::load_owned_value(&mut self.vm, &value)?;
+        self.vm.set_global_value(name, value).map_err(Error::Vm)
+    }
+
+    pub fn add_fn<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoHostFunction<Args, Return>,
+    {
+        self.add_fn_with(name, 1, OpCapability::Pure, function)
+    }
+
+    pub fn add_fn_with<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        fuel_cost: u32,
+        capability: OpCapability,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoHostFunction<Args, Return>,
+    {
+        let op = function.into_host_function(name.into(), fuel_cost, capability);
+        self.vm.install_host_function(op).map_err(Error::Vm)
+    }
+
+    pub fn install_extension(&mut self, extension: RustiaExtension) -> Result<()> {
+        extension.install(self)
+    }
+
+    pub fn compile(source_name: impl Into<String>, source: &str) -> Result<CompiledModule> {
+        let source_name = source_name.into();
+        let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
+        let options = CompileOptions::default().with_source(source_name.clone(), source);
+        let program = compile_with_options(&chunk, options).map_err(Error::Compile)?;
+        Ok(CompiledModule {
+            source_name,
+            program,
+        })
+    }
+
+    pub fn install(&mut self, module: CompiledModule) -> Result<Exports> {
+        self.vm
+            .run(&module.program)
+            .map(Exports::new)
+            .map_err(Error::Vm)
+    }
+
+    pub fn hot_reload(&mut self, source_name: impl Into<String>, source: &str) -> Result<Exports> {
+        let module = Self::compile(source_name, source)?;
+        self.install(module)
     }
 
     #[inline]
@@ -50,11 +146,23 @@ impl Default for Rustia {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+pub struct CompiledModule {
+    source_name: String,
+    program: Program,
+}
+
+impl CompiledModule {
+    pub fn source_name(&self) -> &str {
+        &self.source_name
+    }
+}
+
 #[derive(Debug)]
 pub enum Error {
     Source(SourceError),
     Compile(CompileError),
     Vm(VmError),
+    Embed(String),
 }
 
 impl fmt::Display for Error {
@@ -63,6 +171,7 @@ impl fmt::Display for Error {
             Self::Source(error) => error.fmt(formatter),
             Self::Compile(error) => error.fmt(formatter),
             Self::Vm(error) => error.fmt(formatter),
+            Self::Embed(error) => formatter.write_str(error),
         }
     }
 }
@@ -71,10 +180,13 @@ impl std::error::Error for Error {}
 
 #[cfg(test)]
 mod tests {
-    use super::{Profile, Rustia, VmSettings};
+    use super::{
+        Error, FromRustia, OwnedValue, Profile, Rustia, RustiaExtension, VmErrorKind, VmSettings,
+    };
     use rustia_compiler::{compile_with_options, CompileOptions};
     use rustia_parser::parse_source;
     use rustia_vm::Vm;
+    use serde::{Deserialize, Serialize};
 
     #[test]
     fn compile_and_run_smoke() {
@@ -83,6 +195,191 @@ mod tests {
             .compile_and_run("local x: number = 6 * 7; return x")
             .unwrap();
         assert_eq!(result.as_number(), Some(42.0));
+    }
+
+    #[test]
+    fn owned_values_snapshot_returned_tables() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value = rustia
+            .run_owned(
+                "\
+return {
+    label = 'spawn',
+    count = 3,
+    flags = { true, false },
+}
+",
+            )
+            .unwrap();
+        let table = value.table().unwrap();
+        assert_eq!(
+            table.get_string("label"),
+            Some(&OwnedValue::String("spawn".to_owned()))
+        );
+        assert_eq!(table.get_string("count"), Some(&OwnedValue::Number(3.0)));
+        let flags = table.get_string("flags").unwrap().table().unwrap();
+        assert_eq!(
+            flags.array,
+            vec![OwnedValue::Boolean(true), OwnedValue::Boolean(false)]
+        );
+    }
+
+    #[test]
+    fn insert_global_and_typed_add_fn_are_callable() {
+        let mut rustia = Rustia::new(Profile::DeterministicSim);
+        rustia.insert_global("difficulty", 2_i32).unwrap();
+        rustia
+            .add_fn("clamp", |x: f64, lo: f64, hi: f64| x.clamp(lo, hi))
+            .unwrap();
+
+        let result = rustia
+            .run_owned("return clamp(12 + difficulty, 0, 10)")
+            .unwrap();
+        assert_eq!(f64::from_rustia(result).unwrap(), 10.0);
+    }
+
+    #[test]
+    fn exports_facade_retains_script_functions() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let exports = rustia
+            .compile_and_run_exports(
+                "\
+return {
+    label = 'ai',
+    decide = function(x)
+        return x + 1
+    end,
+}
+",
+            )
+            .unwrap();
+        assert_eq!(exports.get::<String>(&mut rustia, "label").unwrap(), "ai");
+
+        let decide = exports.function(&mut rustia, "decide").unwrap();
+        let result: f64 = decide.call(&mut rustia, (41.0,)).unwrap();
+        assert_eq!(result, 42.0);
+    }
+
+    #[test]
+    fn builder_extension_installs_namespaced_deterministic_ops() {
+        let extension = RustiaExtension::new("host")
+            .fn_slot_read("bias", || 2.0)
+            .fn_effect("emit", |value: f64| value + 1.0);
+        let mut rustia = Rustia::builder()
+            .profile(Profile::DeterministicSim)
+            .extension(extension)
+            .build()
+            .unwrap();
+
+        let result = rustia
+            .run_owned("return host.bias() + host.emit(4)")
+            .unwrap();
+        assert_eq!(f64::from_rustia(result).unwrap(), 7.0);
+    }
+
+    #[test]
+    fn deterministic_builder_rejects_nondeterministic_extension() {
+        let extension = RustiaExtension::new("host").fn_nondeterministic("clock", || 1.0);
+        let result = Rustia::builder()
+            .profile(Profile::DeterministicSim)
+            .extension(extension)
+            .build();
+        let Err(Error::Vm(error)) = result else {
+            panic!("expected deterministic profile to reject nondeterministic extension");
+        };
+        assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
+    }
+
+    #[test]
+    fn hot_reload_compile_error_keeps_old_function_callable() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let exports = rustia
+            .hot_reload("ai.luau", "return { decide = function() return 1 end }")
+            .unwrap();
+        let decide = exports.function(&mut rustia, "decide").unwrap();
+
+        assert!(rustia.hot_reload("ai.luau", "return {").is_err());
+        let result: f64 = decide.call(&mut rustia, ()).unwrap();
+        assert_eq!(result, 1.0);
+    }
+
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
+    struct ScenarioSpec {
+        name: String,
+        difficulty: u32,
+        enemies: Vec<EnemySpec>,
+    }
+
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
+    struct EnemySpec {
+        kind: String,
+        hp: u32,
+    }
+
+    #[test]
+    fn serde_deserializes_exports_and_inserts_globals() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let exports = rustia
+            .compile_and_run_exports(
+                "\
+return {
+    name = 'arena',
+    difficulty = 3,
+    enemies = {
+        { kind = 'scout', hp = 5 },
+        { kind = 'brute', hp = 9 },
+    },
+}
+",
+            )
+            .unwrap();
+        let spec: ScenarioSpec = exports.deserialize(&mut rustia).unwrap();
+        assert_eq!(
+            spec,
+            ScenarioSpec {
+                name: "arena".to_owned(),
+                difficulty: 3,
+                enemies: vec![
+                    EnemySpec {
+                        kind: "scout".to_owned(),
+                        hp: 5
+                    },
+                    EnemySpec {
+                        kind: "brute".to_owned(),
+                        hp: 9
+                    },
+                ],
+            }
+        );
+
+        rustia.insert_serde("config", &spec).unwrap();
+        let value = rustia
+            .run_owned("return config.enemies[2].kind .. ':' .. tostring(config.difficulty)")
+            .unwrap();
+        assert_eq!(String::from_rustia(value).unwrap(), "brute:3");
+    }
+
+    #[test]
+    fn rustia_extension_macro_builds_capability_tagged_extension() {
+        let extension = crate::rustia_extension!("host" {
+            pure(fuel = 2) fn fixed_mul(a: i32, b: i32) -> i32 {
+                a * b
+            }
+
+            effect fn emit(value: f64) -> f64 {
+                value + 10.0
+            }
+        });
+        let mut rustia = Rustia::builder()
+            .profile(Profile::DeterministicSim)
+            .extension(extension)
+            .build()
+            .unwrap();
+
+        let value = rustia
+            .run_owned("return host.fixed_mul(6, 7) + host.emit(1)")
+            .unwrap();
+        assert_eq!(f64::from_rustia(value).unwrap(), 53.0);
     }
 
     #[test]

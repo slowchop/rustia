@@ -15,7 +15,9 @@ pub mod vm;
 
 pub use bytecode::{Constant, Function, Instruction, Opcode, Program};
 pub use error::{Error, ErrorKind, Result};
-pub use extension::{ExtensionHandler, ExtensionOp, OpCapability};
+pub use extension::{
+    ExtensionHandler, ExtensionOp, HostFunctionHandler, HostFunctionOp, OpCapability,
+};
 pub use profile::Profile;
 pub use value::{Value, ValueKind};
 pub use vm::{LoadStringCompiler, Vm, VmSettings, MAX_RECURSION_LIMIT};

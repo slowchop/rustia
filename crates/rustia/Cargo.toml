@@ -10,6 +10,7 @@ rustia-compiler.workspace = true
 rustia-lexer.workspace = true
 rustia-parser.workspace = true
 rustia-vm.workspace = true
+serde.workspace = true
 
 [lints]
 workspace = true

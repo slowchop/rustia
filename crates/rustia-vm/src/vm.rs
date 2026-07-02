@@ -5,7 +5,7 @@ use crate::bytecode::{
     ASSERT_MESSAGE_MISSING_ARGUMENT, ASSERT_MESSAGE_NONE,
 };
 use crate::error::{Error, ErrorKind, ErrorLocation, Result};
-use crate::extension::{ExtensionOp, ExtensionRegistry};
+use crate::extension::{validate_registered_op, ExtensionOp, ExtensionRegistry, HostFunctionOp};
 use crate::heap::{
     FunctionKind, NativeFunction, TableIterationOrder, TableNext, UserdataPayload, VectorData,
     VmCell,
@@ -73,6 +73,7 @@ pub struct Vm {
     conformance_vec2_metatable: Option<u32>,
     conformance_vertex_metatable: Option<u32>,
     extensions: ExtensionRegistry,
+    host_functions: Vec<HostFunctionOp>,
     dynamic_programs: Vec<Arc<Program>>,
     call_stack: Vec<CallStackFrame>,
     coroutines: Vec<CoroutineState>,
@@ -384,6 +385,7 @@ impl Vm {
             conformance_vec2_metatable: standard_globals.conformance_vec2_metatable,
             conformance_vertex_metatable: standard_globals.conformance_vertex_metatable,
             extensions: ExtensionRegistry::default(),
+            host_functions: Vec::new(),
             dynamic_programs: Vec::new(),
             call_stack: Vec::new(),
             coroutines: Vec::new(),
@@ -415,6 +417,152 @@ impl Vm {
 
     pub fn register_extension_op(&mut self, op: ExtensionOp) -> Result<u16> {
         self.extensions.register(self.profile, op)
+    }
+
+    pub fn register_host_function(&mut self, op: HostFunctionOp) -> Result<Value> {
+        validate_registered_op(self.profile, op.fuel_cost, op.capability)?;
+        let id = u32::try_from(self.host_functions.len()).map_err(|_| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "host function table exhausted",
+            })
+        })?;
+        let handle = self
+            .heap
+            .alloc_host_function(id, self.globals)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "host function handle overflow",
+                })
+            })?;
+        self.host_functions.push(op);
+        Ok(Value::function(handle))
+    }
+
+    pub fn install_host_function(&mut self, op: HostFunctionOp) -> Result<()> {
+        let name = op.name.clone();
+        let value = self.register_host_function(op)?;
+        self.set_global_value(&name, value)
+    }
+
+    pub fn string(&mut self, value: impl AsRef<str>) -> Value {
+        Value::string_atom(self.heap.intern_string(value.as_ref()))
+    }
+
+    pub fn array_table(&mut self, values: &[Value]) -> Value {
+        Value::table(self.heap.alloc_array_table(values))
+    }
+
+    pub fn empty_table(&mut self) -> Value {
+        self.array_table(&[])
+    }
+
+    pub fn get_global_value(&mut self, name: impl AsRef<str>) -> Result<Value> {
+        let key = self.string(name);
+        Ok(self
+            .heap
+            .table_get(self.globals, key)
+            .unwrap_or_else(Value::nil))
+    }
+
+    pub fn set_global_value(&mut self, name: impl AsRef<str>, value: Value) -> Result<()> {
+        let key = self.string(name);
+        self.heap
+            .table_set(self.globals, key, value)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "global table write failed",
+                })
+            })
+    }
+
+    pub fn raw_table_get_value(&mut self, table: Value, key: Value) -> Result<Value> {
+        let Some(table) = table.as_table() else {
+            return Err(Error::new(ErrorKind::TypeError { expected: "table" }));
+        };
+        if key.kind() == ValueKind::Nil {
+            return Err(Error::new(ErrorKind::TableIndexNil));
+        }
+        if key.as_number().is_some_and(f64::is_nan) {
+            return Err(Error::new(ErrorKind::TableIndexNaN));
+        }
+        self.heap.table_get(table, key).map(Ok).unwrap_or_else(|| {
+            if self.heap.has_table(table) {
+                Ok(Value::nil())
+            } else {
+                Err(Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                }))
+            }
+        })
+    }
+
+    pub fn raw_table_set_value(&mut self, table: Value, key: Value, value: Value) -> Result<()> {
+        let Some(table) = table.as_table() else {
+            return Err(Error::new(ErrorKind::TypeError { expected: "table" }));
+        };
+        if key.kind() == ValueKind::Nil {
+            return Err(Error::new(ErrorKind::TableIndexNil));
+        }
+        if key.as_number().is_some_and(f64::is_nan) {
+            return Err(Error::new(ErrorKind::TableIndexNaN));
+        }
+        self.heap.table_set(table, key, value).ok_or_else(|| {
+            if self.heap.has_table(table) {
+                Error::new(ErrorKind::RuntimeError {
+                    message: "table write failed".to_owned(),
+                })
+            } else {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            }
+        })
+    }
+
+    pub fn raw_table_entries_value(&mut self, table: Value) -> Result<Vec<(Value, Value)>> {
+        let Some(table) = table.as_table() else {
+            return Err(Error::new(ErrorKind::TypeError { expected: "table" }));
+        };
+        if !self.heap.has_table(table) {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            }));
+        }
+        let mut entries = Vec::new();
+        let mut after = Value::nil();
+        loop {
+            match self
+                .heap
+                .table_next_after(table, after, TableIterationOrder::Insertion)
+            {
+                Some(TableNext::Entry(key, value)) => {
+                    entries.push((key, value));
+                    after = key;
+                }
+                Some(TableNext::End) => return Ok(entries),
+                Some(TableNext::InvalidKey) => {
+                    return Err(Error::new(ErrorKind::InvalidKeyToNext));
+                }
+                None => {
+                    return Err(Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    }));
+                }
+            }
+        }
+    }
+
+    pub fn call_retained_function(
+        &mut self,
+        function: Value,
+        args: &[Value],
+    ) -> Result<Vec<Value>> {
+        let program = Program::new(
+            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            Vec::new(),
+        );
+        let mut fuel = self.settings.initial_fuel;
+        self.call_value(&program, function, args, 0, &mut fuel)
     }
 
     #[inline]
@@ -5115,6 +5263,11 @@ impl Vm {
                     fuel,
                 )
             }
+            FunctionKind::Host(host) => {
+                let op = self.host_function(host)?.clone();
+                charge_fuel(fuel, self.settings.initial_fuel, u64::from(op.fuel_cost))?;
+                (op.handler)(self, args).map(VmFlow::Return)
+            }
             FunctionKind::Native(native) => self.call_native_function_resumable(
                 handle, native, args, program, depth, call_site, fuel,
             ),
@@ -5149,6 +5302,14 @@ impl Vm {
                     reason: "dynamic program handle is missing",
                 })
             })
+    }
+
+    fn host_function(&self, host: u32) -> Result<&HostFunctionOp> {
+        self.host_functions.get(host as usize).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "host function handle is missing",
+            })
+        })
     }
 
     fn retain_dynamic_program(&mut self, program: Program) -> Result<u32> {
@@ -6926,6 +7087,17 @@ impl Vm {
         })?;
         match kind {
             FunctionKind::Native(native) => Ok(debug_info_native_target(function_value, native)),
+            FunctionKind::Host(host) => {
+                let op = self.host_function(host)?;
+                Ok(DebugInfoTarget {
+                    name: op.name.clone(),
+                    source: "[Rust]".to_owned(),
+                    line: -1,
+                    function: function_value,
+                    parameter_count: 0,
+                    is_vararg: true,
+                })
+            }
             FunctionKind::Bytecode {
                 program: None,
                 prototype,
@@ -9401,7 +9573,7 @@ impl Vm {
                     &mut entries,
                 )?;
             }
-            FunctionKind::DynamicMain { .. } | FunctionKind::Native(_) => {}
+            FunctionKind::DynamicMain { .. } | FunctionKind::Host(_) | FunctionKind::Native(_) => {}
         }
 
         let table = self.heap.alloc_array_table(&entries);

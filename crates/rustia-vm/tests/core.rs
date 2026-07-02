@@ -453,7 +453,7 @@ fn deterministic_profile_rejects_effectful_extension_ops() {
         .register_extension_op(ExtensionOp::new(
             "clock",
             1,
-            OpCapability::Effectful,
+            OpCapability::NondeterministicEffect,
             first_arg,
         ))
         .unwrap_err();
