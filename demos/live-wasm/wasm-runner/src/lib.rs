@@ -1,4 +1,4 @@
-use rustia::{Profile, Rustia, Value, ValueKind};
+use rustia::{OwnedValue, Profile, Rustia};
 use std::cell::RefCell;
 use std::slice;
 use std::str;
@@ -57,29 +57,20 @@ pub extern "C" fn rustia_result_len() -> usize {
 fn run_source(source: &str) -> String {
     ENGINE.with(|engine| {
         let mut engine = engine.borrow_mut();
-        match engine.compile_and_run(source) {
-            Ok(value) => format!("ok\n=> {}", format_value(&mut engine, value)),
+        match engine.run_owned(source) {
+            Ok(value) => format!("ok\n=> {}", format_value(&value)),
             Err(error) => format!("error\n{error}"),
         }
     })
 }
 
-fn format_value(engine: &mut Rustia, value: Value) -> String {
-    match value.kind() {
-        ValueKind::Nil => "nil".to_owned(),
-        ValueKind::Boolean => value.as_bool().unwrap_or(false).to_string(),
-        ValueKind::Number => format_number(value.as_number().unwrap_or(f64::NAN)),
-        ValueKind::String => engine
-            .vm_mut()
-            .string_value(value)
-            .ok()
-            .flatten()
-            .map(|text| format!("{text:?}"))
-            .unwrap_or_else(|| "<missing string>".to_owned()),
-        ValueKind::Table | ValueKind::Function | ValueKind::Userdata | ValueKind::Buffer => {
-            format!("{value:?}")
-        }
-        _ => format!("{value:?}"),
+fn format_value(value: &OwnedValue) -> String {
+    match value {
+        OwnedValue::Nil => "nil".to_owned(),
+        OwnedValue::Boolean(value) => value.to_string(),
+        OwnedValue::Number(value) => format_number(*value),
+        OwnedValue::String(value) => format!("{value:?}"),
+        OwnedValue::Table(_) => format!("{value:?}"),
     }
 }
 

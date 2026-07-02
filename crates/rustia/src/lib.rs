@@ -13,8 +13,7 @@ use std::fmt;
 pub use extension_api::{RustiaBuilder, RustiaExtension};
 pub use function::{Exports, Function};
 pub use rustia_vm::{
-    Error as VmError, ErrorKind as VmErrorKind, ExtensionHandler, ExtensionOp, HostFunctionOp,
-    OpCapability, Profile, Value, ValueKind, VmSettings,
+    Error as VmError, ErrorKind as VmErrorKind, OpCapability, Profile, VmSettings,
 };
 pub use serde_value::SerdeValueError;
 pub use value::{
@@ -42,19 +41,23 @@ impl Rustia {
         }
     }
 
-    pub fn compile_and_run(&mut self, source: &str) -> Result<Value> {
-        let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
-        let program = rustia_compiler::compile(&chunk).map_err(Error::Compile)?;
-        self.vm.run(&program).map_err(Error::Vm)
+    pub fn compile_and_run(&mut self, source: &str) -> Result<Exports> {
+        self.compile_and_run_raw(source).map(Exports::new)
     }
 
     pub fn compile_and_run_exports(&mut self, source: &str) -> Result<Exports> {
-        self.compile_and_run(source).map(Exports::new)
+        self.compile_and_run(source)
     }
 
     pub fn run_owned(&mut self, source: &str) -> Result<OwnedValue> {
-        let value = self.compile_and_run(source)?;
+        let value = self.compile_and_run_raw(source)?;
         value::snapshot_value(&mut self.vm, value)
+    }
+
+    pub(crate) fn compile_and_run_raw(&mut self, source: &str) -> Result<rustia_vm::Value> {
+        let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
+        let program = rustia_compiler::compile(&chunk).map_err(Error::Compile)?;
+        self.vm.run(&program).map_err(Error::Vm)
     }
 
     pub fn insert_global<T>(&mut self, name: impl AsRef<str>, value: T) -> Result<()>
@@ -128,12 +131,7 @@ impl Rustia {
     }
 
     #[inline]
-    pub const fn vm(&self) -> &Vm {
-        &self.vm
-    }
-
-    #[inline]
-    pub fn vm_mut(&mut self) -> &mut Vm {
+    pub(crate) fn vm_mut(&mut self) -> &mut Vm {
         &mut self.vm
     }
 }
@@ -192,9 +190,9 @@ mod tests {
     fn compile_and_run_smoke() {
         let mut rustia = Rustia::new(Profile::DeterministicSim);
         let result = rustia
-            .compile_and_run("local x: number = 6 * 7; return x")
+            .run_owned("local x: number = 6 * 7; return x")
             .unwrap();
-        assert_eq!(result.as_number(), Some(42.0));
+        assert_eq!(f64::from_rustia(result).unwrap(), 42.0);
     }
 
     #[test]
@@ -441,7 +439,7 @@ return testlinedefined()
         };
         let mut rustia = Rustia::with_settings(Profile::ReproducibleStandard, settings);
         let result = rustia
-            .compile_and_run(
+            .run_owned(
                 "\
 local v = int64(42)
 v.value = 4
@@ -449,8 +447,7 @@ return tostring(v + 2) .. '|' .. tostring(v == int64(4)) .. '|' .. tostring(int6
 ",
             )
             .unwrap();
-        let text = rustia.vm_mut().string_value(result).unwrap().unwrap();
-        assert_eq!(text, "6|true|-3");
+        assert_eq!(String::from_rustia(result).unwrap(), "6|true|-3");
     }
 
     #[test]
@@ -461,7 +458,7 @@ return tostring(v + 2) .. '|' .. tostring(v == int64(4)) .. '|' .. tostring(int6
         };
         let mut rustia = Rustia::with_settings(Profile::ReproducibleStandard, settings);
         let result = rustia
-            .compile_and_run(
+            .run_owned(
                 "\
 local s = vec2(5, 4)
 local t = vec2(1, 2)
@@ -473,7 +470,7 @@ return x.X == -5 and x.Y == -12 and s:Dot(t) == 13 and m.X == 5 and m.Y == 4 and
 ",
             )
             .unwrap();
-        assert_eq!(result.as_bool(), Some(true));
+        assert!(bool::from_rustia(result).unwrap());
     }
 
     #[test]
@@ -484,7 +481,7 @@ return x.X == -5 and x.Y == -12 and s:Dot(t) == 13 and m.X == 5 and m.Y == 4 and
         };
         let mut rustia = Rustia::with_settings(Profile::ReproducibleStandard, settings);
         let result = rustia
-            .compile_and_run(
+            .run_owned(
                 "\
 local function add(a: number, b: number)
     assert(is_native())
@@ -496,14 +493,14 @@ return add(1, 3) == 4 and not ok and checkbuffer(nil) and checkbuffer(buffer.cre
 ",
             )
             .unwrap();
-        assert_eq!(result.as_bool(), Some(true));
+        assert!(bool::from_rustia(result).unwrap());
     }
 
     #[test]
     fn coroutine_resume_arguments_return_from_yield() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let result = rustia
-            .compile_and_run(
+            .run_owned(
                 "\
 local co
 local seen
@@ -530,14 +527,14 @@ return ok1 and ok2 and ok3 and ok4
 ",
             )
             .unwrap();
-        assert_eq!(result.as_bool(), Some(true));
+        assert!(bool::from_rustia(result).unwrap());
     }
 
     #[test]
     fn coroutine_wrap_resumes_yield_call_results() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let result = rustia
-            .compile_and_run(
+            .run_owned(
                 "\
 local f = coroutine.wrap(function()
     local a, b = coroutine.yield('yielded')
@@ -549,14 +546,14 @@ return first == 'yielded' and second == 'resume' and third == 42
 ",
             )
             .unwrap();
-        assert_eq!(result.as_bool(), Some(true));
+        assert!(bool::from_rustia(result).unwrap());
     }
 
     #[test]
     fn pcall_can_yield_and_resume_successfully() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let result = rustia
-            .compile_and_run(
+            .run_owned(
                 "\
 local co = coroutine.create(function()
     return pcall(function()
@@ -571,14 +568,14 @@ return first and done and protected and a == 1 and b == 2 and c == 3
 ",
             )
             .unwrap();
-        assert_eq!(result.as_bool(), Some(true));
+        assert!(bool::from_rustia(result).unwrap());
     }
 
     #[test]
     fn nested_pcall_preserves_protected_results_after_yield() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let result = rustia
-            .compile_and_run(
+            .run_owned(
                 "\
 local co = coroutine.create(function()
     return pcall(function()
@@ -598,14 +595,14 @@ return first and second and done and outer and inner and value == 3
 ",
             )
             .unwrap();
-        assert_eq!(result.as_bool(), Some(true));
+        assert!(bool::from_rustia(result).unwrap());
     }
 
     #[test]
     fn pcall_catches_error_after_yield() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let result = rustia
-            .compile_and_run(
+            .run_owned(
                 "\
 local co = coroutine.create(function()
     return pcall(function()
@@ -619,6 +616,6 @@ return ok and done and not protected and string.find(err, 'foo', 1, true) ~= nil
 ",
             )
             .unwrap();
-        assert_eq!(result.as_bool(), Some(true));
+        assert!(bool::from_rustia(result).unwrap());
     }
 }

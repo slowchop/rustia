@@ -18,7 +18,7 @@ fn main() -> ExitCode {
     };
 
     let mut rustia = Rustia::new(Profile::ReproducibleStandard);
-    match rustia.compile_and_run(&source) {
+    match rustia.run_owned(&source) {
         Ok(value) => {
             println!("{value:?}");
             ExitCode::SUCCESS
