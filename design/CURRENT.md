@@ -92,6 +92,7 @@ conformance re-derive, GC tuning, `LuauIntegerType2` watch).
 | [`50-conformance.md`](50-conformance.md) | per-behavior conformance table | **v1.1** — 6 rows oracle-corrected; ~703 pending P1 (C2) |
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative** ✅ |
+| [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + deterministic extension/linker plan | **authoritative** ✅ |
 | [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design (some decisions pending) | **authoritative** ✅ |
 | [`00-constraints.md`](00-constraints.md) | the contract + target matrix (§C0) | authoritative (target pinned to 0.709) |
 | [`15-gapclose.md`](15-gapclose.md), [`10-landscape.md`](10-landscape.md) | earlier snapshots | **superseded** by 20/30/50/55 + this file |

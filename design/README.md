@@ -28,6 +28,7 @@ docs are design intent.
 | [`50-conformance.md`](50-conformance.md) | **per-behavior Luau conformance table** — 709 rows, specified/unspecified→rustia's choice, + the 96-row differential-test watch-list + 80 open decisions (+ raw) | **[CONFORMANCE v1]** ✅ |
 | [`55-improvements.md`](55-improvements.md) | **10 adopted design improvements**, each verified still-conformant (dual-part table, string interning, FASTCALL, libm-enforcement, …) | **[IMPROVEMENTS v1]** ✅ |
 | [`65-wasmjit.md`](65-wasmjit.md) | **wasm-emit JIT / AOT-to-wasm spike** (verified) — ~176× the interpreter in V8, crossover ≈ 6 calls; the in-browser near-native path | **[SPIKE]** ✅ |
+| [`75-embedded-api.md`](75-embedded-api.md) | **Grabby-Compatible Embedded API** — public koto-shaped facade, typed conversion, serde, hot reload, deterministic extension/linker plan | **[PLAN]** ✅ |
 
 **TL;DR of where we are:** research + measurement say **GO**, now validated by a working VM. A from-scratch
 Rust Luau interpreter measured **~0.93 µs/decision native / ~0.99 µs wasm** = **4–6× faster than koto**, with
