@@ -1,0 +1,16 @@
+assert(tonumber("", 8) == nil)
+assert(tonumber("  ", 9) == nil)
+assert(tonumber("99", 8) == nil)
+assert(tonumber("  1010  ", 2) == 10)
+assert(tonumber("10", 36) == 36)
+assert(tonumber("1.5", 10) == 1.5)
+assert(tonumber(12, 10) == 12)
+assert(tonumber("12", nil) == 12)
+assert(tonumber(15, 16) == 21)
+assert(tonumber("10", 2.9) == 2)
+assert(tonumber("fFfa", 15) == nil)
+assert(tonumber(string.rep("1", 32), 2) + 1 == 2 ^ 32)
+assert(tonumber("ffffFFFF", 16) + 1 == 2 ^ 32)
+assert(pcall(function() return tonumber({}, 16) end) == false)
+
+return "OK"

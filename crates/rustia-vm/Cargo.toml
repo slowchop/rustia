@@ -1,0 +1,13 @@
+[package]
+name = "rustia-vm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+gc-arena.workspace = true
+libm.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,22 @@
+# Koto equivalent of sparse_tables: map with string + scattered-int keys. unit = fill+read 128 entries.
+export f = |n|
+  checksum = 0
+  for it in 0..n
+    t = {}
+    for i in 1..=64
+      key = "k" + "{i}"
+      t.insert key, i * it
+      nk = (i * 7919) % 100003
+      t.insert nk, i
+    s = 0
+    for i in 1..=64
+      key = "k" + "{i}"
+      v1 = t.get key
+      if v1 != null
+        s += v1
+      nk = (i * 7919) % 100003
+      v2 = t.get nk
+      if v2 != null
+        s += v2
+    checksum += s
+  checksum

@@ -1,0 +1,33 @@
+[workspace]
+members = [
+    "crates/rustia",
+    "crates/rustia-cli",
+    "crates/rustia-compiler",
+    "crates/rustia-conformance",
+    "crates/rustia-lexer",
+    "crates/rustia-parser",
+    "crates/rustia-vm",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+gc-arena = "0.6.0"
+libm = "0.2"
+rustia = { path = "crates/rustia" }
+rustia-compiler = { path = "crates/rustia-compiler" }
+rustia-lexer = { path = "crates/rustia-lexer" }
+rustia-parser = { path = "crates/rustia-parser" }
+rustia-vm = { path = "crates/rustia-vm" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+disallowed_methods = "deny"
+disallowed_types = "deny"

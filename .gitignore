@@ -1,6 +1,6 @@
 target/
 **/target/
-Cargo.lock
+/spikes/**/Cargo.lock
 .fastembed_cache/
 *.profraw
 .claude/worktrees/

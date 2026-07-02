@@ -1,0 +1,15 @@
+[package]
+name = "rustia"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+rustia-compiler.workspace = true
+rustia-lexer.workspace = true
+rustia-parser.workspace = true
+rustia-vm.workspace = true
+
+[lints]
+workspace = true

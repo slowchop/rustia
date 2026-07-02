@@ -1,0 +1,16 @@
+[package]
+name = "rustia-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "rustia"
+path = "src/main.rs"
+
+[dependencies]
+rustia = { path = "../rustia" }
+
+[lints]
+workspace = true

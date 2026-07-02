@@ -1,0 +1,30 @@
+t = [3, 1, 2]
+print "size_fn=${size t}"
+print "last=${t.last()} first=${t.first()}"
+t.sort()
+print "sorted first=${t.first()} last=${t.last()}"
+m = {}
+m.insert "ka", 10
+m.insert 7919, 20
+print "map ka=${m.get 'ka'} num=${m.get 7919}"
+x = 0.5
+print "sin=${x.sin()} sqrt=${x.sqrt()} floor=${(3.7).floor()} abs=${(-2).abs()}"
+gen = ||
+  i = 0
+  loop
+    i += 1
+    yield i * 2
+g = gen()
+print "gen ${g.next().get()} ${g.next().get()}"
+caught = try
+  throw "boom"
+catch _e
+  -1
+print "try $caught"
+make = |start, step|
+  c = start
+  ||
+    c += step
+    c
+counter = make 10, 5
+print "closure ${counter()} ${counter()}"

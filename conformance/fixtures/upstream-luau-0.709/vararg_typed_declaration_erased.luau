@@ -1,0 +1,6 @@
+local function f<T...>(...: T...): T...
+    return ...
+end
+
+local a, b = f(1, 2)
+return a * 10 + b

@@ -146,11 +146,11 @@
             "https://luau.org/types (gradual type system; /typecheck redirects here — checker is static, types runtime-erased)",
             "https://www.lua.org/manual/5.1/manual.html (Lua 5.1 metamethod/metatable event list — baseline Luau extends with __idiv/__iter/__namecall)",
             "https://github.com/luau-lang/luau (VM opcode set ~83 LOP_*, bytecode/typeinfo format, native codegen) — referenced for opcode/codegen scope",
-            "/workspace/src/rustia/design/30-architecture.md (locked axes A/C/E/F/G; determinism spec §3; build plan P2 '~70 opcodes, 5 core libs + coroutine')",
-            "/workspace/src/grabby-aliens/view/assets/scenarios/galaxy.koto (scenario surface: numeric-for over ranges, arithmetic, .cos/.sin, arrays+maps, push, host rand/rand_range, export-a-table)",
-            "/workspace/src/grabby-aliens/scenario/src/lib.rs (from_koto_seeded: prelude.add_fn/insert, compile_and_run, exports().clone() -> serde -> ScenarioSpec, with_execution_limit fuel)",
-            "/workspace/src/grabby-aliens/ai_bakeoff/src/koto_path.rs (AI-leaf argmax: exported closure, numeric-for, indexing, comparison, host fxmul/curve Q16.16, float-free determinism cross-check)",
-            "/workspace/src/grabby-aliens/view/src/console.rs (console REPL: single-chunk eval, host command fns, print/echo, ASCII-only rendering)"
+            "<rustia-repo>/design/30-architecture.md (locked axes A/C/E/F/G; determinism spec §3; build plan P2 '~70 opcodes, 5 core libs + coroutine')",
+            "<grabby-aliens-repo>/view/assets/scenarios/galaxy.koto (scenario surface: numeric-for over ranges, arithmetic, .cos/.sin, arrays+maps, push, host rand/rand_range, export-a-table)",
+            "<grabby-aliens-repo>/scenario/src/lib.rs (from_koto_seeded: prelude.add_fn/insert, compile_and_run, exports().clone() -> serde -> ScenarioSpec, with_execution_limit fuel)",
+            "<grabby-aliens-repo>/ai_bakeoff/src/koto_path.rs (AI-leaf argmax: exported closure, numeric-for, indexing, comparison, host fxmul/curve Q16.16, float-free determinism cross-check)",
+            "<grabby-aliens-repo>/view/src/console.rs (console REPL: single-chunk eval, host command fns, print/echo, ASCII-only rendering)"
           ]
         }
       },
@@ -190,7 +190,7 @@
               "verdict": "REJECT. Pure complexity with no speed payoff; would only make sense if NaN-box won wasm, and it does not."
             }
           ],
-          "spike_method": "Copied + extended the walking-skeleton into $HOME/.claude/jobs/d3f0d35e/tmp/spike-b-value: a `VmValue` trait implemented by three layouts (NbValue 8B NaN-box, TagValue 16B tagged, E24 24B fat) driving ONE generic register VM and ONE shared heap (insertion-ordered tables = Vec keys/vals + seedless-FxHash index; interned strings = arena + fnv intern). The heap path the skeleton skipped is now live (string-keyed + int-keyed tables, handle-in-Value). Microbenched table get/set/insert, string intern/eq, value move + bulk-clone, plus the IAUS f64 argmax kernel with const-generic CANON toggling per-op NaN canonicalization on every f64-producing op. Also modeled koto's non-Copy reality with an Arc-backed value (clone=atomic refcount). Verified the NaN-box soundness concern by enumerating 2048 NaN bit-patterns and checking whether they alias the tag space before/after canon. Honest harness: churned LCG/data-dependent inputs, std::hint::black_box on every result, best-of-7, golden-hash anti-DCE. Ran NATIVE (aarch64-mac, --release lto) and WASM32 (node v25 / V8). Cross-check: NaN-box canon-OFF kernel reproduces the skeleton's published ~0.93us native / ~0.99us wasm, validating apples-to-apples.",
+          "spike_method": "Copied + extended the walking-skeleton into <agent-workdir> a `VmValue` trait implemented by three layouts (NbValue 8B NaN-box, TagValue 16B tagged, E24 24B fat) driving ONE generic register VM and ONE shared heap (insertion-ordered tables = Vec keys/vals + seedless-FxHash index; interned strings = arena + fnv intern). The heap path the skeleton skipped is now live (string-keyed + int-keyed tables, handle-in-Value). Microbenched table get/set/insert, string intern/eq, value move + bulk-clone, plus the IAUS f64 argmax kernel with const-generic CANON toggling per-op NaN canonicalization on every f64-producing op. Also modeled koto's non-Copy reality with an Arc-backed value (clone=atomic refcount). Verified the NaN-box soundness concern by enumerating 2048 NaN bit-patterns and checking whether they alias the tag space before/after canon. Honest harness: churned LCG/data-dependent inputs, std::hint::black_box on every result, best-of-7, golden-hash anti-DCE. Ran NATIVE (aarch64-mac, --release lto) and WASM32 (node v25 / V8). Cross-check: NaN-box canon-OFF kernel reproduces the skeleton's published ~0.93us native / ~0.99us wasm, validating apples-to-apples.",
           "spike_numbers": [
             {
               "metric": "sizeof(Value) / reg[24] file",
@@ -259,12 +259,12 @@
           ],
           "confidence": "high",
           "artifacts": [
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-value/src/lib.rs",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-value/src/main.rs",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-value/run.mjs",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-value/Cargo.toml",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-value/target/release/bvbench",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-value/target/wasm32-unknown-unknown/release/spike_b_value.wasm"
+            "<agent-workdir>",
+            "<agent-workdir>",
+            "<agent-workdir>",
+            "<agent-workdir>",
+            "<agent-workdir>",
+            "<agent-workdir>"
           ]
         }
       },
@@ -304,7 +304,7 @@
               "verdict": "RECOMMENDED as the COMPLEMENT to direction 1. This is the resolution of the 'gc-arena has no cheap snapshot' risk: make 'all rollback-relevant state stays host-columnar' a hard constraint, exactly as the design's risk register proposed."
             }
           ],
-          "spike_method": "Extended the gc-arena 0.6 micro-spike into $HOME/.claude/jobs/d3f0d35e/tmp/spike-d-gc (own target dir). Built a NaN-box-shaped Value enum (Nil/Num/Str/Table) over Gc<RefLock<GTable{Vec<Value>}>>, plus a parallel slotmap heap (SlotMap<key,STable> + dense roots Vec) and a plain Vec<Vec<f64>> baseline. All loops use a data-dependent xorshift64* PRNG for indices + std::hint::black_box on accumulators/handles to defeat const-fold/DCE; release opt-level=3. Measured: (a) write-barrier isolation — same table-mutation loop with RefLock::unlock(mc) [Gc::write barrier] vs unsafe unlock_unchecked() [no barrier], in the Sleeping phase AND artificially forced into the Marked phase (adjust_debt(1e12)+mark_debt) so the #[cold] make_gray_again path can fire; (b) finish_cycle() full-collect cost swept over live-object count; (c) the RETAIN pattern — stash an exported table as a DynamicRoot, run 1000 ticks each doing finish_cycle()+garbage-alloc+fetch+mutate, then serde a retained value OUT into an owned Rust Mirror struct OUTSIDE mutate (deep-copy-at-boundary, since Gc cannot escape mutate), and a size-swept fetch-vs-deep-copy comparison; (d) snapshot+restore round-trip: slotmap clone+assign-back vs gc-arena flatten-to-owned+rebuild-fresh-arena. Separately, a miri binary (src/miri_send.rs) moves a VmCell{arena, DynamicRoot} across two thread boundaries, forcing full GC cycles and fetching the retained handle on each destination thread; run under cargo +nightly miri with both default Stacked Borrows and -Zmiri-tree-borrows. Read gc-arena 0.6.0 source (dynamic_roots.rs, barrier.rs, context.rs, types.rs) to confirm mechanisms.",
+          "spike_method": "Extended the gc-arena 0.6 micro-spike into <agent-workdir> (own target dir). Built a NaN-box-shaped Value enum (Nil/Num/Str/Table) over Gc<RefLock<GTable{Vec<Value>}>>, plus a parallel slotmap heap (SlotMap<key,STable> + dense roots Vec) and a plain Vec<Vec<f64>> baseline. All loops use a data-dependent xorshift64* PRNG for indices + std::hint::black_box on accumulators/handles to defeat const-fold/DCE; release opt-level=3. Measured: (a) write-barrier isolation — same table-mutation loop with RefLock::unlock(mc) [Gc::write barrier] vs unsafe unlock_unchecked() [no barrier], in the Sleeping phase AND artificially forced into the Marked phase (adjust_debt(1e12)+mark_debt) so the #[cold] make_gray_again path can fire; (b) finish_cycle() full-collect cost swept over live-object count; (c) the RETAIN pattern — stash an exported table as a DynamicRoot, run 1000 ticks each doing finish_cycle()+garbage-alloc+fetch+mutate, then serde a retained value OUT into an owned Rust Mirror struct OUTSIDE mutate (deep-copy-at-boundary, since Gc cannot escape mutate), and a size-swept fetch-vs-deep-copy comparison; (d) snapshot+restore round-trip: slotmap clone+assign-back vs gc-arena flatten-to-owned+rebuild-fresh-arena. Separately, a miri binary (src/miri_send.rs) moves a VmCell{arena, DynamicRoot} across two thread boundaries, forcing full GC cycles and fetching the retained handle on each destination thread; run under cargo +nightly miri with both default Stacked Borrows and -Zmiri-tree-borrows. Read gc-arena 0.6.0 source (dynamic_roots.rs, barrier.rs, context.rs, types.rs) to confirm mechanisms.",
           "spike_numbers": [
             {
               "metric": "write-barrier isolated cost (Sleeping phase)",
@@ -379,10 +379,10 @@
           ],
           "confidence": "high",
           "artifacts": [
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-d-gc/src/main.rs",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-d-gc/src/miri_send.rs",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-d-gc/Cargo.toml",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-d-gc/target/release/spike"
+            "<agent-workdir>",
+            "<agent-workdir>",
+            "<agent-workdir>",
+            "<agent-workdir>"
           ]
         }
       },
@@ -422,7 +422,7 @@
               "verdict": "ESSENTIAL sub-facility, not the surface. Critical refinement: implement it ZERO-COPY (serde over live in-arena Value<'gc> inside mutate, hidden behind vm.deserialize_exports::<T>()) — 30% faster than the snapshot-then-serde the literal exports().clone() implies."
             }
           ],
-          "spike_method": "Built a complete vertical slice at $HOME/.claude/jobs/d3f0d35e/tmp/spike-h-slice (1513-line lib + native harness + node runner). Hand-compiled bytecode for a SMALL but REAL general-path Luau program (the grabby from_koto scenario-gen shape): `local base=host_base(0.8); local function make_well(i) return {name='well'..i, gravity=base*2, radius=500+i*10} end; local wells={}; for i=0,2 do wells[i+1]=make_well(i) end; return {name='ring', gravity=base, wells=wells}`. It exercises, in ONE artifact, every item the review said was unmodeled: (a) a real gc-arena heap — Gc<RefLock<Table>> tables + Gc<LuaStr> strings + GC write barriers via borrow_mut(mc), with a forced full mark+sweep (finish_cycle) proven to reclaim 520KB of garbage AND a write-barrier-during-Marking test (drive collector to Marked via finish_marking, write a fresh white child into the black exports table through the barrier, finish the cycle, confirm the child survived); (b) canon-ON NaN on EVERY f64-producing op + table-key -0.0 normalization, with a cross-arch golden run on native AND node(V8); (c) host calls through a REAL call_indirect — Box<dyn Fn(&[OwnedValue])->Result<OwnedValue>> table indexed at runtime (#[inline(never)], no devirtualization), not a match arm; (d) the result table serde-Deserialized into a real ScenarioSpec/WellSpec struct (deny_unknown_fields, serde defaults) two ways: deep-copy-snapshot-then-serde-OUTSIDE-mutate (grabby's exports().clone() shape) AND zero-copy serde over live arena values inside mutate. Measured us/run with 2M iterations, /10 warmup, black_box + anti-DCE checksums, data-bearing output; periodic deterministic GC steps; native (Instant) + wasm32 (node V8 performance.now, best-of-5). Also measured DynamicRoot-retained-handle vs deep-copy cost (the axis-D boundary the arch asked for).",
+          "spike_method": "Built a complete vertical slice at <agent-workdir> (1513-line lib + native harness + node runner). Hand-compiled bytecode for a SMALL but REAL general-path Luau program (the grabby from_koto scenario-gen shape): `local base=host_base(0.8); local function make_well(i) return {name='well'..i, gravity=base*2, radius=500+i*10} end; local wells={}; for i=0,2 do wells[i+1]=make_well(i) end; return {name='ring', gravity=base, wells=wells}`. It exercises, in ONE artifact, every item the review said was unmodeled: (a) a real gc-arena heap — Gc<RefLock<Table>> tables + Gc<LuaStr> strings + GC write barriers via borrow_mut(mc), with a forced full mark+sweep (finish_cycle) proven to reclaim 520KB of garbage AND a write-barrier-during-Marking test (drive collector to Marked via finish_marking, write a fresh white child into the black exports table through the barrier, finish the cycle, confirm the child survived); (b) canon-ON NaN on EVERY f64-producing op + table-key -0.0 normalization, with a cross-arch golden run on native AND node(V8); (c) host calls through a REAL call_indirect — Box<dyn Fn(&[OwnedValue])->Result<OwnedValue>> table indexed at runtime (#[inline(never)], no devirtualization), not a match arm; (d) the result table serde-Deserialized into a real ScenarioSpec/WellSpec struct (deny_unknown_fields, serde defaults) two ways: deep-copy-snapshot-then-serde-OUTSIDE-mutate (grabby's exports().clone() shape) AND zero-copy serde over live arena values inside mutate. Measured us/run with 2M iterations, /10 warmup, black_box + anti-DCE checksums, data-bearing output; periodic deterministic GC steps; native (Instant) + wasm32 (node V8 performance.now, best-of-5). Also measured DynamicRoot-retained-handle vs deep-copy cost (the axis-D boundary the arch asked for).",
           "spike_numbers": [
             {
               "metric": "HONEST general-script us — run only (VM exec + gc-arena heap, ~18 Gc allocs / 68 dispatches)",
@@ -497,11 +497,11 @@
           ],
           "confidence": "medium",
           "artifacts": [
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-h-slice/src/lib.rs",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-h-slice/src/main.rs",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-h-slice/run.mjs",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-h-slice/Cargo.toml",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-h-slice/target/wasm32-unknown-unknown/release/spike_h_slice.wasm"
+            "<agent-workdir>",
+            "<agent-workdir>",
+            "<agent-workdir>",
+            "<agent-workdir>",
+            "<agent-workdir>"
           ]
         }
       }
@@ -527,7 +527,7 @@
       "attempt": 1,
       "lastToolName": "StructuredOutput",
       "lastToolSummary": "Scope triage for rustia vs full latest-Luau, anchored to wh…",
-      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat <grabby-aliens-repo>. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
       "lastProgressAt": 1782794083394,
       "tokens": 41790,
       "toolCalls": 12,
@@ -547,8 +547,8 @@
       "queuedAt": 1782793844390,
       "attempt": 1,
       "lastToolName": "StructuredOutput",
-      "lastToolSummary": "Built $HOME/.claude/jobs/d3f0d35e/tmp/spike-snap (4000…",
-      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
+      "lastToolSummary": "Built <agent-workdir> (4000…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat <grabby-aliens-repo>. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
       "lastProgressAt": 1782794448213,
       "error": "agent({schema}): StructuredOutput retry cap (5) exceeded — 5 failed calls with no valid output",
       "tokens": 75105,
@@ -569,7 +569,7 @@
       "attempt": 1,
       "lastToolName": "StructuredOutput",
       "lastToolSummary": "B — value/heap representation (NaN-box 8B vs tagged 16B vs …",
-      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat <grabby-aliens-repo>. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
       "lastProgressAt": 1782794890007,
       "tokens": 114469,
       "toolCalls": 22,
@@ -590,7 +590,7 @@
       "attempt": 1,
       "lastToolName": "StructuredOutput",
       "lastToolSummary": "D — GC integration (memory/collection strategy for the rust…",
-      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat <grabby-aliens-repo>. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
       "lastProgressAt": 1782794496897,
       "tokens": 99275,
       "toolCalls": 32,
@@ -611,7 +611,7 @@
       "attempt": 1,
       "lastToolName": "StructuredOutput",
       "lastToolSummary": "H — embedding API shape (with the honest general-script num…",
-      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto 0.16.1 in the deterministic game sim\nat <grabby-aliens-repo>. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32 perf (browser/mobile incl iOS WKWebView/JSC); (4) full latest-Luau compat; (5) excellent\nRust embedding API. HARD CONSTRAINTS: bit-for-bit determinism n…",
       "lastProgressAt": 1782795211326,
       "tokens": 193953,
       "toolCalls": 53,

@@ -1,0 +1,12 @@
+# Koto equivalent of coroutines via generator. unit = one yield round trip.
+export f = |n|
+  gen = ||
+    i = 0
+    loop
+      i += 1
+      yield i * 2
+  g = gen()
+  acc = 0
+  for _ in 0..n
+    acc += g.next().get()
+  acc

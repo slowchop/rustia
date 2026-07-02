@@ -141,7 +141,7 @@ not serde at 0.065 µs). **`exports()` = "the table the chunk returns"** (Luau h
 embedder-side unsafe** for the heap/serde path. **Batched decide-N demoted to optional P4** (FFI is ~4%;
 contradicts the per-agent `Selector` shape).
 
-## 3. Determinism: two profiles, not a fork (gak, 2026-06-30)
+## 3. Determinism: two built profiles, three public names (gak, 2026-06-30)
 
 Determinism work splits in two, and only the second part needs a flag:
 - **Group A — free & fully-conformant (ALWAYS ON):** pure-Rust libm, IEEE-exact/no-FMA, NaN canon,
@@ -227,10 +227,10 @@ minimal locked-down sandbox/wasm build.
 - **P1 — engine core.** Lexer + recursive-descent parser (full type-grammar parse, no typecheck) + compiler
   (constant-fold w/ pinned libm+canon, generic-superinstruction fusion, regalloc, O0 mode); `rustia-vm` with
   the **16-byte tagged Value**, gc-arena heap + write barriers + the `VmCell` Send unit + the op-extension hook,
-  big-match dispatch, fuel + recursion cap, stackless trampoline. Host-columnar rollback region. Cross-arch
-  golden (incl. f64) in CI across the FULL target matrix (§C0): native macOS-arm64/**x86_64-Intel**/Windows/
-  Linux-x86_64/arm64, and wasm in **V8 (Chrome) + SpiderMonkey (Firefox) + JSC (Safari/iOS)**. Parser fuzzed vs
-  full_moon.
+  big-match dispatch, fuel + recursion cap, stackless trampoline. Host-columnar rollback region. Prepare the
+  cross-arch golden (incl. f64) for the FULL target matrix (§C0): native macOS-arm64/**x86_64-Intel**/Windows/
+  Linux-x86_64/arm64, and wasm in **V8 (Chrome) + SpiderMonkey (Firefox) + JSC (Safari/iOS)**. CI workflow
+  wiring waits until the self-hosted runner setup has been given to the owner. Parser fuzzed vs full_moon.
 - **P2 — minimum-viable Luau** (grabby's first private use): ~70 opcodes; full grammar + Luau niceties; libs
   math/table/string(+format+patterns)/bit32/coroutine + base globals; metatable OOP; floored `%`. Byte-compat:
   Schubfach `tostring` (high), `string.format` (high), ASCII/C-locale pattern classes (high), PCG32 (low).

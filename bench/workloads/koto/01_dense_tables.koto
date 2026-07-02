@@ -1,0 +1,14 @@
+# Koto equivalent of dense_tables: list build + sort + sum. unit = 256-elem list build+sum+sort.
+export f = |n|
+  checksum = 0
+  for it in 0..n
+    t = []
+    for i in 1..=256
+      v = (i * 2654435761 + it) % 1000
+      t.push v
+    s = 0
+    for v in t
+      s += v
+    t.sort()
+    checksum += t.first() + t.last() + s
+  checksum

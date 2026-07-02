@@ -7,7 +7,7 @@
   "result": {
     "build": {
       "summary": "Built the wasm-emit JIT / AOT-to-wasm path end-to-end for the grabby IAUS argmax kernel (6 actions x 4 considerations, *1.25 momentum, data-dependent inputs via a per-iteration LCG so nothing constant-folds) and measured it 4 ways in wasm-in-V8 (node v25 + deno 2.8, both V8 14.9): (1) a REAL big-match register interpreter — the actual spike-sk-rustia skeleton VM, path-depended — executing the kernel bytecode; (2) the same kernel as a plain Rust fn compiled to wasm32 (the steady-state ceiling); (3) a wasm module GENERATED AT RUNTIME with the wasm-encoder crate, compiled+instantiated in V8 and run; (4) a shared-heap variant whose generated module IMPORTS the host linear memory and routes the inputs array through that heap. All six paths produce a BIT-IDENTICAL FNV checksum (0xd385c5e57bdc3538 for seed 0x12345678) that also matches the native build, and the checksum changes per-seed (data-dependent, not folded). Results: interpreter ~803 ns/op, static-AOT ~3.38 ns/op (237x), runtime-gen naive ~10.0 ns/op (80x), runtime-gen unrolled/kind-specialized ~4.57 ns/op (176x; within 1.35x of LLVM AOT), shared-heap ~4.58 ns/op (no measurable bounds-check penalty). Fixed cost (codegen ~2.5-3.3us + sync compile ~0.65us + sync instantiate ~1.1us) ~= 4.7us. CROSSOVER = ~6 kernel-ops. Verdict: GO for grabby (called tens of millions of times -> ~176x net win, fixed cost amortized after 6 calls); CONDITIONAL for general short-lived scripts (gate JIT on call_count x interp_cost > ~5us standup).",
-      "what_built": "KERNEL: grabby IAUS f64 argmax. Given arr[0..4] in [0,1) and last action index in 0..6, for each of 6 actions compute prod of 4 curves (kind=(a+c)%3: 0=>x*x, 1=>x, 2=>1-x), apply *1.25 if a==last, argmax (strict <, first-wins). Inputs produced per-iteration by an LCG (state=state*6364136223846793005+1442695040888963407; x=(state>>11)*2^-53; last=(state>>32)%6) so the loop cannot be hoisted/constant-folded. Every path folds (best, best_v.bits) into an FNV checksum -> identical across paths == \"same kernel logic\" proof + anti-DCE.\n\nINTERPRETER PATH (1): path-depends on the ACTUAL measured skeleton crate /workspace/src/rustia/spikes/spike-sk-rustia and calls its Vm::run (NaN-boxed Value, fixed-width Instr, one big match->br_table dispatch) on build_argmax_f64() bytecode, FUEL=false (interpreter's best case, conservative for the JIT argument). Compiled to wasm32-unknown-unknown. Not the kernel inlined — a real bytecode VM.\n\nSTATIC-AOT PATH (2): kernel_aot() — the identical kernel as a plain Rust fn, compiled to wasm32 by rustc/LLVM (opt-level 3, lto). The \"ideal compiled code the engine JITs\" ceiling.\n\nRUNTIME-GENERATED PATH (3): emit_module_cfg() in src/lib.rs uses the wasm-encoder crate to BUILD a wasm binary at runtime that contains the identical driver loop + LCG input-gen + argmax kernel + checksum fold, exporting run_gen(iters,seed)->i64. Two emitters: gen_loop (action loop kept, curve-kind chosen via branchless wasm `select`) and gen_opt (both loops unrolled so kind=(a+c)%3 is a codegen-time constant and only the chosen curve is emitted — AOT-to-wasm specialization). codegen runs INSIDE the host wasm module (exported codegen_run/codegen_run_opt), i.e. codegen itself is timed in wasm-in-V8 (the in-browser scenario); it returns (ptr<<32|len) into the host's own linear memory, the JS harness reads the bytes out, then does new WebAssembly.Module(bytes)+new Instance (sync) and await WebAssembly.instantiate (async) with real timing, then runs it. Proven generated-at-runtime: bytes live above __heap_base in the host heap, start with magic 00 61 73 6d v1, WebAssembly.validate=true.\n\nSHARED-HEAP VARIANT (4): emit_module_cfg(shared=true,...) emits a module with an (import \"env\" \"memory\") and, each iteration, f64.store's the 4 generated inputs into the host heap at base+{0,8,16,24} then f64.load's them straight back (bounds-checked round-trip through the VM heap) before the kernel. Instantiated with {env:{memory: host.exports.memory}}; base = host scratch_ptr() (a [f64;16] static in the host heap). run_shared(iters,seed,base).\n\nHARNESS: harness.mjs runs in node v25 and deno (both V8). best-of-9 over ITERS=2,000,000 with 5 warmup calls (TurboFan tier-up); fixed costs are means over 4000 reps (plus best-of-500). src/main.rs is a native sanity bin that confirms interp==aot natively and writes the 4 generated .wasm files to disk.",
+      "what_built": "KERNEL: grabby IAUS f64 argmax. Given arr[0..4] in [0,1) and last action index in 0..6, for each of 6 actions compute prod of 4 curves (kind=(a+c)%3: 0=>x*x, 1=>x, 2=>1-x), apply *1.25 if a==last, argmax (strict <, first-wins). Inputs produced per-iteration by an LCG (state=state*6364136223846793005+1442695040888963407; x=(state>>11)*2^-53; last=(state>>32)%6) so the loop cannot be hoisted/constant-folded. Every path folds (best, best_v.bits) into an FNV checksum -> identical across paths == \"same kernel logic\" proof + anti-DCE.\n\nINTERPRETER PATH (1): path-depends on the ACTUAL measured skeleton crate <rustia-repo>/spikes/spike-sk-rustia and calls its Vm::run (NaN-boxed Value, fixed-width Instr, one big match->br_table dispatch) on build_argmax_f64() bytecode, FUEL=false (interpreter's best case, conservative for the JIT argument). Compiled to wasm32-unknown-unknown. Not the kernel inlined — a real bytecode VM.\n\nSTATIC-AOT PATH (2): kernel_aot() — the identical kernel as a plain Rust fn, compiled to wasm32 by rustc/LLVM (opt-level 3, lto). The \"ideal compiled code the engine JITs\" ceiling.\n\nRUNTIME-GENERATED PATH (3): emit_module_cfg() in src/lib.rs uses the wasm-encoder crate to BUILD a wasm binary at runtime that contains the identical driver loop + LCG input-gen + argmax kernel + checksum fold, exporting run_gen(iters,seed)->i64. Two emitters: gen_loop (action loop kept, curve-kind chosen via branchless wasm `select`) and gen_opt (both loops unrolled so kind=(a+c)%3 is a codegen-time constant and only the chosen curve is emitted — AOT-to-wasm specialization). codegen runs INSIDE the host wasm module (exported codegen_run/codegen_run_opt), i.e. codegen itself is timed in wasm-in-V8 (the in-browser scenario); it returns (ptr<<32|len) into the host's own linear memory, the JS harness reads the bytes out, then does new WebAssembly.Module(bytes)+new Instance (sync) and await WebAssembly.instantiate (async) with real timing, then runs it. Proven generated-at-runtime: bytes live above __heap_base in the host heap, start with magic 00 61 73 6d v1, WebAssembly.validate=true.\n\nSHARED-HEAP VARIANT (4): emit_module_cfg(shared=true,...) emits a module with an (import \"env\" \"memory\") and, each iteration, f64.store's the 4 generated inputs into the host heap at base+{0,8,16,24} then f64.load's them straight back (bounds-checked round-trip through the VM heap) before the kernel. Instantiated with {env:{memory: host.exports.memory}}; base = host scratch_ptr() (a [f64;16] static in the host heap). run_shared(iters,seed,base).\n\nHARNESS: harness.mjs runs in node v25 and deno (both V8). best-of-9 over ITERS=2,000,000 with 5 warmup calls (TurboFan tier-up); fixed costs are means over 4000 reps (plus best-of-500). src/main.rs is a native sanity bin that confirms interp==aot natively and writes the 4 generated .wasm files to disk.",
       "numbers": [
         {
           "metric": "interp ns/op (wasm-in-V8, real register VM)",
@@ -120,17 +120,17 @@
       ],
       "confidence": "high",
       "artifacts": [
-        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/src/lib.rs",
-        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/src/main.rs",
-        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/harness.mjs",
-        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/Cargo.toml",
-        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/out_node.json",
-        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/out_deno.json",
-        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/target/wasm32-unknown-unknown/release/spike_wasmjit.wasm",
-        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/gen_run.wasm",
-        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/gen_run_opt.wasm",
-        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/gen_shared.wasm",
-        "$HOME/.claude/jobs/d3f0d35e/tmp/spike-wasmjit/gen_shared_opt.wasm"
+        "<agent-workdir>",
+        "<agent-workdir>",
+        "<agent-workdir>",
+        "<agent-workdir>",
+        "<agent-workdir>",
+        "<agent-workdir>",
+        "<agent-workdir>",
+        "<agent-workdir>",
+        "<agent-workdir>",
+        "<agent-workdir>",
+        "<agent-workdir>"
       ]
     },
     "verify": {
@@ -248,7 +248,7 @@
       "attempt": 1,
       "lastToolName": "StructuredOutput",
       "lastToolSummary": "Built the wasm-emit JIT / AOT-to-wasm path end-to-end for t…",
-      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto in the deterministic game sim at\n/workspace/src/grabby-aliens, public-bound at full Luau parity. MEASURED so far: a real interpreter (the\nwalking skeleton at /workspace/src/rustia/spikes/spike-sk-rustia, a NaN/tagged-value big-match->br_table register VM)\nruns grabby IAUS kernel at ~0.93us native / ~0.99us wasm-in-V8 (~5x k…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto in the deterministic game sim at\n<grabby-aliens-repo>, public-bound at full Luau parity. MEASURED so far: a real interpreter (the\nwalking skeleton at <rustia-repo>/spikes/spike-sk-rustia, a NaN/tagged-value big-match->br_table register VM)\nruns grabby IAUS kernel at ~0.93us native / ~0.99us wasm-in-V8 (~5x k…",
       "lastProgressAt": 1782814435424,
       "tokens": 152696,
       "toolCalls": 46,
@@ -269,7 +269,7 @@
       "attempt": 1,
       "lastToolName": "StructuredOutput",
       "lastToolSummary": "CONFIRMED",
-      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto in the deterministic game sim at\n/workspace/src/grabby-aliens, public-bound at full Luau parity. MEASURED so far: a real interpreter (the\nwalking skeleton at /workspace/src/rustia/spikes/spike-sk-rustia, a NaN/tagged-value big-match->br_table register VM)\nruns grabby IAUS kernel at ~0.93us native / ~0.99us wasm-in-V8 (~5x k…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Rust Luau interpreter to replace koto in the deterministic game sim at\n<grabby-aliens-repo>, public-bound at full Luau parity. MEASURED so far: a real interpreter (the\nwalking skeleton at <rustia-repo>/spikes/spike-sk-rustia, a NaN/tagged-value big-match->br_table register VM)\nruns grabby IAUS kernel at ~0.93us native / ~0.99us wasm-in-V8 (~5x k…",
       "lastProgressAt": 1782814617202,
       "tokens": 57005,
       "toolCalls": 14,

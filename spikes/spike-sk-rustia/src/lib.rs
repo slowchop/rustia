@@ -2,7 +2,7 @@
 //! real AI-kernel shape, to answer: does a from-scratch Rust VM hit the ~0.7-1.5us Luau-class
 //! bar on native AND wasm?
 //!
-//! Mirrors /workspace/src/rustia/spikes/spike-a-luau/src/main.rs (the Luau reference) and the
+//! Mirrors ../spike-a-luau/src/main.rs (the Luau reference) and the
 //! grabby ai_bakeoff kernel (lib.rs / koto_path.rs) EXACTLY for an apples-to-apples comparison:
 //!   - World of n agents, Q16.16 state, ChaCha8 + fnv1a(id,tick) sub-streams.
 //!   - per agent per tick: derive inputs, run the VM argmax (IAUS product+momentum), eps-greedy,

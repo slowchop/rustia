@@ -305,9 +305,9 @@
             "/tmp/luau_src/Common/include/Luau/Bytecode.h:33-47,65-455,501-547,550-640,750-756 (bytecode version history, 90-opcode enum, LBC_VERSION 3/7/11, typeinfo v1/3, LBF builtin ids, proto flags)",
             "https://luau.org/syntax (string interp, continue, compound assign, generalized iteration, if-else expr, //, number literals, attributes)",
             "https://luau.org/library (documented stdlib function lists; confirms f64-only and no documented int64 lib)",
-            "/workspace/src/grabby-aliens/view/assets/scenarios/galaxy.koto (scenario language surface: for-in ranges, maps, .cos()/.sin(), export)",
-            "/workspace/src/grabby-aliens/ai_bakeoff/src/koto_path.rs:20-46 (AI hot-path SCRIPT: integer control flow + host fxmul/curve, float-free boundary)",
-            "/workspace/src/rustia/design/00-constraints.md (C1 determinism/insertion-order/float-free, C2 Send+Sync, C3 fuel, C4 serde, tension T1)"
+            "<grabby-aliens-repo>/view/assets/scenarios/galaxy.koto (scenario language surface: for-in ranges, maps, .cos()/.sin(), export)",
+            "<grabby-aliens-repo>/ai_bakeoff/src/koto_path.rs:20-46 (AI hot-path SCRIPT: integer control flow + host fxmul/curve, float-free boundary)",
+            "<rustia-repo>/design/00-constraints.md (C1 determinism/insertion-order/float-free, C2 Send+Sync, C3 fuel, C4 serde, tension T1)"
           ],
           "summary": "Deep dive on Luau 0.727 (full C++ source at /tmp/luau_src, dated 2026-06-26, newer than public docs). KEY RESULT on the f64-vs-fixed-point tension (T1): Luau is f64-only at the arithmetic level — all ADD/SUB/MUL/DIV/etc opcodes fast-path on ttisnumber(double)+vector only. A real int64 value type (LUA_TINTEGER) and a ~40-fn `int` library DO exist in 0.727 but are FFlag-gated OFF (LuauIntegerLibrary defaults false), library-only (no operators, accessed via int.add/int.mul), and undocumented/experimental — so int64 is a deferrable opt-in carrier, NOT a language-visible integer subtype. f64 is sufficient for grabby because all script-visible integers stay <2^53 (exact) and the one overflowing op (Q16.16 multiply) is already a host fn; the `buffer` library (little-endian, exact typed int read/write) is the natural secondary deterministic integer/serialization channel. DETERMINISM SURFACES enumerated with exact algorithms: pairs() iterates array-part 1..n then HASH-BUCKET (node-slot) order, not insertion order, but with a FIXED unseeded string hash so it's run-stable (rustia's required insertion order is intentionally stricter/incompatible for hash keys — acceptable); math.random is exact PCG32 (mult 6364136223846793005) with a time/pointer default seed that MUST be forced; tostring(number) uses deterministic Schubfach but string.format %e/%f/%g uses PLATFORM snprintf (cross-platform determinism HAZARD — rustia must ship one pure-Rust float formatter); table.sort is unstable introsort (median-of-3 + heapsort fallback) needing exact replication for tie byte-parity; the libm transcendental set (sin/cos/tan/asin/acos/atan/atan2/sinh/cosh/tanh/exp/log/log10/pow/fmod + Perlin math.noise) is the biggest bit-exact-determinism porting burden and must use a single pure-Rust libm on ALL targets (sqrt is IEEE-safe). No __gc finalizers (one fewer hazard than Lua 5.4); weak tables exist via __mode. Metamethods: 21 fast TMs + __tostring, including Luau-specific __namecall/__iter/__type, no __le-from-__lt synthesis. Coroutines (create/resume/yield/wrap/status/close/isyieldable) + the existing VM interrupt hook map directly onto the steppable/fuel-limited VM requirement. Bytecode: 90 opcodes (LBC_VERSION target 7, max 11; typeinfo v3), of which ~8 are Roblox-specific (userdata/class) and 5 FASTCALL* are lowerable; rustia should own its own compiler/bytecode. SCOPE TRIAGE: grabby-minimal Luau-compat ≈ 70 opcodes + 5 core libs (math/table/string/bit32/buffer) + coroutine + ~26 base globals + Lua-5.1 pattern engine + Schubfach tostring; type annotations are runtime-erased so the parser need only accept-and-ignore the type grammar (the gradual type CHECKER is a separable deferrable subsystem). Deferrable to full Roblox compat: vector type, utf8, string.pack, int64 lib, user-defined class runtime (new LUA_TCLASS/TOBJECT + 6 opcodes), native codegen/typeinfo bytecode, the type checker."
         }
@@ -318,7 +318,7 @@
           "findings": [
             {
               "topic": "Native mlua+Luau build (aarch64-mac) — baseline works",
-              "finding": "Scratch crate at $HOME/.claude/jobs/d3f0d35e/tmp/alt-luau-wasm with mlua 0.10.5 features [luau, vendored] builds and runs natively in 33s. Pulls luau0-src 0.12.3+luau663 (Luau VM version 0.663, recent). `cargo run --release` correctly prints sum=500000500000 for a 1M-iteration loop. So the embedding/binding layer (mlua) and the C++ Luau source are fine on native. Static libs: libluauvm.a 366KB, libluaucompiler.a 693KB, libluauast.a 500KB; final native binary 1.4MB.",
+              "finding": "Scratch crate at <agent-workdir> with mlua 0.10.5 features [luau, vendored] builds and runs natively in 33s. Pulls luau0-src 0.12.3+luau663 (Luau VM version 0.663, recent). `cargo run --release` correctly prints sum=500000500000 for a 1M-iteration loop. So the embedding/binding layer (mlua) and the C++ Luau source are fine on native. Static libs: libluauvm.a 366KB, libluaucompiler.a 693KB, libluauast.a 500KB; final native binary 1.4MB.",
               "confidence": "high"
             },
             {
@@ -381,7 +381,7 @@
             "Precise cross-platform ULP divergence of Luau's math library between x86_64-linux, aarch64-mac, and emscripten musl libm — not quantified here; relevant only if anyone revisits the fork-for-determinism path."
           ],
           "sources": [
-            "Local test crate: $HOME/.claude/jobs/d3f0d35e/tmp/alt-luau-wasm/ (Cargo.toml mlua 0.10 features luau+vendored; native `cargo run --release` => sum=500000500000; pulls luau0-src 0.12.3+luau663)",
+            "Local test crate: <agent-workdir> (Cargo.toml mlua 0.10 features luau+vendored; native `cargo run --release` => sum=500000500000; pulls luau0-src 0.12.3+luau663)",
             "Local verbatim error: `cargo build --target wasm32-unknown-unknown` => luau/Ast/include/Luau/Ast.h:6:10: fatal error: 'iterator' file not found (failing cmd: clang++ --target=wasm32-unknown-unknown -std=c++17 ... -c Cst.cpp)",
             "https://github.com/mlua-rs/luau-src-rs/issues/2 (Luau wasm/emscripten build)",
             "https://github.com/mlua-rs/lua-src-rs/pull/7 (Add support for emscripten (wasm))",
@@ -392,7 +392,7 @@
             "https://docs.rs/mlua/latest/mlua/struct.Lua.html and mlua README (send feature, one-VM-per-thread parallelism, RegistryKey Send+Sync)",
             "https://luau.org/sandbox/ ; https://luau.org/performance/ ; luau-lang/luau discussions #239 (Limiting execution time) and #245 (singlestep/interrupt)",
             "https://simonwillison.net/2026/Mar/9/pluau-wasm-pyodide/ (Luau-to-wasm via emscripten, standalone module)",
-            "grabby baseline: /workspace/src/grabby-aliens/ai_bakeoff/README.md (koto-int 5.4us, koto-float 4.0us/decision, native floor 0.14us)"
+            "grabby baseline: <grabby-aliens-repo>/ai_bakeoff/README.md (koto-int 5.4us, koto-float 4.0us/decision, native floor 0.14us)"
           ],
           "summary": "Embedding the real Luau C++ VM compiled to wasm is NON-VIABLE for grabby's actual target and does not obviate rustia. Decisive, locally-reproduced evidence: mlua+Luau (vendored, Luau 0.663) builds and runs fine on native aarch64-mac, but `cargo build --target wasm32-unknown-unknown` fails on the very first C++ file with a fundamental blocker — `Ast.h:6:10: fatal error: 'iterator' file not found` — because wasm32-unknown-unknown has no C++ standard library/libc at all (this is even earlier than the well-known setjmp problem). The only working wasm path is emscripten (or wasi), which produces a different-ABI module with its own libc/malloc/JS-glue that CANNOT link into or compose with grabby's wasm32-unknown-unknown + wasm-bindgen Bevy module; the only emscripten options are a separate Web Worker (incompatible with a deterministic 10k-decision-per-20ms in-process tick) or recompiling all of Bevy to emscripten (unsupported). On top of that, Luau cannot meet grabby's HARD determinism constraints without an invasive, permanent C++ fork (insertion-ordered table iteration in ltable.cpp, pinned pure-software libm in lmathlib.cpp, FMA/fast-math disabled) — and forking forfeits the one benefit of using real Luau (free upstream full-compat). Send/Sync is fine (mlua `send` feature + one-VM-per-thread matches grabby's model), and Luau's interrupt-at-safepoints hook is a usable but coarse fuel mechanism. fork-Luau-C++-for-native-only is VIABLE-WITH-MAJOR-CAVEATS but fails grabby outright because wasm32 is a required target."
         }
@@ -448,18 +448,18 @@
             "Exact production per-agent AI state size depends on the unbuilt shared-per-crew-type-Q-table design (§2.2) — only the stress-test per-agent sizing exists today."
           ],
           "sources": [
-            "/workspace/src/grabby-aliens/ai_bakeoff/src/lib.rs (World struct fields ~L?: inputs/q/trace/last_action/mood/neighbors/mood_prev; Selector trait L165; tick_with per-agent loop; state_hash)",
-            "/workspace/src/grabby-aliens/ai_bakeoff/src/koto_path.rs (KotoSelector.select → koto.call_function once per agent; single shared VM)",
-            "/workspace/src/grabby-aliens/ai_bakeoff/tests/koto_probe.rs (kvalue_is_send_sync asserts only KValue: Send+Sync; integer/div semantics)",
-            "/workspace/src/grabby-aliens/ai_bakeoff/benches/bakeoff.rs (single-threaded World + Selector; 1k-10k sweep)",
-            "/workspace/src/grabby-aliens/ai_bakeoff/README.md (canonical table: native 0.14µs, koto-int 5.4µs/6.40ms@1k, koto-float 4.0µs; golden 0x31c6ec2734ea6fa2; Send+Sync note; deferred RSS/wasm/iOS)",
-            "/workspace/src/grabby-aliens/view/src/lib.rs:68-71 (App !Send → SimHost NonSend pins sim to one thread)",
-            "/workspace/src/grabby-aliens/view/src/console.rs:47,93,296 (console Koto VM is !Send / NonSend; KotoRepl)",
-            "/workspace/src/grabby-aliens/net/src/bin/server.rs:46-59 (game on main thread App !Send; tokio accept on a separate thread via mpsc)",
-            "/workspace/src/grabby-aliens/view/src/netclient.rs:70,151 (embedded host server on std::thread::spawn — separate world)",
-            "/workspace/src/grabby-aliens/sim/src/predict/wire.rs:18,23,29 (ONE_WAY_TICKS=5, INPUT_REDUNDANCY=5, CLIENT_RING_DEPTH=24)",
-            "/workspace/src/grabby-aliens/sim/src/snapshot.rs:6,9 (in-memory typed ring, no serde; restore ≤1ms target)",
-            "/workspace/src/grabby-aliens/sim/src/brain.rs, crew.rs, npc_farm.rs (current native integer NPC brain; no learned/RL state, NavGoal capture-free)",
+            "<grabby-aliens-repo>/ai_bakeoff/src/lib.rs (World struct fields ~L?: inputs/q/trace/last_action/mood/neighbors/mood_prev; Selector trait L165; tick_with per-agent loop; state_hash)",
+            "<grabby-aliens-repo>/ai_bakeoff/src/koto_path.rs (KotoSelector.select → koto.call_function once per agent; single shared VM)",
+            "<grabby-aliens-repo>/ai_bakeoff/tests/koto_probe.rs (kvalue_is_send_sync asserts only KValue: Send+Sync; integer/div semantics)",
+            "<grabby-aliens-repo>/ai_bakeoff/benches/bakeoff.rs (single-threaded World + Selector; 1k-10k sweep)",
+            "<grabby-aliens-repo>/ai_bakeoff/README.md (canonical table: native 0.14µs, koto-int 5.4µs/6.40ms@1k, koto-float 4.0µs; golden 0x31c6ec2734ea6fa2; Send+Sync note; deferred RSS/wasm/iOS)",
+            "<grabby-aliens-repo>/view/src/lib.rs:68-71 (App !Send → SimHost NonSend pins sim to one thread)",
+            "<grabby-aliens-repo>/view/src/console.rs:47,93,296 (console Koto VM is !Send / NonSend; KotoRepl)",
+            "<grabby-aliens-repo>/net/src/bin/server.rs:46-59 (game on main thread App !Send; tokio accept on a separate thread via mpsc)",
+            "<grabby-aliens-repo>/view/src/netclient.rs:70,151 (embedded host server on std::thread::spawn — separate world)",
+            "<grabby-aliens-repo>/sim/src/predict/wire.rs:18,23,29 (ONE_WAY_TICKS=5, INPUT_REDUNDANCY=5, CLIENT_RING_DEPTH=24)",
+            "<grabby-aliens-repo>/sim/src/snapshot.rs:6,9 (in-memory typed ring, no serde; restore ≤1ms target)",
+            "<grabby-aliens-repo>/sim/src/brain.rs, crew.rs, npc_farm.rs (current native integer NPC brain; no learned/RL state, NavGoal capture-free)",
             "grep over sim/src + view/src: no rayon/par_iter/par_iter_mut/thread::scope over VMs (only mpsc channels + separate-world thread::spawn)"
           ],
           "summary": "Three questions resolved from grabby source. (1) Send vs Sync: only SEND is actually required for the VM — no grabby code shares a single &VM across threads simultaneously. The sim App is !Send and NonSend-pinned to one thread (view/src/lib.rs:68-71), the console Koto VM is !Send/NonSend (console.rs:296), and the only real threads run SEPARATE worlds communicating via mpsc channels (net/src/bin/server.rs:59, netclient.rs:70/151), i.e. move/message-passing, never shared &VM. The 'N independent VMs across a thread pool' design needs Send (own-and-move per thread); Sync is needed only for shared immutable bytecode/LUTs behind Arc. The probe asserts merely KValue: Send+Sync. (2) Per-agent AI memory: bake-off World holds ~89 B/agent (inputs 16, q 24, trace 24, last_action 1, mood 4, neighbors 16, mood_prev 4); mutable/snapshot-relevant ≈69 B/agent; the rollback ring is 24 deep (sim/src/predict/wire.rs:29 CLIENT_RING_DEPTH=24, in-memory no-serde) so AI state riding the ring is ~6.6 MB at 4000 agents worst-case — but lib.rs flags the per-agent Q-table as a deliberate stress test, production shares one Q-table per crew-type so real per-agent state is far smaller. Koto VM RSS is NOT derivable (one shared VM, not per-agent; deferred in README). Today's live sim has no learned AI state at all (brain.rs is stateless native integer utility). (3) Call shape confirmed: one script call_function per agent per tick (lib.rs tick_with loop → koto_path.rs select), the exact shape README finding #2 says doesn't scale (~5.4µs, ~39×) — motivating a batched decide-N API. Reconciliation: canonical per-decision = 5.4µs (amortized from 10.82ms/2k and 27.18ms/5k ≈5.4µs); the 6.40µs@1k is the low-N point inflated by fixed per-tick overhead/warmup; golden hash 0x31c6ec2734ea6fa2 produced bit-identically by native and koto-int."
@@ -472,7 +472,7 @@
         "result": {
           "spike": "SPIKE A: measure Luau actual us/decision on the grabby REAL AI kernel (IAUS utility product + momentum + integer eps-greedy + SARSA(lambda) replacing-trace + social-contagion) to validate/kill the ~4x-faster-than-koto / ~1.0-1.25 us/decision MVP claim on the arithmetic-bound integer-AI workload. The original 4x came from a string-sort bench, near-disjoint from this kernel.",
           "hypothesis": "A reference-Luau bytecode VM (via mlua) running the same per-agent decision the grabby koto path runs should be ~4x faster than koto 0.16.1 and land near 1.0-1.25 us/decision, beating koto's measured ~5.4 us/decision. Risk going in: this kernel is integer/arithmetic-bound (not string-sort), so the claimed 4x might not transfer.",
-          "method": "Read real kernel at /workspace/src/grabby-aliens/ai_bakeoff/src/{lib.rs,koto_path.rs,main.rs} + benches/bakeoff.rs. Key fact: grabby koto path runs ONLY argmax/select (6 actions x 4 considerations product via curve_kind, *1.25 momentum, argmax) in script; eps-greedy + SARSA(lambda) + contagion stay in Rust. Built scratch crate $HOME/.claude/jobs/d3f0d35e/tmp/spike-a-luau with its OWN target dir (grabby source untouched), deps mlua 0.11.6 features=[luau,vendored] -> compiles Luau 0.709 from source via clang (luau0-src 0.18.3+luau709, static luauvm), plus libm + rand_chacha. Rust-side Q16.16 World is a verbatim port of lib.rs (native-floor anchor). Three Luau modes, single-threaded, --release opt-level 3, aarch64-mac, std::time::Instant, warmup=ticks/10, us/d=tick_time/n: (a) REALISTIC: one Luau argmax(i0,i1,i2,i3,last) call per agent per tick, mirrors grabby KotoFloatSelector EXACTLY (inputs marshalled f64=x/65536, script=SCRIPT_FLOAT logic, rest in Rust); (b) VM-INTERNAL: whole per-agent loop (select+eps-greedy+SARSA+input-evolve+mood) + contagion ported to Luau flat tables, run as ONE Luau call per tick (isolates VM exec from FFI; note this moves MORE work into the interpreter than koto ever did); (c) EMPTY: empty Luau fn called per agent (pure mlua entry overhead). Then STEP 4 anchor: built grabby ai_bakeoff (separate target dir) and ran its native/koto/kotof CLI on THIS machine. Commands: cd $HOME/.claude/jobs/d3f0d35e/tmp/spike-a-luau && cargo build --release && ./target/release/spike ; cd /workspace/src/grabby-aliens/ai_bakeoff && CARGO_TARGET_DIR=$HOME/.claude/jobs/d3f0d35e/tmp/grabby-target cargo build --release && ./ai_bakeoff {native,koto,kotof} {1000,5000,10000} {500,100}. f64 Luau math used for considerations (perf proxy; NOT the determinism-constrained Q16.16 path).",
+          "method": "Read real kernel at <grabby-aliens-repo>/ai_bakeoff/src/{lib.rs,koto_path.rs,main.rs} + benches/bakeoff.rs. Key fact: grabby koto path runs ONLY argmax/select (6 actions x 4 considerations product via curve_kind, *1.25 momentum, argmax) in script; eps-greedy + SARSA(lambda) + contagion stay in Rust. Built scratch crate <agent-workdir> with its OWN target dir (grabby source untouched), deps mlua 0.11.6 features=[luau,vendored] -> compiles Luau 0.709 from source via clang (luau0-src 0.18.3+luau709, static luauvm), plus libm + rand_chacha. Rust-side Q16.16 World is a verbatim port of lib.rs (native-floor anchor). Three Luau modes, single-threaded, --release opt-level 3, aarch64-mac, std::time::Instant, warmup=ticks/10, us/d=tick_time/n: (a) REALISTIC: one Luau argmax(i0,i1,i2,i3,last) call per agent per tick, mirrors grabby KotoFloatSelector EXACTLY (inputs marshalled f64=x/65536, script=SCRIPT_FLOAT logic, rest in Rust); (b) VM-INTERNAL: whole per-agent loop (select+eps-greedy+SARSA+input-evolve+mood) + contagion ported to Luau flat tables, run as ONE Luau call per tick (isolates VM exec from FFI; note this moves MORE work into the interpreter than koto ever did); (c) EMPTY: empty Luau fn called per agent (pure mlua entry overhead). Then STEP 4 anchor: built grabby ai_bakeoff (separate target dir) and ran its native/koto/kotof CLI on THIS machine. Commands: cd <agent-workdir> && cargo build --release && ./target/release/spike ; cd <grabby-aliens-repo>/ai_bakeoff && CARGO_TARGET_DIR=<agent-workdir> cargo build --release && ./ai_bakeoff {native,koto,kotof} {1000,5000,10000} {500,100}. f64 Luau math used for considerations (perf proxy; NOT the determinism-constrained Q16.16 path).",
           "numbers": [
             {
               "metric": "native floor (Rust Q16.16, this machine, my port)",
@@ -533,10 +533,10 @@
           ],
           "confidence": "high",
           "artifacts": [
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-a-luau/Cargo.toml",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-a-luau/src/main.rs",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-a-luau/target/release/spike (built binary)",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/grabby-target (grabby ai_bakeoff release build used for the koto anchor; grabby source untouched)"
+            "<agent-workdir>",
+            "<agent-workdir>",
+            "<agent-workdir> (built binary)",
+            "<agent-workdir> (grabby ai_bakeoff release build used for the koto anchor; grabby source untouched)"
           ]
         }
       },
@@ -600,12 +600,12 @@
           ],
           "confidence": "high",
           "artifacts": [
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-dispatch/Cargo.toml",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-dispatch/src/lib.rs",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-dispatch/src/main.rs",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-dispatch/run.mjs",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-dispatch/target/wasm32-unknown-unknown/release/spike_b_dispatch.wasm",
-            "$HOME/.claude/jobs/d3f0d35e/tmp/spike-b-dispatch/target/release/native_bench"
+            "<agent-workdir>",
+            "<agent-workdir>",
+            "<agent-workdir>",
+            "<agent-workdir>",
+            "<agent-workdir>",
+            "<agent-workdir>"
           ]
         }
       }
@@ -641,7 +641,7 @@
       "attempt": 1,
       "lastToolName": "StructuredOutput",
       "lastToolSummary": "Deep dive on Luau 0.727 (full C++ source at /tmp/luau_src, …",
-      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust embedding API.\nHARD CONSTRAINTS: bit-for-…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at <grabby-aliens-repo>. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust embedding API.\nHARD CONSTRAINTS: bit-for-…",
       "lastProgressAt": 1782784141170,
       "tokens": 74462,
       "toolCalls": 27,
@@ -662,12 +662,12 @@
       "attempt": 1,
       "lastToolName": "StructuredOutput",
       "lastToolSummary": "Embedding the real Luau C++ VM compiled to wasm is NON-VIAB…",
-      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust embedding API.\nHARD CONSTRAINTS: bit-for-…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at <grabby-aliens-repo>. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust embedding API.\nHARD CONSTRAINTS: bit-for-…",
       "lastProgressAt": 1782783865283,
       "tokens": 34292,
       "toolCalls": 15,
       "durationMs": 238594,
-      "resultPreview": "{\"findings\":[{\"topic\":\"Native mlua+Luau build (aarch64-mac) — baseline works\",\"finding\":\"Scratch crate at $HOME/.claude/jobs/d3f0d35e/tmp/alt-luau-wasm with mlua 0.10.5 features [luau, vendored] builds and runs natively in 33s. Pulls luau0-src 0.12.3+luau663 (Luau VM version 0.663, recent). `cargo run --release` correctly prints sum=500000500000 for a 1M-iteration loop. So the embedding/bindi…"
+      "resultPreview": "{\"findings\":[{\"topic\":\"Native mlua+Luau build (aarch64-mac) — baseline works\",\"finding\":\"Scratch crate at <agent-workdir> with mlua 0.10.5 features [luau, vendored] builds and runs natively in 33s. Pulls luau0-src 0.12.3+luau663 (Luau VM version 0.663, recent). `cargo run --release` correctly prints sum=500000500000 for a 1M-iteration loop. So the embedding/bindi…"
     },
     {
       "type": "workflow_agent",
@@ -683,7 +683,7 @@
       "attempt": 1,
       "lastToolName": "StructuredOutput",
       "lastToolSummary": "Three questions resolved from grabby source. (1) Send vs Sy…",
-      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust embedding API.\nHARD CONSTRAINTS: bit-for-…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at <grabby-aliens-repo>. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust embedding API.\nHARD CONSTRAINTS: bit-for-…",
       "lastProgressAt": 1782783813974,
       "tokens": 54354,
       "toolCalls": 17,
@@ -704,7 +704,7 @@
       "attempt": 1,
       "lastToolName": "StructuredOutput",
       "lastToolSummary": "SPIKE A: measure Luau actual us/decision on the grabby REAL…",
-      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust embedding API.\nHARD CONSTRAINTS: bit-for-…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at <grabby-aliens-repo>. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust embedding API.\nHARD CONSTRAINTS: bit-for-…",
       "lastProgressAt": 1782784579661,
       "tokens": 57103,
       "toolCalls": 18,
@@ -725,7 +725,7 @@
       "attempt": 1,
       "lastToolName": "StructuredOutput",
       "lastToolSummary": "Spike B: wasm interpreter dispatch tax (native vs wasm-in-V…",
-      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust embedding API.\nHARD CONSTRAINTS: bit-for-…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at <grabby-aliens-repo>. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust embedding API.\nHARD CONSTRAINTS: bit-for-…",
       "lastProgressAt": 1782785565814,
       "tokens": 60402,
       "toolCalls": 40,
@@ -745,7 +745,7 @@
       "queuedAt": 1782784141173,
       "attempt": 1,
       "lastToolName": "StructuredOutput",
-      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust embedding API.\nHARD CONSTRAINTS: bit-for-…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at <grabby-aliens-repo>. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust embedding API.\nHARD CONSTRAINTS: bit-for-…",
       "lastProgressAt": 1782784771798,
       "error": "agent({schema}): StructuredOutput retry cap (5) exceeded — 5 failed calls with no valid output",
       "tokens": 55930,
@@ -766,7 +766,7 @@
       "attempt": 1,
       "lastToolName": "StructuredOutput",
       "lastToolSummary": "{\"spike\":\"SPIKE D: profile koto 0.16.1 koto-int AI hot-path…",
-      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust embedding API.\nHARD CONSTRAINTS: bit-for-…",
+      "promptPreview": "PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at <grabby-aliens-repo>. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust embedding API.\nHARD CONSTRAINTS: bit-for-…",
       "lastProgressAt": 1782784784590,
       "error": "agent({schema}): StructuredOutput retry cap (5) exceeded — 5 failed calls with no valid output",
       "tokens": 63229,
@@ -787,7 +787,7 @@
       "attempt": 1,
       "lastToolName": "StructuredOutput",
       "lastToolSummary": "All four gating gaps the completeness critic raised are now…",
-      "promptPreview": "You are the synthesis lead for rustia. PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at /workspace/src/grabby-aliens. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust em…",
+      "promptPreview": "You are the synthesis lead for rustia. PROJECT: rustia = a from-scratch Luau interpreter in Rust to replace koto 0.16.1 in the deterministic game\nsim at <grabby-aliens-repo>. Priorities IN ORDER: (1) FAST [JIT not required if a non-JIT path is faster]; (2) low\nmemory; (3) wasm32-unknown-unknown perf (browser/mobile; JIT moot in-browser); (4) full latest-Luau compat;\n(5) excellent Rust em…",
       "lastProgressAt": 1782786006044,
       "tokens": 79952,
       "toolCalls": 10,

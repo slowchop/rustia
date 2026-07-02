@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rustia Project Status</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fa;
+      --surface: #ffffff;
+      --ink: #172033;
+      --muted: #5c6878;
+      --line: #d9e0ea;
+      --blue: #17466f;
+      --blue-soft: #e8f1fa;
+      --green: #1f6f49;
+      --green-soft: #e8f5ef;
+      --amber: #8b6400;
+      --amber-soft: #fff4d7;
+      --red: #a13a32;
+      --red-soft: #fbe9e7;
+      --teal: #126b65;
+      --teal-soft: #e5f4f2;
+      --code: #eef2f6;
+      --shadow: 0 18px 42px rgba(23, 32, 51, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, #e9eef5 0, #f5f7fa 340px),
+        var(--bg);
+      color: var(--ink);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    }
+
+    main {
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 32px 20px 56px;
+    }
+
+    header {
+      background: #17324d;
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      color: #ffffff;
+      padding: 28px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      letter-spacing: 0;
+      line-height: 1.2;
+      margin: 0;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 4vw, 3rem);
+      margin-bottom: 8px;
+    }
+
+    h2 {
+      font-size: 1.12rem;
+      margin-bottom: 12px;
+    }
+
+    h3 {
+      color: #314257;
+      font-size: 0.8rem;
+      letter-spacing: 0.04em;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    p {
+      margin: 0 0 10px;
+    }
+
+    p:last-child {
+      margin-bottom: 0;
+    }
+
+    ul,
+    ol {
+      margin: 0;
+      padding-left: 1.2rem;
+    }
+
+    li {
+      color: var(--muted);
+      margin: 6px 0;
+    }
+
+    code {
+      background: var(--code);
+      border-radius: 5px;
+      color: #26364b;
+      font: 0.92em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      padding: 0.1rem 0.32rem;
+    }
+
+    header code {
+      background: rgba(255, 255, 255, 0.15);
+      color: #ffffff;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 11px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: #314257;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+    }
+
+    td {
+      color: var(--muted);
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    section,
+    .metric,
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    section {
+      margin-top: 14px;
+      padding: 20px;
+    }
+
+    .header-meta {
+      color: #d9e6f3;
+      max-width: 880px;
+    }
+
+    .kicker {
+      color: #a8e6dc;
+      font-weight: 700;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      margin-top: 18px;
+    }
+
+    .split {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      margin-top: 14px;
+    }
+
+    .metric {
+      min-height: 128px;
+      padding: 18px;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 1.35rem;
+      line-height: 1.15;
+      margin-bottom: 7px;
+    }
+
+    .metric span {
+      color: var(--muted);
+      display: block;
+    }
+
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .tag {
+      align-items: center;
+      border-radius: 999px;
+      display: inline-flex;
+      font-size: 0.82rem;
+      font-weight: 700;
+      line-height: 1;
+      padding: 7px 10px;
+      white-space: nowrap;
+    }
+
+    .tag.ok {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .tag.info {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .tag.wait {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .tag.hold {
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    .note {
+      background: var(--blue-soft);
+      border-color: #c5d7ea;
+    }
+
+    .warning {
+      background: var(--amber-soft);
+      border-color: #ebd38c;
+    }
+
+    .blocked {
+      background: var(--red-soft);
+      border-color: #efc4c0;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    .compact {
+      margin-top: 8px;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .source-list {
+      columns: 2;
+      column-gap: 28px;
+      margin-top: 8px;
+    }
+
+    @media (max-width: 760px) {
+      main {
+        padding: 22px 14px 40px;
+      }
+
+      header,
+      section {
+        padding: 18px;
+      }
+
+      .source-list {
+        columns: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="kicker">rustia status report</div>
+      <h1>Conformance-first Luau engine implementation</h1>
+      <p class="header-meta">
+        Current objective: build a full, deterministic Luau implementation with P1 engine core underway.
+        The project is moving through upstream Luau 0.709 behavior slices while keeping design, fixtures,
+        and executable gates in sync.
+      </p>
+      <div class="status-row" aria-label="Current status tags">
+        <span class="tag ok">Design locked</span>
+        <span class="tag info">P1 engine core underway</span>
+        <span class="tag info">Luau 0.709 pinned</span>
+        <span class="tag wait">CI not started</span>
+        <span class="tag hold">Keep .github empty</span>
+      </div>
+    </header>
+
+    <div class="grid">
+      <div class="metric">
+        <strong>318 fixtures</strong>
+        <span>Current manifest total recorded in <code>conformance/COVERAGE.md</code>.</span>
+      </div>
+      <div class="metric">
+        <strong>189 refs</strong>
+        <span>Behavior-topic catalog entries currently tracked by conformance docs.</span>
+      </div>
+      <div class="metric">
+        <strong>261 executable</strong>
+        <span>Fixtures marked against the Luau 0.709 oracle and runnable by the rustia harness.</span>
+      </div>
+      <div class="metric">
+        <strong>49 pending impl</strong>
+        <span>Whole upstream Luau 0.709 conformance scripts inventoried for later porting.</span>
+      </div>
+    </div>
+
+    <section>
+      <h2>Objective And Boundaries</h2>
+      <div class="split">
+        <div class="panel note" style="padding: 16px;">
+          <h3>Implementation goal</h3>
+          <p>
+            Build rustia as a conformance-first, from-scratch Luau interpreter in Rust, replacing koto only
+            when full Luau parity and deterministic behavior are proven. The current main path is P1 engine
+            core: lexer, parser, compiler, bytecode VM, public API, CLI, and conformance runner.
+          </p>
+        </div>
+        <div class="panel warning" style="padding: 16px;">
+          <h3>Locked constraints</h3>
+          <p>
+            The design is locked. <code>Value</code> remains a sealed newtype until the JSC/Firefox wasm gate
+            is measured. Private ops and infrastructure notes stay under <code>private/</code>. Public files
+            may only mention the benchmark runner by the generic target label <code>[self-hosted, bench]</code>.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Current Implementation State</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>Status</th>
+              <th>Practical reading</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Workspace</td>
+              <td>Scaffold present</td>
+              <td>
+                <code>Cargo.toml</code> lists production crates for API, CLI, compiler, conformance runner,
+                lexer, parser, and VM. The repo has a broad uncommitted scaffold, so edits must stay scoped
+                and avoid reverting unrelated work.
+              </td>
+            </tr>
+            <tr>
+              <td>Architecture</td>
+              <td>Authoritative</td>
+              <td>
+                <code>design/30-architecture.md</code> locks one portable big-match VM, 16-byte tagged values,
+                gc-arena, instruction fuel, libm math, deterministic numeric behavior, and a hand-written parser.
+              </td>
+            </tr>
+            <tr>
+              <td>Conformance</td>
+              <td>Incremental and executable</td>
+              <td>
+                The current counted state is 318 fixtures, 189 refs, 261 executable Luau 0.709 fixtures,
+                8 pending-oracle smoke fixtures, and 49 pending-impl upstream scripts.
+              </td>
+            </tr>
+            <tr>
+              <td>Benchmarking</td>
+              <td>Designed, not wired</td>
+              <td>
+                The benchmark suite design is self-hosted and uses the public-safe runner label
+                <code>[self-hosted, bench]</code>. Benchmark crate work can proceed, but public CI workflow
+                files have not been created.
+              </td>
+            </tr>
+            <tr>
+              <td>CI</td>
+              <td>Not started</td>
+              <td>
+                No CI configuration has started in this repo, and <code>.github</code> should remain empty
+                until the owner explicitly starts that phase.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Latest Slice Status</h2>
+      <div class="split">
+        <div class="panel" style="padding: 16px;">
+          <h3>Latest completed slice</h3>
+          <p>
+            The last completed counted conformance slice covers direct scalar math helpers:
+            <code>math.floor</code>, <code>math.ceil</code>, <code>math.min</code>, <code>math.max</code>,
+            <code>math.sign</code>, <code>math.clamp</code>, <code>math.round</code>,
+            <code>math.map</code>, and <code>math.lerp</code>. The coverage docs record this as part of the
+            318-fixture snapshot.
+          </p>
+        </div>
+        <div class="panel" style="padding: 16px;">
+          <h3>Current in-progress slice</h3>
+          <p>
+            Visible working-tree context shows VM opcode work started for the next one-result math batch:
+            <code>math.fmod</code>, <code>math.pow</code>, <code>math.sqrt</code>, <code>math.deg</code>,
+            <code>math.rad</code>, <code>math.isnan</code>, <code>math.isinf</code>,
+            <code>math.isfinite</code>, and <code>math.pi</code>. This is not counted in the coverage totals
+            until compiler lowering, fixtures, refs, provenance, docs, and full gates are completed.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Expected Gates After Each Slice</h2>
+      <p class="muted">Each behavior slice should end with the same local verification set before moving on.</p>
+      <div class="table-wrap compact">
+        <table>
+          <thead>
+            <tr>
+              <th>Gate</th>
+              <th>Command or check</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Formatting</td>
+              <td><code>cargo fmt --all --check</code></td>
+            </tr>
+            <tr>
+              <td>Tests</td>
+              <td><code>cargo test --workspace</code></td>
+            </tr>
+            <tr>
+              <td>Lint</td>
+              <td><code>cargo clippy --workspace --all-targets -- -D warnings</code></td>
+            </tr>
+            <tr>
+              <td>Wasm build gate</td>
+              <td><code>cargo check --workspace --target wasm32-unknown-unknown</code></td>
+            </tr>
+            <tr>
+              <td>Conformance manifest</td>
+              <td><code>cargo run -p rustia-conformance -- .</code></td>
+            </tr>
+            <tr>
+              <td>Public safety</td>
+              <td>
+                Scan public files for private ops, host, runner, cache, service, and path details. Public
+                workflow-facing text may only use <code>[self-hosted, bench]</code>.
+              </td>
+            </tr>
+            <tr>
+              <td>CI boundary</td>
+              <td><code>find .github -maxdepth 3 -type f -print</code> should print nothing until CI work starts.</td>
+            </tr>
+            <tr>
+              <td>ASCII manifests</td>
+              <td><code>file conformance/MANIFEST.tsv</code> should remain ASCII text.</td>
+            </tr>
+            <tr>
+              <td>Stale-count scan</td>
+              <td>Search docs and report for obsolete fixture/ref counts or contradicted conformance notes.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="blocked">
+      <h2>CI Boundary</h2>
+      <p>
+        CI configuration has not started. Do not create or edit workflow files yet. <code>.github</code> should
+        remain empty until the owner explicitly begins CI wiring. When CI begins, public workflow files should
+        target only <code>[self-hosted, bench]</code> and must not contain private host, path, service, runner,
+        IP, or repository details.
+      </p>
+    </section>
+
+    <section>
+      <h2>Next Concrete Actions</h2>
+      <ol>
+        <li>
+          Finish the current direct one-result math slice by adding compiler lowering and <code>math.pi</code>
+          field handling, then port the matching upstream Luau 0.709 tests into fixtures and refs.
+        </li>
+        <li>
+          Update <code>conformance/MANIFEST.tsv</code>, <code>conformance/REFS.tsv</code>,
+          fixture provenance, <code>conformance/COVERAGE.md</code>, and any affected design notes in the same
+          change as code.
+        </li>
+        <li>
+          Run the full gate set above and keep the public-safety scan clean before taking another slice.
+        </li>
+        <li>
+          Continue porting the upstream Luau tests into this project so correctness is driven by the pinned
+          oracle rather than model-derived rows.
+        </li>
+        <li>
+          Leave CI and <code>.github</code> untouched until the owner starts that phase.
+        </li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Sources Read For This Report</h2>
+      <p class="muted">
+        Report generated from local repo files and visible working context. No private ops details are included.
+      </p>
+      <ul class="source-list">
+        <li><code>CLAUDE.md</code></li>
+        <li><code>design/CURRENT.md</code></li>
+        <li><code>design/30-architecture.md</code></li>
+        <li><code>design/50-conformance.md</code></li>
+        <li><code>design/80-bench-suite.md</code></li>
+        <li><code>conformance/COVERAGE.md</code></li>
+        <li><code>conformance/MANIFEST.tsv</code></li>
+        <li><code>conformance/REFS.tsv</code></li>
+        <li><code>README.md</code></li>
+        <li><code>Cargo.toml</code></li>
+        <li><code>status-report.html</code></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

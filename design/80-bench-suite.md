@@ -2,7 +2,7 @@
 
 > **Status: [DESIGN — decisions pending] (2026-07-01).** Scoped by the `bench-scoping` agent (clone+read of
 > `khvzak/script-bench-rs`, the 11-workload seed in `spikes/bench-suite/`, and the 2025–26 tracker/wasm-shell
-> tooling) + a self-hosted adjustment for gak's EPYC + privacy lean. Operationalises principle #3 ("measure,
+> tooling) + self-hosted benchmark-label constraints + privacy lean. Operationalises principle #3 ("measure,
 > don't assert — the bench suite is a CI gate"). See [`CURRENT.md`](CURRENT.md).
 
 ## Decision 1 — REWRITE, not fork (LOCKED, gak + license evidence)
@@ -12,15 +12,15 @@ in-VM-throughput workloads. **Clean rewrite**, keep the comparable workloads, ad
 crediting khvzak. (Optional, deferred: run script-bench-rs unmodified at a pinned SHA in a separate job for
 bonus comparison columns — no vendoring, no license issue. Nice-to-have.)
 
-## Tracking pipeline — FULLY SELF-HOSTED, no SaaS (gak's EPYC + privacy)
+## Tracking pipeline — FULLY SELF-HOSTED, no SaaS (generic runner label + privacy)
 Split by what's measurable; never use one for the other's job:
 - **Regression GATE (PR blocker) = `iai-callgrind`** — Valgrind/callgrind **instruction counts**, run **locally
-  on the EPYC runner**. <1% variance (deterministic), no third-party egress, and on-brand: rustia's own
+  on `[self-hosted, bench]`**. <1% variance (deterministic), no third-party egress, and on-brand: rustia's own
   determinism meter is instruction-fuel — "count, not clock." Catches algorithmic regressions independent of
   HW noise. (This is the local equivalent of CodSpeed; chosen over CodSpeed to avoid SaaS egress.)
-- **Headline "bar" numbers = criterion wall-clock, min-of-N**, native + each wasm engine, on the **pinned
-  dedicated EPYC** (CPU governor pinned / turbo off / cores isolated via cpuset / ASLR off / other VMs quiesced
-  / toolchain+deps pinned). Carries the "≈ reference-Luau parity / 5–9× koto" claims (which must be wall-clock).
+- **Headline "bar" numbers = criterion wall-clock, min-of-N**, native + each wasm engine, on `[self-hosted,
+  bench]`. Environment-specific tuning and toolchain details stay private.
+  Carries the "≈ reference-Luau parity / 5–9× koto" claims (which must be wall-clock).
 - **History/tracking = `github-action-benchmark` with `external-data-json-path`** — MIT, commits history JSON
   into the repo (a `bench-data` branch), regression alerts (`fail-on-alert`/`comment-on-alert`), no account, you
   own all data. (NOT the gh-Pages mode — that needs paid GitHub for private repos.)
@@ -44,7 +44,7 @@ Split by what's measurable; never use one for the other's job:
 `{engine, engine_version, target, arch, os, mode, workload, unit, ns_per_unit_min, ns_per_unit_median,
 units_per_sec, n, golden_hash, commit, date, runner}`.
 
-## CI structure (GitHub Actions, self-hosted EPYC runner via a GENERIC label `[self-hosted, bench]` — no infra
+## CI structure (GitHub Actions, self-hosted benchmark runner via a GENERIC label `[self-hosted, bench]` — no infra
 detail in the repo)
 1. **`bench-native`** — build the `bench` crate per engine feature; `iai-callgrind` instruction-count = the
    **gate**; also emit criterion wall-clock JSON.
@@ -76,7 +76,7 @@ bench/  Cargo.toml(features: rustia stub→real, koto, mlua-luau, mlua-lua54, rh
 
 ## Open decisions (gak)
 - **D1 — fully-self-hosted (recommended) vs add CodSpeed.** Recommend the iai-callgrind + criterion +
-  github-action-benchmark pipeline, entirely on the EPYC, no SaaS. CodSpeed only if a hosted dashboard is ever
+  github-action-benchmark pipeline, entirely self-hosted, no SaaS. CodSpeed only if a hosted dashboard is ever
   wanted (SaaS egress). **Lean: fully self-hosted.**
 - **D2 — JSC-in-CI approach: DEFERRED to P1** (nothing rustia to bench in wasm yet). At P1: canonical macOS
   `jsc` nightly + `bun`-JSC-on-Linux per-PR (cheap signal; flag it's "a JSC," not Safari's shipping one).

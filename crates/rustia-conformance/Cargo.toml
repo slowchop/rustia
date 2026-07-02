@@ -1,0 +1,19 @@
+[package]
+name = "rustia-conformance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+rustia.workspace = true
+rustia-compiler.workspace = true
+rustia-parser.workspace = true
+rustia-vm.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "rustia-conformance"
+path = "src/main.rs"

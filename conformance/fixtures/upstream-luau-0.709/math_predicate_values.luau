@@ -1,0 +1,16 @@
+-- Derived from Luau 0.709 tests/conformance/math.luau at
+-- b968ef742741bb2b703afc3b3c53f06608c87481.
+assert(math.isnan(0 / 0))
+assert(math.isnan(10) == false)
+assert(math.isnan(math.huge) == false)
+assert(math.isinf(math.huge))
+assert(math.isinf(-math.huge))
+assert(math.isinf(10) == false)
+assert(math.isinf(0 / 0) == false)
+assert(math.isfinite(math.huge) == false)
+assert(math.isfinite(-math.huge) == false)
+assert(math.isfinite(0 / 0) == false)
+assert(math.isfinite(123.45))
+assert(math.isnan("123.45") == false)
+assert(math.isinf("123.45") == false)
+assert(math.isfinite("123.45") == true)

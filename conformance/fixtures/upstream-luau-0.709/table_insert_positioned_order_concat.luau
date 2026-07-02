@@ -1,0 +1,8 @@
+local a = {}
+table.insert(a, 10)
+table.insert(a, 2, 20)
+table.insert(a, 1, -1)
+table.insert(a, 40)
+table.insert(a, table.getn(a) + 1, 50)
+table.insert(a, 2, -2)
+return table.concat(a, ",")

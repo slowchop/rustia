@@ -5,13 +5,16 @@
 > fix version-drift flagged by 3rd-party review finding H1.)
 
 ## One-paragraph state
-The **design phase is complete and reviewed**; no production engine is built yet (only throwaway spikes). A
+The **design phase is complete and reviewed**, and P1 implementation has started in production crates. The
+current workspace contains the initial VM/lexer/parser/compiler/API/CLI/conformance scaffold, plus the full
+Luau 0.709 conformance corpus inventoried as `pending-impl`; full Luau semantics are not implemented yet. A
 from-scratch Rust Luau interpreter is validated as **GO**: a walking-skeleton VM measured **~0.9–1.0 µs per
 decision on one real workload** (≈ parity with reference Luau, **~4–6× faster than koto**) on native **and**
 wasm-in-V8, deterministic across Linux-x86/Mac-ARM/Chrome-wasm. All 8 architecture axes are decided
 ([`30-architecture.md`](30-architecture.md) v3), a 709-row Luau conformance table exists in draft
 ([`50-conformance.md`](50-conformance.md)), and 10 conformance-verified improvements are adopted
-([`55-improvements.md`](55-improvements.md)). A 3rd-party review (below) is being actioned.
+([`55-improvements.md`](55-improvements.md)). Future benchmark workflow files may target only the generic
+`[self-hosted, bench]` label; CI workflow wiring is not implemented yet.
 
 ## 🚀 Next actions (cold-start handoff — do in this order)
 **Read order for a fresh agent:** `CLAUDE.md` (auto-loaded) → **this file** → [`30-architecture.md`](30-architecture.md) (the ADR)
@@ -22,19 +25,23 @@ wasm-in-V8, deterministic across Linux-x86/Mac-ARM/Chrome-wasm. All 8 architectu
    16-byte **tagged** `Value` (sealed newtype — keep swappable until the gate below), one portable
    big-`match`→`br_table` dispatch + generic superinstructions, **gc-arena** GC on the instruction counter,
    own hand-written recursive-descent **parser** (parse types, don't typecheck), per-instruction **fuel**,
-   f64 + pure-Rust **libm** + per-op NaN/`-0` canon. Wire the cross-arch golden + conformance + bench gates into
-   CI from day one. Much of P1 (lexer/parser/compiler/VM scaffold) is NOT gated → can start now.
+   f64 + pure-Rust **libm** + per-op NaN canon plus table-key `-0` normalization. Much of P1 (lexer/parser/compiler/VM scaffold) is NOT
+   gated → can start now. Prepare the cross-arch golden + conformance + bench gates, but do not create or edit
+   CI workflow/config files until the owner is told exactly what the self-hosted runner setup needs.
 2. **Build the `bench/` crate** (framework + native baseline engines; wasm/JSC P1-gated) — [`80-bench-suite.md`](80-bench-suite.md).
    Fully self-hosted (iai-callgrind + criterion + github-action-benchmark). Runs in parallel with P1.
-3. **Set up the EPYC self-hosted runner** — see `private/ops/ci-security.md` (the `rustia-ops` PRIVATE sibling;
-   the split-runner security model). Infra notes live there, NEVER in this public repo.
+3. **Port the upstream Luau 0.709 test corpus** into this repo as rustia conformance fixtures, alongside the
+   row-by-row oracle re-derivation in [`50-conformance.md`](50-conformance.md). Keep the tests public and
+   provenance-clean; generated/private harness notes stay in `private/`.
+4. **Wire benchmark CI** — before starting any CI configuration, notify the owner of the required setup. Then
+   use only `[self-hosted, bench]` in public workflow files; keep infra details out of this public repo.
 
 **Pre-P1-LOCK gates** (finalizing the value-layout/dispatch waits on these — build behind the sealed `Value`
 meanwhile): see the "What's next" section below for the full list (JSC/Firefox wasm re-measure, `call_ref` bench,
 conformance re-derive, GC tuning, `LuauIntegerType2` watch).
 
 **Project setup facts:** dual `MIT OR Apache-2.0` (holder Gak Dev Pty Ltd); the public/private boundary +
-`private/` mount are in [`CLAUDE.md`](../CLAUDE.md); ops/notes/infra live in the private `rustia-ops` sibling; no Linear.
+`private/` mount are in [`CLAUDE.md`](../CLAUDE.md); no Linear.
 
 ## Canonical claims (corrected — supersede any stronger wording elsewhere)
 - **Perf — state it PER-WORKLOAD, not as a blanket "~5× koto"** (review H2, now measured on an 11-workload
@@ -114,4 +121,5 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
 5. **Watch `FFlag::LuauIntegerType2`** upstream (the f64-only tripwire).
 
 These are P1-gated; the design itself is otherwise complete. P1 (engine build) starts with the cross-engine +
-conformance + benchmark gates wired into CI from day one.
+conformance + benchmark gates prepared from day one; workflow/config wiring waits until the owner has been told
+the required self-hosted runner setup.

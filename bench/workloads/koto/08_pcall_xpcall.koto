@@ -1,0 +1,15 @@
+# Koto equivalent of pcall via try/catch (koto has no separate xpcall). unit = one protected call (1/16 throws).
+maybe_throw = |i|
+  if i % 16 == 0
+    throw "boom"
+  i * 2
+export f = |n|
+  acc = 0
+  for i in 1..=n
+    r = try
+      maybe_throw i
+    catch _e
+      -1
+    if r != -1
+      acc += r
+  acc
