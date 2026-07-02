@@ -622,16 +622,16 @@ luau-0-709.string.pack_direct_edges	stdlib	stdlib.string-pack,stdlib.string-pack
 luau-0-709.string.literal_high_byte_escapes	parser-runtime	string.high-byte-escapes,string.byte-semantics,stdlib.string-byte,string.length-byte	ReproducibleStandard	luau-0.709	string:OK	conformance/fixtures/upstream-luau-0.709/string_literal_high_byte_escapes.luau
 luau-0-709.string.literal_unicode_escape	parser-runtime	string.unicode-escape	ReproducibleStandard	luau-0.709	string:OK	conformance/fixtures/upstream-luau-0.709/string_literal_unicode_and_line_continuation.luau
 luau-0-709.string.literal_unicode_surrogate_escape_bytes	parser-runtime	string.unicode-escape,string.byte-semantics	ReproducibleStandard	luau-0.709	bool:true	conformance/fixtures/upstream-luau-0.709/string_literal_unicode_surrogate_escape_bytes.luau
-p1.string.literal_invalid_unknown_escape	parser-runtime	string.invalid-short-escape	DeterministicSim	pending-oracle	error_contains:invalid escape sequence	conformance/fixtures/p1-smoke/string_literal_invalid_unknown_escape.luau
-p1.string.literal_raw_newline_error	parser-runtime	string.short-string-newline-error	DeterministicSim	pending-oracle	error_contains:newline	conformance/fixtures/p1-smoke/string_literal_raw_newline_error.luau
+p1.string.literal_invalid_unknown_escape	parser-runtime	string.invalid-short-escape	DeterministicSim	luau-0.709	error_contains:invalid escape sequence	conformance/fixtures/p1-smoke/string_literal_invalid_unknown_escape.luau
+p1.string.literal_raw_newline_error	parser-runtime	string.short-string-newline-error	DeterministicSim	luau-0.709	error_contains:newline	conformance/fixtures/p1-smoke/string_literal_raw_newline_error.luau
 luau-0-709.string.literal_line_continuation_escape	parser-runtime	string.line-continuation-escape	ReproducibleStandard	luau-0.709	string:OK	conformance/fixtures/upstream-luau-0.709/string_literal_line_continuation_escape.luau
 luau-0-709.string.byte_range_results	stdlib	stdlib.string-byte,string.byte-semantics	ReproducibleStandard	luau-0.709	number:979899	conformance/fixtures/upstream-luau-0.709/string_byte_range_results.luau
 luau-0-709.number.binary_literal	parser-runtime	number.binary-literal,number.literal-separators	ReproducibleStandard	luau-0.709	number:135283237	conformance/fixtures/upstream-luau-0.709/number_binary_literal.luau
 p1.numeric.arithmetic	parser-runtime	number.mul,type.local-annotation	DeterministicSim	luau-0.709	number:42	conformance/fixtures/p1-smoke/numeric_arithmetic.luau
 p1.numeric.hex_exp_dot	parser-runtime	number.hex-literal,number.exponent-literal,number.leading-dot-literal	DeterministicSim	luau-0.709	number:1016.5	conformance/fixtures/p1-smoke/numeric_literals.luau
 p1.numeric.mod_floor	parser-runtime	number.mod-floored	DeterministicSim	luau-0.709	number:1	conformance/fixtures/p1-smoke/mod_floor.luau
-p1.numeric.mod_negative_zero	determinism	number.mod-negative-zero,number.sign-of-zero	DeterministicSim	pending-oracle	number_bits:8000000000000000	conformance/fixtures/p1-smoke/mod_negative_zero.luau
-p1.types.erased	parser-runtime	type.alias,type.union,type.runtime-erased	DeterministicSim	pending-oracle	number:7	conformance/fixtures/p1-smoke/types_erased.luau
+p1.numeric.mod_negative_zero	determinism	number.mod-negative-zero,number.sign-of-zero	DeterministicSim	luau-0.709	number_bits:8000000000000000	conformance/fixtures/p1-smoke/mod_negative_zero.luau
+p1.types.erased	parser-runtime	type.alias,type.union,type.runtime-erased	DeterministicSim	luau-0.709	number:7	conformance/fixtures/p1-smoke/types_erased.luau
 p1.strings.utf8	parser-runtime	string.short-utf8,string.byte-semantics	DeterministicSim	luau-0.709	string	conformance/fixtures/p1-smoke/utf8_string.luau
 upstream.luau-0-709.apicalls	api-native	upstream.luau-0-709.apicalls	ReproducibleStandard	luau-0.709	pass	conformance/upstream/luau-0.709/tests/conformance/apicalls.luau
 upstream.luau-0-709.assert	core-language	upstream.luau-0-709.assert	ReproducibleStandard	luau-0.709	string:OK	conformance/upstream/luau-0.709/tests/conformance/assert.luau

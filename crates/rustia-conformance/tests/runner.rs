@@ -252,12 +252,7 @@ fn pending_manifest_rows_match_explicit_allowlist() {
 
     assert_eq!(
         actual,
-        vec![
-            "pending-oracle\tp1.string.literal_invalid_unknown_escape\tconformance/fixtures/p1-smoke/string_literal_invalid_unknown_escape.luau\tstring.invalid-short-escape",
-            "pending-oracle\tp1.string.literal_raw_newline_error\tconformance/fixtures/p1-smoke/string_literal_raw_newline_error.luau\tstring.short-string-newline-error",
-            "pending-oracle\tp1.numeric.mod_negative_zero\tconformance/fixtures/p1-smoke/mod_negative_zero.luau\tnumber.mod-negative-zero,number.sign-of-zero",
-            "pending-oracle\tp1.types.erased\tconformance/fixtures/p1-smoke/types_erased.luau\ttype.alias,type.union,type.runtime-erased",
-        ]
+        Vec::<String>::new()
     );
 }
 
@@ -280,12 +275,7 @@ fn pending_ref_catalog_rows_match_explicit_allowlist() {
 
     assert_eq!(
         actual,
-        vec![
-            "pending-oracle\tnumber.mod-negative-zero\tdesign/50-conformance.md",
-            "pending-oracle\tstring.invalid-short-escape\tdesign/50-conformance.md",
-            "pending-oracle\tstring.short-string-newline-error\tdesign/50-conformance.md",
-            "pending-oracle\ttype.union\tdesign/50-conformance.md",
-        ]
+        Vec::<String>::new()
     );
 }
 

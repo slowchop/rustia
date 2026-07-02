@@ -107,7 +107,7 @@ number.binary-literal	parser-runtime	conformance/upstream/luau-0.709/tests/confo
 number.literal-separators	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/bitwise.luau	luau-0.709	Numeric source literals allow underscore digit separators that do not affect the parsed f64 value.
 number.leading-dot-literal	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/literals.luau	luau-0.709	Leading-dot float literals parse to f64.
 number.mod-floored	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Percent operator uses Luau floored modulo semantics.
-number.mod-negative-zero	determinism	design/50-conformance.md	pending-oracle	Modulo preserves observable negative zero where Luau does.
+number.mod-negative-zero	determinism	upstream-luau-0.709:VM/src/lnumutils.h	luau-0.709	Modulo preserves observable negative zero where Luau does.
 number.mul	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Number multiplication produces f64 values.
 number.nan-result	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	NaN-producing numeric operations produce Luau numeric NaN values that tostring renders as "nan".
 number.pow	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Exponentiation uses Luau numeric power semantics for finite numeric results.
@@ -124,8 +124,8 @@ string.short-utf8	parser-runtime	conformance/upstream/luau-0.709/tests/conforman
 string.high-byte-escapes	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/strings.luau	luau-0.709	Decimal and hexadecimal string escapes preserve byte values above 127.
 string.unicode-escape	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/utf8.luau	luau-0.709	Unicode string escapes encode codepoints up to 0x10FFFF as UTF-8 bytes, including surrogate byte sequences used by utf8 invalid-input tests.
 string.line-continuation-escape	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/literals.luau	luau-0.709	Backslash-newline in a short string inserts one normalized newline byte.
-string.invalid-short-escape	parser-runtime	design/50-conformance.md	pending-oracle	Unknown short-string escapes are lex errors.
-string.short-string-newline-error	parser-runtime	design/50-conformance.md	pending-oracle	Unescaped raw newlines in short strings are lex errors.
+string.invalid-short-escape	parser-runtime	upstream-luau-0.709:Ast/src/Lexer.cpp	luau-0.709	Unknown short-string escapes are lex errors.
+string.short-string-newline-error	parser-runtime	upstream-luau-0.709:Ast/src/Lexer.cpp	luau-0.709	Unescaped raw newlines in short strings are lex errors.
 stdlib.string-byte	stdlib	conformance/upstream/luau-0.709/tests/conformance/strings.luau	luau-0.709	string.byte returns numeric byte values for one-based or negative indices, clamps explicit range starts below 1, and returns no value when the selected range is empty or out of bounds.
 stdlib.string-char	stdlib	conformance/upstream/luau-0.709/tests/conformance/strings.luau	luau-0.709	string.char builds a byte string from integer byte values in the inclusive range 0..255 and returns errors for out-of-range values.
 stdlib.string-char-large-arg-list	stdlib	conformance/upstream/luau-0.709/tests/conformance/pm.luau	luau-0.709	string.char accepts at least 256 arguments when constructing byte strings from expanded result lists.
@@ -429,7 +429,7 @@ syntax.return-final-statement	parser	conformance/upstream/luau-0.709/tests/confo
 type.alias	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/native_types.luau	luau-0.709	Type aliases parse and erase at runtime.
 type.local-annotation	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/native_types.luau	luau-0.709	Local type annotations parse and erase at runtime.
 type.runtime-erased	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/explicit_type_instantiations.luau	luau-0.709	Type syntax has no runtime value effect.
-type.union	parser-runtime	design/50-conformance.md	pending-oracle	Union type syntax parses in type context.
+type.union	parser-runtime	upstream-luau-0.709:Ast/src/Parser.cpp	luau-0.709	Union type syntax parses in type context.
 upstream.luau-0-709.apicalls	api-native	conformance/upstream/luau-0.709/tests/conformance/apicalls.luau	luau-0.709	Whole upstream Luau 0.709 conformance script apicalls.luau.
 upstream.luau-0-709.assert	core-language	conformance/upstream/luau-0.709/tests/conformance/assert.luau	luau-0.709	Whole upstream Luau 0.709 conformance script assert.luau.
 upstream.luau-0-709.attrib	core-language	conformance/upstream/luau-0.709/tests/conformance/attrib.luau	luau-0.709	Whole upstream Luau 0.709 conformance script attrib.luau.
