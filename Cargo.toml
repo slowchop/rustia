@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "bench",
     "crates/rustia",
     "crates/rustia-cli",
     "crates/rustia-compiler",

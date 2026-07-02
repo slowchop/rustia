@@ -451,6 +451,17 @@ impl Vm {
         Ok(first_result_or_nil(results))
     }
 
+    pub fn call_function(
+        &mut self,
+        program: &Program,
+        function: Value,
+        args: &[Value],
+    ) -> Result<Value> {
+        let mut fuel = self.settings.initial_fuel;
+        let results = self.call_value(program, function, args, 0, &mut fuel)?;
+        Ok(first_result_or_nil(results))
+    }
+
     fn run_function(
         &mut self,
         program: &Program,

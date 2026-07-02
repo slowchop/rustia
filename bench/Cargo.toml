@@ -1,0 +1,44 @@
+[package]
+name = "script-bench-harness"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = ["rustia-engine"]
+all-engines = [
+    "rustia-engine",
+    "boa",
+    "koto",
+    "mlua-lua54",
+    "mlua-luau",
+    "rhai-engine",
+    "roto",
+    "rquickjs-engine",
+    "wasmi-engine",
+    "wasmtime-engine",
+]
+rustia-engine = ["dep:rustia-compiler", "dep:rustia-parser", "dep:rustia-vm"]
+boa = []
+koto = ["dep:koto"]
+mlua-luau = []
+mlua-lua54 = []
+rhai-engine = []
+roto = []
+rquickjs-engine = []
+wasmi-engine = []
+wasmtime-engine = []
+
+[dependencies]
+rustia-compiler = { workspace = true, optional = true }
+rustia-parser = { workspace = true, optional = true }
+rustia-vm = { workspace = true, optional = true }
+koto = { version = "0.16", default-features = false, features = ["arc"], optional = true }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "script-bench"
+path = "src/main.rs"
