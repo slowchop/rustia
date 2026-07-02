@@ -301,6 +301,15 @@ return {
         assert_eq!(result, 1.0);
     }
 
+    #[test]
+    fn named_compile_preserves_source_name_in_runtime_diagnostics() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let error = rustia
+            .hot_reload("bad_ai.luau", "local t = {}; t[0 / 0] = 1")
+            .unwrap_err();
+        assert!(error.to_string().contains("bad_ai.luau:1:"), "{error}");
+    }
+
     #[derive(Debug, PartialEq, Deserialize, Serialize)]
     struct ScenarioSpec {
         name: String,
