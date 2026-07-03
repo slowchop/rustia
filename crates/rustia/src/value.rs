@@ -51,6 +51,21 @@ impl OwnedTable {
             matches!(entry_key, OwnedKey::String(found) if found == key).then_some(value)
         })
     }
+
+    /// Returns a borrowed table for a string key, or an error if the key holds a non-table value.
+    pub fn get_string_table(&self, key: &str) -> Result<Option<&OwnedTable>> {
+        self.get_string(key).map(expect_table_ref).transpose()
+    }
+
+    /// Returns an owned-array slot by zero-based Rust index. Luau index 1 is slot 0.
+    pub fn get_array(&self, index: usize) -> Option<&OwnedValue> {
+        self.array.get(index)
+    }
+
+    /// Returns a borrowed table for an array slot, or an error if the slot holds a non-table value.
+    pub fn get_array_table(&self, index: usize) -> Result<Option<&OwnedTable>> {
+        self.get_array(index).map(expect_table_ref).transpose()
+    }
 }
 
 impl OwnedValue {
@@ -110,6 +125,17 @@ impl OwnedTable {
         T: FromRustia,
     {
         self.get_string(key)
+            .cloned()
+            .map(T::from_rustia)
+            .transpose()
+    }
+
+    /// Converts an owned-array slot by zero-based Rust index. Luau index 1 is slot 0.
+    pub fn get_array_as<T>(&self, index: usize) -> Result<Option<T>>
+    where
+        T: FromRustia,
+    {
+        self.get_array(index)
             .cloned()
             .map(T::from_rustia)
             .transpose()
@@ -648,6 +674,13 @@ fn number_to_array_index(number: f64) -> Option<usize> {
         return None;
     }
     Some(number as usize)
+}
+
+fn expect_table_ref(value: &OwnedValue) -> Result<&OwnedTable> {
+    match value {
+        OwnedValue::Table(table) => Ok(table),
+        other => type_error("table", other),
+    }
 }
 
 fn type_error<T>(expected: &'static str, value: &OwnedValue) -> Result<T> {

@@ -9,7 +9,7 @@ The **design phase is complete and reviewed**, and P1 implementation is now subs
 The current workspace contains the VM/lexer/parser/compiler/public API/CLI/conformance runner, plus an
 executable Luau 0.709 conformance corpus with **0 pending-oracle** and **0 pending-impl** rows. The public
 embedding facade from [`75-embedded-api.md`](75-embedded-api.md) is implemented at the first useful level:
-owned values with typed table helpers, source-named run/compile helpers, typed host functions with fallible
+owned values with typed and nested table helpers, source-named run/compile helpers, typed host functions with fallible
 `rustia::Result<T>` returns, pre-install host signature metadata, retained script function handles with freshness
 checks and current-generation accessors, serde, deterministic extension registration, hot reload, and macro sugar.
 A from-scratch Rust Luau

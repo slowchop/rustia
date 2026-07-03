@@ -405,7 +405,7 @@
           <span>Whole public rustia project, 65% confidence</span>
         </div>
         <div class="fact">
-          <strong>78%</strong>
+          <strong>79%</strong>
           <span>Usable embedded scripting crate, 70% confidence</span>
         </div>
         <div class="fact">
@@ -438,24 +438,24 @@
       <div class="meta-line">
         <span class="chip medium">65% confidence</span>
       </div>
-      <p>Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, source-named facade diagnostics, typed owned-table helpers, typed and fallible host diagnostic polish, host signature metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics and current-generation accessors, release preflight, and CI workflow wiring started; release packaging and perf gates remain.</p>
+      <p>Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, source-named facade diagnostics, typed/nested owned-table helpers, typed and fallible host diagnostic polish, host signature metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics and current-generation accessors, release preflight, and CI workflow wiring started; release packaging and perf gates remain.</p>
       <p class="plan"><strong>Next:</strong> Harden P1, finish benchmark gates, then move toward full public Luau parity.</p>
     </article>
 
     <article class="goal-card">
       <div class="card-head">
         <h3>Usable embedded scripting crate</h3>
-        <span class="percent">78%</span>
+        <span class="percent">79%</span>
       </div>
 
-    <div class="meter" aria-label="Usable embedded scripting crate: 78% complete">
-      <div class="meter-fill" style="width: 78%"></div>
+    <div class="meter" aria-label="Usable embedded scripting crate: 79% complete">
+      <div class="meter-fill" style="width: 79%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">70% confidence</span>
       </div>
-      <p>The rustia facade supports typed run&lt;T&gt;, source-named run/compile helpers, owned values with Option/Vec/BTreeMap/table conversions plus typed table helpers, typed host functions with argument-context diagnostics and fallible rustia::Result&lt;T&gt; returns, tuple arguments/results through arity 8, pre-install host signature metadata, capability-tagged host helpers, retained functions/exports with generation/freshness metadata and fail-closed current-generation accessors, serde, extensions, hot reload, and compile-checked examples.</p>
+      <p>The rustia facade supports typed run&lt;T&gt;, source-named run/compile helpers, owned values with Option/Vec/BTreeMap/table conversions plus typed and nested table helpers, typed host functions with argument-context diagnostics and fallible rustia::Result&lt;T&gt; returns, tuple arguments/results through arity 8, pre-install host signature metadata, capability-tagged host helpers, retained functions/exports with generation/freshness metadata and fail-closed current-generation accessors, serde, extensions, hot reload, and compile-checked examples.</p>
       <p class="plan"><strong>Next:</strong> Stabilize API semantics, diagnostics, capability policy, and migration docs.</p>
     </article>
 
@@ -506,7 +506,7 @@
       <div class="meta-line">
         <span class="chip medium">75% confidence</span>
       </div>
-      <p>License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, source-named facade diagnostics, typed owned-table helpers, fallible host callback diagnostics, retained-handle freshness checks and current-generation accessors, host signature metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.</p>
+      <p>License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, source-named facade diagnostics, typed/nested owned-table helpers, fallible host callback diagnostics, retained-handle freshness checks and current-generation accessors, host signature metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.</p>
       <p class="plan"><strong>Next:</strong> Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims.</p>
     </article>
 
@@ -1105,19 +1105,19 @@
       <div class="entry-top">
         <div>
           <h4>Owned value firewall</h4>
-          <p>OwnedValue, owned tables/keys, scalar conversions, Option/Vec/BTreeMap conversions, direct OwnedTable conversion, typed owned-table builders, and typed string-key lookup exist.</p>
+          <p>OwnedValue, owned tables/keys, scalar conversions, Option/Vec/BTreeMap conversions, direct OwnedTable conversion, typed owned-table builders, typed string-key lookup, borrowed nested-table access, and typed array-slot access exist.</p>
         </div>
         <div class="entry-score">
-          <strong>81%</strong>
+          <strong>83%</strong>
           <span class="chip medium">75% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Owned value firewall: 81% complete">
-      <div class="meter-fill" style="width: 81%"></div>
+    <div class="meter" aria-label="Owned value firewall: 83% complete">
+      <div class="meter-fill" style="width: 83%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Keep hardening conversion coverage, nested typed access, and avoid leaking internal GC lifetimes.</p>
+      <p class="plan"><strong>Future plan:</strong> Keep hardening conversion coverage, serde coverage, and avoid leaking internal GC lifetimes.</p>
     </article>
 
     <article class="entry">

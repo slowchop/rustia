@@ -21,7 +21,7 @@ at full Luau parity.
 - Pinned to **Luau 0.709** (standalone luau.org surface, not Roblox).
 - Current conformance runner: **684 fixtures**, **481 refs**, **0 pending-oracle**, **0 pending-impl**.
 - Public embedding API first slice: typed `run<T>()`, owned values with
-  `Option<T>`/`Vec<T>`/`BTreeMap<String, T>`/table conversions plus typed table helpers, source-named
+  `Option<T>`/`Vec<T>`/`BTreeMap<String, T>`/table conversions plus typed and nested table helpers, source-named
   run/compile helpers, typed/capability-tagged host functions with fallible `rustia::Result<T>` returns and up to
   eight arguments/results, retained script functions, pre-install host signature metadata, retained-handle
   freshness checks and current-generation accessors, serde, deterministic extensions, hot reload, and macro sugar.
@@ -34,7 +34,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
 | goal | complete | confidence |
 |---|---:|---:|
 | Whole public rustia project | 70% | 65% |
-| Usable embedded scripting crate | 78% | 70% |
+| Usable embedded scripting crate | 79% | 70% |
 | Full public Luau engine release | 48% | 58% |
 | Standalone benchmark OSS project | 72% | 80% |
 | Public release readiness | 67% | 75% |

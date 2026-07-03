@@ -481,6 +481,51 @@ return {
     }
 
     #[test]
+    fn owned_table_helpers_support_nested_typed_access() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value = rustia
+            .run_owned(
+                "\
+return {
+    config = {
+        spawn = {
+            kind = 'scout',
+            stats = { 5, 7 },
+        },
+    },
+}
+",
+            )
+            .unwrap();
+
+        let root = value.table().unwrap();
+        let config = root.get_string_table("config").unwrap().unwrap();
+        let spawn = config.get_string_table("spawn").unwrap().unwrap();
+        assert_eq!(
+            spawn.get_string_as::<String>("kind").unwrap().as_deref(),
+            Some("scout")
+        );
+        assert!(spawn.get_string_table("missing").unwrap().is_none());
+
+        let stats = spawn.get_string_table("stats").unwrap().unwrap();
+        assert_eq!(stats.get_array(0), Some(&OwnedValue::Number(5.0)));
+        assert_eq!(stats.get_array_as::<i32>(0).unwrap(), Some(5));
+        assert_eq!(stats.get_array_as::<i32>(1).unwrap(), Some(7));
+        assert_eq!(stats.get_array_as::<i32>(2).unwrap(), None);
+
+        let string_error = spawn.get_string_table("kind").unwrap_err().to_string();
+        assert!(
+            string_error.contains("expected table, got string"),
+            "unexpected error: {string_error}"
+        );
+        let array_error = stats.get_array_table(0).unwrap_err().to_string();
+        assert!(
+            array_error.contains("expected table, got number"),
+            "unexpected error: {array_error}"
+        );
+    }
+
+    #[test]
     fn insert_global_accepts_option_vec_and_owned_table() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let named_map = BTreeMap::from([("scout".to_owned(), 5_i32), ("brute".to_owned(), 9_i32)]);

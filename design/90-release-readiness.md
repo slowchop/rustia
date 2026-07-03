@@ -51,7 +51,7 @@ from `publish = false` to publishable.
   runtime diagnostics.
 - Owned-value conversions cover scalar values, `Option<T>`, `Vec<T>`,
   deterministic `BTreeMap<String, T>`, direct `OwnedTable` values, typed
-  owned-table builders, and typed string-key lookup.
+  owned-table builders, typed string-key lookup, and nested table/array access.
 - Capability checks fail closed in deterministic profiles.
 - Host functions have documented fuel costs and diagnostic behavior; typed
   argument conversion errors name the host function and argument position.
