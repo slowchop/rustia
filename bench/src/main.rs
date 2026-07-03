@@ -1997,6 +1997,29 @@ mod tests {
     }
 
     #[test]
+    fn default_workloads_have_sources_for_all_benchmark_dialects() {
+        let repo = repo_root().expect("repo root");
+        for workload in WORKLOADS.iter().filter(|workload| workload.default) {
+            assert_sources_for_all_benchmark_dialects(&repo, workload);
+        }
+    }
+
+    #[test]
+    fn string_building_has_sources_for_all_benchmark_dialects() {
+        let repo = repo_root().expect("repo root");
+        let workload = WORKLOADS
+            .iter()
+            .find(|entry| entry.id == "string_building")
+            .expect("string_building workload");
+
+        assert!(
+            !workload.default,
+            "string_building should stay opt-in until it has stable public baselines"
+        );
+        assert_sources_for_all_benchmark_dialects(&repo, workload);
+    }
+
+    #[test]
     fn check_history_accepts_valid_jsonl_and_summarizes_it() {
         let path = write_temp_history(
             "valid",
@@ -2176,6 +2199,25 @@ mod tests {
             timestamp_unix,
             target: "test-target".to_owned(),
         })
+    }
+
+    fn assert_sources_for_all_benchmark_dialects(repo: &Path, workload: &Workload) {
+        for dialect in [
+            Dialect::Luau,
+            Dialect::Koto,
+            Dialect::Lua54,
+            Dialect::JavaScript,
+            Dialect::Rhai,
+            Dialect::Roto,
+            Dialect::Wasm,
+        ] {
+            assert!(
+                workload_path(repo, dialect, workload).is_some(),
+                "missing {} source for workload {}",
+                dialect.as_str(),
+                workload.id
+            );
+        }
     }
 
     fn write_temp_history(name: &str, text: &str) -> PathBuf {
