@@ -43,6 +43,9 @@ jobs:
       - name: Check release notes
         run: node tools/check-release-notes.js
 
+      - name: Check crate metadata audit
+        run: node tools/check-crate-metadata.js --check
+
       - name: Check workflow policy
         run: node tools/check-workflows.js
 

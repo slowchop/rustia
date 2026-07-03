@@ -2,9 +2,11 @@
 name = "script-bench-harness"
 version = "0.0.1"
 edition = "2021"
+rust-version = "1.95"
 description = "Standalone benchmark harness for embedded scripting engines"
 readme = "README.md"
 repository = "https://github.com/slowchop/rustia"
+homepage = "https://github.com/slowchop/rustia"
 license = "MIT OR Apache-2.0"
 keywords = ["benchmark", "scripting", "lua", "luau", "wasm"]
 categories = ["development-tools::profiling"]

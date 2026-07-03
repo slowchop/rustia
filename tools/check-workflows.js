@@ -127,6 +127,7 @@ function checkCi(text) {
   requireIncludes(text, "permissions:\n  contents: read\n", label);
   requireIncludes(text, "runs-on: ubuntu-latest", label);
   requireIncludes(text, "node tools/check-release-notes.js", label);
+  requireIncludes(text, "node tools/check-crate-metadata.js --check", label);
   requireIncludes(text, "node tools/check-package-files.js --check", label);
   requireIncludes(text, "node tools/check-publishability.js --check", label);
   requireIncludes(text, "node tools/check-workflows.js", label);

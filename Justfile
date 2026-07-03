@@ -19,6 +19,12 @@ check-publishability:
 check-release-notes:
     node tools/check-release-notes.js
 
+gen-crate-metadata:
+    node tools/check-crate-metadata.js
+
+check-crate-metadata:
+    node tools/check-crate-metadata.js --check
+
 check-workflows:
     node tools/check-workflows.js
 
@@ -29,6 +35,7 @@ check-benchmark-results:
 
 release-preflight:
     just check-release-notes
+    just check-crate-metadata
     just check-workflows
     just check-package-files
     just check-publishability

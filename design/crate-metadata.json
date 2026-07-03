@@ -1,0 +1,314 @@
+{
+  "schema_version": 1,
+  "source": "cargo metadata --no-deps",
+  "command": "node tools/check-crate-metadata.js",
+  "expected": {
+    "edition": "2021",
+    "rust_version": "1.95",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/slowchop/rustia",
+    "homepage": "https://github.com/slowchop/rustia",
+    "publish": false
+  },
+  "summary": {
+    "package_count": 8,
+    "workspace_version": "0.0.1",
+    "publish_false_count": 8,
+    "all_readmes_exist": true,
+    "internal_dependency_versions_explicit": true
+  },
+  "packages": [
+    {
+      "name": "rustia-lexer",
+      "version": "0.0.1",
+      "manifest": "crates/rustia-lexer/Cargo.toml",
+      "publish": false,
+      "edition": "2021",
+      "rust_version": "1.95",
+      "license": "MIT OR Apache-2.0",
+      "description": "Luau lexer for rustia",
+      "readme": "README.md",
+      "repository": "https://github.com/slowchop/rustia",
+      "homepage": "https://github.com/slowchop/rustia",
+      "keywords": [
+        "luau",
+        "scripting",
+        "deterministic",
+        "wasm",
+        "embedding"
+      ],
+      "categories": [
+        "compilers",
+        "game-development",
+        "wasm"
+      ],
+      "internal_dependencies": []
+    },
+    {
+      "name": "rustia-parser",
+      "version": "0.0.1",
+      "manifest": "crates/rustia-parser/Cargo.toml",
+      "publish": false,
+      "edition": "2021",
+      "rust_version": "1.95",
+      "license": "MIT OR Apache-2.0",
+      "description": "Luau parser for rustia",
+      "readme": "README.md",
+      "repository": "https://github.com/slowchop/rustia",
+      "homepage": "https://github.com/slowchop/rustia",
+      "keywords": [
+        "luau",
+        "scripting",
+        "deterministic",
+        "wasm",
+        "embedding"
+      ],
+      "categories": [
+        "compilers",
+        "game-development",
+        "wasm"
+      ],
+      "internal_dependencies": [
+        {
+          "name": "rustia-lexer",
+          "requirement": "^0.0.1",
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "rustia-vm",
+      "version": "0.0.1",
+      "manifest": "crates/rustia-vm/Cargo.toml",
+      "publish": false,
+      "edition": "2021",
+      "rust_version": "1.95",
+      "license": "MIT OR Apache-2.0",
+      "description": "Deterministic Luau virtual machine for rustia",
+      "readme": "README.md",
+      "repository": "https://github.com/slowchop/rustia",
+      "homepage": "https://github.com/slowchop/rustia",
+      "keywords": [
+        "luau",
+        "scripting",
+        "deterministic",
+        "wasm",
+        "embedding"
+      ],
+      "categories": [
+        "compilers",
+        "game-development",
+        "wasm"
+      ],
+      "internal_dependencies": []
+    },
+    {
+      "name": "rustia-compiler",
+      "version": "0.0.1",
+      "manifest": "crates/rustia-compiler/Cargo.toml",
+      "publish": false,
+      "edition": "2021",
+      "rust_version": "1.95",
+      "license": "MIT OR Apache-2.0",
+      "description": "Luau-to-rustia bytecode compiler",
+      "readme": "README.md",
+      "repository": "https://github.com/slowchop/rustia",
+      "homepage": "https://github.com/slowchop/rustia",
+      "keywords": [
+        "luau",
+        "scripting",
+        "deterministic",
+        "wasm",
+        "embedding"
+      ],
+      "categories": [
+        "compilers",
+        "game-development",
+        "wasm"
+      ],
+      "internal_dependencies": [
+        {
+          "name": "rustia-lexer",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia-parser",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia-vm",
+          "requirement": "^0.0.1",
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "rustia",
+      "version": "0.0.1",
+      "manifest": "crates/rustia/Cargo.toml",
+      "publish": false,
+      "edition": "2021",
+      "rust_version": "1.95",
+      "license": "MIT OR Apache-2.0",
+      "description": "Deterministic Luau interpreter and embedding API",
+      "readme": "README.md",
+      "repository": "https://github.com/slowchop/rustia",
+      "homepage": "https://github.com/slowchop/rustia",
+      "keywords": [
+        "luau",
+        "scripting",
+        "deterministic",
+        "wasm",
+        "embedding"
+      ],
+      "categories": [
+        "compilers",
+        "game-development",
+        "wasm"
+      ],
+      "internal_dependencies": [
+        {
+          "name": "rustia-lexer",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia-parser",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia-vm",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia-compiler",
+          "requirement": "^0.0.1",
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "rustia-cli",
+      "version": "0.0.1",
+      "manifest": "crates/rustia-cli/Cargo.toml",
+      "publish": false,
+      "edition": "2021",
+      "rust_version": "1.95",
+      "license": "MIT OR Apache-2.0",
+      "description": "Command-line runner for rustia Luau scripts",
+      "readme": "README.md",
+      "repository": "https://github.com/slowchop/rustia",
+      "homepage": "https://github.com/slowchop/rustia",
+      "keywords": [
+        "luau",
+        "scripting",
+        "deterministic",
+        "wasm",
+        "embedding"
+      ],
+      "categories": [
+        "compilers",
+        "game-development",
+        "wasm"
+      ],
+      "internal_dependencies": [
+        {
+          "name": "rustia",
+          "requirement": "^0.0.1",
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "rustia-conformance",
+      "version": "0.0.1",
+      "manifest": "crates/rustia-conformance/Cargo.toml",
+      "publish": false,
+      "edition": "2021",
+      "rust_version": "1.95",
+      "license": "MIT OR Apache-2.0",
+      "description": "Conformance runner and coverage tools for rustia",
+      "readme": "README.md",
+      "repository": "https://github.com/slowchop/rustia",
+      "homepage": "https://github.com/slowchop/rustia",
+      "keywords": [
+        "luau",
+        "scripting",
+        "deterministic",
+        "wasm",
+        "embedding"
+      ],
+      "categories": [
+        "compilers",
+        "game-development",
+        "wasm"
+      ],
+      "internal_dependencies": [
+        {
+          "name": "rustia-parser",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia-vm",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia-compiler",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia",
+          "requirement": "^0.0.1",
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "script-bench-harness",
+      "version": "0.0.1",
+      "manifest": "bench/Cargo.toml",
+      "publish": false,
+      "edition": "2021",
+      "rust_version": "1.95",
+      "license": "MIT OR Apache-2.0",
+      "description": "Standalone benchmark harness for embedded scripting engines",
+      "readme": "bench/README.md",
+      "repository": "https://github.com/slowchop/rustia",
+      "homepage": "https://github.com/slowchop/rustia",
+      "keywords": [
+        "benchmark",
+        "scripting",
+        "lua",
+        "luau",
+        "wasm"
+      ],
+      "categories": [
+        "development-tools::profiling"
+      ],
+      "internal_dependencies": [
+        {
+          "name": "rustia-parser",
+          "requirement": "^0.0.1",
+          "optional": true
+        },
+        {
+          "name": "rustia-vm",
+          "requirement": "^0.0.1",
+          "optional": true
+        },
+        {
+          "name": "rustia-compiler",
+          "requirement": "^0.0.1",
+          "optional": true
+        }
+      ]
+    }
+  ]
+}

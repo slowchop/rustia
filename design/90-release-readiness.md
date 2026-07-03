@@ -21,6 +21,8 @@ from `publish = false` to publishable.
 
 - Every public workspace crate has description, repository, homepage, readme,
   license, keywords, categories, and rust-version metadata.
+- Crate metadata is audited by `tools/check-crate-metadata.js`; the committed
+  review artifact is [`crate-metadata.json`](crate-metadata.json).
 - Package file lists must not include private design scratch, `private/`, local
   caches, or generated target output.
 - Package file lists are audited by `tools/check-package-files.js`; the
@@ -82,7 +84,9 @@ from `publish = false` to publishable.
 
 - `just release-preflight` passes before any publishability flip. It checks
   release notes, package file lists, generated progress HTML, benchmark result
-  freshness, workflow policy, and the workspace test suite.
+  freshness, crate metadata, workflow policy, and the workspace test suite.
+- `just check-crate-metadata` passes and `design/crate-metadata.json` is
+  current.
 - `just check-workflows` passes and keeps the hosted CI workflow, manual
   benchmark workflow, action pins, permissions, and generic runner labels in
   their expected public-safe shape.
