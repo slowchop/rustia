@@ -69,5 +69,8 @@ jobs:
           node bench/render-current-results.js --check
           node bench/render-claims.js --check
 
+      - name: Check rustia examples
+        run: cargo test -p rustia --examples --no-run
+
       - name: Run workspace tests
         run: cargo test --workspace

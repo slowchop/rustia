@@ -37,6 +37,9 @@ check-benchmark-results:
     node bench/render-current-results.js --check
     node bench/render-claims.js --check
 
+check-examples:
+    cargo test -p rustia --examples --no-run
+
 release-preflight:
     just check-release-notes
     just check-crate-metadata
@@ -46,6 +49,7 @@ release-preflight:
     just check-publishability
     just check-progress
     just check-benchmark-results
+    just check-examples
     cargo test --workspace
 
 benchmarks:

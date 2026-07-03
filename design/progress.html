@@ -401,7 +401,7 @@
       </div>
       <aside class="facts" aria-label="Current facts">
         <div class="fact">
-          <strong>71%</strong>
+          <strong>72%</strong>
           <span>Whole public rustia project, 65% confidence</span>
         </div>
         <div class="fact">
@@ -417,7 +417,7 @@
           <span>Requested benchmark adapters present</span>
         </div>
         <div class="fact">
-          <strong>68%</strong>
+          <strong>69%</strong>
           <span>Public release readiness, 75% confidence</span>
         </div>
       </aside>
@@ -428,17 +428,17 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Whole public rustia project</h3>
-        <span class="percent">71%</span>
+        <span class="percent">72%</span>
       </div>
 
-    <div class="meter" aria-label="Whole public rustia project: 71% complete">
-      <div class="meter-fill" style="width: 71%"></div>
+    <div class="meter" aria-label="Whole public rustia project: 72% complete">
+      <div class="meter-fill" style="width: 72%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">65% confidence</span>
       </div>
-      <p>Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, source-named facade diagnostics, typed/nested owned-table helpers, typed and fallible host diagnostic polish, host signature/fuel ABI metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics and current-generation accessors, release preflight, and CI workflow wiring started; release packaging and perf gates remain.</p>
+      <p>Design is locked and production crates are substantial, with crate metadata, release-preflight-enforced examples, CLI ergonomics, source-named facade diagnostics, typed/nested owned-table helpers, typed and fallible host diagnostic polish, host signature/fuel ABI metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics and current-generation accessors, release preflight, and CI workflow wiring started; release packaging and perf gates remain.</p>
       <p class="plan"><strong>Next:</strong> Harden P1, finish benchmark gates, then move toward full public Luau parity.</p>
     </article>
 
@@ -496,24 +496,24 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Public release readiness</h3>
-        <span class="percent">68%</span>
+        <span class="percent">69%</span>
       </div>
 
-    <div class="meter" aria-label="Public release readiness: 68% complete">
-      <div class="meter-fill" style="width: 68%"></div>
+    <div class="meter" aria-label="Public release readiness: 69% complete">
+      <div class="meter-fill" style="width: 69%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">75% confidence</span>
       </div>
-      <p>License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, source-named facade diagnostics, typed/nested owned-table helpers, fallible host callback diagnostics, retained-handle freshness checks and current-generation accessors, host signature/fuel ABI metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.</p>
+      <p>License, generated crate metadata audit, explicit internal dependency versions, release-preflight-enforced example compilation, CLI ergonomics, source-named facade diagnostics, typed/nested owned-table helpers, fallible host callback diagnostics, retained-handle freshness checks and current-generation accessors, host signature/fuel ABI metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.</p>
       <p class="plan"><strong>Next:</strong> Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims.</p>
     </article>
 
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 63%</a><a href="#embedded-api">Embedded API 69%</a><a href="#benchmarks">Benchmarks 74%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 59%</a><a href="#packaging">Packaging 60%</a>
+      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 63%</a><a href="#embedded-api">Embedded API 69%</a><a href="#benchmarks">Benchmarks 74%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 60%</a><a href="#packaging">Packaging 60%</a>
     </nav>
 
 
@@ -1428,7 +1428,7 @@
           <p>3 tracked items</p>
         </div>
         <div class="area-score">
-          <span>59% avg complete</span>
+          <span>60% avg complete</span>
           <span>70% avg confidence</span>
         </div>
       </div>
@@ -1438,16 +1438,16 @@
       <div class="entry-top">
         <div>
           <h4>Workspace tests and release preflight</h4>
-          <p>Production crates have meaningful unit and conformance tests; just release-preflight composes release artifact checks, crate metadata checks, workflow policy checks, and cargo test --workspace; hosted CI mirrors that gate.</p>
+          <p>Production crates have meaningful unit and conformance tests; just release-preflight composes release artifact checks, crate metadata checks, workflow policy checks, explicit public-example compilation, and cargo test --workspace; hosted CI mirrors that gate.</p>
         </div>
         <div class="entry-score">
-          <strong>81%</strong>
+          <strong>84%</strong>
           <span class="chip medium">75% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Workspace tests and release preflight: 81% complete">
-      <div class="meter-fill" style="width: 81%"></div>
+    <div class="meter" aria-label="Workspace tests and release preflight: 84% complete">
+      <div class="meter-fill" style="width: 84%"></div>
     </div>
 
       <p class="plan"><strong>Future plan:</strong> Keep expanding tests with new runtime/API work and keep CI aligned with release-preflight.</p>

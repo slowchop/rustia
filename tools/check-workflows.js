@@ -137,6 +137,7 @@ function checkCi(text) {
   requireIncludes(text, "node tools/check-benchmark-results.js", label);
   requireIncludes(text, "node bench/render-current-results.js --check", label);
   requireIncludes(text, "node bench/render-claims.js --check", label);
+  requireIncludes(text, "cargo test -p rustia --examples --no-run", label);
   requireIncludes(text, "cargo test --workspace", label);
   forbidIncludes(text, "cargo run -p script-bench-harness", label);
   checkActionPins(text, label);

@@ -22,11 +22,11 @@ shell, static chart dashboard, and the `rustia`/`boa`/`koto`/`mlua-lua54`/`mlua-
 `wasmi`/`wasmtime` native adapters in place.
 Its generated [`../bench/CLAIMS.md`](../bench/CLAIMS.md) gate keeps public benchmark language per-workload and
 currently approves no blanket speed headline from the committed snapshot.
-The public API now has compile-checked examples for embedding and hot reload.
+The public API now has release-preflight-enforced compile-checked examples for embedding and hot reload.
 `rustia-cli` supports file, stdin, and `--eval` execution with profile, fuel, and source-name options.
-CI wiring now includes hosted release-preflight checks plus a manual benchmark measurement workflow that targets
-only the generic `[self-hosted, bench]` runner label. `tools/check-workflows.js` keeps those workflow policies
-inside `just release-preflight`.
+CI wiring now includes hosted release-preflight checks, explicit public-example compilation, plus a manual
+benchmark measurement workflow that targets only the generic `[self-hosted, bench]` runner label.
+`tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
 ## 🚀 Next actions (cold-start handoff — do in this order)
 **Read order for a fresh agent:** `CLAUDE.md` (auto-loaded) → **this file** → [`30-architecture.md`](30-architecture.md) (the ADR)

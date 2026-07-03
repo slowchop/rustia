@@ -110,18 +110,21 @@ from `publish = false` to publishable.
 
 - `just release-preflight` passes before any publishability flip. It checks
   release notes, package file lists, generated progress HTML, benchmark result
-  freshness, crate metadata, workflow policy, and the workspace test suite.
+  freshness, crate metadata, workflow policy, example compilation, and the
+  workspace test suite.
 - `just check-crate-metadata` passes and `design/crate-metadata.json` is
   current.
 - `just check-workflows` passes and keeps the hosted CI workflow, manual
   benchmark workflow, action pins, permissions, and generic runner labels in
   their expected public-safe shape.
 - `.github/workflows/ci.yml` mirrors the release-preflight gate on hosted Linux
-  CI without running fresh benchmark measurements.
+  CI, including example compilation, without running fresh benchmark
+  measurements.
 - `.github/workflows/benchmarks.yml` provides manual current-matrix measurement
   on the generic `[self-hosted, bench]` runner label and uploads generated
   benchmark artifacts.
 - `cargo test --workspace` passes on the release toolchain.
+- `just check-examples` passes and compiles the public `rustia` examples.
 - `just check-package-files` passes and `design/package-files.json` is current.
 - `just check-package-dry-runs` reaches Cargo packaging for the current
   publish-order leaf candidates: `rustia-lexer` and `rustia-vm`.
