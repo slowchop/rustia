@@ -39,9 +39,9 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 73,
+      "complete": 74,
       "confidence": 65,
-      "state": "Design is locked and production crates are substantial, with crate metadata, release-preflight-enforced examples, first migration guide, CLI ergonomics, source-named facade diagnostics, typed/nested owned-table helpers, typed and fallible host diagnostic polish, host signature/fuel ABI metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics and current-generation accessors, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
+      "state": "Design is locked and production crates are substantial, with crate metadata, release-preflight-enforced examples, first migration guide, CLI ergonomics, source-named facade diagnostics, typed/nested owned-table helpers, typed and fallible host diagnostic polish, host signature/fuel ABI metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics and current-generation accessors, generated leaf package dry-run checks, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
       "future_plan": "Harden P1, finish benchmark gates, then move toward full public Luau parity."
     },
     {
@@ -67,9 +67,9 @@
     },
     {
       "name": "Public release readiness",
-      "complete": 70,
+      "complete": 71,
       "confidence": 75,
-      "state": "License, generated crate metadata audit, explicit internal dependency versions, release-preflight-enforced example compilation, first migration guide, CLI ergonomics, source-named facade diagnostics, typed/nested owned-table helpers, fallible host callback diagnostics, retained-handle freshness checks and current-generation accessors, host signature/fuel ABI metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
+      "state": "License, generated crate metadata audit, explicit internal dependency versions, release-preflight-enforced example compilation, first migration guide, CLI ergonomics, source-named facade diagnostics, typed/nested owned-table helpers, fallible host callback diagnostics, retained-handle freshness checks and current-generation accessors, host signature/fuel ABI metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, generated leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
       "future_plan": "Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims."
     }
   ],
@@ -404,9 +404,9 @@
       "entries": [
         {
           "name": "Workspace tests and release preflight",
-          "complete": 84,
+          "complete": 85,
           "confidence": 75,
-          "state": "Production crates have meaningful unit and conformance tests; just release-preflight composes release artifact checks, crate metadata checks, workflow policy checks, explicit public-example compilation, and cargo test --workspace; hosted CI mirrors that gate.",
+          "state": "Production crates have meaningful unit and conformance tests; just release-preflight composes release artifact checks, crate metadata checks, workflow policy checks, generated leaf package dry-run checks, explicit public-example compilation, and cargo test --workspace; hosted CI mirrors that gate.",
           "future_plan": "Keep expanding tests with new runtime/API work and keep CI aligned with release-preflight."
         },
         {
@@ -430,9 +430,9 @@
       "entries": [
         {
           "name": "Crate publishability",
-          "complete": 60,
+          "complete": 62,
           "confidence": 80,
-          "state": "Workspace crates are still publish = false, but generated crate metadata audit, explicit internal dependency versions, leaf package dry-run checks in preflight/CI, package file-list audit, publishability blocker audit, release checklist, semver policy, changelog validation, and release preflight are present.",
+          "state": "Workspace crates are still publish = false, but generated crate metadata audit, explicit internal dependency versions, publishability-derived leaf package dry-run checks in preflight/CI, package file-list audit, publishability blocker audit, release checklist, semver policy, changelog validation, and release preflight are present.",
           "future_plan": "Flip policy only after P1 gates, then publish/remove internal dependency blockers in generated order."
         }
       ]

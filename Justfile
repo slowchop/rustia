@@ -11,8 +11,7 @@ check-package-files:
     node tools/check-package-files.js --check
 
 check-package-dry-runs:
-    cargo package --no-verify --allow-dirty -p rustia-lexer
-    cargo package --no-verify --allow-dirty -p rustia-vm
+    node tools/check-package-dry-runs.js
 
 gen-publishability:
     node tools/check-publishability.js
@@ -45,8 +44,8 @@ release-preflight:
     just check-crate-metadata
     just check-workflows
     just check-package-files
-    just check-package-dry-runs
     just check-publishability
+    just check-package-dry-runs
     just check-progress
     just check-benchmark-results
     just check-examples
