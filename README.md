@@ -4,12 +4,12 @@ A fast, low-memory, **deterministic** Luau interpreter written in Rust — built
 scripting layer in [grabby-aliens](https://github.com/slowchop/grabby-next), and intended for public release
 at full Luau parity.
 
-> **Status: P1 engine scaffold in progress.** The locked design is now being implemented in production crates;
-> `spikes/` are throwaway prototypes that validated the design.
+> **Status: P1 engine implementation in progress.** The locked design is implemented through a substantial
+> production VM/compiler/API/conformance slice; `spikes/` are throwaway prototypes that validated the design.
 > Read **[`design/CURRENT.md`](design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](design/README.md) for the full doc map.
 
-## Highlights (measured in spikes; production engine still early)
+## Highlights (spikes validated the direction; production gates are now in-tree)
 - Designed to run at/near reference-Luau parity on measured workloads, with koto comparisons tracked
   per-workload; **near-native on hot numeric paths** via a runtime wasm-emit JIT (~176× the interpreter in V8,
   crossover ≈ 6 calls).
@@ -19,6 +19,9 @@ at full Luau parity.
 - One portable engine: big-`match`→`br_table` interpreter + a wasm-emit JIT/AOT tier; **gc-arena** GC,
   **16-byte tagged** values, own hand-written Luau parser, **Send-not-Sync** N-VM threading.
 - Pinned to **Luau 0.709** (standalone luau.org surface, not Roblox).
+- Current conformance runner: **683 fixtures**, **480 refs**, **0 pending-oracle**, **0 pending-impl**.
+- Public embedding API first slice: owned values, typed host functions, retained script functions, serde,
+  deterministic extensions, hot reload, and macro sugar.
 
 ## Layout
 - `design/` — the design record: constraints → research → spikes → architecture (ADR) → conformance → improvements.

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt;
 use std::fs::{self, OpenOptions};
@@ -755,17 +755,27 @@ fn write_results(path: &Path, records: &[Measurement]) -> Result<()> {
     }
     let mut text = String::new();
     text.push_str("# script-bench-harness Results\n\n");
+    let rustia_baselines = records
+        .iter()
+        .filter(|record| record.engine == "rustia")
+        .map(|record| (record.workload.as_str(), record.ns_per_unit_min))
+        .collect::<BTreeMap<_, _>>();
     text.push_str(
-        "| engine | workload | ns/unit min | ns/unit median | units/sec | n | checksum |\n",
+        "| engine | workload | ns/unit min | ns/unit median | speed vs rustia | units/sec | n | checksum |\n",
     );
-    text.push_str("|---|---|---:|---:|---:|---:|---|\n");
+    text.push_str("|---|---|---:|---:|---:|---:|---:|---|\n");
     for record in records {
+        let speed_vs_rustia = rustia_baselines
+            .get(record.workload.as_str())
+            .map(|baseline| format!("{:.2}x", baseline / record.ns_per_unit_min))
+            .unwrap_or_else(|| "n/a".to_owned());
         text.push_str(&format!(
-            "| {} | {} | {:.2} | {:.2} | {:.0} | {} | `{}` |\n",
+            "| {} | {} | {:.2} | {:.2} | {} | {:.0} | {} | `{}` |\n",
             record.engine,
             record.workload,
             record.ns_per_unit_min,
             record.ns_per_unit_median,
+            speed_vs_rustia,
             record.units_per_sec,
             record.n,
             record.checksum.replace('|', "\\|")

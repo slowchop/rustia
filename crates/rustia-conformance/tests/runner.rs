@@ -250,10 +250,7 @@ fn pending_manifest_rows_match_explicit_allowlist() {
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(
-        actual,
-        Vec::<String>::new()
-    );
+    assert_eq!(actual, Vec::<String>::new());
 }
 
 #[test]
@@ -273,10 +270,7 @@ fn pending_ref_catalog_rows_match_explicit_allowlist() {
         }
     }
 
-    assert_eq!(
-        actual,
-        Vec::<String>::new()
-    );
+    assert_eq!(actual, Vec::<String>::new());
 }
 
 #[test]
