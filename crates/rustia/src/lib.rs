@@ -212,6 +212,29 @@ return t[-0] == 42 and t[0] == 42 and rawget(t, -0) == 42 and rawget(t, 0) == 42
     }
 
     #[test]
+    fn fuel_exhaustion_escapes_pcall_and_xpcall() {
+        let cases = [
+            "return pcall(function() while true do end end)",
+            "return xpcall(function() while true do end end, function() return 'caught' end)",
+        ];
+
+        for source in cases {
+            let settings = VmSettings {
+                initial_fuel: Some(1_000),
+                ..VmSettings::default()
+            };
+            let mut rustia = Rustia::with_settings(Profile::DeterministicSim, settings);
+            let Err(Error::Vm(error)) = rustia.run_owned(source) else {
+                panic!("expected fuel exhaustion to escape protected call: {source}");
+            };
+            assert!(matches!(
+                error.kind,
+                VmErrorKind::FuelExhausted { limit: 1_000 }
+            ));
+        }
+    }
+
+    #[test]
     fn owned_values_snapshot_returned_tables() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let value = rustia
