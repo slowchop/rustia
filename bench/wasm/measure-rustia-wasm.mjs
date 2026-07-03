@@ -3,30 +3,54 @@
 
 const path = await import("node:path");
 
+const adapters = [
+  {
+    id: "rustia",
+    abi: 1,
+    dialect: "luau",
+    sourceDir: "bench/workloads/luau",
+    extension: "luau",
+  },
+  {
+    id: "koto",
+    abi: 2,
+    dialect: "koto",
+    sourceDir: "bench/workloads/koto",
+    extension: "koto",
+  },
+  {
+    id: "wasmi",
+    abi: 3,
+    dialect: "wasm",
+    sourceDir: "bench/workloads/wasm",
+    extension: "wat",
+  },
+];
+
 const defaultWorkloads = [
   {
     id: "dense_tables",
-    path: "bench/workloads/luau/01_dense_tables.luau",
+    fileStem: "01_dense_tables",
     unit: "build+sum+sort of 256-elem array",
   },
   {
     id: "sparse_tables",
-    path: "bench/workloads/luau/02_sparse_tables.luau",
+    fileStem: "02_sparse_tables",
     unit: "fill+read 128 hash entries",
   },
   {
     id: "closures_upvalues",
-    path: "bench/workloads/luau/04_closures_upvalues.luau",
+    fileStem: "04_closures_upvalues",
     unit: "one upvalue-mutating closure call",
   },
   {
     id: "generic_iteration",
-    path: "bench/workloads/luau/09_generic_iteration.luau",
+    fileStem: "09_generic_iteration",
     unit: "__iter(32)+pairs(5)+ipairs(32) pass",
   },
   {
     id: "stdlib_math_table",
-    path: "bench/workloads/luau/10_stdlib_math_table.luau",
+    fileStem: "10_stdlib_math_table",
     unit: "math fastcalls + buffered push",
   },
 ];
@@ -52,11 +76,12 @@ function cwd() {
 
 function parseArgs(argv) {
   const options = {
-    wasm: "demos/live-wasm/wasm-runner/target/wasm32-unknown-unknown/release/rustia_live_wasm.wasm",
+    wasm: "bench/wasm/adapter-runner/target/wasm32-unknown-unknown/release/script_bench_wasm_adapter.wasm",
     commit: "unknown",
     targetMs: 80,
     reps: 5,
     maxN: 1_000_000_000,
+    adapters: ["rustia", "koto"],
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -71,11 +96,22 @@ function parseArgs(argv) {
       options.reps = positiveInteger(requiredValue(argv, ++index, arg), arg);
     } else if (arg === "--max-n") {
       options.maxN = positiveInteger(requiredValue(argv, ++index, arg), arg);
+    } else if (arg === "--adapters") {
+      options.adapters = requiredValue(argv, ++index, arg)
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
     } else {
       fail(`unknown argument ${JSON.stringify(arg)}`);
     }
   }
 
+  const known = new Set(adapters.map((adapter) => adapter.id));
+  for (const adapter of options.adapters) {
+    if (!known.has(adapter)) {
+      fail(`unknown adapter ${JSON.stringify(adapter)}`);
+    }
+  }
   return options;
 }
 
@@ -168,52 +204,53 @@ function targetName(runtime) {
 function assertExports(exports) {
   const names = [
     "memory",
-    "rustia_alloc",
-    "rustia_dealloc",
-    "rustia_bench_abi_version",
-    "rustia_bench_prepare",
-    "rustia_bench_run",
-    "rustia_result_ptr",
-    "rustia_result_len",
+    "bench_alloc",
+    "bench_dealloc",
+    "bench_abi_version",
+    "bench_adapter_mask",
+    "bench_prepare",
+    "bench_run",
+    "bench_result_ptr",
+    "bench_result_len",
   ];
   for (const name of names) {
     if (exports[name] == null) {
       fail(`wasm export ${name} is missing`);
     }
   }
-  if (exports.rustia_bench_abi_version() !== 1) {
-    fail(`unsupported wasm bench ABI ${exports.rustia_bench_abi_version()}`);
+  if (exports.bench_abi_version() !== 1) {
+    fail(`unsupported wasm bench ABI ${exports.bench_abi_version()}`);
   }
 }
 
 function writeString(exports, text) {
   const bytes = new TextEncoder().encode(text);
-  const ptr = exports.rustia_alloc(bytes.length);
+  const ptr = exports.bench_alloc(bytes.length);
   new Uint8Array(exports.memory.buffer, ptr, bytes.length).set(bytes);
   return { ptr, len: bytes.length };
 }
 
 function readLastResult(exports) {
-  const ptr = exports.rustia_result_ptr();
-  const len = exports.rustia_result_len();
+  const ptr = exports.bench_result_ptr();
+  const len = exports.bench_result_len();
   return new TextDecoder().decode(new Uint8Array(exports.memory.buffer, ptr, len));
 }
 
-function prepare(exports, source) {
+function prepare(exports, adapter, source) {
   const input = writeString(exports, source);
   try {
-    const code = exports.rustia_bench_prepare(input.ptr, input.len);
+    const code = exports.bench_prepare(adapter.abi, input.ptr, input.len);
     if (code !== 0) {
       throw new Error(readLastResult(exports));
     }
   } finally {
-    exports.rustia_dealloc(input.ptr, input.len);
+    exports.bench_dealloc(input.ptr, input.len);
   }
 }
 
 function runOnce(exports, n) {
   const start = performance.now();
-  const checksum = exports.rustia_bench_run(n);
+  const checksum = exports.bench_run(n);
   const elapsedMs = performance.now() - start;
   if (!Number.isFinite(checksum)) {
     throw new Error(readLastResult(exports));
@@ -242,9 +279,13 @@ function formatChecksum(value) {
   return `number:${value.toFixed(17)}`;
 }
 
-async function measureWorkload(exports, workload, options) {
-  const source = await readText(resolvePath(workload.path));
-  prepare(exports, source);
+function workloadPath(adapter, workload) {
+  return `${adapter.sourceDir}/${workload.fileStem}.${adapter.extension}`;
+}
+
+async function measureWorkload(exports, adapter, workload, options) {
+  const source = await readText(resolvePath(workloadPath(adapter, workload)));
+  prepare(exports, adapter, source);
   const n = calibrate(exports, options);
   runOnce(exports, n);
 
@@ -259,6 +300,8 @@ async function measureWorkload(exports, workload, options) {
   const minMs = Math.min(...samples);
   const medianMs = median(samples);
   return {
+    engine: adapter.id,
+    dialect: adapter.dialect,
     workload: workload.id,
     unit: workload.unit,
     n,
@@ -281,28 +324,81 @@ const options = parseArgs(argsForRuntime());
 const runtime = runtimeInfo();
 const wasmPath = resolvePath(options.wasm);
 const wasmBytes = await readBytes(wasmPath);
-const { instance } = await WebAssembly.instantiate(wasmBytes, {});
+const { instance } = await WebAssembly.instantiate(wasmBytes, wasmImports());
 assertExports(instance.exports);
 
-const rows = [];
-for (const workload of defaultWorkloads) {
-  rows.push(await measureWorkload(instance.exports, workload, options));
+const selectedAdapters = adapters.filter((adapter) => options.adapters.includes(adapter.id));
+const adapterRuns = [];
+for (const adapter of selectedAdapters) {
+  const rows = [];
+  for (const workload of defaultWorkloads) {
+    rows.push(await measureWorkload(instance.exports, adapter, workload, options));
+  }
+  adapterRuns.push({
+    schema_version: 1,
+    schema: "rustia.bench.wasm-runtime-results.v1",
+    source: "script-bench-harness",
+    timestamp_unix: Math.floor(Date.now() / 1000),
+    commit: options.commit,
+    target: targetName(runtime),
+    runtime,
+    adapter: {
+      id: adapter.id,
+      dialect: adapter.dialect,
+      abi: adapter.abi,
+    },
+    wasm: {
+      path: path.relative(cwd(), wasmPath),
+      bytes: wasmBytes.byteLength,
+      bench_abi_version: instance.exports.bench_abi_version(),
+    },
+    rows,
+  });
 }
 
 const value = {
   schema_version: 1,
-  schema: "rustia.bench.wasm-runtime-results.v1",
+  schema: "rustia.bench.wasm-runtime-results-batch.v1",
   source: "script-bench-harness",
-  timestamp_unix: Math.floor(Date.now() / 1000),
-  commit: options.commit,
-  target: targetName(runtime),
   runtime,
   wasm: {
     path: path.relative(cwd(), wasmPath),
     bytes: wasmBytes.byteLength,
-    bench_abi_version: instance.exports.rustia_bench_abi_version(),
+    bench_abi_version: instance.exports.bench_abi_version(),
   },
-  rows,
+  runs: adapterRuns,
 };
 
 console.log(`${JSON.stringify(value, null, 2)}\n`);
+
+function wasmImports() {
+  const placeholder = {
+    __wbg_new_0_3da9e97f24fc69be: () => new Date(),
+    __wbg_getTime_d6f070c088c9b5ed: (value) => Number(value.getTime()),
+    __wbindgen_object_drop_ref: () => {},
+    __wbg_new_cc984128914cfc6f: () => ({}),
+    __wbg_getTimezoneOffset_dc9862c79e5a81a3: (value) => Number(value.getTimezoneOffset()),
+    __wbindgen_object_clone_ref: (value) => value,
+    __wbg_get_78f252d074a84d0b: (object, key) => object?.[key],
+    __wbg_now_390768da5ee9e776: () => performance.now(),
+    __wbg___wbindgen_is_undefined_c05833b95a3cf397: (value) => value === undefined,
+    __wbg_static_accessor_GLOBAL_4ef717fb391d88b7: () => globalThis,
+    __wbg_static_accessor_GLOBAL_THIS_8d1badc68b5a74f4: () => globalThis,
+    __wbg_static_accessor_WINDOW_f2829a2234d7819e: () => undefined,
+    __wbg_static_accessor_SELF_146583524fe1469b: () => globalThis,
+    __wbindgen_describe: () => {},
+    __wbindgen_describe_cast: () => {},
+    __wbg___wbindgen_throw_344f42d3211c4765: () => {
+      throw new Error("wasm-bindgen throw");
+    },
+    __wbg___wbindgen_debug_string_c25d447a39f5578f: () => 0,
+  };
+  const externref = {
+    __wbindgen_externref_table_set_null: () => {},
+    __wbindgen_externref_table_grow: () => 0,
+  };
+  return {
+    __wbindgen_placeholder__: placeholder,
+    __wbindgen_externref_xform__: externref,
+  };
+}

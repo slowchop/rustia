@@ -6,16 +6,16 @@ const fs = require("fs");
 const path = require("path");
 
 const root = path.resolve(__dirname, "..");
-const wasmManifest = path.join(root, "demos", "live-wasm", "wasm-runner", "Cargo.toml");
+const wasmManifest = path.join(root, "bench", "wasm", "adapter-runner", "Cargo.toml");
 const wasmPath = path.join(
   root,
-  "demos",
-  "live-wasm",
-  "wasm-runner",
+  "bench",
+  "wasm",
+  "adapter-runner",
   "target",
   "wasm32-unknown-unknown",
   "release",
-  "rustia_live_wasm.wasm",
+  "script_bench_wasm_adapter.wasm",
 );
 const measureScript = path.join(root, "bench", "wasm", "measure-rustia-wasm.mjs");
 const outputPath = path.join(root, "bench", "wasm", "current-results.json");
@@ -40,6 +40,7 @@ function parseArgs(argv) {
     output: outputPath,
     targetMs: 80,
     reps: 5,
+    adapters: ["rustia", "koto"],
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -57,6 +58,11 @@ function parseArgs(argv) {
       options.targetMs = positiveNumber(requiredValue(argv, ++index, arg), arg);
     } else if (arg === "--reps") {
       options.reps = positiveInteger(requiredValue(argv, ++index, arg), arg);
+    } else if (arg === "--adapters") {
+      options.adapters = requiredValue(argv, ++index, arg)
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
     } else {
       fail(`unknown argument ${JSON.stringify(arg)}`);
     }
@@ -159,6 +165,8 @@ function measureRuntime(runtime, options, commit) {
     String(options.targetMs),
     "--reps",
     String(options.reps),
+    "--adapters",
+    options.adapters.join(","),
   ]);
   const text = run(command, args);
   try {
@@ -168,32 +176,57 @@ function measureRuntime(runtime, options, commit) {
   }
 }
 
-function validateRun(runResult) {
+function validateRuntimeBatch(batch) {
+  if (batch.schema !== "rustia.bench.wasm-runtime-results-batch.v1") {
+    fail(`unexpected measurement schema ${JSON.stringify(batch.schema)}`);
+  }
+  if (!Array.isArray(batch.runs) || batch.runs.length === 0) {
+    fail(`${batch.runtime?.name ?? "runtime"} measurement must contain adapter runs`);
+  }
+  for (const runResult of batch.runs) {
+    validateAdapterRun(runResult);
+  }
+}
+
+function validateAdapterRun(runResult) {
   if (runResult.schema !== "rustia.bench.wasm-runtime-results.v1") {
-    fail(`unexpected measurement schema ${JSON.stringify(runResult.schema)}`);
+    fail(`unexpected adapter measurement schema ${JSON.stringify(runResult.schema)}`);
+  }
+  if (runResult.adapter == null || typeof runResult.adapter !== "object") {
+    fail(`${runResult.runtime?.name ?? "runtime"} measurement must include adapter metadata`);
+  }
+  if (typeof runResult.adapter.id !== "string" || runResult.adapter.id.trim() === "") {
+    fail(`${runResult.runtime?.name ?? "runtime"} adapter id must be a non-empty string`);
   }
   if (!Array.isArray(runResult.rows) || runResult.rows.length === 0) {
-    fail(`${runResult.runtime?.name ?? "runtime"} measurement must contain rows`);
+    fail(`${runResult.runtime?.name ?? "runtime"} ${runResult.adapter.id} measurement must contain rows`);
   }
   for (const [index, row] of runResult.rows.entries()) {
-    for (const field of ["workload", "unit", "checksum"]) {
+    for (const field of ["engine", "dialect", "workload", "unit", "checksum"]) {
       if (typeof row[field] !== "string" || row[field].trim() === "") {
-        fail(`${runResult.runtime.name} rows[${index}].${field} must be a non-empty string`);
+        fail(`${runResult.runtime.name}/${runResult.adapter.id} rows[${index}].${field} must be a non-empty string`);
       }
+    }
+    if (row.engine !== runResult.adapter.id) {
+      fail(`${runResult.runtime.name}/${runResult.adapter.id} rows[${index}].engine must match adapter`);
     }
     for (const field of ["n", "reps", "ns_per_unit_min", "ns_per_unit_median", "units_per_sec"]) {
       if (!Number.isFinite(row[field]) || row[field] <= 0) {
-        fail(`${runResult.runtime.name} rows[${index}].${field} must be positive and finite`);
+        fail(`${runResult.runtime.name}/${runResult.adapter.id} rows[${index}].${field} must be positive and finite`);
       }
     }
     if (row.ns_per_unit_median < row.ns_per_unit_min) {
-      fail(`${runResult.runtime.name} rows[${index}] median must be >= min`);
+      fail(`${runResult.runtime.name}/${runResult.adapter.id} rows[${index}] median must be >= min`);
     }
   }
 }
 
 function summarizeRequirements(runs) {
-  const families = new Set(runs.map((runResult) => runResult.runtime.family));
+  const families = new Set(
+    runs
+      .filter((runResult) => runResult.adapter.id === "rustia")
+      .map((runResult) => runResult.runtime.family),
+  );
   return {
     "v8-production-rustia-wasm": families.has("V8"),
     "javascriptcore-production-rustia-wasm": families.has("JavaScriptCore"),
@@ -217,9 +250,9 @@ for (const runtime of options.runtimes) {
     skipped.push({ runtime, reason: "command not found" });
     continue;
   }
-  const runResult = measureRuntime(runtime, options, commit);
-  validateRun(runResult);
-  runs.push(runResult);
+  const batch = measureRuntime(runtime, options, commit);
+  validateRuntimeBatch(batch);
+  runs.push(...batch.runs);
 }
 
 if (runs.length === 0) {
@@ -244,4 +277,4 @@ const value = {
 const text = `${JSON.stringify(value, null, 2)}\n`;
 fs.mkdirSync(path.dirname(options.output), { recursive: true });
 fs.writeFileSync(options.output, text);
-console.log(`wrote ${relative(options.output)} with ${runs.length} runtime measurement(s)`);
+console.log(`wrote ${relative(options.output)} with ${runs.length} wasm adapter measurement(s)`);

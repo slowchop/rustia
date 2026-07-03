@@ -15,6 +15,10 @@ const expectedWorkloads = new Map([
   ["generic_iteration", "__iter(32)+pairs(5)+ipairs(32) pass"],
   ["stdlib_math_table", "math fastcalls + buffered push"],
 ]);
+const expectedAdapters = new Map([
+  ["rustia", "luau"],
+  ["koto", "koto"],
+]);
 
 function fail(message) {
   console.error(`check-wasm-gate-results: ${message}`);
@@ -76,7 +80,8 @@ function validateResults(data) {
   if (!Array.isArray(data.runs) || data.runs.length === 0) {
     fail("results runs must be a non-empty array");
   }
-  const families = new Set();
+  const rustiaFamilies = new Set();
+  const adaptersByTarget = new Map();
   for (const [runIndex, run] of data.runs.entries()) {
     const label = `results runs[${runIndex}]`;
     assertEqual(run.schema, "rustia.bench.wasm-runtime-results.v1", `${label}.schema`);
@@ -86,7 +91,20 @@ function validateResults(data) {
     assertText(run.runtime.family, `${label}.runtime.family`);
     assertText(run.runtime.version, `${label}.runtime.version`);
     assertText(run.runtime.host, `${label}.runtime.host`);
-    families.add(run.runtime.family);
+    assertObject(run.adapter, `${label}.adapter`);
+    assertText(run.adapter.id, `${label}.adapter.id`);
+    assertText(run.adapter.dialect, `${label}.adapter.dialect`);
+    const expectedDialect = expectedAdapters.get(run.adapter.id);
+    if (expectedDialect == null) {
+      fail(`${label}.adapter.id is not expected for wasm target: ${run.adapter.id}`);
+    }
+    assertEqual(run.adapter.dialect, expectedDialect, `${label}.adapter.dialect`);
+    if (run.adapter.id === "rustia") {
+      rustiaFamilies.add(run.runtime.family);
+    }
+    const adapters = adaptersByTarget.get(run.target) ?? new Set();
+    adapters.add(run.adapter.id);
+    adaptersByTarget.set(run.target, adapters);
     assertObject(run.wasm, `${label}.wasm`);
     assertEqual(run.wasm.bench_abi_version, 1, `${label}.wasm.bench_abi_version`);
     assertEqual(run.wasm.bytes, data.wasm.bytes, `${label}.wasm.bytes`);
@@ -97,9 +115,13 @@ function validateResults(data) {
     const workloads = new Set();
     for (const [rowIndex, row] of run.rows.entries()) {
       const rowLabel = `${label}.rows[${rowIndex}]`;
+      assertText(row.engine, `${rowLabel}.engine`);
+      assertText(row.dialect, `${rowLabel}.dialect`);
       assertText(row.workload, `${rowLabel}.workload`);
       assertText(row.unit, `${rowLabel}.unit`);
       assertText(row.checksum, `${rowLabel}.checksum`);
+      assertEqual(row.engine, run.adapter.id, `${rowLabel}.engine`);
+      assertEqual(row.dialect, run.adapter.dialect, `${rowLabel}.dialect`);
       for (const field of ["n", "reps", "ns_per_unit_min", "ns_per_unit_median", "units_per_sec"]) {
         assertPositiveFinite(row[field], `${rowLabel}.${field}`);
       }
@@ -120,18 +142,26 @@ function validateResults(data) {
     }
   }
 
-  assertEqual(Boolean(data.requirements["v8-production-rustia-wasm"]), families.has("V8"), "V8 requirement summary");
+  for (const [target, adapters] of adaptersByTarget) {
+    for (const adapter of expectedAdapters.keys()) {
+      if (!adapters.has(adapter)) {
+        fail(`${target} is missing wasm adapter ${adapter}`);
+      }
+    }
+  }
+
+  assertEqual(Boolean(data.requirements["v8-production-rustia-wasm"]), rustiaFamilies.has("V8"), "V8 requirement summary");
   assertEqual(
     Boolean(data.requirements["javascriptcore-production-rustia-wasm"]),
-    families.has("JavaScriptCore"),
+    rustiaFamilies.has("JavaScriptCore"),
     "JavaScriptCore requirement summary",
   );
   assertEqual(
     Boolean(data.requirements["spidermonkey-production-rustia-wasm"]),
-    families.has("SpiderMonkey"),
+    rustiaFamilies.has("SpiderMonkey"),
     "SpiderMonkey requirement summary",
   );
-  return families;
+  return rustiaFamilies;
 }
 
 function validateGate(gate, results) {
@@ -153,5 +183,5 @@ const gate = readJson(gatePath);
 const families = validateResults(results);
 validateGate(gate, results);
 console.log(
-  `wasm gate results ok: ${results.runs.length} runtime(s), ${[...families].sort().join(", ")}`,
+  `wasm gate results ok: ${results.runs.length} adapter runtime(s), rustia on ${[...families].sort().join(", ")}`,
 );
