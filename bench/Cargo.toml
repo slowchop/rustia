@@ -24,7 +24,7 @@ koto = ["dep:koto"]
 mlua-luau = ["dep:mlua_luau"]
 mlua-lua54 = ["dep:mlua_lua54"]
 rhai-engine = ["dep:rhai"]
-roto = []
+roto = ["dep:roto"]
 rquickjs-engine = ["dep:rquickjs"]
 wasmi-engine = ["dep:wasmi"]
 wasmtime-engine = ["dep:wasmtime"]
@@ -38,6 +38,7 @@ mlua_luau = { package = "mlua", version = "0.11", default-features = false, feat
 mlua_lua54 = { package = "mlua", version = "0.11", default-features = false, features = ["lua54", "vendored"], optional = true }
 rhai = { version = "1.25", optional = true }
 boa_engine = { version = "0.21", optional = true }
+roto = { version = "0.11", default-features = false, optional = true }
 rquickjs = { version = "0.12", optional = true }
 serde_json = "1"
 wasmi = { version = "2.0.0-beta.4", optional = true }

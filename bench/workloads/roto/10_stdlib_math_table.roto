@@ -1,0 +1,26 @@
+// Workload: f64 math methods plus list push/read.
+// unit = math method group + buffered push.
+
+fn get(xs: List[f64], idx: u64) -> f64 {
+    match xs.get(idx) {
+        Some(v) => v,
+        None => 0.0,
+    }
+}
+
+fn f(n: u64) -> f64 {
+    let checksum: f64 = 0.0;
+    let i: u64 = 0;
+    let x: f64 = 1.0;
+    while i < n {
+        let y = (x.sqrt() + (x * 0.5).pow(1.5) + (x / 3.0).round()).floor();
+        let xs: List[f64] = [];
+        xs.push(y);
+        xs.push(y + 1.0);
+        xs.push(y + 2.0);
+        checksum = checksum + get(xs, 0) + get(xs, 1) - get(xs, 2);
+        i = i + 1;
+        x = x + 1.0;
+    }
+    checksum
+}

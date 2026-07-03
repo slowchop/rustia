@@ -1,0 +1,51 @@
+// Workload: dense list build + sum + manual sort.
+// unit = build+sum+sort of 256-element list.
+
+fn get(xs: List[i64], idx: u64) -> i64 {
+    match xs.get(idx) {
+        Some(v) => v,
+        None => 0,
+    }
+}
+
+fn sort256(xs: List[i64]) {
+    let i: u64 = 0;
+    while i < 256 {
+        let j = i + 1;
+        while j < 256 {
+            if get(xs, j) < get(xs, i) {
+                xs.swap(i, j);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn f(n: u64) -> i64 {
+    let checksum: i64 = 0;
+    let it: u64 = 0;
+    let salt: i64 = 0;
+    let factor: i64 = 2654435761;
+    while it < n {
+        let xs: List[i64] = [];
+        let i: i64 = 1;
+        while i <= 256 {
+            xs.push((i * factor + salt) % 1000);
+            i = i + 1;
+        }
+
+        let sum: i64 = 0;
+        let j: u64 = 0;
+        while j < 256 {
+            sum = sum + get(xs, j);
+            j = j + 1;
+        }
+
+        sort256(xs);
+        checksum = checksum + get(xs, 0) + get(xs, 255) + sum;
+        it = it + 1;
+        salt = salt + 1;
+    }
+    checksum
+}

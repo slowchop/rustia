@@ -1,0 +1,26 @@
+// Workload: function-call state update analogue for engines without closures.
+// unit = one state-update helper call.
+
+record State {
+    seed: i64,
+}
+
+fn bump(state: State, x: i64) -> State {
+    State {
+        seed: (state.seed * 1103515245 + x + 12345) % 1000000007,
+    }
+}
+
+fn f(n: u64) -> i64 {
+    let state = State { seed: 7 };
+    let checksum: i64 = 0;
+    let i: u64 = 0;
+    let x: i64 = 0;
+    while i < n {
+        state = bump(state, x);
+        checksum = checksum + state.seed;
+        i = i + 1;
+        x = x + 1;
+    }
+    checksum
+}

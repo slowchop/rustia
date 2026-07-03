@@ -209,7 +209,7 @@ const ENGINE_SLOTS: &[EngineSlot] = &[
         dialect: Dialect::Roto,
         feature: Some("roto"),
         enabled: cfg!(feature = "roto"),
-        implemented: false,
+        implemented: cfg!(feature = "roto"),
     },
     EngineSlot {
         id: "rquickjs",
@@ -596,6 +596,8 @@ fn prepare(
         "mlua-luau" => Ok(Box::new(MluaLuauPrepared::new(_workload, _source)?)),
         #[cfg(feature = "rhai-engine")]
         "rhai" => Ok(Box::new(RhaiPrepared::new(_workload, _source)?)),
+        #[cfg(feature = "roto")]
+        "roto" => Ok(Box::new(RotoPrepared::new(_workload, _source)?)),
         #[cfg(feature = "rquickjs-engine")]
         "rquickjs" => Ok(Box::new(RquickJsPrepared::new(_workload, _source)?)),
         #[cfg(feature = "wasmi-engine")]
@@ -964,6 +966,55 @@ fn rhai_checksum(value: &rhai::Dynamic) -> String {
         return format!("string:{value}");
     }
     value.type_name().to_owned()
+}
+
+#[cfg(feature = "roto")]
+enum RotoFunction {
+    I64(roto::TypedFunc<roto::NoCtx, fn(u64) -> i64>),
+    F64(roto::TypedFunc<roto::NoCtx, fn(u64) -> f64>),
+}
+
+#[cfg(feature = "roto")]
+struct RotoPrepared {
+    function: RotoFunction,
+}
+
+#[cfg(feature = "roto")]
+impl RotoPrepared {
+    fn new(workload: &Workload, source: &str) -> Result<Self> {
+        let runtime = roto::Runtime::new();
+        let mut package = roto::FileTree::test_file(workload.id, source, 0)
+            .compile(&runtime)
+            .map_err(|error| Error::new(format!("compile {} failed: {error}", workload.id)))?;
+        let function = if workload.id == "stdlib_math_table" {
+            RotoFunction::F64(
+                package
+                    .get_function::<fn(u64) -> f64>("f")
+                    .map_err(|error| {
+                        Error::new(format!("get roto function {} failed: {error}", workload.id))
+                    })?,
+            )
+        } else {
+            RotoFunction::I64(
+                package
+                    .get_function::<fn(u64) -> i64>("f")
+                    .map_err(|error| {
+                        Error::new(format!("get roto function {} failed: {error}", workload.id))
+                    })?,
+            )
+        };
+        Ok(Self { function })
+    }
+}
+
+#[cfg(feature = "roto")]
+impl PreparedWorkload for RotoPrepared {
+    fn run(&mut self, n: u64) -> Result<String> {
+        match &self.function {
+            RotoFunction::I64(function) => Ok(format!("i64:{}", function.call(n))),
+            RotoFunction::F64(function) => Ok(format!("f64:{:.17}", function.call(n))),
+        }
+    }
 }
 
 #[cfg(feature = "rquickjs-engine")]

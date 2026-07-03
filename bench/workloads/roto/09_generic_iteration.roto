@@ -1,0 +1,46 @@
+// Workload: list for-iteration plus indexed while scans.
+// unit = one 32-element for pass plus two indexed passes.
+
+fn get(xs: List[i64], idx: u64) -> i64 {
+    match xs.get(idx) {
+        Some(v) => v,
+        None => 0,
+    }
+}
+
+fn make() -> List[i64] {
+    let xs: List[i64] = [];
+    let i: i64 = 1;
+    while i <= 32 {
+        xs.push(i * i);
+        i = i + 1;
+    }
+    xs
+}
+
+fn f(n: u64) -> i64 {
+    let xs = make();
+    let checksum: i64 = 0;
+    let it: u64 = 0;
+    while it < n {
+        for value in xs {
+            checksum = checksum + value;
+        }
+
+        let i: u64 = 0;
+        while i < xs.len() {
+            checksum = checksum + get(xs, i);
+            i = i + 1;
+        }
+
+        let j: u64 = 0;
+        let k: i64 = 1;
+        while j < 5 {
+            checksum = checksum + k * 3;
+            j = j + 1;
+            k = k + 1;
+        }
+        it = it + 1;
+    }
+    checksum
+}

@@ -1,0 +1,46 @@
+// Workload: sparse key/value lists with linear lookup.
+// unit = fill+read 128 sparse entries.
+
+fn get(xs: List[i64], idx: u64) -> i64 {
+    match xs.get(idx) {
+        Some(v) => v,
+        None => 0,
+    }
+}
+
+fn find(keys: List[i64], values: List[i64], key: i64) -> i64 {
+    let i: u64 = 0;
+    while i < keys.len() {
+        if get(keys, i) == key {
+            return get(values, i);
+        }
+        i = i + 1;
+    }
+    0
+}
+
+fn f(n: u64) -> i64 {
+    let checksum: i64 = 0;
+    let it: u64 = 0;
+    let salt: i64 = 0;
+    while it < n {
+        let keys: List[i64] = [];
+        let values: List[i64] = [];
+        let i: i64 = 1;
+        while i <= 128 {
+            let key = i * 17 + (salt % 13);
+            keys.push(key);
+            values.push(i * i + salt);
+            i = i + 1;
+        }
+
+        let q: i64 = 1;
+        while q <= 64 {
+            checksum = checksum + find(keys, values, q * 17 + (salt % 13));
+            q = q + 1;
+        }
+        it = it + 1;
+        salt = salt + 1;
+    }
+    checksum
+}
