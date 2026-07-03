@@ -42,6 +42,7 @@ check-benchmark-results:
     node tools/check-benchmark-results.js
     node bench/render-current-results.js --check
     node bench/render-claims.js --check
+    node tools/check-benchmark-site.js
 
 check-examples:
     cargo test -p rustia --examples --no-run

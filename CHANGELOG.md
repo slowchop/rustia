@@ -20,6 +20,8 @@ Current unpublished workspace version: `0.0.1`.
 - The benchmark harness has current-results JSON/HTML, generated per-workload
   claim gating, package-file history, the requested adapter matrix, and
   cross-adapter source coverage for the non-default `string_building` workload.
+- The benchmark static site now has a release-preflight contract check for local
+  assets, DOM bindings, JSONL history parsing, and current-results agreement.
 - Release preflight now composes release notes, package files, generated leaf
   package dry runs, progress HTML, project-status drift checks, benchmark
   result freshness, and workspace tests.

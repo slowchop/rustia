@@ -104,6 +104,8 @@ from `publish = false` to publishable.
 - `bench/history/runs.jsonl`, `bench/RESULTS.md`,
   `bench/current-results.json`, `bench/current-results.html`, and
   `bench/CLAIMS.md` are generated from the same committed benchmark history.
+- The dependency-free `bench/site/` dashboard has a checked static asset,
+  DOM-binding, JSONL-history, and current-results contract.
 - Native baseline history covers the completed adapter matrix on a clean commit.
 - Public benchmark claims are stated per workload in `bench/CLAIMS.md`, not as
   a single blanket multiplier. The current generated claim gate approves no

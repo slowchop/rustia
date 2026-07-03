@@ -9,6 +9,8 @@ Static dashboard for benchmark history.
 - `app.js` - JSONL parser, current leaderboard, run table, and canvas history chart.
 
 The site consumes `../history/runs.jsonl` directly and has no build step.
+`just check-benchmark-results` validates the static asset contract and confirms
+the committed history still agrees with `../current-results.json`.
 
 ## Local Preview
 
