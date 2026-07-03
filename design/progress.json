@@ -60,17 +60,17 @@
     },
     {
       "name": "Standalone benchmark OSS project",
-      "complete": 68,
+      "complete": 69,
       "confidence": 80,
-      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, history, static site, five default workload families, and all 10 requested adapters are present.",
+      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, and all 10 requested adapters are present.",
       "future_plan": "Split from workspace, expand workloads, wire CI, and publish charts/history."
     },
     {
       "name": "Public release readiness",
-      "complete": 54,
+      "complete": 55,
       "confidence": 75,
-      "state": "License, crate metadata, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, changelog validation, release preflight, and generated package file-list audit are present; crates are still workspace-private and CI/release polish is incomplete.",
-      "future_plan": "Add public benchmark claims and remove publish blockers in topological order."
+      "state": "License, crate metadata, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, changelog validation, release preflight, generated benchmark claim gating, and generated package file-list audit are present; crates are still workspace-private and CI/release polish is incomplete.",
+      "future_plan": "Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims."
     }
   ],
   "areas": [
@@ -345,9 +345,9 @@
       "entries": [
         {
           "name": "Harness CLI and schema",
-          "complete": 88,
+          "complete": 90,
           "confidence": 85,
-          "state": "bench/ has a standalone-style CLI, package metadata, machine-readable inventory, validated JSONL history schema, refreshable RESULTS.md, and current-results JSON.",
+          "state": "bench/ has a standalone-style CLI, package metadata, machine-readable inventory, validated JSONL history schema, refreshable RESULTS.md, current-results JSON, and generated per-workload claim gating.",
           "future_plan": "Keep JSONL as the source of truth for CI and website data."
         },
         {
@@ -366,9 +366,9 @@
         },
         {
           "name": "History and static site",
-          "complete": 78,
+          "complete": 80,
           "confidence": 82,
-          "state": "Append-only history, dirty-baseline guards, markdown results, current-results JSON, and dependency-free dashboard files are present.",
+          "state": "Append-only history, dirty-baseline guards, markdown results, current-results JSON, dependency-free dashboard files, and claim-gate markdown are present.",
           "future_plan": "Publish long-run history and richer charts after standalone split."
         },
         {

@@ -16,6 +16,8 @@ benchmark gate before public claims. All 8 architecture axes are decided ([`30-a
 v3), 10 conformance-verified improvements are adopted ([`55-improvements.md`](55-improvements.md)), and the
 standalone benchmark harness has the engine/workload/history shell, static chart dashboard, and the
 `rustia`/`boa`/`koto`/`mlua-lua54`/`mlua-luau`/`rhai`/`roto`/`rquickjs`/`wasmi`/`wasmtime` native adapters in place.
+Its generated [`../bench/CLAIMS.md`](../bench/CLAIMS.md) gate keeps public benchmark language per-workload and
+currently approves no blanket speed headline from the committed snapshot.
 The public API now has compile-checked examples for embedding and hot reload.
 `rustia-cli` supports file, stdin, and `--eval` execution with profile, fuel, and source-name options.
 Future benchmark workflow files may target only the generic `[self-hosted, bench]` label; CI workflow wiring is

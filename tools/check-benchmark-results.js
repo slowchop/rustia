@@ -9,6 +9,7 @@ const childProcess = require("child_process");
 const root = path.resolve(__dirname, "..");
 const expectedResults = path.join(root, "bench", "RESULTS.md");
 const expectedJson = path.join(root, "bench", "current-results.json");
+const expectedClaims = path.join(root, "bench", "CLAIMS.md");
 
 function fail(message) {
   console.error(`check-benchmark-results: ${message}`);
@@ -36,6 +37,22 @@ function runCargo(args) {
   }
 }
 
+function runNode(args) {
+  try {
+    childProcess.execFileSync(process.execPath, args, {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    const stderr = error.stderr ? String(error.stderr).trim() : "";
+    const command = args
+      .map((arg) => path.isAbsolute(arg) ? relative(arg) : arg)
+      .join(" ");
+    fail(`node ${command} failed${stderr ? `\n${stderr}` : ""}`);
+  }
+}
+
 function read(filePath) {
   try {
     return fs.readFileSync(filePath, "utf8");
@@ -56,6 +73,7 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-bench-results-"));
 try {
   const actualResults = path.join(tempDir, "RESULTS.md");
   const actualJson = path.join(tempDir, "current-results.json");
+  const actualClaims = path.join(tempDir, "CLAIMS.md");
   runCargo([
     "run",
     "-p",
@@ -69,7 +87,15 @@ try {
   ]);
   compare(expectedResults, actualResults, "just gen-current-results");
   compare(expectedJson, actualJson, "just gen-current-results");
-  console.log("benchmark markdown and JSON results are current");
+  runNode([
+    path.join(root, "bench", "render-claims.js"),
+    "--source",
+    actualJson,
+    "--output",
+    actualClaims,
+  ]);
+  compare(expectedClaims, actualClaims, "just gen-current-results");
+  console.log("benchmark markdown, JSON, and claim results are current");
 } finally {
   fs.rmSync(tempDir, { recursive: true, force: true });
 }

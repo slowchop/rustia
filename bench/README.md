@@ -146,11 +146,12 @@ just gen-current-results
 ```
 
 `gen-current-results` does not run measurements; it only regenerates result
-artifacts from committed history. `gen-benchmark-results` is kept as a recipe
+artifacts from committed history, including [`CLAIMS.md`](CLAIMS.md), the
+per-workload public-claim gate. `gen-benchmark-results` is kept as a recipe
 alias.
 
-Check that committed benchmark markdown, current-results JSON, and current HTML
-are fresh without running measurements:
+Check that committed benchmark markdown, current-results JSON, claim gate, and
+current HTML are fresh without running measurements:
 
 ```sh
 just check-benchmark-results

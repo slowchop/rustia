@@ -417,7 +417,7 @@
           <span>Requested benchmark adapters present</span>
         </div>
         <div class="fact">
-          <strong>54%</strong>
+          <strong>55%</strong>
           <span>Public release readiness, 75% confidence</span>
         </div>
       </aside>
@@ -479,41 +479,41 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Standalone benchmark OSS project</h3>
-        <span class="percent">68%</span>
+        <span class="percent">69%</span>
       </div>
 
-    <div class="meter" aria-label="Standalone benchmark OSS project: 68% complete">
-      <div class="meter-fill" style="width: 68%"></div>
+    <div class="meter" aria-label="Standalone benchmark OSS project: 69% complete">
+      <div class="meter-fill" style="width: 69%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip high">80% confidence</span>
       </div>
-      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, history, static site, five default workload families, and all 10 requested adapters are present.</p>
+      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, and all 10 requested adapters are present.</p>
       <p class="plan"><strong>Next:</strong> Split from workspace, expand workloads, wire CI, and publish charts/history.</p>
     </article>
 
     <article class="goal-card">
       <div class="card-head">
         <h3>Public release readiness</h3>
-        <span class="percent">54%</span>
+        <span class="percent">55%</span>
       </div>
 
-    <div class="meter" aria-label="Public release readiness: 54% complete">
-      <div class="meter-fill" style="width: 54%"></div>
+    <div class="meter" aria-label="Public release readiness: 55% complete">
+      <div class="meter-fill" style="width: 55%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">75% confidence</span>
       </div>
-      <p>License, crate metadata, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, changelog validation, release preflight, and generated package file-list audit are present; crates are still workspace-private and CI/release polish is incomplete.</p>
-      <p class="plan"><strong>Next:</strong> Add public benchmark claims and remove publish blockers in topological order.</p>
+      <p>License, crate metadata, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, changelog validation, release preflight, generated benchmark claim gating, and generated package file-list audit are present; crates are still workspace-private and CI/release polish is incomplete.</p>
+      <p class="plan"><strong>Next:</strong> Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims.</p>
     </article>
 
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 62%</a><a href="#embedded-api">Embedded API 60%</a><a href="#benchmarks">Benchmarks 68%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 57%</a><a href="#packaging">Packaging 51%</a>
+      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 62%</a><a href="#embedded-api">Embedded API 60%</a><a href="#benchmarks">Benchmarks 69%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 57%</a><a href="#packaging">Packaging 51%</a>
     </nav>
 
 
@@ -1263,7 +1263,7 @@
           <p>5 tracked items</p>
         </div>
         <div class="area-score">
-          <span>68% avg complete</span>
+          <span>69% avg complete</span>
           <span>85% avg confidence</span>
         </div>
       </div>
@@ -1273,16 +1273,16 @@
       <div class="entry-top">
         <div>
           <h4>Harness CLI and schema</h4>
-          <p>bench/ has a standalone-style CLI, package metadata, machine-readable inventory, validated JSONL history schema, refreshable RESULTS.md, and current-results JSON.</p>
+          <p>bench/ has a standalone-style CLI, package metadata, machine-readable inventory, validated JSONL history schema, refreshable RESULTS.md, current-results JSON, and generated per-workload claim gating.</p>
         </div>
         <div class="entry-score">
-          <strong>88%</strong>
+          <strong>90%</strong>
           <span class="chip high">85% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Harness CLI and schema: 88% complete">
-      <div class="meter-fill" style="width: 88%"></div>
+    <div class="meter" aria-label="Harness CLI and schema: 90% complete">
+      <div class="meter-fill" style="width: 90%"></div>
     </div>
 
       <p class="plan"><strong>Future plan:</strong> Keep JSONL as the source of truth for CI and website data.</p>
@@ -1330,16 +1330,16 @@
       <div class="entry-top">
         <div>
           <h4>History and static site</h4>
-          <p>Append-only history, dirty-baseline guards, markdown results, current-results JSON, and dependency-free dashboard files are present.</p>
+          <p>Append-only history, dirty-baseline guards, markdown results, current-results JSON, dependency-free dashboard files, and claim-gate markdown are present.</p>
         </div>
         <div class="entry-score">
-          <strong>78%</strong>
+          <strong>80%</strong>
           <span class="chip high">82% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="History and static site: 78% complete">
-      <div class="meter-fill" style="width: 78%"></div>
+    <div class="meter" aria-label="History and static site: 80% complete">
+      <div class="meter-fill" style="width: 80%"></div>
     </div>
 
       <p class="plan"><strong>Future plan:</strong> Publish long-run history and richer charts after standalone split.</p>

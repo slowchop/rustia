@@ -66,11 +66,12 @@ from `publish = false` to publishable.
 ## Benchmark And CI Gate
 
 - `bench/history/runs.jsonl`, `bench/RESULTS.md`,
-  `bench/current-results.json`, and `bench/current-results.html` are generated
-  from the same committed benchmark history.
+  `bench/current-results.json`, `bench/current-results.html`, and
+  `bench/CLAIMS.md` are generated from the same committed benchmark history.
 - Native baseline history covers the completed adapter matrix on a clean commit.
-- Public benchmark claims are stated per workload, not as a single blanket
-  multiplier.
+- Public benchmark claims are stated per workload in `bench/CLAIMS.md`, not as
+  a single blanket multiplier. The current generated claim gate approves no
+  global speed headline.
 - Public benchmark workflows use only the generic `[self-hosted, bench]` runner
   label after owner setup is confirmed.
 

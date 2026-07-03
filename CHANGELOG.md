@@ -15,8 +15,8 @@ Current unpublished workspace version: `0.0.1`.
   and hot reload.
 - `rustia-cli` supports file, stdin, and `--eval` execution with profile, fuel,
   and source-name options.
-- The benchmark harness has current-results JSON/HTML, package-file history,
-  and the requested adapter matrix.
+- The benchmark harness has current-results JSON/HTML, generated per-workload
+  claim gating, package-file history, and the requested adapter matrix.
 - Release preflight now composes release notes, package files, progress HTML,
   benchmark result freshness, and workspace tests.
 - Release-readiness docs now cover package metadata, package file-list audits,

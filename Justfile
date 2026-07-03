@@ -16,6 +16,7 @@ check-release-notes:
 check-benchmark-results:
     node tools/check-benchmark-results.js
     node bench/render-current-results.js --check
+    node bench/render-claims.js --check
 
 release-preflight:
     just check-release-notes
@@ -34,5 +35,6 @@ benchmarks:
 gen-current-results:
     cargo run -p script-bench-harness -- --refresh-results
     node bench/render-current-results.js
+    node bench/render-claims.js
 
 gen-benchmark-results: gen-current-results
