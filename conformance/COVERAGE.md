@@ -5,7 +5,7 @@ The declared behavior-topic catalog is `REFS.tsv`.
 
 ## Current Status
 
-- The current manifest contains 684 fixtures and 481 refs: 684 executable `luau-0.709` fixtures, 0
+- The current manifest contains 686 fixtures and 483 refs: 686 executable `luau-0.709` fixtures, 0
   `pending-oracle` P1 smoke fixtures, and 0 whole upstream Luau 0.709 conformance scripts as
   `pending-impl` inventory.
 - No manifest rows or catalog refs remain pending. P1 smoke fixtures are now pinned to Luau 0.709 oracle
@@ -37,7 +37,8 @@ The declared behavior-topic catalog is `REFS.tsv`.
   clamping/negative-index ranges, direct `string.format` for `%s`, `%%`, `%q`, `%c`, integer, and
   fixed/exponent/general floating directives with basic width/precision handling, string method indexing for implemented string library functions,
   `table.concat` including start/end ranges and numeric hash-key ranges, basic
-  `tonumber` including explicit-base integer parsing, direct `math.abs`, and direct scalar math helpers.
+  `tonumber` including explicit-base integer parsing, base-16 `0x` prefixes, and unsigned explicit-base
+  sign handling, direct `math.abs`, and direct scalar math helpers.
 - Numeric operator coverage now includes upstream-derived `+`, `-`, `*`, `/`, `%` with both local update and
   runtime-visible RHS, `//`, finite `^`, NaN, infinities, sign-of-zero cases, unary numeric minus, and
   string-to-number arithmetic coercion. Numeric literal coverage now includes source-level binary literals

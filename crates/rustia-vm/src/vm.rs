@@ -14742,27 +14742,81 @@ fn parse_tonumber_string(text: &str) -> Option<f64> {
 }
 
 fn parse_tonumber_base(text: &[u8], base: u32) -> Option<f64> {
-    let text = std::str::from_utf8(text).ok()?.trim();
-    if text.is_empty() {
+    let text = std::str::from_utf8(text).ok()?.as_bytes();
+    let mut cursor = 0;
+    while text
+        .get(cursor)
+        .is_some_and(|byte| byte.is_ascii_whitespace())
+    {
+        cursor += 1;
+    }
+    if cursor == text.len() {
         return None;
     }
-    let (sign, digits) = match text.as_bytes() {
-        [b'+', rest @ ..] => (1.0, std::str::from_utf8(rest).ok()?),
-        [b'-', rest @ ..] => (-1.0, std::str::from_utf8(rest).ok()?),
-        _ => (1.0, text),
-    };
-    if digits.is_empty() {
-        return None;
-    }
-    let mut value = 0.0;
-    for byte in digits.bytes() {
-        let digit = tonumber_digit(byte)?;
-        if digit >= base {
-            return None;
+
+    let negative = match text[cursor] {
+        b'+' => {
+            cursor += 1;
+            false
         }
-        value = value * f64::from(base) + f64::from(digit);
+        b'-' => {
+            cursor += 1;
+            true
+        }
+        _ => false,
+    };
+
+    if base == 16
+        && text.get(cursor) == Some(&b'0')
+        && text
+            .get(cursor + 1)
+            .is_some_and(|byte| matches!(byte, b'x' | b'X'))
+        && text
+            .get(cursor + 2)
+            .and_then(|byte| tonumber_digit(*byte))
+            .is_some_and(|digit| digit < base)
+    {
+        cursor += 2;
     }
-    Some(canonicalize_number(sign * value))
+
+    let mut value = 0_u64;
+    let mut overflowed = false;
+    let mut parsed_digit = false;
+    while let Some(byte) = text.get(cursor).copied() {
+        let Some(digit) = tonumber_digit(byte) else {
+            break;
+        };
+        if digit >= base {
+            break;
+        }
+        parsed_digit = true;
+        cursor += 1;
+        if !overflowed {
+            match value
+                .checked_mul(u64::from(base))
+                .and_then(|value| value.checked_add(u64::from(digit)))
+            {
+                Some(next) => value = next,
+                None => {
+                    value = u64::MAX;
+                    overflowed = true;
+                }
+            }
+        }
+    }
+
+    if !parsed_digit
+        || text[cursor..]
+            .iter()
+            .any(|byte| !byte.is_ascii_whitespace())
+    {
+        return None;
+    }
+
+    if negative && !overflowed {
+        value = 0_u64.wrapping_sub(value);
+    }
+    Some(canonicalize_number(value as f64))
 }
 
 fn tonumber_digit(byte: u8) -> Option<u32> {
