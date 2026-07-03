@@ -19,6 +19,9 @@ check-publishability:
 check-release-notes:
     node tools/check-release-notes.js
 
+check-workflows:
+    node tools/check-workflows.js
+
 check-benchmark-results:
     node tools/check-benchmark-results.js
     node bench/render-current-results.js --check
@@ -26,6 +29,7 @@ check-benchmark-results:
 
 release-preflight:
     just check-release-notes
+    just check-workflows
     just check-package-files
     just check-publishability
     just check-progress

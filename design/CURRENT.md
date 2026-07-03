@@ -21,7 +21,8 @@ currently approves no blanket speed headline from the committed snapshot.
 The public API now has compile-checked examples for embedding and hot reload.
 `rustia-cli` supports file, stdin, and `--eval` execution with profile, fuel, and source-name options.
 CI wiring now includes hosted release-preflight checks plus a manual benchmark measurement workflow that targets
-only the generic `[self-hosted, bench]` runner label.
+only the generic `[self-hosted, bench]` runner label. `tools/check-workflows.js` keeps those workflow policies
+inside `just release-preflight`.
 
 ## 🚀 Next actions (cold-start handoff — do in this order)
 **Read order for a fresh agent:** `CLAUDE.md` (auto-loaded) → **this file** → [`30-architecture.md`](30-architecture.md) (the ADR)

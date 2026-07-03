@@ -61,7 +61,8 @@ detail in the repo)
 without fresh benchmark measurements. `.github/workflows/benchmarks.yml` is a manual `workflow_dispatch`
 measurement job on `[self-hosted, bench]`; it appends current benchmark history in the checkout, regenerates the
 benchmark artifacts, verifies them, and uploads the resulting files. It does not yet publish the JSONL history
-back to a tracking branch or static host.
+back to a tracking branch or static host. `tools/check-workflows.js` guards the public workflow policy: hosted
+CI stays hosted, the benchmark job stays manual, and self-hosted labels stay exactly `[self-hosted, bench]`.
 
 **Reserving rustia's column:** the `bench` crate enumerates engines by **cargo feature**; `rustia` is
 `cfg`-gated to a no-op stub emitting `— (pending P1)`. Baseline engines tracked **now**; flip the feature at P1

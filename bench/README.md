@@ -65,7 +65,8 @@ The same measurement sequence is wired as a manual GitHub Actions workflow in
 `.github/workflows/benchmarks.yml`. It requires a self-hosted runner with the
 generic labels `[self-hosted, bench]`, regenerates the benchmark artifacts, and
 uploads them as workflow artifacts; it does not yet publish history back to a
-tracking branch or static host.
+tracking branch or static host. The runner-label and manual-trigger policy is
+checked by `tools/check-workflows.js`.
 
 `all-engines` intentionally excludes `mlua-lua54` because `mlua-lua54` and
 `mlua-luau` cannot be linked into one binary. Run the Lua 5.4 mlua adapter as a

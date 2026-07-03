@@ -43,6 +43,9 @@ jobs:
       - name: Check release notes
         run: node tools/check-release-notes.js
 
+      - name: Check workflow policy
+        run: node tools/check-workflows.js
+
       - name: Check package file audit
         run: node tools/check-package-files.js --check
 

@@ -23,6 +23,8 @@ Current unpublished workspace version: `0.0.1`.
   file audits into `design/publishability.json`.
 - GitHub Actions now has a hosted release-preflight workflow and a manual
   self-hosted benchmark measurement workflow.
+- Workflow policy is checked in release preflight so hosted CI and benchmark
+  runner labels stay public and generic.
 - Release-readiness docs now cover package metadata, package file-list audits,
   semver policy, changelog validation, and publish ordering.
 

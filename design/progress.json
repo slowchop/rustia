@@ -67,9 +67,9 @@
     },
     {
       "name": "Public release readiness",
-      "complete": 58,
+      "complete": 59,
       "confidence": 75,
-      "state": "License, crate metadata, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, generated benchmark claim gating, package file-list audit, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
+      "state": "License, crate metadata, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
       "future_plan": "Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims."
     }
   ],
@@ -373,9 +373,9 @@
         },
         {
           "name": "Benchmark CI",
-          "complete": 40,
+          "complete": 42,
           "confidence": 90,
-          "state": "A manual workflow_dispatch benchmark measurement job exists on the generic [self-hosted, bench] runner label and uploads generated artifacts.",
+          "state": "A manual workflow_dispatch benchmark measurement job exists on the generic [self-hosted, bench] runner label, uploads generated artifacts, and is guarded by a workflow policy check.",
           "future_plan": "After runner setup, add automated history publication and regression alerts without exposing infra details."
         }
       ]
@@ -404,9 +404,9 @@
       "entries": [
         {
           "name": "Workspace tests and release preflight",
-          "complete": 78,
+          "complete": 80,
           "confidence": 75,
-          "state": "Production crates have meaningful unit and conformance tests; just release-preflight composes release artifact checks with cargo test --workspace; hosted CI mirrors that gate.",
+          "state": "Production crates have meaningful unit and conformance tests; just release-preflight composes release artifact checks, workflow policy checks, and cargo test --workspace; hosted CI mirrors that gate.",
           "future_plan": "Keep expanding tests with new runtime/API work and keep CI aligned with release-preflight."
         },
         {

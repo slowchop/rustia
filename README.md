@@ -34,7 +34,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
 | Usable embedded scripting crate | 65% | 70% |
 | Full public Luau engine release | 48% | 58% |
 | Standalone benchmark OSS project | 72% | 80% |
-| Public release readiness | 58% | 75% |
+| Public release readiness | 59% | 75% |
 
 - Current conformance runner: **684 fixtures**, **481 refs**, **0 pending**.
 - The benchmark harness has all 10 requested adapters; Lua 5.4 runs separately from Luau because `mlua-sys`
@@ -47,8 +47,8 @@ public rustia project; actual grabby integration work is explicitly out of scope
   [`design/package-files.json`](design/package-files.json). Current publish blockers are generated at
   [`design/publishability.json`](design/publishability.json).
 - `just release-preflight` validates the current release-note, package-file, progress-dashboard, benchmark-result,
-  and workspace-test gates without running fresh benchmark measurements; `.github/workflows/ci.yml` mirrors that
-  gate on hosted Linux CI.
+  workflow-policy, and workspace-test gates without running fresh benchmark measurements; `.github/workflows/ci.yml`
+  mirrors that gate on hosted Linux CI.
 
 ## Layout
 - `design/` — the design record: constraints → research → spikes → architecture (ADR) → conformance → improvements.
