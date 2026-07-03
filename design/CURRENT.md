@@ -32,7 +32,7 @@ not implemented yet.
    The runner already exposes the requested engine matrix, five default workloads, extra workload slots, and
    append-only JSONL history. Next work is committed baseline history for each completed adapter, generated
    `RESULTS.md`, the standalone-project split, and CI workflow wiring.
-3. **Keep the Luau 0.709 conformance corpus green**. The current repo has 683 executable fixtures covering 480
+3. **Keep the Luau 0.709 conformance corpus green**. The current repo has 684 executable fixtures covering 481
    behavior refs with no pending rows; new engine work should add focused fixtures rather than re-opening
    pending inventory.
 4. **Wire benchmark CI** — before starting any CI configuration, notify the owner of the required setup. Then
@@ -69,7 +69,7 @@ watch).
   vector width 3, flags-off — see [`05-luau-target.md`](05-luau-target.md). **f64-only is VERIFIED correct**
   (`math.type==nil`; integers are default-OFF even at HEAD 0.727 behind `FFlag::LuauIntegerType2`).
 - **Conformance corpus is executable and pending-free** (review C2 follow-through): the runner reports
-  **683 fixtures**, **480 refs**, **683 Luau 0.709 oracle-backed rows**, **0 pending-oracle**, **0 pending-impl**,
+  **684 fixtures**, **481 refs**, **684 Luau 0.709 oracle-backed rows**, **0 pending-oracle**, **0 pending-impl**,
   and **0 rustia-only**. The old warning about ~703 model-generated rows is obsolete; future work is incremental
   coverage for newly discovered gaps, not a bulk oracle re-derivation pass.
 
@@ -91,7 +91,7 @@ watch).
 | **CURRENT.md** (this) | the live canonical state | authoritative |
 | [`30-architecture.md`](30-architecture.md) | the ADR (8 axes, decided) v3 + v3.1 refinements | authoritative for design |
 | [`05-luau-target.md`](05-luau-target.md) | the pinned-target spec (Luau 0.709) | **authoritative** ✅ |
-| [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 683 fixtures / 480 refs / 0 pending |
+| [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 684 fixtures / 481 refs / 0 pending |
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + deterministic extension/linker plan | **implemented first slice** ✅ |
@@ -105,7 +105,7 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 | # | finding | status |
 |---|---|---|
 | C1 | pin the Luau target | **RESOLVED** → [`05-luau-target.md`](05-luau-target.md): Luau **0.709** (= our oracle), standalone surface, vector-3, flags-off; **f64-only verified** (`math.type==nil`); int64 is a tripwire on `FFlag::LuauIntegerType2`. |
-| C2 | conformance table not trustworthy | **RESOLVED for current corpus** — runner reports 683 Luau 0.709 oracle-backed fixtures, 480 refs, and 0 pending rows. Keep adding targeted oracle fixtures for new bugs/features. |
+| C2 | conformance table not trustworthy | **RESOLVED for current corpus** — runner reports 684 Luau 0.709 oracle-backed fixtures, 481 refs, and 0 pending rows. Keep adding targeted oracle fixtures for new bugs/features. |
 | H1 | version drift | **FIXED** (this file + banners). |
 | H2 | "~5× koto" too narrow | **RESOLVED** — drop the blanket number; state **per-workload** (below). |
 | H3 | wasm gate + Wasm 3.0 | **Wasm-3.0 assessed** (br_table stays; wasm-GC rejected; relaxed-SIMD banned); **JSC/SpiderMonkey measurement STILL the open pre-lock gate.** |

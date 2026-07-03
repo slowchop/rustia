@@ -19,7 +19,7 @@ at full Luau parity.
 - One portable engine: big-`match`→`br_table` interpreter + a wasm-emit JIT/AOT tier; **gc-arena** GC,
   **16-byte tagged** values, own hand-written Luau parser, **Send-not-Sync** N-VM threading.
 - Pinned to **Luau 0.709** (standalone luau.org surface, not Roblox).
-- Current conformance runner: **683 fixtures**, **480 refs**, **0 pending-oracle**, **0 pending-impl**.
+- Current conformance runner: **684 fixtures**, **481 refs**, **0 pending-oracle**, **0 pending-impl**.
 - Public embedding API first slice: owned values, typed host functions, retained script functions, serde,
   deterministic extensions, hot reload, and macro sugar.
 
@@ -36,7 +36,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
 | Standalone benchmark OSS project | 66% | 80% |
 | Public release readiness | 45% | 75% |
 
-- Current conformance runner: **683 fixtures**, **480 refs**, **0 pending**.
+- Current conformance runner: **684 fixtures**, **481 refs**, **0 pending**.
 - The benchmark harness has all 10 requested adapters; Lua 5.4 runs separately from Luau because `mlua-sys`
   cannot link both in one binary.
 - Major remaining gates are engine hardening, benchmark CI/history, JSC/SpiderMonkey wasm proof, and release

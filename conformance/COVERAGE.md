@@ -5,7 +5,7 @@ The declared behavior-topic catalog is `REFS.tsv`.
 
 ## Current Status
 
-- The current manifest contains 683 fixtures and 480 refs: 683 executable `luau-0.709` fixtures, 0
+- The current manifest contains 684 fixtures and 481 refs: 684 executable `luau-0.709` fixtures, 0
   `pending-oracle` P1 smoke fixtures, and 0 whole upstream Luau 0.709 conformance scripts as
   `pending-impl` inventory.
 - No manifest rows or catalog refs remain pending. P1 smoke fixtures are now pinned to Luau 0.709 oracle
@@ -85,7 +85,8 @@ The declared behavior-topic catalog is `REFS.tsv`.
   The whole upstream `stringinterp.luau` and `strings.luau` corpora are now executable.
 - Table/iteration coverage now includes array literal construction, sequential array length/index reads,
   named and computed table fields, duplicate field overwrite/removal order, absent key reads, non-integer
-  numeric keys, string-key bracket indexing, table index assignment, table field/index compound assignment,
+  numeric keys, string-key bracket indexing, table index assignment, negative-zero numeric key normalization,
+  table field/index compound assignment,
   nil/NaN key write errors, NaN-key reads returning nil, direct table-constructor traversal,
   `ipairs` stopping at the first nil array slot,
   `pairs` continuing past nil holes, Luau-style array-boundary length search for nil-tailed pre-sized arrays

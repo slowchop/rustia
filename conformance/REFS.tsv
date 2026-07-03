@@ -379,6 +379,7 @@ table.noninteger-number-key	runtime	conformance/upstream/luau-0.709/tests/confor
 table.string-key-index	runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	String table keys can be read through bracket indexing.
 table.index-assignment	runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Table bracket or field assignment writes the indexed key.
 table.numeric-hash-key	runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Numeric keys outside positive integer array slots are stored and read as hash keys.
+table.negative-zero-key-normalization	runtime	upstream-luau-0.709:VM/src/ltable.cpp	luau-0.709	Raw table storage canonicalizes numeric -0 and 0 to the same table key.
 table.nan-key-read	runtime	conformance/upstream/luau-0.709/tests/conformance/math.luau	luau-0.709	Table reads using a NaN key return nil.
 table.invalid-key-write-error	runtime	conformance/upstream/luau-0.709/tests/conformance/errors.luau	luau-0.709	Table writes using nil or NaN keys raise the exact Luau table-index error.
 table.raw-key-equality	runtime	conformance/upstream/luau-0.709/tests/conformance/events.luau	luau-0.709	Table raw storage and lookup use raw key identity and do not dispatch __eq metamethods.
