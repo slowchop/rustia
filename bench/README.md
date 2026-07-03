@@ -115,6 +115,18 @@ machine-readable latest-results snapshot keyed by target, engine, and workload.
 Use `--latest-json <path>` to choose a different destination or
 `--no-latest-json` to skip it.
 
+Generate the static current-results HTML from the latest snapshot:
+
+```sh
+node bench/render-current-results.js
+```
+
+Or refresh the committed current-results JSON and render the HTML together:
+
+```sh
+just gen-benchmark-results
+```
+
 ## Provenance
 
 The harness is a clean rewrite. Prior-art and workload-provenance notes are
