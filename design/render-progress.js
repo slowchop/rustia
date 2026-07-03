@@ -7,6 +7,7 @@ const path = require("path");
 const root = path.resolve(__dirname, "..");
 const sourcePath = path.join(__dirname, "progress.json");
 const outputPath = path.join(__dirname, "progress.html");
+const checkOnly = process.argv.includes("--check");
 
 function fail(message) {
   console.error(`render-progress: ${message}`);
@@ -653,5 +654,20 @@ function stripTrailingWhitespace(value) {
 }
 
 const data = readData();
-fs.writeFileSync(outputPath, stripTrailingWhitespace(render(data)), "utf8");
-console.log(`Wrote ${path.relative(root, outputPath)}`);
+const output = stripTrailingWhitespace(render(data));
+
+if (checkOnly) {
+  let current;
+  try {
+    current = fs.readFileSync(outputPath, "utf8");
+  } catch (error) {
+    fail(`could not read ${path.relative(root, outputPath)}: ${error.message}`);
+  }
+  if (current !== output) {
+    fail(`${path.relative(root, outputPath)} is stale; run node design/render-progress.js`);
+  }
+  console.log(`${path.relative(root, outputPath)} is current`);
+} else {
+  fs.writeFileSync(outputPath, output, "utf8");
+  console.log(`Wrote ${path.relative(root, outputPath)}`);
+}

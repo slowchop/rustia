@@ -7,6 +7,7 @@ const path = require("path");
 const root = path.resolve(__dirname, "..");
 const sourcePath = path.join(__dirname, "current-results.json");
 const outputPath = path.join(__dirname, "current-results.html");
+const checkOnly = process.argv.includes("--check");
 
 function fail(message) {
   console.error(`render-current-results: ${message}`);
@@ -706,8 +707,22 @@ function render(data) {
 function main() {
   const data = readData();
   const html = render(data).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
-  fs.writeFileSync(outputPath, `${html}\n`);
-  console.log(`wrote ${relative(outputPath)} from ${relative(sourcePath)}`);
+  const output = `${html}\n`;
+  if (checkOnly) {
+    let current;
+    try {
+      current = fs.readFileSync(outputPath, "utf8");
+    } catch (error) {
+      fail(`could not read ${relative(outputPath)}: ${error.message}`);
+    }
+    if (current !== output) {
+      fail(`${relative(outputPath)} is stale; run node bench/render-current-results.js`);
+    }
+    console.log(`${relative(outputPath)} is current`);
+  } else {
+    fs.writeFileSync(outputPath, output);
+    console.log(`wrote ${relative(outputPath)} from ${relative(sourcePath)}`);
+  }
 }
 
 main();

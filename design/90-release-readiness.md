@@ -76,10 +76,15 @@ from `publish = false` to publishable.
 
 ## Release Process Gate
 
+- `just release-preflight` passes before any publishability flip. It checks
+  release notes, package file lists, generated progress HTML, benchmark result
+  freshness, and the workspace test suite.
 - `cargo test --workspace` passes on the release toolchain.
 - `just check-package-files` passes and `design/package-files.json` is current.
 - `just check-release-notes` passes and `CHANGELOG.md` names the current
   workspace version plus public-facing unreleased changes.
+- `just check-progress` and `just check-benchmark-results` pass without
+  rewriting committed generated artifacts.
 - `rustia-cli` supports file, stdin, and `--eval` execution, plus profile,
   fuel, and source-name options for diagnostics.
 - `cargo package --no-verify` reaches packaging for each publishable crate; any

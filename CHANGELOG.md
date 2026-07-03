@@ -17,6 +17,8 @@ Current unpublished workspace version: `0.0.1`.
   and source-name options.
 - The benchmark harness has current-results JSON/HTML, package-file history,
   and the requested adapter matrix.
+- Release preflight now composes release notes, package files, progress HTML,
+  benchmark result freshness, and workspace tests.
 - Release-readiness docs now cover package metadata, package file-list audits,
   semver policy, changelog validation, and publish ordering.
 

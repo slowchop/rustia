@@ -149,6 +149,13 @@ just gen-current-results
 artifacts from committed history. `gen-benchmark-results` is kept as a recipe
 alias.
 
+Check that committed benchmark markdown, current-results JSON, and current HTML
+are fresh without running measurements:
+
+```sh
+just check-benchmark-results
+```
+
 Pass `--commit <id>` only for orchestrated measurement runs that already proved
 the tree was clean before the first history append.
 
