@@ -6,8 +6,8 @@ but it is structured to become a standalone OSS benchmark project.
 ## Split Contract
 
 - Keep `bench/history/runs.jsonl` as the append-only source of truth.
-- Keep `bench/latest.json`, `bench/RESULTS.md`, and `bench/current-results.html`
-  generated from committed history.
+- Keep `bench/current-results.json`, `bench/RESULTS.md`, and
+  `bench/current-results.html` generated from committed history.
 - Keep `bench/site/` static and dependency-free so history can be served from a
   plain repository or static host.
 - Keep adapter features independent. `mlua-lua54` must stay in a separate binary

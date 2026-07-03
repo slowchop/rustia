@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 
 const root = path.resolve(__dirname, "..");
-const sourcePath = path.join(__dirname, "latest.json");
+const sourcePath = path.join(__dirname, "current-results.json");
 const outputPath = path.join(__dirname, "current-results.html");
 
 function fail(message) {
@@ -626,7 +626,7 @@ function render(data) {
       <div class="hero-panel">
         <p class="eyebrow">script-bench current snapshot</p>
         <h1>rustia Current Benchmark Results</h1>
-        <p class="lead">Static HTML generated from the committed latest benchmark JSON. Bars are rough relative comparisons: lower time bars compare each row to the fastest engine in that workload, while speed bars use the harness speed-vs-rustia ratio.</p>
+        <p class="lead">Static HTML generated from the committed current benchmark JSON. Bars are rough relative comparisons: lower time bars compare each row to the fastest engine in that workload, while speed bars use the harness speed-vs-rustia ratio.</p>
         <p class="source-line">
           <span>Source <code>${escapeHtml(relative(sourcePath))}</code></span>
           <span>History <code>${escapeHtml(data.history ?? "n/a")}</code></span>

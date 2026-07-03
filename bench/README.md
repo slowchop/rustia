@@ -127,8 +127,9 @@ benchmarks:
 cargo run -p script-bench-harness -- --refresh-results
 ```
 
-By default, the same command also writes `bench/latest.json`, a deterministic
-machine-readable latest-results snapshot keyed by target, engine, and workload.
+By default, the same command also writes `bench/current-results.json`, a
+deterministic machine-readable current-results snapshot keyed by target,
+engine, and workload.
 Use `--latest-json <path>` to choose a different destination or
 `--no-latest-json` to skip it.
 
@@ -141,11 +142,12 @@ node bench/render-current-results.js
 Or refresh the committed current-results JSON and render the HTML together:
 
 ```sh
-just gen-benchmark-results
+just gen-current-results
 ```
 
-`gen-benchmark-results` does not run measurements; it only regenerates result
-artifacts from committed history.
+`gen-current-results` does not run measurements; it only regenerates result
+artifacts from committed history. `gen-benchmark-results` is kept as a recipe
+alias.
 
 Pass `--commit <id>` only for orchestrated measurement runs that already proved
 the tree was clean before the first history append.

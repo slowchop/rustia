@@ -6,8 +6,10 @@ benchmarks:
     git diff --cached --quiet --ignore-submodules --
     cargo run -p script-bench-harness --release --features all-engines -- --history bench/history/runs.jsonl --commit $(git rev-parse --short HEAD)
     cargo run -p script-bench-harness --release --no-default-features --features mlua-lua54 -- --engines mlua-lua54 --history bench/history/runs.jsonl --commit $(git rev-parse --short HEAD)
-    just gen-benchmark-results
+    just gen-current-results
 
-gen-benchmark-results:
+gen-current-results:
     cargo run -p script-bench-harness -- --refresh-results
     node bench/render-current-results.js
+
+gen-benchmark-results: gen-current-results

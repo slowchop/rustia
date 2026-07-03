@@ -22,7 +22,7 @@ const DEFAULT_REPS: usize = 9;
 const DEFAULT_MAX_N: u64 = 1_000_000_000;
 const HISTORY_PATH: &str = "bench/history/runs.jsonl";
 const RESULTS_PATH: &str = "bench/RESULTS.md";
-const LATEST_JSON_PATH: &str = "bench/latest.json";
+const CURRENT_RESULTS_JSON_PATH: &str = "bench/current-results.json";
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -270,7 +270,7 @@ impl Default for Config {
             max_n: DEFAULT_MAX_N,
             history: Some(PathBuf::from(HISTORY_PATH)),
             results: Some(PathBuf::from(RESULTS_PATH)),
-            latest_json: Some(PathBuf::from(LATEST_JSON_PATH)),
+            latest_json: Some(PathBuf::from(CURRENT_RESULTS_JSON_PATH)),
             commit: None,
             list: false,
             list_json: false,
@@ -599,7 +599,7 @@ fn print_usage() {
     println!("  --reps 9");
     println!("  --history bench/history/runs.jsonl");
     println!("  --results bench/RESULTS.md");
-    println!("  --latest-json bench/latest.json");
+    println!("  --latest-json bench/current-results.json");
     println!("  --commit <clean-git-id>");
     println!("  --no-history");
     println!("  --no-results");
@@ -667,7 +667,8 @@ fn inventory_json_value() -> serde_json::Value {
         "history_schema": "jsonl-v1",
         "default_history": HISTORY_PATH,
         "default_results": RESULTS_PATH,
-        "default_latest_json": LATEST_JSON_PATH,
+        "default_current_results_json": CURRENT_RESULTS_JSON_PATH,
+        "default_latest_json": CURRENT_RESULTS_JSON_PATH,
         "engines": engines,
         "workloads": workloads,
     })
@@ -1938,7 +1939,11 @@ mod tests {
         assert_eq!(value["history_schema"], "jsonl-v1");
         assert_eq!(value["default_history"], HISTORY_PATH);
         assert_eq!(value["default_results"], RESULTS_PATH);
-        assert_eq!(value["default_latest_json"], LATEST_JSON_PATH);
+        assert_eq!(
+            value["default_current_results_json"],
+            CURRENT_RESULTS_JSON_PATH
+        );
+        assert_eq!(value["default_latest_json"], CURRENT_RESULTS_JSON_PATH);
 
         let workloads = value
             .get("workloads")
