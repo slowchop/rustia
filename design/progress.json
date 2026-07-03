@@ -13,8 +13,8 @@
     "canonical_facts": {
       "luau_target": "Luau 0.709, standalone surface",
       "conformance": {
-        "fixtures": 689,
-        "refs": 488,
+        "fixtures": 690,
+        "refs": 489,
         "pending": 0
       },
       "benchmark_adapters": {
@@ -167,7 +167,7 @@
           "name": "Manifest and refs",
           "complete": 90,
           "confidence": 90,
-          "state": "689 fixtures and 488 refs are executable with 0 pending rows.",
+          "state": "690 fixtures and 489 refs are executable with 0 pending rows.",
           "future_plan": "Add focused fixtures for newly found gaps instead of reopening bulk inventory."
         },
         {

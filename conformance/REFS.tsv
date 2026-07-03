@@ -208,6 +208,7 @@ stdlib.bit32-coercion-errors	stdlib	conformance/upstream/luau-0.709/tests/confor
 stdlib.ipairs-array	stdlib	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	ipairs iterates array table elements with one-based numeric keys.
 stdlib.ipairs-stops-at-nil	stdlib	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	ipairs stops at the first nil array element.
 stdlib.ipairs-return-triple	stdlib	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	ipairs returns the raw array iterator function, the table state, and initial control value 0 for manual iterator calls.
+stdlib.ipairs-raw-index	stdlib	upstream-luau-0.709:VM/src/lbaselib.cpp	luau-0.709	ipairs and its inext iterator use raw array indexing, stop at raw nil slots, and do not invoke __index or __len metamethods.
 stdlib.next-call-first-result	stdlib	conformance/upstream/luau-0.709/tests/conformance/tables.luau	luau-0.709	next returns nil or the next key when used in single-result contexts.
 stdlib.next-array	stdlib	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	next iterates non-nil array table slots with one-based numeric keys when used directly in generic for.
 stdlib.next-hash	stdlib	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	next iterates hash table entries when used directly in generic for.
