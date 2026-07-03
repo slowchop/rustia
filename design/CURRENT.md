@@ -9,13 +9,14 @@ The **design phase is complete and reviewed**, and P1 implementation is now subs
 The current workspace contains the VM/lexer/parser/compiler/public API/CLI/conformance runner, plus an
 executable Luau 0.709 conformance corpus with **0 pending-oracle** and **0 pending-impl** rows. The public
 embedding facade from [`75-embedded-api.md`](75-embedded-api.md) is implemented at the first useful level:
-owned values, typed host functions, retained script function handles, serde, deterministic extension
-registration, hot reload, and macro sugar. A from-scratch Rust Luau interpreter is validated as **GO** by the
-earlier spikes and is now backed by the production conformance suite; performance still needs the continuous
-benchmark gate before public claims. All 8 architecture axes are decided ([`30-architecture.md`](30-architecture.md)
-v3), 10 conformance-verified improvements are adopted ([`55-improvements.md`](55-improvements.md)), and the
-standalone benchmark harness has the engine/workload/history shell, static chart dashboard, and the
-`rustia`/`boa`/`koto`/`mlua-lua54`/`mlua-luau`/`rhai`/`roto`/`rquickjs`/`wasmi`/`wasmtime` native adapters in place.
+owned values, typed host functions, pre-install host signature metadata, retained script function handles, serde,
+deterministic extension registration, hot reload, and macro sugar. A from-scratch Rust Luau interpreter is
+validated as **GO** by the earlier spikes and is now backed by the production conformance suite; performance
+still needs the continuous benchmark gate before public claims. All 8 architecture axes are decided
+([`30-architecture.md`](30-architecture.md) v3), 10 conformance-verified improvements are adopted
+([`55-improvements.md`](55-improvements.md)), and the standalone benchmark harness has the
+engine/workload/history shell, static chart dashboard, and the `rustia`/`boa`/`koto`/`mlua-lua54`/`mlua-luau`/
+`rhai`/`roto`/`rquickjs`/`wasmi`/`wasmtime` native adapters in place.
 Its generated [`../bench/CLAIMS.md`](../bench/CLAIMS.md) gate keeps public benchmark language per-workload and
 currently approves no blanket speed headline from the committed snapshot.
 The public API now has compile-checked examples for embedding and hot reload.

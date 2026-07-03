@@ -1,5 +1,6 @@
 use crate::{Error, Result};
 use rustia_vm::{Error as VmError, ErrorKind as VmErrorKind, Value as RawValue, ValueKind, Vm};
+use std::any::type_name;
 use std::collections::BTreeMap;
 
 const SNAPSHOT_DEPTH_LIMIT: usize = 64;
@@ -81,6 +82,13 @@ pub trait FromRustia: Sized {
 
 pub trait IntoRustiaMulti {
     fn into_rustia_multi(self) -> Vec<OwnedValue>;
+
+    fn rustia_type_names() -> Vec<&'static str>
+    where
+        Self: Sized,
+    {
+        vec![type_name::<Self>()]
+    }
 }
 
 pub trait FromRustiaMulti: Sized {
@@ -413,6 +421,10 @@ impl IntoRustiaMulti for () {
     fn into_rustia_multi(self) -> Vec<OwnedValue> {
         Vec::new()
     }
+
+    fn rustia_type_names() -> Vec<&'static str> {
+        Vec::new()
+    }
 }
 
 impl FromRustiaMulti for () {
@@ -431,6 +443,10 @@ macro_rules! impl_tuple_multi {
             fn into_rustia_multi(self) -> Vec<OwnedValue> {
                 let ($($name,)+) = self;
                 vec![$($name.into_rustia(),)+]
+            }
+
+            fn rustia_type_names() -> Vec<&'static str> {
+                vec![$(type_name::<$name>()),+]
             }
         }
 

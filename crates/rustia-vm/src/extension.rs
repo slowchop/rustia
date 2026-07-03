@@ -76,6 +76,8 @@ pub struct HostFunctionOp {
     pub fuel_cost: u32,
     pub capability: OpCapability,
     pub parameter_count: u8,
+    pub parameter_types: Vec<&'static str>,
+    pub return_types: Vec<&'static str>,
     pub handler: HostFunctionHandler,
 }
 
@@ -85,6 +87,8 @@ impl HostFunctionOp {
         fuel_cost: u32,
         capability: OpCapability,
         parameter_count: u8,
+        parameter_types: Vec<&'static str>,
+        return_types: Vec<&'static str>,
         handler: HostFunctionHandler,
     ) -> Self {
         Self {
@@ -92,6 +96,8 @@ impl HostFunctionOp {
             fuel_cost,
             capability,
             parameter_count,
+            parameter_types,
+            return_types,
             handler,
         }
     }
@@ -105,6 +111,8 @@ impl fmt::Debug for HostFunctionOp {
             .field("fuel_cost", &self.fuel_cost)
             .field("capability", &self.capability)
             .field("parameter_count", &self.parameter_count)
+            .field("parameter_types", &self.parameter_types)
+            .field("return_types", &self.return_types)
             .finish_non_exhaustive()
     }
 }

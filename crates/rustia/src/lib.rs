@@ -682,6 +682,7 @@ return {
     fn extension_reports_host_function_metadata() {
         let extension = RustiaExtension::new("host")
             .fn_pure("zero", || 1.0)
+            .fn_pure("split", |value: f64| (value, value > 0.0))
             .fn_with(
                 "sum3",
                 7,
@@ -699,12 +700,24 @@ return {
                     fuel_cost: 1,
                     capability: OpCapability::Pure,
                     parameter_count: 0,
+                    parameter_types: &[],
+                    return_types: &["f64"],
+                },
+                RustiaHostFunctionInfo {
+                    name: "split",
+                    fuel_cost: 1,
+                    capability: OpCapability::Pure,
+                    parameter_count: 1,
+                    parameter_types: &["f64"],
+                    return_types: &["f64", "bool"],
                 },
                 RustiaHostFunctionInfo {
                     name: "sum3",
                     fuel_cost: 7,
                     capability: OpCapability::ReadsSlotState,
                     parameter_count: 3,
+                    parameter_types: &["f64", "f64", "f64"],
+                    return_types: &["f64"],
                 },
             ]
         );

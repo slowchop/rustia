@@ -58,7 +58,8 @@ from `publish = false` to publishable.
   deterministic input, slot reads/writes, deterministic effects, external
   mutable-state reads, and nondeterministic effects.
 - `RustiaExtension` exposes namespace and per-function name, fuel, capability,
-  and parameter-count metadata before installation.
+  parameter-count, parameter type, and return type metadata before
+  installation.
 - Public examples cover globals, typed functions, serde, extensions, retained
   functions, and hot reload.
 - Current examples:

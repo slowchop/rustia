@@ -41,7 +41,8 @@ Current unpublished workspace version: `0.0.1`.
 - The public `Rustia` facade now has capability-specific host function helpers,
   and `RustiaExtension` can mark external mutable-state reads explicitly.
 - `RustiaExtension` exposes namespace plus per-function name, fuel,
-  capability, and parameter-count metadata before installation.
+  capability, parameter-count, parameter type, and return type metadata before
+  installation.
 - Release-readiness docs now cover package metadata, package file-list audits,
   semver policy, changelog validation, and publish ordering.
 

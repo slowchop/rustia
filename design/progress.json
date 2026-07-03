@@ -39,16 +39,16 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 64,
+      "complete": 65,
       "confidence": 65,
-      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, typed host diagnostic polish, capability-tagged host API helpers, retained-handle generation semantics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
+      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, typed host diagnostic polish, host signature metadata, capability-tagged host API helpers, retained-handle generation semantics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
       "future_plan": "Harden P1, finish benchmark gates, then move toward full public Luau parity."
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 72,
+      "complete": 73,
       "confidence": 70,
-      "state": "The rustia facade supports typed run<T>, owned values with Option/Vec/BTreeMap/table conversions, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.",
+      "state": "The rustia facade supports typed run<T>, owned values with Option/Vec/BTreeMap/table conversions, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, pre-install host signature metadata, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.",
       "future_plan": "Stabilize API semantics, diagnostics, capability policy, and migration docs."
     },
     {
@@ -67,9 +67,9 @@
     },
     {
       "name": "Public release readiness",
-      "complete": 61,
+      "complete": 62,
       "confidence": 75,
-      "state": "License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
+      "state": "License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, host signature metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
       "future_plan": "Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims."
     }
   ],
@@ -291,17 +291,17 @@
         },
         {
           "name": "Typed host functions",
-          "complete": 80,
+          "complete": 83,
           "confidence": 75,
-          "state": "Plain Rust functions can be registered with typed args/results through arity 8, capability-specific facade helpers, parameter-count metadata, and conversion errors that name the host function plus argument or return position.",
-          "future_plan": "Add richer type-level signature metadata and keep tightening diagnostics."
+          "state": "Plain Rust functions can be registered with typed args/results through arity 8, capability-specific facade helpers, parameter-count metadata, Rust parameter/return type metadata, and conversion errors that name the host function plus argument or return position.",
+          "future_plan": "Keep tightening diagnostics and decide whether public signature metadata should grow beyond Rust type names."
         },
         {
           "name": "Extension/linker layer",
-          "complete": 67,
+          "complete": 69,
           "confidence": 70,
-          "state": "Namespaced extensions, coarse capabilities, pre-install function metadata, deterministic registration validation, and explicit external-state helpers exist.",
-          "future_plan": "Add richer type metadata, versioned fuel costs, and migration docs."
+          "state": "Namespaced extensions, coarse capabilities, pre-install function metadata including Rust parameter/return type names, deterministic registration validation, and explicit external-state helpers exist.",
+          "future_plan": "Add versioned fuel costs and migration docs."
         },
         {
           "name": "Public host-bridge seam",

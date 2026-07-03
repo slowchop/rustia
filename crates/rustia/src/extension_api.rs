@@ -58,6 +58,8 @@ pub struct RustiaHostFunctionInfo<'a> {
     pub fuel_cost: u32,
     pub capability: OpCapability,
     pub parameter_count: u8,
+    pub parameter_types: &'a [&'static str],
+    pub return_types: &'a [&'static str],
 }
 
 impl RustiaExtension {
@@ -88,6 +90,8 @@ impl RustiaExtension {
                 fuel_cost: function.fuel_cost,
                 capability: function.capability,
                 parameter_count: function.parameter_count,
+                parameter_types: &function.parameter_types,
+                return_types: &function.return_types,
             })
     }
 

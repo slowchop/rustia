@@ -4,6 +4,7 @@ use crate::value::{
 };
 use crate::{Error, Result, Rustia};
 use rustia_vm::{HostFunctionOp, OpCapability, Value as RawValue, ValueKind, Vm};
+use std::any::type_name;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
@@ -122,6 +123,8 @@ where
             fuel_cost,
             capability,
             0,
+            Vec::new(),
+            Return::rustia_type_names(),
             Arc::new(move |vm, _args| host_return_to_raw(vm, &diagnostic_name, self())),
         )
     }
@@ -148,6 +151,8 @@ macro_rules! impl_host_function {
                     fuel_cost,
                     capability,
                     $parameter_count,
+                    vec![$(type_name::<$name>()),+],
+                    Return::rustia_type_names(),
                     Arc::new(move |vm, args| {
                         let mut index = 0usize;
                         $(

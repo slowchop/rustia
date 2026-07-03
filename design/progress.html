@@ -401,11 +401,11 @@
       </div>
       <aside class="facts" aria-label="Current facts">
         <div class="fact">
-          <strong>64%</strong>
+          <strong>65%</strong>
           <span>Whole public rustia project, 65% confidence</span>
         </div>
         <div class="fact">
-          <strong>72%</strong>
+          <strong>73%</strong>
           <span>Usable embedded scripting crate, 70% confidence</span>
         </div>
         <div class="fact">
@@ -417,7 +417,7 @@
           <span>Requested benchmark adapters present</span>
         </div>
         <div class="fact">
-          <strong>61%</strong>
+          <strong>62%</strong>
           <span>Public release readiness, 75% confidence</span>
         </div>
       </aside>
@@ -428,34 +428,34 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Whole public rustia project</h3>
-        <span class="percent">64%</span>
+        <span class="percent">65%</span>
       </div>
 
-    <div class="meter" aria-label="Whole public rustia project: 64% complete">
-      <div class="meter-fill" style="width: 64%"></div>
+    <div class="meter" aria-label="Whole public rustia project: 65% complete">
+      <div class="meter-fill" style="width: 65%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">65% confidence</span>
       </div>
-      <p>Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, typed host diagnostic polish, capability-tagged host API helpers, retained-handle generation semantics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.</p>
+      <p>Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, typed host diagnostic polish, host signature metadata, capability-tagged host API helpers, retained-handle generation semantics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.</p>
       <p class="plan"><strong>Next:</strong> Harden P1, finish benchmark gates, then move toward full public Luau parity.</p>
     </article>
 
     <article class="goal-card">
       <div class="card-head">
         <h3>Usable embedded scripting crate</h3>
-        <span class="percent">72%</span>
+        <span class="percent">73%</span>
       </div>
 
-    <div class="meter" aria-label="Usable embedded scripting crate: 72% complete">
-      <div class="meter-fill" style="width: 72%"></div>
+    <div class="meter" aria-label="Usable embedded scripting crate: 73% complete">
+      <div class="meter-fill" style="width: 73%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">70% confidence</span>
       </div>
-      <p>The rustia facade supports typed run&lt;T&gt;, owned values with Option/Vec/BTreeMap/table conversions, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.</p>
+      <p>The rustia facade supports typed run&lt;T&gt;, owned values with Option/Vec/BTreeMap/table conversions, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, pre-install host signature metadata, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.</p>
       <p class="plan"><strong>Next:</strong> Stabilize API semantics, diagnostics, capability policy, and migration docs.</p>
     </article>
 
@@ -496,17 +496,17 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Public release readiness</h3>
-        <span class="percent">61%</span>
+        <span class="percent">62%</span>
       </div>
 
-    <div class="meter" aria-label="Public release readiness: 61% complete">
-      <div class="meter-fill" style="width: 61%"></div>
+    <div class="meter" aria-label="Public release readiness: 62% complete">
+      <div class="meter-fill" style="width: 62%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">75% confidence</span>
       </div>
-      <p>License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.</p>
+      <p>License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, host signature metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.</p>
       <p class="plan"><strong>Next:</strong> Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims.</p>
     </article>
 
@@ -1124,38 +1124,38 @@
       <div class="entry-top">
         <div>
           <h4>Typed host functions</h4>
-          <p>Plain Rust functions can be registered with typed args/results through arity 8, capability-specific facade helpers, parameter-count metadata, and conversion errors that name the host function plus argument or return position.</p>
+          <p>Plain Rust functions can be registered with typed args/results through arity 8, capability-specific facade helpers, parameter-count metadata, Rust parameter/return type metadata, and conversion errors that name the host function plus argument or return position.</p>
         </div>
         <div class="entry-score">
-          <strong>80%</strong>
+          <strong>83%</strong>
           <span class="chip medium">75% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Typed host functions: 80% complete">
-      <div class="meter-fill" style="width: 80%"></div>
+    <div class="meter" aria-label="Typed host functions: 83% complete">
+      <div class="meter-fill" style="width: 83%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add richer type-level signature metadata and keep tightening diagnostics.</p>
+      <p class="plan"><strong>Future plan:</strong> Keep tightening diagnostics and decide whether public signature metadata should grow beyond Rust type names.</p>
     </article>
 
     <article class="entry">
       <div class="entry-top">
         <div>
           <h4>Extension/linker layer</h4>
-          <p>Namespaced extensions, coarse capabilities, pre-install function metadata, deterministic registration validation, and explicit external-state helpers exist.</p>
+          <p>Namespaced extensions, coarse capabilities, pre-install function metadata including Rust parameter/return type names, deterministic registration validation, and explicit external-state helpers exist.</p>
         </div>
         <div class="entry-score">
-          <strong>67%</strong>
+          <strong>69%</strong>
           <span class="chip medium">70% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Extension/linker layer: 67% complete">
-      <div class="meter-fill" style="width: 67%"></div>
+    <div class="meter" aria-label="Extension/linker layer: 69% complete">
+      <div class="meter-fill" style="width: 69%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add richer type metadata, versioned fuel costs, and migration docs.</p>
+      <p class="plan"><strong>Future plan:</strong> Add versioned fuel costs and migration docs.</p>
     </article>
 
     <article class="entry">
