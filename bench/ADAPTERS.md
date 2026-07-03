@@ -21,6 +21,7 @@ Implemented adapters:
 - `mlua-luau`
 - `rhai`
 - `rquickjs`
+- `wasmi`
 
 The remaining adapters are pending.
 
@@ -33,5 +34,6 @@ Most current feature flags are intentionally dependency-free placeholders. They
 let the CLI expose the public engine matrix without forcing normal rustia builds
 to download heavyweight benchmark dependencies. `boa` and `rquickjs` are the
 JavaScript interpreter baselines, `koto` is the direct migration comparison,
-`mlua-luau` is the Luau 0.709 oracle comparison, and `rhai` tracks another
-widely used Rust-native scripting baseline.
+`mlua-luau` is the Luau 0.709 oracle comparison, `rhai` tracks another widely
+used Rust-native scripting baseline, and `wasmi` is the WASM interpreter
+baseline for the shared `.wat` workload set.

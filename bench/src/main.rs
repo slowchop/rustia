@@ -220,7 +220,7 @@ const ENGINE_SLOTS: &[EngineSlot] = &[
         dialect: Dialect::Wasm,
         feature: Some("wasmi-engine"),
         enabled: cfg!(feature = "wasmi-engine"),
-        implemented: false,
+        implemented: cfg!(feature = "wasmi-engine"),
     },
     EngineSlot {
         id: "wasmtime",
@@ -568,6 +568,8 @@ fn prepare(
         "rhai" => Ok(Box::new(RhaiPrepared::new(_workload, _source)?)),
         #[cfg(feature = "rquickjs-engine")]
         "rquickjs" => Ok(Box::new(RquickJsPrepared::new(_workload, _source)?)),
+        #[cfg(feature = "wasmi-engine")]
+        "wasmi" => Ok(Box::new(WasmiPrepared::new(_workload, _source)?)),
         id => Err(Error::new(format!(
             "engine adapter {id:?} is not implemented yet"
         ))),
@@ -950,6 +952,47 @@ fn rquickjs_checksum(value: &rquickjs::Value<'_>) -> Result<String> {
             .map_err(|error| Error::new(format!("rquickjs string checksum failed: {error}")));
     }
     Ok(value.type_name().to_owned())
+}
+
+#[cfg(feature = "wasmi-engine")]
+struct WasmiPrepared {
+    store: wasmi::Store<()>,
+    function: wasmi::TypedFunc<i64, i64>,
+}
+
+#[cfg(feature = "wasmi-engine")]
+impl WasmiPrepared {
+    fn new(workload: &Workload, source: &str) -> Result<Self> {
+        let engine = wasmi::Engine::default();
+        let module = wasmi::Module::new(&engine, source)
+            .map_err(|error| Error::new(format!("compile {} failed: {error}", workload.id)))?;
+        let mut store = wasmi::Store::new(&engine, ());
+        let linker = wasmi::Linker::new(&engine);
+        let instance = linker
+            .instantiate_and_start(&mut store, &module)
+            .map_err(|error| Error::new(format!("instantiate {} failed: {error}", workload.id)))?;
+        let function = instance
+            .get_typed_func::<i64, i64>(&mut store, "f")
+            .map_err(|error| {
+                Error::new(format!(
+                    "wasmi workload {} must export f(i64) -> i64: {error}",
+                    workload.id
+                ))
+            })?;
+        Ok(Self { store, function })
+    }
+}
+
+#[cfg(feature = "wasmi-engine")]
+impl PreparedWorkload for WasmiPrepared {
+    fn run(&mut self, n: u64) -> Result<String> {
+        let n = i64::try_from(n).map_err(|_| Error::new("wasmi n exceeded i64::MAX"))?;
+        let result = self
+            .function
+            .call(&mut self.store, n)
+            .map_err(|error| Error::new(format!("wasmi workload call failed: {error}")))?;
+        Ok(format!("i64:{result}"))
+    }
 }
 
 #[cfg(feature = "rustia-engine")]

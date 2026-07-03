@@ -27,7 +27,7 @@ mlua-lua54 = []
 rhai-engine = ["dep:rhai"]
 roto = []
 rquickjs-engine = ["dep:rquickjs"]
-wasmi-engine = []
+wasmi-engine = ["dep:wasmi"]
 wasmtime-engine = []
 
 [dependencies]
@@ -39,6 +39,7 @@ mlua = { version = "0.11", default-features = false, features = ["luau"], option
 rhai = { version = "1.25", optional = true }
 boa_engine = { version = "0.21", optional = true }
 rquickjs = { version = "0.12", optional = true }
+wasmi = { version = "2.0.0-beta.4", optional = true }
 
 [lints]
 workspace = true
