@@ -67,10 +67,10 @@
     },
     {
       "name": "Public release readiness",
-      "complete": 51,
+      "complete": 52,
       "confidence": 75,
-      "state": "License, crate metadata, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, and semver policy are present; crates are still workspace-private and CI/release polish is incomplete.",
-      "future_plan": "Add package-list reviews, release notes/changelog flow, and public benchmark claims."
+      "state": "License, crate metadata, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, and generated package file-list audit are present; crates are still workspace-private and CI/release polish is incomplete.",
+      "future_plan": "Add release notes/changelog flow and public benchmark claims."
     }
   ],
   "areas": [
@@ -430,10 +430,10 @@
       "entries": [
         {
           "name": "Crate publishability",
-          "complete": 45,
+          "complete": 48,
           "confidence": 80,
-          "state": "Workspace crates are still publish = false, but public metadata, explicit internal dependency versions, leaf package checks, release checklist, and semver policy are present.",
-          "future_plan": "Review package file lists, add release notes/changelog flow, then publish/remove internal dependency blockers in topological order."
+          "state": "Workspace crates are still publish = false, but public metadata, explicit internal dependency versions, leaf package checks, package file-list audit, release checklist, and semver policy are present.",
+          "future_plan": "Add release notes/changelog flow, then publish/remove internal dependency blockers in topological order."
         }
       ]
     }

@@ -23,6 +23,8 @@ from `publish = false` to publishable.
   license, keywords, categories, and rust-version metadata.
 - Package file lists must not include private design scratch, `private/`, local
   caches, or generated target output.
+- Package file lists are audited by `tools/check-package-files.js`; the
+  committed review artifact is [`package-files.json`](package-files.json).
 - Internal crate dependencies have explicit versions before any crate is
   published.
 - Leaf packages currently verified with `cargo package --no-verify`:
@@ -75,8 +77,7 @@ from `publish = false` to publishable.
 ## Release Process Gate
 
 - `cargo test --workspace` passes on the release toolchain.
-- `cargo package --list` has been reviewed for every crate intended for
-  publication.
+- `just check-package-files` passes and `design/package-files.json` is current.
 - `rustia-cli` supports file, stdin, and `--eval` execution, plus profile,
   fuel, and source-name options for diagnostics.
 - `cargo package --no-verify` reaches packaging for each publishable crate; any

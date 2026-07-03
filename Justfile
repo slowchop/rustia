@@ -1,6 +1,12 @@
 gen-progress:
     node design/render-progress.js
 
+gen-package-files:
+    node tools/check-package-files.js
+
+check-package-files:
+    node tools/check-package-files.js --check
+
 benchmarks:
     git diff --quiet --ignore-submodules --
     git diff --cached --quiet --ignore-submodules --
