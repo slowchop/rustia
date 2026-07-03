@@ -47,6 +47,13 @@ Emit the wasm pre-lock gate tracker as deterministic JSON:
 cargo run -p script-bench-harness -- --wasm-gate-json
 ```
 
+Measure the `call_ref` versus `br_table` wasm dispatch gate across available
+JavaScript runtimes:
+
+```sh
+node tools/run-wasm-dispatch-gate.js
+```
+
 Engine slots are tracked for `rustia`, `boa`, `koto`, `mlua-lua54`,
 `mlua-luau`, `rhai`, `roto`, `rquickjs`, `wasmi`, and `wasmtime`. Adapters are
 feature-gated so heavyweight dependencies do not affect the normal workspace
@@ -187,9 +194,11 @@ tracked in [`PRIOR-ART.md`](PRIOR-ART.md).
 
 `site/` contains a dependency-free dashboard that reads `history/runs.jsonl`,
 shows current leaderboards, renders per-workload history charts, and loads
-`wasm-gate.json` so the open V8/JSC/SpiderMonkey pre-lock requirements stay
+`wasm-gate.json` so the closed V8/JSC/SpiderMonkey pre-lock requirements stay
 visible next to the rough performance comparisons.
 It also reads `wasm/current-results.json` for the browser-wasm target bench.
+The dispatch panel reads `wasm/dispatch-current-results.json` for the
+`call_ref` versus `br_table` microbench.
 That target currently measures the wasm-compatible scripting adapters `rustia`
 and `koto`; current adapter status is tracked in
 [`wasm/ADAPTERS.md`](wasm/ADAPTERS.md).

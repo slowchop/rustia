@@ -66,7 +66,8 @@ coverage for #15 `string_building`. It also owns `bench/wasm-gate.json`, a deter
 exposed by `script-bench --wasm-gate-json` and rendered by the static dashboard. The wasm target bench now builds
 `bench/wasm/adapter-runner` and records `rustia` plus `koto` on Node/V8, Deno/V8, and Bun/JavaScriptCore-family
 runtimes in `bench/wasm/current-results.json`; adapter exclusions are documented in `bench/wasm/ADAPTERS.md`.
-The pre-lock gate still needs SpiderMonkey and the `call_ref` microbench.
+The dispatch gate now records `call_ref` versus `br_table` on V8, JavaScriptCore-family, and SpiderMonkey
+runtimes in `bench/wasm/dispatch-current-results.json`, closing the pre-lock wasm gate.
 It does not yet publish the JSONL history back to a tracking branch or static host. `tools/check-workflows.js`
 guards the public workflow policy: hosted CI stays hosted, the benchmark job stays manual, and self-hosted labels
 stay exactly `[self-hosted, bench]`.
@@ -76,8 +77,9 @@ default `rustia-engine` feature while the external adapters stay independently g
 
 ## ⚠️ Remaining wasm gate
 Production rustia wasm now runs through the bench wasm adapter runner, and koto is the current wasm-compatible
-comparison adapter. V8 and Bun/JavaScriptCore-family measurements exist. The remaining cross-engine runtime gap
-is SpiderMonkey, plus the planned `call_ref` versus `br_table` dispatch microbench across the same engine family.
+comparison adapter. V8, Bun/JavaScriptCore-family, and SpiderMonkey measurements exist, and the dispatch
+microbench shows `call_ref` behind `br_table` on those same families. The pre-lock wasm gate is closed; keep
+these measurements fresh as the harness changes.
 
 ## Where it lives
 ```

@@ -13,6 +13,7 @@ const historyPath = path.join(root, "bench", "history", "runs.jsonl");
 const currentResultsPath = path.join(root, "bench", "current-results.json");
 const wasmGatePath = path.join(root, "bench", "wasm-gate.json");
 const wasmResultsPath = path.join(root, "bench", "wasm", "current-results.json");
+const wasmDispatchPath = path.join(root, "bench", "wasm", "dispatch-current-results.json");
 
 function fail(message) {
   console.error(`check-benchmark-site: ${message}`);
@@ -311,6 +312,84 @@ function checkWasmResults(results) {
   }
 }
 
+function checkWasmDispatch(results) {
+  assertEqual(results.schema_version, 1, "wasm dispatch schema_version");
+  assertEqual(results.schema, "rustia.bench.wasm-dispatch-current-results.v1", "wasm dispatch schema");
+  if (!Array.isArray(results.required_families) || results.required_families.length === 0) {
+    fail(`${relative(wasmDispatchPath)} required_families must be a non-empty array`);
+  }
+  for (const family of ["V8", "JavaScriptCore", "SpiderMonkey"]) {
+    if (!results.required_families.includes(family)) {
+      fail(`${relative(wasmDispatchPath)} required_families must include ${family}`);
+    }
+  }
+  if (!Array.isArray(results.runs) || results.runs.length === 0) {
+    fail(`${relative(wasmDispatchPath)} runs must be a non-empty array`);
+  }
+  if (!Array.isArray(results.skipped)) {
+    fail(`${relative(wasmDispatchPath)} skipped must be an array`);
+  }
+  const measuredFamilies = new Set();
+  for (const [index, run] of results.runs.entries()) {
+    const label = `${relative(wasmDispatchPath)} runs[${index}]`;
+    if (!isObject(run.runtime) || !isObject(run.comparison)) {
+      fail(`${label} must include runtime and comparison metadata`);
+    }
+    for (const field of ["target", "commit"]) {
+      if (typeof run[field] !== "string" || run[field].trim() === "") {
+        fail(`${label}.${field} must be a non-empty string`);
+      }
+    }
+    for (const field of ["name", "family"]) {
+      if (typeof run.runtime[field] !== "string" || run.runtime[field].trim() === "") {
+        fail(`${label}.runtime.${field} must be a non-empty string`);
+      }
+    }
+    if (run.comparison.status === "measured") {
+      measuredFamilies.add(run.runtime.family);
+      for (const field of ["candidate_vs_baseline_min", "candidate_vs_baseline_median"]) {
+        assertFinitePositive(Number(run.comparison[field]), `${label}.comparison.${field}`);
+      }
+      if (!isObject(run.verification)) {
+        fail(`${label}.verification must be an object`);
+      }
+      assertFinitePositive(Number(run.verification.n), `${label}.verification.n`);
+      if (typeof run.verification.checksum !== "string" || run.verification.checksum.trim() === "") {
+        fail(`${label}.verification.checksum must be a non-empty string`);
+      }
+      if (!Array.isArray(run.rows) || run.rows.length !== 2) {
+        fail(`${label}.rows must contain br_table and call_ref`);
+      }
+      const styles = new Set();
+      for (const [rowIndex, row] of run.rows.entries()) {
+        const rowLabel = `${label}.rows[${rowIndex}]`;
+        for (const field of ["style", "feature", "checksum"]) {
+          if (typeof row[field] !== "string" || row[field].trim() === "") {
+            fail(`${rowLabel}.${field} must be a non-empty string`);
+          }
+        }
+        for (const field of ["n", "reps", "wasm_bytes", "ns_per_dispatch_min", "ns_per_dispatch_median", "dispatches_per_sec"]) {
+          assertFinitePositive(Number(row[field]), `${rowLabel}.${field}`);
+        }
+        styles.add(row.style);
+      }
+      for (const style of ["br_table", "call_ref"]) {
+        if (!styles.has(style)) {
+          fail(`${label}.rows is missing ${style}`);
+        }
+      }
+    } else if (run.comparison.status !== "unsupported") {
+      fail(`${label}.comparison.status must be measured or unsupported`);
+    }
+  }
+  const expectedComplete = ["V8", "JavaScriptCore", "SpiderMonkey"].every((family) => measuredFamilies.has(family));
+  assertEqual(
+    Boolean(results.requirements?.["call-ref-vs-br-table"]),
+    expectedComplete,
+    "wasm dispatch call_ref-vs-br_table requirement",
+  );
+}
+
 const html = read(indexPath);
 const js = read(appPath);
 const css = read(stylePath);
@@ -318,6 +397,7 @@ const historyRecords = parseHistory(read(historyPath));
 const currentResults = parseJson(currentResultsPath);
 const wasmGate = parseJson(wasmGatePath);
 const wasmResults = parseJson(wasmResultsPath);
+const wasmDispatch = parseJson(wasmDispatchPath);
 
 requireIncludes(html, '<link rel="stylesheet" href="./style.css">', indexPath, "local stylesheet link");
 requireIncludes(html, '<script src="./app.js" defer></script>', indexPath, "local app script");
@@ -325,10 +405,12 @@ requireIncludes(html, 'href="../history/runs.jsonl"', indexPath, "history downlo
 requireIncludes(js, 'fetch("../history/runs.jsonl"', appPath, "relative history fetch");
 requireIncludes(js, 'fetch("../wasm-gate.json"', appPath, "relative wasm gate fetch");
 requireIncludes(js, 'fetch("../wasm/current-results.json"', appPath, "relative wasm results fetch");
+requireIncludes(js, 'fetch("../wasm/dispatch-current-results.json"', appPath, "relative wasm dispatch fetch");
 requireIncludes(js, "function parseHistory(text)", appPath, "JSONL parser");
 requireIncludes(js, "function drawChart()", appPath, "canvas chart renderer");
 requireIncludes(js, "function renderWasmGate()", appPath, "wasm gate renderer");
 requireIncludes(js, "function renderWasmResults()", appPath, "wasm results renderer");
+requireIncludes(js, "function renderWasmDispatch()", appPath, "wasm dispatch renderer");
 noExternalAssets(html, indexPath);
 noExternalAssets(css, stylePath);
 noExternalAssets(js, appPath);
@@ -343,7 +425,8 @@ for (const id of queriedIds(js)) {
 checkCurrentResultsAgreement(historyRecords, currentResults);
 checkWasmGate(wasmGate);
 checkWasmResults(wasmResults);
+checkWasmDispatch(wasmDispatch);
 
 console.log(
-  `benchmark site contract ok: ${historyRecords.length} history records, ${currentResults.metadata.row_count} current rows, ${wasmGate.requirements.length} wasm gate requirements, ${wasmResults.runs.length} wasm adapter runs`,
+  `benchmark site contract ok: ${historyRecords.length} history records, ${currentResults.metadata.row_count} current rows, ${wasmGate.requirements.length} wasm gate requirements, ${wasmResults.runs.length} wasm adapter runs, ${wasmDispatch.runs.length} wasm dispatch runs`,
 );

@@ -401,7 +401,7 @@
       </div>
       <aside class="facts" aria-label="Current facts">
         <div class="fact">
-          <strong>78%</strong>
+          <strong>80%</strong>
           <span>Whole public rustia project, 65% confidence</span>
         </div>
         <div class="fact">
@@ -428,11 +428,11 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Whole public rustia project</h3>
-        <span class="percent">78%</span>
+        <span class="percent">80%</span>
       </div>
 
-    <div class="meter" aria-label="Whole public rustia project: 78% complete">
-      <div class="meter-fill" style="width: 78%"></div>
+    <div class="meter" aria-label="Whole public rustia project: 80% complete">
+      <div class="meter-fill" style="width: 80%"></div>
     </div>
 
       <div class="meta-line">
@@ -479,18 +479,18 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Standalone benchmark OSS project</h3>
-        <span class="percent">76%</span>
+        <span class="percent">80%</span>
       </div>
 
-    <div class="meter" aria-label="Standalone benchmark OSS project: 76% complete">
-      <div class="meter-fill" style="width: 76%"></div>
+    <div class="meter" aria-label="Standalone benchmark OSS project: 80% complete">
+      <div class="meter-fill" style="width: 80%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip high">80% confidence</span>
       </div>
-      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, a wasm target runner for rustia+koto on V8 and JavaScriptCore-family runtimes, and a manual self-hosted measurement workflow are present.</p>
-      <p class="plan"><strong>Next:</strong> Split from workspace, expand workloads, add SpiderMonkey/call_ref wasm gates, publish long-run history, and automate tracking charts.</p>
+      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, a wasm target runner for rustia+koto on V8, JavaScriptCore-family, and SpiderMonkey runtimes, a call_ref versus br_table dispatch microbench on those same families, and a manual self-hosted measurement workflow are present.</p>
+      <p class="plan"><strong>Next:</strong> Split from workspace, expand workloads, publish long-run history, and automate tracking charts.</p>
     </article>
 
     <article class="goal-card">
@@ -513,7 +513,7 @@
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 69%</a><a href="#embedded-api">Embedded API 70%</a><a href="#benchmarks">Benchmarks 75%</a><a href="#wasm-perf">Wasm/perf 50%</a><a href="#tooling">Tooling 65%</a><a href="#packaging">Packaging 62%</a>
+      <a href="#design">Design 93%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 75%</a><a href="#determinism">Determinism 80%</a><a href="#embedded-api">Embedded API 70%</a><a href="#benchmarks">Benchmarks 75%</a><a href="#wasm-perf">Wasm/perf 62%</a><a href="#tooling">Tooling 65%</a><a href="#packaging">Packaging 62%</a>
     </nav>
 
 
@@ -524,7 +524,7 @@
           <p>5 tracked items</p>
         </div>
         <div class="area-score">
-          <span>92% avg complete</span>
+          <span>93% avg complete</span>
           <span>86% avg confidence</span>
         </div>
       </div>
@@ -553,19 +553,19 @@
       <div class="entry-top">
         <div>
           <h4>Architecture decisions</h4>
-          <p>All eight architecture axes are decided in design/30-architecture.md.</p>
+          <p>All eight architecture axes are decided in design/30-architecture.md, and the wasm pre-lock dispatch gate is closed across V8, JavaScriptCore-family, and SpiderMonkey.</p>
         </div>
         <div class="entry-score">
-          <strong>92%</strong>
+          <strong>95%</strong>
           <span class="chip high">85% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Architecture decisions: 92% complete">
-      <div class="meter-fill" style="width: 92%"></div>
+    <div class="meter" aria-label="Architecture decisions: 95% complete">
+      <div class="meter-fill" style="width: 95%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Reconfirm value-layout/dispatch on JSC and SpiderMonkey before final P1 lock.</p>
+      <p class="plan"><strong>Future plan:</strong> Keep architecture docs synced as performance work produces stronger production evidence.</p>
     </article>
 
     <article class="entry">
@@ -835,7 +835,7 @@
           <p>7 tracked items</p>
         </div>
         <div class="area-score">
-          <span>73% avg complete</span>
+          <span>75% avg complete</span>
           <span>68% avg confidence</span>
         </div>
       </div>
@@ -845,19 +845,19 @@
       <div class="entry-top">
         <div>
           <h4>Bytecode dispatch core</h4>
-          <p>Portable interpreter exists; big-match/br-table direction is locked.</p>
+          <p>Portable interpreter exists; big-match/br-table direction is locked, and the call_ref microbench favors br_table across V8, JavaScriptCore-family, and SpiderMonkey.</p>
         </div>
         <div class="entry-score">
-          <strong>70%</strong>
+          <strong>80%</strong>
           <span class="chip medium">65% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Bytecode dispatch core: 70% complete">
-      <div class="meter-fill" style="width: 70%"></div>
+    <div class="meter" aria-label="Bytecode dispatch core: 80% complete">
+      <div class="meter-fill" style="width: 80%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add hot/cold split, benchmark call_ref, and maintain fusion-invariant fuel.</p>
+      <p class="plan"><strong>Future plan:</strong> Add hot/cold split and maintain fusion-invariant fuel.</p>
     </article>
 
     <article class="entry">
@@ -876,7 +876,7 @@
       <div class="meter-fill" style="width: 76%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Keep representation sealed until JSC/SpiderMonkey measurements close the gate.</p>
+      <p class="plan"><strong>Future plan:</strong> Keep representation sealed while production performance and GC work proceeds.</p>
     </article>
 
     <article class="entry">
@@ -984,7 +984,7 @@
           <p>4 tracked items</p>
         </div>
         <div class="area-score">
-          <span>69% avg complete</span>
+          <span>80% avg complete</span>
           <span>75% avg confidence</span>
         </div>
       </div>
@@ -1051,19 +1051,19 @@
       <div class="entry-top">
         <div>
           <h4>Cross-engine wasm proof</h4>
-          <p>Production rustia wasm now has V8 and Bun/JavaScriptCore-family measurements, plus a wasm target adapter bench for rustia and koto.</p>
+          <p>Production rustia wasm and call_ref vs br_table dispatch are measured across V8, JavaScriptCore-family, and SpiderMonkey; the pre-lock wasm gate is closed.</p>
         </div>
         <div class="entry-score">
-          <strong>55%</strong>
+          <strong>100%</strong>
           <span class="chip high">80% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Cross-engine wasm proof: 55% complete">
-      <div class="meter-fill" style="width: 55%"></div>
+    <div class="meter" aria-label="Cross-engine wasm proof: 100% complete">
+      <div class="meter-fill" style="width: 100%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add SpiderMonkey production measurement and call_ref vs br_table evidence before locking the gate.</p>
+      <p class="plan"><strong>Future plan:</strong> Keep the measurements fresh as the wasm artifact and runtimes evolve.</p>
     </article>
 
       </div>
@@ -1374,7 +1374,7 @@
           <p>2 tracked items</p>
         </div>
         <div class="area-score">
-          <span>50% avg complete</span>
+          <span>62% avg complete</span>
           <span>73% avg confidence</span>
         </div>
       </div>
@@ -1403,19 +1403,19 @@
       <div class="entry-top">
         <div>
           <h4>Native/wasm matrix</h4>
-          <p>Native baselines are being recorded, and wasm target results now cover rustia+koto on Node/V8, Deno/V8, and Bun/JavaScriptCore-family.</p>
+          <p>Native baselines are being recorded, wasm target results cover rustia+koto on Node/V8, Deno/V8, Bun/JavaScriptCore-family, and SpiderMonkey, and dispatch results cover br_table/call_ref on those same families.</p>
         </div>
         <div class="entry-score">
-          <strong>55%</strong>
+          <strong>78%</strong>
           <span class="chip medium">75% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Native/wasm matrix: 55% complete">
-      <div class="meter-fill" style="width: 55%"></div>
+    <div class="meter" aria-label="Native/wasm matrix: 78% complete">
+      <div class="meter-fill" style="width: 78%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add SpiderMonkey production wasm results and call_ref vs br_table microbench evidence.</p>
+      <p class="plan"><strong>Future plan:</strong> Broaden public baselines and keep result history fresh across runtime updates.</p>
     </article>
 
       </div>

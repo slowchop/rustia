@@ -6,7 +6,9 @@ const path = require("path");
 
 const root = path.resolve(__dirname, "..");
 const resultsPath = path.join(root, "bench", "wasm", "current-results.json");
+const dispatchResultsPath = path.join(root, "bench", "wasm", "dispatch-current-results.json");
 const gatePath = path.join(root, "bench", "wasm-gate.json");
+const requiredDispatchFamilies = ["V8", "JavaScriptCore", "SpiderMonkey"];
 
 const expectedWorkloads = new Map([
   ["dense_tables", "build+sum+sort of 256-elem array"],
@@ -178,10 +180,120 @@ function validateGate(gate, results) {
   }
 }
 
+function validateDispatchResults(data) {
+  assertEqual(data.schema_version, 1, "dispatch results schema_version");
+  assertEqual(data.schema, "rustia.bench.wasm-dispatch-current-results.v1", "dispatch results schema");
+  assertEqual(data.source, "script-bench-harness", "dispatch results source");
+  assertText(data.updated, "dispatch results updated");
+  assertText(data.commit, "dispatch results commit");
+  assertObject(data.requirements, "dispatch results requirements");
+  if (!Array.isArray(data.required_families)) {
+    fail("dispatch results required_families must be an array");
+  }
+  for (const family of requiredDispatchFamilies) {
+    if (!data.required_families.includes(family)) {
+      fail(`dispatch results required_families is missing ${family}`);
+    }
+  }
+  if (!Array.isArray(data.runs) || data.runs.length === 0) {
+    fail("dispatch results runs must be a non-empty array");
+  }
+  if (!Array.isArray(data.skipped)) {
+    fail("dispatch results skipped must be an array");
+  }
+
+  const measuredFamilies = new Set();
+  for (const [runIndex, run] of data.runs.entries()) {
+    const label = `dispatch results runs[${runIndex}]`;
+    assertEqual(run.schema_version, 1, `${label}.schema_version`);
+    assertEqual(run.schema, "rustia.bench.wasm-dispatch-results.v1", `${label}.schema`);
+    assertEqual(run.source, "script-bench-harness", `${label}.source`);
+    assertText(run.target, `${label}.target`);
+    assertObject(run.runtime, `${label}.runtime`);
+    assertText(run.runtime.name, `${label}.runtime.name`);
+    assertText(run.runtime.family, `${label}.runtime.family`);
+    assertText(run.runtime.version, `${label}.runtime.version`);
+    assertText(run.runtime.host, `${label}.runtime.host`);
+    assertObject(run.microbench, `${label}.microbench`);
+    assertEqual(run.microbench.id, "call_ref_vs_br_table", `${label}.microbench.id`);
+    assertEqual(run.microbench.dispatches_per_unit, 1, `${label}.microbench.dispatches_per_unit`);
+    assertObject(run.comparison, `${label}.comparison`);
+    if (run.comparison.status === "measured") {
+      measuredFamilies.add(run.runtime.family);
+      assertObject(run.verification, `${label}.verification`);
+      assertPositiveFinite(run.verification.n, `${label}.verification.n`);
+      assertText(run.verification.checksum, `${label}.verification.checksum`);
+      assertEqual(run.comparison.baseline, "br_table", `${label}.comparison.baseline`);
+      assertEqual(run.comparison.candidate, "call_ref", `${label}.comparison.candidate`);
+      assertPositiveFinite(
+        run.comparison.candidate_vs_baseline_min,
+        `${label}.comparison.candidate_vs_baseline_min`,
+      );
+      assertPositiveFinite(
+        run.comparison.candidate_vs_baseline_median,
+        `${label}.comparison.candidate_vs_baseline_median`,
+      );
+      if (!Array.isArray(run.rows) || run.rows.length !== 2) {
+        fail(`${label}.rows must contain br_table and call_ref rows`);
+      }
+      const styles = new Set();
+      for (const [rowIndex, row] of run.rows.entries()) {
+        const rowLabel = `${label}.rows[${rowIndex}]`;
+        assertText(row.style, `${rowLabel}.style`);
+        assertText(row.feature, `${rowLabel}.feature`);
+        assertPositiveFinite(row.n, `${rowLabel}.n`);
+        assertPositiveFinite(row.reps, `${rowLabel}.reps`);
+        assertPositiveFinite(row.wasm_bytes, `${rowLabel}.wasm_bytes`);
+        assertPositiveFinite(row.ns_per_dispatch_min, `${rowLabel}.ns_per_dispatch_min`);
+        assertPositiveFinite(row.ns_per_dispatch_median, `${rowLabel}.ns_per_dispatch_median`);
+        assertPositiveFinite(row.dispatches_per_sec, `${rowLabel}.dispatches_per_sec`);
+        assertText(row.checksum, `${rowLabel}.checksum`);
+        if (row.ns_per_dispatch_median < row.ns_per_dispatch_min) {
+          fail(`${rowLabel}.ns_per_dispatch_median must be >= ns_per_dispatch_min`);
+        }
+        styles.add(row.style);
+      }
+      for (const style of ["br_table", "call_ref"]) {
+        if (!styles.has(style)) {
+          fail(`${label}.rows is missing ${style}`);
+        }
+      }
+    } else if (run.comparison.status !== "unsupported") {
+      fail(`${label}.comparison.status must be measured or unsupported`);
+    }
+  }
+
+  const expectedComplete = requiredDispatchFamilies.every((family) => measuredFamilies.has(family));
+  assertEqual(
+    Boolean(data.requirements["call-ref-vs-br-table"]),
+    expectedComplete,
+    "call_ref vs br_table requirement summary",
+  );
+  return measuredFamilies;
+}
+
+function validateDispatchGate(gate, dispatchResults) {
+  const requirements = new Map(gate.requirements.map((requirement) => [requirement.id, requirement]));
+  const requirement = requirements.get("call-ref-vs-br-table");
+  if (!requirement) {
+    fail(`${relative(gatePath)} is missing requirement call-ref-vs-br-table`);
+  }
+  const measured = requirement.status === "measured";
+  const complete = Boolean(dispatchResults.requirements["call-ref-vs-br-table"]);
+  if (measured !== complete) {
+    fail(`call-ref-vs-br-table gate status ${requirement.status} does not match current dispatch results`);
+  }
+}
+
 const results = readJson(resultsPath);
+const dispatchResults = readJson(dispatchResultsPath);
 const gate = readJson(gatePath);
 const families = validateResults(results);
+const dispatchFamilies = validateDispatchResults(dispatchResults);
 validateGate(gate, results);
+validateDispatchGate(gate, dispatchResults);
 console.log(
-  `wasm gate results ok: ${results.runs.length} adapter runtime(s), rustia on ${[...families].sort().join(", ")}`,
+  `wasm gate results ok: ${results.runs.length} adapter runtime(s), rustia on ${
+    [...families].sort().join(", ")
+  }; dispatch on ${[...dispatchFamilies].sort().join(", ")}`,
 );

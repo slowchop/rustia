@@ -6,6 +6,8 @@ const state = {
   wasmGateError: "",
   wasmResults: null,
   wasmResultsError: "",
+  wasmDispatch: null,
+  wasmDispatchError: "",
 };
 
 const colors = [
@@ -37,6 +39,9 @@ const els = {
   wasmResultsStatus: document.querySelector("#wasm-results-status"),
   wasmResultsSummary: document.querySelector("#wasm-results-summary"),
   wasmResultsBody: document.querySelector("#wasm-results-body"),
+  wasmDispatchStatus: document.querySelector("#wasm-dispatch-status"),
+  wasmDispatchSummary: document.querySelector("#wasm-dispatch-summary"),
+  wasmDispatchBody: document.querySelector("#wasm-dispatch-body"),
   leaderboardSubtitle: document.querySelector("#leaderboard-subtitle"),
   leaderboardBody: document.querySelector("#leaderboard-body"),
   chartSubtitle: document.querySelector("#chart-subtitle"),
@@ -61,6 +66,7 @@ window.addEventListener("resize", () => drawChart());
 loadDefaultHistory();
 loadWasmGate();
 loadWasmResults();
+loadWasmDispatch();
 
 async function loadDefaultHistory() {
   setStatus("Loading history");
@@ -106,6 +112,21 @@ async function loadWasmResults() {
     state.wasmResultsError = error.message;
   }
   renderWasmResults();
+}
+
+async function loadWasmDispatch() {
+  try {
+    const response = await fetch("../wasm/dispatch-current-results.json", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    state.wasmDispatch = normalizeWasmDispatch(await response.json());
+    state.wasmDispatchError = "";
+  } catch (error) {
+    state.wasmDispatch = null;
+    state.wasmDispatchError = error.message;
+  }
+  renderWasmDispatch();
 }
 
 async function loadSelectedFile() {
@@ -173,6 +194,7 @@ function render() {
   renderMetrics();
   renderWasmGate();
   renderWasmResults();
+  renderWasmDispatch();
   renderLeaderboard();
   renderRuns();
   drawChart();
@@ -350,6 +372,126 @@ function wasmFlatRows() {
     speed_vs_rustia: rustiaBaselines.get(`${row.runtime}\0${row.workload}`) == null
       ? null
       : rustiaBaselines.get(`${row.runtime}\0${row.workload}`) / row.ns_per_unit_min,
+  }));
+}
+
+function normalizeWasmDispatch(data) {
+  const runs = Array.isArray(data.runs)
+    ? data.runs.map((run) => ({
+      target: String(run.target ?? ""),
+      commit: String(run.commit ?? data.commit ?? "unknown"),
+      runtime: {
+        name: String(run.runtime?.name ?? "unknown"),
+        family: String(run.runtime?.family ?? "unknown"),
+      },
+      comparison: {
+        status: String(run.comparison?.status ?? "unknown"),
+        candidate_vs_baseline_min: Number(run.comparison?.candidate_vs_baseline_min),
+        candidate_vs_baseline_median: Number(run.comparison?.candidate_vs_baseline_median),
+      },
+      rows: Array.isArray(run.rows)
+        ? run.rows.map((row) => ({
+          style: String(row.style ?? "unknown"),
+          feature: String(row.feature ?? ""),
+          ns_per_dispatch_min: Number(row.ns_per_dispatch_min),
+          ns_per_dispatch_median: Number(row.ns_per_dispatch_median),
+          dispatches_per_sec: Number(row.dispatches_per_sec),
+          checksum: String(row.checksum ?? ""),
+        }))
+        : [],
+    }))
+    : [];
+  return {
+    schema: String(data.schema ?? ""),
+    updated: String(data.updated ?? ""),
+    commit: String(data.commit ?? "unknown"),
+    requirements: data.requirements ?? {},
+    requiredFamilies: Array.isArray(data.required_families) ? data.required_families.map(String) : [],
+    skipped: Array.isArray(data.skipped) ? data.skipped.map((item) => ({
+      runtime: String(item.runtime ?? "unknown"),
+      reason: String(item.reason ?? "unknown"),
+    })) : [],
+    runs,
+  };
+}
+
+function renderWasmDispatch() {
+  if (!state.wasmDispatch) {
+    els.wasmDispatchStatus.textContent = state.wasmDispatchError ? "missing" : "loading";
+    els.wasmDispatchStatus.className = "chip chip-warn";
+    els.wasmDispatchSummary.textContent = state.wasmDispatchError
+      ? `Could not load ../wasm/dispatch-current-results.json: ${state.wasmDispatchError}`
+      : "Loading wasm dispatch microbench data.";
+    els.wasmDispatchBody.replaceChildren();
+    return;
+  }
+
+  const flatRows = wasmDispatchFlatRows();
+  const measuredFamilies = unique(
+    state.wasmDispatch.runs
+      .filter((run) => run.comparison.status === "measured")
+      .map((run) => run.runtime.family),
+  );
+  const requiredFamilies = state.wasmDispatch.requiredFamilies.length
+    ? state.wasmDispatch.requiredFamilies
+    : measuredFamilies;
+  const complete = Boolean(state.wasmDispatch.requirements?.["call-ref-vs-br-table"]);
+  const skipped = state.wasmDispatch.skipped.length
+    ? `; skipped ${state.wasmDispatch.skipped.map((item) => item.runtime).join(", ")}`
+    : "";
+  els.wasmDispatchStatus.textContent = `${flatRows.length} rows`;
+  els.wasmDispatchStatus.className = complete ? "chip chip-good" : "chip chip-warn";
+  els.wasmDispatchSummary.textContent =
+    `call_ref vs br_table measured on ${measuredFamilies.length} of ${requiredFamilies.length} required engine family/families${skipped}; updated ${state.wasmDispatch.updated || "unknown"}.`;
+  els.wasmDispatchBody.replaceChildren(
+    ...flatRows
+      .sort((left, right) =>
+        left.runtime.localeCompare(right.runtime) ||
+        left.style.localeCompare(right.style)
+      )
+      .map((row) =>
+        rowElement("tr", [
+          cell(row.runtime),
+          rowElement("td", [engineLabel(row.style)]),
+          cell(formatNumber(row.ns_per_dispatch_min)),
+          cell(formatNumber(row.ns_per_dispatch_median)),
+          cell(row.slower_vs_br_table == null ? "n/a" : `${row.slower_vs_br_table.toFixed(2)}x`),
+          cell(row.commit),
+        ]),
+      ),
+  );
+}
+
+function wasmDispatchFlatRows() {
+  if (!state.wasmDispatch) {
+    return [];
+  }
+  const rows = [];
+  for (const run of state.wasmDispatch.runs) {
+    for (const row of run.rows) {
+      if (!Number.isFinite(row.ns_per_dispatch_min)) {
+        continue;
+      }
+      rows.push({
+        runtime: `${run.runtime.family}/${run.runtime.name}`,
+        target: run.target,
+        style: row.style,
+        ns_per_dispatch_min: row.ns_per_dispatch_min,
+        ns_per_dispatch_median: row.ns_per_dispatch_median,
+        commit: run.commit,
+      });
+    }
+  }
+  const baselines = new Map(
+    rows
+      .filter((row) => row.style === "br_table")
+      .map((row) => [row.runtime, row.ns_per_dispatch_min]),
+  );
+  return rows.map((row) => ({
+    ...row,
+    slower_vs_br_table: baselines.get(row.runtime) == null
+      ? null
+      : row.ns_per_dispatch_min / baselines.get(row.runtime),
   }));
 }
 

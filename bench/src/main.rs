@@ -705,9 +705,9 @@ fn wasm_gate_json_value() -> serde_json::Value {
         "source": "script-bench-harness",
         "updated": "2026-07-03",
         "scope": "Production rustia wasm value-layout and dispatch pre-lock gate. Grabby integration work is excluded.",
-        "status": "open",
-        "gate_complete": false,
-        "summary": "The pre-lock wasm decision remains open until production rustia wasm is measured on V8, JavaScriptCore, and SpiderMonkey, and call_ref is checked against br_table on the same engine family.",
+        "status": "complete",
+        "gate_complete": true,
+        "summary": "Production rustia wasm is measured on V8, JavaScriptCore-family, and SpiderMonkey runtimes, and call_ref vs br_table dispatch is measured across those same engine families. The pre-lock wasm decision is closed: keep br_table as the portable dispatch baseline.",
         "requirements": [
             {
                 "id": "v8-production-rustia-wasm",
@@ -715,15 +715,20 @@ fn wasm_gate_json_value() -> serde_json::Value {
                 "engine": "V8",
                 "runtime": "node / deno / d8",
                 "required": true,
-                "status": "pending-production-harness",
+                "status": "measured",
                 "evidence": [
+                    {
+                        "kind": "current-results",
+                        "path": "bench/wasm/current-results.json",
+                        "summary": "Production rustia wasm retained-function workloads measured under Node and Deno V8.",
+                    },
                     {
                         "kind": "design-spike",
                         "path": "design/65-wasmjit.md",
                         "summary": "V8 wasm-emit hot-kernel spike was verified, but it is not a production rustia wasm measurement.",
                     },
                 ],
-                "next": "Build the production rustia wasm harness and record benchmark history from a clean baseline.",
+                "next": "Keep V8 history fresh as the benchmark harness and production wasm artifact evolve.",
             },
             {
                 "id": "javascriptcore-production-rustia-wasm",
@@ -731,9 +736,15 @@ fn wasm_gate_json_value() -> serde_json::Value {
                 "engine": "JavaScriptCore",
                 "runtime": "jsc / bun / Safari Technology Preview",
                 "required": true,
-                "status": "missing-measurement",
-                "evidence": [],
-                "next": "Run the production rustia wasm benchmark under a JSC runtime and commit the measurement metadata.",
+                "status": "measured",
+                "evidence": [
+                    {
+                        "kind": "current-results",
+                        "path": "bench/wasm/current-results.json",
+                        "summary": "Production rustia wasm retained-function workloads measured under Bun's JavaScriptCore runtime.",
+                    },
+                ],
+                "next": "Add a Safari Technology Preview or jsc-shell run when that runtime is available.",
             },
             {
                 "id": "spidermonkey-production-rustia-wasm",
@@ -741,9 +752,15 @@ fn wasm_gate_json_value() -> serde_json::Value {
                 "engine": "SpiderMonkey",
                 "runtime": "js / sm",
                 "required": true,
-                "status": "missing-measurement",
-                "evidence": [],
-                "next": "Run the production rustia wasm benchmark under SpiderMonkey and commit the measurement metadata.",
+                "status": "measured",
+                "evidence": [
+                    {
+                        "kind": "current-results",
+                        "path": "bench/wasm/current-results.json",
+                        "summary": "Production rustia wasm retained-function workloads measured under the SpiderMonkey js shell.",
+                    },
+                ],
+                "next": "Keep SpiderMonkey history fresh as the benchmark harness and production wasm artifact evolve.",
             },
             {
                 "id": "call-ref-vs-br-table",
@@ -751,9 +768,15 @@ fn wasm_gate_json_value() -> serde_json::Value {
                 "engine": "Cross-engine wasm",
                 "runtime": "V8 / JavaScriptCore / SpiderMonkey",
                 "required": true,
-                "status": "pending-microbench",
-                "evidence": [],
-                "next": "Add the call_ref versus br_table microbench to the wasm harness and compare it across the required engines.",
+                "status": "measured",
+                "evidence": [
+                    {
+                        "kind": "dispatch-current-results",
+                        "path": "bench/wasm/dispatch-current-results.json",
+                        "summary": "call_ref vs br_table dispatch measured under V8, JavaScriptCore-family, and SpiderMonkey runtimes.",
+                    },
+                ],
+                "next": "Keep the microbench in the wasm gate checks so future runtime shifts cannot reopen the dispatch assumption silently.",
             },
         ],
     })

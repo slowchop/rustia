@@ -18,6 +18,7 @@ const wasmPath = path.join(
   "script_bench_wasm_adapter.wasm",
 );
 const measureScript = path.join(root, "bench", "wasm", "measure-rustia-wasm.mjs");
+const measureScriptSpiderMonkey = path.join(root, "bench", "wasm", "measure-rustia-wasm-sm.js");
 const outputPath = path.join(root, "bench", "wasm", "current-results.json");
 
 function fail(message) {
@@ -108,11 +109,19 @@ function run(command, args, options = {}) {
 }
 
 function commandExists(command) {
+  return commandPath(command) != null;
+}
+
+function commandPath(command) {
   const result = childProcess.spawnSync("sh", ["-lc", `command -v ${shellQuote(command)}`], {
     cwd: root,
     encoding: "utf8",
   });
-  return result.status === 0 && result.stdout.trim() !== "";
+  if (result.status !== 0) {
+    return null;
+  }
+  const text = result.stdout.trim();
+  return text === "" ? null : text;
 }
 
 function shellQuote(value) {
@@ -151,12 +160,35 @@ function runtimeCommand(runtime, commonArgs) {
   if (runtime === "bun") {
     return { command: "bun", args: commonArgs };
   }
+  if (runtime === "spidermonkey") {
+    const candidates = ["js", "sm", "js140", "js128", "js125", "js115", "js102"];
+    for (const candidate of candidates) {
+      const found = commandPath(candidate);
+      if (found) {
+        return { command: found, args: commonArgs };
+      }
+    }
+    return null;
+  }
   fail(`unsupported runtime ${JSON.stringify(runtime)}`);
 }
 
+function commandOutput(command, args) {
+  try {
+    return childProcess.execFileSync(command, args, {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch (_) {
+    return "unknown";
+  }
+}
+
 function measureRuntime(runtime, options, commit) {
-  const { command, args } = runtimeCommand(runtime, [
-    relative(measureScript),
+  const script = runtime === "spidermonkey" ? measureScriptSpiderMonkey : measureScript;
+  const commandArgs = [
+    relative(script),
     "--wasm",
     relative(wasmPath),
     "--commit",
@@ -167,7 +199,20 @@ function measureRuntime(runtime, options, commit) {
     String(options.reps),
     "--adapters",
     options.adapters.join(","),
-  ]);
+  ];
+  const runtimeSpec = runtimeCommand(runtime, commandArgs);
+  if (!runtimeSpec) {
+    return {
+      skipped: {
+        runtime,
+        reason: "command not found",
+      },
+    };
+  }
+  if (runtime === "spidermonkey") {
+    runtimeSpec.args.push("--runtime-version", commandOutput(runtimeSpec.command, ["--version"]));
+  }
+  const { command, args } = runtimeSpec;
   const text = run(command, args);
   try {
     return JSON.parse(text);
@@ -247,10 +292,18 @@ const runs = [];
 const skipped = [];
 for (const runtime of options.runtimes) {
   if (runtime !== "node" && !commandExists(runtime)) {
-    skipped.push({ runtime, reason: "command not found" });
+    const runtimeSpec = runtime === "spidermonkey" ? runtimeCommand(runtime, []) : null;
+    if (!runtimeSpec) {
+      skipped.push({ runtime, reason: "command not found" });
+      continue;
+    }
+  }
+  const measured = measureRuntime(runtime, options, commit);
+  if (measured.skipped) {
+    skipped.push(measured.skipped);
     continue;
   }
-  const batch = measureRuntime(runtime, options, commit);
+  const batch = measured;
   validateRuntimeBatch(batch);
   runs.push(...batch.runs);
 }

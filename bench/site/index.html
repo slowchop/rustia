@@ -94,6 +94,31 @@
         </div>
       </section>
 
+      <section class="panel wasm-dispatch-panel" aria-label="Wasm dispatch microbench">
+        <div class="panel-heading">
+          <h2>Wasm Dispatch Bench</h2>
+          <span id="wasm-dispatch-status" class="chip">loading</span>
+        </div>
+        <div class="gate-summary">
+          <p id="wasm-dispatch-summary"></p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Runtime</th>
+                <th>Style</th>
+                <th>Min ns/dispatch</th>
+                <th>Median</th>
+                <th>vs br_table</th>
+                <th>Commit</th>
+              </tr>
+            </thead>
+            <tbody id="wasm-dispatch-body"></tbody>
+          </table>
+        </div>
+      </section>
+
       <section class="grid">
         <article class="panel leaderboard-panel">
           <div class="panel-heading">

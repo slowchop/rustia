@@ -35,10 +35,10 @@ a terminal summary of the same source data.
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 78% | 65% |
+| Whole public rustia project | 80% | 65% |
 | Usable embedded scripting crate | 83% | 70% |
 | Full public Luau engine release | 48% | 58% |
-| Standalone benchmark OSS project | 76% | 80% |
+| Standalone benchmark OSS project | 80% | 80% |
 | Public release readiness | 73% | 75% |
 
 - Current conformance runner: **684 fixtures**, **481 refs**, **0 pending**.
@@ -46,7 +46,7 @@ a terminal summary of the same source data.
   across them; Lua 5.4 runs separately from Luau because `mlua-sys` cannot link both in one binary.
 - Current benchmark claim posture is generated at [`bench/CLAIMS.md`](bench/CLAIMS.md); it approves no blanket
   speed headline from the current snapshot.
-- Major remaining gates are engine hardening, long-run benchmark history, JSC/SpiderMonkey wasm proof, and release
+- Major remaining gates are engine hardening, long-run benchmark history, public benchmark publication, and release
   packaging. Semver policy is tracked in [`design/91-semver-policy.md`](design/91-semver-policy.md), release
   notes in [`CHANGELOG.md`](CHANGELOG.md), koto migration guidance in
   [`design/76-koto-migration.md`](design/76-koto-migration.md), crate metadata audit in

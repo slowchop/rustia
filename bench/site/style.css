@@ -211,7 +211,8 @@ select {
 }
 
 .wasm-gate-panel,
-.wasm-target-panel {
+.wasm-target-panel,
+.wasm-dispatch-panel {
   margin-bottom: 16px;
 }
 

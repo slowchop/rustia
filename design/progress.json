@@ -50,16 +50,30 @@
         "runtimes": [
           "Node/V8",
           "Deno/V8",
-          "Bun/JavaScriptCore-family"
+          "Bun/JavaScriptCore-family",
+          "SpiderMonkey/js shell"
         ],
         "note": "Other requested adapters were compatibility-probed; only rustia and koto currently execute inside the wasm target runner by default."
+      },
+      "wasm_dispatch_bench": {
+        "styles": [
+          "br_table",
+          "call_ref"
+        ],
+        "runtimes": [
+          "Node/V8",
+          "Deno/V8",
+          "Bun/JavaScriptCore-family",
+          "SpiderMonkey/js shell"
+        ],
+        "note": "call_ref is slower than br_table across the measured engine families."
       }
     }
   },
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 78,
+      "complete": 80,
       "confidence": 65,
       "state": "Design is locked and production crates are substantial, with crate metadata, release-preflight-enforced examples, first migration guide, CLI ergonomics including a line-oriented REPL, source-aware CLI diagnostics, public source-span/runtime-location error accessors, source-named facade diagnostics, typed/nested owned-table helpers, typed and fallible host diagnostic polish, host signature/fuel ABI metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics and current-generation accessors, generated leaf package dry-run checks, release preflight, CI workflow wiring, and expanded benchmark workload source coverage started; release packaging and perf gates remain.",
       "future_plan": "Harden P1, finish benchmark gates, then move toward full public Luau parity."
@@ -80,10 +94,10 @@
     },
     {
       "name": "Standalone benchmark OSS project",
-      "complete": 76,
+      "complete": 80,
       "confidence": 80,
-      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, a wasm target runner for rustia+koto on V8 and JavaScriptCore-family runtimes, and a manual self-hosted measurement workflow are present.",
-      "future_plan": "Split from workspace, expand workloads, add SpiderMonkey/call_ref wasm gates, publish long-run history, and automate tracking charts."
+      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, a wasm target runner for rustia+koto on V8, JavaScriptCore-family, and SpiderMonkey runtimes, a call_ref versus br_table dispatch microbench on those same families, and a manual self-hosted measurement workflow are present.",
+      "future_plan": "Split from workspace, expand workloads, publish long-run history, and automate tracking charts."
     },
     {
       "name": "Public release readiness",
@@ -106,10 +120,10 @@
         },
         {
           "name": "Architecture decisions",
-          "complete": 92,
+          "complete": 95,
           "confidence": 85,
-          "state": "All eight architecture axes are decided in design/30-architecture.md.",
-          "future_plan": "Reconfirm value-layout/dispatch on JSC and SpiderMonkey before final P1 lock."
+          "state": "All eight architecture axes are decided in design/30-architecture.md, and the wasm pre-lock dispatch gate is closed across V8, JavaScriptCore-family, and SpiderMonkey.",
+          "future_plan": "Keep architecture docs synced as performance work produces stronger production evidence."
         },
         {
           "name": "Review cleanup",
@@ -210,17 +224,17 @@
       "entries": [
         {
           "name": "Bytecode dispatch core",
-          "complete": 70,
+          "complete": 80,
           "confidence": 65,
-          "state": "Portable interpreter exists; big-match/br-table direction is locked.",
-          "future_plan": "Add hot/cold split, benchmark call_ref, and maintain fusion-invariant fuel."
+          "state": "Portable interpreter exists; big-match/br-table direction is locked, and the call_ref microbench favors br_table across V8, JavaScriptCore-family, and SpiderMonkey.",
+          "future_plan": "Add hot/cold split and maintain fusion-invariant fuel."
         },
         {
           "name": "Value representation",
           "complete": 76,
           "confidence": 75,
           "state": "16-byte tagged value direction is implemented and documented.",
-          "future_plan": "Keep representation sealed until JSC/SpiderMonkey measurements close the gate."
+          "future_plan": "Keep representation sealed while production performance and GC work proceeds."
         },
         {
           "name": "Heap and GC",
@@ -285,10 +299,10 @@
         },
         {
           "name": "Cross-engine wasm proof",
-          "complete": 55,
+          "complete": 100,
           "confidence": 80,
-          "state": "Production rustia wasm now has V8 and Bun/JavaScriptCore-family measurements, plus a wasm target adapter bench for rustia and koto.",
-          "future_plan": "Add SpiderMonkey production measurement and call_ref vs br_table evidence before locking the gate."
+          "state": "Production rustia wasm and call_ref vs br_table dispatch are measured across V8, JavaScriptCore-family, and SpiderMonkey; the pre-lock wasm gate is closed.",
+          "future_plan": "Keep the measurements fresh as the wasm artifact and runtimes evolve."
         }
       ]
     },
@@ -412,10 +426,10 @@
         },
         {
           "name": "Native/wasm matrix",
-          "complete": 55,
+          "complete": 78,
           "confidence": 75,
-          "state": "Native baselines are being recorded, and wasm target results now cover rustia+koto on Node/V8, Deno/V8, and Bun/JavaScriptCore-family.",
-          "future_plan": "Add SpiderMonkey production wasm results and call_ref vs br_table microbench evidence."
+          "state": "Native baselines are being recorded, wasm target results cover rustia+koto on Node/V8, Deno/V8, Bun/JavaScriptCore-family, and SpiderMonkey, and dispatch results cover br_table/call_ref on those same families.",
+          "future_plan": "Broaden public baselines and keep result history fresh across runtime updates."
         }
       ]
     },

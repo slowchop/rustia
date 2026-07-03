@@ -9,6 +9,9 @@ Currently measured:
 - `rustia` - production rustia crate compiled to wasm.
 - `koto` - pure Rust Koto adapter compiled to wasm.
 
+Current committed runtime coverage is Node/V8, Deno/V8,
+Bun/JavaScriptCore-family, and the SpiderMonkey `js` shell.
+
 Not currently measured:
 
 - `boa` - compile probe reaches `getrandom`'s wasm support gate.
