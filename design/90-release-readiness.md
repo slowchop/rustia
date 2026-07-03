@@ -75,7 +75,8 @@ from `publish = false` to publishable.
 - Retained `Function` handles and `Exports` expose install generations, and
   failed hot reloads leave the current generation unchanged. `is_current()` /
   `ensure_current()` expose freshness checks, while `Function::call_current()`
-  rejects stale handles after a successful hot reload.
+  and `Exports::{value,deserialize,get,function}_current()` reject stale
+  handles after a successful hot reload.
 
 ## Runtime Gate
 

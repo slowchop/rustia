@@ -29,7 +29,7 @@ return {
 }
 ",
     )?;
-    let new_decide = exports.function(&mut rustia, "decide")?;
+    let new_decide = exports.function_current(&mut rustia, "decide")?;
     assert_eq!(new_decide.call::<_, f64>(&mut rustia, (21.0,))?, 42.0);
     assert!(!old_decide.is_current(&rustia));
     assert!(old_decide

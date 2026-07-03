@@ -852,13 +852,19 @@ return {
     fn retained_handles_are_versioned_across_successful_hot_reload() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let first_exports = rustia
-            .hot_reload("ai.luau", "return { decide = function() return 1 end }")
+            .hot_reload(
+                "ai.luau",
+                "return { label = 'old', decide = function() return 1 end }",
+            )
             .unwrap();
         let first_generation = first_exports.generation();
         let first_decide = first_exports.function(&mut rustia, "decide").unwrap();
 
         let second_exports = rustia
-            .hot_reload("ai.luau", "return { decide = function() return 2 end }")
+            .hot_reload(
+                "ai.luau",
+                "return { label = 'new', decide = function() return 2 end }",
+            )
             .unwrap();
         let second_generation = second_exports.generation();
         let second_decide = second_exports.function(&mut rustia, "decide").unwrap();
@@ -878,6 +884,27 @@ return {
                 .contains("stale exports handle from generation"),
             "{stale_exports}"
         );
+        assert!(first_exports.value_current(&mut rustia).is_err());
+        assert!(first_exports
+            .get_current::<String>(&mut rustia, "label")
+            .is_err());
+        assert!(first_exports
+            .function_current(&mut rustia, "decide")
+            .is_err());
+        assert_eq!(
+            first_exports.get::<String>(&mut rustia, "label").unwrap(),
+            "old"
+        );
+        assert_eq!(
+            second_exports
+                .get_current::<String>(&mut rustia, "label")
+                .unwrap(),
+            "new"
+        );
+        let current_decide = second_exports
+            .function_current(&mut rustia, "decide")
+            .unwrap();
+        assert_eq!(current_decide.generation(), second_generation);
 
         let old_result: f64 = first_decide.call(&mut rustia, ()).unwrap();
         let new_result: f64 = second_decide.call(&mut rustia, ()).unwrap();
@@ -977,6 +1004,8 @@ return {
                 ],
             }
         );
+        let current_spec: ScenarioSpec = exports.deserialize_current(&mut rustia).unwrap();
+        assert_eq!(current_spec, spec);
 
         rustia.insert_serde("config", &spec).unwrap();
         let value = rustia

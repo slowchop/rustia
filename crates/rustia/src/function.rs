@@ -88,12 +88,25 @@ impl Exports {
         snapshot_value(rustia.vm_mut(), self.value)
     }
 
+    pub fn value_current(&self, rustia: &mut Rustia) -> Result<OwnedValue> {
+        self.ensure_current(rustia)?;
+        self.value(rustia)
+    }
+
     pub fn deserialize<T>(&self, rustia: &mut Rustia) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
     {
         let value = self.value(rustia)?;
         value.deserialize()
+    }
+
+    pub fn deserialize_current<T>(&self, rustia: &mut Rustia) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        self.ensure_current(rustia)?;
+        self.deserialize(rustia)
     }
 
     pub fn get<T>(&self, rustia: &mut Rustia, name: &str) -> Result<T>
@@ -105,12 +118,25 @@ impl Exports {
         T::from_rustia(value)
     }
 
+    pub fn get_current<T>(&self, rustia: &mut Rustia, name: &str) -> Result<T>
+    where
+        T: FromRustia,
+    {
+        self.ensure_current(rustia)?;
+        self.get(rustia, name)
+    }
+
     pub fn function(&self, rustia: &mut Rustia, name: &str) -> Result<Function> {
         let value = self.raw_get(rustia, name)?;
         if value.kind() != ValueKind::Function {
             return Err(Error::Embed(format!("export `{name}` is not a function")));
         }
         Ok(Function::new(value, self.generation))
+    }
+
+    pub fn function_current(&self, rustia: &mut Rustia, name: &str) -> Result<Function> {
+        self.ensure_current(rustia)?;
+        self.function(rustia, name)
     }
 
     fn raw_get(&self, rustia: &mut Rustia, name: &str) -> Result<RawValue> {
