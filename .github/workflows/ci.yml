@@ -61,6 +61,9 @@ jobs:
       - name: Check progress dashboard
         run: node design/render-progress.js --check
 
+      - name: Check project status alignment
+        run: node tools/check-project-status.js
+
       - name: Check benchmark generated artifacts
         run: |
           node tools/check-benchmark-results.js

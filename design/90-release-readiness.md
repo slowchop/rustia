@@ -137,14 +137,16 @@ from `publish = false` to publishable.
   publish-order leaf candidates from `design/publishability.json`.
 - `just check-release-notes` passes and `CHANGELOG.md` names the current
   workspace version plus public-facing unreleased changes.
-- `just check-progress` and `just check-benchmark-results` pass without
-  rewriting committed generated artifacts.
+- `just check-progress`, `just check-project-status`, and
+  `just check-benchmark-results` pass without rewriting committed generated
+  artifacts or letting README/current-progress facts drift.
 - `rustia-cli` supports file, stdin, `--eval`, and `--repl` execution, plus
   profile, fuel, source-name options, line-oriented REPL evaluation, and
   source-aware compile/runtime diagnostics.
 - `cargo package --no-verify` reaches packaging for each publishable crate; any
   unpublished path dependency blocker is documented.
-- README, `design/CURRENT.md`, `design/progress.json`, and generated progress
-  HTML agree on conformance counts, benchmark state, and release status.
+- README, `design/CURRENT.md`, `design/progress.json`, generated progress
+  HTML, conformance TSVs, benchmark inventory, and current benchmark result
+  JSON agree on conformance counts, benchmark state, and release status.
 - The crate graph has a documented semver policy before the first non-`0.0.x`
   release.

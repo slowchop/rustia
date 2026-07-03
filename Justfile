@@ -4,6 +4,9 @@ gen-progress:
 check-progress:
     node design/render-progress.js --check
 
+check-project-status:
+    node tools/check-project-status.js
+
 gen-package-files:
     node tools/check-package-files.js
 
@@ -47,6 +50,7 @@ release-preflight:
     just check-publishability
     just check-package-dry-runs
     just check-progress
+    just check-project-status
     just check-benchmark-results
     just check-examples
     cargo test --workspace

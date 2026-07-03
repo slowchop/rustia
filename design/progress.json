@@ -33,6 +33,14 @@
           "wasmtime"
         ],
         "note": "mlua-lua54 runs separately from mlua-luau because both mlua-sys builds use links = \"lua\"."
+      },
+      "benchmark_workloads": {
+        "present": 12,
+        "default": 5,
+        "current_results": 5,
+        "source_covered_non_default": [
+          "string_building"
+        ]
       }
     }
   },
