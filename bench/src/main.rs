@@ -244,6 +244,7 @@ struct Config {
     history: Option<PathBuf>,
     results: Option<PathBuf>,
     list: bool,
+    list_json: bool,
 }
 
 impl Default for Config {
@@ -265,6 +266,7 @@ impl Default for Config {
             history: Some(PathBuf::from(HISTORY_PATH)),
             results: Some(PathBuf::from(RESULTS_PATH)),
             list: false,
+            list_json: false,
         }
     }
 }
@@ -327,6 +329,10 @@ fn main() {
 
 fn run() -> Result<()> {
     let config = parse_args(env::args().skip(1))?;
+    if config.list_json {
+        print_inventory_json()?;
+        return Ok(());
+    }
     if config.list {
         print_inventory();
         return Ok(());
@@ -390,6 +396,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--list" => config.list = true,
+            "--list-json" => config.list_json = true,
             "--no-history" => config.history = None,
             "--no-results" => config.results = None,
             "--engines" => {
@@ -469,6 +476,7 @@ fn split_csv(value: &str) -> Vec<String> {
 fn print_usage() {
     println!("usage: script-bench [options]");
     println!("  --list");
+    println!("  --list-json");
     println!("  --engines rustia,koto,mlua-luau");
     println!("  --workloads dense_tables,sparse_tables,closures_upvalues,generic_iteration,stdlib_math_table");
     println!("  --target-ms 250");
@@ -495,6 +503,51 @@ fn print_inventory() {
         let default = if workload.default { "default" } else { "" };
         println!("  {:<20} {:<8} {}", workload.id, default, workload.unit);
     }
+}
+
+fn print_inventory_json() -> Result<()> {
+    let engines = ENGINE_SLOTS
+        .iter()
+        .map(|slot| {
+            serde_json::json!({
+                "id": slot.id,
+                "dialect": slot.dialect.as_str(),
+                "feature": slot.feature,
+                "enabled": slot.enabled,
+                "implemented": slot.implemented,
+                "available": slot.enabled && slot.implemented,
+                "status": if slot.enabled && slot.implemented {
+                    "available"
+                } else {
+                    unavailable_reason(slot)
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+    let workloads = WORKLOADS
+        .iter()
+        .map(|workload| {
+            serde_json::json!({
+                "id": workload.id,
+                "file_stem": workload.file_stem,
+                "unit": workload.unit,
+                "default": workload.default,
+            })
+        })
+        .collect::<Vec<_>>();
+    let value = serde_json::json!({
+        "schema_version": 1,
+        "binary": "script-bench",
+        "history_schema": "jsonl-v1",
+        "default_history": HISTORY_PATH,
+        "default_results": RESULTS_PATH,
+        "engines": engines,
+        "workloads": workloads,
+    });
+    let text = serde_json::to_string_pretty(&value)
+        .map_err(|error| Error::new(format!("inventory JSON failed: {error}")))?;
+    println!("{text}");
+    Ok(())
 }
 
 fn unavailable_reason(slot: &EngineSlot) -> &'static str {

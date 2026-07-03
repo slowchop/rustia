@@ -27,6 +27,13 @@ List all configured engine slots:
 cargo run -p script-bench-harness -- --list
 ```
 
+Emit the same engine/workload inventory as deterministic JSON for wrappers,
+CI, or static-site generation:
+
+```sh
+cargo run -p script-bench-harness -- --list-json
+```
+
 Engine slots are tracked for `rustia`, `boa`, `koto`, `mlua-lua54`,
 `mlua-luau`, `rhai`, `roto`, `rquickjs`, `wasmi`, and `wasmtime`. Adapters are
 feature-gated so heavyweight dependencies do not affect the normal workspace
@@ -79,6 +86,11 @@ Each line in `history/runs.jsonl` is a JSON object:
 
 The future website should treat JSONL as the append-only source of truth and
 generate charts from `engine × target × workload` series.
+
+`--list-json` emits a separate schema-identified metadata document for the
+available engine slots, feature gates, workload IDs, default workload set, and
+result paths. It is intended for tooling; benchmark measurements stay in the
+append-only JSONL history above.
 
 ## Provenance
 
