@@ -1,6 +1,6 @@
 # rustia — continuous perf-benchmark suite + CI (design)
 
-> **Status: [DESIGN — decisions pending] (2026-07-01).** Scoped by the `bench-scoping` agent (clone+read of
+> **Status: [DESIGN — implementation started] (2026-07-03).** Scoped by the `bench-scoping` agent (clone+read of
 > `khvzak/script-bench-rs`, the 11-workload seed in `spikes/bench-suite/`, and the 2025–26 tracker/wasm-shell
 > tooling) + self-hosted benchmark-label constraints + privacy lean. Operationalises principle #3 ("measure,
 > don't assert — the bench suite is a CI gate"). See [`CURRENT.md`](CURRENT.md).
@@ -56,6 +56,12 @@ detail in the repo)
 4. **`track`** — collect JSON → `github-action-benchmark` `external-data-json-path` → regenerate `RESULTS.md`.
    Triggers: PR = instruction-count gate + posts the table; push-main = record history; nightly cron = full
    matrix incl. the expensive macOS/JSC + Intel-Mac + Windows + arm-Linux arches.
+
+**Current implementation slice:** `.github/workflows/ci.yml` runs release-preflight checks on hosted Linux CI
+without fresh benchmark measurements. `.github/workflows/benchmarks.yml` is a manual `workflow_dispatch`
+measurement job on `[self-hosted, bench]`; it appends current benchmark history in the checkout, regenerates the
+benchmark artifacts, verifies them, and uploads the resulting files. It does not yet publish the JSONL history
+back to a tracking branch or static host.
 
 **Reserving rustia's column:** the `bench` crate enumerates engines by **cargo feature**; `rustia` is
 `cfg`-gated to a no-op stub emitting `— (pending P1)`. Baseline engines tracked **now**; flip the feature at P1

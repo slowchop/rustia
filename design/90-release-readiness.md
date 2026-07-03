@@ -83,6 +83,11 @@ from `publish = false` to publishable.
 - `just release-preflight` passes before any publishability flip. It checks
   release notes, package file lists, generated progress HTML, benchmark result
   freshness, and the workspace test suite.
+- `.github/workflows/ci.yml` mirrors the release-preflight gate on hosted Linux
+  CI without running fresh benchmark measurements.
+- `.github/workflows/benchmarks.yml` provides manual current-matrix measurement
+  on the generic `[self-hosted, bench]` runner label and uploads generated
+  benchmark artifacts.
 - `cargo test --workspace` passes on the release toolchain.
 - `just check-package-files` passes and `design/package-files.json` is current.
 - `just check-publishability` passes and `design/publishability.json` is

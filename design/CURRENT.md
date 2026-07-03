@@ -20,8 +20,8 @@ Its generated [`../bench/CLAIMS.md`](../bench/CLAIMS.md) gate keeps public bench
 currently approves no blanket speed headline from the committed snapshot.
 The public API now has compile-checked examples for embedding and hot reload.
 `rustia-cli` supports file, stdin, and `--eval` execution with profile, fuel, and source-name options.
-Future benchmark workflow files may target only the generic `[self-hosted, bench]` label; CI workflow wiring is
-not implemented yet.
+CI wiring now includes hosted release-preflight checks plus a manual benchmark measurement workflow that targets
+only the generic `[self-hosted, bench]` runner label.
 
 ## 🚀 Next actions (cold-start handoff — do in this order)
 **Read order for a fresh agent:** `CLAUDE.md` (auto-loaded) → **this file** → [`30-architecture.md`](30-architecture.md) (the ADR)
@@ -34,13 +34,15 @@ not implemented yet.
    tests while performance work proceeds.
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, extra workload slots,
-   append-only JSONL history, package metadata, and split notes. Next work is the actual standalone-project
-   split, longer-run public history, and CI workflow wiring.
+   append-only JSONL history, package metadata, split notes, static dashboard files, and a manual self-hosted
+   measurement workflow. Next work is the actual standalone-project split, longer-run public history, and
+   automated tracking publication.
 3. **Keep the Luau 0.709 conformance corpus green**. The current repo has 684 executable fixtures covering 481
    behavior refs with no pending rows; new engine work should add focused fixtures rather than re-opening
    pending inventory.
-4. **Wire benchmark CI** — before starting any CI configuration, notify the owner of the required setup. Then
-   use only `[self-hosted, bench]` in public workflow files; keep infra details out of this public repo.
+4. **Operationalize benchmark CI** — the public workflow uses only `[self-hosted, bench]`. The owner still needs
+   to register that runner before using the manual measurement workflow, and automated history publication is
+   not wired yet.
 
 **Pre-P1-LOCK gates** (finalizing the value-layout/dispatch/wasm story waits on these): see the "What's next"
 section below for the full list (JSC/Firefox wasm re-measure, `call_ref` bench, GC tuning, `LuauIntegerType2`
@@ -99,8 +101,8 @@ watch).
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + deterministic extension/linker plan | **implemented first slice** ✅ |
-| [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design (some decisions pending) | **runner/adapters/history/site/package metadata implemented; split/CI pending** |
-| [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **metadata/checklist/changelog/preflight gates started; publish=false remains** |
+| [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design (some decisions pending) | **runner/adapters/history/site/package metadata/manual benchmark workflow implemented; split/published tracking pending** |
+| [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **metadata/checklist/changelog/preflight/CI gates started; publish=false remains** |
 | [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **policy started; 0.0.x remains unstable** |
 | [`package-files.json`](package-files.json) | generated package file-list review for all workspace packages | **current audit: 8 packages / 0 forbidden paths** |
 | [`publishability.json`](publishability.json) | generated publishability blocker review for all workspace packages | **current audit: all 8 blocked by publish=false; internal dependency order recorded** |

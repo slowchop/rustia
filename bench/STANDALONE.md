@@ -25,6 +25,8 @@ workspace coupling is intentional:
   `../crates/`.
 - The root `Justfile` owns convenience recipes while the project remains in this
   workspace.
+- `.github/workflows/benchmarks.yml` owns the current in-repo manual
+  self-hosted measurement job while the project remains in this workspace.
 - Root license files cover the current in-repo copy.
 
 When the project splits, either publish `rustia-*` crates first, move the rustia

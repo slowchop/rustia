@@ -39,9 +39,9 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 60,
+      "complete": 61,
       "confidence": 65,
-      "state": "Design is locked and production crates are substantial, with crate metadata, examples, and CLI ergonomics started; release, CI, and perf gates remain.",
+      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
       "future_plan": "Harden P1, finish benchmark gates, then move toward full public Luau parity."
     },
     {
@@ -60,16 +60,16 @@
     },
     {
       "name": "Standalone benchmark OSS project",
-      "complete": 69,
+      "complete": 72,
       "confidence": 80,
-      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, and all 10 requested adapters are present.",
-      "future_plan": "Split from workspace, expand workloads, wire CI, and publish charts/history."
+      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, all 10 requested adapters, and a manual self-hosted measurement workflow are present.",
+      "future_plan": "Split from workspace, expand workloads, publish long-run history, and automate tracking charts."
     },
     {
       "name": "Public release readiness",
-      "complete": 56,
+      "complete": 58,
       "confidence": 75,
-      "state": "License, crate metadata, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, changelog validation, release preflight, generated benchmark claim gating, package file-list audit, and publishability blocker audit are present; crates are still workspace-private and CI/release polish is incomplete.",
+      "state": "License, crate metadata, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, generated benchmark claim gating, package file-list audit, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
       "future_plan": "Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims."
     }
   ],
@@ -373,10 +373,10 @@
         },
         {
           "name": "Benchmark CI",
-          "complete": 15,
+          "complete": 40,
           "confidence": 90,
-          "state": "CI workflow wiring is not present.",
-          "future_plan": "Add self-hosted [self-hosted, bench] workflows after runner setup is confirmed."
+          "state": "A manual workflow_dispatch benchmark measurement job exists on the generic [self-hosted, bench] runner label and uploads generated artifacts.",
+          "future_plan": "After runner setup, add automated history publication and regression alerts without exposing infra details."
         }
       ]
     },
@@ -404,10 +404,10 @@
       "entries": [
         {
           "name": "Workspace tests and release preflight",
-          "complete": 74,
+          "complete": 78,
           "confidence": 75,
-          "state": "Production crates have meaningful unit and conformance tests, and just release-preflight composes release artifact checks with cargo test --workspace.",
-          "future_plan": "Keep expanding tests with new runtime/API work and add CI wiring when runner setup is available."
+          "state": "Production crates have meaningful unit and conformance tests; just release-preflight composes release artifact checks with cargo test --workspace; hosted CI mirrors that gate.",
+          "future_plan": "Keep expanding tests with new runtime/API work and keep CI aligned with release-preflight."
         },
         {
           "name": "CLI",

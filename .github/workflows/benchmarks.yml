@@ -1,0 +1,78 @@
+name: Benchmark Measurement
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  measure-current:
+    name: Measure current benchmark matrix
+    runs-on:
+      - self-hosted
+      - bench
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust stable
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Use Rust stable
+        run: rustup default stable
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify clean checkout
+        run: |
+          git diff --quiet --ignore-submodules --
+          git diff --cached --quiet --ignore-submodules --
+
+      - name: Run all-engines benchmark binary
+        run: >
+          cargo run -p script-bench-harness --release --features all-engines --
+          --history bench/history/runs.jsonl
+          --commit "$(git rev-parse --short HEAD)"
+
+      - name: Run Lua 5.4 benchmark binary
+        run: >
+          cargo run -p script-bench-harness --release --no-default-features
+          --features mlua-lua54 --
+          --engines mlua-lua54
+          --history bench/history/runs.jsonl
+          --commit "$(git rev-parse --short HEAD)"
+
+      - name: Refresh generated benchmark reports
+        run: |
+          cargo run -p script-bench-harness -- --refresh-results
+          node bench/render-current-results.js
+          node bench/render-claims.js
+
+      - name: Check generated benchmark artifacts
+        run: |
+          node tools/check-benchmark-results.js
+          node bench/render-current-results.js --check
+          node bench/render-claims.js --check
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-current-results
+          path: |
+            bench/history/runs.jsonl
+            bench/RESULTS.md
+            bench/current-results.json
+            bench/current-results.html
+            bench/CLAIMS.md

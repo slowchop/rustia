@@ -61,6 +61,12 @@ baselines do not get tagged with `-dirty` commit IDs. The recipe pins the clean
 HEAD commit into both benchmark invocations, because the first append dirties
 `bench/history/runs.jsonl` before the separate Lua 5.4 binary runs.
 
+The same measurement sequence is wired as a manual GitHub Actions workflow in
+`.github/workflows/benchmarks.yml`. It requires a self-hosted runner with the
+generic labels `[self-hosted, bench]`, regenerates the benchmark artifacts, and
+uploads them as workflow artifacts; it does not yet publish history back to a
+tracking branch or static host.
+
 `all-engines` intentionally excludes `mlua-lua54` because `mlua-lua54` and
 `mlua-luau` cannot be linked into one binary. Run the Lua 5.4 mlua adapter as a
 separate binary:

@@ -401,7 +401,7 @@
       </div>
       <aside class="facts" aria-label="Current facts">
         <div class="fact">
-          <strong>60%</strong>
+          <strong>61%</strong>
           <span>Whole public rustia project, 65% confidence</span>
         </div>
         <div class="fact">
@@ -417,7 +417,7 @@
           <span>Requested benchmark adapters present</span>
         </div>
         <div class="fact">
-          <strong>56%</strong>
+          <strong>58%</strong>
           <span>Public release readiness, 75% confidence</span>
         </div>
       </aside>
@@ -428,17 +428,17 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Whole public rustia project</h3>
-        <span class="percent">60%</span>
+        <span class="percent">61%</span>
       </div>
 
-    <div class="meter" aria-label="Whole public rustia project: 60% complete">
-      <div class="meter-fill" style="width: 60%"></div>
+    <div class="meter" aria-label="Whole public rustia project: 61% complete">
+      <div class="meter-fill" style="width: 61%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">65% confidence</span>
       </div>
-      <p>Design is locked and production crates are substantial, with crate metadata, examples, and CLI ergonomics started; release, CI, and perf gates remain.</p>
+      <p>Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.</p>
       <p class="plan"><strong>Next:</strong> Harden P1, finish benchmark gates, then move toward full public Luau parity.</p>
     </article>
 
@@ -479,41 +479,41 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Standalone benchmark OSS project</h3>
-        <span class="percent">69%</span>
+        <span class="percent">72%</span>
       </div>
 
-    <div class="meter" aria-label="Standalone benchmark OSS project: 69% complete">
-      <div class="meter-fill" style="width: 69%"></div>
+    <div class="meter" aria-label="Standalone benchmark OSS project: 72% complete">
+      <div class="meter-fill" style="width: 72%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip high">80% confidence</span>
       </div>
-      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, and all 10 requested adapters are present.</p>
-      <p class="plan"><strong>Next:</strong> Split from workspace, expand workloads, wire CI, and publish charts/history.</p>
+      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, all 10 requested adapters, and a manual self-hosted measurement workflow are present.</p>
+      <p class="plan"><strong>Next:</strong> Split from workspace, expand workloads, publish long-run history, and automate tracking charts.</p>
     </article>
 
     <article class="goal-card">
       <div class="card-head">
         <h3>Public release readiness</h3>
-        <span class="percent">56%</span>
+        <span class="percent">58%</span>
       </div>
 
-    <div class="meter" aria-label="Public release readiness: 56% complete">
-      <div class="meter-fill" style="width: 56%"></div>
+    <div class="meter" aria-label="Public release readiness: 58% complete">
+      <div class="meter-fill" style="width: 58%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">75% confidence</span>
       </div>
-      <p>License, crate metadata, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, changelog validation, release preflight, generated benchmark claim gating, package file-list audit, and publishability blocker audit are present; crates are still workspace-private and CI/release polish is incomplete.</p>
+      <p>License, crate metadata, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, generated benchmark claim gating, package file-list audit, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.</p>
       <p class="plan"><strong>Next:</strong> Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims.</p>
     </article>
 
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 62%</a><a href="#embedded-api">Embedded API 60%</a><a href="#benchmarks">Benchmarks 69%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 57%</a><a href="#packaging">Packaging 54%</a>
+      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 62%</a><a href="#embedded-api">Embedded API 60%</a><a href="#benchmarks">Benchmarks 74%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 58%</a><a href="#packaging">Packaging 54%</a>
     </nav>
 
 
@@ -1263,7 +1263,7 @@
           <p>5 tracked items</p>
         </div>
         <div class="area-score">
-          <span>69% avg complete</span>
+          <span>74% avg complete</span>
           <span>85% avg confidence</span>
         </div>
       </div>
@@ -1349,19 +1349,19 @@
       <div class="entry-top">
         <div>
           <h4>Benchmark CI</h4>
-          <p>CI workflow wiring is not present.</p>
+          <p>A manual workflow_dispatch benchmark measurement job exists on the generic [self-hosted, bench] runner label and uploads generated artifacts.</p>
         </div>
         <div class="entry-score">
-          <strong>15%</strong>
+          <strong>40%</strong>
           <span class="chip high">90% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Benchmark CI: 15% complete">
-      <div class="meter-fill" style="width: 15%"></div>
+    <div class="meter" aria-label="Benchmark CI: 40% complete">
+      <div class="meter-fill" style="width: 40%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add self-hosted [self-hosted, bench] workflows after runner setup is confirmed.</p>
+      <p class="plan"><strong>Future plan:</strong> After runner setup, add automated history publication and regression alerts without exposing infra details.</p>
     </article>
 
       </div>
@@ -1428,7 +1428,7 @@
           <p>3 tracked items</p>
         </div>
         <div class="area-score">
-          <span>57% avg complete</span>
+          <span>58% avg complete</span>
           <span>70% avg confidence</span>
         </div>
       </div>
@@ -1438,19 +1438,19 @@
       <div class="entry-top">
         <div>
           <h4>Workspace tests and release preflight</h4>
-          <p>Production crates have meaningful unit and conformance tests, and just release-preflight composes release artifact checks with cargo test --workspace.</p>
+          <p>Production crates have meaningful unit and conformance tests; just release-preflight composes release artifact checks with cargo test --workspace; hosted CI mirrors that gate.</p>
         </div>
         <div class="entry-score">
-          <strong>74%</strong>
+          <strong>78%</strong>
           <span class="chip medium">75% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Workspace tests and release preflight: 74% complete">
-      <div class="meter-fill" style="width: 74%"></div>
+    <div class="meter" aria-label="Workspace tests and release preflight: 78% complete">
+      <div class="meter-fill" style="width: 78%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Keep expanding tests with new runtime/API work and add CI wiring when runner setup is available.</p>
+      <p class="plan"><strong>Future plan:</strong> Keep expanding tests with new runtime/API work and keep CI aligned with release-preflight.</p>
     </article>
 
     <article class="entry">
