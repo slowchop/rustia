@@ -6,6 +6,8 @@ const path = require("path");
 
 const root = path.resolve(__dirname, "..");
 const sourcePath = path.join(__dirname, "current-results.json");
+const wasmResultsPath = path.join(__dirname, "wasm", "current-results.json");
+const wasmDispatchPath = path.join(__dirname, "wasm", "dispatch-current-results.json");
 const outputPath = path.join(__dirname, "current-results.html");
 const checkOnly = process.argv.includes("--check");
 
@@ -67,6 +69,44 @@ function readData() {
   return data;
 }
 
+function readJson(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    fail(`could not parse ${relative(filePath)}: ${error.message}`);
+  }
+}
+
+function readWasmResults() {
+  const data = readJson(wasmResultsPath);
+  if (data.schema_version !== 1) {
+    fail("wasm results schema_version must be 1");
+  }
+  if (data.schema !== "rustia.bench.wasm-gate-current-results.v1") {
+    fail('wasm results schema must be "rustia.bench.wasm-gate-current-results.v1"');
+  }
+  if (!Array.isArray(data.runs) || data.runs.length === 0) {
+    fail("wasm results runs must be a non-empty array");
+  }
+  data.runs.forEach(validateWasmRun);
+  return data;
+}
+
+function readWasmDispatchResults() {
+  const data = readJson(wasmDispatchPath);
+  if (data.schema_version !== 1) {
+    fail("wasm dispatch schema_version must be 1");
+  }
+  if (data.schema !== "rustia.bench.wasm-dispatch-current-results.v1") {
+    fail('wasm dispatch schema must be "rustia.bench.wasm-dispatch-current-results.v1"');
+  }
+  if (!Array.isArray(data.runs) || data.runs.length === 0) {
+    fail("wasm dispatch runs must be a non-empty array");
+  }
+  data.runs.forEach(validateWasmDispatchRun);
+  return data;
+}
+
 function validateRow(row, index) {
   const label = `rows[${index}]`;
   for (const key of ["commit", "target", "engine", "dialect", "workload", "unit", "checksum"]) {
@@ -82,6 +122,87 @@ function validateRow(row, index) {
   if (row.speed_vs_rustia != null && (!Number.isFinite(row.speed_vs_rustia) || row.speed_vs_rustia <= 0)) {
     fail(`${label}.speed_vs_rustia must be null or a positive finite number`);
   }
+}
+
+function validateWasmRun(run, index) {
+  const label = `wasm runs[${index}]`;
+  if (run.schema !== "rustia.bench.wasm-runtime-results.v1") {
+    fail(`${label}.schema must be "rustia.bench.wasm-runtime-results.v1"`);
+  }
+  for (const key of ["commit", "target"]) {
+    if (typeof run[key] !== "string" || run[key].trim() === "") {
+      fail(`${label}.${key} must be a non-empty string`);
+    }
+  }
+  if (run.runtime == null || typeof run.runtime !== "object" || Array.isArray(run.runtime)) {
+    fail(`${label}.runtime must be an object`);
+  }
+  if (run.adapter == null || typeof run.adapter !== "object" || Array.isArray(run.adapter)) {
+    fail(`${label}.adapter must be an object`);
+  }
+  for (const key of ["name", "family"]) {
+    if (typeof run.runtime[key] !== "string" || run.runtime[key].trim() === "") {
+      fail(`${label}.runtime.${key} must be a non-empty string`);
+    }
+  }
+  for (const key of ["id", "dialect"]) {
+    if (typeof run.adapter[key] !== "string" || run.adapter[key].trim() === "") {
+      fail(`${label}.adapter.${key} must be a non-empty string`);
+    }
+  }
+  if (!Array.isArray(run.rows) || run.rows.length === 0) {
+    fail(`${label}.rows must be a non-empty array`);
+  }
+  run.rows.forEach((row, rowIndex) => {
+    const rowLabel = `${label}.rows[${rowIndex}]`;
+    for (const key of ["engine", "dialect", "workload", "unit", "checksum"]) {
+      if (typeof row[key] !== "string" || row[key].trim() === "") {
+        fail(`${rowLabel}.${key} must be a non-empty string`);
+      }
+    }
+    for (const key of ["n", "ns_per_unit_min", "ns_per_unit_median", "units_per_sec"]) {
+      if (!Number.isFinite(row[key]) || row[key] <= 0) {
+        fail(`${rowLabel}.${key} must be a positive finite number`);
+      }
+    }
+  });
+}
+
+function validateWasmDispatchRun(run, index) {
+  const label = `wasm dispatch runs[${index}]`;
+  if (run.schema !== "rustia.bench.wasm-dispatch-results.v1") {
+    fail(`${label}.schema must be "rustia.bench.wasm-dispatch-results.v1"`);
+  }
+  if (run.runtime == null || typeof run.runtime !== "object" || Array.isArray(run.runtime)) {
+    fail(`${label}.runtime must be an object`);
+  }
+  if (run.comparison == null || typeof run.comparison !== "object" || Array.isArray(run.comparison)) {
+    fail(`${label}.comparison must be an object`);
+  }
+  if (run.comparison.status !== "measured") {
+    fail(`${label}.comparison.status must be measured`);
+  }
+  for (const key of ["name", "family"]) {
+    if (typeof run.runtime[key] !== "string" || run.runtime[key].trim() === "") {
+      fail(`${label}.runtime.${key} must be a non-empty string`);
+    }
+  }
+  if (!Array.isArray(run.rows) || run.rows.length !== 2) {
+    fail(`${label}.rows must contain br_table and call_ref`);
+  }
+  run.rows.forEach((row, rowIndex) => {
+    const rowLabel = `${label}.rows[${rowIndex}]`;
+    for (const key of ["style", "feature", "checksum"]) {
+      if (typeof row[key] !== "string" || row[key].trim() === "") {
+        fail(`${rowLabel}.${key} must be a non-empty string`);
+      }
+    }
+    for (const key of ["n", "ns_per_dispatch_min", "ns_per_dispatch_median", "dispatches_per_sec"]) {
+      if (!Number.isFinite(row[key]) || row[key] <= 0) {
+        fail(`${rowLabel}.${key} must be a positive finite number`);
+      }
+    }
+  });
 }
 
 function validateMetadataMatchesRows(data) {
@@ -143,6 +264,10 @@ function formatTime(timestampUnix) {
 
 function formatSpeed(value) {
   return Number.isFinite(value) ? `${formatNumber(value)}x` : "n/a";
+}
+
+function runtimeLabel(runtime) {
+  return `${runtime.family}/${runtime.name}`;
 }
 
 function slug(value) {
@@ -348,8 +473,159 @@ function targetSection(group) {
   `;
 }
 
-function render(data) {
+function wasmTargetRows(data) {
+  const rows = [];
+  for (const run of data.runs) {
+    for (const row of run.rows) {
+      rows.push({
+        runtime: runtimeLabel(run.runtime),
+        adapter: run.adapter.id,
+        dialect: run.adapter.dialect,
+        workload: row.workload,
+        unit: row.unit,
+        ns_per_unit_min: row.ns_per_unit_min,
+        ns_per_unit_median: row.ns_per_unit_median,
+        commit: run.commit,
+      });
+    }
+  }
+  const rustiaBaselines = new Map(
+    rows
+      .filter((row) => row.adapter === "rustia")
+      .map((row) => [`${row.runtime}\0${row.workload}`, row.ns_per_unit_min]),
+  );
+  return rows
+    .map((row) => ({
+      ...row,
+      speed_vs_rustia: rustiaBaselines.get(`${row.runtime}\0${row.workload}`) == null
+        ? null
+        : rustiaBaselines.get(`${row.runtime}\0${row.workload}`) / row.ns_per_unit_min,
+    }))
+    .sort((left, right) =>
+      left.runtime.localeCompare(right.runtime) ||
+      left.workload.localeCompare(right.workload) ||
+      left.adapter.localeCompare(right.adapter)
+    );
+}
+
+function wasmDispatchRows(data) {
+  const rows = [];
+  for (const run of data.runs) {
+    for (const row of run.rows) {
+      rows.push({
+        runtime: runtimeLabel(run.runtime),
+        style: row.style,
+        feature: row.feature,
+        ns_per_dispatch_min: row.ns_per_dispatch_min,
+        ns_per_dispatch_median: row.ns_per_dispatch_median,
+        commit: run.commit,
+      });
+    }
+  }
+  const baselines = new Map(
+    rows
+      .filter((row) => row.style === "br_table")
+      .map((row) => [row.runtime, row.ns_per_dispatch_min]),
+  );
+  return rows
+    .map((row) => ({
+      ...row,
+      slower_vs_br_table: baselines.get(row.runtime) == null
+        ? null
+        : row.ns_per_dispatch_min / baselines.get(row.runtime),
+    }))
+    .sort((left, right) => left.runtime.localeCompare(right.runtime) || left.style.localeCompare(right.style));
+}
+
+function wasmTargetSection(data) {
+  const rows = wasmTargetRows(data);
+  const runtimes = unique(rows.map((row) => row.runtime));
+  const adapters = unique(rows.map((row) => row.adapter));
+  return `
+    <section class="panel" id="wasm-target">
+      <div class="section-head">
+        <div>
+          <h2>Wasm Target Bench</h2>
+          <p>${formatInteger(rows.length)} rows · ${formatInteger(adapters.length)} adapters · ${formatInteger(runtimes.length)} runtimes · source <code>${escapeHtml(relative(wasmResultsPath))}</code></p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Runtime</th>
+              <th>Adapter</th>
+              <th>Workload</th>
+              <th>Min ns/unit</th>
+              <th>Median</th>
+              <th>vs rustia</th>
+              <th>Commit</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td>${escapeHtml(row.runtime)}</td>
+                <td><strong>${escapeHtml(row.adapter)}</strong> <span class="subtle">${escapeHtml(row.dialect)}</span></td>
+                <td>${escapeHtml(row.workload)}</td>
+                <td>${formatNumber(row.ns_per_unit_min)}</td>
+                <td>${formatNumber(row.ns_per_unit_median)}</td>
+                <td>${formatSpeed(row.speed_vs_rustia)}</td>
+                <td>${escapeHtml(row.commit)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function wasmDispatchSection(data) {
+  const rows = wasmDispatchRows(data);
+  const runtimes = unique(rows.map((row) => row.runtime));
+  return `
+    <section class="panel" id="wasm-dispatch">
+      <div class="section-head">
+        <div>
+          <h2>Wasm Dispatch Bench</h2>
+          <p>${formatInteger(rows.length)} rows · ${formatInteger(runtimes.length)} runtimes · source <code>${escapeHtml(relative(wasmDispatchPath))}</code></p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Runtime</th>
+              <th>Style</th>
+              <th>Min ns/dispatch</th>
+              <th>Median</th>
+              <th>vs br_table</th>
+              <th>Commit</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td>${escapeHtml(row.runtime)}</td>
+                <td><strong>${escapeHtml(row.style)}</strong> <span class="subtle">${escapeHtml(row.feature)}</span></td>
+                <td>${formatNumber(row.ns_per_dispatch_min)}</td>
+                <td>${formatNumber(row.ns_per_dispatch_median)}</td>
+                <td>${formatSpeed(row.slower_vs_br_table)}</td>
+                <td>${escapeHtml(row.commit)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function render(data, wasmResults, wasmDispatchResults) {
   const summary = summarize(data);
+  const wasmRows = wasmTargetRows(wasmResults);
+  const dispatchRows = wasmDispatchRows(wasmDispatchResults);
   const totalMatchups = groupBy(summary.rows, (row) => `${row.target}\0${row.workload}`).size;
   const latestCommit = summary.rows
     .slice()
@@ -476,6 +752,12 @@ function render(data) {
     .result-label span {
       color: var(--muted);
       font-size: 13px;
+    }
+
+    .subtle {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
     }
 
     .nav {
@@ -685,19 +967,25 @@ function render(data) {
         ${metric(formatInteger(data.metadata.row_count), "current result rows")}
         ${metric(formatInteger(data.metadata.engines.length), "engines")}
         ${metric(formatInteger(data.metadata.workloads.length), "workloads")}
+        ${metric(formatInteger(wasmRows.length), "wasm target rows")}
+        ${metric(formatInteger(dispatchRows.length), "wasm dispatch rows")}
         ${metric(escapeHtml(latestCommit), "latest commit in snapshot")}
         ${metric(`${formatTime(summary.minTimestamp)} to ${formatTime(summary.maxTimestamp)}`, "measurement window")}
       </div>
     </section>
 
     <nav class="nav" aria-label="Targets">
+      <a href="#wasm-target">Wasm Target</a>
+      <a href="#wasm-dispatch">Wasm Dispatch</a>
       ${summary.targetRows.map((group) => `<a href="#${escapeHtml(slug(group.target))}">${escapeHtml(group.target)}</a>`).join("")}
     </nav>
 
     ${engineSummaryTable(summary.engineRows, totalMatchups)}
+    ${wasmTargetSection(wasmResults)}
+    ${wasmDispatchSection(wasmDispatchResults)}
     ${summary.targetRows.map(targetSection).join("")}
 
-    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. History <code>${escapeHtml(data.metadata.history)}</code> (${escapeHtml(data.metadata.history_schema)}). The dashboard is deterministic and contains no external assets or runtime JavaScript. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(data.metadata.history)}</code> (${escapeHtml(data.metadata.history_schema)}). The dashboard is deterministic and contains no external assets or runtime JavaScript. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
 </body>
 </html>
@@ -706,7 +994,9 @@ function render(data) {
 
 function main() {
   const data = readData();
-  const html = render(data).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
+  const wasmResults = readWasmResults();
+  const wasmDispatchResults = readWasmDispatchResults();
+  const html = render(data, wasmResults, wasmDispatchResults).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
   const output = `${html}\n`;
   if (checkOnly) {
     let current;

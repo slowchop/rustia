@@ -121,6 +121,12 @@
       font-size: 13px;
     }
 
+    .subtle {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
     .nav {
       display: flex;
       flex-wrap: wrap;
@@ -345,6 +351,18 @@
 
 
     <div class="metric">
+      <strong>40</strong>
+      <span>wasm target rows</span>
+    </div>
+
+
+    <div class="metric">
+      <strong>8</strong>
+      <span>wasm dispatch rows</span>
+    </div>
+
+
+    <div class="metric">
       <strong>9f3b0d1</strong>
       <span>latest commit in snapshot</span>
     </div>
@@ -359,6 +377,8 @@
     </section>
 
     <nav class="nav" aria-label="Targets">
+      <a href="#wasm-target">Wasm Target</a>
+      <a href="#wasm-dispatch">Wasm Dispatch</a>
       <a href="#macos-aarch64">macos-aarch64</a>
     </nav>
 
@@ -512,6 +532,533 @@
                   <td>14,206</td>
                   <td>1 targets, 5 workloads</td>
                 </tr>
+
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+
+    <section class="panel" id="wasm-target">
+      <div class="section-head">
+        <div>
+          <h2>Wasm Target Bench</h2>
+          <p>40 rows · 2 adapters · 4 runtimes · source <code>bench/wasm/current-results.json</code></p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Runtime</th>
+              <th>Adapter</th>
+              <th>Workload</th>
+              <th>Min ns/unit</th>
+              <th>Median</th>
+              <th>vs rustia</th>
+              <th>Commit</th>
+            </tr>
+          </thead>
+          <tbody>
+
+              <tr>
+                <td>JavaScriptCore/bun</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>closures_upvalues</td>
+                <td>242</td>
+                <td>249</td>
+                <td>3.763x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>JavaScriptCore/bun</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>closures_upvalues</td>
+                <td>909</td>
+                <td>930</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>JavaScriptCore/bun</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>dense_tables</td>
+                <td>272,077</td>
+                <td>421,794</td>
+                <td>0.91x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>JavaScriptCore/bun</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>dense_tables</td>
+                <td>247,579</td>
+                <td>251,704</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>JavaScriptCore/bun</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>generic_iteration</td>
+                <td>4,302</td>
+                <td>4,346</td>
+                <td>7.186x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>JavaScriptCore/bun</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>generic_iteration</td>
+                <td>30,915</td>
+                <td>41,664</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>JavaScriptCore/bun</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>sparse_tables</td>
+                <td>98,555</td>
+                <td>110,179</td>
+                <td>1.526x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>JavaScriptCore/bun</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>sparse_tables</td>
+                <td>150,417</td>
+                <td>290,102</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>JavaScriptCore/bun</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>stdlib_math_table</td>
+                <td>1,048</td>
+                <td>1,139</td>
+                <td>1.64x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>JavaScriptCore/bun</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>stdlib_math_table</td>
+                <td>1,720</td>
+                <td>1,726</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>SpiderMonkey/spidermonkey</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>closures_upvalues</td>
+                <td>239</td>
+                <td>292</td>
+                <td>3.665x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>SpiderMonkey/spidermonkey</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>closures_upvalues</td>
+                <td>875</td>
+                <td>968</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>SpiderMonkey/spidermonkey</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>dense_tables</td>
+                <td>187,435</td>
+                <td>210,334</td>
+                <td>1.453x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>SpiderMonkey/spidermonkey</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>dense_tables</td>
+                <td>272,351</td>
+                <td>290,944</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>SpiderMonkey/spidermonkey</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>generic_iteration</td>
+                <td>4,660</td>
+                <td>5,149</td>
+                <td>8.9x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>SpiderMonkey/spidermonkey</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>generic_iteration</td>
+                <td>41,473</td>
+                <td>44,733</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>SpiderMonkey/spidermonkey</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>sparse_tables</td>
+                <td>102,385</td>
+                <td>111,453</td>
+                <td>1.819x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>SpiderMonkey/spidermonkey</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>sparse_tables</td>
+                <td>186,224</td>
+                <td>188,772</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>SpiderMonkey/spidermonkey</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>stdlib_math_table</td>
+                <td>1,124</td>
+                <td>1,236</td>
+                <td>1.97x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>SpiderMonkey/spidermonkey</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>stdlib_math_table</td>
+                <td>2,215</td>
+                <td>2,354</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/deno</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>closures_upvalues</td>
+                <td>211</td>
+                <td>213</td>
+                <td>3.548x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/deno</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>closures_upvalues</td>
+                <td>750</td>
+                <td>757</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/deno</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>dense_tables</td>
+                <td>163,822</td>
+                <td>187,524</td>
+                <td>1.422x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/deno</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>dense_tables</td>
+                <td>232,973</td>
+                <td>267,892</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/deno</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>generic_iteration</td>
+                <td>4,209</td>
+                <td>4,554</td>
+                <td>6.264x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/deno</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>generic_iteration</td>
+                <td>26,363</td>
+                <td>31,960</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/deno</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>sparse_tables</td>
+                <td>84,874</td>
+                <td>95,632</td>
+                <td>2.114x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/deno</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>sparse_tables</td>
+                <td>179,428</td>
+                <td>194,977</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/deno</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>stdlib_math_table</td>
+                <td>1,050</td>
+                <td>1,109</td>
+                <td>1.54x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/deno</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>stdlib_math_table</td>
+                <td>1,617</td>
+                <td>1,861</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/node</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>closures_upvalues</td>
+                <td>230</td>
+                <td>231</td>
+                <td>3.341x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/node</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>closures_upvalues</td>
+                <td>770</td>
+                <td>824</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/node</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>dense_tables</td>
+                <td>175,354</td>
+                <td>187,257</td>
+                <td>1.255x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/node</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>dense_tables</td>
+                <td>220,093</td>
+                <td>255,406</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/node</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>generic_iteration</td>
+                <td>4,566</td>
+                <td>5,505</td>
+                <td>6.039x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/node</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>generic_iteration</td>
+                <td>27,576</td>
+                <td>31,852</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/node</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>sparse_tables</td>
+                <td>95,324</td>
+                <td>100,752</td>
+                <td>1.743x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/node</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>sparse_tables</td>
+                <td>166,151</td>
+                <td>174,024</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/node</td>
+                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td>stdlib_math_table</td>
+                <td>1,083</td>
+                <td>1,176</td>
+                <td>1.557x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/node</td>
+                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td>stdlib_math_table</td>
+                <td>1,686</td>
+                <td>1,853</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+
+    <section class="panel" id="wasm-dispatch">
+      <div class="section-head">
+        <div>
+          <h2>Wasm Dispatch Bench</h2>
+          <p>8 rows · 4 runtimes · source <code>bench/wasm/dispatch-current-results.json</code></p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Runtime</th>
+              <th>Style</th>
+              <th>Min ns/dispatch</th>
+              <th>Median</th>
+              <th>vs br_table</th>
+              <th>Commit</th>
+            </tr>
+          </thead>
+          <tbody>
+
+              <tr>
+                <td>JavaScriptCore/bun</td>
+                <td><strong>br_table</strong> <span class="subtle">core br_table dispatch</span></td>
+                <td>0.865</td>
+                <td>1.011</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>JavaScriptCore/bun</td>
+                <td><strong>call_ref</strong> <span class="subtle">typed function reference dispatch</span></td>
+                <td>3.167</td>
+                <td>3.491</td>
+                <td>3.661x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>SpiderMonkey/spidermonkey</td>
+                <td><strong>br_table</strong> <span class="subtle">core br_table dispatch</span></td>
+                <td>0.568</td>
+                <td>0.626</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>SpiderMonkey/spidermonkey</td>
+                <td><strong>call_ref</strong> <span class="subtle">typed function reference dispatch</span></td>
+                <td>9.63</td>
+                <td>9.674</td>
+                <td>17x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/deno</td>
+                <td><strong>br_table</strong> <span class="subtle">core br_table dispatch</span></td>
+                <td>0.386</td>
+                <td>0.386</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/deno</td>
+                <td><strong>call_ref</strong> <span class="subtle">typed function reference dispatch</span></td>
+                <td>1.039</td>
+                <td>1.101</td>
+                <td>2.693x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/node</td>
+                <td><strong>br_table</strong> <span class="subtle">core br_table dispatch</span></td>
+                <td>0.424</td>
+                <td>0.45</td>
+                <td>1x</td>
+                <td>b5573b6</td>
+              </tr>
+
+              <tr>
+                <td>V8/node</td>
+                <td><strong>call_ref</strong> <span class="subtle">typed function reference dispatch</span></td>
+                <td>1.114</td>
+                <td>1.267</td>
+                <td>2.628x</td>
+                <td>b5573b6</td>
+              </tr>
 
           </tbody>
         </table>
@@ -1340,7 +1887,7 @@
     </section>
 
 
-    <p class="footnote">Schema <code>rustia.bench.current-results.v1</code>. History <code>bench/history/runs.jsonl</code> (jsonl-v1). The dashboard is deterministic and contains no external assets or runtime JavaScript. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>rustia.bench.current-results.v1</code>. Wasm sources <code>bench/wasm/current-results.json</code> and <code>bench/wasm/dispatch-current-results.json</code>. History <code>bench/history/runs.jsonl</code> (jsonl-v1). The dashboard is deterministic and contains no external assets or runtime JavaScript. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
 </body>
 </html>
