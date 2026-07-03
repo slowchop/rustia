@@ -23,7 +23,8 @@ at full Luau parity.
 - Public embedding API first slice: typed `run<T>()`, owned values with `Option<T>`/`Vec<T>`/`BTreeMap<String, T>`/table
   conversions, source-named run/compile helpers, typed/capability-tagged host functions with fallible
   `rustia::Result<T>` returns and up to eight arguments/results, retained script functions, pre-install host
-  signature metadata, serde, deterministic extensions, hot reload, and macro sugar.
+  signature metadata, retained-handle freshness checks, serde, deterministic extensions, hot reload, and macro
+  sugar.
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](design/progress.json) into
@@ -32,11 +33,11 @@ public rustia project; actual grabby integration work is explicitly out of scope
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 67% | 65% |
-| Usable embedded scripting crate | 75% | 70% |
+| Whole public rustia project | 68% | 65% |
+| Usable embedded scripting crate | 76% | 70% |
 | Full public Luau engine release | 48% | 58% |
 | Standalone benchmark OSS project | 72% | 80% |
-| Public release readiness | 64% | 75% |
+| Public release readiness | 65% | 75% |
 
 - Current conformance runner: **684 fixtures**, **481 refs**, **0 pending**.
 - The benchmark harness has all 10 requested adapters; Lua 5.4 runs separately from Luau because `mlua-sys`
@@ -61,7 +62,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
 
 ## Examples
 - `cargo run -p rustia --example embedding` — globals, fallible typed host functions, deterministic extensions, retained script functions, and serde.
-- `cargo run -p rustia --example hot_reload` — compile/install hot reload and retained-handle behavior across reload failures.
+- `cargo run -p rustia --example hot_reload` — compile/install hot reload plus retained-handle survival and freshness checks.
 
 ## CLI
 - `cargo run -p rustia-cli -- path/to/script.luau`

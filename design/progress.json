@@ -39,16 +39,16 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 67,
+      "complete": 68,
       "confidence": 65,
-      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, source-named facade diagnostics, typed and fallible host diagnostic polish, host signature metadata, capability-tagged host API helpers, retained-handle generation semantics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
+      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, source-named facade diagnostics, typed and fallible host diagnostic polish, host signature metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
       "future_plan": "Harden P1, finish benchmark gates, then move toward full public Luau parity."
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 75,
+      "complete": 76,
       "confidence": 70,
-      "state": "The rustia facade supports typed run<T>, source-named run/compile helpers, owned values with Option/Vec/BTreeMap/table conversions, typed host functions with argument-context diagnostics and fallible rustia::Result<T> returns, tuple arguments/results through arity 8, pre-install host signature metadata, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.",
+      "state": "The rustia facade supports typed run<T>, source-named run/compile helpers, owned values with Option/Vec/BTreeMap/table conversions, typed host functions with argument-context diagnostics and fallible rustia::Result<T> returns, tuple arguments/results through arity 8, pre-install host signature metadata, capability-tagged host helpers, retained functions with generation/freshness metadata and fail-closed current calls, serde, extensions, hot reload, and compile-checked examples.",
       "future_plan": "Stabilize API semantics, diagnostics, capability policy, and migration docs."
     },
     {
@@ -67,9 +67,9 @@
     },
     {
       "name": "Public release readiness",
-      "complete": 64,
+      "complete": 65,
       "confidence": 75,
-      "state": "License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, source-named facade diagnostics, fallible host callback diagnostics, host signature metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
+      "state": "License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, source-named facade diagnostics, fallible host callback diagnostics, retained-handle freshness checks, host signature metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
       "future_plan": "Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims."
     }
   ],
@@ -319,16 +319,16 @@
         },
         {
           "name": "Retained handles",
-          "complete": 64,
+          "complete": 69,
           "confidence": 65,
-          "state": "Script function handles can be retained, called, and inspected for the install generation they came from.",
-          "future_plan": "Document migration guidance and decide whether future invalidation hooks are needed."
+          "state": "Script function and export handles can be retained, called, inspected for the install generation they came from, checked for freshness, and called through a fail-closed current-generation path.",
+          "future_plan": "Document migration guidance and decide whether explicit invalidation hooks are needed beyond freshness checks."
         },
         {
           "name": "Hot reload",
-          "complete": 58,
+          "complete": 61,
           "confidence": 65,
-          "state": "Compile/install/hot-reload entry points and source-named run helpers exist; tests cover source-name diagnostics, failed-reload old-program survival, and generation-stamped handles across successful reload.",
+          "state": "Compile/install/hot-reload entry points and source-named run helpers exist; tests cover source-name diagnostics, failed-reload old-program survival, generation-stamped handles across successful reload, and stale-handle fail-closed calls.",
           "future_plan": "Add migration docs and broader diagnostics around install-time runtime failures."
         },
         {

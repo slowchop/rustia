@@ -31,6 +31,15 @@ return {
     )?;
     let new_decide = exports.function(&mut rustia, "decide")?;
     assert_eq!(new_decide.call::<_, f64>(&mut rustia, (21.0,))?, 42.0);
+    assert!(!old_decide.is_current(&rustia));
+    assert!(old_decide
+        .call_current::<_, f64>(&mut rustia, (1.0,))
+        .is_err());
+    assert!(new_decide.is_current(&rustia));
+    assert_eq!(
+        new_decide.call_current::<_, f64>(&mut rustia, (21.0,))?,
+        42.0
+    );
 
     println!("hot reload example ok");
     Ok(())

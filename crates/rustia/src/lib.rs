@@ -867,11 +867,34 @@ return {
         assert_eq!(rustia.generation(), second_generation);
         assert_eq!(first_decide.generation(), first_generation);
         assert_eq!(second_decide.generation(), second_generation);
+        assert!(!first_exports.is_current(&rustia));
+        assert!(!first_decide.is_current(&rustia));
+        assert!(second_exports.is_current(&rustia));
+        assert!(second_decide.is_current(&rustia));
+        let stale_exports = first_exports.ensure_current(&rustia).unwrap_err();
+        assert!(
+            stale_exports
+                .to_string()
+                .contains("stale exports handle from generation"),
+            "{stale_exports}"
+        );
 
         let old_result: f64 = first_decide.call(&mut rustia, ()).unwrap();
         let new_result: f64 = second_decide.call(&mut rustia, ()).unwrap();
         assert_eq!(old_result, 1.0);
         assert_eq!(new_result, 2.0);
+
+        let stale = first_decide
+            .call_current::<_, f64>(&mut rustia, ())
+            .unwrap_err();
+        assert!(
+            stale
+                .to_string()
+                .contains("stale function handle from generation"),
+            "{stale}"
+        );
+        let current: f64 = second_decide.call_current(&mut rustia, ()).unwrap();
+        assert_eq!(current, 2.0);
     }
 
     #[test]

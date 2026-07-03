@@ -22,6 +22,14 @@ impl Function {
         self.generation
     }
 
+    pub fn is_current(&self, rustia: &Rustia) -> bool {
+        self.generation == rustia.generation()
+    }
+
+    pub fn ensure_current(&self, rustia: &Rustia) -> Result<()> {
+        ensure_current_generation("function handle", self.generation, rustia.generation())
+    }
+
     pub fn call<Args, Return>(&self, rustia: &mut Rustia, args: Args) -> Result<Return>
     where
         Args: IntoRustiaMulti,
@@ -42,6 +50,15 @@ impl Function {
             .collect::<Result<Vec<_>>>()?;
         Return::from_rustia_multi(results)
     }
+
+    pub fn call_current<Args, Return>(&self, rustia: &mut Rustia, args: Args) -> Result<Return>
+    where
+        Args: IntoRustiaMulti,
+        Return: FromRustiaMulti,
+    {
+        self.ensure_current(rustia)?;
+        self.call(rustia, args)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -57,6 +74,14 @@ impl Exports {
 
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    pub fn is_current(&self, rustia: &Rustia) -> bool {
+        self.generation == rustia.generation()
+    }
+
+    pub fn ensure_current(&self, rustia: &Rustia) -> Result<()> {
+        ensure_current_generation("exports handle", self.generation, rustia.generation())
     }
 
     pub fn value(&self, rustia: &mut Rustia) -> Result<OwnedValue> {
@@ -95,6 +120,19 @@ impl Exports {
             .raw_table_get_value(self.value, key)
             .map_err(Error::Vm)
     }
+}
+
+fn ensure_current_generation(
+    label: &str,
+    handle_generation: u64,
+    current_generation: u64,
+) -> Result<()> {
+    if handle_generation == current_generation {
+        return Ok(());
+    }
+    Err(Error::Embed(format!(
+        "stale {label} from generation {handle_generation}; current generation is {current_generation}"
+    )))
 }
 
 pub trait IntoHostFunction<Args, Return>: Send + Sync + 'static {

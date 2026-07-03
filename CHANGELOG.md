@@ -42,6 +42,8 @@ Current unpublished workspace version: `0.0.1`.
   functions, and retained calls.
 - Retained script functions and export tables now expose the successful install
   generation they came from, making hot-reload handle semantics explicit.
+- Retained function/export handles now expose freshness checks, and
+  `Function::call_current` rejects stale handles after a successful hot reload.
 - The public `Rustia` facade now has capability-specific host function helpers,
   and `RustiaExtension` can mark external mutable-state reads explicitly.
 - `RustiaExtension` exposes namespace plus per-function name, fuel,

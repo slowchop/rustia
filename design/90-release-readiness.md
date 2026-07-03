@@ -71,9 +71,11 @@ from `publish = false` to publishable.
     helpers, fallible typed host functions, deterministic extensions, retained
     script functions, and serde.
   - `crates/rustia/examples/hot_reload.rs` covers compile/install hot reload
-    and retained handles across reload failures.
+    plus retained-handle survival and freshness checks.
 - Retained `Function` handles and `Exports` expose install generations, and
-  failed hot reloads leave the current generation unchanged.
+  failed hot reloads leave the current generation unchanged. `is_current()` /
+  `ensure_current()` expose freshness checks, while `Function::call_current()`
+  rejects stale handles after a successful hot reload.
 
 ## Runtime Gate
 

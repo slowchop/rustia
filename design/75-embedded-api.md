@@ -77,7 +77,7 @@ Core pieces:
   values.
 - typed host functions support fallible `rustia::Result<T>` returns.
 - typed host functions and retained script calls support tuple-shaped arguments/results through arity 8.
-- retained handles for functions/tables.
+- retained handles for functions/tables with generation freshness checks.
 - internal gc-arena `Value` remains behind the facade.
 
 Reason: best fit for koto migration, grabby ergonomics, and public API clarity.
@@ -181,8 +181,10 @@ Requirements:
 
 Current implementation slice: source-named run/compile helpers preserve host-provided names in runtime
 diagnostics. `Exports::generation()`, `Function::generation()`, and `Rustia::generation()` report the successful
-install generation. Failed hot reloads do not advance the generation, and old retained function handles remain
-callable because the VM retains prior dynamic programs.
+install generation. `is_current()` / `ensure_current()` let hosts check retained handle freshness, and
+`Function::call_current()` gives hosts a fail-closed call path for stale handles. Failed hot reloads do not
+advance the generation, and old retained function handles remain callable through `Function::call()` because the
+VM retains prior dynamic programs.
 
 ### 5. Optional macro/codegen sugar
 
