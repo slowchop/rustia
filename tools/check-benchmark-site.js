@@ -11,6 +11,7 @@ const appPath = path.join(siteDir, "app.js");
 const stylePath = path.join(siteDir, "style.css");
 const historyPath = path.join(root, "bench", "history", "runs.jsonl");
 const currentResultsPath = path.join(root, "bench", "current-results.json");
+const wasmGatePath = path.join(root, "bench", "wasm-gate.json");
 
 function fail(message) {
   console.error(`check-benchmark-site: ${message}`);
@@ -172,18 +173,101 @@ function checkCurrentResultsAgreement(historyRecords, currentResults) {
   }
 }
 
+function isObject(value) {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isCompleteStatus(status) {
+  return ["complete", "measured", "closed"].includes(status);
+}
+
+function checkWasmGate(gate) {
+  assertEqual(gate.schema_version, 1, "wasm gate schema_version");
+  assertEqual(gate.schema, "rustia.bench.wasm-gate.v1", "wasm gate schema");
+  assertEqual(gate.source, "script-bench-harness", "wasm gate source");
+  if (typeof gate.updated !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(gate.updated)) {
+    fail(`${relative(wasmGatePath)} updated must be an ISO date`);
+  }
+  for (const field of ["scope", "status", "summary"]) {
+    if (typeof gate[field] !== "string" || gate[field].trim() === "") {
+      fail(`${relative(wasmGatePath)} ${field} must be a non-empty string`);
+    }
+  }
+  if (!Array.isArray(gate.requirements) || gate.requirements.length === 0) {
+    fail(`${relative(wasmGatePath)} requirements must be a non-empty array`);
+  }
+
+  const requiredIds = new Set([
+    "v8-production-rustia-wasm",
+    "javascriptcore-production-rustia-wasm",
+    "spidermonkey-production-rustia-wasm",
+    "call-ref-vs-br-table",
+  ]);
+  const completeRequired = [];
+  const seen = new Set();
+  for (const [index, requirement] of gate.requirements.entries()) {
+    const label = `${relative(wasmGatePath)} requirements[${index}]`;
+    if (!isObject(requirement)) {
+      fail(`${label} must be an object`);
+    }
+    for (const field of ["id", "label", "engine", "runtime", "status", "next"]) {
+      if (typeof requirement[field] !== "string" || requirement[field].trim() === "") {
+        fail(`${label}.${field} must be a non-empty string`);
+      }
+    }
+    if (requirement.required !== true) {
+      fail(`${label}.required must be true for the current pre-lock gate`);
+    }
+    seen.add(requirement.id);
+    if (isCompleteStatus(requirement.status)) {
+      completeRequired.push(requirement.id);
+    }
+    if (!Array.isArray(requirement.evidence)) {
+      fail(`${label}.evidence must be an array`);
+    }
+    for (const [evidenceIndex, evidence] of requirement.evidence.entries()) {
+      const evidenceLabel = `${label}.evidence[${evidenceIndex}]`;
+      if (!isObject(evidence)) {
+        fail(`${evidenceLabel} must be an object`);
+      }
+      for (const field of ["kind", "summary"]) {
+        if (typeof evidence[field] !== "string" || evidence[field].trim() === "") {
+          fail(`${evidenceLabel}.${field} must be a non-empty string`);
+        }
+      }
+      if (evidence.path != null && evidence.path !== "") {
+        const evidencePath = path.join(root, evidence.path);
+        if (!fs.existsSync(evidencePath)) {
+          fail(`${evidenceLabel}.path does not exist: ${evidence.path}`);
+        }
+      }
+    }
+  }
+
+  for (const id of requiredIds) {
+    if (!seen.has(id)) {
+      fail(`${relative(wasmGatePath)} is missing requirement ${id}`);
+    }
+  }
+  const expectedComplete = completeRequired.length === gate.requirements.length;
+  assertEqual(gate.gate_complete, expectedComplete, "wasm gate gate_complete");
+}
+
 const html = read(indexPath);
 const js = read(appPath);
 const css = read(stylePath);
 const historyRecords = parseHistory(read(historyPath));
 const currentResults = parseJson(currentResultsPath);
+const wasmGate = parseJson(wasmGatePath);
 
 requireIncludes(html, '<link rel="stylesheet" href="./style.css">', indexPath, "local stylesheet link");
 requireIncludes(html, '<script src="./app.js" defer></script>', indexPath, "local app script");
 requireIncludes(html, 'href="../history/runs.jsonl"', indexPath, "history download link");
 requireIncludes(js, 'fetch("../history/runs.jsonl"', appPath, "relative history fetch");
+requireIncludes(js, 'fetch("../wasm-gate.json"', appPath, "relative wasm gate fetch");
 requireIncludes(js, "function parseHistory(text)", appPath, "JSONL parser");
 requireIncludes(js, "function drawChart()", appPath, "canvas chart renderer");
+requireIncludes(js, "function renderWasmGate()", appPath, "wasm gate renderer");
 noExternalAssets(html, indexPath);
 noExternalAssets(css, stylePath);
 noExternalAssets(js, appPath);
@@ -196,7 +280,8 @@ for (const id of queriedIds(js)) {
 }
 
 checkCurrentResultsAgreement(historyRecords, currentResults);
+checkWasmGate(wasmGate);
 
 console.log(
-  `benchmark site contract ok: ${historyRecords.length} history records, ${currentResults.metadata.row_count} current rows`,
+  `benchmark site contract ok: ${historyRecords.length} history records, ${currentResults.metadata.row_count} current rows, ${wasmGate.requirements.length} wasm gate requirements`,
 );

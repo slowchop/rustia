@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "schema": "rustia.bench.wasm-gate.v1",
+  "source": "script-bench-harness",
+  "updated": "2026-07-03",
+  "scope": "Production rustia wasm value-layout and dispatch pre-lock gate. Grabby integration work is excluded.",
+  "status": "open",
+  "gate_complete": false,
+  "summary": "The pre-lock wasm decision remains open until production rustia wasm is measured on V8, JavaScriptCore, and SpiderMonkey, and call_ref is checked against br_table on the same engine family.",
+  "requirements": [
+    {
+      "id": "v8-production-rustia-wasm",
+      "label": "V8 production rustia wasm",
+      "engine": "V8",
+      "runtime": "node / deno / d8",
+      "required": true,
+      "status": "pending-production-harness",
+      "evidence": [
+        {
+          "kind": "design-spike",
+          "path": "design/65-wasmjit.md",
+          "summary": "V8 wasm-emit hot-kernel spike was verified, but it is not a production rustia wasm measurement."
+        }
+      ],
+      "next": "Build the production rustia wasm harness and record benchmark history from a clean baseline."
+    },
+    {
+      "id": "javascriptcore-production-rustia-wasm",
+      "label": "JavaScriptCore production rustia wasm",
+      "engine": "JavaScriptCore",
+      "runtime": "jsc / bun / Safari Technology Preview",
+      "required": true,
+      "status": "missing-measurement",
+      "evidence": [],
+      "next": "Run the production rustia wasm benchmark under a JSC runtime and commit the measurement metadata."
+    },
+    {
+      "id": "spidermonkey-production-rustia-wasm",
+      "label": "SpiderMonkey production rustia wasm",
+      "engine": "SpiderMonkey",
+      "runtime": "js / sm",
+      "required": true,
+      "status": "missing-measurement",
+      "evidence": [],
+      "next": "Run the production rustia wasm benchmark under SpiderMonkey and commit the measurement metadata."
+    },
+    {
+      "id": "call-ref-vs-br-table",
+      "label": "call_ref vs br_table dispatch",
+      "engine": "Cross-engine wasm",
+      "runtime": "V8 / JavaScriptCore / SpiderMonkey",
+      "required": true,
+      "status": "pending-microbench",
+      "evidence": [],
+      "next": "Add the call_ref versus br_table microbench to the wasm harness and compare it across the required engines."
+    }
+  ]
+}

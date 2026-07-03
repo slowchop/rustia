@@ -181,6 +181,130 @@ select {
   line-height: 1.2;
 }
 
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 8px;
+  background: #f8fafc;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+  text-align: center;
+  white-space: normal;
+}
+
+.chip-good {
+  border-color: #a6d8bc;
+  background: #ecfdf3;
+  color: var(--good);
+}
+
+.chip-warn {
+  border-color: #f5c88a;
+  background: #fff7ed;
+  color: #9a5b13;
+}
+
+.wasm-gate-panel {
+  margin-bottom: 16px;
+}
+
+.gate-summary {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px 0;
+}
+
+.gate-summary p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.gate-meter {
+  overflow: hidden;
+  block-size: 8px;
+  border-radius: 999px;
+  background: #edf0f5;
+}
+
+.gate-meter-fill {
+  block-size: 100%;
+  inline-size: 0%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: inline-size 160ms ease;
+}
+
+.gate-count {
+  font-size: 13px;
+}
+
+.gate-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+
+.gate-item {
+  min-width: 0;
+  border-left: 3px solid #f5c88a;
+  padding: 2px 0 2px 12px;
+}
+
+.gate-item-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.gate-item-heading div {
+  min-width: 0;
+}
+
+.gate-item-heading strong,
+.gate-item-heading span {
+  display: block;
+}
+
+.gate-item-heading strong {
+  font-size: 14px;
+}
+
+.gate-item-heading div > span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.evidence-list {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.evidence-list a {
+  color: var(--accent-strong);
+}
+
+.gate-empty,
+.gate-next {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.gate-next {
+  color: var(--ink);
+}
+
 .grid {
   display: grid;
   grid-template-columns: minmax(420px, 0.9fr) minmax(520px, 1.1fr);
@@ -299,6 +423,7 @@ code {
   }
 
   .metrics,
+  .gate-list,
   .grid {
     grid-template-columns: 1fr;
   }

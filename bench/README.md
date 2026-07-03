@@ -41,6 +41,12 @@ CI, or static-site generation:
 cargo run -p script-bench-harness -- --list-json
 ```
 
+Emit the wasm pre-lock gate tracker as deterministic JSON:
+
+```sh
+cargo run -p script-bench-harness -- --wasm-gate-json
+```
+
 Engine slots are tracked for `rustia`, `boa`, `koto`, `mlua-lua54`,
 `mlua-luau`, `rhai`, `roto`, `rquickjs`, `wasmi`, and `wasmtime`. Adapters are
 feature-gated so heavyweight dependencies do not affect the normal workspace
@@ -180,7 +186,9 @@ tracked in [`PRIOR-ART.md`](PRIOR-ART.md).
 ## Static Site
 
 `site/` contains a dependency-free dashboard that reads `history/runs.jsonl`,
-shows current leaderboards, and renders per-workload history charts.
+shows current leaderboards, renders per-workload history charts, and loads
+`wasm-gate.json` so the open V8/JSC/SpiderMonkey pre-lock requirements stay
+visible next to the rough performance comparisons.
 
 ```sh
 python3 -m http.server 8000

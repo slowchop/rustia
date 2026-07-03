@@ -54,6 +54,21 @@
         </article>
       </section>
 
+      <section class="panel wasm-gate-panel" aria-label="Wasm pre-lock gate">
+        <div class="panel-heading">
+          <h2>Wasm Pre-Lock Gate</h2>
+          <span id="wasm-gate-status" class="chip">loading</span>
+        </div>
+        <div class="gate-summary">
+          <p id="wasm-gate-summary"></p>
+          <div class="gate-meter" aria-label="Required measurements complete">
+            <div id="wasm-gate-progress" class="gate-meter-fill"></div>
+          </div>
+          <p id="wasm-gate-count" class="gate-count"></p>
+        </div>
+        <div id="wasm-gate-list" class="gate-list"></div>
+      </section>
+
       <section class="grid">
         <article class="panel leaderboard-panel">
           <div class="panel-heading">

@@ -8,6 +8,8 @@ but it is structured to become a standalone OSS benchmark project.
 - Keep `bench/history/runs.jsonl` as the append-only source of truth.
 - Keep `bench/current-results.json`, `bench/RESULTS.md`, and
   `bench/current-results.html` generated from committed history.
+- Keep `bench/wasm-gate.json` as the explicit pre-lock wasm measurement gate
+  until production rustia wasm has real V8/JSC/SpiderMonkey history.
 - Keep `bench/site/` static and dependency-free so history can be served from a
   plain repository or static host.
 - Keep adapter features independent. `mlua-lua54` must stay in a separate binary

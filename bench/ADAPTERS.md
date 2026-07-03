@@ -42,3 +42,8 @@ another widely used Rust-native scripting baseline, `roto` is the statically
 typed Cranelift-JIT scripting baseline, `wasmi` is the WASM interpreter
 baseline, and `wasmtime` is the Wasmtime JIT baseline for the shared `.wat`
 workload set.
+
+The `wasmi` and `wasmtime` adapters are benchmark baselines for the shared `.wat`
+workloads. They do not close rustia's browser-wasm pre-lock gate; that gate is
+tracked separately in [`wasm-gate.json`](wasm-gate.json) and requires production
+rustia wasm measurements on V8, JavaScriptCore, and SpiderMonkey.

@@ -2,6 +2,8 @@ const state = {
   records: [],
   target: "",
   workload: "",
+  wasmGate: null,
+  wasmGateError: "",
 };
 
 const colors = [
@@ -25,6 +27,11 @@ const els = {
   engines: document.querySelector("#metric-engines"),
   workloads: document.querySelector("#metric-workloads"),
   commit: document.querySelector("#metric-commit"),
+  wasmGateStatus: document.querySelector("#wasm-gate-status"),
+  wasmGateSummary: document.querySelector("#wasm-gate-summary"),
+  wasmGateProgress: document.querySelector("#wasm-gate-progress"),
+  wasmGateCount: document.querySelector("#wasm-gate-count"),
+  wasmGateList: document.querySelector("#wasm-gate-list"),
   leaderboardSubtitle: document.querySelector("#leaderboard-subtitle"),
   leaderboardBody: document.querySelector("#leaderboard-body"),
   chartSubtitle: document.querySelector("#chart-subtitle"),
@@ -47,6 +54,7 @@ els.workload.addEventListener("change", () => {
 window.addEventListener("resize", () => drawChart());
 
 loadDefaultHistory();
+loadWasmGate();
 
 async function loadDefaultHistory() {
   setStatus("Loading history");
@@ -62,6 +70,21 @@ async function loadDefaultHistory() {
     setRecords([]);
     setStatus(`Could not load history: ${error.message}`);
   }
+}
+
+async function loadWasmGate() {
+  try {
+    const response = await fetch("../wasm-gate.json", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    state.wasmGate = normalizeWasmGate(await response.json());
+    state.wasmGateError = "";
+  } catch (error) {
+    state.wasmGate = null;
+    state.wasmGateError = error.message;
+  }
+  renderWasmGate();
 }
 
 async function loadSelectedFile() {
@@ -127,6 +150,7 @@ function setRecords(records) {
 
 function render() {
   renderMetrics();
+  renderWasmGate();
   renderLeaderboard();
   renderRuns();
   drawChart();
@@ -142,6 +166,110 @@ function renderMetrics() {
     unique(state.records.map((record) => record.workload)).length,
   );
   els.commit.textContent = latest?.commit ?? "n/a";
+}
+
+function normalizeWasmGate(data) {
+  const requirements = Array.isArray(data.requirements)
+    ? data.requirements.map((requirement) => ({
+      id: String(requirement.id ?? ""),
+      label: String(requirement.label ?? requirement.id ?? "Unnamed requirement"),
+      engine: String(requirement.engine ?? "unknown"),
+      runtime: String(requirement.runtime ?? ""),
+      required: requirement.required !== false,
+      status: String(requirement.status ?? "unknown"),
+      evidence: Array.isArray(requirement.evidence)
+        ? requirement.evidence.map((item) => ({
+          kind: String(item.kind ?? "evidence"),
+          path: item.path == null ? "" : String(item.path),
+          summary: String(item.summary ?? ""),
+        }))
+        : [],
+      next: String(requirement.next ?? ""),
+    }))
+    : [];
+  return {
+    schema: String(data.schema ?? ""),
+    updated: String(data.updated ?? ""),
+    status: String(data.status ?? "unknown"),
+    gate_complete: Boolean(data.gate_complete),
+    summary: String(data.summary ?? ""),
+    requirements,
+  };
+}
+
+function renderWasmGate() {
+  if (!state.wasmGate) {
+    els.wasmGateStatus.textContent = state.wasmGateError ? "missing" : "loading";
+    els.wasmGateStatus.className = "chip chip-warn";
+    els.wasmGateSummary.textContent = state.wasmGateError
+      ? `Could not load ../wasm-gate.json: ${state.wasmGateError}`
+      : "Loading wasm gate data.";
+    els.wasmGateProgress.style.inlineSize = "0%";
+    els.wasmGateCount.textContent = "0 of 0 required measurements complete";
+    els.wasmGateList.replaceChildren();
+    return;
+  }
+
+  const required = state.wasmGate.requirements.filter((item) => item.required);
+  const complete = required.filter((item) => isCompleteStatus(item.status)).length;
+  const total = required.length;
+  const percent = total === 0 ? 100 : Math.round((complete / total) * 100);
+  els.wasmGateStatus.textContent = state.wasmGate.gate_complete ? "closed" : state.wasmGate.status;
+  els.wasmGateStatus.className = `chip ${state.wasmGate.gate_complete ? "chip-good" : "chip-warn"}`;
+  els.wasmGateSummary.textContent = state.wasmGate.summary;
+  els.wasmGateProgress.style.inlineSize = `${percent}%`;
+  els.wasmGateCount.textContent = `${complete} of ${total} required measurements complete`;
+  els.wasmGateList.replaceChildren(
+    ...state.wasmGate.requirements.map((requirement) => gateRequirementElement(requirement)),
+  );
+}
+
+function gateRequirementElement(requirement) {
+  const article = document.createElement("article");
+  article.className = "gate-item";
+  const heading = rowElement("div", [
+    rowElement("div", [
+      rowElement("strong", [document.createTextNode(requirement.label)]),
+      rowElement("span", [document.createTextNode(`${requirement.engine} · ${requirement.runtime}`)]),
+    ]),
+    chip(requirement.status, isCompleteStatus(requirement.status) ? "good" : "warn"),
+  ]);
+  heading.className = "gate-item-heading";
+
+  const evidence = requirement.evidence.length
+    ? rowElement("ul", requirement.evidence.map((item) => evidenceElement(item)))
+    : rowElement("p", [document.createTextNode("No committed production measurement yet.")]);
+  evidence.className = requirement.evidence.length ? "evidence-list" : "gate-empty";
+
+  const next = rowElement("p", [document.createTextNode(requirement.next)]);
+  next.className = "gate-next";
+  article.append(heading, evidence, next);
+  return article;
+}
+
+function evidenceElement(item) {
+  const text = `${item.kind}: ${item.summary}`;
+  const li = document.createElement("li");
+  if (item.path) {
+    const anchor = document.createElement("a");
+    anchor.href = `../../${item.path}`;
+    anchor.textContent = text;
+    li.append(anchor);
+  } else {
+    li.textContent = text;
+  }
+  return li;
+}
+
+function chip(text, tone) {
+  const span = document.createElement("span");
+  span.className = `chip chip-${tone}`;
+  span.textContent = text;
+  return span;
+}
+
+function isCompleteStatus(status) {
+  return ["complete", "measured", "closed"].includes(status);
 }
 
 function renderLeaderboard() {

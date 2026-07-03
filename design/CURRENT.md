@@ -21,6 +21,9 @@ performance still needs the continuous benchmark gate before public claims. All 
 shell, static chart dashboard, 12 workload entries including cross-adapter `string_building` source coverage, and
 the `rustia`/`boa`/`koto`/`mlua-lua54`/`mlua-luau`/`rhai`/`roto`/`rquickjs`/`wasmi`/`wasmtime` native adapters in
 place.
+The benchmark artifacts now also include a first-class wasm pre-lock gate source
+(`../bench/wasm-gate.json`) and static-site panel that makes the required
+production rustia wasm measurements explicit.
 Its generated [`../bench/CLAIMS.md`](../bench/CLAIMS.md) gate keeps public benchmark language per-workload and
 currently approves no blanket speed headline from the committed snapshot.
 The public API now has release-preflight-enforced compile-checked examples for embedding and hot reload, plus a
@@ -44,8 +47,8 @@ benchmark measurement workflow that targets only the generic `[self-hosted, benc
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 12 workload entries including
    source-covered `string_building`, append-only JSONL history, package metadata, split notes, static dashboard
-   files, and a manual self-hosted measurement workflow. Next work is the actual standalone-project split,
-   longer-run public history, and automated tracking publication.
+   files, an explicit wasm pre-lock gate artifact, and a manual self-hosted measurement workflow. Next work is
+   the actual standalone-project split, longer-run public history, and automated tracking publication.
 3. **Keep the Luau 0.709 conformance corpus green**. The current repo has 684 executable fixtures covering 481
    behavior refs with no pending rows; new engine work should add focused fixtures rather than re-opening
    pending inventory.

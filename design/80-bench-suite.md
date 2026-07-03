@@ -62,9 +62,12 @@ without fresh benchmark measurements. `.github/workflows/benchmarks.yml` is a ma
 measurement job on `[self-hosted, bench]`; it appends current benchmark history in the checkout, regenerates the
 benchmark artifacts, verifies them, and uploads the resulting files. The `bench` crate now enumerates all 10
 requested adapters, five default measured workloads, and 12 workload entries including cross-adapter source
-coverage for #15 `string_building`. It does not yet publish the JSONL history back to a tracking branch or static
-host. `tools/check-workflows.js` guards the public workflow policy: hosted CI stays hosted, the benchmark job
-stays manual, and self-hosted labels stay exactly `[self-hosted, bench]`.
+coverage for #15 `string_building`. It also owns `bench/wasm-gate.json`, a deterministic pre-lock gate tracker
+exposed by `script-bench --wasm-gate-json` and rendered by the static dashboard. That tracker records the verified
+V8 spike as spike-only evidence and keeps production rustia wasm measurements on V8, JSC, and SpiderMonkey open.
+It does not yet publish the JSONL history back to a tracking branch or static host. `tools/check-workflows.js`
+guards the public workflow policy: hosted CI stays hosted, the benchmark job stays manual, and self-hosted labels
+stay exactly `[self-hosted, bench]`.
 
 **Rustia's column:** the `bench` crate enumerates engines by **cargo feature**; `rustia` now runs through the
 default `rustia-engine` feature while the external adapters stay independently gated for standalone builds.
@@ -72,7 +75,7 @@ default `rustia-engine` feature while the external adapters stay independently g
 ## ⚠️ P1-gating (important): the WASM matrix has nothing rustia to run yet
 mlua+Luau is native C; only koto compiles to wasm. So the V8/SpiderMonkey/**JSC** matrix + the JSC-in-CI
 question are **deferred to P1** (when rustia has a wasm build). **Build NOW:** the `bench/` crate + the native
-baseline benches (koto, mlua+Luau, rhai, rune) + the golden hasher + the `RESULTS.md` generator + the tracking
+baseline benches, the wasm gate tracker, the golden hasher, the `RESULTS.md` generator, and the tracking
 pipeline. Reserve the wasm/JSC columns like rustia's.
 
 ## Where it lives

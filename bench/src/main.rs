@@ -23,6 +23,7 @@ const DEFAULT_MAX_N: u64 = 1_000_000_000;
 const HISTORY_PATH: &str = "bench/history/runs.jsonl";
 const RESULTS_PATH: &str = "bench/RESULTS.md";
 const CURRENT_RESULTS_JSON_PATH: &str = "bench/current-results.json";
+const WASM_GATE_PATH: &str = "bench/wasm-gate.json";
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -254,6 +255,7 @@ struct Config {
     commit: Option<String>,
     list: bool,
     list_json: bool,
+    wasm_gate_json: bool,
     check_history: bool,
     refresh_results: bool,
 }
@@ -280,6 +282,7 @@ impl Default for Config {
             commit: None,
             list: false,
             list_json: false,
+            wasm_gate_json: false,
             check_history: false,
             refresh_results: false,
         }
@@ -380,6 +383,10 @@ fn main() {
 
 fn run() -> Result<()> {
     let config = parse_args(env::args().skip(1))?;
+    if config.wasm_gate_json {
+        print_wasm_gate_json()?;
+        return Ok(());
+    }
     if config.list_json {
         print_inventory_json()?;
         return Ok(());
@@ -494,6 +501,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
         match arg.as_str() {
             "--list" => config.list = true,
             "--list-json" => config.list_json = true,
+            "--wasm-gate-json" => config.wasm_gate_json = true,
             "--check-history" => config.check_history = true,
             "--refresh-results" => config.refresh_results = true,
             "--no-history" => config.history = None,
@@ -597,6 +605,7 @@ fn print_usage() {
     println!("usage: script-bench [options]");
     println!("  --list");
     println!("  --list-json");
+    println!("  --wasm-gate-json");
     println!("  --check-history");
     println!("  --refresh-results");
     println!("  --engines rustia,koto,mlua-luau");
@@ -633,6 +642,13 @@ fn print_inventory() {
 fn print_inventory_json() -> Result<()> {
     let text = serde_json::to_string_pretty(&inventory_json_value())
         .map_err(|error| Error::new(format!("inventory JSON failed: {error}")))?;
+    println!("{text}");
+    Ok(())
+}
+
+fn print_wasm_gate_json() -> Result<()> {
+    let text = serde_json::to_string_pretty(&wasm_gate_json_value())
+        .map_err(|error| Error::new(format!("wasm gate JSON failed: {error}")))?;
     println!("{text}");
     Ok(())
 }
@@ -675,8 +691,71 @@ fn inventory_json_value() -> serde_json::Value {
         "default_results": RESULTS_PATH,
         "default_current_results_json": CURRENT_RESULTS_JSON_PATH,
         "default_latest_json": CURRENT_RESULTS_JSON_PATH,
+        "default_wasm_gate": WASM_GATE_PATH,
+        "wasm_gate": wasm_gate_json_value(),
         "engines": engines,
         "workloads": workloads,
+    })
+}
+
+fn wasm_gate_json_value() -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": 1,
+        "schema": "rustia.bench.wasm-gate.v1",
+        "source": "script-bench-harness",
+        "updated": "2026-07-03",
+        "scope": "Production rustia wasm value-layout and dispatch pre-lock gate. Grabby integration work is excluded.",
+        "status": "open",
+        "gate_complete": false,
+        "summary": "The pre-lock wasm decision remains open until production rustia wasm is measured on V8, JavaScriptCore, and SpiderMonkey, and call_ref is checked against br_table on the same engine family.",
+        "requirements": [
+            {
+                "id": "v8-production-rustia-wasm",
+                "label": "V8 production rustia wasm",
+                "engine": "V8",
+                "runtime": "node / deno / d8",
+                "required": true,
+                "status": "pending-production-harness",
+                "evidence": [
+                    {
+                        "kind": "design-spike",
+                        "path": "design/65-wasmjit.md",
+                        "summary": "V8 wasm-emit hot-kernel spike was verified, but it is not a production rustia wasm measurement.",
+                    },
+                ],
+                "next": "Build the production rustia wasm harness and record benchmark history from a clean baseline.",
+            },
+            {
+                "id": "javascriptcore-production-rustia-wasm",
+                "label": "JavaScriptCore production rustia wasm",
+                "engine": "JavaScriptCore",
+                "runtime": "jsc / bun / Safari Technology Preview",
+                "required": true,
+                "status": "missing-measurement",
+                "evidence": [],
+                "next": "Run the production rustia wasm benchmark under a JSC runtime and commit the measurement metadata.",
+            },
+            {
+                "id": "spidermonkey-production-rustia-wasm",
+                "label": "SpiderMonkey production rustia wasm",
+                "engine": "SpiderMonkey",
+                "runtime": "js / sm",
+                "required": true,
+                "status": "missing-measurement",
+                "evidence": [],
+                "next": "Run the production rustia wasm benchmark under SpiderMonkey and commit the measurement metadata.",
+            },
+            {
+                "id": "call-ref-vs-br-table",
+                "label": "call_ref vs br_table dispatch",
+                "engine": "Cross-engine wasm",
+                "runtime": "V8 / JavaScriptCore / SpiderMonkey",
+                "required": true,
+                "status": "pending-microbench",
+                "evidence": [],
+                "next": "Add the call_ref versus br_table microbench to the wasm harness and compare it across the required engines.",
+            },
+        ],
     })
 }
 
