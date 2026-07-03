@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>script-bench history</title>
-    <link rel="stylesheet" href="./style.css">
+    <link rel="stylesheet" href="./style.css?v=target-runtime">
   </head>
   <body>
     <header class="topbar">
@@ -81,7 +81,7 @@
           <table>
             <thead>
               <tr>
-                <th>Runtime</th>
+                <th>Target / runtime</th>
                 <th>Adapter</th>
                 <th>Workload</th>
                 <th>Min ns/unit</th>
@@ -106,7 +106,7 @@
           <table>
             <thead>
               <tr>
-                <th>Runtime</th>
+                <th>Target / runtime</th>
                 <th>Style</th>
                 <th>Min ns/dispatch</th>
                 <th>Median</th>
@@ -175,6 +175,6 @@
       </section>
     </main>
 
-    <script src="./app.js" defer></script>
+    <script src="./app.js?v=target-runtime" defer></script>
   </body>
 </html>

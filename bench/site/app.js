@@ -325,13 +325,14 @@ function renderWasmResults() {
   els.wasmResultsBody.replaceChildren(
     ...flatRows
       .sort((left, right) =>
+        left.target.localeCompare(right.target) ||
         left.runtime.localeCompare(right.runtime) ||
         left.workload.localeCompare(right.workload) ||
         left.adapter.localeCompare(right.adapter)
       )
       .map((row) =>
         rowElement("tr", [
-          cell(row.runtime),
+          targetRuntimeCell(row),
           rowElement("td", [engineLabel(row.adapter)]),
           cell(row.workload),
           cell(formatNumber(row.ns_per_unit_min)),
@@ -446,12 +447,13 @@ function renderWasmDispatch() {
   els.wasmDispatchBody.replaceChildren(
     ...flatRows
       .sort((left, right) =>
+        left.target.localeCompare(right.target) ||
         left.runtime.localeCompare(right.runtime) ||
         left.style.localeCompare(right.style)
       )
       .map((row) =>
         rowElement("tr", [
-          cell(row.runtime),
+          targetRuntimeCell(row),
           rowElement("td", [engineLabel(row.style)]),
           cell(formatNumber(row.ns_per_dispatch_min)),
           cell(formatNumber(row.ns_per_dispatch_median)),
@@ -796,6 +798,17 @@ function rowElement(tag, children) {
 function cell(text) {
   const td = document.createElement("td");
   td.textContent = text;
+  return td;
+}
+
+function targetRuntimeCell(row) {
+  const td = document.createElement("td");
+  const label = rowElement("span", [
+    rowElement("strong", [document.createTextNode(row.target)]),
+    rowElement("span", [document.createTextNode(row.runtime)]),
+  ]);
+  label.className = "target-runtime";
+  td.append(label);
   return td;
 }
 

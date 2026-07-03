@@ -395,21 +395,21 @@ function metric(value, label) {
   `;
 }
 
-function engineSummaryTable(engineRows, totalMatchups) {
+function engineSummaryTable(engineRows) {
   const maxSpeed = Math.max(...engineRows.map((row) => row.geoSpeed ?? 0), 1);
   return `
     <section class="panel">
       <div class="section-head">
         <div>
           <h2>Engine Summary</h2>
-          <p>Grouped by engine and target. Geomean uses available speed-vs-rustia ratios from the current snapshot.</p>
+          <p>One row per engine/target pair. Geomean uses available speed-vs-rustia ratios from the current snapshot.</p>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Engine / target</th>
+              <th>Engine (target)</th>
               <th>Geomean vs rustia</th>
               <th>Best results</th>
               <th>Median min ns/unit</th>
@@ -421,14 +421,14 @@ function engineSummaryTable(engineRows, totalMatchups) {
               const width = row.geoSpeed ? Math.max(2, (row.geoSpeed / maxSpeed) * 100) : 0;
               return `
                 <tr>
-                  <td><strong>${escapeHtml(row.engine)}</strong> <span class="subtle">${escapeHtml(row.targetLabel)}</span></td>
+                  <td>${engineTargetLabel(row.engine, row.targetLabel)}</td>
                   <td>
                     <div class="bar-cell">
                       <span>${formatSpeed(row.geoSpeed)}</span>
                       <div class="bar" aria-hidden="true"><span style="width: ${width.toFixed(3)}%"></span></div>
                     </div>
                   </td>
-                  <td>${formatInteger(row.bestCount)} / ${formatInteger(totalMatchups)}</td>
+                  <td>${formatInteger(row.bestCount)} / ${formatInteger(row.workloadCount)}</td>
                   <td>${formatNumber(row.medianNs)}</td>
                   <td>${formatInteger(row.workloadCount)} workloads</td>
                 </tr>
@@ -439,6 +439,10 @@ function engineSummaryTable(engineRows, totalMatchups) {
       </div>
     </section>
   `;
+}
+
+function engineTargetLabel(engine, targetLabel) {
+  return `<span class="engine-target"><strong>${escapeHtml(engine)}</strong><span>(${escapeHtml(targetLabel)})</span></span>`;
 }
 
 function workloadSection(target, workload, rows) {
@@ -530,6 +534,7 @@ function wasmTargetRows(data) {
         : rustiaBaselines.get(`${row.runtime}\0${row.workload}`) / row.ns_per_unit_min,
     }))
     .sort((left, right) =>
+      left.target.localeCompare(right.target) ||
       left.runtime.localeCompare(right.runtime) ||
       left.workload.localeCompare(right.workload) ||
       left.adapter.localeCompare(right.adapter)
@@ -541,6 +546,7 @@ function wasmDispatchRows(data) {
   for (const run of data.runs) {
     for (const row of run.rows) {
       rows.push({
+        target: run.target,
         runtime: runtimeLabel(run.runtime),
         style: row.style,
         feature: row.feature,
@@ -562,11 +568,16 @@ function wasmDispatchRows(data) {
         ? null
         : row.ns_per_dispatch_min / baselines.get(row.runtime),
     }))
-    .sort((left, right) => left.runtime.localeCompare(right.runtime) || left.style.localeCompare(right.style));
+    .sort((left, right) =>
+      left.target.localeCompare(right.target) ||
+      left.runtime.localeCompare(right.runtime) ||
+      left.style.localeCompare(right.style)
+    );
 }
 
 function wasmTargetSection(data) {
   const rows = wasmTargetRows(data);
+  const targets = unique(rows.map((row) => row.target));
   const runtimes = unique(rows.map((row) => row.runtime));
   const adapters = unique(rows.map((row) => row.adapter));
   return `
@@ -574,14 +585,14 @@ function wasmTargetSection(data) {
       <div class="section-head">
         <div>
           <h2>Wasm Target Bench</h2>
-          <p>${formatInteger(rows.length)} rows · ${formatInteger(adapters.length)} adapters · ${formatInteger(runtimes.length)} runtimes · source <code>${escapeHtml(relative(wasmResultsPath))}</code></p>
+          <p>${formatInteger(rows.length)} rows · ${formatInteger(adapters.length)} adapters · ${formatInteger(targets.length)} targets · ${formatInteger(runtimes.length)} runtimes · source <code>${escapeHtml(relative(wasmResultsPath))}</code></p>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Runtime</th>
+              <th>Target / runtime</th>
               <th>Adapter</th>
               <th>Workload</th>
               <th>Min ns/unit</th>
@@ -593,7 +604,7 @@ function wasmTargetSection(data) {
           <tbody>
             ${rows.map((row) => `
               <tr>
-                <td>${escapeHtml(row.runtime)}</td>
+                <td>${targetRuntimeLabel(row)}</td>
                 <td><strong>${escapeHtml(row.adapter)}</strong> <span class="subtle">${escapeHtml(row.dialect)}</span></td>
                 <td>${escapeHtml(row.workload)}</td>
                 <td>${formatNumber(row.ns_per_unit_min)}</td>
@@ -611,20 +622,21 @@ function wasmTargetSection(data) {
 
 function wasmDispatchSection(data) {
   const rows = wasmDispatchRows(data);
+  const targets = unique(rows.map((row) => row.target));
   const runtimes = unique(rows.map((row) => row.runtime));
   return `
     <section class="panel" id="wasm-dispatch">
       <div class="section-head">
         <div>
           <h2>Wasm Dispatch Bench</h2>
-          <p>${formatInteger(rows.length)} rows · ${formatInteger(runtimes.length)} runtimes · source <code>${escapeHtml(relative(wasmDispatchPath))}</code></p>
+          <p>${formatInteger(rows.length)} rows · ${formatInteger(targets.length)} targets · ${formatInteger(runtimes.length)} runtimes · source <code>${escapeHtml(relative(wasmDispatchPath))}</code></p>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Runtime</th>
+              <th>Target / runtime</th>
               <th>Style</th>
               <th>Min ns/dispatch</th>
               <th>Median</th>
@@ -635,7 +647,7 @@ function wasmDispatchSection(data) {
           <tbody>
             ${rows.map((row) => `
               <tr>
-                <td>${escapeHtml(row.runtime)}</td>
+                <td>${targetRuntimeLabel(row)}</td>
                 <td><strong>${escapeHtml(row.style)}</strong> <span class="subtle">${escapeHtml(row.feature)}</span></td>
                 <td>${formatNumber(row.ns_per_dispatch_min)}</td>
                 <td>${formatNumber(row.ns_per_dispatch_median)}</td>
@@ -650,11 +662,14 @@ function wasmDispatchSection(data) {
   `;
 }
 
+function targetRuntimeLabel(row) {
+  return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.runtime)}</span></span>`;
+}
+
 function render(data, wasmResults, wasmDispatchResults) {
   const wasmRows = wasmTargetRows(wasmResults);
   const summary = summarize(data, wasmRows);
   const dispatchRows = wasmDispatchRows(wasmDispatchResults);
-  const totalMatchups = groupBy(summary.summaryRows, (row) => `${row.target}\0${row.workload}`).size;
   const latestCommit = summary.rows
     .slice()
     .sort((left, right) => right.timestamp_unix - left.timestamp_unix || right.commit.localeCompare(left.commit))[0].commit;
@@ -783,6 +798,38 @@ function render(data, wasmResults, wasmDispatchResults) {
     }
 
     .subtle {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .engine-target {
+      display: inline-flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .engine-target span {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .target-runtime {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .target-runtime strong,
+    .target-runtime span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .target-runtime span {
       color: var(--muted);
       font-size: 12px;
       font-weight: 600;
@@ -1008,7 +1055,7 @@ function render(data, wasmResults, wasmDispatchResults) {
       ${summary.targetRows.map((group) => `<a href="#${escapeHtml(slug(group.target))}">${escapeHtml(group.target)}</a>`).join("")}
     </nav>
 
-    ${engineSummaryTable(summary.engineRows, totalMatchups)}
+    ${engineSummaryTable(summary.engineRows)}
     ${wasmTargetSection(wasmResults)}
     ${wasmDispatchSection(wasmDispatchResults)}
     ${summary.targetRows.map(targetSection).join("")}

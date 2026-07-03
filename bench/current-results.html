@@ -127,6 +127,38 @@
       font-weight: 600;
     }
 
+    .engine-target {
+      display: inline-flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .engine-target span {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .target-runtime {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .target-runtime strong,
+    .target-runtime span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .target-runtime span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
     .nav {
       display: flex;
       flex-wrap: wrap;
@@ -387,14 +419,14 @@
       <div class="section-head">
         <div>
           <h2>Engine Summary</h2>
-          <p>Grouped by engine and target. Geomean uses available speed-vs-rustia ratios from the current snapshot.</p>
+          <p>One row per engine/target pair. Geomean uses available speed-vs-rustia ratios from the current snapshot.</p>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Engine / target</th>
+              <th>Engine (target)</th>
               <th>Geomean vs rustia</th>
               <th>Best results</th>
               <th>Median min ns/unit</th>
@@ -404,235 +436,235 @@
           <tbody>
 
                 <tr>
-                  <td><strong>wasmtime</strong> <span class="subtle">macos-aarch64</span></td>
+                  <td><span class="engine-target"><strong>wasmtime</strong><span>(macos-aarch64)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>235x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 100.000%"></span></div>
                     </div>
                   </td>
-                  <td>4 / 25</td>
+                  <td>4 / 5</td>
                   <td>78.8</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>wasmi</strong> <span class="subtle">macos-aarch64</span></td>
+                  <td><span class="engine-target"><strong>wasmi</strong><span>(macos-aarch64)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>61.6x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 26.262%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 25</td>
+                  <td>0 / 5</td>
                   <td>162</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>mlua-luau</strong> <span class="subtle">macos-aarch64</span></td>
+                  <td><span class="engine-target"><strong>mlua-luau</strong><span>(macos-aarch64)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>13x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 5.524%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 25</td>
+                  <td>0 / 5</td>
                   <td>2,126</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>mlua-lua54</strong> <span class="subtle">macos-aarch64</span></td>
+                  <td><span class="engine-target"><strong>mlua-lua54</strong><span>(macos-aarch64)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>10.6x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 4.502%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 25</td>
+                  <td>0 / 5</td>
                   <td>1,429</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>roto</strong> <span class="subtle">macos-aarch64</span></td>
+                  <td><span class="engine-target"><strong>roto</strong><span>(macos-aarch64)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>5.111x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.179%"></span></div>
                     </div>
                   </td>
-                  <td>1 / 25</td>
+                  <td>1 / 5</td>
                   <td>1,152</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>rquickjs</strong> <span class="subtle">macos-aarch64</span></td>
+                  <td><span class="engine-target"><strong>rquickjs</strong><span>(macos-aarch64)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>3.098x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 25</td>
+                  <td>0 / 5</td>
                   <td>2,914</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>koto</strong> <span class="subtle">wasm32 / SpiderMonkey/spidermonkey</span></td>
+                  <td><span class="engine-target"><strong>koto</strong><span>(wasm32 / SpiderMonkey/spidermonkey)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>2.793x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>5 / 25</td>
+                  <td>5 / 5</td>
                   <td>4,660</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>koto</strong> <span class="subtle">macos-aarch64</span></td>
+                  <td><span class="engine-target"><strong>koto</strong><span>(macos-aarch64)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>2.696x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 25</td>
+                  <td>0 / 5</td>
                   <td>2,319</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>koto</strong> <span class="subtle">wasm32 / V8/deno</span></td>
+                  <td><span class="engine-target"><strong>koto</strong><span>(wasm32 / V8/deno)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>2.526x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>5 / 25</td>
+                  <td>5 / 5</td>
                   <td>4,209</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>koto</strong> <span class="subtle">wasm32 / V8/node</span></td>
+                  <td><span class="engine-target"><strong>koto</strong><span>(wasm32 / V8/node)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>2.33x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>5 / 25</td>
+                  <td>5 / 5</td>
                   <td>4,566</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>koto</strong> <span class="subtle">wasm32 / JavaScriptCore/bun</span></td>
+                  <td><span class="engine-target"><strong>koto</strong><span>(wasm32 / JavaScriptCore/bun)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>2.28x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>4 / 25</td>
+                  <td>4 / 5</td>
                   <td>4,302</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>rhai</strong> <span class="subtle">macos-aarch64</span></td>
+                  <td><span class="engine-target"><strong>rhai</strong><span>(macos-aarch64)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>1.418x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 25</td>
+                  <td>0 / 5</td>
                   <td>3,463</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>rustia</strong> <span class="subtle">macos-aarch64</span></td>
+                  <td><span class="engine-target"><strong>rustia</strong><span>(macos-aarch64)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>1x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 25</td>
+                  <td>0 / 5</td>
                   <td>17,533</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>rustia</strong> <span class="subtle">wasm32 / JavaScriptCore/bun</span></td>
+                  <td><span class="engine-target"><strong>rustia</strong><span>(wasm32 / JavaScriptCore/bun)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>1x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>1 / 25</td>
+                  <td>1 / 5</td>
                   <td>30,915</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>rustia</strong> <span class="subtle">wasm32 / SpiderMonkey/spidermonkey</span></td>
+                  <td><span class="engine-target"><strong>rustia</strong><span>(wasm32 / SpiderMonkey/spidermonkey)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>1x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 25</td>
+                  <td>0 / 5</td>
                   <td>41,473</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>rustia</strong> <span class="subtle">wasm32 / V8/deno</span></td>
+                  <td><span class="engine-target"><strong>rustia</strong><span>(wasm32 / V8/deno)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>1x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 25</td>
+                  <td>0 / 5</td>
                   <td>26,363</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>rustia</strong> <span class="subtle">wasm32 / V8/node</span></td>
+                  <td><span class="engine-target"><strong>rustia</strong><span>(wasm32 / V8/node)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>1x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 25</td>
+                  <td>0 / 5</td>
                   <td>27,576</td>
                   <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>boa</strong> <span class="subtle">macos-aarch64</span></td>
+                  <td><span class="engine-target"><strong>boa</strong><span>(macos-aarch64)</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>0.629x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 25</td>
+                  <td>0 / 5</td>
                   <td>14,206</td>
                   <td>5 workloads</td>
                 </tr>
@@ -647,14 +679,14 @@
       <div class="section-head">
         <div>
           <h2>Wasm Target Bench</h2>
-          <p>40 rows · 2 adapters · 4 runtimes · source <code>bench/wasm/current-results.json</code></p>
+          <p>40 rows · 2 adapters · 4 targets · 4 runtimes · source <code>bench/wasm/current-results.json</code></p>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Runtime</th>
+              <th>Target / runtime</th>
               <th>Adapter</th>
               <th>Workload</th>
               <th>Min ns/unit</th>
@@ -666,7 +698,7 @@
           <tbody>
 
               <tr>
-                <td>JavaScriptCore/bun</td>
+                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>closures_upvalues</td>
                 <td>242</td>
@@ -676,7 +708,7 @@
               </tr>
 
               <tr>
-                <td>JavaScriptCore/bun</td>
+                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>closures_upvalues</td>
                 <td>909</td>
@@ -686,7 +718,7 @@
               </tr>
 
               <tr>
-                <td>JavaScriptCore/bun</td>
+                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>dense_tables</td>
                 <td>272,077</td>
@@ -696,7 +728,7 @@
               </tr>
 
               <tr>
-                <td>JavaScriptCore/bun</td>
+                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>dense_tables</td>
                 <td>247,579</td>
@@ -706,7 +738,7 @@
               </tr>
 
               <tr>
-                <td>JavaScriptCore/bun</td>
+                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>generic_iteration</td>
                 <td>4,302</td>
@@ -716,7 +748,7 @@
               </tr>
 
               <tr>
-                <td>JavaScriptCore/bun</td>
+                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>generic_iteration</td>
                 <td>30,915</td>
@@ -726,7 +758,7 @@
               </tr>
 
               <tr>
-                <td>JavaScriptCore/bun</td>
+                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>sparse_tables</td>
                 <td>98,555</td>
@@ -736,7 +768,7 @@
               </tr>
 
               <tr>
-                <td>JavaScriptCore/bun</td>
+                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>sparse_tables</td>
                 <td>150,417</td>
@@ -746,7 +778,7 @@
               </tr>
 
               <tr>
-                <td>JavaScriptCore/bun</td>
+                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>stdlib_math_table</td>
                 <td>1,048</td>
@@ -756,7 +788,7 @@
               </tr>
 
               <tr>
-                <td>JavaScriptCore/bun</td>
+                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>stdlib_math_table</td>
                 <td>1,720</td>
@@ -766,7 +798,7 @@
               </tr>
 
               <tr>
-                <td>SpiderMonkey/spidermonkey</td>
+                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>closures_upvalues</td>
                 <td>239</td>
@@ -776,7 +808,7 @@
               </tr>
 
               <tr>
-                <td>SpiderMonkey/spidermonkey</td>
+                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>closures_upvalues</td>
                 <td>875</td>
@@ -786,7 +818,7 @@
               </tr>
 
               <tr>
-                <td>SpiderMonkey/spidermonkey</td>
+                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>dense_tables</td>
                 <td>187,435</td>
@@ -796,7 +828,7 @@
               </tr>
 
               <tr>
-                <td>SpiderMonkey/spidermonkey</td>
+                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>dense_tables</td>
                 <td>272,351</td>
@@ -806,7 +838,7 @@
               </tr>
 
               <tr>
-                <td>SpiderMonkey/spidermonkey</td>
+                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>generic_iteration</td>
                 <td>4,660</td>
@@ -816,7 +848,7 @@
               </tr>
 
               <tr>
-                <td>SpiderMonkey/spidermonkey</td>
+                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>generic_iteration</td>
                 <td>41,473</td>
@@ -826,7 +858,7 @@
               </tr>
 
               <tr>
-                <td>SpiderMonkey/spidermonkey</td>
+                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>sparse_tables</td>
                 <td>102,385</td>
@@ -836,7 +868,7 @@
               </tr>
 
               <tr>
-                <td>SpiderMonkey/spidermonkey</td>
+                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>sparse_tables</td>
                 <td>186,224</td>
@@ -846,7 +878,7 @@
               </tr>
 
               <tr>
-                <td>SpiderMonkey/spidermonkey</td>
+                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>stdlib_math_table</td>
                 <td>1,124</td>
@@ -856,7 +888,7 @@
               </tr>
 
               <tr>
-                <td>SpiderMonkey/spidermonkey</td>
+                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>stdlib_math_table</td>
                 <td>2,215</td>
@@ -866,7 +898,7 @@
               </tr>
 
               <tr>
-                <td>V8/deno</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>closures_upvalues</td>
                 <td>211</td>
@@ -876,7 +908,7 @@
               </tr>
 
               <tr>
-                <td>V8/deno</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>closures_upvalues</td>
                 <td>750</td>
@@ -886,7 +918,7 @@
               </tr>
 
               <tr>
-                <td>V8/deno</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>dense_tables</td>
                 <td>163,822</td>
@@ -896,7 +928,7 @@
               </tr>
 
               <tr>
-                <td>V8/deno</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>dense_tables</td>
                 <td>232,973</td>
@@ -906,7 +938,7 @@
               </tr>
 
               <tr>
-                <td>V8/deno</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>generic_iteration</td>
                 <td>4,209</td>
@@ -916,7 +948,7 @@
               </tr>
 
               <tr>
-                <td>V8/deno</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>generic_iteration</td>
                 <td>26,363</td>
@@ -926,7 +958,7 @@
               </tr>
 
               <tr>
-                <td>V8/deno</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>sparse_tables</td>
                 <td>84,874</td>
@@ -936,7 +968,7 @@
               </tr>
 
               <tr>
-                <td>V8/deno</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>sparse_tables</td>
                 <td>179,428</td>
@@ -946,7 +978,7 @@
               </tr>
 
               <tr>
-                <td>V8/deno</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>stdlib_math_table</td>
                 <td>1,050</td>
@@ -956,7 +988,7 @@
               </tr>
 
               <tr>
-                <td>V8/deno</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>stdlib_math_table</td>
                 <td>1,617</td>
@@ -966,7 +998,7 @@
               </tr>
 
               <tr>
-                <td>V8/node</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>closures_upvalues</td>
                 <td>230</td>
@@ -976,7 +1008,7 @@
               </tr>
 
               <tr>
-                <td>V8/node</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>closures_upvalues</td>
                 <td>770</td>
@@ -986,7 +1018,7 @@
               </tr>
 
               <tr>
-                <td>V8/node</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>dense_tables</td>
                 <td>175,354</td>
@@ -996,7 +1028,7 @@
               </tr>
 
               <tr>
-                <td>V8/node</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>dense_tables</td>
                 <td>220,093</td>
@@ -1006,7 +1038,7 @@
               </tr>
 
               <tr>
-                <td>V8/node</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>generic_iteration</td>
                 <td>4,566</td>
@@ -1016,7 +1048,7 @@
               </tr>
 
               <tr>
-                <td>V8/node</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>generic_iteration</td>
                 <td>27,576</td>
@@ -1026,7 +1058,7 @@
               </tr>
 
               <tr>
-                <td>V8/node</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>sparse_tables</td>
                 <td>95,324</td>
@@ -1036,7 +1068,7 @@
               </tr>
 
               <tr>
-                <td>V8/node</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>sparse_tables</td>
                 <td>166,151</td>
@@ -1046,7 +1078,7 @@
               </tr>
 
               <tr>
-                <td>V8/node</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
                 <td><strong>koto</strong> <span class="subtle">koto</span></td>
                 <td>stdlib_math_table</td>
                 <td>1,083</td>
@@ -1056,7 +1088,7 @@
               </tr>
 
               <tr>
-                <td>V8/node</td>
+                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
                 <td><strong>rustia</strong> <span class="subtle">luau</span></td>
                 <td>stdlib_math_table</td>
                 <td>1,686</td>
@@ -1075,14 +1107,14 @@
       <div class="section-head">
         <div>
           <h2>Wasm Dispatch Bench</h2>
-          <p>8 rows · 4 runtimes · source <code>bench/wasm/dispatch-current-results.json</code></p>
+          <p>8 rows · 4 targets · 4 runtimes · source <code>bench/wasm/dispatch-current-results.json</code></p>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Runtime</th>
+              <th>Target / runtime</th>
               <th>Style</th>
               <th>Min ns/dispatch</th>
               <th>Median</th>
@@ -1093,7 +1125,7 @@
           <tbody>
 
               <tr>
-                <td>JavaScriptCore/bun</td>
+                <td><span class="target-runtime"><strong>wasm32-dispatch-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
                 <td><strong>br_table</strong> <span class="subtle">core br_table dispatch</span></td>
                 <td>0.865</td>
                 <td>1.011</td>
@@ -1102,7 +1134,7 @@
               </tr>
 
               <tr>
-                <td>JavaScriptCore/bun</td>
+                <td><span class="target-runtime"><strong>wasm32-dispatch-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
                 <td><strong>call_ref</strong> <span class="subtle">typed function reference dispatch</span></td>
                 <td>3.167</td>
                 <td>3.491</td>
@@ -1111,7 +1143,7 @@
               </tr>
 
               <tr>
-                <td>SpiderMonkey/spidermonkey</td>
+                <td><span class="target-runtime"><strong>wasm32-dispatch-spidermonkey-spidermonkey-unknown-host</strong><span>SpiderMonkey/spidermonkey</span></span></td>
                 <td><strong>br_table</strong> <span class="subtle">core br_table dispatch</span></td>
                 <td>0.568</td>
                 <td>0.626</td>
@@ -1120,7 +1152,7 @@
               </tr>
 
               <tr>
-                <td>SpiderMonkey/spidermonkey</td>
+                <td><span class="target-runtime"><strong>wasm32-dispatch-spidermonkey-spidermonkey-unknown-host</strong><span>SpiderMonkey/spidermonkey</span></span></td>
                 <td><strong>call_ref</strong> <span class="subtle">typed function reference dispatch</span></td>
                 <td>9.63</td>
                 <td>9.674</td>
@@ -1129,7 +1161,7 @@
               </tr>
 
               <tr>
-                <td>V8/deno</td>
+                <td><span class="target-runtime"><strong>wasm32-dispatch-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
                 <td><strong>br_table</strong> <span class="subtle">core br_table dispatch</span></td>
                 <td>0.386</td>
                 <td>0.386</td>
@@ -1138,7 +1170,7 @@
               </tr>
 
               <tr>
-                <td>V8/deno</td>
+                <td><span class="target-runtime"><strong>wasm32-dispatch-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
                 <td><strong>call_ref</strong> <span class="subtle">typed function reference dispatch</span></td>
                 <td>1.039</td>
                 <td>1.101</td>
@@ -1147,7 +1179,7 @@
               </tr>
 
               <tr>
-                <td>V8/node</td>
+                <td><span class="target-runtime"><strong>wasm32-dispatch-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
                 <td><strong>br_table</strong> <span class="subtle">core br_table dispatch</span></td>
                 <td>0.424</td>
                 <td>0.45</td>
@@ -1156,7 +1188,7 @@
               </tr>
 
               <tr>
-                <td>V8/node</td>
+                <td><span class="target-runtime"><strong>wasm32-dispatch-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
                 <td><strong>call_ref</strong> <span class="subtle">typed function reference dispatch</span></td>
                 <td>1.114</td>
                 <td>1.267</td>
