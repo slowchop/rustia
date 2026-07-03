@@ -24,8 +24,8 @@ at full Luau parity.
   `Option<T>`/`Vec<T>`/`BTreeMap<String, T>`/table conversions plus typed and nested table helpers, source-named
   run/compile helpers, typed/capability-tagged host functions with fallible `rustia::Result<T>` returns and up to
   eight arguments/results, retained script functions, pre-install host signature/fuel ABI metadata,
-  retained-handle freshness checks and current-generation accessors, owned-value/table serde, deterministic
-  extensions, hot reload, and macro sugar.
+  retained-handle freshness checks and current-generation accessors, public source-span/runtime-location error
+  accessors, owned-value/table serde, deterministic extensions, hot reload, and macro sugar.
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](design/progress.json) into
@@ -34,11 +34,11 @@ public rustia project; actual grabby integration work is explicitly out of scope
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 74% | 65% |
-| Usable embedded scripting crate | 82% | 70% |
+| Whole public rustia project | 75% | 65% |
+| Usable embedded scripting crate | 83% | 70% |
 | Full public Luau engine release | 48% | 58% |
 | Standalone benchmark OSS project | 72% | 80% |
-| Public release readiness | 71% | 75% |
+| Public release readiness | 72% | 75% |
 
 - Current conformance runner: **684 fixtures**, **481 refs**, **0 pending**.
 - The benchmark harness has all 10 requested adapters; Lua 5.4 runs separately from Luau because `mlua-sys`
@@ -70,6 +70,9 @@ public rustia project; actual grabby integration work is explicitly out of scope
 - `cargo run -p rustia-cli -- path/to/script.luau`
 - `cargo run -p rustia-cli -- --profile deterministic-sim --fuel 100000 --eval "return 40 + 2"`
 - `cargo run -p rustia-cli -- --source-name stdin.luau -`
+
+Compile and runtime failures include source-name-aware line snippets and caret markers where rustia has source
+span or runtime-line evidence.
 
 Built design-first with Claude Code.
 

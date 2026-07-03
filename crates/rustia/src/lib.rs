@@ -302,12 +302,54 @@ impl CompiledModule {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl From<rustia_lexer::Span> for SourceSpan {
+    fn from(span: rustia_lexer::Span) -> Self {
+        Self {
+            start: span.start,
+            end: span.end,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceLocation<'a> {
+    pub source: &'a str,
+    pub line: u32,
+}
+
 #[derive(Debug)]
 pub enum Error {
     Source(SourceError),
     Compile(CompileError),
     Vm(VmError),
     Embed(String),
+}
+
+impl Error {
+    pub fn source_span(&self) -> Option<SourceSpan> {
+        match self {
+            Self::Source(SourceError::Lex(error)) => Some(error.span.into()),
+            Self::Source(SourceError::Parse(error)) => Some(error.span.into()),
+            Self::Compile(error) => error.span.map(Into::into),
+            Self::Vm(_) | Self::Embed(_) => None,
+        }
+    }
+
+    pub fn source_location(&self) -> Option<SourceLocation<'_>> {
+        match self {
+            Self::Vm(error) => error.location.as_ref().map(|location| SourceLocation {
+                source: &location.source,
+                line: location.line,
+            }),
+            Self::Source(_) | Self::Compile(_) | Self::Embed(_) => None,
+        }
+    }
 }
 
 impl fmt::Display for Error {
@@ -327,7 +369,7 @@ impl std::error::Error for Error {}
 mod tests {
     use super::{
         Error, FromRustia, OpCapability, OwnedTable, OwnedValue, Profile, Result, Rustia,
-        RustiaExtension, RustiaHostFunctionInfo, VmErrorKind, VmSettings,
+        RustiaExtension, RustiaHostFunctionInfo, SourceSpan, VmErrorKind, VmSettings,
         RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
         RUSTIA_MIN_HOST_FUNCTION_FUEL,
     };
@@ -1132,6 +1174,32 @@ return {
             .unwrap_err();
         assert!(error.to_string().contains("bad_inline.luau:1:"), "{error}");
         assert_eq!(rustia.generation(), generation);
+    }
+
+    #[test]
+    fn public_errors_expose_source_span_and_runtime_location() {
+        let Err(error) = Rustia::compile("compile-diag.luau", "break") else {
+            panic!("break outside loop should fail compilation");
+        };
+        assert_eq!(error.source_span(), Some(SourceSpan { start: 0, end: 5 }));
+        assert_eq!(error.source_location(), None);
+
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let Err(error) = rustia.run_owned_named(
+            "runtime-diag.luau",
+            "\
+local t = {}
+t[0 / 0] = 1
+",
+        ) else {
+            panic!("NaN table key should fail at runtime");
+        };
+        let location = error
+            .source_location()
+            .expect("runtime error should carry source location");
+        assert_eq!(location.source, "runtime-diag.luau");
+        assert_eq!(location.line, 2);
+        assert_eq!(error.source_span(), None);
     }
 
     #[derive(Debug, PartialEq, Deserialize, Serialize)]

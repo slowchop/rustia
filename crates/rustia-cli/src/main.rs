@@ -1,5 +1,6 @@
-use rustia::{OwnedValue, Profile, Rustia, VmSettings};
+use rustia::{OwnedValue, Profile, Rustia, SourceSpan, VmSettings};
 use std::env;
+use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, Read};
 use std::path::PathBuf;
@@ -33,8 +34,12 @@ fn main() -> ExitCode {
             eprintln!("{label}: {error}");
             ExitCode::from(1)
         }
-        Err(CliError::Rustia(error)) => {
-            eprintln!("{error}");
+        Err(CliError::Rustia {
+            error,
+            source_name,
+            source,
+        }) => {
+            eprintln!("{}", format_diagnostic(&error, &source_name, &source));
             ExitCode::from(1)
         }
     }
@@ -43,7 +48,11 @@ fn main() -> ExitCode {
 fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), CliError> {
     let config = parse_args(args)?;
     let (source_name, source) = read_source(&config)?;
-    let value = run_source(&config, &source_name, &source)?;
+    let value = run_source(&config, &source_name, &source).map_err(|error| CliError::Rustia {
+        error,
+        source_name: source_name.clone(),
+        source: source.clone(),
+    })?;
     println!("{value:?}");
     Ok(())
 }
@@ -91,6 +100,126 @@ fn read_source(config: &Config) -> Result<(String, String), CliError> {
 fn run_source(config: &Config, source_name: &str, source: &str) -> rustia::Result<OwnedValue> {
     let mut rustia = Rustia::with_settings(config.profile, config.settings.clone());
     rustia.run_owned_named(source_name, source)
+}
+
+fn format_diagnostic(error: &rustia::Error, source_name: &str, source: &str) -> String {
+    let mut output = error.to_string();
+    if let Some(span) = error.source_span() {
+        append_span_snippet(&mut output, source_name, source, span);
+    } else if let Some(location) = error.source_location() {
+        append_line_snippet(&mut output, location.source, source, location.line);
+    }
+    output
+}
+
+fn append_span_snippet(output: &mut String, source_name: &str, source: &str, span: SourceSpan) {
+    let position = line_position(source, span.start);
+    let line = &source[position.line_start..position.line_end];
+    let width = position.line.to_string().len();
+    let caret_count = span_caret_count(source, position.line_start, position.line_end, span);
+
+    let _ = write!(
+        output,
+        "\n --> {source_name}:{}:{}\n{:>width$} |\n{:>width$} | {line}\n{:>width$} | {}{}",
+        position.line,
+        position.column,
+        "",
+        position.line,
+        "",
+        " ".repeat(position.column.saturating_sub(1)),
+        "^".repeat(caret_count),
+        width = width
+    );
+}
+
+fn append_line_snippet(output: &mut String, source_name: &str, source: &str, line_number: u32) {
+    let Some((line_index, line)) = source_line(source, line_number) else {
+        return;
+    };
+    let width = line_index.to_string().len();
+
+    let _ = write!(
+        output,
+        "\n --> {source_name}:{line_index}\n{:>width$} |\n{:>width$} | {line}\n{:>width$} | ^",
+        "",
+        line_index,
+        "",
+        width = width
+    );
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct LinePosition {
+    line: usize,
+    column: usize,
+    line_start: usize,
+    line_end: usize,
+}
+
+fn line_position(source: &str, byte_index: usize) -> LinePosition {
+    let target = byte_index.min(source.len());
+    let mut line = 1;
+    let mut line_start = 0;
+
+    for (index, ch) in source.char_indices() {
+        if index >= target {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            line_start = index + ch.len_utf8();
+        }
+    }
+
+    let mut line_end = source[line_start..]
+        .find('\n')
+        .map_or(source.len(), |offset| line_start + offset);
+    if line_end > line_start && source.as_bytes()[line_end - 1] == b'\r' {
+        line_end -= 1;
+    }
+    let column = source[line_start..target].chars().count() + 1;
+
+    LinePosition {
+        line,
+        column,
+        line_start,
+        line_end,
+    }
+}
+
+fn span_caret_count(source: &str, line_start: usize, line_end: usize, span: SourceSpan) -> usize {
+    let start = span.start.clamp(line_start, line_end);
+    let end = span.end.clamp(start, line_end);
+    source[start..end].chars().count().max(1)
+}
+
+fn source_line(source: &str, line_number: u32) -> Option<(usize, &str)> {
+    let line_index = usize::try_from(line_number).ok()?;
+    if line_index == 0 {
+        return None;
+    }
+    let mut current = 1;
+    let mut line_start = 0;
+
+    for (index, ch) in source.char_indices() {
+        if current == line_index && ch == '\n' {
+            let line = trim_line_ending(&source[line_start..index]);
+            return Some((line_index, line));
+        }
+        if ch == '\n' {
+            current += 1;
+            line_start = index + ch.len_utf8();
+        }
+    }
+
+    if current == line_index {
+        return Some((line_index, trim_line_ending(&source[line_start..])));
+    }
+    None
+}
+
+fn trim_line_ending(line: &str) -> &str {
+    line.strip_suffix('\r').unwrap_or(line)
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, CliError> {
@@ -236,8 +365,15 @@ enum Input {
 enum CliError {
     Help,
     Usage(String),
-    Io { label: String, error: io::Error },
-    Rustia(rustia::Error),
+    Io {
+        label: String,
+        error: io::Error,
+    },
+    Rustia {
+        error: rustia::Error,
+        source_name: String,
+        source: String,
+    },
 }
 
 impl CliError {
@@ -248,13 +384,17 @@ impl CliError {
 
 impl From<rustia::Error> for CliError {
     fn from(error: rustia::Error) -> Self {
-        Self::Rustia(error)
+        Self::Rustia {
+            error,
+            source_name: "<unknown>".to_owned(),
+            source: String::new(),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_args, parse_profile, run_source, CliError, Input};
+    use super::{format_diagnostic, parse_args, parse_profile, run_source, CliError, Input};
     use rustia::{FromRustia, Profile};
     use std::path::PathBuf;
 
@@ -350,6 +490,40 @@ mod tests {
             .expect_err("NaN table key should fail");
 
         assert!(error.to_string().contains("cli-test.luau:1:"), "{error}");
+    }
+
+    #[test]
+    fn diagnostic_formats_compile_error_source_span() {
+        let config = parse_args(args(&["--eval", "return 1"])).unwrap();
+        let source = "\
+local x = 1
+break
+";
+        let error = run_source(&config, "broken.luau", source)
+            .expect_err("break outside loop should fail compilation");
+        let diagnostic = format_diagnostic(&error, "broken.luau", source);
+
+        assert!(diagnostic.contains("break outside loop"), "{diagnostic}");
+        assert!(diagnostic.contains(" --> broken.luau:2:1"), "{diagnostic}");
+        assert!(diagnostic.contains("2 | break"), "{diagnostic}");
+        assert!(diagnostic.contains("| ^^^^^"), "{diagnostic}");
+    }
+
+    #[test]
+    fn diagnostic_formats_runtime_error_source_line() {
+        let config = parse_args(args(&["--eval", "return 1"])).unwrap();
+        let source = "\
+local t = {}
+t[0 / 0] = 1
+";
+        let error =
+            run_source(&config, "runtime.luau", source).expect_err("NaN table key should fail");
+        let diagnostic = format_diagnostic(&error, "runtime.luau", source);
+
+        assert!(diagnostic.contains("runtime.luau:2:"), "{diagnostic}");
+        assert!(diagnostic.contains(" --> runtime.luau:2"), "{diagnostic}");
+        assert!(diagnostic.contains("2 | t[0 / 0] = 1"), "{diagnostic}");
+        assert!(diagnostic.contains("| ^"), "{diagnostic}");
     }
 
     #[test]

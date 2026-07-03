@@ -70,6 +70,7 @@ Core pieces:
 
 - typed `Rustia::run<T>()` for direct single-result conversion.
 - source-named `run_named<T>()`, `run_owned_named()`, and compile/run helpers for host-controlled diagnostics.
+- public error accessors for compile-time byte spans and runtime source/line locations.
 - `OwnedValue` as the public value firewall.
 - `IntoRustia` / `FromRustia`.
 - `IntoRustiaMulti` / `FromRustiaMulti`.
@@ -185,7 +186,8 @@ Requirements:
 - retained handles are versioned or explicitly invalidated across reload.
 
 Current implementation slice: source-named run/compile helpers preserve host-provided names in runtime
-diagnostics. `Exports::generation()`, `Function::generation()`, and `Rustia::generation()` report the successful
+diagnostics, and `rustia::Error` exposes public source-span/runtime-location accessors for host-side diagnostic
+renderers. `Exports::generation()`, `Function::generation()`, and `Rustia::generation()` report the successful
 install generation. `is_current()` / `ensure_current()` let hosts check retained handle freshness, and
 `Function::call_current()` and `Exports::{value,deserialize,get,function}_current()` give hosts fail-closed
 access paths for stale handles. Failed hot reloads do not advance the generation, and old retained function

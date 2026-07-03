@@ -15,6 +15,8 @@ Current unpublished workspace version: `0.0.1`.
   and hot reload.
 - `rustia-cli` supports file, stdin, and `--eval` execution with profile, fuel,
   and source-name options.
+- `rustia-cli` renders source-aware diagnostics for compile and runtime
+  failures when rustia exposes source-span or runtime-line evidence.
 - The benchmark harness has current-results JSON/HTML, generated per-workload
   claim gating, package-file history, and the requested adapter matrix.
 - Release preflight now composes release notes, package files, generated leaf
@@ -38,6 +40,8 @@ Current unpublished workspace version: `0.0.1`.
   script result through `FromRustia`.
 - `Rustia::run_named<T>()`, `run_owned_named()`, and named compile/run helpers
   preserve host-provided source names in runtime diagnostics.
+- `rustia::Error` now exposes public source-span and runtime source-location
+  accessors for host diagnostic renderers.
 - Typed host functions can return `rustia::Result<T>` to report fallible host
   callback errors through the script runtime.
 - Typed host functions and retained script calls now support up to eight

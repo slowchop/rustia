@@ -46,8 +46,9 @@ from `publish = false` to publishable.
 
 ## API Gate
 
-- Public error types, conversion traits, retained handles, extension APIs, and
-  hot-reload semantics have stable names and documented behavior.
+- Public error types, source-span/runtime-location accessors, conversion
+  traits, retained handles, extension APIs, and hot-reload semantics have stable
+  names and documented behavior.
 - `Rustia::run<T>()` supports direct typed conversion of single-result scripts.
 - Source-named run/compile helpers preserve host-provided source names in
   runtime diagnostics.
@@ -139,7 +140,7 @@ from `publish = false` to publishable.
 - `just check-progress` and `just check-benchmark-results` pass without
   rewriting committed generated artifacts.
 - `rustia-cli` supports file, stdin, and `--eval` execution, plus profile,
-  fuel, and source-name options for diagnostics.
+  fuel, source-name options, and source-aware compile/runtime diagnostics.
 - `cargo package --no-verify` reaches packaging for each publishable crate; any
   unpublished path dependency blocker is documented.
 - README, `design/CURRENT.md`, `design/progress.json`, and generated progress

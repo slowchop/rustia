@@ -11,8 +11,8 @@ executable Luau 0.709 conformance corpus with **0 pending-oracle** and **0 pendi
 embedding facade from [`75-embedded-api.md`](75-embedded-api.md) is implemented at the first useful level:
 owned values with typed and nested table helpers, source-named run/compile helpers, typed host functions with
 fallible `rustia::Result<T>` returns, pre-install host signature/fuel ABI metadata, retained script function
-handles with freshness checks and current-generation accessors, owned-value/table serde, deterministic extension
-registration, hot reload, and macro sugar.
+handles with freshness checks and current-generation accessors, public source-span/runtime-location error
+accessors, owned-value/table serde, deterministic extension registration, hot reload, and macro sugar.
 A from-scratch Rust Luau
 interpreter is validated as **GO** by the earlier spikes and is now backed by the production conformance suite;
 performance still needs the continuous benchmark gate before public claims. All 8 architecture axes are decided
@@ -24,7 +24,8 @@ Its generated [`../bench/CLAIMS.md`](../bench/CLAIMS.md) gate keeps public bench
 currently approves no blanket speed headline from the committed snapshot.
 The public API now has release-preflight-enforced compile-checked examples for embedding and hot reload, plus a
 first koto-to-rustia migration guide.
-`rustia-cli` supports file, stdin, and `--eval` execution with profile, fuel, and source-name options.
+`rustia-cli` supports file, stdin, and `--eval` execution with profile, fuel, source-name options, and
+source-aware diagnostics for compile and runtime failures.
 CI wiring now includes hosted release-preflight checks, explicit public-example compilation, plus a manual
 benchmark measurement workflow that targets only the generic `[self-hosted, bench]` runner label.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
