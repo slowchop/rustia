@@ -90,9 +90,7 @@ fn read_source(config: &Config) -> Result<(String, String), CliError> {
 
 fn run_source(config: &Config, source_name: &str, source: &str) -> rustia::Result<OwnedValue> {
     let mut rustia = Rustia::with_settings(config.profile, config.settings.clone());
-    let module = Rustia::compile(source_name, source)?;
-    let exports = rustia.install(module)?;
-    exports.value(&mut rustia)
+    rustia.run_owned_named(source_name, source)
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, CliError> {

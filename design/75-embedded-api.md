@@ -69,6 +69,7 @@ let y: f64 = decide.call((12.0,))?;
 Core pieces:
 
 - typed `Rustia::run<T>()` for direct single-result conversion.
+- source-named `run_named<T>()`, `run_owned_named()`, and compile/run helpers for host-controlled diagnostics.
 - `OwnedValue` as the public value firewall.
 - `IntoRustia` / `FromRustia`.
 - `IntoRustiaMulti` / `FromRustiaMulti`.
@@ -176,9 +177,10 @@ Requirements:
 - old program remains callable on reload failure.
 - retained handles are versioned or explicitly invalidated across reload.
 
-Current implementation slice: `Exports::generation()`, `Function::generation()`, and `Rustia::generation()`
-report the successful install generation. Failed hot reloads do not advance the generation, and old retained
-function handles remain callable because the VM retains prior dynamic programs.
+Current implementation slice: source-named run/compile helpers preserve host-provided names in runtime
+diagnostics. `Exports::generation()`, `Function::generation()`, and `Rustia::generation()` report the successful
+install generation. Failed hot reloads do not advance the generation, and old retained function handles remain
+callable because the VM retains prior dynamic programs.
 
 ### 5. Optional macro/codegen sugar
 

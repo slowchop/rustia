@@ -39,16 +39,16 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 65,
+      "complete": 66,
       "confidence": 65,
-      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, typed host diagnostic polish, host signature metadata, capability-tagged host API helpers, retained-handle generation semantics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
+      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, source-named facade diagnostics, typed host diagnostic polish, host signature metadata, capability-tagged host API helpers, retained-handle generation semantics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
       "future_plan": "Harden P1, finish benchmark gates, then move toward full public Luau parity."
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 73,
+      "complete": 74,
       "confidence": 70,
-      "state": "The rustia facade supports typed run<T>, owned values with Option/Vec/BTreeMap/table conversions, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, pre-install host signature metadata, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.",
+      "state": "The rustia facade supports typed run<T>, source-named run/compile helpers, owned values with Option/Vec/BTreeMap/table conversions, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, pre-install host signature metadata, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.",
       "future_plan": "Stabilize API semantics, diagnostics, capability policy, and migration docs."
     },
     {
@@ -67,9 +67,9 @@
     },
     {
       "name": "Public release readiness",
-      "complete": 62,
+      "complete": 63,
       "confidence": 75,
-      "state": "License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, host signature metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
+      "state": "License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, source-named facade diagnostics, host signature metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
       "future_plan": "Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims."
     }
   ],
@@ -277,9 +277,9 @@
       "entries": [
         {
           "name": "Koto-shaped facade",
-          "complete": 75,
+          "complete": 77,
           "confidence": 75,
-          "state": "Builder, typed run<T>, compile/run, globals, exports, retained functions, and examples exist.",
+          "state": "Builder, typed run<T>, source-named compile/run helpers, globals, exports, retained functions, and examples exist.",
           "future_plan": "Stabilize names, error types, and migration docs."
         },
         {
@@ -326,9 +326,9 @@
         },
         {
           "name": "Hot reload",
-          "complete": 57,
+          "complete": 58,
           "confidence": 65,
-          "state": "Compile/install/hot-reload entry points exist; tests cover failed-reload old-program survival and generation-stamped handles across successful reload.",
+          "state": "Compile/install/hot-reload entry points and source-named run helpers exist; tests cover source-name diagnostics, failed-reload old-program survival, and generation-stamped handles across successful reload.",
           "future_plan": "Add migration docs and broader diagnostics around install-time runtime failures."
         },
         {

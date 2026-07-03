@@ -47,6 +47,8 @@ from `publish = false` to publishable.
 - Public error types, conversion traits, retained handles, extension APIs, and
   hot-reload semantics have stable names and documented behavior.
 - `Rustia::run<T>()` supports direct typed conversion of single-result scripts.
+- Source-named run/compile helpers preserve host-provided source names in
+  runtime diagnostics.
 - Owned-value conversions cover scalar values, `Option<T>`, `Vec<T>`,
   deterministic `BTreeMap<String, T>`, and direct `OwnedTable` values.
 - Capability checks fail closed in deterministic profiles.
@@ -63,8 +65,9 @@ from `publish = false` to publishable.
 - Public examples cover globals, typed functions, serde, extensions, retained
   functions, and hot reload.
 - Current examples:
-  - `crates/rustia/examples/embedding.rs` covers globals, typed host functions,
-    deterministic extensions, retained script functions, and serde.
+  - `crates/rustia/examples/embedding.rs` covers globals, source-named run
+    helpers, typed host functions, deterministic extensions, retained script
+    functions, and serde.
   - `crates/rustia/examples/hot_reload.rs` covers compile/install hot reload
     and retained handles across reload failures.
 - Retained `Function` handles and `Exports` expose install generations, and

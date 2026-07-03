@@ -27,11 +27,14 @@ fn main() -> rustia::Result<()> {
     rustia.insert_global("difficulty", 3_i32)?;
     rustia.add_fn("clamp", |value: f64, lo: f64, hi: f64| value.clamp(lo, hi))?;
 
-    let value =
-        rustia.run_owned("return clamp(difficulty + host.bias() + host.score(5), 0, 12)")?;
+    let value = rustia.run_owned_named(
+        "embedding-inline.luau",
+        "return clamp(difficulty + host.bias() + host.score(5), 0, 12)",
+    )?;
     assert_eq!(f64::from_rustia(value)?, 11.0);
 
-    let exports = rustia.compile_and_run_exports(
+    let exports = rustia.compile_and_run_exports_named(
+        "ai_exports.luau",
         "\
 return {
     label = 'ai',
@@ -47,7 +50,8 @@ return {
     let clamped: f64 = decide.call(&mut rustia, (9.0,))?;
     assert_eq!(clamped, 10.0);
 
-    let scenario_exports = rustia.compile_and_run_exports(
+    let scenario_exports = rustia.compile_and_run_exports_named(
+        "scenario.luau",
         "\
 return {
     name = 'arena',
@@ -79,8 +83,10 @@ return {
     );
 
     rustia.insert_serde("scenario", &scenario)?;
-    let value = rustia
-        .run_owned("return scenario.enemies[2].kind .. ':' .. tostring(scenario.difficulty)")?;
+    let value = rustia.run_owned_named(
+        "scenario_check.luau",
+        "return scenario.enemies[2].kind .. ':' .. tostring(scenario.difficulty)",
+    )?;
     assert_eq!(String::from_rustia(value)?, "brute:2");
 
     println!("embedding example ok");

@@ -49,12 +49,38 @@ impl Rustia {
         Ok(Exports::new(value, self.generation))
     }
 
+    pub fn compile_and_run_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &str,
+    ) -> Result<Exports> {
+        let value = self.compile_and_run_raw_named(source_name, source)?;
+        Ok(Exports::new(value, self.generation))
+    }
+
     pub fn compile_and_run_exports(&mut self, source: &str) -> Result<Exports> {
         self.compile_and_run(source)
     }
 
+    pub fn compile_and_run_exports_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &str,
+    ) -> Result<Exports> {
+        self.compile_and_run_named(source_name, source)
+    }
+
     pub fn run_owned(&mut self, source: &str) -> Result<OwnedValue> {
         let value = self.compile_and_run_raw(source)?;
+        value::snapshot_value(&mut self.vm, value)
+    }
+
+    pub fn run_owned_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &str,
+    ) -> Result<OwnedValue> {
+        let value = self.compile_and_run_raw_named(source_name, source)?;
         value::snapshot_value(&mut self.vm, value)
     }
 
@@ -66,10 +92,29 @@ impl Rustia {
         T::from_rustia(value)
     }
 
+    pub fn run_named<T>(&mut self, source_name: impl Into<String>, source: &str) -> Result<T>
+    where
+        T: FromRustia,
+    {
+        let value = self.run_owned_named(source_name, source)?;
+        T::from_rustia(value)
+    }
+
     pub(crate) fn compile_and_run_raw(&mut self, source: &str) -> Result<rustia_vm::Value> {
         let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
         let program = rustia_compiler::compile(&chunk).map_err(Error::Compile)?;
         let value = self.vm.run(&program).map_err(Error::Vm)?;
+        self.advance_generation();
+        Ok(value)
+    }
+
+    pub(crate) fn compile_and_run_raw_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &str,
+    ) -> Result<rustia_vm::Value> {
+        let module = Self::compile(source_name, source)?;
+        let value = self.vm.run(&module.program).map_err(Error::Vm)?;
         self.advance_generation();
         Ok(value)
     }
@@ -798,6 +843,29 @@ return {
             .hot_reload("bad_ai.luau", "local t = {}; t[0 / 0] = 1")
             .unwrap_err();
         assert!(error.to_string().contains("bad_ai.luau:1:"), "{error}");
+    }
+
+    #[test]
+    fn named_run_helpers_preserve_source_name_in_runtime_diagnostics() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+
+        let answer: f64 = rustia.run_named("inline.luau", "return 40 + 2").unwrap();
+        assert_eq!(answer, 42.0);
+
+        let owned = rustia.run_owned_named("owned.luau", "return 'ok'").unwrap();
+        assert_eq!(String::from_rustia(owned).unwrap(), "ok");
+
+        let exports = rustia
+            .compile_and_run_exports_named("exports.luau", "return { answer = 42 }")
+            .unwrap();
+        assert_eq!(exports.get::<i32>(&mut rustia, "answer").unwrap(), 42);
+
+        let generation = rustia.generation();
+        let error = rustia
+            .run_named::<f64>("bad_inline.luau", "local t = {}; t[0 / 0] = 1")
+            .unwrap_err();
+        assert!(error.to_string().contains("bad_inline.luau:1:"), "{error}");
+        assert_eq!(rustia.generation(), generation);
     }
 
     #[derive(Debug, PartialEq, Deserialize, Serialize)]

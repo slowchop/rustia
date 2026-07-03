@@ -31,6 +31,8 @@ Current unpublished workspace version: `0.0.1`.
   argument or return position.
 - The public `Rustia` facade now has `run<T>()` for typed conversion of a
   script result through `FromRustia`.
+- `Rustia::run_named<T>()`, `run_owned_named()`, and named compile/run helpers
+  preserve host-provided source names in runtime diagnostics.
 - Typed host functions and retained script calls now support up to eight
   typed arguments/results through the public tuple conversion traits.
 - Owned-value conversions now cover `Option<T>`, `Vec<T>`,

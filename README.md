@@ -21,8 +21,9 @@ at full Luau parity.
 - Pinned to **Luau 0.709** (standalone luau.org surface, not Roblox).
 - Current conformance runner: **684 fixtures**, **481 refs**, **0 pending-oracle**, **0 pending-impl**.
 - Public embedding API first slice: typed `run<T>()`, owned values with `Option<T>`/`Vec<T>`/`BTreeMap<String, T>`/table
-  conversions, typed/capability-tagged host functions with up to eight arguments/results, retained script
-  functions, pre-install host signature metadata, serde, deterministic extensions, hot reload, and macro sugar.
+  conversions, source-named run/compile helpers, typed/capability-tagged host functions with up to eight
+  arguments/results, retained script functions, pre-install host signature metadata, serde, deterministic
+  extensions, hot reload, and macro sugar.
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](design/progress.json) into
@@ -31,11 +32,11 @@ public rustia project; actual grabby integration work is explicitly out of scope
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 65% | 65% |
-| Usable embedded scripting crate | 73% | 70% |
+| Whole public rustia project | 66% | 65% |
+| Usable embedded scripting crate | 74% | 70% |
 | Full public Luau engine release | 48% | 58% |
 | Standalone benchmark OSS project | 72% | 80% |
-| Public release readiness | 62% | 75% |
+| Public release readiness | 63% | 75% |
 
 - Current conformance runner: **684 fixtures**, **481 refs**, **0 pending**.
 - The benchmark harness has all 10 requested adapters; Lua 5.4 runs separately from Luau because `mlua-sys`
