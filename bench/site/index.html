@@ -69,6 +69,31 @@
         <div id="wasm-gate-list" class="gate-list"></div>
       </section>
 
+      <section class="panel wasm-target-panel" aria-label="Wasm target benchmarks">
+        <div class="panel-heading">
+          <h2>Wasm Target Bench</h2>
+          <span id="wasm-results-status" class="chip">loading</span>
+        </div>
+        <div class="gate-summary">
+          <p id="wasm-results-summary"></p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Runtime</th>
+                <th>Adapter</th>
+                <th>Workload</th>
+                <th>Min ns/unit</th>
+                <th>vs rustia</th>
+                <th>Commit</th>
+              </tr>
+            </thead>
+            <tbody id="wasm-results-body"></tbody>
+          </table>
+        </div>
+      </section>
+
       <section class="grid">
         <article class="panel leaderboard-panel">
           <div class="panel-heading">

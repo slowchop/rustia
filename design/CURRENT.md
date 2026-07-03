@@ -22,8 +22,9 @@ shell, static chart dashboard, 12 workload entries including cross-adapter `stri
 the `rustia`/`boa`/`koto`/`mlua-lua54`/`mlua-luau`/`rhai`/`roto`/`rquickjs`/`wasmi`/`wasmtime` native adapters in
 place.
 The benchmark artifacts now also include a first-class wasm pre-lock gate source
-(`../bench/wasm-gate.json`) and static-site panel that makes the required
-production rustia wasm measurements explicit.
+(`../bench/wasm-gate.json`), production wasm target results for `rustia` and
+`koto` on V8 plus Bun/JavaScriptCore-family runtimes, and static-site panels
+that make the required production rustia wasm measurements explicit.
 Its generated [`../bench/CLAIMS.md`](../bench/CLAIMS.md) gate keeps public benchmark language per-workload and
 currently approves no blanket speed headline from the committed snapshot.
 The public API now has release-preflight-enforced compile-checked examples for embedding and hot reload, plus a
@@ -47,8 +48,9 @@ benchmark measurement workflow that targets only the generic `[self-hosted, benc
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 12 workload entries including
    source-covered `string_building`, append-only JSONL history, package metadata, split notes, static dashboard
-   files, an explicit wasm pre-lock gate artifact, and a manual self-hosted measurement workflow. Next work is
-   the actual standalone-project split, longer-run public history, and automated tracking publication.
+   files, an explicit wasm pre-lock gate artifact, a wasm target bench for rustia+koto, and a manual self-hosted
+   measurement workflow. Next work is the actual standalone-project split, SpiderMonkey wasm measurement,
+   longer-run public history, and automated tracking publication.
 3. **Keep the Luau 0.709 conformance corpus green**. The current repo has 684 executable fixtures covering 481
    behavior refs with no pending rows; new engine work should add focused fixtures rather than re-opening
    pending inventory.
@@ -73,8 +75,9 @@ watch).
   sub-µs (~0.2 µs) is **bespoke/private-fork, kernel-specific**. The committed benchmark crate now has five
   default measured workloads plus a source-covered #15 `string_building` workload; rustia's public numbers still
   need the continuous benchmark gate before claims.
-- **wasm cross-engine is a PRE-LOCK GATE (still open):** only V8 (Chrome/node/deno) is measured. **JSC
-  (Safari/iOS-WKWebView) + SpiderMonkey (Firefox) MUST be measured before the value-layout/wasm lock.**
+- **wasm cross-engine is a PRE-LOCK GATE (still open):** production rustia wasm is now measured on V8
+  (node/deno) and Bun's JavaScriptCore-family runtime. **SpiderMonkey (Firefox) is still missing**, and a
+  Safari Technology Preview / `jsc` shell run is still desirable before final public wording for Safari/iOS.
   Wasm-3.0 pass done: `br_table` dispatch stays (tail-calls/`call_ref` don't reopen it — `call_ref` is a cheap
   P1 micro-bench), **wasm-GC rejected** (determinism/layout), relaxed-SIMD stays banned.
 - **You CAN JIT in the browser — VALIDATED (spike `65-wasmjit`, verified).** Not native machine code, but you
@@ -133,15 +136,15 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 | C2 | conformance table not trustworthy | **RESOLVED for current corpus** — runner reports 684 Luau 0.709 oracle-backed fixtures, 481 refs, and 0 pending rows. Keep adding targeted oracle fixtures for new bugs/features. |
 | H1 | version drift | **FIXED** (this file + banners). |
 | H2 | "~5× koto" too narrow | **RESOLVED** — drop the blanket number; state **per-workload** (below). |
-| H3 | wasm gate + Wasm 3.0 | **Wasm-3.0 assessed** (br_table stays; wasm-GC rejected; relaxed-SIMD banned); **JSC/SpiderMonkey measurement STILL the open pre-lock gate.** |
+| H3 | wasm gate + Wasm 3.0 | **Wasm-3.0 assessed** (br_table stays; wasm-GC rejected; relaxed-SIMD banned); V8 + Bun/JSC-family production wasm measured; **SpiderMonkey and `call_ref` microbench remain open.** |
 | M1 | three named modes | **RESOLVED** — LuauCompat(knobs)/ReproducibleStandard(default)/DeterministicSim(real build). |
 | M2 | Standard incremental GC | **RESOLVED** — paced/incremental for Standard, full-collect-on-instruction-count for DeterministicSim. |
 | M3 | promote inline caches + hot/cold | **RESOLVED** — hot/cold→P1, GETTABLEKS IC→P2. |
 
 ## What's next (the genuine remaining gates before P1 lock)
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items:
-1. **JSC (Safari/iOS) + SpiderMonkey (Firefox) wasm measurement** — the real H3 pre-lock gate (needs a real
-   luau-on-wasm harness; `alt-luau-wasm` is not one). Final value-layout/dispatch lock is blocked on this.
+1. **SpiderMonkey (Firefox) wasm measurement** — the real remaining H3 cross-engine runtime gap. A
+   Safari Technology Preview / `jsc` shell run should still be added to harden the Bun/JSC-family signal.
 2. **`call_ref` vs `br_table` micro-bench** on V8/JSC/SpiderMonkey (cheap; expected to confirm br_table).
 3. **Tune the GC intervals** (Deterministic instruction-count interval = determinism ABI; Standard paced-debt
    multiplier) on realistic heap sizes at P1.

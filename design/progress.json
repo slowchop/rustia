@@ -41,13 +41,25 @@
         "source_covered_non_default": [
           "string_building"
         ]
+      },
+      "wasm_target_bench": {
+        "default_adapters": [
+          "rustia",
+          "koto"
+        ],
+        "runtimes": [
+          "Node/V8",
+          "Deno/V8",
+          "Bun/JavaScriptCore-family"
+        ],
+        "note": "Other requested adapters were compatibility-probed; only rustia and koto currently execute inside the wasm target runner by default."
       }
     }
   },
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 77,
+      "complete": 78,
       "confidence": 65,
       "state": "Design is locked and production crates are substantial, with crate metadata, release-preflight-enforced examples, first migration guide, CLI ergonomics including a line-oriented REPL, source-aware CLI diagnostics, public source-span/runtime-location error accessors, source-named facade diagnostics, typed/nested owned-table helpers, typed and fallible host diagnostic polish, host signature/fuel ABI metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics and current-generation accessors, generated leaf package dry-run checks, release preflight, CI workflow wiring, and expanded benchmark workload source coverage started; release packaging and perf gates remain.",
       "future_plan": "Harden P1, finish benchmark gates, then move toward full public Luau parity."
@@ -68,10 +80,10 @@
     },
     {
       "name": "Standalone benchmark OSS project",
-      "complete": 73,
+      "complete": 76,
       "confidence": 80,
-      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, and a manual self-hosted measurement workflow are present.",
-      "future_plan": "Split from workspace, expand workloads, publish long-run history, and automate tracking charts."
+      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, a wasm target runner for rustia+koto on V8 and JavaScriptCore-family runtimes, and a manual self-hosted measurement workflow are present.",
+      "future_plan": "Split from workspace, expand workloads, add SpiderMonkey/call_ref wasm gates, publish long-run history, and automate tracking charts."
     },
     {
       "name": "Public release readiness",
@@ -273,10 +285,10 @@
         },
         {
           "name": "Cross-engine wasm proof",
-          "complete": 30,
+          "complete": 55,
           "confidence": 80,
-          "state": "V8 evidence exists; JSC and SpiderMonkey are still open gates.",
-          "future_plan": "Build real wasm measurement harness and record golden results."
+          "state": "Production rustia wasm now has V8 and Bun/JavaScriptCore-family measurements, plus a wasm target adapter bench for rustia and koto.",
+          "future_plan": "Add SpiderMonkey production measurement and call_ref vs br_table evidence before locking the gate."
         }
       ]
     },
@@ -400,10 +412,10 @@
         },
         {
           "name": "Native/wasm matrix",
-          "complete": 30,
+          "complete": 55,
           "confidence": 75,
-          "state": "Native baselines are being recorded; full wasm engine matrix is deferred.",
-          "future_plan": "Measure V8, SpiderMonkey, and JSC on production rustia wasm."
+          "state": "Native baselines are being recorded, and wasm target results now cover rustia+koto on Node/V8, Deno/V8, and Bun/JavaScriptCore-family.",
+          "future_plan": "Add SpiderMonkey production wasm results and call_ref vs br_table microbench evidence."
         }
       ]
     },

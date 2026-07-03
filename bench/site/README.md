@@ -8,11 +8,12 @@ Static dashboard for benchmark history.
 - `style.css` - responsive dashboard styling.
 - `app.js` - JSONL parser, current leaderboard, run table, and canvas history chart.
 
-The site consumes `../history/runs.jsonl` and `../wasm-gate.json` directly and
-has no build step.
+The site consumes `../history/runs.jsonl`, `../wasm-gate.json`, and
+`../wasm/current-results.json` directly and has no build step.
 `just check-benchmark-results` validates the static asset contract and confirms
 the committed history still agrees with `../current-results.json`, while the
-wasm pre-lock gate remains wired into the dashboard.
+wasm pre-lock gate and wasm target comparison table remain wired into the
+dashboard.
 
 ## Local Preview
 

@@ -63,8 +63,10 @@ measurement job on `[self-hosted, bench]`; it appends current benchmark history 
 benchmark artifacts, verifies them, and uploads the resulting files. The `bench` crate now enumerates all 10
 requested adapters, five default measured workloads, and 12 workload entries including cross-adapter source
 coverage for #15 `string_building`. It also owns `bench/wasm-gate.json`, a deterministic pre-lock gate tracker
-exposed by `script-bench --wasm-gate-json` and rendered by the static dashboard. That tracker records the verified
-V8 spike as spike-only evidence and keeps production rustia wasm measurements on V8, JSC, and SpiderMonkey open.
+exposed by `script-bench --wasm-gate-json` and rendered by the static dashboard. The wasm target bench now builds
+`bench/wasm/adapter-runner` and records `rustia` plus `koto` on Node/V8, Deno/V8, and Bun/JavaScriptCore-family
+runtimes in `bench/wasm/current-results.json`; adapter exclusions are documented in `bench/wasm/ADAPTERS.md`.
+The pre-lock gate still needs SpiderMonkey and the `call_ref` microbench.
 It does not yet publish the JSONL history back to a tracking branch or static host. `tools/check-workflows.js`
 guards the public workflow policy: hosted CI stays hosted, the benchmark job stays manual, and self-hosted labels
 stay exactly `[self-hosted, bench]`.
@@ -72,11 +74,10 @@ stay exactly `[self-hosted, bench]`.
 **Rustia's column:** the `bench` crate enumerates engines by **cargo feature**; `rustia` now runs through the
 default `rustia-engine` feature while the external adapters stay independently gated for standalone builds.
 
-## ⚠️ P1-gating (important): the WASM matrix has nothing rustia to run yet
-mlua+Luau is native C; only koto compiles to wasm. So the V8/SpiderMonkey/**JSC** matrix + the JSC-in-CI
-question are **deferred to P1** (when rustia has a wasm build). **Build NOW:** the `bench/` crate + the native
-baseline benches, the wasm gate tracker, the golden hasher, the `RESULTS.md` generator, and the tracking
-pipeline. Reserve the wasm/JSC columns like rustia's.
+## ⚠️ Remaining wasm gate
+Production rustia wasm now runs through the bench wasm adapter runner, and koto is the current wasm-compatible
+comparison adapter. V8 and Bun/JavaScriptCore-family measurements exist. The remaining cross-engine runtime gap
+is SpiderMonkey, plus the planned `call_ref` versus `br_table` dispatch microbench across the same engine family.
 
 ## Where it lives
 ```

@@ -35,10 +35,10 @@ a terminal summary of the same source data.
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 77% | 65% |
+| Whole public rustia project | 78% | 65% |
 | Usable embedded scripting crate | 83% | 70% |
 | Full public Luau engine release | 48% | 58% |
-| Standalone benchmark OSS project | 73% | 80% |
+| Standalone benchmark OSS project | 76% | 80% |
 | Public release readiness | 73% | 75% |
 
 - Current conformance runner: **684 fixtures**, **481 refs**, **0 pending**.

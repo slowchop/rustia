@@ -210,7 +210,8 @@ select {
   color: #9a5b13;
 }
 
-.wasm-gate-panel {
+.wasm-gate-panel,
+.wasm-target-panel {
   margin-bottom: 16px;
 }
 

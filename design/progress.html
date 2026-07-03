@@ -401,7 +401,7 @@
       </div>
       <aside class="facts" aria-label="Current facts">
         <div class="fact">
-          <strong>77%</strong>
+          <strong>78%</strong>
           <span>Whole public rustia project, 65% confidence</span>
         </div>
         <div class="fact">
@@ -428,11 +428,11 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Whole public rustia project</h3>
-        <span class="percent">77%</span>
+        <span class="percent">78%</span>
       </div>
 
-    <div class="meter" aria-label="Whole public rustia project: 77% complete">
-      <div class="meter-fill" style="width: 77%"></div>
+    <div class="meter" aria-label="Whole public rustia project: 78% complete">
+      <div class="meter-fill" style="width: 78%"></div>
     </div>
 
       <div class="meta-line">
@@ -479,18 +479,18 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Standalone benchmark OSS project</h3>
-        <span class="percent">73%</span>
+        <span class="percent">76%</span>
       </div>
 
-    <div class="meter" aria-label="Standalone benchmark OSS project: 73% complete">
-      <div class="meter-fill" style="width: 73%"></div>
+    <div class="meter" aria-label="Standalone benchmark OSS project: 76% complete">
+      <div class="meter-fill" style="width: 76%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip high">80% confidence</span>
       </div>
-      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, and a manual self-hosted measurement workflow are present.</p>
-      <p class="plan"><strong>Next:</strong> Split from workspace, expand workloads, publish long-run history, and automate tracking charts.</p>
+      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, a wasm target runner for rustia+koto on V8 and JavaScriptCore-family runtimes, and a manual self-hosted measurement workflow are present.</p>
+      <p class="plan"><strong>Next:</strong> Split from workspace, expand workloads, add SpiderMonkey/call_ref wasm gates, publish long-run history, and automate tracking charts.</p>
     </article>
 
     <article class="goal-card">
@@ -513,7 +513,7 @@
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 63%</a><a href="#embedded-api">Embedded API 70%</a><a href="#benchmarks">Benchmarks 75%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 65%</a><a href="#packaging">Packaging 62%</a>
+      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 69%</a><a href="#embedded-api">Embedded API 70%</a><a href="#benchmarks">Benchmarks 75%</a><a href="#wasm-perf">Wasm/perf 50%</a><a href="#tooling">Tooling 65%</a><a href="#packaging">Packaging 62%</a>
     </nav>
 
 
@@ -984,7 +984,7 @@
           <p>4 tracked items</p>
         </div>
         <div class="area-score">
-          <span>63% avg complete</span>
+          <span>69% avg complete</span>
           <span>75% avg confidence</span>
         </div>
       </div>
@@ -1051,19 +1051,19 @@
       <div class="entry-top">
         <div>
           <h4>Cross-engine wasm proof</h4>
-          <p>V8 evidence exists; JSC and SpiderMonkey are still open gates.</p>
+          <p>Production rustia wasm now has V8 and Bun/JavaScriptCore-family measurements, plus a wasm target adapter bench for rustia and koto.</p>
         </div>
         <div class="entry-score">
-          <strong>30%</strong>
+          <strong>55%</strong>
           <span class="chip high">80% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Cross-engine wasm proof: 30% complete">
-      <div class="meter-fill" style="width: 30%"></div>
+    <div class="meter" aria-label="Cross-engine wasm proof: 55% complete">
+      <div class="meter-fill" style="width: 55%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Build real wasm measurement harness and record golden results.</p>
+      <p class="plan"><strong>Future plan:</strong> Add SpiderMonkey production measurement and call_ref vs br_table evidence before locking the gate.</p>
     </article>
 
       </div>
@@ -1374,7 +1374,7 @@
           <p>2 tracked items</p>
         </div>
         <div class="area-score">
-          <span>38% avg complete</span>
+          <span>50% avg complete</span>
           <span>73% avg confidence</span>
         </div>
       </div>
@@ -1403,19 +1403,19 @@
       <div class="entry-top">
         <div>
           <h4>Native/wasm matrix</h4>
-          <p>Native baselines are being recorded; full wasm engine matrix is deferred.</p>
+          <p>Native baselines are being recorded, and wasm target results now cover rustia+koto on Node/V8, Deno/V8, and Bun/JavaScriptCore-family.</p>
         </div>
         <div class="entry-score">
-          <strong>30%</strong>
+          <strong>55%</strong>
           <span class="chip medium">75% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Native/wasm matrix: 30% complete">
-      <div class="meter-fill" style="width: 30%"></div>
+    <div class="meter" aria-label="Native/wasm matrix: 55% complete">
+      <div class="meter-fill" style="width: 55%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Measure V8, SpiderMonkey, and JSC on production rustia wasm.</p>
+      <p class="plan"><strong>Future plan:</strong> Add SpiderMonkey production wasm results and call_ref vs br_table microbench evidence.</p>
     </article>
 
       </div>

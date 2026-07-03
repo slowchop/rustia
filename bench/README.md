@@ -189,6 +189,10 @@ tracked in [`PRIOR-ART.md`](PRIOR-ART.md).
 shows current leaderboards, renders per-workload history charts, and loads
 `wasm-gate.json` so the open V8/JSC/SpiderMonkey pre-lock requirements stay
 visible next to the rough performance comparisons.
+It also reads `wasm/current-results.json` for the browser-wasm target bench.
+That target currently measures the wasm-compatible scripting adapters `rustia`
+and `koto`; current adapter status is tracked in
+[`wasm/ADAPTERS.md`](wasm/ADAPTERS.md).
 
 ```sh
 python3 -m http.server 8000

@@ -12,6 +12,7 @@ const stylePath = path.join(siteDir, "style.css");
 const historyPath = path.join(root, "bench", "history", "runs.jsonl");
 const currentResultsPath = path.join(root, "bench", "current-results.json");
 const wasmGatePath = path.join(root, "bench", "wasm-gate.json");
+const wasmResultsPath = path.join(root, "bench", "wasm", "current-results.json");
 
 function fail(message) {
   console.error(`check-benchmark-site: ${message}`);
@@ -253,21 +254,81 @@ function checkWasmGate(gate) {
   assertEqual(gate.gate_complete, expectedComplete, "wasm gate gate_complete");
 }
 
+function checkWasmResults(results) {
+  assertEqual(results.schema_version, 1, "wasm results schema_version");
+  assertEqual(results.schema, "rustia.bench.wasm-gate-current-results.v1", "wasm results schema");
+  if (!Array.isArray(results.runs) || results.runs.length === 0) {
+    fail(`${relative(wasmResultsPath)} runs must be a non-empty array`);
+  }
+  const adaptersByTarget = new Map();
+  for (const [index, run] of results.runs.entries()) {
+    const label = `${relative(wasmResultsPath)} runs[${index}]`;
+    if (!isObject(run.runtime) || !isObject(run.adapter)) {
+      fail(`${label} must include runtime and adapter metadata`);
+    }
+    for (const field of ["target", "commit"]) {
+      if (typeof run[field] !== "string" || run[field].trim() === "") {
+        fail(`${label}.${field} must be a non-empty string`);
+      }
+    }
+    for (const field of ["name", "family"]) {
+      if (typeof run.runtime[field] !== "string" || run.runtime[field].trim() === "") {
+        fail(`${label}.runtime.${field} must be a non-empty string`);
+      }
+    }
+    for (const field of ["id", "dialect"]) {
+      if (typeof run.adapter[field] !== "string" || run.adapter[field].trim() === "") {
+        fail(`${label}.adapter.${field} must be a non-empty string`);
+      }
+    }
+    if (!["rustia", "koto"].includes(run.adapter.id)) {
+      fail(`${label}.adapter.id must be rustia or koto for the wasm target bench`);
+    }
+    const adapters = adaptersByTarget.get(run.target) ?? new Set();
+    adapters.add(run.adapter.id);
+    adaptersByTarget.set(run.target, adapters);
+    if (!Array.isArray(run.rows) || run.rows.length !== 5) {
+      fail(`${label}.rows must contain five default workload rows`);
+    }
+    for (const [rowIndex, row] of run.rows.entries()) {
+      const rowLabel = `${label}.rows[${rowIndex}]`;
+      for (const field of ["engine", "dialect", "workload", "unit", "checksum"]) {
+        if (typeof row[field] !== "string" || row[field].trim() === "") {
+          fail(`${rowLabel}.${field} must be a non-empty string`);
+        }
+      }
+      for (const field of ["n", "reps", "ns_per_unit_min", "ns_per_unit_median", "units_per_sec"]) {
+        assertFinitePositive(Number(row[field]), `${rowLabel}.${field}`);
+      }
+    }
+  }
+  for (const [target, adapters] of adaptersByTarget) {
+    for (const adapter of ["rustia", "koto"]) {
+      if (!adapters.has(adapter)) {
+        fail(`${relative(wasmResultsPath)} target ${target} is missing ${adapter}`);
+      }
+    }
+  }
+}
+
 const html = read(indexPath);
 const js = read(appPath);
 const css = read(stylePath);
 const historyRecords = parseHistory(read(historyPath));
 const currentResults = parseJson(currentResultsPath);
 const wasmGate = parseJson(wasmGatePath);
+const wasmResults = parseJson(wasmResultsPath);
 
 requireIncludes(html, '<link rel="stylesheet" href="./style.css">', indexPath, "local stylesheet link");
 requireIncludes(html, '<script src="./app.js" defer></script>', indexPath, "local app script");
 requireIncludes(html, 'href="../history/runs.jsonl"', indexPath, "history download link");
 requireIncludes(js, 'fetch("../history/runs.jsonl"', appPath, "relative history fetch");
 requireIncludes(js, 'fetch("../wasm-gate.json"', appPath, "relative wasm gate fetch");
+requireIncludes(js, 'fetch("../wasm/current-results.json"', appPath, "relative wasm results fetch");
 requireIncludes(js, "function parseHistory(text)", appPath, "JSONL parser");
 requireIncludes(js, "function drawChart()", appPath, "canvas chart renderer");
 requireIncludes(js, "function renderWasmGate()", appPath, "wasm gate renderer");
+requireIncludes(js, "function renderWasmResults()", appPath, "wasm results renderer");
 noExternalAssets(html, indexPath);
 noExternalAssets(css, stylePath);
 noExternalAssets(js, appPath);
@@ -281,7 +342,8 @@ for (const id of queriedIds(js)) {
 
 checkCurrentResultsAgreement(historyRecords, currentResults);
 checkWasmGate(wasmGate);
+checkWasmResults(wasmResults);
 
 console.log(
-  `benchmark site contract ok: ${historyRecords.length} history records, ${currentResults.metadata.row_count} current rows, ${wasmGate.requirements.length} wasm gate requirements`,
+  `benchmark site contract ok: ${historyRecords.length} history records, ${currentResults.metadata.row_count} current rows, ${wasmGate.requirements.length} wasm gate requirements, ${wasmResults.runs.length} wasm adapter runs`,
 );

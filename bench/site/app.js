@@ -4,6 +4,8 @@ const state = {
   workload: "",
   wasmGate: null,
   wasmGateError: "",
+  wasmResults: null,
+  wasmResultsError: "",
 };
 
 const colors = [
@@ -32,6 +34,9 @@ const els = {
   wasmGateProgress: document.querySelector("#wasm-gate-progress"),
   wasmGateCount: document.querySelector("#wasm-gate-count"),
   wasmGateList: document.querySelector("#wasm-gate-list"),
+  wasmResultsStatus: document.querySelector("#wasm-results-status"),
+  wasmResultsSummary: document.querySelector("#wasm-results-summary"),
+  wasmResultsBody: document.querySelector("#wasm-results-body"),
   leaderboardSubtitle: document.querySelector("#leaderboard-subtitle"),
   leaderboardBody: document.querySelector("#leaderboard-body"),
   chartSubtitle: document.querySelector("#chart-subtitle"),
@@ -55,6 +60,7 @@ window.addEventListener("resize", () => drawChart());
 
 loadDefaultHistory();
 loadWasmGate();
+loadWasmResults();
 
 async function loadDefaultHistory() {
   setStatus("Loading history");
@@ -85,6 +91,21 @@ async function loadWasmGate() {
     state.wasmGateError = error.message;
   }
   renderWasmGate();
+}
+
+async function loadWasmResults() {
+  try {
+    const response = await fetch("../wasm/current-results.json", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    state.wasmResults = normalizeWasmResults(await response.json());
+    state.wasmResultsError = "";
+  } catch (error) {
+    state.wasmResults = null;
+    state.wasmResultsError = error.message;
+  }
+  renderWasmResults();
 }
 
 async function loadSelectedFile() {
@@ -151,6 +172,7 @@ function setRecords(records) {
 function render() {
   renderMetrics();
   renderWasmGate();
+  renderWasmResults();
   renderLeaderboard();
   renderRuns();
   drawChart();
@@ -222,6 +244,113 @@ function renderWasmGate() {
   els.wasmGateList.replaceChildren(
     ...state.wasmGate.requirements.map((requirement) => gateRequirementElement(requirement)),
   );
+}
+
+function normalizeWasmResults(data) {
+  const runs = Array.isArray(data.runs)
+    ? data.runs.map((run) => ({
+      target: String(run.target ?? ""),
+      commit: String(run.commit ?? data.commit ?? "unknown"),
+      runtime: {
+        name: String(run.runtime?.name ?? "unknown"),
+        family: String(run.runtime?.family ?? "unknown"),
+      },
+      adapter: {
+        id: String(run.adapter?.id ?? "unknown"),
+        dialect: String(run.adapter?.dialect ?? "unknown"),
+      },
+      rows: Array.isArray(run.rows)
+        ? run.rows.map((row) => ({
+          engine: String(row.engine ?? run.adapter?.id ?? "unknown"),
+          dialect: String(row.dialect ?? run.adapter?.dialect ?? "unknown"),
+          workload: String(row.workload ?? "unknown"),
+          unit: String(row.unit ?? ""),
+          ns_per_unit_min: Number(row.ns_per_unit_min),
+          ns_per_unit_median: Number(row.ns_per_unit_median),
+          units_per_sec: Number(row.units_per_sec),
+          checksum: String(row.checksum ?? ""),
+        }))
+        : [],
+    }))
+    : [];
+  return {
+    schema: String(data.schema ?? ""),
+    updated: String(data.updated ?? ""),
+    commit: String(data.commit ?? "unknown"),
+    requirements: data.requirements ?? {},
+    runs,
+  };
+}
+
+function renderWasmResults() {
+  if (!state.wasmResults) {
+    els.wasmResultsStatus.textContent = state.wasmResultsError ? "missing" : "loading";
+    els.wasmResultsStatus.className = "chip chip-warn";
+    els.wasmResultsSummary.textContent = state.wasmResultsError
+      ? `Could not load ../wasm/current-results.json: ${state.wasmResultsError}`
+      : "Loading wasm target benchmark data.";
+    els.wasmResultsBody.replaceChildren();
+    return;
+  }
+
+  const flatRows = wasmFlatRows();
+  const runtimeCount = unique(state.wasmResults.runs.map((run) => `${run.runtime.family}/${run.runtime.name}`)).length;
+  const adapterCount = unique(state.wasmResults.runs.map((run) => run.adapter.id)).length;
+  els.wasmResultsStatus.textContent = `${flatRows.length} rows`;
+  els.wasmResultsStatus.className = "chip chip-good";
+  els.wasmResultsSummary.textContent =
+    `${adapterCount} wasm adapter(s) across ${runtimeCount} runtime(s); updated ${state.wasmResults.updated || "unknown"}.`;
+  els.wasmResultsBody.replaceChildren(
+    ...flatRows
+      .sort((left, right) =>
+        left.runtime.localeCompare(right.runtime) ||
+        left.workload.localeCompare(right.workload) ||
+        left.adapter.localeCompare(right.adapter)
+      )
+      .map((row) =>
+        rowElement("tr", [
+          cell(row.runtime),
+          rowElement("td", [engineLabel(row.adapter)]),
+          cell(row.workload),
+          cell(formatNumber(row.ns_per_unit_min)),
+          cell(row.speed_vs_rustia == null ? "n/a" : `${row.speed_vs_rustia.toFixed(2)}x`),
+          cell(row.commit),
+        ]),
+      ),
+  );
+}
+
+function wasmFlatRows() {
+  if (!state.wasmResults) {
+    return [];
+  }
+  const rows = [];
+  for (const run of state.wasmResults.runs) {
+    for (const row of run.rows) {
+      if (!Number.isFinite(row.ns_per_unit_min)) {
+        continue;
+      }
+      rows.push({
+        runtime: `${run.runtime.family}/${run.runtime.name}`,
+        target: run.target,
+        adapter: run.adapter.id,
+        workload: row.workload,
+        ns_per_unit_min: row.ns_per_unit_min,
+        commit: run.commit,
+      });
+    }
+  }
+  const rustiaBaselines = new Map(
+    rows
+      .filter((row) => row.adapter === "rustia")
+      .map((row) => [`${row.runtime}\0${row.workload}`, row.ns_per_unit_min]),
+  );
+  return rows.map((row) => ({
+    ...row,
+    speed_vs_rustia: rustiaBaselines.get(`${row.runtime}\0${row.workload}`) == null
+      ? null
+      : rustiaBaselines.get(`${row.runtime}\0${row.workload}`) / row.ns_per_unit_min,
+  }));
 }
 
 function gateRequirementElement(requirement) {
