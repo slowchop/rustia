@@ -5910,7 +5910,7 @@ fn compare_ordered_constants(op: BinaryOp, lhs: &Constant, rhs: &Constant) -> Op
 mod tests {
     use super::{compile, compile_with_options, BuiltinEnvironment, CompileOptions};
     use rustia_parser::{parse_source, parse_source_bytes};
-    use rustia_vm::bytecode::{Opcode, Program};
+    use rustia_vm::bytecode::{Constant, Opcode, Program};
     use rustia_vm::{ErrorKind, Profile, Vm, VmSettings};
 
     #[test]
@@ -5921,6 +5921,49 @@ mod tests {
         let mut vm = Vm::new(Profile::DeterministicSim);
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(42.0));
+    }
+
+    #[test]
+    fn constant_folded_number_equality_uses_luau_semantics() {
+        let cases = [
+            ("return -0 == 0", true),
+            ("return 0 ~= -0", false),
+            ("return 0 / 0 == 0 / 0", false),
+            ("return 0 / 0 ~= 0 / 0", true),
+        ];
+
+        for (source, expected) in cases {
+            let chunk = parse_source(source).unwrap();
+            let program = compile(&chunk).unwrap();
+            assert!(program
+                .main
+                .code
+                .iter()
+                .all(|instruction| !matches!(instruction.op, Opcode::Equal | Opcode::NotEqual)));
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            let result = vm.run(&program).unwrap();
+            assert_eq!(result.as_bool(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn constant_pool_keeps_signed_zero_numbers_distinct() {
+        let chunk = parse_source("return tostring(-0) .. '|' .. tostring(0)").unwrap();
+        let program = compile(&chunk).unwrap();
+        let zero_bits = program
+            .constants
+            .iter()
+            .filter_map(|constant| match constant {
+                Constant::Number(value) if *value == 0.0 => Some(value.to_bits()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(zero_bits.contains(&(-0.0f64).to_bits()));
+        assert!(zero_bits.contains(&0.0f64.to_bits()));
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(vm.string_value(result).unwrap().as_deref(), Some("-0|0"));
     }
 
     #[test]
