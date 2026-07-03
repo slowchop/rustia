@@ -284,6 +284,7 @@ mod tests {
     use rustia_parser::parse_source;
     use rustia_vm::Vm;
     use serde::{Deserialize, Serialize};
+    use std::collections::BTreeMap;
 
     #[test]
     fn compile_and_run_smoke() {
@@ -301,10 +302,13 @@ mod tests {
         let answer: f64 = rustia.run("return 40 + 2").unwrap();
         let numbers: Vec<i32> = rustia.run("return { 1, 2, 3 }").unwrap();
         let missing: Option<String> = rustia.run("return nil").unwrap();
+        let named: BTreeMap<String, i32> = rustia.run("return { scout = 5, brute = 9 }").unwrap();
 
         assert_eq!(answer, 42.0);
         assert_eq!(numbers, vec![1, 2, 3]);
         assert_eq!(missing, None);
+        assert_eq!(named.get("scout"), Some(&5));
+        assert_eq!(named.get("brute"), Some(&9));
     }
 
     #[test]
@@ -312,6 +316,24 @@ mod tests {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let error = rustia.run::<String>("return 42").unwrap_err().to_string();
         assert!(error.contains("expected string, got number"), "{error}");
+
+        let array_error = rustia
+            .run::<BTreeMap<String, i32>>("return { 1, 2 }")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            array_error.contains("expected string-keyed table, got table with array entries"),
+            "{array_error}"
+        );
+
+        let key_error = rustia
+            .run::<BTreeMap<String, i32>>("return { [true] = 1 }")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            key_error.contains("expected string-keyed table, got non-string key"),
+            "{key_error}"
+        );
     }
 
     #[test]
@@ -383,11 +405,13 @@ return {
     #[test]
     fn insert_global_accepts_option_vec_and_owned_table() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let named_map = BTreeMap::from([("scout".to_owned(), 5_i32), ("brute".to_owned(), 9_i32)]);
         rustia.insert_global("maybe", Some(4_i32)).unwrap();
         rustia
             .insert_global("missing", Option::<i32>::None)
             .unwrap();
         rustia.insert_global("numbers", vec![1_i32, 2, 3]).unwrap();
+        rustia.insert_global("named_map", named_map).unwrap();
         rustia
             .insert_global(
                 "named",
@@ -405,6 +429,8 @@ return maybe == 4
     and missing == nil
     and numbers[1] == 1
     and numbers[3] == 3
+    and named_map.scout == 5
+    and named_map.brute == 9
     and named.kind == 'scout'
 ",
             )
@@ -459,6 +485,16 @@ return maybe == 4
             .unwrap();
         rustia.add_fn("make_vec", || vec![2.0, 4.0, 6.0]).unwrap();
         rustia
+            .add_fn("sum_map", |values: BTreeMap<String, f64>| {
+                values.values().sum::<f64>()
+            })
+            .unwrap();
+        rustia
+            .add_fn("make_map", || {
+                BTreeMap::from([("scout".to_owned(), 5.0), ("brute".to_owned(), 9.0)])
+            })
+            .unwrap();
+        rustia
             .add_fn("make_table", || {
                 OwnedTable::entries([(
                     OwnedKey::String("kind".to_owned()),
@@ -474,6 +510,8 @@ return sum_vec({ 1, 2, 3 }) == 6
     and maybe_name(true) == 'scout'
     and maybe_name(false) == nil
     and make_vec()[2] == 4
+    and sum_map({ scout = 5, brute = 9 }) == 14
+    and make_map().brute == 9
     and make_table().kind == 'scout'
 ",
             )

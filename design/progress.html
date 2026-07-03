@@ -405,7 +405,7 @@
           <span>Whole public rustia project, 65% confidence</span>
         </div>
         <div class="fact">
-          <strong>71%</strong>
+          <strong>72%</strong>
           <span>Usable embedded scripting crate, 70% confidence</span>
         </div>
         <div class="fact">
@@ -445,17 +445,17 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Usable embedded scripting crate</h3>
-        <span class="percent">71%</span>
+        <span class="percent">72%</span>
       </div>
 
-    <div class="meter" aria-label="Usable embedded scripting crate: 71% complete">
-      <div class="meter-fill" style="width: 71%"></div>
+    <div class="meter" aria-label="Usable embedded scripting crate: 72% complete">
+      <div class="meter-fill" style="width: 72%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">70% confidence</span>
       </div>
-      <p>The rustia facade supports typed run&lt;T&gt;, owned values with Option/Vec/table conversions, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.</p>
+      <p>The rustia facade supports typed run&lt;T&gt;, owned values with Option/Vec/BTreeMap/table conversions, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.</p>
       <p class="plan"><strong>Next:</strong> Stabilize API semantics, diagnostics, capability policy, and migration docs.</p>
     </article>
 
@@ -1105,16 +1105,16 @@
       <div class="entry-top">
         <div>
           <h4>Owned value firewall</h4>
-          <p>OwnedValue, owned tables/keys, scalar conversions, Option/Vec conversions, and direct OwnedTable conversion exist.</p>
+          <p>OwnedValue, owned tables/keys, scalar conversions, Option/Vec/BTreeMap conversions, and direct OwnedTable conversion exist.</p>
         </div>
         <div class="entry-score">
-          <strong>76%</strong>
+          <strong>78%</strong>
           <span class="chip medium">75% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Owned value firewall: 76% complete">
-      <div class="meter-fill" style="width: 76%"></div>
+    <div class="meter" aria-label="Owned value firewall: 78% complete">
+      <div class="meter-fill" style="width: 78%"></div>
     </div>
 
       <p class="plan"><strong>Future plan:</strong> Keep hardening conversion coverage and avoid leaking internal GC lifetimes.</p>

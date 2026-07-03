@@ -1,5 +1,6 @@
 use crate::{Error, Result};
 use rustia_vm::{Error as VmError, ErrorKind as VmErrorKind, Value as RawValue, ValueKind, Vm};
+use std::collections::BTreeMap;
 
 const SNAPSHOT_DEPTH_LIMIT: usize = 64;
 
@@ -269,6 +270,42 @@ where
     }
 }
 
+impl<T> IntoRustia for BTreeMap<String, T>
+where
+    T: IntoRustia,
+{
+    fn into_rustia(self) -> OwnedValue {
+        OwnedValue::Table(OwnedTable::entries(
+            self.into_iter()
+                .map(|(key, value)| (OwnedKey::String(key), value.into_rustia())),
+        ))
+    }
+}
+
+impl<T> FromRustia for BTreeMap<String, T>
+where
+    T: FromRustia,
+{
+    fn from_rustia(value: OwnedValue) -> Result<Self> {
+        let table = OwnedTable::from_rustia(value)?;
+        if !table.array.is_empty() {
+            return Err(Error::Embed(
+                "expected string-keyed table, got table with array entries".to_owned(),
+            ));
+        }
+        table
+            .entries
+            .into_iter()
+            .map(|(key, value)| match key {
+                OwnedKey::String(key) => T::from_rustia(value).map(|value| (key, value)),
+                _ => Err(Error::Embed(
+                    "expected string-keyed table, got non-string key".to_owned(),
+                )),
+            })
+            .collect()
+    }
+}
+
 macro_rules! impl_single_multi {
     ($($ty:ty),* $(,)?) => {
         $(
@@ -336,6 +373,29 @@ where
 }
 
 impl<T> FromRustiaMulti for Vec<T>
+where
+    T: FromRustia,
+{
+    fn from_rustia_multi(mut values: Vec<OwnedValue>) -> Result<Self> {
+        let value = if values.is_empty() {
+            OwnedValue::Nil
+        } else {
+            values.remove(0)
+        };
+        Self::from_rustia(value)
+    }
+}
+
+impl<T> IntoRustiaMulti for BTreeMap<String, T>
+where
+    T: IntoRustia,
+{
+    fn into_rustia_multi(self) -> Vec<OwnedValue> {
+        vec![self.into_rustia()]
+    }
+}
+
+impl<T> FromRustiaMulti for BTreeMap<String, T>
 where
     T: FromRustia,
 {
