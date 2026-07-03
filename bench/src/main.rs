@@ -1588,6 +1588,12 @@ fn history_record_from_json(
 ) -> Result<HistoryRecord> {
     let timestamp_unix = json_u64(path, line_number, value, "timestamp_unix")?;
     let commit = json_non_empty_string(path, line_number, value, "commit")?;
+    if commit.ends_with("-dirty") {
+        return Err(Error::new(format!(
+            "{} line {line_number}: committed history must not use dirty commit id {commit:?}",
+            path.display()
+        )));
+    }
     let target = json_non_empty_string(path, line_number, value, "target")?;
     let engine = json_non_empty_string(path, line_number, value, "engine")?;
     let dialect = json_non_empty_string(path, line_number, value, "dialect")?;
@@ -2002,6 +2008,28 @@ mod tests {
     }
 
     #[test]
+    fn check_history_rejects_dirty_commit_records() {
+        let path = write_temp_history(
+            "dirty-commit",
+            &format!(
+                "{}\n",
+                sample_history_json_with_commit(
+                    100,
+                    "rustia",
+                    "luau",
+                    "dense_tables",
+                    "abc1234-dirty"
+                )
+            ),
+        );
+
+        let error = check_history(&path).expect_err("dirty commit should fail");
+        let _ = fs::remove_file(&path);
+
+        assert!(error.to_string().contains("dirty commit id"));
+    }
+
+    #[test]
     fn write_results_can_refresh_from_history_without_new_measurements() {
         let history = write_temp_history(
             "refresh-results-history",
@@ -2056,6 +2084,16 @@ mod tests {
         dialect: &'static str,
         workload: &'static str,
     ) -> String {
+        sample_history_json_with_commit(timestamp_unix, engine, dialect, workload, "test")
+    }
+
+    fn sample_history_json_with_commit(
+        timestamp_unix: u64,
+        engine: &'static str,
+        dialect: &'static str,
+        workload: &'static str,
+        commit: &'static str,
+    ) -> String {
         let unit = WORKLOADS
             .iter()
             .find(|entry| entry.id == workload)
@@ -2072,7 +2110,7 @@ mod tests {
             ns_per_unit_median: 1.5,
             units_per_sec: 1_000_000_000.0,
             checksum: "i64:42".to_owned(),
-            commit: "test".to_owned(),
+            commit: commit.to_owned(),
             timestamp_unix,
             target: "test-target".to_owned(),
         })

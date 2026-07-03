@@ -45,6 +45,18 @@ The matrix switch is present now:
 cargo run -p script-bench-harness --features all-engines -- --list
 ```
 
+Run and append the full default benchmark matrix with:
+
+```sh
+just benchmarks
+```
+
+That recipe runs the `all-engines` binary first, runs the Lua 5.4 mlua adapter
+in its required separate binary, appends measurements to `bench/history/runs.jsonl`,
+and refreshes the generated result files. It intentionally requires a clean
+staged/unstaged worktree before appending benchmark history, so committed
+baselines do not get tagged with `-dirty` commit IDs.
+
 `all-engines` intentionally excludes `mlua-lua54` because `mlua-lua54` and
 `mlua-luau` cannot be linked into one binary. Run the Lua 5.4 mlua adapter as a
 separate binary:
@@ -101,7 +113,8 @@ cargo run -p script-bench-harness -- --check-history
 ```
 
 The check validates required fields, known engine/workload IDs, dialect and unit
-consistency, positive finite timing values, and append-only timestamp order.
+consistency, positive finite timing values, clean commit IDs, and append-only
+timestamp order.
 
 Refresh generated markdown results from committed history without running
 benchmarks:
@@ -126,6 +139,9 @@ Or refresh the committed current-results JSON and render the HTML together:
 ```sh
 just gen-benchmark-results
 ```
+
+`gen-benchmark-results` does not run measurements; it only regenerates result
+artifacts from committed history.
 
 ## Provenance
 
