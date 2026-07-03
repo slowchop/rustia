@@ -27,6 +27,8 @@ Current unpublished workspace version: `0.0.1`.
   runner labels stay public and generic.
 - Release preflight and hosted CI now compile the public `rustia` examples
   explicitly.
+- The first public koto-to-rustia migration guide is documented in
+  `design/76-koto-migration.md`.
 - Crate metadata policy is generated from cargo metadata into
   `design/crate-metadata.json` and checked in release preflight.
 - Typed host function conversion errors now include the host function name and

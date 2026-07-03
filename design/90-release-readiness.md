@@ -70,6 +70,8 @@ from `publish = false` to publishable.
   functions, and hot reload.
 - Owned snapshots expose serde deserialization at the `OwnedValue` level plus
   string-keyed field and array-slot helpers on `OwnedTable`.
+- The first public koto-to-rustia migration guide is tracked in
+  [`76-koto-migration.md`](76-koto-migration.md).
 - Current examples:
   - `crates/rustia/examples/embedding.rs` covers globals, source-named run
     helpers, fallible typed host functions, deterministic extensions, retained

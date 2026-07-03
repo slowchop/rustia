@@ -47,7 +47,8 @@ public rustia project; actual grabby integration work is explicitly out of scope
   speed headline from the current snapshot.
 - Major remaining gates are engine hardening, long-run benchmark history, JSC/SpiderMonkey wasm proof, and release
   packaging. Semver policy is tracked in [`design/91-semver-policy.md`](design/91-semver-policy.md), release
-  notes in [`CHANGELOG.md`](CHANGELOG.md), crate metadata audit in
+  notes in [`CHANGELOG.md`](CHANGELOG.md), koto migration guidance in
+  [`design/76-koto-migration.md`](design/76-koto-migration.md), crate metadata audit in
   [`design/crate-metadata.json`](design/crate-metadata.json), and package file-list review in
   [`design/package-files.json`](design/package-files.json). Current publish blockers are generated at
   [`design/publishability.json`](design/publishability.json).

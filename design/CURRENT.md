@@ -22,7 +22,8 @@ shell, static chart dashboard, and the `rustia`/`boa`/`koto`/`mlua-lua54`/`mlua-
 `wasmi`/`wasmtime` native adapters in place.
 Its generated [`../bench/CLAIMS.md`](../bench/CLAIMS.md) gate keeps public benchmark language per-workload and
 currently approves no blanket speed headline from the committed snapshot.
-The public API now has release-preflight-enforced compile-checked examples for embedding and hot reload.
+The public API now has release-preflight-enforced compile-checked examples for embedding and hot reload, plus a
+first koto-to-rustia migration guide.
 `rustia-cli` supports file, stdin, and `--eval` execution with profile, fuel, and source-name options.
 CI wiring now includes hosted release-preflight checks, explicit public-example compilation, plus a manual
 benchmark measurement workflow that targets only the generic `[self-hosted, bench]` runner label.
@@ -106,6 +107,7 @@ watch).
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + deterministic extension/linker plan | **implemented first slice** ✅ |
+| [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |
 | [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design (some decisions pending) | **runner/adapters/history/site/package metadata/manual benchmark workflow implemented; split/published tracking pending** |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **metadata/checklist/changelog/preflight/CI gates started; publish=false remains** |
 | [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **policy started; 0.0.x remains unstable** |
