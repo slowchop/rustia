@@ -7,6 +7,9 @@ gen-package-files:
 check-package-files:
     node tools/check-package-files.js --check
 
+check-release-notes:
+    node tools/check-release-notes.js
+
 benchmarks:
     git diff --quiet --ignore-submodules --
     git diff --cached --quiet --ignore-submodules --

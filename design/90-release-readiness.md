@@ -78,6 +78,8 @@ from `publish = false` to publishable.
 
 - `cargo test --workspace` passes on the release toolchain.
 - `just check-package-files` passes and `design/package-files.json` is current.
+- `just check-release-notes` passes and `CHANGELOG.md` names the current
+  workspace version plus public-facing unreleased changes.
 - `rustia-cli` supports file, stdin, and `--eval` execution, plus profile,
   fuel, and source-name options for diagnostics.
 - `cargo package --no-verify` reaches packaging for each publishable crate; any

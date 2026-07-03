@@ -58,7 +58,7 @@ Before a breaking public-facade change lands after `0.1.0`:
 
 - Update `crates/rustia/examples/` and README commands.
 - Add or update tests proving the new behavior.
-- Document migration impact in the release notes or changelog.
+- Document migration impact in [`../CHANGELOG.md`](../CHANGELOG.md).
 - Keep `design/CURRENT.md`, `design/progress.json`, and generated progress HTML
   aligned with the new status.
 - If a schema changes, bump its schema version and keep the old behavior
