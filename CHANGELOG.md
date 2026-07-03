@@ -27,6 +27,8 @@ Current unpublished workspace version: `0.0.1`.
   runner labels stay public and generic.
 - Crate metadata policy is generated from cargo metadata into
   `design/crate-metadata.json` and checked in release preflight.
+- Typed host function conversion errors now include the host function name and
+  argument or return position.
 - Release-readiness docs now cover package metadata, package file-list audits,
   semver policy, changelog validation, and publish ordering.
 

@@ -401,11 +401,11 @@
       </div>
       <aside class="facts" aria-label="Current facts">
         <div class="fact">
-          <strong>61%</strong>
+          <strong>62%</strong>
           <span>Whole public rustia project, 65% confidence</span>
         </div>
         <div class="fact">
-          <strong>65%</strong>
+          <strong>66%</strong>
           <span>Usable embedded scripting crate, 70% confidence</span>
         </div>
         <div class="fact">
@@ -428,34 +428,34 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Whole public rustia project</h3>
-        <span class="percent">61%</span>
+        <span class="percent">62%</span>
       </div>
 
-    <div class="meter" aria-label="Whole public rustia project: 61% complete">
-      <div class="meter-fill" style="width: 61%"></div>
+    <div class="meter" aria-label="Whole public rustia project: 62% complete">
+      <div class="meter-fill" style="width: 62%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">65% confidence</span>
       </div>
-      <p>Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.</p>
+      <p>Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, typed host diagnostic polish, release preflight, and CI workflow wiring started; release packaging and perf gates remain.</p>
       <p class="plan"><strong>Next:</strong> Harden P1, finish benchmark gates, then move toward full public Luau parity.</p>
     </article>
 
     <article class="goal-card">
       <div class="card-head">
         <h3>Usable embedded scripting crate</h3>
-        <span class="percent">65%</span>
+        <span class="percent">66%</span>
       </div>
 
-    <div class="meter" aria-label="Usable embedded scripting crate: 65% complete">
-      <div class="meter-fill" style="width: 65%"></div>
+    <div class="meter" aria-label="Usable embedded scripting crate: 66% complete">
+      <div class="meter-fill" style="width: 66%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">70% confidence</span>
       </div>
-      <p>The rustia facade supports owned values, typed host functions, retained functions, serde, extensions, hot reload, and compile-checked examples.</p>
+      <p>The rustia facade supports owned values, typed host functions with argument-context diagnostics, retained functions, serde, extensions, hot reload, and compile-checked examples.</p>
       <p class="plan"><strong>Next:</strong> Stabilize API semantics, diagnostics, capability policy, and migration docs.</p>
     </article>
 
@@ -1124,19 +1124,19 @@
       <div class="entry-top">
         <div>
           <h4>Typed host functions</h4>
-          <p>Plain Rust functions can be registered with typed args/results.</p>
+          <p>Plain Rust functions can be registered with typed args/results, and conversion errors name the host function plus argument or return position.</p>
         </div>
         <div class="entry-score">
-          <strong>68%</strong>
+          <strong>72%</strong>
           <span class="chip medium">75% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Typed host functions: 68% complete">
-      <div class="meter-fill" style="width: 68%"></div>
+    <div class="meter" aria-label="Typed host functions: 72% complete">
+      <div class="meter-fill" style="width: 72%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Expand arity/signature support and improve diagnostics.</p>
+      <p class="plan"><strong>Future plan:</strong> Expand arity/signature support and keep tightening diagnostics.</p>
     </article>
 
     <article class="entry">

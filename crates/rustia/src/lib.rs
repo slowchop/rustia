@@ -276,6 +276,28 @@ return {
     }
 
     #[test]
+    fn typed_host_function_arg_errors_include_function_and_position() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        rustia
+            .add_fn("clamp", |x: f64, lo: f64, hi: f64| x.clamp(lo, hi))
+            .unwrap();
+
+        let wrong_type = rustia.run_owned("return clamp('bad', 0, 10)").unwrap_err();
+        let wrong_type = wrong_type.to_string();
+        assert!(
+            wrong_type.contains("host function `clamp` argument 1: expected number, got string"),
+            "{wrong_type}"
+        );
+
+        let missing_arg = rustia.run_owned("return clamp(4, 0)").unwrap_err();
+        let missing_arg = missing_arg.to_string();
+        assert!(
+            missing_arg.contains("host function `clamp` argument 3: expected number, got nil"),
+            "{missing_arg}"
+        );
+    }
+
+    #[test]
     fn exports_facade_retains_script_functions() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let exports = rustia

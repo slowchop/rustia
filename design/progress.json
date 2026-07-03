@@ -39,16 +39,16 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 61,
+      "complete": 62,
       "confidence": 65,
-      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
+      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, typed host diagnostic polish, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
       "future_plan": "Harden P1, finish benchmark gates, then move toward full public Luau parity."
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 65,
+      "complete": 66,
       "confidence": 70,
-      "state": "The rustia facade supports owned values, typed host functions, retained functions, serde, extensions, hot reload, and compile-checked examples.",
+      "state": "The rustia facade supports owned values, typed host functions with argument-context diagnostics, retained functions, serde, extensions, hot reload, and compile-checked examples.",
       "future_plan": "Stabilize API semantics, diagnostics, capability policy, and migration docs."
     },
     {
@@ -291,10 +291,10 @@
         },
         {
           "name": "Typed host functions",
-          "complete": 68,
+          "complete": 72,
           "confidence": 75,
-          "state": "Plain Rust functions can be registered with typed args/results.",
-          "future_plan": "Expand arity/signature support and improve diagnostics."
+          "state": "Plain Rust functions can be registered with typed args/results, and conversion errors name the host function plus argument or return position.",
+          "future_plan": "Expand arity/signature support and keep tightening diagnostics."
         },
         {
           "name": "Extension/linker layer",

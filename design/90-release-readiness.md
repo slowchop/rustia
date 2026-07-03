@@ -47,7 +47,8 @@ from `publish = false` to publishable.
 - Public error types, conversion traits, retained handles, extension APIs, and
   hot-reload semantics have stable names and documented behavior.
 - Capability checks fail closed in deterministic profiles.
-- Host functions have documented fuel costs and diagnostic behavior.
+- Host functions have documented fuel costs and diagnostic behavior; typed
+  argument conversion errors name the host function and argument position.
 - Public examples cover globals, typed functions, serde, extensions, retained
   functions, and hot reload.
 - Current examples:

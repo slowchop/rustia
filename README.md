@@ -30,8 +30,8 @@ public rustia project; actual grabby integration work is explicitly out of scope
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 61% | 65% |
-| Usable embedded scripting crate | 65% | 70% |
+| Whole public rustia project | 62% | 65% |
+| Usable embedded scripting crate | 66% | 70% |
 | Full public Luau engine release | 48% | 58% |
 | Standalone benchmark OSS project | 72% | 80% |
 | Public release readiness | 60% | 75% |
