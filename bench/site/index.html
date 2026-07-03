@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>script-bench history</title>
+    <link rel="stylesheet" href="./style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">script-bench</p>
+        <h1>Benchmark History</h1>
+      </div>
+      <div class="actions">
+        <label class="file-picker">
+          <span>Load JSONL</span>
+          <input id="history-file" type="file" accept=".jsonl,.json,text/plain">
+        </label>
+        <button id="reload" type="button">Reload</button>
+        <a id="download" class="button" href="../history/runs.jsonl" download>Download</a>
+      </div>
+    </header>
+
+    <main>
+      <section class="toolbar" aria-label="Benchmark filters">
+        <label>
+          <span>Target</span>
+          <select id="target-select"></select>
+        </label>
+        <label>
+          <span>Workload</span>
+          <select id="workload-select"></select>
+        </label>
+        <div id="status" class="status" role="status"></div>
+      </section>
+
+      <section class="metrics" aria-label="Summary">
+        <article>
+          <span>Records</span>
+          <strong id="metric-records">0</strong>
+        </article>
+        <article>
+          <span>Engines</span>
+          <strong id="metric-engines">0</strong>
+        </article>
+        <article>
+          <span>Workloads</span>
+          <strong id="metric-workloads">0</strong>
+        </article>
+        <article>
+          <span>Latest Commit</span>
+          <strong id="metric-commit">n/a</strong>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel leaderboard-panel">
+          <div class="panel-heading">
+            <h2>Current Leaderboard</h2>
+            <span id="leaderboard-subtitle"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Engine</th>
+                  <th>Min ns/unit</th>
+                  <th>Median</th>
+                  <th>vs rustia</th>
+                  <th>Trend</th>
+                  <th>Commit</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboard-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <h2>History</h2>
+            <span id="chart-subtitle"></span>
+          </div>
+          <canvas id="history-chart" width="960" height="420"></canvas>
+          <div id="legend" class="legend"></div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Latest Runs</h2>
+          <span id="runs-subtitle"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Target</th>
+                <th>Engine</th>
+                <th>Workload</th>
+                <th>Min ns/unit</th>
+                <th>Units/sec</th>
+              </tr>
+            </thead>
+            <tbody id="runs-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>

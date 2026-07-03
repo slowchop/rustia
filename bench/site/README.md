@@ -1,14 +1,28 @@
 # script-bench site
 
-This directory is reserved for the standalone OSS project's static website.
+Static dashboard for benchmark history.
 
-Planned shape:
+## Files
 
-- ingest `../history/runs.jsonl`
-- group by `engine`, `target`, and `workload`
-- render per-workload history charts and current leaderboard tables
-- publish as a static site with no hosted metrics dependency
-- keep raw JSONL downloadable for independent analysis
+- `index.html` - dashboard shell.
+- `style.css` - responsive dashboard styling.
+- `app.js` - JSONL parser, current leaderboard, run table, and canvas history chart.
 
-The benchmark runner already emits the stable append-only history format the
-site should consume.
+The site consumes `../history/runs.jsonl` directly and has no build step.
+
+## Local Preview
+
+From the repository root:
+
+```sh
+python3 -m http.server 8000
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8000/bench/site/
+```
+
+The file picker can load a local JSONL file when the page is opened outside a
+static server.

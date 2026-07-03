@@ -69,3 +69,14 @@ Each line in `history/runs.jsonl` is a JSON object:
 
 The future website should treat JSONL as the append-only source of truth and
 generate charts from `engine × target × workload` series.
+
+## Static Site
+
+`site/` contains a dependency-free dashboard that reads `history/runs.jsonl`,
+shows current leaderboards, and renders per-workload history charts.
+
+```sh
+python3 -m http.server 8000
+```
+
+Open `http://127.0.0.1:8000/bench/site/`.
