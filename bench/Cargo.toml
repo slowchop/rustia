@@ -28,7 +28,7 @@ rhai-engine = ["dep:rhai"]
 roto = []
 rquickjs-engine = ["dep:rquickjs"]
 wasmi-engine = ["dep:wasmi"]
-wasmtime-engine = []
+wasmtime-engine = ["dep:wasmtime"]
 
 [dependencies]
 rustia-compiler = { workspace = true, optional = true }
@@ -40,6 +40,7 @@ rhai = { version = "1.25", optional = true }
 boa_engine = { version = "0.21", optional = true }
 rquickjs = { version = "0.12", optional = true }
 wasmi = { version = "2.0.0-beta.4", optional = true }
+wasmtime = { version = "46.0.1", default-features = false, features = ["anyhow", "cranelift", "runtime", "std", "wat"], optional = true }
 
 [lints]
 workspace = true

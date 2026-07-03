@@ -227,7 +227,7 @@ const ENGINE_SLOTS: &[EngineSlot] = &[
         dialect: Dialect::Wasm,
         feature: Some("wasmtime-engine"),
         enabled: cfg!(feature = "wasmtime-engine"),
-        implemented: false,
+        implemented: cfg!(feature = "wasmtime-engine"),
     },
 ];
 
@@ -570,6 +570,8 @@ fn prepare(
         "rquickjs" => Ok(Box::new(RquickJsPrepared::new(_workload, _source)?)),
         #[cfg(feature = "wasmi-engine")]
         "wasmi" => Ok(Box::new(WasmiPrepared::new(_workload, _source)?)),
+        #[cfg(feature = "wasmtime-engine")]
+        "wasmtime" => Ok(Box::new(WasmtimePrepared::new(_workload, _source)?)),
         id => Err(Error::new(format!(
             "engine adapter {id:?} is not implemented yet"
         ))),
@@ -991,6 +993,45 @@ impl PreparedWorkload for WasmiPrepared {
             .function
             .call(&mut self.store, n)
             .map_err(|error| Error::new(format!("wasmi workload call failed: {error}")))?;
+        Ok(format!("i64:{result}"))
+    }
+}
+
+#[cfg(feature = "wasmtime-engine")]
+struct WasmtimePrepared {
+    store: wasmtime::Store<()>,
+    function: wasmtime::TypedFunc<i64, i64>,
+}
+
+#[cfg(feature = "wasmtime-engine")]
+impl WasmtimePrepared {
+    fn new(workload: &Workload, source: &str) -> Result<Self> {
+        let engine = wasmtime::Engine::default();
+        let module = wasmtime::Module::new(&engine, source)
+            .map_err(|error| Error::new(format!("compile {} failed: {error}", workload.id)))?;
+        let mut store = wasmtime::Store::new(&engine, ());
+        let instance = wasmtime::Instance::new(&mut store, &module, &[])
+            .map_err(|error| Error::new(format!("instantiate {} failed: {error}", workload.id)))?;
+        let function = instance
+            .get_typed_func::<i64, i64>(&mut store, "f")
+            .map_err(|error| {
+                Error::new(format!(
+                    "wasmtime workload {} must export f(i64) -> i64: {error}",
+                    workload.id
+                ))
+            })?;
+        Ok(Self { store, function })
+    }
+}
+
+#[cfg(feature = "wasmtime-engine")]
+impl PreparedWorkload for WasmtimePrepared {
+    fn run(&mut self, n: u64) -> Result<String> {
+        let n = i64::try_from(n).map_err(|_| Error::new("wasmtime n exceeded i64::MAX"))?;
+        let result = self
+            .function
+            .call(&mut self.store, n)
+            .map_err(|error| Error::new(format!("wasmtime workload call failed: {error}")))?;
         Ok(format!("i64:{result}"))
     }
 }
