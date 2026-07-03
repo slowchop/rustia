@@ -199,7 +199,7 @@ const ENGINE_SLOTS: &[EngineSlot] = &[
         dialect: Dialect::Rhai,
         feature: Some("rhai-engine"),
         enabled: cfg!(feature = "rhai-engine"),
-        implemented: false,
+        implemented: cfg!(feature = "rhai-engine"),
     },
     EngineSlot {
         id: "roto",
@@ -562,6 +562,8 @@ fn prepare(
         "koto" => Ok(Box::new(KotoPrepared::new(_workload, _source)?)),
         #[cfg(feature = "mlua-luau")]
         "mlua-luau" => Ok(Box::new(MluaLuauPrepared::new(_workload, _source)?)),
+        #[cfg(feature = "rhai-engine")]
+        "rhai" => Ok(Box::new(RhaiPrepared::new(_workload, _source)?)),
         id => Err(Error::new(format!(
             "engine adapter {id:?} is not implemented yet"
         ))),
@@ -767,6 +769,57 @@ fn mlua_checksum(value: &mlua::Value) -> String {
         },
         other => format!("{}", other.type_name()),
     }
+}
+
+#[cfg(feature = "rhai-engine")]
+struct RhaiPrepared {
+    engine: rhai::Engine,
+    ast: rhai::AST,
+    scope: rhai::Scope<'static>,
+}
+
+#[cfg(feature = "rhai-engine")]
+impl RhaiPrepared {
+    fn new(workload: &Workload, source: &str) -> Result<Self> {
+        let engine = rhai::Engine::new();
+        let ast = engine
+            .compile(source)
+            .map_err(|error| Error::new(format!("compile {} failed: {error}", workload.id)))?;
+        Ok(Self {
+            engine,
+            ast,
+            scope: rhai::Scope::new(),
+        })
+    }
+}
+
+#[cfg(feature = "rhai-engine")]
+impl PreparedWorkload for RhaiPrepared {
+    fn run(&mut self, n: u64) -> Result<String> {
+        let n = rhai::INT::try_from(n).map_err(|_| Error::new("rhai n exceeded INT::MAX"))?;
+        let result = self
+            .engine
+            .call_fn::<rhai::Dynamic>(&mut self.scope, &self.ast, "f", (n,))
+            .map_err(|error| Error::new(format!("rhai workload call failed: {error}")))?;
+        Ok(rhai_checksum(&result))
+    }
+}
+
+#[cfg(feature = "rhai-engine")]
+fn rhai_checksum(value: &rhai::Dynamic) -> String {
+    if let Ok(value) = value.as_int() {
+        return format!("i64:{value}");
+    }
+    if let Ok(value) = value.as_float() {
+        return format!("f64:{value:.17}");
+    }
+    if let Some(value) = value.clone().try_cast::<bool>() {
+        return format!("bool:{value}");
+    }
+    if let Some(value) = value.clone().try_cast::<rhai::ImmutableString>() {
+        return format!("string:{value}");
+    }
+    value.type_name().to_owned()
 }
 
 #[cfg(feature = "rustia-engine")]
