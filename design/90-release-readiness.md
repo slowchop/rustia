@@ -25,14 +25,17 @@ from `publish = false` to publishable.
   caches, or generated target output.
 - Package file lists are audited by `tools/check-package-files.js`; the
   committed review artifact is [`package-files.json`](package-files.json).
+- Publishability blockers are audited by `tools/check-publishability.js`; the
+  committed review artifact is [`publishability.json`](publishability.json).
 - Internal crate dependencies have explicit versions before any crate is
   published.
 - Leaf packages currently verified with `cargo package --no-verify`:
   `rustia-lexer` and `rustia-vm`.
 - Full-workspace packaging is still blocked until internal crates are published
-  in topological order; today `rustia-parser` correctly resolves
-  `rustia-lexer ^0.0.1` from crates.io and fails because that crate is not yet
-  published.
+  in topological order. The current generated order is `rustia-lexer`,
+  `rustia-parser`, `rustia-vm`, `rustia-compiler`, `rustia`, `rustia-cli`,
+  then `rustia-conformance`; `rustia-lexer` and `rustia-vm` are the first
+  candidates after the policy flip because they have no internal dependencies.
 - The benchmark crate must either publish the `rustia-*` crates first, move the
   rustia adapter into a git/path-only integration crate, or ship that adapter as
   an example outside the core package.
@@ -82,6 +85,8 @@ from `publish = false` to publishable.
   freshness, and the workspace test suite.
 - `cargo test --workspace` passes on the release toolchain.
 - `just check-package-files` passes and `design/package-files.json` is current.
+- `just check-publishability` passes and `design/publishability.json` is
+  current.
 - `just check-release-notes` passes and `CHANGELOG.md` names the current
   workspace version plus public-facing unreleased changes.
 - `just check-progress` and `just check-benchmark-results` pass without

@@ -19,6 +19,8 @@ Current unpublished workspace version: `0.0.1`.
   claim gating, package-file history, and the requested adapter matrix.
 - Release preflight now composes release notes, package files, progress HTML,
   benchmark result freshness, and workspace tests.
+- Crate publishability blockers are generated from cargo metadata and package
+  file audits into `design/publishability.json`.
 - Release-readiness docs now cover package metadata, package file-list audits,
   semver policy, changelog validation, and publish ordering.
 

@@ -1,0 +1,293 @@
+{
+  "schema_version": 1,
+  "source": "cargo metadata --no-deps plus design/package-files.json",
+  "command": "node tools/check-publishability.js",
+  "summary": {
+    "package_count": 8,
+    "public_rustia_crate_count": 7,
+    "publish_false_count": 8,
+    "blocked_count": 8,
+    "first_publish_candidates_after_policy_flip": [
+      "rustia-lexer",
+      "rustia-vm"
+    ],
+    "public_crate_publish_order": [
+      "rustia-lexer",
+      "rustia-parser",
+      "rustia-vm",
+      "rustia-compiler",
+      "rustia",
+      "rustia-cli",
+      "rustia-conformance"
+    ],
+    "benchmark_crate_status": "blocked until standalone split or rustia-adapter strategy is chosen"
+  },
+  "packages": [
+    {
+      "name": "rustia-lexer",
+      "version": "0.0.1",
+      "manifest": "crates/rustia-lexer/Cargo.toml",
+      "publish": false,
+      "role": "public-rustia-crate",
+      "package_file_audit": {
+        "file_count": 6,
+        "forbidden_path_violations": 0
+      },
+      "internal_dependencies": [],
+      "status": "blocked",
+      "blockers": [
+        {
+          "code": "publish_false",
+          "detail": "The workspace intentionally keeps this crate private with publish = false."
+        }
+      ]
+    },
+    {
+      "name": "rustia-parser",
+      "version": "0.0.1",
+      "manifest": "crates/rustia-parser/Cargo.toml",
+      "publish": false,
+      "role": "public-rustia-crate",
+      "package_file_audit": {
+        "file_count": 6,
+        "forbidden_path_violations": 0
+      },
+      "internal_dependencies": [
+        {
+          "name": "rustia-lexer",
+          "requirement": "^0.0.1",
+          "optional": false
+        }
+      ],
+      "status": "blocked",
+      "blockers": [
+        {
+          "code": "publish_false",
+          "detail": "The workspace intentionally keeps this crate private with publish = false."
+        },
+        {
+          "code": "internal_dependencies_unpublished",
+          "detail": "Requires published or removed internal crates first: rustia-lexer."
+        }
+      ]
+    },
+    {
+      "name": "rustia-vm",
+      "version": "0.0.1",
+      "manifest": "crates/rustia-vm/Cargo.toml",
+      "publish": false,
+      "role": "public-rustia-crate",
+      "package_file_audit": {
+        "file_count": 15,
+        "forbidden_path_violations": 0
+      },
+      "internal_dependencies": [],
+      "status": "blocked",
+      "blockers": [
+        {
+          "code": "publish_false",
+          "detail": "The workspace intentionally keeps this crate private with publish = false."
+        }
+      ]
+    },
+    {
+      "name": "rustia-compiler",
+      "version": "0.0.1",
+      "manifest": "crates/rustia-compiler/Cargo.toml",
+      "publish": false,
+      "role": "public-rustia-crate",
+      "package_file_audit": {
+        "file_count": 6,
+        "forbidden_path_violations": 0
+      },
+      "internal_dependencies": [
+        {
+          "name": "rustia-lexer",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia-parser",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia-vm",
+          "requirement": "^0.0.1",
+          "optional": false
+        }
+      ],
+      "status": "blocked",
+      "blockers": [
+        {
+          "code": "publish_false",
+          "detail": "The workspace intentionally keeps this crate private with publish = false."
+        },
+        {
+          "code": "internal_dependencies_unpublished",
+          "detail": "Requires published or removed internal crates first: rustia-lexer, rustia-parser, rustia-vm."
+        }
+      ]
+    },
+    {
+      "name": "rustia",
+      "version": "0.0.1",
+      "manifest": "crates/rustia/Cargo.toml",
+      "publish": false,
+      "role": "public-rustia-crate",
+      "package_file_audit": {
+        "file_count": 13,
+        "forbidden_path_violations": 0
+      },
+      "internal_dependencies": [
+        {
+          "name": "rustia-lexer",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia-parser",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia-vm",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia-compiler",
+          "requirement": "^0.0.1",
+          "optional": false
+        }
+      ],
+      "status": "blocked",
+      "blockers": [
+        {
+          "code": "publish_false",
+          "detail": "The workspace intentionally keeps this crate private with publish = false."
+        },
+        {
+          "code": "internal_dependencies_unpublished",
+          "detail": "Requires published or removed internal crates first: rustia-lexer, rustia-parser, rustia-vm, rustia-compiler."
+        }
+      ]
+    },
+    {
+      "name": "rustia-cli",
+      "version": "0.0.1",
+      "manifest": "crates/rustia-cli/Cargo.toml",
+      "publish": false,
+      "role": "public-rustia-crate",
+      "package_file_audit": {
+        "file_count": 6,
+        "forbidden_path_violations": 0
+      },
+      "internal_dependencies": [
+        {
+          "name": "rustia",
+          "requirement": "^0.0.1",
+          "optional": false
+        }
+      ],
+      "status": "blocked",
+      "blockers": [
+        {
+          "code": "publish_false",
+          "detail": "The workspace intentionally keeps this crate private with publish = false."
+        },
+        {
+          "code": "internal_dependencies_unpublished",
+          "detail": "Requires published or removed internal crates first: rustia."
+        }
+      ]
+    },
+    {
+      "name": "rustia-conformance",
+      "version": "0.0.1",
+      "manifest": "crates/rustia-conformance/Cargo.toml",
+      "publish": false,
+      "role": "public-rustia-crate",
+      "package_file_audit": {
+        "file_count": 8,
+        "forbidden_path_violations": 0
+      },
+      "internal_dependencies": [
+        {
+          "name": "rustia-parser",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia-vm",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia-compiler",
+          "requirement": "^0.0.1",
+          "optional": false
+        },
+        {
+          "name": "rustia",
+          "requirement": "^0.0.1",
+          "optional": false
+        }
+      ],
+      "status": "blocked",
+      "blockers": [
+        {
+          "code": "publish_false",
+          "detail": "The workspace intentionally keeps this crate private with publish = false."
+        },
+        {
+          "code": "internal_dependencies_unpublished",
+          "detail": "Requires published or removed internal crates first: rustia-parser, rustia-vm, rustia-compiler, rustia."
+        }
+      ]
+    },
+    {
+      "name": "script-bench-harness",
+      "version": "0.0.1",
+      "manifest": "bench/Cargo.toml",
+      "publish": false,
+      "role": "standalone-benchmark",
+      "package_file_audit": {
+        "file_count": 65,
+        "forbidden_path_violations": 0
+      },
+      "internal_dependencies": [
+        {
+          "name": "rustia-parser",
+          "requirement": "^0.0.1",
+          "optional": true
+        },
+        {
+          "name": "rustia-vm",
+          "requirement": "^0.0.1",
+          "optional": true
+        },
+        {
+          "name": "rustia-compiler",
+          "requirement": "^0.0.1",
+          "optional": true
+        }
+      ],
+      "status": "blocked",
+      "blockers": [
+        {
+          "code": "publish_false",
+          "detail": "The workspace intentionally keeps this crate private with publish = false."
+        },
+        {
+          "code": "internal_dependencies_unpublished",
+          "detail": "Requires published or removed internal crates first: rustia-parser, rustia-vm, rustia-compiler."
+        },
+        {
+          "code": "benchmark_adapter_strategy",
+          "detail": "Standalone split or rustia-adapter packaging strategy must be chosen before publishing the benchmark crate."
+        }
+      ]
+    }
+  ]
+}

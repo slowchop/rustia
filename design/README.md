@@ -32,6 +32,7 @@ docs are design intent.
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **[CHECKLIST]** |
 | [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **[POLICY]** |
 | [`package-files.json`](package-files.json) | generated `cargo package --list` audit for every workspace package | **[GENERATED]** |
+| [`publishability.json`](publishability.json) | generated publishability blocker audit for every workspace package | **[GENERATED]** |
 
 **TL;DR of where we are:** research + measurement say **GO**, now validated by a working VM. A from-scratch
 Rust Luau interpreter measured **~0.93 µs/decision native / ~0.99 µs wasm** = **4–6× faster than koto**, with

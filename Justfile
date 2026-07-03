@@ -10,6 +10,12 @@ gen-package-files:
 check-package-files:
     node tools/check-package-files.js --check
 
+gen-publishability:
+    node tools/check-publishability.js
+
+check-publishability:
+    node tools/check-publishability.js --check
+
 check-release-notes:
     node tools/check-release-notes.js
 
@@ -21,6 +27,7 @@ check-benchmark-results:
 release-preflight:
     just check-release-notes
     just check-package-files
+    just check-publishability
     just check-progress
     just check-benchmark-results
     cargo test --workspace
