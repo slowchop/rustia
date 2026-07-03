@@ -1,8 +1,12 @@
+show-progress file='design/progress.json':
+    @node design/show-progress.js "{{file}}"
+
 gen-progress:
     node design/render-progress.js
 
 check-progress:
     node design/render-progress.js --check
+    node design/show-progress.js --no-color --width 88 >/dev/null
 
 check-project-status:
     node tools/check-project-status.js

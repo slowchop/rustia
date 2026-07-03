@@ -23,6 +23,8 @@ Current unpublished workspace version: `0.0.1`.
 - Release preflight now composes release notes, package files, generated leaf
   package dry runs, progress HTML, project-status drift checks, benchmark
   result freshness, and workspace tests.
+- `just show-progress` renders the structured progress data as a terminal
+  status report.
 - Crate publishability blockers are generated from cargo metadata and package
   file audits into `design/publishability.json`.
 - GitHub Actions now has a hosted release-preflight workflow and a manual

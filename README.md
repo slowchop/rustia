@@ -30,7 +30,8 @@ at full Luau parity.
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](design/progress.json) into
 [`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-03 for the
-public rustia project; actual grabby integration work is explicitly out of scope.
+public rustia project; actual grabby integration work is explicitly out of scope. Use `just show-progress` for
+a terminal summary of the same source data.
 
 | goal | complete | confidence |
 |---|---:|---:|
