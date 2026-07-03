@@ -1,7 +1,7 @@
 use rustia_vm::number::{binary, NumericOp, CANON_NAN_BITS};
 use rustia_vm::{
     Constant, ExtensionOp, Function, Instruction, OpCapability, Opcode, Profile, Program, Value,
-    Vm, VmSettings, MAX_RECURSION_LIMIT,
+    ValueKind, Vm, VmSettings, MAX_RECURSION_LIMIT,
 };
 use std::num::NonZeroU64;
 
@@ -30,6 +30,20 @@ fn loadstring_compiler_should_not_run(
     _source_name: Option<&[u8]>,
 ) -> std::result::Result<Program, String> {
     panic!("loadstring compiler should not run after fuel exhaustion")
+}
+
+fn global_kind(profile: Profile, name: &[u8]) -> ValueKind {
+    let program = Program::new(
+        Function::new(
+            vec![
+                Instruction::with_aux(Opcode::GetGlobal, 0, 0, 0, 0),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+            ],
+            1,
+        ),
+        vec![Constant::String(name.to_vec())],
+    );
+    Vm::new(profile).run(&program).unwrap().kind()
 }
 
 #[test]
@@ -68,25 +82,16 @@ fn nan_is_canonical_at_value_ingress() {
 }
 
 #[test]
-fn deterministic_sim_omits_manual_collectgarbage_global() {
-    let program = Program::new(
-        Function::new(
-            vec![
-                Instruction::with_aux(Opcode::GetGlobal, 0, 0, 0, 0),
-                Instruction::new(Opcode::Return, 0, 1, 0),
-            ],
-            1,
-        ),
-        vec![Constant::String(b"collectgarbage".to_vec())],
-    );
+fn deterministic_sim_omits_environment_dependent_gc_and_os_globals() {
+    for profile in [Profile::LuauCompat, Profile::ReproducibleStandard] {
+        assert_eq!(global_kind(profile, b"collectgarbage"), ValueKind::Function);
+        assert_eq!(global_kind(profile, b"gcinfo"), ValueKind::Function);
+        assert_eq!(global_kind(profile, b"os"), ValueKind::Table);
+    }
 
-    let mut standard = Vm::new(Profile::ReproducibleStandard);
-    let standard_result = standard.run(&program).unwrap();
-    assert_eq!(standard_result.kind(), rustia_vm::ValueKind::Function);
-
-    let mut deterministic = Vm::new(Profile::DeterministicSim);
-    let deterministic_result = deterministic.run(&program).unwrap();
-    assert_eq!(deterministic_result.kind(), rustia_vm::ValueKind::Nil);
+    for name in [b"collectgarbage".as_slice(), b"gcinfo", b"os"] {
+        assert_eq!(global_kind(Profile::DeterministicSim, name), ValueKind::Nil);
+    }
 }
 
 #[test]
@@ -706,7 +711,7 @@ fn not_opcode_uses_luau_truthiness() {
 }
 
 #[test]
-fn deterministic_gc_instruction_count_persists_across_runs() {
+fn deterministic_gc_instruction_count_persists_across_runs_and_is_profile_specific() {
     let settings = VmSettings {
         deterministic_gc_interval: NonZeroU64::new(2).unwrap(),
         ..VmSettings::default()
@@ -715,9 +720,14 @@ fn deterministic_gc_instruction_count_persists_across_runs() {
         Function::new(vec![Instruction::new(Opcode::Return, 0, 1, 0)], 1),
         vec![],
     );
-    let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
+    let mut vm = Vm::with_settings(Profile::DeterministicSim, settings.clone());
     vm.run(&program).unwrap();
     assert_eq!(vm.deterministic_collection_count(), 0);
     vm.run(&program).unwrap();
     assert_eq!(vm.deterministic_collection_count(), 1);
+
+    let mut standard = Vm::with_settings(Profile::ReproducibleStandard, settings);
+    standard.run(&program).unwrap();
+    standard.run(&program).unwrap();
+    assert_eq!(standard.deterministic_collection_count(), 0);
 }
