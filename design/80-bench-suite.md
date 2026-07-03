@@ -8,9 +8,9 @@
 ## Decision 1 — REWRITE, not fork (LOCKED, gak + license evidence)
 `khvzak/script-bench-rs` has **no LICENSE / no `license` field** → all-rights-reserved → vendoring into a
 public-bound repo is unsafe. It's also a single Rust↔script *interop* workload; our seed already has 11
-in-VM-throughput workloads. **Clean rewrite**, keep the comparable workloads, add `bench/PRIOR-ART.md`
-crediting khvzak. (Optional, deferred: run script-bench-rs unmodified at a pinned SHA in a separate job for
-bonus comparison columns — no vendoring, no license issue. Nice-to-have.)
+in-VM-throughput workloads. **Clean rewrite**, keep comparable workload coverage, and record provenance in
+[`../bench/PRIOR-ART.md`](../bench/PRIOR-ART.md). (Optional, deferred: run script-bench-rs unmodified at a
+pinned SHA in a separate job for bonus comparison columns — no vendoring, no license issue. Nice-to-have.)
 
 ## Tracking pipeline — FULLY SELF-HOSTED, no SaaS (generic runner label + privacy)
 Split by what's measurable; never use one for the other's job:

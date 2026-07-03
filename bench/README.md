@@ -80,6 +80,11 @@ Each line in `history/runs.jsonl` is a JSON object:
 The future website should treat JSONL as the append-only source of truth and
 generate charts from `engine × target × workload` series.
 
+## Provenance
+
+The harness is a clean rewrite. Prior-art and workload-provenance notes are
+tracked in [`PRIOR-ART.md`](PRIOR-ART.md).
+
 ## Static Site
 
 `site/` contains a dependency-free dashboard that reads `history/runs.jsonl`,
