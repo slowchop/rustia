@@ -22,6 +22,7 @@ Implemented adapters:
 - `rhai`
 - `rquickjs`
 - `wasmi`
+- `wasmtime`
 
 The remaining adapters are pending.
 
