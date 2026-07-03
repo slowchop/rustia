@@ -14837,12 +14837,79 @@ fn parse_hex_number_string(text: &str) -> Option<f64> {
     let digits = digits
         .strip_prefix("0x")
         .or_else(|| digits.strip_prefix("0X"))?;
-    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+
+    let mut cursor = 0;
+    let bytes = digits.as_bytes();
+    let mut value = 0.0;
+    let mut parsed_digit = false;
+    while let Some(digit) = bytes
+        .get(cursor)
+        .and_then(|byte| tonumber_digit(*byte))
+        .filter(|digit| *digit < 16)
+    {
+        value = value * 16.0 + f64::from(digit);
+        parsed_digit = true;
+        cursor += 1;
+    }
+
+    if bytes.get(cursor) == Some(&b'.') {
+        cursor += 1;
+        let mut place = 1.0 / 16.0;
+        while let Some(digit) = bytes
+            .get(cursor)
+            .and_then(|byte| tonumber_digit(*byte))
+            .filter(|digit| *digit < 16)
+        {
+            value += f64::from(digit) * place;
+            place /= 16.0;
+            parsed_digit = true;
+            cursor += 1;
+        }
+    }
+
+    if !parsed_digit {
         return None;
     }
-    u64::from_str_radix(digits, 16)
-        .ok()
-        .map(|value| sign * value as f64)
+
+    if bytes
+        .get(cursor)
+        .is_some_and(|byte| matches!(byte, b'p' | b'P'))
+    {
+        cursor += 1;
+        let exponent_sign = match bytes.get(cursor) {
+            Some(b'+') => {
+                cursor += 1;
+                1
+            }
+            Some(b'-') => {
+                cursor += 1;
+                -1
+            }
+            _ => 1,
+        };
+        let mut exponent = 0_i32;
+        let mut parsed_exponent_digit = false;
+        while let Some(digit) = bytes
+            .get(cursor)
+            .copied()
+            .filter(u8::is_ascii_digit)
+            .map(|byte| i32::from(byte - b'0'))
+        {
+            exponent = exponent.saturating_mul(10).saturating_add(digit);
+            parsed_exponent_digit = true;
+            cursor += 1;
+        }
+        if !parsed_exponent_digit {
+            return None;
+        }
+        value = libm::ldexp(value, exponent.saturating_mul(exponent_sign));
+    }
+
+    if cursor != bytes.len() {
+        return None;
+    }
+
+    Some(sign * value)
 }
 
 fn luau_number_to_string(value: f64) -> String {
