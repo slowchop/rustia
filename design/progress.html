@@ -401,7 +401,7 @@
       </div>
       <aside class="facts" aria-label="Current facts">
         <div class="fact">
-          <strong>58%</strong>
+          <strong>59%</strong>
           <span>Whole public rustia project, 65% confidence</span>
         </div>
         <div class="fact">
@@ -417,7 +417,7 @@
           <span>Requested benchmark adapters present</span>
         </div>
         <div class="fact">
-          <strong>45%</strong>
+          <strong>48%</strong>
           <span>Public release readiness, 75% confidence</span>
         </div>
       </aside>
@@ -428,17 +428,17 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Whole public rustia project</h3>
-        <span class="percent">58%</span>
+        <span class="percent">59%</span>
       </div>
 
-    <div class="meter" aria-label="Whole public rustia project: 58% complete">
-      <div class="meter-fill" style="width: 58%"></div>
+    <div class="meter" aria-label="Whole public rustia project: 59% complete">
+      <div class="meter-fill" style="width: 59%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">65% confidence</span>
       </div>
-      <p>Design is locked and production crates are substantial, but release, CI, and perf gates remain.</p>
+      <p>Design is locked and production crates are substantial, with crate metadata and release gates started; release, CI, and perf gates remain.</p>
       <p class="plan"><strong>Next:</strong> Harden P1, finish benchmark gates, then move toward full public Luau parity.</p>
     </article>
 
@@ -496,24 +496,24 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Public release readiness</h3>
-        <span class="percent">45%</span>
+        <span class="percent">48%</span>
       </div>
 
-    <div class="meter" aria-label="Public release readiness: 45% complete">
-      <div class="meter-fill" style="width: 45%"></div>
+    <div class="meter" aria-label="Public release readiness: 48% complete">
+      <div class="meter-fill" style="width: 48%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">75% confidence</span>
       </div>
-      <p>License is set and docs are strong; crates are still workspace-private and CI/release polish is absent.</p>
-      <p class="plan"><strong>Next:</strong> Prepare publishable crate metadata, examples, semver policy, and public benchmark claims.</p>
+      <p>License, crate metadata, explicit internal dependency versions, and a release-readiness checklist are present; crates are still workspace-private and CI/release polish is incomplete.</p>
+      <p class="plan"><strong>Next:</strong> Add examples, semver policy, package-list reviews, and public benchmark claims.</p>
     </article>
 
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 62%</a><a href="#embedded-api">Embedded API 59%</a><a href="#benchmarks">Benchmarks 68%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 54%</a><a href="#packaging">Packaging 30%</a>
+      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 62%</a><a href="#embedded-api">Embedded API 59%</a><a href="#benchmarks">Benchmarks 68%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 54%</a><a href="#packaging">Packaging 42%</a>
     </nav>
 
 
@@ -1501,7 +1501,7 @@
           <p>1 tracked item</p>
         </div>
         <div class="area-score">
-          <span>30% avg complete</span>
+          <span>42% avg complete</span>
           <span>80% avg confidence</span>
         </div>
       </div>
@@ -1511,19 +1511,19 @@
       <div class="entry-top">
         <div>
           <h4>Crate publishability</h4>
-          <p>Workspace crates are publish = false.</p>
+          <p>Workspace crates are still publish = false, but public metadata, explicit internal dependency versions, leaf package checks, and a release-readiness checklist are present.</p>
         </div>
         <div class="entry-score">
-          <strong>30%</strong>
+          <strong>42%</strong>
           <span class="chip high">80% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Crate publishability: 30% complete">
-      <div class="meter-fill" style="width: 30%"></div>
+    <div class="meter" aria-label="Crate publishability: 42% complete">
+      <div class="meter-fill" style="width: 42%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add crate metadata, examples, feature policy, and release checklist.</p>
+      <p class="plan"><strong>Future plan:</strong> Review package file lists, add examples and semver policy, then publish/remove internal dependency blockers in topological order.</p>
     </article>
 
       </div>

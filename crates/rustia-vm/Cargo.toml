@@ -2,7 +2,14 @@
 name = "rustia-vm"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+readme.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Deterministic Luau virtual machine for rustia"
 publish.workspace = true
 
 [dependencies]

@@ -2,7 +2,14 @@
 name = "rustia-cli"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+readme.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Command-line runner for rustia Luau scripts"
 publish.workspace = true
 
 [[bin]]
@@ -10,7 +17,7 @@ name = "rustia"
 path = "src/main.rs"
 
 [dependencies]
-rustia = { path = "../rustia" }
+rustia.workspace = true
 
 [lints]
 workspace = true
