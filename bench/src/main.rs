@@ -213,7 +213,7 @@ const ENGINE_SLOTS: &[EngineSlot] = &[
         dialect: Dialect::JavaScript,
         feature: Some("rquickjs-engine"),
         enabled: cfg!(feature = "rquickjs-engine"),
-        implemented: false,
+        implemented: cfg!(feature = "rquickjs-engine"),
     },
     EngineSlot {
         id: "wasmi",
@@ -566,6 +566,8 @@ fn prepare(
         "mlua-luau" => Ok(Box::new(MluaLuauPrepared::new(_workload, _source)?)),
         #[cfg(feature = "rhai-engine")]
         "rhai" => Ok(Box::new(RhaiPrepared::new(_workload, _source)?)),
+        #[cfg(feature = "rquickjs-engine")]
+        "rquickjs" => Ok(Box::new(RquickJsPrepared::new(_workload, _source)?)),
         id => Err(Error::new(format!(
             "engine adapter {id:?} is not implemented yet"
         ))),
@@ -880,6 +882,74 @@ fn rhai_checksum(value: &rhai::Dynamic) -> String {
         return format!("string:{value}");
     }
     value.type_name().to_owned()
+}
+
+#[cfg(feature = "rquickjs-engine")]
+struct RquickJsPrepared {
+    function: rquickjs::Persistent<rquickjs::Function<'static>>,
+    context: rquickjs::Context,
+    _runtime: rquickjs::Runtime,
+}
+
+#[cfg(feature = "rquickjs-engine")]
+impl RquickJsPrepared {
+    fn new(workload: &Workload, source: &str) -> Result<Self> {
+        let runtime = rquickjs::Runtime::new()
+            .map_err(|error| Error::new(format!("create rquickjs runtime failed: {error}")))?;
+        let context = rquickjs::Context::full(&runtime)
+            .map_err(|error| Error::new(format!("create rquickjs context failed: {error}")))?;
+        let function = context.with(|ctx| {
+            let function = ctx.eval::<rquickjs::Function, _>(source).map_err(|error| {
+                Error::new(format!("initialize {} failed: {error}", workload.id))
+            })?;
+            Ok(rquickjs::Persistent::save(&ctx, function))
+        })?;
+        Ok(Self {
+            function,
+            context,
+            _runtime: runtime,
+        })
+    }
+}
+
+#[cfg(feature = "rquickjs-engine")]
+impl PreparedWorkload for RquickJsPrepared {
+    fn run(&mut self, n: u64) -> Result<String> {
+        self.context.with(|ctx| {
+            let function = self
+                .function
+                .clone()
+                .restore(&ctx)
+                .map_err(|error| Error::new(format!("rquickjs restore failed: {error}")))?;
+            let result = function
+                .call::<_, rquickjs::Value>((n as f64,))
+                .map_err(|error| Error::new(format!("rquickjs workload call failed: {error}")))?;
+            rquickjs_checksum(&result)
+        })
+    }
+}
+
+#[cfg(feature = "rquickjs-engine")]
+fn rquickjs_checksum(value: &rquickjs::Value<'_>) -> Result<String> {
+    if value.is_undefined() {
+        return Ok("undefined".to_owned());
+    }
+    if value.is_null() {
+        return Ok("null".to_owned());
+    }
+    if let Some(value) = value.as_bool() {
+        return Ok(format!("bool:{value}"));
+    }
+    if let Some(value) = value.as_number() {
+        return Ok(format!("f64:{value:.17}"));
+    }
+    if let Some(value) = value.as_string() {
+        return value
+            .to_string()
+            .map(|text| format!("string:{text}"))
+            .map_err(|error| Error::new(format!("rquickjs string checksum failed: {error}")));
+    }
+    Ok(value.type_name().to_owned())
 }
 
 #[cfg(feature = "rustia-engine")]

@@ -40,10 +40,10 @@ cargo run -p script-bench-harness --features all-engines -- --list
 
 In this slice, `rustia` works through the default `rustia-engine` feature,
 `boa` works with `--features boa`, `koto` works with `--features koto`, the Luau
-oracle comparison works with `--features mlua-luau`, and Rhai works with
-`--features rhai-engine`. The crate also builds with `--no-default-features` so
-the standalone harness shell is not tied to rustia internals. The other adapters
-intentionally report
+oracle comparison works with `--features mlua-luau`, Rhai works with
+`--features rhai-engine`, and QuickJS works with `--features rquickjs-engine`.
+The crate also builds with `--no-default-features` so the standalone harness
+shell is not tied to rustia internals. The other adapters intentionally report
 `adapter pending`; see `ADAPTERS.md` for the dependency split required before
 wiring them in.
 

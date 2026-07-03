@@ -20,6 +20,7 @@ Implemented adapters:
 - `koto`
 - `mlua-luau`
 - `rhai`
+- `rquickjs`
 
 The remaining adapters are pending.
 
@@ -30,7 +31,7 @@ separate runner binaries that emit the same JSONL schema.
 
 Most current feature flags are intentionally dependency-free placeholders. They
 let the CLI expose the public engine matrix without forcing normal rustia builds
-to download heavyweight benchmark dependencies. `boa` is the JavaScript
-interpreter baseline, `koto` is the direct migration comparison, `mlua-luau` is
-the Luau 0.709 oracle comparison, and `rhai` tracks another widely used
-Rust-native scripting baseline.
+to download heavyweight benchmark dependencies. `boa` and `rquickjs` are the
+JavaScript interpreter baselines, `koto` is the direct migration comparison,
+`mlua-luau` is the Luau 0.709 oracle comparison, and `rhai` tracks another
+widely used Rust-native scripting baseline.
