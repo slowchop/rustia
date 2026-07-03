@@ -246,6 +246,7 @@ struct Config {
     list: bool,
     list_json: bool,
     check_history: bool,
+    refresh_results: bool,
 }
 
 impl Default for Config {
@@ -269,6 +270,7 @@ impl Default for Config {
             list: false,
             list_json: false,
             check_history: false,
+            refresh_results: false,
         }
     }
 }
@@ -379,6 +381,24 @@ fn run() -> Result<()> {
         );
         return Ok(());
     }
+    if config.refresh_results {
+        let history = config
+            .history
+            .as_deref()
+            .ok_or_else(|| Error::new("--refresh-results requires history output to be enabled"))?;
+        let results = config
+            .results
+            .as_deref()
+            .ok_or_else(|| Error::new("--refresh-results requires results output to be enabled"))?;
+        let rows = write_results(results, Some(history), &[])?;
+        println!(
+            "results refreshed: {} rows from {} -> {}",
+            rows,
+            history.display(),
+            results.display()
+        );
+        return Ok(());
+    }
 
     let repo = repo_root()?;
     let selected_engines = select_engines(&config.engines)?;
@@ -440,6 +460,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
             "--list" => config.list = true,
             "--list-json" => config.list_json = true,
             "--check-history" => config.check_history = true,
+            "--refresh-results" => config.refresh_results = true,
             "--no-history" => config.history = None,
             "--no-results" => config.results = None,
             "--engines" => {
@@ -521,6 +542,7 @@ fn print_usage() {
     println!("  --list");
     println!("  --list-json");
     println!("  --check-history");
+    println!("  --refresh-results");
     println!("  --engines rustia,koto,mlua-luau");
     println!("  --workloads dense_tables,sparse_tables,closures_upvalues,generic_iteration,stdlib_math_table");
     println!("  --target-ms 250");
@@ -1295,7 +1317,7 @@ fn append_history(path: &Path, records: &[Measurement]) -> Result<()> {
     Ok(())
 }
 
-fn write_results(path: &Path, history: Option<&Path>, records: &[Measurement]) -> Result<()> {
+fn write_results(path: &Path, history: Option<&Path>, records: &[Measurement]) -> Result<usize> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| Error::io(parent, error))?;
     }
@@ -1328,7 +1350,9 @@ fn write_results(path: &Path, history: Option<&Path>, records: &[Measurement]) -
             row.checksum.replace('|', "\\|")
         ));
     }
-    fs::write(path, text).map_err(|error| Error::io(path, error))
+    let row_count = rows.len();
+    fs::write(path, text).map_err(|error| Error::io(path, error))?;
+    Ok(row_count)
 }
 
 fn latest_result_rows(history: Option<&Path>, records: &[Measurement]) -> Result<Vec<ResultRow>> {
@@ -1847,6 +1871,28 @@ mod tests {
         assert!(error.to_string().contains("append-only"));
     }
 
+    #[test]
+    fn write_results_can_refresh_from_history_without_new_measurements() {
+        let history = write_temp_history(
+            "refresh-results-history",
+            &format!(
+                "{}\n{}\n",
+                sample_history_json(100, "rustia", "luau", "dense_tables"),
+                sample_history_json(101, "koto", "koto", "sparse_tables")
+            ),
+        );
+        let results = temp_path("refresh-results", "md");
+
+        let row_count = write_results(&results, Some(&history), &[]).expect("write results");
+        let text = fs::read_to_string(&results).expect("read results");
+        let _ = fs::remove_file(&history);
+        let _ = fs::remove_file(&results);
+
+        assert_eq!(row_count, 2);
+        assert!(text.contains("| rustia | dense_tables |"));
+        assert!(text.contains("| koto | sparse_tables |"));
+    }
+
     fn sample_history_json(
         timestamp_unix: u64,
         engine: &'static str,
@@ -1876,15 +1922,19 @@ mod tests {
     }
 
     fn write_temp_history(name: &str, text: &str) -> PathBuf {
+        let path = temp_path(name, "jsonl");
+        fs::write(&path, text).expect("write temp history");
+        path
+    }
+
+    fn temp_path(name: &str, extension: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time")
             .as_nanos();
-        let path = env::temp_dir().join(format!(
-            "script-bench-{name}-{}-{unique}.jsonl",
+        env::temp_dir().join(format!(
+            "script-bench-{name}-{}-{unique}.{extension}",
             std::process::id()
-        ));
-        fs::write(&path, text).expect("write temp history");
-        path
+        ))
     }
 }

@@ -345,9 +345,9 @@
       "entries": [
         {
           "name": "Harness CLI and schema",
-          "complete": 84,
+          "complete": 85,
           "confidence": 85,
-          "state": "bench/ has a standalone-style CLI, machine-readable inventory, validated JSONL history schema, and generated RESULTS.md.",
+          "state": "bench/ has a standalone-style CLI, machine-readable inventory, validated JSONL history schema, and refreshable generated RESULTS.md.",
           "future_plan": "Keep JSONL as the source of truth for CI and website data."
         },
         {
