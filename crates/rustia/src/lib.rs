@@ -322,7 +322,7 @@ impl std::error::Error for Error {}
 #[cfg(test)]
 mod tests {
     use super::{
-        Error, FromRustia, OpCapability, OwnedKey, OwnedTable, OwnedValue, Profile, Result, Rustia,
+        Error, FromRustia, OpCapability, OwnedTable, OwnedValue, Profile, Result, Rustia,
         RustiaExtension, RustiaHostFunctionInfo, VmErrorKind, VmSettings,
     };
     use rustia_compiler::{compile_with_options, CompileOptions};
@@ -448,6 +448,39 @@ return {
     }
 
     #[test]
+    fn owned_table_helpers_accept_typed_values_and_getters() {
+        let labels = OwnedTable::string_entries([("kind", "scout"), ("role", "ai")]);
+        assert_eq!(
+            labels.get_string_as::<String>("kind").unwrap().as_deref(),
+            Some("scout")
+        );
+        assert_eq!(labels.get_string_as::<String>("missing").unwrap(), None);
+
+        let stats = OwnedTable::string_entries([("hp", 5_i32), ("speed", 7_i32)]);
+        assert_eq!(stats.get_string_as::<i32>("hp").unwrap(), Some(5));
+
+        let error = labels
+            .get_string_as::<bool>("kind")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("expected boolean, got string"),
+            "unexpected error: {error}"
+        );
+
+        let array = OwnedTable::array_values([1_i32, 2, 3]);
+        assert_eq!(
+            array.array,
+            vec![
+                OwnedValue::Number(1.0),
+                OwnedValue::Number(2.0),
+                OwnedValue::Number(3.0)
+            ]
+        );
+        assert!(array.entries.is_empty());
+    }
+
+    #[test]
     fn insert_global_accepts_option_vec_and_owned_table() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let named_map = BTreeMap::from([("scout".to_owned(), 5_i32), ("brute".to_owned(), 9_i32)]);
@@ -458,13 +491,7 @@ return {
         rustia.insert_global("numbers", vec![1_i32, 2, 3]).unwrap();
         rustia.insert_global("named_map", named_map).unwrap();
         rustia
-            .insert_global(
-                "named",
-                OwnedTable::entries([(
-                    OwnedKey::String("kind".to_owned()),
-                    OwnedValue::String("scout".to_owned()),
-                )]),
-            )
+            .insert_global("named", OwnedTable::string_entries([("kind", "scout")]))
             .unwrap();
 
         let value = rustia
@@ -541,10 +568,7 @@ return maybe == 4
             .unwrap();
         rustia
             .add_fn("make_table", || {
-                OwnedTable::entries([(
-                    OwnedKey::String("kind".to_owned()),
-                    OwnedValue::String("scout".to_owned()),
-                )])
+                OwnedTable::string_entries([("kind", "scout")])
             })
             .unwrap();
 

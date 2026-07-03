@@ -73,8 +73,8 @@ Core pieces:
 - `OwnedValue` as the public value firewall.
 - `IntoRustia` / `FromRustia`.
 - `IntoRustiaMulti` / `FromRustiaMulti`.
-- owned conversions for `Option<T>`, `Vec<T>`, deterministic `BTreeMap<String, T>`, and direct `OwnedTable`
-  values.
+- owned conversions for `Option<T>`, `Vec<T>`, deterministic `BTreeMap<String, T>`, direct `OwnedTable`
+  values, and typed `OwnedTable` helper constructors/getters.
 - typed host functions support fallible `rustia::Result<T>` returns.
 - typed host functions and retained script calls support tuple-shaped arguments/results through arity 8.
 - retained handles for functions/tables with generation freshness checks.
@@ -243,7 +243,7 @@ store authoritative state on the GC heap instead of in captured host slots.
 
 ## Build Order
 
-1. `OwnedValue` plus `FromRustia` / `IntoRustia`.
+1. `OwnedValue` plus `FromRustia` / `IntoRustia` and typed `OwnedTable` helpers.
 2. typed `add_fn` and `Function::call`.
 3. returned-table `Exports` facade.
 4. serde deserialize/serialize.

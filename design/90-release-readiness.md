@@ -50,7 +50,8 @@ from `publish = false` to publishable.
 - Source-named run/compile helpers preserve host-provided source names in
   runtime diagnostics.
 - Owned-value conversions cover scalar values, `Option<T>`, `Vec<T>`,
-  deterministic `BTreeMap<String, T>`, and direct `OwnedTable` values.
+  deterministic `BTreeMap<String, T>`, direct `OwnedTable` values, typed
+  owned-table builders, and typed string-key lookup.
 - Capability checks fail closed in deterministic profiles.
 - Host functions have documented fuel costs and diagnostic behavior; typed
   argument conversion errors name the host function and argument position.

@@ -80,6 +80,42 @@ pub trait FromRustia: Sized {
     fn from_rustia(value: OwnedValue) -> Result<Self>;
 }
 
+impl OwnedTable {
+    pub fn array_values<T>(values: impl IntoIterator<Item = T>) -> Self
+    where
+        T: IntoRustia,
+    {
+        Self {
+            array: values.into_iter().map(IntoRustia::into_rustia).collect(),
+            entries: Vec::new(),
+        }
+    }
+
+    pub fn string_entries<K, V>(entries: impl IntoIterator<Item = (K, V)>) -> Self
+    where
+        K: Into<String>,
+        V: IntoRustia,
+    {
+        Self {
+            array: Vec::new(),
+            entries: entries
+                .into_iter()
+                .map(|(key, value)| (OwnedKey::String(key.into()), value.into_rustia()))
+                .collect(),
+        }
+    }
+
+    pub fn get_string_as<T>(&self, key: &str) -> Result<Option<T>>
+    where
+        T: FromRustia,
+    {
+        self.get_string(key)
+            .cloned()
+            .map(T::from_rustia)
+            .transpose()
+    }
+}
+
 pub trait IntoRustiaMulti {
     fn into_rustia_multi(self) -> Vec<OwnedValue>;
 
@@ -255,9 +291,7 @@ where
     T: IntoRustia,
 {
     fn into_rustia(self) -> OwnedValue {
-        OwnedValue::Table(OwnedTable::array(
-            self.into_iter().map(IntoRustia::into_rustia),
-        ))
+        OwnedValue::Table(OwnedTable::array_values(self))
     }
 }
 
@@ -283,10 +317,7 @@ where
     T: IntoRustia,
 {
     fn into_rustia(self) -> OwnedValue {
-        OwnedValue::Table(OwnedTable::entries(
-            self.into_iter()
-                .map(|(key, value)| (OwnedKey::String(key), value.into_rustia())),
-        ))
+        OwnedValue::Table(OwnedTable::string_entries(self))
     }
 }
 

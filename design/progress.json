@@ -39,16 +39,16 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 69,
+      "complete": 70,
       "confidence": 65,
-      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, source-named facade diagnostics, typed and fallible host diagnostic polish, host signature metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics and current-generation accessors, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
+      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, source-named facade diagnostics, typed owned-table helpers, typed and fallible host diagnostic polish, host signature metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics and current-generation accessors, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
       "future_plan": "Harden P1, finish benchmark gates, then move toward full public Luau parity."
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 77,
+      "complete": 78,
       "confidence": 70,
-      "state": "The rustia facade supports typed run<T>, source-named run/compile helpers, owned values with Option/Vec/BTreeMap/table conversions, typed host functions with argument-context diagnostics and fallible rustia::Result<T> returns, tuple arguments/results through arity 8, pre-install host signature metadata, capability-tagged host helpers, retained functions/exports with generation/freshness metadata and fail-closed current-generation accessors, serde, extensions, hot reload, and compile-checked examples.",
+      "state": "The rustia facade supports typed run<T>, source-named run/compile helpers, owned values with Option/Vec/BTreeMap/table conversions plus typed table helpers, typed host functions with argument-context diagnostics and fallible rustia::Result<T> returns, tuple arguments/results through arity 8, pre-install host signature metadata, capability-tagged host helpers, retained functions/exports with generation/freshness metadata and fail-closed current-generation accessors, serde, extensions, hot reload, and compile-checked examples.",
       "future_plan": "Stabilize API semantics, diagnostics, capability policy, and migration docs."
     },
     {
@@ -67,9 +67,9 @@
     },
     {
       "name": "Public release readiness",
-      "complete": 66,
+      "complete": 67,
       "confidence": 75,
-      "state": "License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, source-named facade diagnostics, fallible host callback diagnostics, retained-handle freshness checks and current-generation accessors, host signature metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
+      "state": "License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, source-named facade diagnostics, typed owned-table helpers, fallible host callback diagnostics, retained-handle freshness checks and current-generation accessors, host signature metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
       "future_plan": "Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims."
     }
   ],
@@ -284,10 +284,10 @@
         },
         {
           "name": "Owned value firewall",
-          "complete": 78,
+          "complete": 81,
           "confidence": 75,
-          "state": "OwnedValue, owned tables/keys, scalar conversions, Option/Vec/BTreeMap conversions, and direct OwnedTable conversion exist.",
-          "future_plan": "Keep hardening conversion coverage and avoid leaking internal GC lifetimes."
+          "state": "OwnedValue, owned tables/keys, scalar conversions, Option/Vec/BTreeMap conversions, direct OwnedTable conversion, typed owned-table builders, and typed string-key lookup exist.",
+          "future_plan": "Keep hardening conversion coverage, nested typed access, and avoid leaking internal GC lifetimes."
         },
         {
           "name": "Typed host functions",

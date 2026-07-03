@@ -38,8 +38,9 @@ Current unpublished workspace version: `0.0.1`.
 - Typed host functions and retained script calls now support up to eight
   typed arguments/results through the public tuple conversion traits.
 - Owned-value conversions now cover `Option<T>`, `Vec<T>`,
-  `BTreeMap<String, T>`, and direct `OwnedTable` values for globals, host
-  functions, and retained calls.
+  `BTreeMap<String, T>`, direct `OwnedTable` values, typed owned-table
+  builders, and typed string-key lookup for globals, host functions, and
+  retained calls.
 - Retained script functions and export tables now expose the successful install
   generation they came from, making hot-reload handle semantics explicit.
 - Retained function/export handles now expose freshness checks, and
