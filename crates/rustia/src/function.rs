@@ -121,13 +121,14 @@ where
             name,
             fuel_cost,
             capability,
+            0,
             Arc::new(move |vm, _args| host_return_to_raw(vm, &diagnostic_name, self())),
         )
     }
 }
 
 macro_rules! impl_host_function {
-    ($($name:ident),+ $(,)?) => {
+    ($parameter_count:expr; $($name:ident),+ $(,)?) => {
         impl<Func, Return, $($name),+> IntoHostFunction<($($name,)+), Return> for Func
         where
             Func: Fn($($name),+) -> Return + Send + Sync + 'static,
@@ -146,6 +147,7 @@ macro_rules! impl_host_function {
                     name,
                     fuel_cost,
                     capability,
+                    $parameter_count,
                     Arc::new(move |vm, args| {
                         let mut index = 0usize;
                         $(
@@ -161,14 +163,14 @@ macro_rules! impl_host_function {
     };
 }
 
-impl_host_function!(A);
-impl_host_function!(A, B);
-impl_host_function!(A, B, C);
-impl_host_function!(A, B, C, D);
-impl_host_function!(A, B, C, D, E);
-impl_host_function!(A, B, C, D, E, F);
-impl_host_function!(A, B, C, D, E, F, G);
-impl_host_function!(A, B, C, D, E, F, G, H);
+impl_host_function!(1; A);
+impl_host_function!(2; A, B);
+impl_host_function!(3; A, B, C);
+impl_host_function!(4; A, B, C, D);
+impl_host_function!(5; A, B, C, D, E);
+impl_host_function!(6; A, B, C, D, E, F);
+impl_host_function!(7; A, B, C, D, E, F, G);
+impl_host_function!(8; A, B, C, D, E, F, G, H);
 
 fn host_arg_from_raw<T>(
     vm: &mut Vm,

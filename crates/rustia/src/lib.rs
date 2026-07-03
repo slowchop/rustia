@@ -10,7 +10,7 @@ use rustia_parser::SourceError;
 use rustia_vm::{Program, Vm};
 use std::fmt;
 
-pub use extension_api::{RustiaBuilder, RustiaExtension};
+pub use extension_api::{RustiaBuilder, RustiaExtension, RustiaHostFunctionInfo};
 pub use function::{Exports, Function};
 pub use rustia_vm::{
     Error as VmError, ErrorKind as VmErrorKind, OpCapability, Profile, VmSettings,
@@ -269,7 +269,8 @@ impl std::error::Error for Error {}
 #[cfg(test)]
 mod tests {
     use super::{
-        Error, FromRustia, OwnedValue, Profile, Rustia, RustiaExtension, VmErrorKind, VmSettings,
+        Error, FromRustia, OpCapability, OwnedValue, Profile, Rustia, RustiaExtension,
+        RustiaHostFunctionInfo, VmErrorKind, VmSettings,
     };
     use rustia_compiler::{compile_with_options, CompileOptions};
     use rustia_parser::parse_source;
@@ -509,6 +510,38 @@ return {
             .run_owned("return host.bias() + host.emit(4)")
             .unwrap();
         assert_eq!(f64::from_rustia(result).unwrap(), 7.0);
+    }
+
+    #[test]
+    fn extension_reports_host_function_metadata() {
+        let extension = RustiaExtension::new("host")
+            .fn_pure("zero", || 1.0)
+            .fn_with(
+                "sum3",
+                7,
+                OpCapability::ReadsSlotState,
+                |a: f64, b: f64, c: f64| a + b + c,
+            );
+
+        assert_eq!(extension.namespace(), Some("host"));
+        let functions = extension.functions().collect::<Vec<_>>();
+        assert_eq!(
+            functions,
+            vec![
+                RustiaHostFunctionInfo {
+                    name: "zero",
+                    fuel_cost: 1,
+                    capability: OpCapability::Pure,
+                    parameter_count: 0,
+                },
+                RustiaHostFunctionInfo {
+                    name: "sum3",
+                    fuel_cost: 7,
+                    capability: OpCapability::ReadsSlotState,
+                    parameter_count: 3,
+                },
+            ]
+        );
     }
 
     #[test]

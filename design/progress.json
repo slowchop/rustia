@@ -291,17 +291,17 @@
         },
         {
           "name": "Typed host functions",
-          "complete": 78,
+          "complete": 80,
           "confidence": 75,
-          "state": "Plain Rust functions can be registered with typed args/results through arity 8, capability-specific facade helpers, and conversion errors that name the host function plus argument or return position.",
-          "future_plan": "Add richer signature metadata and keep tightening diagnostics."
+          "state": "Plain Rust functions can be registered with typed args/results through arity 8, capability-specific facade helpers, parameter-count metadata, and conversion errors that name the host function plus argument or return position.",
+          "future_plan": "Add richer type-level signature metadata and keep tightening diagnostics."
         },
         {
           "name": "Extension/linker layer",
-          "complete": 63,
+          "complete": 67,
           "confidence": 70,
-          "state": "Namespaced extensions, coarse capabilities, deterministic registration validation, and explicit external-state helpers exist.",
-          "future_plan": "Add richer capability metadata, versioned fuel costs, and migration docs."
+          "state": "Namespaced extensions, coarse capabilities, pre-install function metadata, deterministic registration validation, and explicit external-state helpers exist.",
+          "future_plan": "Add richer type metadata, versioned fuel costs, and migration docs."
         },
         {
           "name": "Public host-bridge seam",

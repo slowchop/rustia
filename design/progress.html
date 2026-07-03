@@ -513,7 +513,7 @@
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 62%</a><a href="#embedded-api">Embedded API 63%</a><a href="#benchmarks">Benchmarks 74%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 59%</a><a href="#packaging">Packaging 60%</a>
+      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 62%</a><a href="#embedded-api">Embedded API 64%</a><a href="#benchmarks">Benchmarks 74%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 59%</a><a href="#packaging">Packaging 60%</a>
     </nav>
 
 
@@ -1076,7 +1076,7 @@
           <p>9 tracked items</p>
         </div>
         <div class="area-score">
-          <span>63% avg complete</span>
+          <span>64% avg complete</span>
           <span>71% avg confidence</span>
         </div>
       </div>
@@ -1124,38 +1124,38 @@
       <div class="entry-top">
         <div>
           <h4>Typed host functions</h4>
-          <p>Plain Rust functions can be registered with typed args/results through arity 8, capability-specific facade helpers, and conversion errors that name the host function plus argument or return position.</p>
+          <p>Plain Rust functions can be registered with typed args/results through arity 8, capability-specific facade helpers, parameter-count metadata, and conversion errors that name the host function plus argument or return position.</p>
         </div>
         <div class="entry-score">
-          <strong>78%</strong>
+          <strong>80%</strong>
           <span class="chip medium">75% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Typed host functions: 78% complete">
-      <div class="meter-fill" style="width: 78%"></div>
+    <div class="meter" aria-label="Typed host functions: 80% complete">
+      <div class="meter-fill" style="width: 80%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add richer signature metadata and keep tightening diagnostics.</p>
+      <p class="plan"><strong>Future plan:</strong> Add richer type-level signature metadata and keep tightening diagnostics.</p>
     </article>
 
     <article class="entry">
       <div class="entry-top">
         <div>
           <h4>Extension/linker layer</h4>
-          <p>Namespaced extensions, coarse capabilities, deterministic registration validation, and explicit external-state helpers exist.</p>
+          <p>Namespaced extensions, coarse capabilities, pre-install function metadata, deterministic registration validation, and explicit external-state helpers exist.</p>
         </div>
         <div class="entry-score">
-          <strong>63%</strong>
+          <strong>67%</strong>
           <span class="chip medium">70% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Extension/linker layer: 63% complete">
-      <div class="meter-fill" style="width: 63%"></div>
+    <div class="meter" aria-label="Extension/linker layer: 67% complete">
+      <div class="meter-fill" style="width: 67%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add richer capability metadata, versioned fuel costs, and migration docs.</p>
+      <p class="plan"><strong>Future plan:</strong> Add richer type metadata, versioned fuel costs, and migration docs.</p>
     </article>
 
     <article class="entry">

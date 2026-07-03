@@ -54,6 +54,8 @@ from `publish = false` to publishable.
 - The public facade has capability-specific helpers for pure functions,
   deterministic input, slot reads/writes, deterministic effects, external
   mutable-state reads, and nondeterministic effects.
+- `RustiaExtension` exposes namespace and per-function name, fuel, capability,
+  and parameter-count metadata before installation.
 - Public examples cover globals, typed functions, serde, extensions, retained
   functions, and hot reload.
 - Current examples:

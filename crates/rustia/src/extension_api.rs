@@ -52,6 +52,14 @@ pub struct RustiaExtension {
     functions: Vec<HostFunctionOp>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RustiaHostFunctionInfo<'a> {
+    pub name: &'a str,
+    pub fuel_cost: u32,
+    pub capability: OpCapability,
+    pub parameter_count: u8,
+}
+
 impl RustiaExtension {
     pub fn new(namespace: impl Into<String>) -> Self {
         let namespace = namespace.into();
@@ -66,6 +74,21 @@ impl RustiaExtension {
             namespace: None,
             functions: Vec::new(),
         }
+    }
+
+    pub fn namespace(&self) -> Option<&str> {
+        self.namespace.as_deref()
+    }
+
+    pub fn functions(&self) -> impl Iterator<Item = RustiaHostFunctionInfo<'_>> + '_ {
+        self.functions
+            .iter()
+            .map(|function| RustiaHostFunctionInfo {
+                name: &function.name,
+                fuel_cost: function.fuel_cost,
+                capability: function.capability,
+                parameter_count: function.parameter_count,
+            })
     }
 
     pub fn fn_pure<Func, Args, Return>(self, name: impl Into<String>, function: Func) -> Self

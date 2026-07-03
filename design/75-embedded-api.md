@@ -119,6 +119,8 @@ Current implementation slice: `Rustia::add_pure_fn`, `add_input_fn`, `add_slot_r
 `add_effect_fn`, `add_external_state_fn`, and `add_nondeterministic_fn` expose the same capability vocabulary on
 the global facade. `RustiaExtension::fn_external_state` fills the remaining named extension helper. Deterministic
 profiles reject external mutable-state reads and nondeterministic effects at registration time.
+`RustiaExtension::namespace()` and `functions()` expose pre-install metadata for namespace, function name, fuel
+cost, capability, and parameter count.
 
 ### 3. Serde-first data bridge
 

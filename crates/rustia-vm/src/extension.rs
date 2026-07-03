@@ -75,6 +75,7 @@ pub struct HostFunctionOp {
     pub name: String,
     pub fuel_cost: u32,
     pub capability: OpCapability,
+    pub parameter_count: u8,
     pub handler: HostFunctionHandler,
 }
 
@@ -83,12 +84,14 @@ impl HostFunctionOp {
         name: impl Into<String>,
         fuel_cost: u32,
         capability: OpCapability,
+        parameter_count: u8,
         handler: HostFunctionHandler,
     ) -> Self {
         Self {
             name: name.into(),
             fuel_cost,
             capability,
+            parameter_count,
             handler,
         }
     }
@@ -101,6 +104,7 @@ impl fmt::Debug for HostFunctionOp {
             .field("name", &self.name)
             .field("fuel_cost", &self.fuel_cost)
             .field("capability", &self.capability)
+            .field("parameter_count", &self.parameter_count)
             .finish_non_exhaustive()
     }
 }
