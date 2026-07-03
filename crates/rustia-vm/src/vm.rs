@@ -6682,12 +6682,28 @@ impl Vm {
         if value.truthy() {
             return Ok(args.to_vec());
         }
-        let message = if let Some(message) = args.get(1).copied() {
-            self.string_value_bytes(message)?
-                .map(|message| String::from_utf8_lossy(&message).into_owned())
-                .unwrap_or_else(|| "assertion failed!".to_owned())
-        } else {
-            "assertion failed!".to_owned()
+        let message = match args.get(1).copied() {
+            None => "assertion failed!".to_owned(),
+            Some(value) if value.kind() == ValueKind::Nil => "assertion failed!".to_owned(),
+            Some(value) => match value.kind() {
+                ValueKind::String => {
+                    let message = self.string_value_bytes(value)?.ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "string value missing atom",
+                        })
+                    })?;
+                    String::from_utf8_lossy(&message).into_owned()
+                }
+                ValueKind::Number => luau_number_to_string(value.as_number().unwrap_or(f64::NAN)),
+                _ => {
+                    return Err(Error::new(ErrorKind::RuntimeError {
+                        message: format!(
+                            "invalid argument #2 to 'assert' (string expected, got {})",
+                            self.luau_type_name(value)
+                        ),
+                    }));
+                }
+            },
         };
         Err(Error::new(ErrorKind::AssertionFailed { message }))
     }

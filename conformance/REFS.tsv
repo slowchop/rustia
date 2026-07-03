@@ -8,6 +8,7 @@ assert.fails-on-nil	stdlib	conformance/upstream/luau-0.709/tests/conformance/ass
 assert.missing-first-argument	stdlib	conformance/upstream/luau-0.709/tests/conformance/assert.luau	luau-0.709	Luau assert() raises missing argument #1.
 assert.source-prefix	stdlib	conformance/upstream/luau-0.709/tests/conformance/assert.luau	luau-0.709	Assert failure errors caught by pcall include the failing chunk name and source line.
 assert.uses-string-message	stdlib	conformance/upstream/luau-0.709/tests/conformance/assert.luau	luau-0.709	Luau assert failure uses a string message argument when provided.
+assert.message-conversion	stdlib	upstream-luau-0.709:VM/src/lbaselib.cpp	luau-0.709	Luau assert failure uses luaL_optstring: nil defaults, strings and numbers become messages, and other values raise a string-expected argument error.
 comparison.number-greater-equal	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Number greater-or-equal uses Luau numeric comparison semantics.
 comparison.number-greater-than	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Number greater-than uses Luau numeric comparison semantics.
 comparison.number-less-equal	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Number less-or-equal uses Luau numeric comparison semantics.

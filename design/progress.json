@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "date": "2026-07-03",
+    "date": "2026-07-04",
     "scope": "Public rustia project readiness, based on the current workspace and canonical design docs.",
     "excludes": [
       "Actual grabby integration work"
@@ -13,8 +13,8 @@
     "canonical_facts": {
       "luau_target": "Luau 0.709, standalone surface",
       "conformance": {
-        "fixtures": 688,
-        "refs": 487,
+        "fixtures": 689,
+        "refs": 488,
         "pending": 0
       },
       "benchmark_adapters": {
@@ -167,7 +167,7 @@
           "name": "Manifest and refs",
           "complete": 90,
           "confidence": 90,
-          "state": "688 fixtures and 487 refs are executable with 0 pending rows.",
+          "state": "689 fixtures and 488 refs are executable with 0 pending rows.",
           "future_plan": "Add focused fixtures for newly found gaps instead of reopening bulk inventory."
         },
         {

@@ -5,7 +5,7 @@ The declared behavior-topic catalog is `REFS.tsv`.
 
 ## Current Status
 
-- The current manifest contains 688 fixtures and 487 refs: 688 executable `luau-0.709` fixtures, 0
+- The current manifest contains 689 fixtures and 488 refs: 689 executable `luau-0.709` fixtures, 0
   `pending-oracle` P1 smoke fixtures, and 0 whole upstream Luau 0.709 conformance scripts as
   `pending-impl` inventory.
 - No manifest rows or catalog refs remain pending. P1 smoke fixtures are now pinned to Luau 0.709 oracle
@@ -13,7 +13,7 @@ The declared behavior-topic catalog is `REFS.tsv`.
   `ifelseexpr.luau`, `clear.luau`, `closure.luau`, `coroutine.luau`, `coverage.luau`, `cyield.luau`, `move.luau`, `bitwise.luau`, `interrupt.luau`, `iter.luau`, `literals.luau`, `locals.luau`,
   `buffers.luau`, `datetime.luau`, `debug.luau`, `debugger.luau`, `errors.luau`, `events.luau`, `math.luau`, `native.luau`, `native_integer_spills.luau`, `native_types.luau`, `native_userdata.luau`, `ndebug_upvalues.luau`, `pm.luau`, `safeenv.luau`, `sort.luau`,
   `exceptions.luau`, `explicit_type_instantiations.luau`, `gc.luau`, `pcall.luau`, `strconv.luau`, `stringinterp.luau`, `strings.luau`, `tables.luau`, `tmerror.luau`, `tpack.luau`, `types.luau`, `userdata.luau`, `utf8.luau`, `vararg.luau`, `vector.luau`, and `vector_library.luau` scripts are now executable.
-- Executable upstream-derived fixtures currently cover assert basics, numeric equality/comparison, unary `not`
+- Executable upstream-derived fixtures currently cover assert basics and message conversion, numeric equality/comparison, unary `not`
   and numeric minus,
   logical `and`/`or`, conformance-silenced `print`, first-class no-op `print` global typing, single and multi-name locals, global name and `_G`
   environment reads/writes, local assignment/swap, anonymous-call local/global/table assignment target conflict, basic
