@@ -550,7 +550,9 @@ function renderLeaderboard() {
     (left, right) => left.ns_per_unit_min - right.ns_per_unit_min,
   );
   const rustia = rows.find((row) => row.engine === "rustia");
-  els.leaderboardSubtitle.textContent = state.workload || "No workload";
+  els.leaderboardSubtitle.textContent = state.workload && state.target
+    ? `${state.workload} · ${state.target}`
+    : state.workload || "No workload";
   els.leaderboardBody.replaceChildren(
     ...rows.map((row) => {
       const previous = previousRecord(row);
@@ -559,7 +561,7 @@ function renderLeaderboard() {
         : null;
       return rowElement("tr", [
         rowElement("td", [
-          engineLabel(row.engine),
+          engineTargetLabel(row.engine, row.target),
         ]),
         cell(formatNumber(row.ns_per_unit_min)),
         cell(formatNumber(row.ns_per_unit_median)),
@@ -829,6 +831,23 @@ function engineLabel(engine) {
     document.createTextNode(engine),
   ]);
   label.className = "engine";
+  return label;
+}
+
+function engineTargetLabel(engine, target) {
+  const detail = rowElement("span", [
+    document.createTextNode(` (${target})`),
+  ]);
+  detail.className = "engine-target-detail";
+  const text = rowElement("span", [
+    document.createTextNode(engine),
+    detail,
+  ]);
+  const label = rowElement("span", [
+    colorDot(engineColor(engine)),
+    text,
+  ]);
+  label.className = "engine-target";
   return label;
 }
 
