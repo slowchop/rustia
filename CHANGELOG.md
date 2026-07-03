@@ -33,6 +33,8 @@ Current unpublished workspace version: `0.0.1`.
   script result through `FromRustia`.
 - `Rustia::run_named<T>()`, `run_owned_named()`, and named compile/run helpers
   preserve host-provided source names in runtime diagnostics.
+- Typed host functions can return `rustia::Result<T>` to report fallible host
+  callback errors through the script runtime.
 - Typed host functions and retained script calls now support up to eight
   typed arguments/results through the public tuple conversion traits.
 - Owned-value conversions now cover `Option<T>`, `Vec<T>`,
@@ -43,8 +45,8 @@ Current unpublished workspace version: `0.0.1`.
 - The public `Rustia` facade now has capability-specific host function helpers,
   and `RustiaExtension` can mark external mutable-state reads explicitly.
 - `RustiaExtension` exposes namespace plus per-function name, fuel,
-  capability, parameter-count, parameter type, and return type metadata before
-  installation.
+  capability, parameter-count, parameter type, return type, and fallibility
+  metadata before installation.
 - Release-readiness docs now cover package metadata, package file-list audits,
   semver policy, changelog validation, and publish ordering.
 

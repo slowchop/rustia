@@ -54,20 +54,22 @@ from `publish = false` to publishable.
 - Capability checks fail closed in deterministic profiles.
 - Host functions have documented fuel costs and diagnostic behavior; typed
   argument conversion errors name the host function and argument position.
+- Host callbacks can return `rustia::Result<T>` so fallible host errors cross
+  the script boundary with host-function diagnostic context.
 - Typed host functions and retained script calls support public tuple
   arguments/results through arity 8.
 - The public facade has capability-specific helpers for pure functions,
   deterministic input, slot reads/writes, deterministic effects, external
   mutable-state reads, and nondeterministic effects.
 - `RustiaExtension` exposes namespace and per-function name, fuel, capability,
-  parameter-count, parameter type, and return type metadata before
+  parameter-count, parameter type, return type, and fallibility metadata before
   installation.
 - Public examples cover globals, typed functions, serde, extensions, retained
   functions, and hot reload.
 - Current examples:
   - `crates/rustia/examples/embedding.rs` covers globals, source-named run
-    helpers, typed host functions, deterministic extensions, retained script
-    functions, and serde.
+    helpers, fallible typed host functions, deterministic extensions, retained
+    script functions, and serde.
   - `crates/rustia/examples/hot_reload.rs` covers compile/install hot reload
     and retained handles across reload failures.
 - Retained `Function` handles and `Exports` expose install generations, and

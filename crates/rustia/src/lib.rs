@@ -322,7 +322,7 @@ impl std::error::Error for Error {}
 #[cfg(test)]
 mod tests {
     use super::{
-        Error, FromRustia, OpCapability, OwnedKey, OwnedTable, OwnedValue, Profile, Rustia,
+        Error, FromRustia, OpCapability, OwnedKey, OwnedTable, OwnedValue, Profile, Result, Rustia,
         RustiaExtension, RustiaHostFunctionInfo, VmErrorKind, VmSettings,
     };
     use rustia_compiler::{compile_with_options, CompileOptions};
@@ -632,6 +632,31 @@ return sum_vec({ 1, 2, 3 }) == 6
     }
 
     #[test]
+    fn typed_host_functions_can_return_rustia_result_errors() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        rustia
+            .add_fn("checked_div", |x: f64, y: f64| -> Result<f64> {
+                if y == 0.0 {
+                    return Err(Error::Embed("division by zero".to_owned()));
+                }
+                Ok(x / y)
+            })
+            .unwrap();
+
+        let value: f64 = rustia.run("return checked_div(12, 3)").unwrap();
+        assert_eq!(value, 4.0);
+
+        let error = rustia
+            .run_owned("return checked_div(12, 0)")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("host function `checked_div` return value: division by zero"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn exports_facade_retains_script_functions() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let exports = rustia
@@ -727,6 +752,7 @@ return {
     fn extension_reports_host_function_metadata() {
         let extension = RustiaExtension::new("host")
             .fn_pure("zero", || 1.0)
+            .fn_pure("try_zero", || -> Result<f64> { Ok(1.0) })
             .fn_pure("split", |value: f64| (value, value > 0.0))
             .fn_with(
                 "sum3",
@@ -747,6 +773,16 @@ return {
                     parameter_count: 0,
                     parameter_types: &[],
                     return_types: &["f64"],
+                    fallible: false,
+                },
+                RustiaHostFunctionInfo {
+                    name: "try_zero",
+                    fuel_cost: 1,
+                    capability: OpCapability::Pure,
+                    parameter_count: 0,
+                    parameter_types: &[],
+                    return_types: &["f64"],
+                    fallible: true,
                 },
                 RustiaHostFunctionInfo {
                     name: "split",
@@ -755,6 +791,7 @@ return {
                     parameter_count: 1,
                     parameter_types: &["f64"],
                     return_types: &["f64", "bool"],
+                    fallible: false,
                 },
                 RustiaHostFunctionInfo {
                     name: "sum3",
@@ -763,6 +800,7 @@ return {
                     parameter_count: 3,
                     parameter_types: &["f64", "f64", "f64"],
                     return_types: &["f64"],
+                    fallible: false,
                 },
             ]
         );

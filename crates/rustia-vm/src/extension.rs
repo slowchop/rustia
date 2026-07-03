@@ -78,6 +78,7 @@ pub struct HostFunctionOp {
     pub parameter_count: u8,
     pub parameter_types: Vec<&'static str>,
     pub return_types: Vec<&'static str>,
+    pub fallible: bool,
     pub handler: HostFunctionHandler,
 }
 
@@ -89,6 +90,7 @@ impl HostFunctionOp {
         parameter_count: u8,
         parameter_types: Vec<&'static str>,
         return_types: Vec<&'static str>,
+        fallible: bool,
         handler: HostFunctionHandler,
     ) -> Self {
         Self {
@@ -98,6 +100,7 @@ impl HostFunctionOp {
             parameter_count,
             parameter_types,
             return_types,
+            fallible,
             handler,
         }
     }
@@ -113,6 +116,7 @@ impl fmt::Debug for HostFunctionOp {
             .field("parameter_count", &self.parameter_count)
             .field("parameter_types", &self.parameter_types)
             .field("return_types", &self.return_types)
+            .field("fallible", &self.fallible)
             .finish_non_exhaustive()
     }
 }

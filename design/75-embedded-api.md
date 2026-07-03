@@ -75,6 +75,7 @@ Core pieces:
 - `IntoRustiaMulti` / `FromRustiaMulti`.
 - owned conversions for `Option<T>`, `Vec<T>`, deterministic `BTreeMap<String, T>`, and direct `OwnedTable`
   values.
+- typed host functions support fallible `rustia::Result<T>` returns.
 - typed host functions and retained script calls support tuple-shaped arguments/results through arity 8.
 - retained handles for functions/tables.
 - internal gc-arena `Value` remains behind the facade.
@@ -125,7 +126,8 @@ Current implementation slice: `Rustia::add_pure_fn`, `add_input_fn`, `add_slot_r
 the global facade. `RustiaExtension::fn_external_state` fills the remaining named extension helper. Deterministic
 profiles reject external mutable-state reads and nondeterministic effects at registration time.
 `RustiaExtension::namespace()` and `functions()` expose pre-install metadata for namespace, function name, fuel
-cost, capability, parameter count, parameter Rust type names, and return Rust type names.
+cost, capability, parameter count, parameter Rust type names, return Rust type names, and whether the callback
+is fallible.
 
 ### 3. Serde-first data bridge
 

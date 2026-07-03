@@ -60,6 +60,7 @@ pub struct RustiaHostFunctionInfo<'a> {
     pub parameter_count: u8,
     pub parameter_types: &'a [&'static str],
     pub return_types: &'a [&'static str],
+    pub fallible: bool,
 }
 
 impl RustiaExtension {
@@ -92,6 +93,7 @@ impl RustiaExtension {
                 parameter_count: function.parameter_count,
                 parameter_types: &function.parameter_types,
                 return_types: &function.return_types,
+                fallible: function.fallible,
             })
     }
 

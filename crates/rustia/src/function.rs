@@ -106,10 +106,55 @@ pub trait IntoHostFunction<Args, Return>: Send + Sync + 'static {
     ) -> HostFunctionOp;
 }
 
+pub trait IntoHostReturn {
+    fn into_host_return(self) -> Result<Vec<OwnedValue>>;
+
+    fn rustia_type_names() -> Vec<&'static str>
+    where
+        Self: Sized;
+
+    fn is_fallible() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
+}
+
+impl<T> IntoHostReturn for T
+where
+    T: IntoRustiaMulti,
+{
+    fn into_host_return(self) -> Result<Vec<OwnedValue>> {
+        Ok(self.into_rustia_multi())
+    }
+
+    fn rustia_type_names() -> Vec<&'static str> {
+        T::rustia_type_names()
+    }
+}
+
+impl<T> IntoHostReturn for Result<T>
+where
+    T: IntoRustiaMulti,
+{
+    fn into_host_return(self) -> Result<Vec<OwnedValue>> {
+        self.map(IntoRustiaMulti::into_rustia_multi)
+    }
+
+    fn rustia_type_names() -> Vec<&'static str> {
+        T::rustia_type_names()
+    }
+
+    fn is_fallible() -> bool {
+        true
+    }
+}
+
 impl<F, Return> IntoHostFunction<(), Return> for F
 where
     F: Fn() -> Return + Send + Sync + 'static,
-    Return: IntoRustiaMulti,
+    Return: IntoHostReturn,
 {
     fn into_host_function(
         self,
@@ -125,6 +170,7 @@ where
             0,
             Vec::new(),
             Return::rustia_type_names(),
+            Return::is_fallible(),
             Arc::new(move |vm, _args| host_return_to_raw(vm, &diagnostic_name, self())),
         )
     }
@@ -135,7 +181,7 @@ macro_rules! impl_host_function {
         impl<Func, Return, $($name),+> IntoHostFunction<($($name,)+), Return> for Func
         where
             Func: Fn($($name),+) -> Return + Send + Sync + 'static,
-            Return: IntoRustiaMulti,
+            Return: IntoHostReturn,
             $($name: FromRustia,)+
         {
             #[allow(non_snake_case)]
@@ -153,6 +199,7 @@ macro_rules! impl_host_function {
                     $parameter_count,
                     vec![$(type_name::<$name>()),+],
                     Return::rustia_type_names(),
+                    Return::is_fallible(),
                     Arc::new(move |vm, args| {
                         let mut index = 0usize;
                         $(
@@ -200,10 +247,11 @@ fn host_return_to_raw<Return>(
     value: Return,
 ) -> rustia_vm::Result<Vec<RawValue>>
 where
-    Return: IntoRustiaMulti,
+    Return: IntoHostReturn,
 {
     value
-        .into_rustia_multi()
+        .into_host_return()
+        .map_err(|error| host_embed_error(function_name, "return value", error))?
         .into_iter()
         .enumerate()
         .map(|(index, value)| {

@@ -26,12 +26,18 @@ fn main() -> rustia::Result<()> {
 
     rustia.insert_global("difficulty", 3_i32)?;
     rustia.add_fn("clamp", |value: f64, lo: f64, hi: f64| value.clamp(lo, hi))?;
+    rustia.add_fn("checked_bonus", |value: f64| -> rustia::Result<f64> {
+        if value < 0.0 {
+            return Err(rustia::Error::Embed("negative bonus".to_owned()));
+        }
+        Ok(value + 1.0)
+    })?;
 
     let value = rustia.run_owned_named(
         "embedding-inline.luau",
-        "return clamp(difficulty + host.bias() + host.score(5), 0, 12)",
+        "return clamp(difficulty + host.bias() + host.score(5) + checked_bonus(1), 0, 12)",
     )?;
-    assert_eq!(f64::from_rustia(value)?, 11.0);
+    assert_eq!(f64::from_rustia(value)?, 12.0);
 
     let exports = rustia.compile_and_run_exports_named(
         "ai_exports.luau",
