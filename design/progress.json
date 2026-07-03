@@ -46,10 +46,10 @@
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 64,
+      "complete": 65,
       "confidence": 70,
-      "state": "The rustia facade supports owned values, typed host functions, retained functions, serde, extensions, and hot reload.",
-      "future_plan": "Stabilize API semantics, diagnostics, capability policy, and docs/examples."
+      "state": "The rustia facade supports owned values, typed host functions, retained functions, serde, extensions, hot reload, and compile-checked examples.",
+      "future_plan": "Stabilize API semantics, diagnostics, capability policy, and migration docs."
     },
     {
       "name": "Full public Luau engine release",
@@ -67,10 +67,10 @@
     },
     {
       "name": "Public release readiness",
-      "complete": 48,
+      "complete": 49,
       "confidence": 75,
-      "state": "License, crate metadata, explicit internal dependency versions, and a release-readiness checklist are present; crates are still workspace-private and CI/release polish is incomplete.",
-      "future_plan": "Add examples, semver policy, package-list reviews, and public benchmark claims."
+      "state": "License, crate metadata, explicit internal dependency versions, compile-checked examples, and a release-readiness checklist are present; crates are still workspace-private and CI/release polish is incomplete.",
+      "future_plan": "Add semver policy, package-list reviews, and public benchmark claims."
     }
   ],
   "areas": [
@@ -277,10 +277,10 @@
       "entries": [
         {
           "name": "Koto-shaped facade",
-          "complete": 70,
+          "complete": 72,
           "confidence": 75,
-          "state": "Builder, compile/run, globals, exports, and function calls exist.",
-          "future_plan": "Stabilize names, error types, examples, and migration docs."
+          "state": "Builder, compile/run, globals, exports, retained functions, and examples exist.",
+          "future_plan": "Stabilize names, error types, and migration docs."
         },
         {
           "name": "Owned value firewall",
@@ -326,10 +326,10 @@
         },
         {
           "name": "Hot reload",
-          "complete": 50,
+          "complete": 52,
           "confidence": 65,
-          "state": "Compile/install/hot-reload entry points exist.",
-          "future_plan": "Guarantee old-program survival, diagnostics, and handle semantics on reload failure."
+          "state": "Compile/install/hot-reload entry points exist, with an example covering retained handles across reload failure.",
+          "future_plan": "Guarantee old-program survival, diagnostics, and handle semantics with stronger tests and docs."
         },
         {
           "name": "Macro/codegen sugar",

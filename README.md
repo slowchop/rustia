@@ -31,10 +31,10 @@ public rustia project; actual grabby integration work is explicitly out of scope
 | goal | complete | confidence |
 |---|---:|---:|
 | Whole public rustia project | 59% | 65% |
-| Usable embedded scripting crate | 64% | 70% |
+| Usable embedded scripting crate | 65% | 70% |
 | Full public Luau engine release | 48% | 58% |
 | Standalone benchmark OSS project | 68% | 80% |
-| Public release readiness | 48% | 75% |
+| Public release readiness | 49% | 75% |
 
 - Current conformance runner: **684 fixtures**, **481 refs**, **0 pending**.
 - The benchmark harness has all 10 requested adapters; Lua 5.4 runs separately from Luau because `mlua-sys`
@@ -47,6 +47,10 @@ public rustia project; actual grabby integration work is explicitly out of scope
 - `conformance/` — executable Luau fixtures and the upstream Luau 0.709 test-port plan.
 - `crates/` — production P1 workspace: VM, lexer, parser, compiler, public API, CLI, and conformance runner.
 - `spikes/` — throwaway prototypes (skeleton VM, libm cross-arch, wasm-JIT, gc-arena, …) with their measurements.
+
+## Examples
+- `cargo run -p rustia --example embedding` — globals, typed host functions, deterministic extensions, retained script functions, and serde.
+- `cargo run -p rustia --example hot_reload` — compile/install hot reload and retained-handle behavior across reload failures.
 
 Built design-first with Claude Code.
 

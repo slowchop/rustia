@@ -41,6 +41,11 @@ from `publish = false` to publishable.
 - Host functions have documented fuel costs and diagnostic behavior.
 - Public examples cover globals, typed functions, serde, extensions, retained
   functions, and hot reload.
+- Current examples:
+  - `crates/rustia/examples/embedding.rs` covers globals, typed host functions,
+    deterministic extensions, retained script functions, and serde.
+  - `crates/rustia/examples/hot_reload.rs` covers compile/install hot reload
+    and retained handles across reload failures.
 
 ## Runtime Gate
 
