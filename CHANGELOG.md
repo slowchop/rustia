@@ -52,8 +52,9 @@ Current unpublished workspace version: `0.0.1`.
 - The public `Rustia` facade now has capability-specific host function helpers,
   and `RustiaExtension` can mark external mutable-state reads explicitly.
 - `RustiaExtension` exposes namespace plus per-function name, fuel,
-  capability, parameter-count, parameter type, return type, and fallibility
-  metadata before installation.
+  host-fuel ABI version, capability, parameter-count, parameter type, return
+  type, and fallibility metadata before installation; the public metadata
+  structs are non-exhaustive.
 - Release-readiness docs now cover package metadata, package file-list audits,
   semver policy, changelog validation, and publish ordering.
 

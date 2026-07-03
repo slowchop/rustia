@@ -126,8 +126,9 @@ Current implementation slice: `Rustia::add_pure_fn`, `add_input_fn`, `add_slot_r
 the global facade. `RustiaExtension::fn_external_state` fills the remaining named extension helper. Deterministic
 profiles reject external mutable-state reads and nondeterministic effects at registration time.
 `RustiaExtension::namespace()` and `functions()` expose pre-install metadata for namespace, function name, fuel
-cost, capability, parameter count, parameter Rust type names, return Rust type names, and whether the callback
-is fallible.
+ABI version, fuel cost, capability, parameter count, parameter Rust type names, return Rust type names, and
+whether the callback is fallible. `RustiaExtension::fuel_policy()` exposes the host-function fuel ABI version,
+default helper cost, and minimum accepted cost so hosts can snapshot their extension cost schedule.
 
 ### 3. Serde-first data bridge
 

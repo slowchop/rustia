@@ -53,8 +53,9 @@ from `publish = false` to publishable.
   deterministic `BTreeMap<String, T>`, direct `OwnedTable` values, typed
   owned-table builders, typed string-key lookup, and nested table/array access.
 - Capability checks fail closed in deterministic profiles.
-- Host functions have documented fuel costs and diagnostic behavior; typed
-  argument conversion errors name the host function and argument position.
+- Host functions have documented fuel costs, public fuel-ABI metadata, and
+  diagnostic behavior; typed argument conversion errors name the host function
+  and argument position.
 - Host callbacks can return `rustia::Result<T>` so fallible host errors cross
   the script boundary with host-function diagnostic context.
 - Typed host functions and retained script calls support public tuple
@@ -62,9 +63,9 @@ from `publish = false` to publishable.
 - The public facade has capability-specific helpers for pure functions,
   deterministic input, slot reads/writes, deterministic effects, external
   mutable-state reads, and nondeterministic effects.
-- `RustiaExtension` exposes namespace and per-function name, fuel, capability,
-  parameter-count, parameter type, return type, and fallibility metadata before
-  installation.
+- `RustiaExtension` exposes namespace, host-fuel policy, and per-function name,
+  fuel ABI version, fuel cost, capability, parameter-count, parameter type,
+  return type, and fallibility metadata before installation.
 - Public examples cover globals, typed functions, serde, extensions, retained
   functions, and hot reload.
 - Owned snapshots expose serde deserialization at the `OwnedValue` level plus

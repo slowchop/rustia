@@ -52,9 +52,42 @@ pub struct RustiaExtension {
     functions: Vec<HostFunctionOp>,
 }
 
+/// Version for the public host-function fuel-cost schedule.
+///
+/// Bump this when a rustia release changes the meaning of declared host fuel costs.
+pub const RUSTIA_HOST_FUEL_ABI_VERSION: u32 = 1;
+
+/// Default fuel cost assigned by capability-specific host-function helpers.
+pub const RUSTIA_DEFAULT_HOST_FUNCTION_FUEL: u32 = 1;
+
+/// Minimum accepted host-function fuel cost.
+pub const RUSTIA_MIN_HOST_FUNCTION_FUEL: u32 = 1;
+
+/// Public host-function fuel policy for extension metadata.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RustiaHostFuelPolicy {
+    /// ABI version for interpreting host-function fuel costs.
+    pub abi_version: u32,
+    /// Fuel cost used when the helper API does not take an explicit cost.
+    pub default_function_fuel: u32,
+    /// Smallest fuel cost accepted by VM registration.
+    pub minimum_function_fuel: u32,
+}
+
+pub const RUSTIA_HOST_FUEL_POLICY: RustiaHostFuelPolicy = RustiaHostFuelPolicy {
+    abi_version: RUSTIA_HOST_FUEL_ABI_VERSION,
+    default_function_fuel: RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
+    minimum_function_fuel: RUSTIA_MIN_HOST_FUNCTION_FUEL,
+};
+
+/// Public pre-install metadata for a registered host function.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RustiaHostFunctionInfo<'a> {
     pub name: &'a str,
+    /// ABI version used to interpret `fuel_cost`.
+    pub fuel_abi_version: u32,
     pub fuel_cost: u32,
     pub capability: OpCapability,
     pub parameter_count: u8,
@@ -83,11 +116,16 @@ impl RustiaExtension {
         self.namespace.as_deref()
     }
 
+    pub fn fuel_policy(&self) -> RustiaHostFuelPolicy {
+        RUSTIA_HOST_FUEL_POLICY
+    }
+
     pub fn functions(&self) -> impl Iterator<Item = RustiaHostFunctionInfo<'_>> + '_ {
         self.functions
             .iter()
             .map(|function| RustiaHostFunctionInfo {
                 name: &function.name,
+                fuel_abi_version: RUSTIA_HOST_FUEL_ABI_VERSION,
                 fuel_cost: function.fuel_cost,
                 capability: function.capability,
                 parameter_count: function.parameter_count,
@@ -101,35 +139,60 @@ impl RustiaExtension {
     where
         Func: IntoHostFunction<Args, Return>,
     {
-        self.fn_with(name, 1, OpCapability::Pure, function)
+        self.fn_with(
+            name,
+            RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
+            OpCapability::Pure,
+            function,
+        )
     }
 
     pub fn fn_input<Func, Args, Return>(self, name: impl Into<String>, function: Func) -> Self
     where
         Func: IntoHostFunction<Args, Return>,
     {
-        self.fn_with(name, 1, OpCapability::ReadsDeterministicInput, function)
+        self.fn_with(
+            name,
+            RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
+            OpCapability::ReadsDeterministicInput,
+            function,
+        )
     }
 
     pub fn fn_slot_read<Func, Args, Return>(self, name: impl Into<String>, function: Func) -> Self
     where
         Func: IntoHostFunction<Args, Return>,
     {
-        self.fn_with(name, 1, OpCapability::ReadsSlotState, function)
+        self.fn_with(
+            name,
+            RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
+            OpCapability::ReadsSlotState,
+            function,
+        )
     }
 
     pub fn fn_slot_write<Func, Args, Return>(self, name: impl Into<String>, function: Func) -> Self
     where
         Func: IntoHostFunction<Args, Return>,
     {
-        self.fn_with(name, 1, OpCapability::WritesSlotEffect, function)
+        self.fn_with(
+            name,
+            RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
+            OpCapability::WritesSlotEffect,
+            function,
+        )
     }
 
     pub fn fn_effect<Func, Args, Return>(self, name: impl Into<String>, function: Func) -> Self
     where
         Func: IntoHostFunction<Args, Return>,
     {
-        self.fn_with(name, 1, OpCapability::EmitsDeterministicEffect, function)
+        self.fn_with(
+            name,
+            RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
+            OpCapability::EmitsDeterministicEffect,
+            function,
+        )
     }
 
     pub fn fn_external_state<Func, Args, Return>(
@@ -140,7 +203,12 @@ impl RustiaExtension {
     where
         Func: IntoHostFunction<Args, Return>,
     {
-        self.fn_with(name, 1, OpCapability::ReadsExternalMutableState, function)
+        self.fn_with(
+            name,
+            RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
+            OpCapability::ReadsExternalMutableState,
+            function,
+        )
     }
 
     pub fn fn_nondeterministic<Func, Args, Return>(
@@ -151,7 +219,12 @@ impl RustiaExtension {
     where
         Func: IntoHostFunction<Args, Return>,
     {
-        self.fn_with(name, 1, OpCapability::NondeterministicEffect, function)
+        self.fn_with(
+            name,
+            RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
+            OpCapability::NondeterministicEffect,
+            function,
+        )
     }
 
     pub fn fn_with<Func, Args, Return>(

@@ -10,7 +10,11 @@ use rustia_parser::SourceError;
 use rustia_vm::{Program, Vm};
 use std::fmt;
 
-pub use extension_api::{RustiaBuilder, RustiaExtension, RustiaHostFunctionInfo};
+pub use extension_api::{
+    RustiaBuilder, RustiaExtension, RustiaHostFuelPolicy, RustiaHostFunctionInfo,
+    RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
+    RUSTIA_MIN_HOST_FUNCTION_FUEL,
+};
 pub use function::{Exports, Function};
 pub use rustia_vm::{
     Error as VmError, ErrorKind as VmErrorKind, OpCapability, Profile, VmSettings,
@@ -324,6 +328,8 @@ mod tests {
     use super::{
         Error, FromRustia, OpCapability, OwnedTable, OwnedValue, Profile, Result, Rustia,
         RustiaExtension, RustiaHostFunctionInfo, VmErrorKind, VmSettings,
+        RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
+        RUSTIA_MIN_HOST_FUNCTION_FUEL,
     };
     use rustia_compiler::{compile_with_options, CompileOptions};
     use rustia_parser::parse_source;
@@ -904,12 +910,26 @@ return {
             );
 
         assert_eq!(extension.namespace(), Some("host"));
+        assert_eq!(extension.fuel_policy(), RUSTIA_HOST_FUEL_POLICY);
+        assert_eq!(
+            extension.fuel_policy().abi_version,
+            RUSTIA_HOST_FUEL_ABI_VERSION
+        );
+        assert_eq!(
+            extension.fuel_policy().default_function_fuel,
+            RUSTIA_DEFAULT_HOST_FUNCTION_FUEL
+        );
+        assert_eq!(
+            extension.fuel_policy().minimum_function_fuel,
+            RUSTIA_MIN_HOST_FUNCTION_FUEL
+        );
         let functions = extension.functions().collect::<Vec<_>>();
         assert_eq!(
             functions,
             vec![
                 RustiaHostFunctionInfo {
                     name: "zero",
+                    fuel_abi_version: RUSTIA_HOST_FUEL_ABI_VERSION,
                     fuel_cost: 1,
                     capability: OpCapability::Pure,
                     parameter_count: 0,
@@ -919,6 +939,7 @@ return {
                 },
                 RustiaHostFunctionInfo {
                     name: "try_zero",
+                    fuel_abi_version: RUSTIA_HOST_FUEL_ABI_VERSION,
                     fuel_cost: 1,
                     capability: OpCapability::Pure,
                     parameter_count: 0,
@@ -928,6 +949,7 @@ return {
                 },
                 RustiaHostFunctionInfo {
                     name: "split",
+                    fuel_abi_version: RUSTIA_HOST_FUEL_ABI_VERSION,
                     fuel_cost: 1,
                     capability: OpCapability::Pure,
                     parameter_count: 1,
@@ -937,6 +959,7 @@ return {
                 },
                 RustiaHostFunctionInfo {
                     name: "sum3",
+                    fuel_abi_version: RUSTIA_HOST_FUEL_ABI_VERSION,
                     fuel_cost: 7,
                     capability: OpCapability::ReadsSlotState,
                     parameter_count: 3,
@@ -946,6 +969,19 @@ return {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn extension_rejects_zero_fuel_host_functions() {
+        let extension = RustiaExtension::new("host").fn_with("free", 0, OpCapability::Pure, || 1.0);
+        let result = Rustia::builder().extension(extension).build();
+        let Err(Error::Vm(error)) = result else {
+            panic!("expected zero-fuel host function to be rejected");
+        };
+        let VmErrorKind::InvalidProgram { reason } = error.kind else {
+            panic!("expected invalid-program error, got {error:?}");
+        };
+        assert_eq!(reason, "extension op fuel cost must be non-zero");
     }
 
     #[test]
