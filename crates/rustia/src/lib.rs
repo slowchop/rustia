@@ -196,6 +196,22 @@ mod tests {
     }
 
     #[test]
+    fn numeric_table_keys_normalize_negative_zero_at_script_boundary() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let result = rustia
+            .run_owned(
+                "\
+local t = {}
+t[-0] = 11
+t[0] = t[0] + 31
+return t[-0] == 42 and t[0] == 42 and rawget(t, -0) == 42 and rawget(t, 0) == 42
+",
+            )
+            .unwrap();
+        assert!(bool::from_rustia(result).unwrap());
+    }
+
+    #[test]
     fn owned_values_snapshot_returned_tables() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let value = rustia
