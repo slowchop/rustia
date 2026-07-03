@@ -14732,13 +14732,37 @@ fn parse_tonumber_string(text: &str) -> Option<f64> {
     if text.is_empty() {
         return None;
     }
-    if text.eq_ignore_ascii_case("nan") {
+    if parse_nan_string(text) {
         return Some(canonicalize_number(f64::NAN));
     }
     if let Some(number) = parse_hex_number_string(text) {
         return Some(canonicalize_number(number));
     }
     text.parse::<f64>().ok().map(canonicalize_number)
+}
+
+fn parse_nan_string(text: &str) -> bool {
+    let payload = match text.as_bytes() {
+        [b'+', rest @ ..] | [b'-', rest @ ..] => rest,
+        _ => text.as_bytes(),
+    };
+
+    if payload.eq_ignore_ascii_case(b"nan") {
+        return true;
+    }
+
+    if payload.len() < 5 || !payload[..3].eq_ignore_ascii_case(b"nan") || payload[3] != b'(' {
+        return false;
+    }
+
+    let Some(close) = payload[4..]
+        .iter()
+        .position(|byte| *byte == b')')
+        .map(|offset| offset + 4)
+    else {
+        return false;
+    };
+    close + 1 == payload.len()
 }
 
 fn parse_tonumber_base(text: &[u8], base: u32) -> Option<f64> {
