@@ -1447,6 +1447,12 @@ fn write_latest_json(
         .iter()
         .map(|row| row.workload.as_str())
         .collect::<BTreeSet<_>>();
+    let commits = rows
+        .iter()
+        .map(|row| row.commit.as_str())
+        .collect::<BTreeSet<_>>();
+    let first_timestamp_unix = rows.iter().map(|row| row.timestamp_unix).min().unwrap_or(0);
+    let last_timestamp_unix = rows.iter().map(|row| row.timestamp_unix).max().unwrap_or(0);
     let row_values = rows
         .iter()
         .map(|row| {
@@ -1472,13 +1478,25 @@ fn write_latest_json(
         .collect::<Vec<_>>();
     let value = serde_json::json!({
         "schema_version": 1,
+        "schema": "rustia.bench.current-results.v1",
         "source": "script-bench-harness",
-        "history_schema": "jsonl-v1",
-        "history": history.map(|path| path.display().to_string()),
-        "row_count": rows.len(),
-        "targets": targets.into_iter().collect::<Vec<_>>(),
-        "engines": engines.into_iter().collect::<Vec<_>>(),
-        "workloads": workloads.into_iter().collect::<Vec<_>>(),
+        "metadata": {
+            "description": "Current benchmark snapshot generated from committed history; no benchmark measurements are run by the renderer.",
+            "history": history
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "in-memory measurements".to_owned()),
+            "history_schema": "jsonl-v1",
+            "selection": "latest available result per target, engine, and workload in the source history",
+            "row_count": rows.len(),
+            "targets": targets.into_iter().collect::<Vec<_>>(),
+            "engines": engines.into_iter().collect::<Vec<_>>(),
+            "workloads": workloads.into_iter().collect::<Vec<_>>(),
+            "commits": commits.into_iter().collect::<Vec<_>>(),
+            "measurement_window_unix": {
+                "start": first_timestamp_unix,
+                "end": last_timestamp_unix,
+            },
+        },
         "rows": row_values,
     });
     let text = serde_json::to_string_pretty(&value)
@@ -2101,8 +2119,12 @@ mod tests {
 
         assert_eq!(row_count, 2);
         assert_eq!(value["schema_version"], 1);
-        assert_eq!(value["row_count"], 2);
-        assert_eq!(value["targets"][0], "test-target");
+        assert_eq!(value["schema"], "rustia.bench.current-results.v1");
+        assert_eq!(value["metadata"]["row_count"], 2);
+        assert_eq!(value["metadata"]["targets"][0], "test-target");
+        assert_eq!(value["metadata"]["commits"][0], "test");
+        assert_eq!(value["metadata"]["measurement_window_unix"]["start"], 100);
+        assert_eq!(value["metadata"]["measurement_window_unix"]["end"], 101);
         assert_eq!(value["rows"][0]["target"], "test-target");
         assert_eq!(value["rows"][0]["engine"], "rustia");
         assert_eq!(value["rows"][0]["speed_vs_rustia"].as_f64(), Some(1.0));

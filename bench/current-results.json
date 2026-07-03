@@ -1,19 +1,42 @@
 {
-  "engines": [
-    "boa",
-    "koto",
-    "mlua-lua54",
-    "mlua-luau",
-    "rhai",
-    "roto",
-    "rquickjs",
-    "rustia",
-    "wasmi",
-    "wasmtime"
-  ],
-  "history": "bench/history/runs.jsonl",
-  "history_schema": "jsonl-v1",
-  "row_count": 50,
+  "metadata": {
+    "commits": [
+      "9f3b0d1",
+      "d4bb1ed",
+      "e48285b"
+    ],
+    "description": "Current benchmark snapshot generated from committed history; no benchmark measurements are run by the renderer.",
+    "engines": [
+      "boa",
+      "koto",
+      "mlua-lua54",
+      "mlua-luau",
+      "rhai",
+      "roto",
+      "rquickjs",
+      "rustia",
+      "wasmi",
+      "wasmtime"
+    ],
+    "history": "bench/history/runs.jsonl",
+    "history_schema": "jsonl-v1",
+    "measurement_window_unix": {
+      "end": 1783045640,
+      "start": 1783043624
+    },
+    "row_count": 50,
+    "selection": "latest available result per target, engine, and workload in the source history",
+    "targets": [
+      "macos-aarch64"
+    ],
+    "workloads": [
+      "closures_upvalues",
+      "dense_tables",
+      "generic_iteration",
+      "sparse_tables",
+      "stdlib_math_table"
+    ]
+  },
   "rows": [
     {
       "checksum": "number:248724390.00000000000000000",
@@ -766,16 +789,7 @@
       "workload": "stdlib_math_table"
     }
   ],
+  "schema": "rustia.bench.current-results.v1",
   "schema_version": 1,
-  "source": "script-bench-harness",
-  "targets": [
-    "macos-aarch64"
-  ],
-  "workloads": [
-    "closures_upvalues",
-    "dense_tables",
-    "generic_iteration",
-    "sparse_tables",
-    "stdlib_math_table"
-  ]
+  "source": "script-bench-harness"
 }
