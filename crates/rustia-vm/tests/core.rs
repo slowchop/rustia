@@ -374,6 +374,44 @@ fn table_insert_opcode_charges_shift_work_fuel() {
 }
 
 #[test]
+fn string_find_opcode_charges_text_and_pattern_fuel() {
+    let program = Program::new(
+        Function::new(
+            vec![
+                Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                Instruction::with_aux(Opcode::StringFind, 2, 0, 1, 2),
+                Instruction::new(Opcode::Return, 2, 1, 0),
+            ],
+            3,
+        ),
+        vec![
+            Constant::String(b"abcdefgh".to_vec()),
+            Constant::String(b"def".to_vec()),
+        ],
+    );
+
+    let settings = VmSettings {
+        initial_fuel: Some(13),
+        ..VmSettings::default()
+    };
+    let mut starved = Vm::with_settings(Profile::ReproducibleStandard, settings);
+    let error = starved.run(&program).unwrap_err();
+    assert!(matches!(
+        error.kind,
+        rustia_vm::ErrorKind::FuelExhausted { limit: 13 }
+    ));
+    assert_eq!(error.pc, Some(2));
+
+    let settings = VmSettings {
+        initial_fuel: Some(15),
+        ..VmSettings::default()
+    };
+    let mut enough = Vm::with_settings(Profile::ReproducibleStandard, settings);
+    assert_eq!(enough.run(&program).unwrap().as_number(), Some(4.0));
+}
+
+#[test]
 fn loadstring_charges_source_length_fuel_before_compiling() {
     let program = Program::new(
         Function::new(
