@@ -11,7 +11,6 @@ all-engines = [
     "rustia-engine",
     "boa",
     "koto",
-    "mlua-lua54",
     "mlua-luau",
     "rhai-engine",
     "roto",
@@ -22,8 +21,8 @@ all-engines = [
 rustia-engine = ["dep:rustia-compiler", "dep:rustia-parser", "dep:rustia-vm"]
 boa = ["dep:boa_engine"]
 koto = ["dep:koto"]
-mlua-luau = ["dep:mlua"]
-mlua-lua54 = []
+mlua-luau = ["dep:mlua_luau"]
+mlua-lua54 = ["dep:mlua_lua54"]
 rhai-engine = ["dep:rhai"]
 roto = []
 rquickjs-engine = ["dep:rquickjs"]
@@ -35,7 +34,8 @@ rustia-compiler = { workspace = true, optional = true }
 rustia-parser = { workspace = true, optional = true }
 rustia-vm = { workspace = true, optional = true }
 koto = { version = "0.16", default-features = false, features = ["arc"], optional = true }
-mlua = { version = "0.11", default-features = false, features = ["luau"], optional = true }
+mlua_luau = { package = "mlua", version = "0.11", default-features = false, features = ["luau"], optional = true }
+mlua_lua54 = { package = "mlua", version = "0.11", default-features = false, features = ["lua54", "vendored"], optional = true }
 rhai = { version = "1.25", optional = true }
 boa_engine = { version = "0.21", optional = true }
 rquickjs = { version = "0.12", optional = true }

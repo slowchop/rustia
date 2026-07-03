@@ -14,6 +14,9 @@ use rustia_parser::parse_source;
 #[cfg(feature = "rustia-engine")]
 use rustia_vm::{Profile, Program, Value, ValueKind, Vm};
 
+#[cfg(all(feature = "mlua-luau", feature = "mlua-lua54"))]
+compile_error!("features mlua-luau and mlua-lua54 cannot be enabled in the same binary; run them as separate benchmark binaries");
+
 const DEFAULT_TARGET_MS: u64 = 250;
 const DEFAULT_REPS: usize = 9;
 const DEFAULT_MAX_N: u64 = 1_000_000_000;
@@ -185,7 +188,7 @@ const ENGINE_SLOTS: &[EngineSlot] = &[
         dialect: Dialect::Lua54,
         feature: Some("mlua-lua54"),
         enabled: cfg!(feature = "mlua-lua54"),
-        implemented: false,
+        implemented: cfg!(feature = "mlua-lua54"),
     },
     EngineSlot {
         id: "mlua-luau",
@@ -562,6 +565,8 @@ fn prepare(
         "koto" => Ok(Box::new(KotoPrepared::new(_workload, _source)?)),
         #[cfg(feature = "boa")]
         "boa" => Ok(Box::new(BoaPrepared::new(_workload, _source)?)),
+        #[cfg(feature = "mlua-lua54")]
+        "mlua-lua54" => Ok(Box::new(MluaLua54Prepared::new(_workload, _source)?)),
         #[cfg(feature = "mlua-luau")]
         "mlua-luau" => Ok(Box::new(MluaLuauPrepared::new(_workload, _source)?)),
         #[cfg(feature = "rhai-engine")]
@@ -789,19 +794,67 @@ fn boa_checksum(value: &boa_engine::JsValue) -> String {
     value.display().to_string()
 }
 
+#[cfg(feature = "mlua-lua54")]
+struct MluaLua54Prepared {
+    _lua: mlua_lua54::Lua,
+    function: mlua_lua54::Function,
+}
+
+#[cfg(feature = "mlua-lua54")]
+impl MluaLua54Prepared {
+    fn new(workload: &Workload, source: &str) -> Result<Self> {
+        let lua = mlua_lua54::Lua::new();
+        let function = lua
+            .load(source)
+            .eval::<mlua_lua54::Function>()
+            .map_err(|error| Error::new(format!("initialize {} failed: {error}", workload.id)))?;
+        Ok(Self {
+            _lua: lua,
+            function,
+        })
+    }
+}
+
+#[cfg(feature = "mlua-lua54")]
+impl PreparedWorkload for MluaLua54Prepared {
+    fn run(&mut self, n: u64) -> Result<String> {
+        let n = i64::try_from(n).map_err(|_| Error::new("mlua-lua54 n exceeded i64::MAX"))?;
+        let result = self
+            .function
+            .call::<mlua_lua54::Value>(n)
+            .map_err(|error| Error::new(format!("mlua-lua54 workload call failed: {error}")))?;
+        Ok(mlua_lua54_checksum(&result))
+    }
+}
+
+#[cfg(feature = "mlua-lua54")]
+fn mlua_lua54_checksum(value: &mlua_lua54::Value) -> String {
+    match value {
+        mlua_lua54::Value::Nil => "nil".to_owned(),
+        mlua_lua54::Value::Boolean(value) => format!("bool:{value}"),
+        mlua_lua54::Value::Integer(value) => format!("i64:{value}"),
+        mlua_lua54::Value::Number(value) => format!("f64:{value:.17}"),
+        mlua_lua54::Value::String(value) => match value.to_str() {
+            Ok(text) => format!("string:{text}"),
+            Err(_) => format!("bytes:{}", value.as_bytes().len()),
+        },
+        other => format!("{}", other.type_name()),
+    }
+}
+
 #[cfg(feature = "mlua-luau")]
 struct MluaLuauPrepared {
-    _lua: mlua::Lua,
-    function: mlua::Function,
+    _lua: mlua_luau::Lua,
+    function: mlua_luau::Function,
 }
 
 #[cfg(feature = "mlua-luau")]
 impl MluaLuauPrepared {
     fn new(workload: &Workload, source: &str) -> Result<Self> {
-        let lua = mlua::Lua::new();
+        let lua = mlua_luau::Lua::new();
         let function = lua
             .load(source)
-            .eval::<mlua::Function>()
+            .eval::<mlua_luau::Function>()
             .map_err(|error| Error::new(format!("initialize {} failed: {error}", workload.id)))?;
         Ok(Self {
             _lua: lua,
@@ -816,20 +869,20 @@ impl PreparedWorkload for MluaLuauPrepared {
         let n = i64::try_from(n).map_err(|_| Error::new("mlua-luau n exceeded i64::MAX"))?;
         let result = self
             .function
-            .call::<mlua::Value>(n)
+            .call::<mlua_luau::Value>(n)
             .map_err(|error| Error::new(format!("mlua-luau workload call failed: {error}")))?;
-        Ok(mlua_checksum(&result))
+        Ok(mlua_luau_checksum(&result))
     }
 }
 
 #[cfg(feature = "mlua-luau")]
-fn mlua_checksum(value: &mlua::Value) -> String {
+fn mlua_luau_checksum(value: &mlua_luau::Value) -> String {
     match value {
-        mlua::Value::Nil => "nil".to_owned(),
-        mlua::Value::Boolean(value) => format!("bool:{value}"),
-        mlua::Value::Integer(value) => format!("i64:{value}"),
-        mlua::Value::Number(value) => format!("f64:{value:.17}"),
-        mlua::Value::String(value) => match value.to_str() {
+        mlua_luau::Value::Nil => "nil".to_owned(),
+        mlua_luau::Value::Boolean(value) => format!("bool:{value}"),
+        mlua_luau::Value::Integer(value) => format!("i64:{value}"),
+        mlua_luau::Value::Number(value) => format!("f64:{value:.17}"),
+        mlua_luau::Value::String(value) => match value.to_str() {
             Ok(text) => format!("string:{text}"),
             Err(_) => format!("bytes:{}", value.as_bytes().len()),
         },
