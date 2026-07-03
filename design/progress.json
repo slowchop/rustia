@@ -39,9 +39,9 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 75,
+      "complete": 76,
       "confidence": 65,
-      "state": "Design is locked and production crates are substantial, with crate metadata, release-preflight-enforced examples, first migration guide, CLI ergonomics, source-aware CLI diagnostics, public source-span/runtime-location error accessors, source-named facade diagnostics, typed/nested owned-table helpers, typed and fallible host diagnostic polish, host signature/fuel ABI metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics and current-generation accessors, generated leaf package dry-run checks, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
+      "state": "Design is locked and production crates are substantial, with crate metadata, release-preflight-enforced examples, first migration guide, CLI ergonomics including a line-oriented REPL, source-aware CLI diagnostics, public source-span/runtime-location error accessors, source-named facade diagnostics, typed/nested owned-table helpers, typed and fallible host diagnostic polish, host signature/fuel ABI metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics and current-generation accessors, generated leaf package dry-run checks, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
       "future_plan": "Harden P1, finish benchmark gates, then move toward full public Luau parity."
     },
     {
@@ -67,9 +67,9 @@
     },
     {
       "name": "Public release readiness",
-      "complete": 72,
+      "complete": 73,
       "confidence": 75,
-      "state": "License, generated crate metadata audit, explicit internal dependency versions, release-preflight-enforced example compilation, first migration guide, CLI ergonomics, source-aware CLI diagnostics, public source-span/runtime-location error accessors, source-named facade diagnostics, typed/nested owned-table helpers, fallible host callback diagnostics, retained-handle freshness checks and current-generation accessors, host signature/fuel ABI metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, generated leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
+      "state": "License, generated crate metadata audit, explicit internal dependency versions, release-preflight-enforced example compilation, first migration guide, CLI ergonomics including a line-oriented REPL, source-aware CLI diagnostics, public source-span/runtime-location error accessors, source-named facade diagnostics, typed/nested owned-table helpers, fallible host callback diagnostics, retained-handle freshness checks and current-generation accessors, host signature/fuel ABI metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, generated leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
       "future_plan": "Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims."
     }
   ],
@@ -411,10 +411,10 @@
         },
         {
           "name": "CLI",
-          "complete": 68,
+          "complete": 74,
           "confidence": 65,
-          "state": "rustia-cli supports file, stdin, and --eval execution with profile, fuel, source-name options, unit-tested parsing, and source-aware compile/runtime diagnostics.",
-          "future_plan": "Add REPL ergonomics and richer diagnostic formatting as VM stack traces mature."
+          "state": "rustia-cli supports file, stdin, --eval, and --repl execution with profile, fuel, source-name options, state-preserving line evaluation, expression shorthand, unit-tested parsing, and source-aware compile/runtime diagnostics.",
+          "future_plan": "Add richer multiline editing/history behavior and diagnostic formatting as VM stack traces mature."
         },
         {
           "name": "Live wasm demo",

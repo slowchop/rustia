@@ -2,7 +2,7 @@ use rustia::{OwnedValue, Profile, Rustia, SourceSpan, VmSettings};
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -10,9 +10,11 @@ const USAGE: &str = "\
 usage: rustia [options] <script.luau>
        rustia [options] --eval <source>
        rustia [options] -
+       rustia [options] --repl
 
 options:
   -e, --eval <source>        run source passed on the command line
+      --repl                 run a line-oriented interactive session
       --profile <profile>    luau-compat | reproducible-standard | deterministic-sim
       --fuel <instructions>  set an instruction fuel budget
       --source-name <name>   override the source name used in diagnostics
@@ -47,6 +49,20 @@ fn main() -> ExitCode {
 
 fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), CliError> {
     let config = parse_args(args)?;
+    if config.input == Some(Input::Repl) {
+        let stdin = io::stdin();
+        let show_prompts = stdin.is_terminal();
+        let mut stdout = io::stdout();
+        let mut stderr = io::stderr();
+        return run_repl(
+            &config,
+            stdin.lock(),
+            &mut stdout,
+            &mut stderr,
+            show_prompts,
+        );
+    }
+
     let (source_name, source) = read_source(&config)?;
     let value = run_source(&config, &source_name, &source).map_err(|error| CliError::Rustia {
         error,
@@ -93,13 +109,119 @@ fn read_source(config: &Config) -> Result<(String, String), CliError> {
                 source,
             ))
         }
-        None => Err(CliError::usage("missing script path, --eval source, or -")),
+        Some(Input::Repl) => Err(CliError::usage(
+            "--repl does not read a single source chunk",
+        )),
+        None => Err(CliError::usage(
+            "missing script path, --eval source, -, or --repl",
+        )),
     }
 }
 
 fn run_source(config: &Config, source_name: &str, source: &str) -> rustia::Result<OwnedValue> {
     let mut rustia = Rustia::with_settings(config.profile, config.settings.clone());
+    run_chunk(&mut rustia, source_name, source)
+}
+
+fn run_chunk(rustia: &mut Rustia, source_name: &str, source: &str) -> rustia::Result<OwnedValue> {
     rustia.run_owned_named(source_name, source)
+}
+
+fn run_repl<R, O, E>(
+    config: &Config,
+    mut input: R,
+    output: &mut O,
+    error_output: &mut E,
+    show_prompts: bool,
+) -> Result<(), CliError>
+where
+    R: BufRead,
+    O: Write,
+    E: Write,
+{
+    let mut rustia = Rustia::with_settings(config.profile, config.settings.clone());
+    let source_prefix = config.source_name.as_deref().unwrap_or("<repl>");
+    let mut line = String::new();
+    let mut line_number = 1usize;
+
+    loop {
+        if show_prompts {
+            output
+                .write_all(b"rustia> ")
+                .map_err(|error| CliError::Io {
+                    label: "<stdout>".to_owned(),
+                    error,
+                })?;
+            output.flush().map_err(|error| CliError::Io {
+                label: "<stdout>".to_owned(),
+                error,
+            })?;
+        }
+
+        line.clear();
+        let read = input.read_line(&mut line).map_err(|error| CliError::Io {
+            label: "<stdin>".to_owned(),
+            error,
+        })?;
+        if read == 0 {
+            break;
+        }
+
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            line_number += 1;
+            continue;
+        }
+        if matches!(trimmed, ":quit" | ":exit") {
+            break;
+        }
+        if trimmed == ":help" {
+            writeln!(
+                output,
+                "enter Luau statements, use =expr to print an expression, :quit to exit"
+            )
+            .map_err(|error| CliError::Io {
+                label: "<stdout>".to_owned(),
+                error,
+            })?;
+            line_number += 1;
+            continue;
+        }
+
+        let source = repl_source(trimmed);
+        let source_name = format!("{source_prefix}[{line_number}]");
+        match run_chunk(&mut rustia, &source_name, &source) {
+            Ok(value) => {
+                writeln!(output, "{value:?}").map_err(|error| CliError::Io {
+                    label: "<stdout>".to_owned(),
+                    error,
+                })?;
+            }
+            Err(error) => {
+                writeln!(
+                    error_output,
+                    "{}",
+                    format_diagnostic(&error, &source_name, &source)
+                )
+                .map_err(|error| CliError::Io {
+                    label: "<stderr>".to_owned(),
+                    error,
+                })?;
+            }
+        }
+
+        line_number += 1;
+    }
+
+    Ok(())
+}
+
+fn repl_source(input: &str) -> String {
+    if let Some(expr) = input.strip_prefix('=') {
+        format!("return {}", expr.trim_start())
+    } else {
+        input.to_owned()
+    }
 }
 
 fn format_diagnostic(error: &rustia::Error, source_name: &str, source: &str) -> String {
@@ -249,6 +371,9 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, CliError
 
             match arg.as_str() {
                 "-h" | "--help" => return Err(CliError::Help),
+                "--repl" => {
+                    config.set_input(Input::Repl)?;
+                }
                 "-e" | "--eval" => {
                     let source = args
                         .next()
@@ -285,7 +410,9 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, CliError
     }
 
     if config.input.is_none() {
-        return Err(CliError::usage("missing script path, --eval source, or -"));
+        return Err(CliError::usage(
+            "missing script path, --eval source, -, or --repl",
+        ));
     }
 
     Ok(config)
@@ -359,6 +486,7 @@ enum Input {
     File(PathBuf),
     Eval(String),
     Stdin,
+    Repl,
 }
 
 #[derive(Debug)]
@@ -394,8 +522,11 @@ impl From<rustia::Error> for CliError {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_diagnostic, parse_args, parse_profile, run_source, CliError, Input};
+    use super::{
+        format_diagnostic, parse_args, parse_profile, run_repl, run_source, CliError, Input,
+    };
     use rustia::{FromRustia, Profile};
+    use std::io::Cursor;
     use std::path::PathBuf;
 
     fn args(values: &[&str]) -> Vec<String> {
@@ -448,6 +579,22 @@ mod tests {
         assert_eq!(config.settings.initial_fuel, Some(10));
         assert_eq!(config.source_name.as_deref(), Some("stdin.luau"));
         assert_eq!(config.input, Some(Input::Stdin));
+    }
+
+    #[test]
+    fn parses_repl_mode() {
+        let config = parse_args(args(&[
+            "--profile=deterministic-sim",
+            "--fuel=1000",
+            "--source-name=session",
+            "--repl",
+        ]))
+        .unwrap();
+
+        assert_eq!(config.profile, Profile::DeterministicSim);
+        assert_eq!(config.settings.initial_fuel, Some(1000));
+        assert_eq!(config.source_name.as_deref(), Some("session"));
+        assert_eq!(config.input, Some(Input::Repl));
     }
 
     #[test]
@@ -532,5 +679,37 @@ t[0 / 0] = 1
         let value = run_source(&config, "<test>", "return 40 + 2").unwrap();
 
         assert_eq!(f64::from_rustia(value).unwrap(), 42.0);
+    }
+
+    #[test]
+    fn repl_keeps_vm_state_and_supports_expression_shorthand() {
+        let config = parse_args(args(&["--repl"])).unwrap();
+        let input = Cursor::new("x = 41\n=x + 1\n:quit\n");
+        let mut output = Vec::new();
+        let mut errors = Vec::new();
+
+        run_repl(&config, input, &mut output, &mut errors, false).unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("Nil"), "{output}");
+        assert!(output.contains("Number(42.0)"), "{output}");
+        assert!(errors.is_empty(), "{}", String::from_utf8(errors).unwrap());
+    }
+
+    #[test]
+    fn repl_reports_errors_and_continues() {
+        let config = parse_args(args(&["--source-name", "test-session", "--repl"])).unwrap();
+        let input = Cursor::new("break\n=40 + 2\n");
+        let mut output = Vec::new();
+        let mut errors = Vec::new();
+
+        run_repl(&config, input, &mut output, &mut errors, false).unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        let errors = String::from_utf8(errors).unwrap();
+        assert!(output.contains("Number(42.0)"), "{output}");
+        assert!(errors.contains("break outside loop"), "{errors}");
+        assert!(errors.contains(" --> test-session[1]:1:1"), "{errors}");
+        assert!(errors.contains("1 | break"), "{errors}");
     }
 }

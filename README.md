@@ -34,11 +34,11 @@ public rustia project; actual grabby integration work is explicitly out of scope
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 75% | 65% |
+| Whole public rustia project | 76% | 65% |
 | Usable embedded scripting crate | 83% | 70% |
 | Full public Luau engine release | 48% | 58% |
 | Standalone benchmark OSS project | 72% | 80% |
-| Public release readiness | 72% | 75% |
+| Public release readiness | 73% | 75% |
 
 - Current conformance runner: **684 fixtures**, **481 refs**, **0 pending**.
 - The benchmark harness has all 10 requested adapters; Lua 5.4 runs separately from Luau because `mlua-sys`
@@ -70,6 +70,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
 - `cargo run -p rustia-cli -- path/to/script.luau`
 - `cargo run -p rustia-cli -- --profile deterministic-sim --fuel 100000 --eval "return 40 + 2"`
 - `cargo run -p rustia-cli -- --source-name stdin.luau -`
+- `cargo run -p rustia-cli -- --repl`
 
 Compile and runtime failures include source-name-aware line snippets and caret markers where rustia has source
 span or runtime-line evidence.

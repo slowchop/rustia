@@ -24,8 +24,9 @@ Its generated [`../bench/CLAIMS.md`](../bench/CLAIMS.md) gate keeps public bench
 currently approves no blanket speed headline from the committed snapshot.
 The public API now has release-preflight-enforced compile-checked examples for embedding and hot reload, plus a
 first koto-to-rustia migration guide.
-`rustia-cli` supports file, stdin, and `--eval` execution with profile, fuel, source-name options, and
-source-aware diagnostics for compile and runtime failures.
+`rustia-cli` supports file, stdin, `--eval`, and `--repl` execution with profile, fuel, source-name options,
+state-preserving line evaluation, expression shorthand, and source-aware diagnostics for compile and runtime
+failures.
 CI wiring now includes hosted release-preflight checks, explicit public-example compilation, plus a manual
 benchmark measurement workflow that targets only the generic `[self-hosted, bench]` runner label.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.

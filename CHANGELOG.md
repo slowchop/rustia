@@ -13,8 +13,8 @@ Current unpublished workspace version: `0.0.1`.
 - The public `rustia` facade has compile-checked examples for globals, typed
   host functions, deterministic extensions, retained script functions, serde,
   and hot reload.
-- `rustia-cli` supports file, stdin, and `--eval` execution with profile, fuel,
-  and source-name options.
+- `rustia-cli` supports file, stdin, `--eval`, and `--repl` execution with
+  profile, fuel, and source-name options.
 - `rustia-cli` renders source-aware diagnostics for compile and runtime
   failures when rustia exposes source-span or runtime-line evidence.
 - The benchmark harness has current-results JSON/HTML, generated per-workload

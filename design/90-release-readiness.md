@@ -139,8 +139,9 @@ from `publish = false` to publishable.
   workspace version plus public-facing unreleased changes.
 - `just check-progress` and `just check-benchmark-results` pass without
   rewriting committed generated artifacts.
-- `rustia-cli` supports file, stdin, and `--eval` execution, plus profile,
-  fuel, source-name options, and source-aware compile/runtime diagnostics.
+- `rustia-cli` supports file, stdin, `--eval`, and `--repl` execution, plus
+  profile, fuel, source-name options, line-oriented REPL evaluation, and
+  source-aware compile/runtime diagnostics.
 - `cargo package --no-verify` reaches packaging for each publishable crate; any
   unpublished path dependency blocker is documented.
 - README, `design/CURRENT.md`, `design/progress.json`, and generated progress
