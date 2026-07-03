@@ -98,6 +98,21 @@ impl FromRustia for OwnedValue {
     }
 }
 
+impl IntoRustia for OwnedTable {
+    fn into_rustia(self) -> OwnedValue {
+        OwnedValue::Table(self)
+    }
+}
+
+impl FromRustia for OwnedTable {
+    fn from_rustia(value: OwnedValue) -> Result<Self> {
+        match value {
+            OwnedValue::Table(table) => Ok(table),
+            other => type_error("table", &other),
+        }
+    }
+}
+
 impl IntoRustia for () {
     fn into_rustia(self) -> OwnedValue {
         OwnedValue::Nil
@@ -205,6 +220,15 @@ impl FromRustia for String {
     }
 }
 
+impl<T> IntoRustia for Option<T>
+where
+    T: IntoRustia,
+{
+    fn into_rustia(self) -> OwnedValue {
+        self.map_or(OwnedValue::Nil, IntoRustia::into_rustia)
+    }
+}
+
 impl<T> FromRustia for Option<T>
 where
     T: FromRustia,
@@ -213,6 +237,34 @@ where
         match value {
             OwnedValue::Nil => Ok(None),
             value => T::from_rustia(value).map(Some),
+        }
+    }
+}
+
+impl<T> IntoRustia for Vec<T>
+where
+    T: IntoRustia,
+{
+    fn into_rustia(self) -> OwnedValue {
+        OwnedValue::Table(OwnedTable::array(
+            self.into_iter().map(IntoRustia::into_rustia),
+        ))
+    }
+}
+
+impl<T> FromRustia for Vec<T>
+where
+    T: FromRustia,
+{
+    fn from_rustia(value: OwnedValue) -> Result<Self> {
+        match value {
+            OwnedValue::Table(table) if table.entries.is_empty() => {
+                table.array.into_iter().map(T::from_rustia).collect()
+            }
+            OwnedValue::Table(_) => Err(Error::Embed(
+                "expected array table, got table with keyed entries".to_owned(),
+            )),
+            other => type_error("array table", &other),
         }
     }
 }
@@ -241,12 +293,59 @@ macro_rules! impl_single_multi {
 }
 
 impl_single_multi!(
-    OwnedValue, bool, f64, f32, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, String
+    OwnedValue, OwnedTable, bool, f64, f32, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize,
+    String
 );
 
 impl IntoRustiaMulti for &str {
     fn into_rustia_multi(self) -> Vec<OwnedValue> {
         vec![self.into_rustia()]
+    }
+}
+
+impl<T> IntoRustiaMulti for Option<T>
+where
+    T: IntoRustia,
+{
+    fn into_rustia_multi(self) -> Vec<OwnedValue> {
+        vec![self.into_rustia()]
+    }
+}
+
+impl<T> FromRustiaMulti for Option<T>
+where
+    T: FromRustia,
+{
+    fn from_rustia_multi(mut values: Vec<OwnedValue>) -> Result<Self> {
+        let value = if values.is_empty() {
+            OwnedValue::Nil
+        } else {
+            values.remove(0)
+        };
+        Self::from_rustia(value)
+    }
+}
+
+impl<T> IntoRustiaMulti for Vec<T>
+where
+    T: IntoRustia,
+{
+    fn into_rustia_multi(self) -> Vec<OwnedValue> {
+        vec![self.into_rustia()]
+    }
+}
+
+impl<T> FromRustiaMulti for Vec<T>
+where
+    T: FromRustia,
+{
+    fn from_rustia_multi(mut values: Vec<OwnedValue>) -> Result<Self> {
+        let value = if values.is_empty() {
+            OwnedValue::Nil
+        } else {
+            values.remove(0)
+        };
+        Self::from_rustia(value)
     }
 }
 

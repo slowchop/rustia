@@ -405,7 +405,7 @@
           <span>Whole public rustia project, 65% confidence</span>
         </div>
         <div class="fact">
-          <strong>69%</strong>
+          <strong>70%</strong>
           <span>Usable embedded scripting crate, 70% confidence</span>
         </div>
         <div class="fact">
@@ -445,17 +445,17 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Usable embedded scripting crate</h3>
-        <span class="percent">69%</span>
+        <span class="percent">70%</span>
       </div>
 
-    <div class="meter" aria-label="Usable embedded scripting crate: 69% complete">
-      <div class="meter-fill" style="width: 69%"></div>
+    <div class="meter" aria-label="Usable embedded scripting crate: 70% complete">
+      <div class="meter-fill" style="width: 70%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">70% confidence</span>
       </div>
-      <p>The rustia facade supports owned values, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.</p>
+      <p>The rustia facade supports owned values with Option/Vec/table conversions, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.</p>
       <p class="plan"><strong>Next:</strong> Stabilize API semantics, diagnostics, capability policy, and migration docs.</p>
     </article>
 
@@ -1105,19 +1105,19 @@
       <div class="entry-top">
         <div>
           <h4>Owned value firewall</h4>
-          <p>OwnedValue, owned tables/keys, and conversions exist.</p>
+          <p>OwnedValue, owned tables/keys, scalar conversions, Option/Vec conversions, and direct OwnedTable conversion exist.</p>
         </div>
         <div class="entry-score">
-          <strong>72%</strong>
+          <strong>76%</strong>
           <span class="chip medium">75% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Owned value firewall: 72% complete">
-      <div class="meter-fill" style="width: 72%"></div>
+    <div class="meter" aria-label="Owned value firewall: 76% complete">
+      <div class="meter-fill" style="width: 76%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Harden conversion coverage and avoid leaking internal GC lifetimes.</p>
+      <p class="plan"><strong>Future plan:</strong> Keep hardening conversion coverage and avoid leaking internal GC lifetimes.</p>
     </article>
 
     <article class="entry">

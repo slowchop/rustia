@@ -70,6 +70,7 @@ Core pieces:
 - `OwnedValue` as the public value firewall.
 - `IntoRustia` / `FromRustia`.
 - `IntoRustiaMulti` / `FromRustiaMulti`.
+- owned conversions for `Option<T>`, `Vec<T>`, and direct `OwnedTable` values.
 - typed host functions and retained script calls support tuple-shaped arguments/results through arity 8.
 - retained handles for functions/tables.
 - internal gc-arena `Value` remains behind the facade.

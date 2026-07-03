@@ -31,6 +31,8 @@ Current unpublished workspace version: `0.0.1`.
   argument or return position.
 - Typed host functions and retained script calls now support up to eight
   typed arguments/results through the public tuple conversion traits.
+- Owned-value conversions now cover `Option<T>`, `Vec<T>`, and direct
+  `OwnedTable` values for globals, host functions, and retained calls.
 - Retained script functions and export tables now expose the successful install
   generation they came from, making hot-reload handle semantics explicit.
 - The public `Rustia` facade now has capability-specific host function helpers,

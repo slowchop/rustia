@@ -46,9 +46,9 @@
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 69,
+      "complete": 70,
       "confidence": 70,
-      "state": "The rustia facade supports owned values, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.",
+      "state": "The rustia facade supports owned values with Option/Vec/table conversions, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.",
       "future_plan": "Stabilize API semantics, diagnostics, capability policy, and migration docs."
     },
     {
@@ -284,10 +284,10 @@
         },
         {
           "name": "Owned value firewall",
-          "complete": 72,
+          "complete": 76,
           "confidence": 75,
-          "state": "OwnedValue, owned tables/keys, and conversions exist.",
-          "future_plan": "Harden conversion coverage and avoid leaking internal GC lifetimes."
+          "state": "OwnedValue, owned tables/keys, scalar conversions, Option/Vec conversions, and direct OwnedTable conversion exist.",
+          "future_plan": "Keep hardening conversion coverage and avoid leaking internal GC lifetimes."
         },
         {
           "name": "Typed host functions",

@@ -269,8 +269,8 @@ impl std::error::Error for Error {}
 #[cfg(test)]
 mod tests {
     use super::{
-        Error, FromRustia, OpCapability, OwnedValue, Profile, Rustia, RustiaExtension,
-        RustiaHostFunctionInfo, VmErrorKind, VmSettings,
+        Error, FromRustia, OpCapability, OwnedKey, OwnedTable, OwnedValue, Profile, Rustia,
+        RustiaExtension, RustiaHostFunctionInfo, VmErrorKind, VmSettings,
     };
     use rustia_compiler::{compile_with_options, CompileOptions};
     use rustia_parser::parse_source;
@@ -353,6 +353,38 @@ return {
     }
 
     #[test]
+    fn insert_global_accepts_option_vec_and_owned_table() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        rustia.insert_global("maybe", Some(4_i32)).unwrap();
+        rustia
+            .insert_global("missing", Option::<i32>::None)
+            .unwrap();
+        rustia.insert_global("numbers", vec![1_i32, 2, 3]).unwrap();
+        rustia
+            .insert_global(
+                "named",
+                OwnedTable::entries([(
+                    OwnedKey::String("kind".to_owned()),
+                    OwnedValue::String("scout".to_owned()),
+                )]),
+            )
+            .unwrap();
+
+        let value = rustia
+            .run_owned(
+                "\
+return maybe == 4
+    and missing == nil
+    and numbers[1] == 1
+    and numbers[3] == 3
+    and named.kind == 'scout'
+",
+            )
+            .unwrap();
+        assert!(bool::from_rustia(value).unwrap());
+    }
+
+    #[test]
     fn insert_global_and_typed_add_fn_are_callable() {
         let mut rustia = Rustia::new(Profile::DeterministicSim);
         rustia.insert_global("difficulty", 2_i32).unwrap();
@@ -382,6 +414,43 @@ return {
             .run_owned("return sum8(1, 2, 3, 4, 5, 6, 7, 8)")
             .unwrap();
         assert_eq!(f64::from_rustia(result).unwrap(), 36.0);
+    }
+
+    #[test]
+    fn typed_host_functions_accept_and_return_owned_rust_shapes() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        rustia
+            .add_fn("sum_vec", |values: Vec<f64>| {
+                values.into_iter().sum::<f64>()
+            })
+            .unwrap();
+        rustia
+            .add_fn("maybe_name", |enabled: bool| {
+                enabled.then_some("scout".to_owned())
+            })
+            .unwrap();
+        rustia.add_fn("make_vec", || vec![2.0, 4.0, 6.0]).unwrap();
+        rustia
+            .add_fn("make_table", || {
+                OwnedTable::entries([(
+                    OwnedKey::String("kind".to_owned()),
+                    OwnedValue::String("scout".to_owned()),
+                )])
+            })
+            .unwrap();
+
+        let value = rustia
+            .run_owned(
+                "\
+return sum_vec({ 1, 2, 3 }) == 6
+    and maybe_name(true) == 'scout'
+    and maybe_name(false) == nil
+    and make_vec()[2] == 4
+    and make_table().kind == 'scout'
+",
+            )
+            .unwrap();
+        assert!(bool::from_rustia(value).unwrap());
     }
 
     #[test]
@@ -471,6 +540,37 @@ return {
         let decide = exports.function(&mut rustia, "decide").unwrap();
         let result: f64 = decide.call(&mut rustia, (41.0,)).unwrap();
         assert_eq!(result, 42.0);
+    }
+
+    #[test]
+    fn retained_script_functions_return_vec_and_option_shapes() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let exports = rustia
+            .compile_and_run_exports(
+                "\
+return {
+    values = function()
+        return { 1, 2, 3 }
+    end,
+    maybe = function(enabled)
+        if enabled then
+            return 'scout'
+        end
+    end,
+}
+",
+            )
+            .unwrap();
+
+        let values = exports.function(&mut rustia, "values").unwrap();
+        let values: Vec<f64> = values.call(&mut rustia, ()).unwrap();
+        assert_eq!(values, vec![1.0, 2.0, 3.0]);
+
+        let maybe = exports.function(&mut rustia, "maybe").unwrap();
+        let found: Option<String> = maybe.call(&mut rustia, (true,)).unwrap();
+        let missing: Option<String> = maybe.call(&mut rustia, (false,)).unwrap();
+        assert_eq!(found.as_deref(), Some("scout"));
+        assert_eq!(missing, None);
     }
 
     #[test]
