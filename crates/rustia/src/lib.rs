@@ -95,6 +95,83 @@ impl Rustia {
         self.add_fn_with(name, 1, OpCapability::Pure, function)
     }
 
+    pub fn add_pure_fn<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoHostFunction<Args, Return>,
+    {
+        self.add_fn_with(name, 1, OpCapability::Pure, function)
+    }
+
+    pub fn add_input_fn<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoHostFunction<Args, Return>,
+    {
+        self.add_fn_with(name, 1, OpCapability::ReadsDeterministicInput, function)
+    }
+
+    pub fn add_slot_read_fn<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoHostFunction<Args, Return>,
+    {
+        self.add_fn_with(name, 1, OpCapability::ReadsSlotState, function)
+    }
+
+    pub fn add_slot_write_fn<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoHostFunction<Args, Return>,
+    {
+        self.add_fn_with(name, 1, OpCapability::WritesSlotEffect, function)
+    }
+
+    pub fn add_effect_fn<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoHostFunction<Args, Return>,
+    {
+        self.add_fn_with(name, 1, OpCapability::EmitsDeterministicEffect, function)
+    }
+
+    pub fn add_external_state_fn<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoHostFunction<Args, Return>,
+    {
+        self.add_fn_with(name, 1, OpCapability::ReadsExternalMutableState, function)
+    }
+
+    pub fn add_nondeterministic_fn<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoHostFunction<Args, Return>,
+    {
+        self.add_fn_with(name, 1, OpCapability::NondeterministicEffect, function)
+    }
+
     pub fn add_fn_with<Func, Args, Return>(
         &mut self,
         name: impl Into<String>,
@@ -289,6 +366,51 @@ return {
     }
 
     #[test]
+    fn facade_capability_helpers_register_allowed_deterministic_functions() {
+        let mut rustia = Rustia::new(Profile::DeterministicSim);
+        rustia.add_pure_fn("pure", || 5.0).unwrap();
+        rustia.add_input_fn("input", || 2.0).unwrap();
+        rustia.add_slot_read_fn("slot", || 3.0).unwrap();
+        rustia
+            .add_slot_write_fn("slot_write", |value: f64| value + 4.0)
+            .unwrap();
+        rustia
+            .add_effect_fn("effect", |value: f64| value * 2.0)
+            .unwrap();
+
+        let result = rustia
+            .run_owned("return pure() + input() + slot() + slot_write(1) + effect(3)")
+            .unwrap();
+        assert_eq!(f64::from_rustia(result).unwrap(), 21.0);
+    }
+
+    #[test]
+    fn deterministic_facade_rejects_external_or_nondeterministic_helpers() {
+        let mut external = Rustia::new(Profile::DeterministicSim);
+        let Err(Error::Vm(error)) = external.add_external_state_fn("clock", || 1.0) else {
+            panic!("expected deterministic profile to reject external-state host function");
+        };
+        assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
+
+        let mut nondeterministic = Rustia::new(Profile::DeterministicSim);
+        let Err(Error::Vm(error)) = nondeterministic.add_nondeterministic_fn("random", || 1.0)
+        else {
+            panic!("expected deterministic profile to reject nondeterministic host function");
+        };
+        assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
+    }
+
+    #[test]
+    fn standard_facade_accepts_external_and_nondeterministic_helpers() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        rustia.add_external_state_fn("clock", || 7.0).unwrap();
+        rustia.add_nondeterministic_fn("random", || 11.0).unwrap();
+
+        let result = rustia.run_owned("return clock() + random()").unwrap();
+        assert_eq!(f64::from_rustia(result).unwrap(), 18.0);
+    }
+
+    #[test]
     fn typed_host_function_arg_errors_include_function_and_position() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         rustia
@@ -358,6 +480,19 @@ return {
             .build();
         let Err(Error::Vm(error)) = result else {
             panic!("expected deterministic profile to reject nondeterministic extension");
+        };
+        assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
+    }
+
+    #[test]
+    fn deterministic_builder_rejects_external_state_extension() {
+        let extension = RustiaExtension::new("host").fn_external_state("clock", || 1.0);
+        let result = Rustia::builder()
+            .profile(Profile::DeterministicSim)
+            .extension(extension)
+            .build();
+        let Err(Error::Vm(error)) = result else {
+            panic!("expected deterministic profile to reject external-state extension");
         };
         assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
     }

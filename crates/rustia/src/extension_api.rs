@@ -103,6 +103,17 @@ impl RustiaExtension {
         self.fn_with(name, 1, OpCapability::EmitsDeterministicEffect, function)
     }
 
+    pub fn fn_external_state<Func, Args, Return>(
+        self,
+        name: impl Into<String>,
+        function: Func,
+    ) -> Self
+    where
+        Func: IntoHostFunction<Args, Return>,
+    {
+        self.fn_with(name, 1, OpCapability::ReadsExternalMutableState, function)
+    }
+
     pub fn fn_nondeterministic<Func, Args, Return>(
         self,
         name: impl Into<String>,

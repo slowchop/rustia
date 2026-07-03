@@ -114,6 +114,11 @@ The current coarse VM capability set should become more precise:
 
 `DeterministicSim` allows the first five and rejects the last two.
 
+Current implementation slice: `Rustia::add_pure_fn`, `add_input_fn`, `add_slot_read_fn`, `add_slot_write_fn`,
+`add_effect_fn`, `add_external_state_fn`, and `add_nondeterministic_fn` expose the same capability vocabulary on
+the global facade. `RustiaExtension::fn_external_state` fills the remaining named extension helper. Deterministic
+profiles reject external mutable-state reads and nondeterministic effects at registration time.
+
 ### 3. Serde-first data bridge
 
 This replaces the existing koto scenario/config path.

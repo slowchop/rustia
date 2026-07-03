@@ -39,16 +39,16 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 63,
+      "complete": 64,
       "confidence": 65,
-      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, typed host diagnostic polish, retained-handle generation semantics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
+      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, typed host diagnostic polish, capability-tagged host API helpers, retained-handle generation semantics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
       "future_plan": "Harden P1, finish benchmark gates, then move toward full public Luau parity."
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 67,
+      "complete": 68,
       "confidence": 70,
-      "state": "The rustia facade supports owned values, typed host functions with argument-context diagnostics, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.",
+      "state": "The rustia facade supports owned values, typed host functions with argument-context diagnostics, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.",
       "future_plan": "Stabilize API semantics, diagnostics, capability policy, and migration docs."
     },
     {
@@ -291,23 +291,23 @@
         },
         {
           "name": "Typed host functions",
-          "complete": 72,
+          "complete": 74,
           "confidence": 75,
-          "state": "Plain Rust functions can be registered with typed args/results, and conversion errors name the host function plus argument or return position.",
+          "state": "Plain Rust functions can be registered with typed args/results, capability-specific facade helpers, and conversion errors that name the host function plus argument or return position.",
           "future_plan": "Expand arity/signature support and keep tightening diagnostics."
         },
         {
           "name": "Extension/linker layer",
-          "complete": 58,
+          "complete": 63,
           "confidence": 70,
-          "state": "Namespaced extensions and coarse capabilities exist.",
-          "future_plan": "Add richer capability metadata, fuel costs, and policy validation."
+          "state": "Namespaced extensions, coarse capabilities, deterministic registration validation, and explicit external-state helpers exist.",
+          "future_plan": "Add richer capability metadata, versioned fuel costs, and migration docs."
         },
         {
           "name": "Public host-bridge seam",
-          "complete": 62,
+          "complete": 65,
           "confidence": 75,
-          "state": "The generic seam for deterministic host functions, typed slots, and effect ordering is documented without public grabby types.",
+          "state": "The generic seam for deterministic host functions, typed slots, and effect ordering is documented and now has matching public capability helper names without public grabby types.",
           "future_plan": "Keep public rustia generic while strengthening capability enforcement and scratch-heap rules."
         },
         {
