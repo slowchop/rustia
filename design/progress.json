@@ -46,9 +46,9 @@
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 68,
+      "complete": 69,
       "confidence": 70,
-      "state": "The rustia facade supports owned values, typed host functions with argument-context diagnostics, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.",
+      "state": "The rustia facade supports owned values, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.",
       "future_plan": "Stabilize API semantics, diagnostics, capability policy, and migration docs."
     },
     {
@@ -291,10 +291,10 @@
         },
         {
           "name": "Typed host functions",
-          "complete": 74,
+          "complete": 78,
           "confidence": 75,
-          "state": "Plain Rust functions can be registered with typed args/results, capability-specific facade helpers, and conversion errors that name the host function plus argument or return position.",
-          "future_plan": "Expand arity/signature support and keep tightening diagnostics."
+          "state": "Plain Rust functions can be registered with typed args/results through arity 8, capability-specific facade helpers, and conversion errors that name the host function plus argument or return position.",
+          "future_plan": "Add richer signature metadata and keep tightening diagnostics."
         },
         {
           "name": "Extension/linker layer",

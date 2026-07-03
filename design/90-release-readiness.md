@@ -49,6 +49,8 @@ from `publish = false` to publishable.
 - Capability checks fail closed in deterministic profiles.
 - Host functions have documented fuel costs and diagnostic behavior; typed
   argument conversion errors name the host function and argument position.
+- Typed host functions and retained script calls support public tuple
+  arguments/results through arity 8.
 - The public facade has capability-specific helpers for pure functions,
   deterministic input, slot reads/writes, deterministic effects, external
   mutable-state reads, and nondeterministic effects.

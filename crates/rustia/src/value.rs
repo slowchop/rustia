@@ -295,6 +295,10 @@ impl_tuple_multi!(A);
 impl_tuple_multi!(A, B);
 impl_tuple_multi!(A, B, C);
 impl_tuple_multi!(A, B, C, D);
+impl_tuple_multi!(A, B, C, D, E);
+impl_tuple_multi!(A, B, C, D, E, F);
+impl_tuple_multi!(A, B, C, D, E, F, G);
+impl_tuple_multi!(A, B, C, D, E, F, G, H);
 
 pub(crate) fn snapshot_value(vm: &mut Vm, value: RawValue) -> Result<OwnedValue> {
     snapshot_value_inner(vm, value, 0)

@@ -20,8 +20,8 @@ at full Luau parity.
   **16-byte tagged** values, own hand-written Luau parser, **Send-not-Sync** N-VM threading.
 - Pinned to **Luau 0.709** (standalone luau.org surface, not Roblox).
 - Current conformance runner: **684 fixtures**, **481 refs**, **0 pending-oracle**, **0 pending-impl**.
-- Public embedding API first slice: owned values, typed/capability-tagged host functions, retained script
-  functions, serde, deterministic extensions, hot reload, and macro sugar.
+- Public embedding API first slice: owned values, typed/capability-tagged host functions with up to eight
+  arguments/results, retained script functions, serde, deterministic extensions, hot reload, and macro sugar.
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](design/progress.json) into
@@ -31,7 +31,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
 | goal | complete | confidence |
 |---|---:|---:|
 | Whole public rustia project | 64% | 65% |
-| Usable embedded scripting crate | 68% | 70% |
+| Usable embedded scripting crate | 69% | 70% |
 | Full public Luau engine release | 48% | 58% |
 | Standalone benchmark OSS project | 72% | 80% |
 | Public release readiness | 60% | 75% |

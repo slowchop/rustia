@@ -366,6 +366,24 @@ return {
     }
 
     #[test]
+    fn typed_host_functions_support_eight_arguments() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        rustia
+            .add_fn(
+                "sum8",
+                |a: f64, b: f64, c: f64, d: f64, e: f64, f: f64, g: f64, h: f64| {
+                    a + b + c + d + e + f + g + h
+                },
+            )
+            .unwrap();
+
+        let result = rustia
+            .run_owned("return sum8(1, 2, 3, 4, 5, 6, 7, 8)")
+            .unwrap();
+        assert_eq!(f64::from_rustia(result).unwrap(), 36.0);
+    }
+
+    #[test]
     fn facade_capability_helpers_register_allowed_deterministic_functions() {
         let mut rustia = Rustia::new(Profile::DeterministicSim);
         rustia.add_pure_fn("pure", || 5.0).unwrap();
@@ -452,6 +470,28 @@ return {
         let decide = exports.function(&mut rustia, "decide").unwrap();
         let result: f64 = decide.call(&mut rustia, (41.0,)).unwrap();
         assert_eq!(result, 42.0);
+    }
+
+    #[test]
+    fn retained_script_functions_support_eight_arguments_and_results() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let exports = rustia
+            .compile_and_run_exports(
+                "\
+return {
+    rotate = function(a, b, c, d, e, f, g, h)
+        return h, g, f, e, d, c, b, a
+    end,
+}
+",
+            )
+            .unwrap();
+
+        let rotate = exports.function(&mut rustia, "rotate").unwrap();
+        let result: (f64, f64, f64, f64, f64, f64, f64, f64) = rotate
+            .call(&mut rustia, (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0))
+            .unwrap();
+        assert_eq!(result, (8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0));
     }
 
     #[test]

@@ -165,6 +165,10 @@ impl_host_function!(A);
 impl_host_function!(A, B);
 impl_host_function!(A, B, C);
 impl_host_function!(A, B, C, D);
+impl_host_function!(A, B, C, D, E);
+impl_host_function!(A, B, C, D, E, F);
+impl_host_function!(A, B, C, D, E, F, G);
+impl_host_function!(A, B, C, D, E, F, G, H);
 
 fn host_arg_from_raw<T>(
     vm: &mut Vm,
