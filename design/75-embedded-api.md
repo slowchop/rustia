@@ -60,6 +60,7 @@ let mut vm = Rustia::builder()
 vm.add_fn("clamp", |x: f64, lo: f64, hi: f64| x.clamp(lo, hi))?;
 vm.insert_global("difficulty", 3)?;
 
+let quick: f64 = vm.run("return clamp(difficulty + 9, 0, 10)")?;
 let exports = vm.compile_and_run("return { decide = function(x) return clamp(x, 0, 10) end }")?;
 let decide = exports.function("decide")?;
 let y: f64 = decide.call((12.0,))?;
@@ -67,6 +68,7 @@ let y: f64 = decide.call((12.0,))?;
 
 Core pieces:
 
+- typed `Rustia::run<T>()` for direct single-result conversion.
 - `OwnedValue` as the public value firewall.
 - `IntoRustia` / `FromRustia`.
 - `IntoRustiaMulti` / `FromRustiaMulti`.

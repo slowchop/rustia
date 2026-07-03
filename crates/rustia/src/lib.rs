@@ -58,6 +58,14 @@ impl Rustia {
         value::snapshot_value(&mut self.vm, value)
     }
 
+    pub fn run<T>(&mut self, source: &str) -> Result<T>
+    where
+        T: FromRustia,
+    {
+        let value = self.run_owned(source)?;
+        T::from_rustia(value)
+    }
+
     pub(crate) fn compile_and_run_raw(&mut self, source: &str) -> Result<rustia_vm::Value> {
         let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
         let program = rustia_compiler::compile(&chunk).map_err(Error::Compile)?;
@@ -284,6 +292,26 @@ mod tests {
             .run_owned("local x: number = 6 * 7; return x")
             .unwrap();
         assert_eq!(f64::from_rustia(result).unwrap(), 42.0);
+    }
+
+    #[test]
+    fn typed_run_converts_owned_results() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+
+        let answer: f64 = rustia.run("return 40 + 2").unwrap();
+        let numbers: Vec<i32> = rustia.run("return { 1, 2, 3 }").unwrap();
+        let missing: Option<String> = rustia.run("return nil").unwrap();
+
+        assert_eq!(answer, 42.0);
+        assert_eq!(numbers, vec![1, 2, 3]);
+        assert_eq!(missing, None);
+    }
+
+    #[test]
+    fn typed_run_reports_conversion_errors() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let error = rustia.run::<String>("return 42").unwrap_err().to_string();
+        assert!(error.contains("expected string, got number"), "{error}");
     }
 
     #[test]

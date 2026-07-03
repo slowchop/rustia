@@ -29,6 +29,8 @@ Current unpublished workspace version: `0.0.1`.
   `design/crate-metadata.json` and checked in release preflight.
 - Typed host function conversion errors now include the host function name and
   argument or return position.
+- The public `Rustia` facade now has `run<T>()` for typed conversion of a
+  script result through `FromRustia`.
 - Typed host functions and retained script calls now support up to eight
   typed arguments/results through the public tuple conversion traits.
 - Owned-value conversions now cover `Option<T>`, `Vec<T>`, and direct

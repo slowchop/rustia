@@ -46,6 +46,7 @@ from `publish = false` to publishable.
 
 - Public error types, conversion traits, retained handles, extension APIs, and
   hot-reload semantics have stable names and documented behavior.
+- `Rustia::run<T>()` supports direct typed conversion of single-result scripts.
 - Owned-value conversions cover scalar values, `Option<T>`, `Vec<T>`, and
   direct `OwnedTable` values.
 - Capability checks fail closed in deterministic profiles.

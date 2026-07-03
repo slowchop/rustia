@@ -46,9 +46,9 @@
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 70,
+      "complete": 71,
       "confidence": 70,
-      "state": "The rustia facade supports owned values with Option/Vec/table conversions, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.",
+      "state": "The rustia facade supports typed run<T>, owned values with Option/Vec/table conversions, typed host functions with argument-context diagnostics, tuple arguments/results through arity 8, capability-tagged host helpers, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.",
       "future_plan": "Stabilize API semantics, diagnostics, capability policy, and migration docs."
     },
     {
@@ -277,9 +277,9 @@
       "entries": [
         {
           "name": "Koto-shaped facade",
-          "complete": 72,
+          "complete": 75,
           "confidence": 75,
-          "state": "Builder, compile/run, globals, exports, retained functions, and examples exist.",
+          "state": "Builder, typed run<T>, compile/run, globals, exports, retained functions, and examples exist.",
           "future_plan": "Stabilize names, error types, and migration docs."
         },
         {
