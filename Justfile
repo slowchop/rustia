@@ -10,6 +10,10 @@ gen-package-files:
 check-package-files:
     node tools/check-package-files.js --check
 
+check-package-dry-runs:
+    cargo package --no-verify --allow-dirty -p rustia-lexer
+    cargo package --no-verify --allow-dirty -p rustia-vm
+
 gen-publishability:
     node tools/check-publishability.js
 
@@ -38,6 +42,7 @@ release-preflight:
     just check-crate-metadata
     just check-workflows
     just check-package-files
+    just check-package-dry-runs
     just check-publishability
     just check-progress
     just check-benchmark-results

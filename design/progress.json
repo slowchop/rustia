@@ -67,9 +67,9 @@
     },
     {
       "name": "Public release readiness",
-      "complete": 60,
+      "complete": 61,
       "confidence": 75,
-      "state": "License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
+      "state": "License, generated crate metadata audit, explicit internal dependency versions, compile-checked examples, CLI ergonomics, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
       "future_plan": "Remove publish blockers in topological order and replace the not-approved benchmark claim gate with credible per-workload public claims."
     }
   ],
@@ -430,9 +430,9 @@
       "entries": [
         {
           "name": "Crate publishability",
-          "complete": 57,
+          "complete": 60,
           "confidence": 80,
-          "state": "Workspace crates are still publish = false, but generated crate metadata audit, explicit internal dependency versions, leaf package checks, package file-list audit, publishability blocker audit, release checklist, semver policy, changelog validation, and release preflight are present.",
+          "state": "Workspace crates are still publish = false, but generated crate metadata audit, explicit internal dependency versions, leaf package dry-run checks in preflight/CI, package file-list audit, publishability blocker audit, release checklist, semver policy, changelog validation, and release preflight are present.",
           "future_plan": "Flip policy only after P1 gates, then publish/remove internal dependency blockers in generated order."
         }
       ]

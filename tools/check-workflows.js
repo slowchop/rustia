@@ -129,6 +129,8 @@ function checkCi(text) {
   requireIncludes(text, "node tools/check-release-notes.js", label);
   requireIncludes(text, "node tools/check-crate-metadata.js --check", label);
   requireIncludes(text, "node tools/check-package-files.js --check", label);
+  requireIncludes(text, "cargo package --no-verify --allow-dirty -p rustia-lexer", label);
+  requireIncludes(text, "cargo package --no-verify --allow-dirty -p rustia-vm", label);
   requireIncludes(text, "node tools/check-publishability.js --check", label);
   requireIncludes(text, "node tools/check-workflows.js", label);
   requireIncludes(text, "node design/render-progress.js --check", label);

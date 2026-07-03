@@ -52,6 +52,11 @@ jobs:
       - name: Check package file audit
         run: node tools/check-package-files.js --check
 
+      - name: Check leaf package dry runs
+        run: |
+          cargo package --no-verify --allow-dirty -p rustia-lexer
+          cargo package --no-verify --allow-dirty -p rustia-vm
+
       - name: Check publishability audit
         run: node tools/check-publishability.js --check
 

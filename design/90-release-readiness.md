@@ -31,8 +31,8 @@ from `publish = false` to publishable.
   committed review artifact is [`publishability.json`](publishability.json).
 - Internal crate dependencies have explicit versions before any crate is
   published.
-- Leaf packages currently verified with `cargo package --no-verify`:
-  `rustia-lexer` and `rustia-vm`.
+- Leaf packages currently verified by `just check-package-dry-runs` with
+  `cargo package --no-verify --allow-dirty`: `rustia-lexer` and `rustia-vm`.
 - Full-workspace packaging is still blocked until internal crates are published
   in topological order. The current generated order is `rustia-lexer`,
   `rustia-parser`, `rustia-vm`, `rustia-compiler`, `rustia`, `rustia-cli`,
@@ -105,6 +105,8 @@ from `publish = false` to publishable.
   benchmark artifacts.
 - `cargo test --workspace` passes on the release toolchain.
 - `just check-package-files` passes and `design/package-files.json` is current.
+- `just check-package-dry-runs` reaches Cargo packaging for the current
+  publish-order leaf candidates: `rustia-lexer` and `rustia-vm`.
 - `just check-publishability` passes and `design/publishability.json` is
   current.
 - `just check-release-notes` passes and `CHANGELOG.md` names the current
