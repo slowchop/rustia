@@ -308,30 +308,56 @@ function compareRows(left, right) {
   );
 }
 
-function summarize(data) {
+function summarize(data, wasmRows) {
   const rows = data.rows.slice().sort(compareRows);
+  const summaryRows = [
+    ...rows.map((row) => ({
+      engine: row.engine,
+      target: row.target,
+      targetLabel: row.target,
+      workload: row.workload,
+      ns_per_unit_min: row.ns_per_unit_min,
+      speed_vs_rustia: row.speed_vs_rustia,
+    })),
+    ...wasmRows.map((row) => ({
+      engine: row.adapter,
+      target: row.target,
+      targetLabel: `wasm32 / ${row.runtime}`,
+      workload: row.workload,
+      ns_per_unit_min: row.ns_per_unit_min,
+      speed_vs_rustia: row.speed_vs_rustia,
+    })),
+  ].sort(compareRows);
   const timestamps = rows.map((row) => row.timestamp_unix);
   const targetRows = [...groupBy(rows, (row) => row.target)]
     .map(([target, values]) => ({ target, values }))
     .sort((left, right) => left.target.localeCompare(right.target));
-  const engineRows = [...groupBy(rows, (row) => row.engine)]
-    .map(([engine, values]) => ({
-      engine,
-      targetCount: unique(values.map((row) => row.target)).length,
-      workloadCount: unique(values.map((row) => row.workload)).length,
-      bestCount: 0,
-      geoSpeed: geometricMean(values.map((row) => row.speed_vs_rustia)),
-      medianNs: median(values.map((row) => row.ns_per_unit_min)),
-    }))
+  const engineRows = [...groupBy(summaryRows, (row) => `${row.engine}\0${row.target}`)]
+    .map(([key, values]) => {
+      const [engine, target] = key.split("\0");
+      return {
+        engine,
+        target,
+        targetLabel: values[0].targetLabel,
+        workloadCount: unique(values.map((row) => row.workload)).length,
+        bestCount: 0,
+        geoSpeed: geometricMean(values.map((row) => row.speed_vs_rustia)),
+        medianNs: median(values.map((row) => row.ns_per_unit_min)),
+      };
+    })
     .sort((left, right) => {
       const leftSpeed = left.geoSpeed ?? -Infinity;
       const rightSpeed = right.geoSpeed ?? -Infinity;
-      return rightSpeed - leftSpeed || left.engine.localeCompare(right.engine);
+      return (
+        rightSpeed - leftSpeed ||
+        left.engine.localeCompare(right.engine) ||
+        left.target.localeCompare(right.target)
+      );
     });
 
-  for (const group of groupBy(rows, (row) => `${row.target}\0${row.workload}`).values()) {
+  for (const group of groupBy(summaryRows, (row) => `${row.target}\0${row.workload}`).values()) {
     group.sort((left, right) => left.ns_per_unit_min - right.ns_per_unit_min);
-    const winner = engineRows.find((engine) => engine.engine === group[0].engine);
+    const winner = engineRows.find((engine) => engine.engine === group[0].engine && engine.target === group[0].target);
     if (winner) {
       winner.bestCount += 1;
     }
@@ -339,6 +365,7 @@ function summarize(data) {
 
   return {
     rows,
+    summaryRows,
     targetRows,
     engineRows,
     minTimestamp: Math.min(...timestamps),
@@ -375,14 +402,14 @@ function engineSummaryTable(engineRows, totalMatchups) {
       <div class="section-head">
         <div>
           <h2>Engine Summary</h2>
-          <p>Geomean uses available speed-vs-rustia ratios from the current snapshot.</p>
+          <p>Grouped by engine and target. Geomean uses available speed-vs-rustia ratios from the current snapshot.</p>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Engine</th>
+              <th>Engine / target</th>
               <th>Geomean vs rustia</th>
               <th>Best results</th>
               <th>Median min ns/unit</th>
@@ -394,7 +421,7 @@ function engineSummaryTable(engineRows, totalMatchups) {
               const width = row.geoSpeed ? Math.max(2, (row.geoSpeed / maxSpeed) * 100) : 0;
               return `
                 <tr>
-                  <td><strong>${escapeHtml(row.engine)}</strong></td>
+                  <td><strong>${escapeHtml(row.engine)}</strong> <span class="subtle">${escapeHtml(row.targetLabel)}</span></td>
                   <td>
                     <div class="bar-cell">
                       <span>${formatSpeed(row.geoSpeed)}</span>
@@ -403,7 +430,7 @@ function engineSummaryTable(engineRows, totalMatchups) {
                   </td>
                   <td>${formatInteger(row.bestCount)} / ${formatInteger(totalMatchups)}</td>
                   <td>${formatNumber(row.medianNs)}</td>
-                  <td>${formatInteger(row.targetCount)} targets, ${formatInteger(row.workloadCount)} workloads</td>
+                  <td>${formatInteger(row.workloadCount)} workloads</td>
                 </tr>
               `;
             }).join("")}
@@ -478,6 +505,7 @@ function wasmTargetRows(data) {
   for (const run of data.runs) {
     for (const row of run.rows) {
       rows.push({
+        target: run.target,
         runtime: runtimeLabel(run.runtime),
         adapter: run.adapter.id,
         dialect: run.adapter.dialect,
@@ -623,10 +651,10 @@ function wasmDispatchSection(data) {
 }
 
 function render(data, wasmResults, wasmDispatchResults) {
-  const summary = summarize(data);
   const wasmRows = wasmTargetRows(wasmResults);
+  const summary = summarize(data, wasmRows);
   const dispatchRows = wasmDispatchRows(wasmDispatchResults);
-  const totalMatchups = groupBy(summary.rows, (row) => `${row.target}\0${row.workload}`).size;
+  const totalMatchups = groupBy(summary.summaryRows, (row) => `${row.target}\0${row.workload}`).size;
   const latestCommit = summary.rows
     .slice()
     .sort((left, right) => right.timestamp_unix - left.timestamp_unix || right.commit.localeCompare(left.commit))[0].commit;

@@ -387,14 +387,14 @@
       <div class="section-head">
         <div>
           <h2>Engine Summary</h2>
-          <p>Geomean uses available speed-vs-rustia ratios from the current snapshot.</p>
+          <p>Grouped by engine and target. Geomean uses available speed-vs-rustia ratios from the current snapshot.</p>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Engine</th>
+              <th>Engine / target</th>
               <th>Geomean vs rustia</th>
               <th>Best results</th>
               <th>Median min ns/unit</th>
@@ -404,133 +404,237 @@
           <tbody>
 
                 <tr>
-                  <td><strong>wasmtime</strong></td>
+                  <td><strong>wasmtime</strong> <span class="subtle">macos-aarch64</span></td>
                   <td>
                     <div class="bar-cell">
                       <span>235x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 100.000%"></span></div>
                     </div>
                   </td>
-                  <td>4 / 5</td>
+                  <td>4 / 25</td>
                   <td>78.8</td>
-                  <td>1 targets, 5 workloads</td>
+                  <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>wasmi</strong></td>
+                  <td><strong>wasmi</strong> <span class="subtle">macos-aarch64</span></td>
                   <td>
                     <div class="bar-cell">
                       <span>61.6x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 26.262%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 5</td>
+                  <td>0 / 25</td>
                   <td>162</td>
-                  <td>1 targets, 5 workloads</td>
+                  <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>mlua-luau</strong></td>
+                  <td><strong>mlua-luau</strong> <span class="subtle">macos-aarch64</span></td>
                   <td>
                     <div class="bar-cell">
                       <span>13x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 5.524%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 5</td>
+                  <td>0 / 25</td>
                   <td>2,126</td>
-                  <td>1 targets, 5 workloads</td>
+                  <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>mlua-lua54</strong></td>
+                  <td><strong>mlua-lua54</strong> <span class="subtle">macos-aarch64</span></td>
                   <td>
                     <div class="bar-cell">
                       <span>10.6x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 4.502%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 5</td>
+                  <td>0 / 25</td>
                   <td>1,429</td>
-                  <td>1 targets, 5 workloads</td>
+                  <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>roto</strong></td>
+                  <td><strong>roto</strong> <span class="subtle">macos-aarch64</span></td>
                   <td>
                     <div class="bar-cell">
                       <span>5.111x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.179%"></span></div>
                     </div>
                   </td>
-                  <td>1 / 5</td>
+                  <td>1 / 25</td>
                   <td>1,152</td>
-                  <td>1 targets, 5 workloads</td>
+                  <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>rquickjs</strong></td>
+                  <td><strong>rquickjs</strong> <span class="subtle">macos-aarch64</span></td>
                   <td>
                     <div class="bar-cell">
                       <span>3.098x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 5</td>
+                  <td>0 / 25</td>
                   <td>2,914</td>
-                  <td>1 targets, 5 workloads</td>
+                  <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>koto</strong></td>
+                  <td><strong>koto</strong> <span class="subtle">wasm32 / SpiderMonkey/spidermonkey</span></td>
+                  <td>
+                    <div class="bar-cell">
+                      <span>2.793x</span>
+                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
+                    </div>
+                  </td>
+                  <td>5 / 25</td>
+                  <td>4,660</td>
+                  <td>5 workloads</td>
+                </tr>
+
+                <tr>
+                  <td><strong>koto</strong> <span class="subtle">macos-aarch64</span></td>
                   <td>
                     <div class="bar-cell">
                       <span>2.696x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 5</td>
+                  <td>0 / 25</td>
                   <td>2,319</td>
-                  <td>1 targets, 5 workloads</td>
+                  <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>rhai</strong></td>
+                  <td><strong>koto</strong> <span class="subtle">wasm32 / V8/deno</span></td>
+                  <td>
+                    <div class="bar-cell">
+                      <span>2.526x</span>
+                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
+                    </div>
+                  </td>
+                  <td>5 / 25</td>
+                  <td>4,209</td>
+                  <td>5 workloads</td>
+                </tr>
+
+                <tr>
+                  <td><strong>koto</strong> <span class="subtle">wasm32 / V8/node</span></td>
+                  <td>
+                    <div class="bar-cell">
+                      <span>2.33x</span>
+                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
+                    </div>
+                  </td>
+                  <td>5 / 25</td>
+                  <td>4,566</td>
+                  <td>5 workloads</td>
+                </tr>
+
+                <tr>
+                  <td><strong>koto</strong> <span class="subtle">wasm32 / JavaScriptCore/bun</span></td>
+                  <td>
+                    <div class="bar-cell">
+                      <span>2.28x</span>
+                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
+                    </div>
+                  </td>
+                  <td>4 / 25</td>
+                  <td>4,302</td>
+                  <td>5 workloads</td>
+                </tr>
+
+                <tr>
+                  <td><strong>rhai</strong> <span class="subtle">macos-aarch64</span></td>
                   <td>
                     <div class="bar-cell">
                       <span>1.418x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 5</td>
+                  <td>0 / 25</td>
                   <td>3,463</td>
-                  <td>1 targets, 5 workloads</td>
+                  <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>rustia</strong></td>
+                  <td><strong>rustia</strong> <span class="subtle">macos-aarch64</span></td>
                   <td>
                     <div class="bar-cell">
                       <span>1x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 5</td>
+                  <td>0 / 25</td>
                   <td>17,533</td>
-                  <td>1 targets, 5 workloads</td>
+                  <td>5 workloads</td>
                 </tr>
 
                 <tr>
-                  <td><strong>boa</strong></td>
+                  <td><strong>rustia</strong> <span class="subtle">wasm32 / JavaScriptCore/bun</span></td>
+                  <td>
+                    <div class="bar-cell">
+                      <span>1x</span>
+                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
+                    </div>
+                  </td>
+                  <td>1 / 25</td>
+                  <td>30,915</td>
+                  <td>5 workloads</td>
+                </tr>
+
+                <tr>
+                  <td><strong>rustia</strong> <span class="subtle">wasm32 / SpiderMonkey/spidermonkey</span></td>
+                  <td>
+                    <div class="bar-cell">
+                      <span>1x</span>
+                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
+                    </div>
+                  </td>
+                  <td>0 / 25</td>
+                  <td>41,473</td>
+                  <td>5 workloads</td>
+                </tr>
+
+                <tr>
+                  <td><strong>rustia</strong> <span class="subtle">wasm32 / V8/deno</span></td>
+                  <td>
+                    <div class="bar-cell">
+                      <span>1x</span>
+                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
+                    </div>
+                  </td>
+                  <td>0 / 25</td>
+                  <td>26,363</td>
+                  <td>5 workloads</td>
+                </tr>
+
+                <tr>
+                  <td><strong>rustia</strong> <span class="subtle">wasm32 / V8/node</span></td>
+                  <td>
+                    <div class="bar-cell">
+                      <span>1x</span>
+                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
+                    </div>
+                  </td>
+                  <td>0 / 25</td>
+                  <td>27,576</td>
+                  <td>5 workloads</td>
+                </tr>
+
+                <tr>
+                  <td><strong>boa</strong> <span class="subtle">macos-aarch64</span></td>
                   <td>
                     <div class="bar-cell">
                       <span>0.629x</span>
                       <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
                     </div>
                   </td>
-                  <td>0 / 5</td>
+                  <td>0 / 25</td>
                   <td>14,206</td>
-                  <td>1 targets, 5 workloads</td>
+                  <td>5 workloads</td>
                 </tr>
 
           </tbody>
