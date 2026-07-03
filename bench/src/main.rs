@@ -245,6 +245,7 @@ struct Config {
     history: Option<PathBuf>,
     results: Option<PathBuf>,
     latest_json: Option<PathBuf>,
+    commit: Option<String>,
     list: bool,
     list_json: bool,
     check_history: bool,
@@ -270,6 +271,7 @@ impl Default for Config {
             history: Some(PathBuf::from(HISTORY_PATH)),
             results: Some(PathBuf::from(RESULTS_PATH)),
             latest_json: Some(PathBuf::from(LATEST_JSON_PATH)),
+            commit: None,
             list: false,
             list_json: false,
             check_history: false,
@@ -552,6 +554,20 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
                     .ok_or_else(|| Error::new("--latest-json requires a path"))?;
                 config.latest_json = Some(PathBuf::from(value));
             }
+            "--commit" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| Error::new("--commit requires a value"))?;
+                if value.trim().is_empty() {
+                    return Err(Error::new("--commit must not be empty"));
+                }
+                if value.ends_with("-dirty") {
+                    return Err(Error::new(
+                        "--commit must name a clean benchmark baseline commit",
+                    ));
+                }
+                config.commit = Some(value);
+            }
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
@@ -584,6 +600,7 @@ fn print_usage() {
     println!("  --history bench/history/runs.jsonl");
     println!("  --results bench/RESULTS.md");
     println!("  --latest-json bench/latest.json");
+    println!("  --commit <clean-git-id>");
     println!("  --no-history");
     println!("  --no-results");
     println!("  --no-latest-json");
@@ -812,7 +829,7 @@ fn measure(
         ns_per_unit_median: median_s * 1e9 / n_f64,
         units_per_sec: n_f64 / min_s,
         checksum,
-        commit: git_commit(),
+        commit: config.commit.clone().unwrap_or_else(git_commit),
         timestamp_unix: unix_time(),
         target: format!("{}-{}", env::consts::OS, env::consts::ARCH),
     })
@@ -2027,6 +2044,14 @@ mod tests {
         let _ = fs::remove_file(&path);
 
         assert!(error.to_string().contains("dirty commit id"));
+    }
+
+    #[test]
+    fn parse_args_rejects_dirty_commit_override() {
+        let error = parse_args(["--commit".to_owned(), "abc1234-dirty".to_owned()].into_iter())
+            .expect_err("dirty commit override should fail");
+
+        assert!(error.to_string().contains("clean benchmark baseline"));
     }
 
     #[test]

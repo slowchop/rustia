@@ -55,7 +55,9 @@ That recipe runs the `all-engines` binary first, runs the Lua 5.4 mlua adapter
 in its required separate binary, appends measurements to `bench/history/runs.jsonl`,
 and refreshes the generated result files. It intentionally requires a clean
 staged/unstaged worktree before appending benchmark history, so committed
-baselines do not get tagged with `-dirty` commit IDs.
+baselines do not get tagged with `-dirty` commit IDs. The recipe pins the clean
+HEAD commit into both benchmark invocations, because the first append dirties
+`bench/history/runs.jsonl` before the separate Lua 5.4 binary runs.
 
 `all-engines` intentionally excludes `mlua-lua54` because `mlua-lua54` and
 `mlua-luau` cannot be linked into one binary. Run the Lua 5.4 mlua adapter as a
@@ -142,6 +144,9 @@ just gen-benchmark-results
 
 `gen-benchmark-results` does not run measurements; it only regenerates result
 artifacts from committed history.
+
+Pass `--commit <id>` only for orchestrated measurement runs that already proved
+the tree was clean before the first history append.
 
 ## Provenance
 
