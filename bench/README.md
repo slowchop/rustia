@@ -94,6 +94,15 @@ append-only JSONL history above. In that document, `implemented` means the
 source adapter exists, while `available` means this specific binary was compiled
 with the adapter's feature enabled.
 
+Validate committed history without running benchmarks:
+
+```sh
+cargo run -p script-bench-harness -- --check-history
+```
+
+The check validates required fields, known engine/workload IDs, dialect and unit
+consistency, positive finite timing values, and append-only timestamp order.
+
 ## Provenance
 
 The harness is a clean rewrite. Prior-art and workload-provenance notes are

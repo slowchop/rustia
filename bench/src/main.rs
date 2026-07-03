@@ -245,6 +245,7 @@ struct Config {
     results: Option<PathBuf>,
     list: bool,
     list_json: bool,
+    check_history: bool,
 }
 
 impl Default for Config {
@@ -267,6 +268,7 @@ impl Default for Config {
             results: Some(PathBuf::from(RESULTS_PATH)),
             list: false,
             list_json: false,
+            check_history: false,
         }
     }
 }
@@ -297,6 +299,29 @@ struct ResultRow {
     ns_per_unit_median: f64,
     units_per_sec: f64,
     checksum: String,
+}
+
+#[derive(Clone, Debug)]
+struct HistoryRecord {
+    timestamp_unix: u64,
+    target: String,
+    engine: String,
+    workload: String,
+    n: u64,
+    ns_per_unit_min: f64,
+    ns_per_unit_median: f64,
+    units_per_sec: f64,
+    checksum: String,
+}
+
+#[derive(Debug)]
+struct HistorySummary {
+    records: usize,
+    engines: BTreeSet<String>,
+    workloads: BTreeSet<String>,
+    targets: BTreeSet<String>,
+    first_timestamp_unix: u64,
+    last_timestamp_unix: u64,
 }
 
 impl ResultRow {
@@ -335,6 +360,23 @@ fn run() -> Result<()> {
     }
     if config.list {
         print_inventory();
+        return Ok(());
+    }
+    if config.check_history {
+        let history = config
+            .history
+            .as_deref()
+            .ok_or_else(|| Error::new("--check-history requires history output to be enabled"))?;
+        let summary = check_history(history)?;
+        println!(
+            "history ok: {} records, {} engines, {} workloads, {} targets, {}..{}",
+            summary.records,
+            summary.engines.len(),
+            summary.workloads.len(),
+            summary.targets.len(),
+            summary.first_timestamp_unix,
+            summary.last_timestamp_unix
+        );
         return Ok(());
     }
 
@@ -397,6 +439,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
         match arg.as_str() {
             "--list" => config.list = true,
             "--list-json" => config.list_json = true,
+            "--check-history" => config.check_history = true,
             "--no-history" => config.history = None,
             "--no-results" => config.results = None,
             "--engines" => {
@@ -477,6 +520,7 @@ fn print_usage() {
     println!("usage: script-bench [options]");
     println!("  --list");
     println!("  --list-json");
+    println!("  --check-history");
     println!("  --engines rustia,koto,mlua-luau");
     println!("  --workloads dense_tables,sparse_tables,closures_upvalues,generic_iteration,stdlib_math_table");
     println!("  --target-ms 250");
@@ -1290,7 +1334,16 @@ fn write_results(path: &Path, history: Option<&Path>, records: &[Measurement]) -
 fn latest_result_rows(history: Option<&Path>, records: &[Measurement]) -> Result<Vec<ResultRow>> {
     let mut latest = BTreeMap::<(String, String), ResultRow>::new();
     if let Some(history) = history {
-        for row in read_history_result_rows(history)? {
+        for record in read_history_records(history)? {
+            let row = ResultRow {
+                engine: record.engine,
+                workload: record.workload,
+                n: record.n,
+                ns_per_unit_min: record.ns_per_unit_min,
+                ns_per_unit_median: record.ns_per_unit_median,
+                units_per_sec: record.units_per_sec,
+                checksum: record.checksum,
+            };
             latest.insert((row.engine.clone(), row.workload.clone()), row);
         }
     }
@@ -1310,14 +1363,47 @@ fn latest_result_rows(history: Option<&Path>, records: &[Measurement]) -> Result
     Ok(rows)
 }
 
-fn read_history_result_rows(path: &Path) -> Result<Vec<ResultRow>> {
+fn check_history(path: &Path) -> Result<HistorySummary> {
+    let records = read_history_records(path)?;
+    if records.is_empty() {
+        return Err(Error::new(format!(
+            "{}: history must contain at least one record",
+            path.display()
+        )));
+    }
+
+    let mut engines = BTreeSet::new();
+    let mut workloads = BTreeSet::new();
+    let mut targets = BTreeSet::new();
+    let mut first_timestamp_unix = u64::MAX;
+    let mut last_timestamp_unix = 0;
+    for record in &records {
+        engines.insert(record.engine.clone());
+        workloads.insert(record.workload.clone());
+        targets.insert(record.target.clone());
+        first_timestamp_unix = first_timestamp_unix.min(record.timestamp_unix);
+        last_timestamp_unix = last_timestamp_unix.max(record.timestamp_unix);
+    }
+
+    Ok(HistorySummary {
+        records: records.len(),
+        engines,
+        workloads,
+        targets,
+        first_timestamp_unix,
+        last_timestamp_unix,
+    })
+}
+
+fn read_history_records(path: &Path) -> Result<Vec<HistoryRecord>> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(Error::io(path, error)),
     };
 
-    let mut rows = Vec::new();
+    let mut records = Vec::new();
+    let mut previous_timestamp = None;
     for (index, line) in text.lines().enumerate() {
         let line_number = index + 1;
         if line.trim().is_empty() {
@@ -1329,17 +1415,92 @@ fn read_history_result_rows(path: &Path) -> Result<Vec<ResultRow>> {
                 path.display()
             ))
         })?;
-        rows.push(ResultRow {
-            engine: json_string(path, line_number, &value, "engine")?,
-            workload: json_string(path, line_number, &value, "workload")?,
-            n: json_u64(path, line_number, &value, "n")?,
-            ns_per_unit_min: json_f64(path, line_number, &value, "ns_per_unit_min")?,
-            ns_per_unit_median: json_f64(path, line_number, &value, "ns_per_unit_median")?,
-            units_per_sec: json_f64(path, line_number, &value, "units_per_sec")?,
-            checksum: json_string(path, line_number, &value, "checksum")?,
-        });
+        let record = history_record_from_json(path, line_number, &value)?;
+        if let Some(previous_timestamp) = previous_timestamp {
+            if record.timestamp_unix < previous_timestamp {
+                return Err(Error::new(format!(
+                    "{} line {line_number}: timestamp_unix must be append-only; {timestamp} is before previous {previous_timestamp}",
+                    path.display(),
+                    timestamp = record.timestamp_unix
+                )));
+            }
+        }
+        previous_timestamp = Some(record.timestamp_unix);
+        records.push(record);
     }
-    Ok(rows)
+    Ok(records)
+}
+
+fn history_record_from_json(
+    path: &Path,
+    line_number: usize,
+    value: &serde_json::Value,
+) -> Result<HistoryRecord> {
+    let timestamp_unix = json_u64(path, line_number, value, "timestamp_unix")?;
+    let _commit = json_non_empty_string(path, line_number, value, "commit")?;
+    let target = json_non_empty_string(path, line_number, value, "target")?;
+    let engine = json_non_empty_string(path, line_number, value, "engine")?;
+    let dialect = json_non_empty_string(path, line_number, value, "dialect")?;
+    let workload = json_non_empty_string(path, line_number, value, "workload")?;
+    let unit = json_non_empty_string(path, line_number, value, "unit")?;
+    let n = json_positive_u64(path, line_number, value, "n")?;
+    let _reps = json_positive_u64(path, line_number, value, "reps")?;
+    let ns_per_unit_min = json_positive_f64(path, line_number, value, "ns_per_unit_min")?;
+    let ns_per_unit_median = json_positive_f64(path, line_number, value, "ns_per_unit_median")?;
+    let units_per_sec = json_positive_f64(path, line_number, value, "units_per_sec")?;
+    let checksum = json_non_empty_string(path, line_number, value, "checksum")?;
+
+    let engine_slot = ENGINE_SLOTS
+        .iter()
+        .find(|slot| slot.id == engine)
+        .ok_or_else(|| {
+            Error::new(format!(
+                "{} line {line_number}: unknown engine {engine:?}",
+                path.display()
+            ))
+        })?;
+    if engine_slot.dialect.as_str() != dialect {
+        return Err(Error::new(format!(
+            "{} line {line_number}: engine {engine:?} uses dialect {:?}, got {dialect:?}",
+            path.display(),
+            engine_slot.dialect.as_str()
+        )));
+    }
+
+    let workload_spec = WORKLOADS
+        .iter()
+        .find(|entry| entry.id == workload)
+        .ok_or_else(|| {
+            Error::new(format!(
+                "{} line {line_number}: unknown workload {workload:?}",
+                path.display()
+            ))
+        })?;
+    if workload_spec.unit != unit {
+        return Err(Error::new(format!(
+            "{} line {line_number}: workload {workload:?} uses unit {:?}, got {unit:?}",
+            path.display(),
+            workload_spec.unit
+        )));
+    }
+    if ns_per_unit_median < ns_per_unit_min {
+        return Err(Error::new(format!(
+            "{} line {line_number}: ns_per_unit_median must be >= ns_per_unit_min",
+            path.display()
+        )));
+    }
+
+    Ok(HistoryRecord {
+        timestamp_unix,
+        target,
+        engine,
+        workload,
+        n,
+        ns_per_unit_min,
+        ns_per_unit_median,
+        units_per_sec,
+        checksum,
+    })
 }
 
 fn json_string(
@@ -1355,6 +1516,24 @@ fn json_string(
         .ok_or_else(|| history_field_error(path, line_number, field, "string"))
 }
 
+fn json_non_empty_string(
+    path: &Path,
+    line_number: usize,
+    value: &serde_json::Value,
+    field: &str,
+) -> Result<String> {
+    let text = json_string(path, line_number, value, field)?;
+    if text.is_empty() {
+        return Err(history_field_error(
+            path,
+            line_number,
+            field,
+            "non-empty string",
+        ));
+    }
+    Ok(text)
+}
+
 fn json_u64(
     path: &Path,
     line_number: usize,
@@ -1365,6 +1544,24 @@ fn json_u64(
         .get(field)
         .and_then(serde_json::Value::as_u64)
         .ok_or_else(|| history_field_error(path, line_number, field, "u64"))
+}
+
+fn json_positive_u64(
+    path: &Path,
+    line_number: usize,
+    value: &serde_json::Value,
+    field: &str,
+) -> Result<u64> {
+    let number = json_u64(path, line_number, value, field)?;
+    if number == 0 {
+        return Err(history_field_error(
+            path,
+            line_number,
+            field,
+            "positive u64",
+        ));
+    }
+    Ok(number)
 }
 
 fn json_f64(
@@ -1378,6 +1575,24 @@ fn json_f64(
         .and_then(serde_json::Value::as_f64)
         .filter(|value| value.is_finite())
         .ok_or_else(|| history_field_error(path, line_number, field, "finite number"))
+}
+
+fn json_positive_f64(
+    path: &Path,
+    line_number: usize,
+    value: &serde_json::Value,
+    field: &str,
+) -> Result<f64> {
+    let number = json_f64(path, line_number, value, field)?;
+    if number <= 0.0 {
+        return Err(history_field_error(
+            path,
+            line_number,
+            field,
+            "positive finite number",
+        ));
+    }
+    Ok(number)
 }
 
 fn history_field_error(path: &Path, line_number: usize, field: &str, expected: &str) -> Error {
@@ -1569,5 +1784,107 @@ mod tests {
                 "stdlib_math_table"
             ]
         );
+    }
+
+    #[test]
+    fn check_history_accepts_valid_jsonl_and_summarizes_it() {
+        let path = write_temp_history(
+            "valid",
+            &format!(
+                "{}\n{}\n",
+                sample_history_json(100, "rustia", "luau", "dense_tables"),
+                sample_history_json(101, "koto", "koto", "sparse_tables")
+            ),
+        );
+
+        let summary = check_history(&path).expect("valid history");
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(summary.records, 2);
+        assert_eq!(
+            summary.engines,
+            BTreeSet::from(["koto".to_owned(), "rustia".to_owned()])
+        );
+        assert_eq!(
+            summary.workloads,
+            BTreeSet::from(["dense_tables".to_owned(), "sparse_tables".to_owned()])
+        );
+        assert_eq!(summary.targets, BTreeSet::from(["test-target".to_owned()]));
+        assert_eq!(summary.first_timestamp_unix, 100);
+        assert_eq!(summary.last_timestamp_unix, 101);
+    }
+
+    #[test]
+    fn check_history_rejects_unknown_engine() {
+        let path = write_temp_history(
+            "unknown-engine",
+            &format!(
+                "{}\n",
+                sample_history_json(100, "missing-engine", "luau", "dense_tables")
+            ),
+        );
+
+        let error = check_history(&path).expect_err("unknown engine should fail");
+        let _ = fs::remove_file(&path);
+
+        assert!(error.to_string().contains("unknown engine"));
+    }
+
+    #[test]
+    fn check_history_rejects_non_append_only_timestamps() {
+        let path = write_temp_history(
+            "timestamp-order",
+            &format!(
+                "{}\n{}\n",
+                sample_history_json(200, "rustia", "luau", "dense_tables"),
+                sample_history_json(199, "rustia", "luau", "sparse_tables")
+            ),
+        );
+
+        let error = check_history(&path).expect_err("out-of-order timestamp should fail");
+        let _ = fs::remove_file(&path);
+
+        assert!(error.to_string().contains("append-only"));
+    }
+
+    fn sample_history_json(
+        timestamp_unix: u64,
+        engine: &'static str,
+        dialect: &'static str,
+        workload: &'static str,
+    ) -> String {
+        let unit = WORKLOADS
+            .iter()
+            .find(|entry| entry.id == workload)
+            .expect("known workload")
+            .unit;
+        record_json(&Measurement {
+            engine: engine.to_owned(),
+            dialect,
+            workload: workload.to_owned(),
+            unit,
+            n: 10,
+            reps: 3,
+            ns_per_unit_min: 1.0,
+            ns_per_unit_median: 1.5,
+            units_per_sec: 1_000_000_000.0,
+            checksum: "i64:42".to_owned(),
+            commit: "test".to_owned(),
+            timestamp_unix,
+            target: "test-target".to_owned(),
+        })
+    }
+
+    fn write_temp_history(name: &str, text: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let path = env::temp_dir().join(format!(
+            "script-bench-{name}-{}-{unique}.jsonl",
+            std::process::id()
+        ));
+        fs::write(&path, text).expect("write temp history");
+        path
     }
 }
