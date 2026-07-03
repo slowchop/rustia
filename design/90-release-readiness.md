@@ -7,6 +7,8 @@ from `publish = false` to publishable.
 
 - Keep all workspace crates `publish = false` until the P1 engine, conformance,
   benchmark, and API gates below are complete.
+- Semver and API stability rules are defined in
+  [`91-semver-policy.md`](91-semver-policy.md).
 - Keep `script-bench-harness` unpublished while it depends on unpublished
   workspace path crates for the optional rustia adapter.
 - Use dual `MIT OR Apache-2.0` licensing for every public crate.

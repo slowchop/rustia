@@ -30,6 +30,7 @@ docs are design intent.
 | [`65-wasmjit.md`](65-wasmjit.md) | **wasm-emit JIT / AOT-to-wasm spike** (verified) — ~176× the interpreter in V8, crossover ≈ 6 calls; the in-browser near-native path | **[SPIKE]** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | **Grabby-Compatible Embedded API** — public koto-shaped facade, typed conversion, serde, hot reload, deterministic extension/linker plan | **[PLAN]** ✅ |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **[CHECKLIST]** |
+| [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **[POLICY]** |
 
 **TL;DR of where we are:** research + measurement say **GO**, now validated by a working VM. A from-scratch
 Rust Luau interpreter measured **~0.93 µs/decision native / ~0.99 µs wasm** = **4–6× faster than koto**, with

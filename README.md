@@ -34,13 +34,13 @@ public rustia project; actual grabby integration work is explicitly out of scope
 | Usable embedded scripting crate | 65% | 70% |
 | Full public Luau engine release | 48% | 58% |
 | Standalone benchmark OSS project | 68% | 80% |
-| Public release readiness | 50% | 75% |
+| Public release readiness | 51% | 75% |
 
 - Current conformance runner: **684 fixtures**, **481 refs**, **0 pending**.
 - The benchmark harness has all 10 requested adapters; Lua 5.4 runs separately from Luau because `mlua-sys`
   cannot link both in one binary.
 - Major remaining gates are engine hardening, benchmark CI/history, JSC/SpiderMonkey wasm proof, and release
-  packaging.
+  packaging. Semver policy is tracked in [`design/91-semver-policy.md`](design/91-semver-policy.md).
 
 ## Layout
 - `design/` — the design record: constraints → research → spikes → architecture (ADR) → conformance → improvements.
