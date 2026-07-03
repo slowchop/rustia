@@ -39,9 +39,9 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 59,
+      "complete": 60,
       "confidence": 65,
-      "state": "Design is locked and production crates are substantial, with crate metadata and release gates started; release, CI, and perf gates remain.",
+      "state": "Design is locked and production crates are substantial, with crate metadata, examples, and CLI ergonomics started; release, CI, and perf gates remain.",
       "future_plan": "Harden P1, finish benchmark gates, then move toward full public Luau parity."
     },
     {
@@ -67,9 +67,9 @@
     },
     {
       "name": "Public release readiness",
-      "complete": 49,
+      "complete": 50,
       "confidence": 75,
-      "state": "License, crate metadata, explicit internal dependency versions, compile-checked examples, and a release-readiness checklist are present; crates are still workspace-private and CI/release polish is incomplete.",
+      "state": "License, crate metadata, explicit internal dependency versions, compile-checked examples, CLI ergonomics, and a release-readiness checklist are present; crates are still workspace-private and CI/release polish is incomplete.",
       "future_plan": "Add semver policy, package-list reviews, and public benchmark claims."
     }
   ],
@@ -411,10 +411,10 @@
         },
         {
           "name": "CLI",
-          "complete": 55,
+          "complete": 62,
           "confidence": 65,
-          "state": "rustia-cli exists as a runner surface.",
-          "future_plan": "Improve REPL/run ergonomics and diagnostic presentation."
+          "state": "rustia-cli supports file, stdin, and --eval execution with profile, fuel, and source-name options, plus unit-tested parsing.",
+          "future_plan": "Add richer diagnostic formatting and REPL ergonomics."
         },
         {
           "name": "Live wasm demo",

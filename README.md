@@ -30,11 +30,11 @@ public rustia project; actual grabby integration work is explicitly out of scope
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 59% | 65% |
+| Whole public rustia project | 60% | 65% |
 | Usable embedded scripting crate | 65% | 70% |
 | Full public Luau engine release | 48% | 58% |
 | Standalone benchmark OSS project | 68% | 80% |
-| Public release readiness | 49% | 75% |
+| Public release readiness | 50% | 75% |
 
 - Current conformance runner: **684 fixtures**, **481 refs**, **0 pending**.
 - The benchmark harness has all 10 requested adapters; Lua 5.4 runs separately from Luau because `mlua-sys`
@@ -51,6 +51,11 @@ public rustia project; actual grabby integration work is explicitly out of scope
 ## Examples
 - `cargo run -p rustia --example embedding` — globals, typed host functions, deterministic extensions, retained script functions, and serde.
 - `cargo run -p rustia --example hot_reload` — compile/install hot reload and retained-handle behavior across reload failures.
+
+## CLI
+- `cargo run -p rustia-cli -- path/to/script.luau`
+- `cargo run -p rustia-cli -- --profile deterministic-sim --fuel 100000 --eval "return 40 + 2"`
+- `cargo run -p rustia-cli -- --source-name stdin.luau -`
 
 Built design-first with Claude Code.
 

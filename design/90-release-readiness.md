@@ -75,6 +75,8 @@ from `publish = false` to publishable.
 - `cargo test --workspace` passes on the release toolchain.
 - `cargo package --list` has been reviewed for every crate intended for
   publication.
+- `rustia-cli` supports file, stdin, and `--eval` execution, plus profile,
+  fuel, and source-name options for diagnostics.
 - `cargo package --no-verify` reaches packaging for each publishable crate; any
   unpublished path dependency blocker is documented.
 - README, `design/CURRENT.md`, `design/progress.json`, and generated progress
