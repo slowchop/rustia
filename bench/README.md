@@ -5,6 +5,8 @@ engines. It lives in the rustia repo while rustia is early, but it is structured
 to split into its own OSS project with a website, published result history, and
 stats charts.
 
+Split notes are tracked in [`STANDALONE.md`](STANDALONE.md).
+
 The harness writes one JSONL record per completed engine/workload measurement,
 so history can be committed, served statically, or uploaded by CI without needing
 a hosted metrics service.

@@ -29,9 +29,9 @@ not implemented yet.
    deterministic f64/libm behavior, table-key `-0` normalization, and profile-specific GC behavior covered by
    tests while performance work proceeds.
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
-   The runner already exposes the requested engine matrix, five default workloads, extra workload slots, and
-   append-only JSONL history. Next work is committed baseline history for each completed adapter, generated
-   `RESULTS.md`, the standalone-project split, and CI workflow wiring.
+   The runner already exposes the requested engine matrix, five default workloads, extra workload slots,
+   append-only JSONL history, package metadata, and split notes. Next work is the actual standalone-project
+   split, longer-run public history, and CI workflow wiring.
 3. **Keep the Luau 0.709 conformance corpus green**. The current repo has 684 executable fixtures covering 481
    behavior refs with no pending rows; new engine work should add focused fixtures rather than re-opening
    pending inventory.
@@ -95,7 +95,7 @@ watch).
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + deterministic extension/linker plan | **implemented first slice** ✅ |
-| [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design (some decisions pending) | **runner/adapters/history/site implemented; split/CI pending** |
+| [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design (some decisions pending) | **runner/adapters/history/site/package metadata implemented; split/CI pending** |
 | [`00-constraints.md`](00-constraints.md) | the contract + target matrix (§C0) | authoritative (target pinned to 0.709) |
 | [`15-gapclose.md`](15-gapclose.md), [`10-landscape.md`](10-landscape.md) | earlier snapshots | **superseded** by 20/30/50/55 + this file |
 

@@ -33,7 +33,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
 | Whole public rustia project | 58% | 65% |
 | Usable embedded scripting crate | 64% | 70% |
 | Full public Luau engine release | 48% | 58% |
-| Standalone benchmark OSS project | 66% | 80% |
+| Standalone benchmark OSS project | 68% | 80% |
 | Public release readiness | 45% | 75% |
 
 - Current conformance runner: **684 fixtures**, **481 refs**, **0 pending**.

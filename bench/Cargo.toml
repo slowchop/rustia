@@ -1,8 +1,13 @@
 [package]
 name = "script-bench-harness"
 version = "0.0.1"
-edition.workspace = true
-license.workspace = true
+edition = "2021"
+description = "Standalone benchmark harness for embedded scripting engines"
+readme = "README.md"
+repository = "https://github.com/slowchop/rustia"
+license = "MIT OR Apache-2.0"
+keywords = ["benchmark", "scripting", "lua", "luau", "wasm"]
+categories = ["development-tools::profiling"]
 publish = false
 
 [features]
@@ -30,9 +35,9 @@ wasmi-engine = ["dep:wasmi"]
 wasmtime-engine = ["dep:wasmtime"]
 
 [dependencies]
-rustia-compiler = { workspace = true, optional = true }
-rustia-parser = { workspace = true, optional = true }
-rustia-vm = { workspace = true, optional = true }
+rustia-compiler = { version = "0.0.1", path = "../crates/rustia-compiler", optional = true }
+rustia-parser = { version = "0.0.1", path = "../crates/rustia-parser", optional = true }
+rustia-vm = { version = "0.0.1", path = "../crates/rustia-vm", optional = true }
 koto = { version = "0.16", default-features = false, features = ["arc"], optional = true }
 mlua_luau = { package = "mlua", version = "0.11", default-features = false, features = ["luau"], optional = true }
 mlua_lua54 = { package = "mlua", version = "0.11", default-features = false, features = ["lua54", "vendored"], optional = true }
@@ -44,8 +49,12 @@ serde_json = "1"
 wasmi = { version = "2.0.0-beta.4", optional = true }
 wasmtime = { version = "46.0.1", default-features = false, features = ["anyhow", "cranelift", "runtime", "std", "wat"], optional = true }
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+disallowed_methods = "deny"
+disallowed_types = "deny"
 
 [[bin]]
 name = "script-bench"
