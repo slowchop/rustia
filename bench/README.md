@@ -110,6 +110,11 @@ benchmarks:
 cargo run -p script-bench-harness -- --refresh-results
 ```
 
+By default, the same command also writes `bench/latest.json`, a deterministic
+machine-readable latest-results snapshot keyed by target, engine, and workload.
+Use `--latest-json <path>` to choose a different destination or
+`--no-latest-json` to skip it.
+
 ## Provenance
 
 The harness is a clean rewrite. Prior-art and workload-provenance notes are

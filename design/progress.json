@@ -60,9 +60,9 @@
     },
     {
       "name": "Standalone benchmark OSS project",
-      "complete": 65,
+      "complete": 66,
       "confidence": 80,
-      "state": "Harness, machine-readable inventory, history, static site, five default workload families, and all 10 requested adapters are present.",
+      "state": "Harness, machine-readable inventory, latest-results JSON, history, static site, five default workload families, and all 10 requested adapters are present.",
       "future_plan": "Split from workspace, expand workloads, wire CI, and publish charts/history."
     },
     {
@@ -345,9 +345,9 @@
       "entries": [
         {
           "name": "Harness CLI and schema",
-          "complete": 85,
+          "complete": 86,
           "confidence": 85,
-          "state": "bench/ has a standalone-style CLI, machine-readable inventory, validated JSONL history schema, and refreshable generated RESULTS.md.",
+          "state": "bench/ has a standalone-style CLI, machine-readable inventory, validated JSONL history schema, refreshable RESULTS.md, and latest-results JSON.",
           "future_plan": "Keep JSONL as the source of truth for CI and website data."
         },
         {
@@ -366,9 +366,9 @@
         },
         {
           "name": "History and static site",
-          "complete": 74,
+          "complete": 76,
           "confidence": 82,
-          "state": "Append-only history, markdown results, and dependency-free dashboard files are present.",
+          "state": "Append-only history, markdown results, latest-results JSON, and dependency-free dashboard files are present.",
           "future_plan": "Publish long-run history and richer charts after standalone split."
         },
         {

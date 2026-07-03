@@ -1,54 +1,54 @@
 # script-bench-harness Results
 
-| engine | workload | ns/unit min | ns/unit median | speed vs rustia | units/sec | n | checksum |
-|---|---|---:|---:|---:|---:|---:|---|
-| rustia | dense_tables | 132121.35 | 136884.91 | 1.00x | 7569 | 1930 | `number:248724390.00000000000000000` |
-| rustia | sparse_tables | 113417.87 | 116401.27 | 1.00x | 8817 | 2284 | `number:5432448320.00000000000000000` |
-| rustia | closures_upvalues | 420.84 | 429.48 | 1.00x | 2376190 | 579836 | `number:94562626538.00000000000000000` |
-| rustia | generic_iteration | 17532.75 | 17763.53 | 1.00x | 57036 | 14203 | `number:325177685.00000000000000000` |
-| rustia | stdlib_math_table | 1203.27 | 1276.25 | 1.00x | 831067 | 207633 | `number:2415222.13453363860026002` |
-| boa | dense_tables | 379687.53 | 381671.80 | 0.35x | 2634 | 657 | `f64:773108584.00000000000000000` |
-| boa | sparse_tables | 140450.51 | 141920.21 | 0.81x | 7120 | 1646 | `f64:186669568.00000000000000000` |
-| boa | closures_upvalues | 1004.41 | 1017.97 | 0.42x | 995610 | 245427 | `f64:267657925.00000000000000000` |
-| boa | generic_iteration | 14205.81 | 14415.49 | 1.23x | 70394 | 17210 | `f64:487795690.00000000000000000` |
-| boa | stdlib_math_table | 1771.95 | 1779.74 | 0.68x | 564350 | 140346 | `f64:198528400.00000000000000000` |
-| koto | dense_tables | 98905.81 | 100379.45 | 1.34x | 10111 | 2479 | `i64:319480686` |
-| koto | sparse_tables | 54426.85 | 55041.96 | 2.08x | 18373 | 4566 | `i64:21687038880` |
-| koto | closures_upvalues | 120.93 | 123.24 | 3.48x | 8269340 | 2056863 | `i64:18511760` |
-| koto | generic_iteration | 2319.27 | 2344.86 | 7.56x | 431171 | 105963 | `i64:2426022885` |
-| koto | stdlib_math_table | 619.17 | 640.71 | 1.94x | 1615062 | 399211 | `f64:5763316.91772976424545050` |
-| mlua-lua54 | dense_tables | 25106.02 | 30907.22 | 5.26x | 39831 | 4835 | `f64:623055600.00000000000000000` |
-| mlua-lua54 | sparse_tables | 12220.80 | 14005.85 | 9.28x | 81828 | 9027 | `i64:84774362400` |
-| mlua-lua54 | closures_upvalues | 16.91 | 17.76 | 24.88x | 59128106 | 3634346 | `i64:3714905140579` |
-| mlua-lua54 | generic_iteration | 1428.80 | 1433.44 | 12.27x | 699888 | 175898 | `i64:4027184710` |
-| mlua-lua54 | stdlib_math_table | 136.57 | 137.47 | 8.81x | 7322484 | 1805928 | `f64:51843909.79990477859973907` |
-| mlua-luau | dense_tables | 9756.98 | 9897.68 | 13.54x | 102491 | 25041 | `i64:3227058462` |
-| mlua-luau | sparse_tables | 9267.55 | 9386.82 | 12.24x | 107903 | 26714 | `i64:742266655520` |
-| mlua-luau | closures_upvalues | 21.14 | 21.67 | 19.91x | 47304267 | 11353306 | `i64:36252508900869` |
-| mlua-luau | generic_iteration | 2126.04 | 2132.74 | 8.25x | 470359 | 118187 | `i64:2705891365` |
-| mlua-luau | stdlib_math_table | 89.55 | 91.38 | 13.44x | 11166814 | 2722252 | `f64:95543127.61494137346744537` |
-| rhai | dense_tables | 107845.68 | 108245.40 | 1.23x | 9273 | 2311 | `i64:297844382` |
-| rhai | sparse_tables | 114295.85 | 117810.63 | 0.99x | 8749 | 2140 | `i64:4765009600` |
-| rhai | closures_upvalues | 521.34 | 526.51 | 0.81x | 1918135 | 477406 | `i64:4296642` |
-| rhai | generic_iteration | 3462.96 | 3490.77 | 5.06x | 288770 | 72123 | `i64:1651256085` |
-| rhai | stdlib_math_table | 1043.06 | 1051.61 | 1.15x | 958713 | 233219 | `f64:2799594.88353615999221802` |
-| roto | dense_tables | 1212499.80 | 1219194.72 | 0.11x | 825 | 205 | `i64:26496231` |
-| roto | sparse_tables | 51290.84 | 51948.71 | 2.21x | 19497 | 4821 | `i64:1174781280` |
-| roto | closures_upvalues | 3.80 | 3.89 | 110.60x | 262814536 | 64915530 | `i64:32459754323576297` |
-| roto | generic_iteration | 1151.70 | 1159.85 | 15.22x | 868281 | 212460 | `i64:4870645500` |
-| roto | stdlib_math_table | 139.92 | 140.89 | 8.60x | 7146891 | 1769578 | `f64:589624224613838.00000000000000000` |
-| rquickjs | dense_tables | 57415.46 | 58060.51 | 2.30x | 17417 | 4290 | `f64:449924937.00000000000000000` |
-| rquickjs | sparse_tables | 48596.71 | 49476.75 | 2.33x | 20578 | 5038 | `f64:665038841.00000000000000000` |
-| rquickjs | closures_upvalues | 249.23 | 253.27 | 1.69x | 4012429 | 983254 | `f64:479440894.00000000000000000` |
-| rquickjs | generic_iteration | 2913.91 | 2947.44 | 6.02x | 343182 | 85326 | `f64:731331593.00000000000000000` |
-| rquickjs | stdlib_math_table | 230.24 | 232.86 | 5.23x | 4343378 | 1078250 | `f64:891651733.00000000000000000` |
-| wasmi | dense_tables | 1268.64 | 1279.56 | 104.14x | 788243 | 195589 | `i64:477758442` |
-| wasmi | sparse_tables | 1316.27 | 1388.44 | 86.17x | 759722 | 188661 | `i64:471613295` |
-| wasmi | closures_upvalues | 87.66 | 90.49 | 4.80x | 11407740 | 2762618 | `i64:225067907` |
-| wasmi | generic_iteration | 161.75 | 162.86 | 108.39x | 6182236 | 1491577 | `i64:562873861` |
-| wasmi | stdlib_math_table | 6.33 | 6.67 | 190.14x | 158018103 | 38427797 | `i64:778690848` |
-| wasmtime | dense_tables | 192.92 | 194.42 | 684.85x | 5183517 | 1285087 | `i64:494587780` |
-| wasmtime | sparse_tables | 303.68 | 307.21 | 373.48x | 3292925 | 795129 | `i64:139741997` |
-| wasmtime | closures_upvalues | 16.09 | 16.28 | 26.15x | 62138558 | 15357019 | `i64:957182651` |
-| wasmtime | generic_iteration | 78.82 | 79.46 | 222.45x | 12687541 | 3148279 | `i64:255746502` |
-| wasmtime | stdlib_math_table | 2.52 | 2.54 | 477.66x | 396964377 | 97985380 | `i64:388485342` |
+| target | engine | workload | ns/unit min | ns/unit median | speed vs rustia | units/sec | n | checksum |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| macos-aarch64 | rustia | dense_tables | 132121.35 | 136884.91 | 1.00x | 7569 | 1930 | `number:248724390.00000000000000000` |
+| macos-aarch64 | rustia | sparse_tables | 113417.87 | 116401.27 | 1.00x | 8817 | 2284 | `number:5432448320.00000000000000000` |
+| macos-aarch64 | rustia | closures_upvalues | 420.84 | 429.48 | 1.00x | 2376190 | 579836 | `number:94562626538.00000000000000000` |
+| macos-aarch64 | rustia | generic_iteration | 17532.75 | 17763.53 | 1.00x | 57036 | 14203 | `number:325177685.00000000000000000` |
+| macos-aarch64 | rustia | stdlib_math_table | 1203.27 | 1276.25 | 1.00x | 831067 | 207633 | `number:2415222.13453363860026002` |
+| macos-aarch64 | boa | dense_tables | 379687.53 | 381671.80 | 0.35x | 2634 | 657 | `f64:773108584.00000000000000000` |
+| macos-aarch64 | boa | sparse_tables | 140450.51 | 141920.21 | 0.81x | 7120 | 1646 | `f64:186669568.00000000000000000` |
+| macos-aarch64 | boa | closures_upvalues | 1004.41 | 1017.97 | 0.42x | 995610 | 245427 | `f64:267657925.00000000000000000` |
+| macos-aarch64 | boa | generic_iteration | 14205.81 | 14415.49 | 1.23x | 70394 | 17210 | `f64:487795690.00000000000000000` |
+| macos-aarch64 | boa | stdlib_math_table | 1771.95 | 1779.74 | 0.68x | 564350 | 140346 | `f64:198528400.00000000000000000` |
+| macos-aarch64 | koto | dense_tables | 98905.81 | 100379.45 | 1.34x | 10111 | 2479 | `i64:319480686` |
+| macos-aarch64 | koto | sparse_tables | 54426.85 | 55041.96 | 2.08x | 18373 | 4566 | `i64:21687038880` |
+| macos-aarch64 | koto | closures_upvalues | 120.93 | 123.24 | 3.48x | 8269340 | 2056863 | `i64:18511760` |
+| macos-aarch64 | koto | generic_iteration | 2319.27 | 2344.86 | 7.56x | 431171 | 105963 | `i64:2426022885` |
+| macos-aarch64 | koto | stdlib_math_table | 619.17 | 640.71 | 1.94x | 1615062 | 399211 | `f64:5763316.91772976424545050` |
+| macos-aarch64 | mlua-lua54 | dense_tables | 25106.02 | 30907.22 | 5.26x | 39831 | 4835 | `f64:623055600.00000000000000000` |
+| macos-aarch64 | mlua-lua54 | sparse_tables | 12220.80 | 14005.85 | 9.28x | 81828 | 9027 | `i64:84774362400` |
+| macos-aarch64 | mlua-lua54 | closures_upvalues | 16.91 | 17.76 | 24.88x | 59128106 | 3634346 | `i64:3714905140579` |
+| macos-aarch64 | mlua-lua54 | generic_iteration | 1428.80 | 1433.44 | 12.27x | 699888 | 175898 | `i64:4027184710` |
+| macos-aarch64 | mlua-lua54 | stdlib_math_table | 136.57 | 137.47 | 8.81x | 7322484 | 1805928 | `f64:51843909.79990477859973907` |
+| macos-aarch64 | mlua-luau | dense_tables | 9756.98 | 9897.68 | 13.54x | 102491 | 25041 | `i64:3227058462` |
+| macos-aarch64 | mlua-luau | sparse_tables | 9267.55 | 9386.82 | 12.24x | 107903 | 26714 | `i64:742266655520` |
+| macos-aarch64 | mlua-luau | closures_upvalues | 21.14 | 21.67 | 19.91x | 47304267 | 11353306 | `i64:36252508900869` |
+| macos-aarch64 | mlua-luau | generic_iteration | 2126.04 | 2132.74 | 8.25x | 470359 | 118187 | `i64:2705891365` |
+| macos-aarch64 | mlua-luau | stdlib_math_table | 89.55 | 91.38 | 13.44x | 11166814 | 2722252 | `f64:95543127.61494137346744537` |
+| macos-aarch64 | rhai | dense_tables | 107845.68 | 108245.40 | 1.23x | 9273 | 2311 | `i64:297844382` |
+| macos-aarch64 | rhai | sparse_tables | 114295.85 | 117810.63 | 0.99x | 8749 | 2140 | `i64:4765009600` |
+| macos-aarch64 | rhai | closures_upvalues | 521.34 | 526.51 | 0.81x | 1918135 | 477406 | `i64:4296642` |
+| macos-aarch64 | rhai | generic_iteration | 3462.96 | 3490.77 | 5.06x | 288770 | 72123 | `i64:1651256085` |
+| macos-aarch64 | rhai | stdlib_math_table | 1043.06 | 1051.61 | 1.15x | 958713 | 233219 | `f64:2799594.88353615999221802` |
+| macos-aarch64 | roto | dense_tables | 1212499.80 | 1219194.72 | 0.11x | 825 | 205 | `i64:26496231` |
+| macos-aarch64 | roto | sparse_tables | 51290.84 | 51948.71 | 2.21x | 19497 | 4821 | `i64:1174781280` |
+| macos-aarch64 | roto | closures_upvalues | 3.80 | 3.89 | 110.60x | 262814536 | 64915530 | `i64:32459754323576297` |
+| macos-aarch64 | roto | generic_iteration | 1151.70 | 1159.85 | 15.22x | 868281 | 212460 | `i64:4870645500` |
+| macos-aarch64 | roto | stdlib_math_table | 139.92 | 140.89 | 8.60x | 7146891 | 1769578 | `f64:589624224613838.00000000000000000` |
+| macos-aarch64 | rquickjs | dense_tables | 57415.46 | 58060.51 | 2.30x | 17417 | 4290 | `f64:449924937.00000000000000000` |
+| macos-aarch64 | rquickjs | sparse_tables | 48596.71 | 49476.75 | 2.33x | 20578 | 5038 | `f64:665038841.00000000000000000` |
+| macos-aarch64 | rquickjs | closures_upvalues | 249.23 | 253.27 | 1.69x | 4012429 | 983254 | `f64:479440894.00000000000000000` |
+| macos-aarch64 | rquickjs | generic_iteration | 2913.91 | 2947.44 | 6.02x | 343182 | 85326 | `f64:731331593.00000000000000000` |
+| macos-aarch64 | rquickjs | stdlib_math_table | 230.24 | 232.86 | 5.23x | 4343378 | 1078250 | `f64:891651733.00000000000000000` |
+| macos-aarch64 | wasmi | dense_tables | 1268.64 | 1279.56 | 104.14x | 788243 | 195589 | `i64:477758442` |
+| macos-aarch64 | wasmi | sparse_tables | 1316.27 | 1388.44 | 86.17x | 759722 | 188661 | `i64:471613295` |
+| macos-aarch64 | wasmi | closures_upvalues | 87.66 | 90.49 | 4.80x | 11407740 | 2762618 | `i64:225067907` |
+| macos-aarch64 | wasmi | generic_iteration | 161.75 | 162.86 | 108.39x | 6182236 | 1491577 | `i64:562873861` |
+| macos-aarch64 | wasmi | stdlib_math_table | 6.33 | 6.67 | 190.14x | 158018103 | 38427797 | `i64:778690848` |
+| macos-aarch64 | wasmtime | dense_tables | 192.92 | 194.42 | 684.85x | 5183517 | 1285087 | `i64:494587780` |
+| macos-aarch64 | wasmtime | sparse_tables | 303.68 | 307.21 | 373.48x | 3292925 | 795129 | `i64:139741997` |
+| macos-aarch64 | wasmtime | closures_upvalues | 16.09 | 16.28 | 26.15x | 62138558 | 15357019 | `i64:957182651` |
+| macos-aarch64 | wasmtime | generic_iteration | 78.82 | 79.46 | 222.45x | 12687541 | 3148279 | `i64:255746502` |
+| macos-aarch64 | wasmtime | stdlib_math_table | 2.52 | 2.54 | 477.66x | 396964377 | 97985380 | `i64:388485342` |

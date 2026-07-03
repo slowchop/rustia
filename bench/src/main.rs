@@ -22,6 +22,7 @@ const DEFAULT_REPS: usize = 9;
 const DEFAULT_MAX_N: u64 = 1_000_000_000;
 const HISTORY_PATH: &str = "bench/history/runs.jsonl";
 const RESULTS_PATH: &str = "bench/RESULTS.md";
+const LATEST_JSON_PATH: &str = "bench/latest.json";
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -243,6 +244,7 @@ struct Config {
     max_n: u64,
     history: Option<PathBuf>,
     results: Option<PathBuf>,
+    latest_json: Option<PathBuf>,
     list: bool,
     list_json: bool,
     check_history: bool,
@@ -267,6 +269,7 @@ impl Default for Config {
             max_n: DEFAULT_MAX_N,
             history: Some(PathBuf::from(HISTORY_PATH)),
             results: Some(PathBuf::from(RESULTS_PATH)),
+            latest_json: Some(PathBuf::from(LATEST_JSON_PATH)),
             list: false,
             list_json: false,
             check_history: false,
@@ -294,8 +297,13 @@ struct Measurement {
 
 #[derive(Clone, Debug)]
 struct ResultRow {
+    timestamp_unix: u64,
+    commit: String,
+    target: String,
     engine: String,
+    dialect: String,
     workload: String,
+    unit: String,
     n: u64,
     ns_per_unit_min: f64,
     ns_per_unit_median: f64,
@@ -306,9 +314,12 @@ struct ResultRow {
 #[derive(Clone, Debug)]
 struct HistoryRecord {
     timestamp_unix: u64,
+    commit: String,
     target: String,
     engine: String,
+    dialect: String,
     workload: String,
+    unit: String,
     n: u64,
     ns_per_unit_min: f64,
     ns_per_unit_median: f64,
@@ -329,8 +340,13 @@ struct HistorySummary {
 impl ResultRow {
     fn from_measurement(record: &Measurement) -> Self {
         Self {
+            timestamp_unix: record.timestamp_unix,
+            commit: record.commit.clone(),
+            target: record.target.clone(),
             engine: record.engine.clone(),
+            dialect: record.dialect.to_owned(),
             workload: record.workload.clone(),
+            unit: record.unit.to_owned(),
             n: record.n,
             ns_per_unit_min: record.ns_per_unit_min,
             ns_per_unit_median: record.ns_per_unit_median,
@@ -386,16 +402,24 @@ fn run() -> Result<()> {
             .history
             .as_deref()
             .ok_or_else(|| Error::new("--refresh-results requires history output to be enabled"))?;
-        let results = config
-            .results
-            .as_deref()
-            .ok_or_else(|| Error::new("--refresh-results requires results output to be enabled"))?;
-        let rows = write_results(results, Some(history), &[])?;
+        let mut outputs = Vec::new();
+        if let Some(results) = config.results.as_deref() {
+            let rows = write_results(results, Some(history), &[])?;
+            outputs.push(format!("{rows} markdown rows -> {}", results.display()));
+        }
+        if let Some(latest_json) = config.latest_json.as_deref() {
+            let rows = write_latest_json(latest_json, Some(history), &[])?;
+            outputs.push(format!("{rows} JSON rows -> {}", latest_json.display()));
+        }
+        if outputs.is_empty() {
+            return Err(Error::new(
+                "--refresh-results requires results or latest JSON output to be enabled",
+            ));
+        }
         println!(
-            "results refreshed: {} rows from {} -> {}",
-            rows,
+            "results refreshed from {}: {}",
             history.display(),
-            results.display()
+            outputs.join(", ")
         );
         return Ok(());
     }
@@ -448,6 +472,9 @@ fn run() -> Result<()> {
     if let Some(results) = &config.results {
         write_results(results, config.history.as_deref(), &records)?;
     }
+    if let Some(latest_json) = &config.latest_json {
+        write_latest_json(latest_json, config.history.as_deref(), &records)?;
+    }
 
     Ok(())
 }
@@ -463,6 +490,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
             "--refresh-results" => config.refresh_results = true,
             "--no-history" => config.history = None,
             "--no-results" => config.results = None,
+            "--no-latest-json" => config.latest_json = None,
             "--engines" => {
                 let value = args
                     .next()
@@ -518,6 +546,12 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
                     .ok_or_else(|| Error::new("--results requires a path"))?;
                 config.results = Some(PathBuf::from(value));
             }
+            "--latest-json" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| Error::new("--latest-json requires a path"))?;
+                config.latest_json = Some(PathBuf::from(value));
+            }
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
@@ -549,8 +583,10 @@ fn print_usage() {
     println!("  --reps 9");
     println!("  --history bench/history/runs.jsonl");
     println!("  --results bench/RESULTS.md");
+    println!("  --latest-json bench/latest.json");
     println!("  --no-history");
     println!("  --no-results");
+    println!("  --no-latest-json");
 }
 
 fn print_inventory() {
@@ -614,6 +650,7 @@ fn inventory_json_value() -> serde_json::Value {
         "history_schema": "jsonl-v1",
         "default_history": HISTORY_PATH,
         "default_results": RESULTS_PATH,
+        "default_latest_json": LATEST_JSON_PATH,
         "engines": engines,
         "workloads": workloads,
     })
@@ -1327,19 +1364,25 @@ fn write_results(path: &Path, history: Option<&Path>, records: &[Measurement]) -
     let rustia_baselines = rows
         .iter()
         .filter(|row| row.engine == "rustia")
-        .map(|row| (row.workload.as_str(), row.ns_per_unit_min))
+        .map(|row| {
+            (
+                (row.target.as_str(), row.workload.as_str()),
+                row.ns_per_unit_min,
+            )
+        })
         .collect::<BTreeMap<_, _>>();
     text.push_str(
-        "| engine | workload | ns/unit min | ns/unit median | speed vs rustia | units/sec | n | checksum |\n",
+        "| target | engine | workload | ns/unit min | ns/unit median | speed vs rustia | units/sec | n | checksum |\n",
     );
-    text.push_str("|---|---|---:|---:|---:|---:|---:|---|\n");
+    text.push_str("|---|---|---|---:|---:|---:|---:|---:|---|\n");
     for row in &rows {
         let speed_vs_rustia = rustia_baselines
-            .get(row.workload.as_str())
+            .get(&(row.target.as_str(), row.workload.as_str()))
             .map(|baseline| format!("{:.2}x", baseline / row.ns_per_unit_min))
             .unwrap_or_else(|| "n/a".to_owned());
         text.push_str(&format!(
-            "| {} | {} | {:.2} | {:.2} | {} | {:.0} | {} | `{}` |\n",
+            "| {} | {} | {} | {:.2} | {:.2} | {} | {:.0} | {} | `{}` |\n",
+            row.target,
             row.engine,
             row.workload,
             row.ns_per_unit_min,
@@ -1355,31 +1398,114 @@ fn write_results(path: &Path, history: Option<&Path>, records: &[Measurement]) -
     Ok(row_count)
 }
 
+fn write_latest_json(
+    path: &Path,
+    history: Option<&Path>,
+    records: &[Measurement],
+) -> Result<usize> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| Error::io(parent, error))?;
+    }
+    let rows = latest_result_rows(history, records)?;
+    let rustia_baselines = rows
+        .iter()
+        .filter(|row| row.engine == "rustia")
+        .map(|row| {
+            (
+                (row.target.as_str(), row.workload.as_str()),
+                row.ns_per_unit_min,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let targets = rows
+        .iter()
+        .map(|row| row.target.as_str())
+        .collect::<BTreeSet<_>>();
+    let engines = rows
+        .iter()
+        .map(|row| row.engine.as_str())
+        .collect::<BTreeSet<_>>();
+    let workloads = rows
+        .iter()
+        .map(|row| row.workload.as_str())
+        .collect::<BTreeSet<_>>();
+    let row_values = rows
+        .iter()
+        .map(|row| {
+            let speed_vs_rustia = rustia_baselines
+                .get(&(row.target.as_str(), row.workload.as_str()))
+                .map(|baseline| baseline / row.ns_per_unit_min);
+            serde_json::json!({
+                "timestamp_unix": row.timestamp_unix,
+                "commit": row.commit,
+                "target": row.target,
+                "engine": row.engine,
+                "dialect": row.dialect,
+                "workload": row.workload,
+                "unit": row.unit,
+                "n": row.n,
+                "ns_per_unit_min": row.ns_per_unit_min,
+                "ns_per_unit_median": row.ns_per_unit_median,
+                "units_per_sec": row.units_per_sec,
+                "checksum": row.checksum,
+                "speed_vs_rustia": speed_vs_rustia,
+            })
+        })
+        .collect::<Vec<_>>();
+    let value = serde_json::json!({
+        "schema_version": 1,
+        "source": "script-bench-harness",
+        "history_schema": "jsonl-v1",
+        "history": history.map(|path| path.display().to_string()),
+        "row_count": rows.len(),
+        "targets": targets.into_iter().collect::<Vec<_>>(),
+        "engines": engines.into_iter().collect::<Vec<_>>(),
+        "workloads": workloads.into_iter().collect::<Vec<_>>(),
+        "rows": row_values,
+    });
+    let text = serde_json::to_string_pretty(&value)
+        .map_err(|error| Error::new(format!("latest JSON failed: {error}")))?;
+    fs::write(path, format!("{text}\n")).map_err(|error| Error::io(path, error))?;
+    Ok(rows.len())
+}
+
 fn latest_result_rows(history: Option<&Path>, records: &[Measurement]) -> Result<Vec<ResultRow>> {
-    let mut latest = BTreeMap::<(String, String), ResultRow>::new();
+    let mut latest = BTreeMap::<(String, String, String), ResultRow>::new();
     if let Some(history) = history {
         for record in read_history_records(history)? {
             let row = ResultRow {
+                timestamp_unix: record.timestamp_unix,
+                commit: record.commit,
+                target: record.target,
                 engine: record.engine,
+                dialect: record.dialect,
                 workload: record.workload,
+                unit: record.unit,
                 n: record.n,
                 ns_per_unit_min: record.ns_per_unit_min,
                 ns_per_unit_median: record.ns_per_unit_median,
                 units_per_sec: record.units_per_sec,
                 checksum: record.checksum,
             };
-            latest.insert((row.engine.clone(), row.workload.clone()), row);
+            latest.insert(
+                (row.target.clone(), row.engine.clone(), row.workload.clone()),
+                row,
+            );
         }
     }
     for record in records {
         let row = ResultRow::from_measurement(record);
-        latest.insert((row.engine.clone(), row.workload.clone()), row);
+        latest.insert(
+            (row.target.clone(), row.engine.clone(), row.workload.clone()),
+            row,
+        );
     }
 
     let mut rows = latest.into_values().collect::<Vec<_>>();
     rows.sort_by(|left, right| {
-        engine_order(&left.engine)
-            .cmp(&engine_order(&right.engine))
+        left.target
+            .cmp(&right.target)
+            .then_with(|| engine_order(&left.engine).cmp(&engine_order(&right.engine)))
             .then_with(|| left.engine.cmp(&right.engine))
             .then_with(|| workload_order(&left.workload).cmp(&workload_order(&right.workload)))
             .then_with(|| left.workload.cmp(&right.workload))
@@ -1461,7 +1587,7 @@ fn history_record_from_json(
     value: &serde_json::Value,
 ) -> Result<HistoryRecord> {
     let timestamp_unix = json_u64(path, line_number, value, "timestamp_unix")?;
-    let _commit = json_non_empty_string(path, line_number, value, "commit")?;
+    let commit = json_non_empty_string(path, line_number, value, "commit")?;
     let target = json_non_empty_string(path, line_number, value, "target")?;
     let engine = json_non_empty_string(path, line_number, value, "engine")?;
     let dialect = json_non_empty_string(path, line_number, value, "dialect")?;
@@ -1516,9 +1642,12 @@ fn history_record_from_json(
 
     Ok(HistoryRecord {
         timestamp_unix,
+        commit,
         target,
         engine,
+        dialect,
         workload,
+        unit,
         n,
         ns_per_unit_min,
         ns_per_unit_median,
@@ -1786,6 +1915,7 @@ mod tests {
         assert_eq!(value["history_schema"], "jsonl-v1");
         assert_eq!(value["default_history"], HISTORY_PATH);
         assert_eq!(value["default_results"], RESULTS_PATH);
+        assert_eq!(value["default_latest_json"], LATEST_JSON_PATH);
 
         let workloads = value
             .get("workloads")
@@ -1889,8 +2019,35 @@ mod tests {
         let _ = fs::remove_file(&results);
 
         assert_eq!(row_count, 2);
-        assert!(text.contains("| rustia | dense_tables |"));
-        assert!(text.contains("| koto | sparse_tables |"));
+        assert!(text.contains("| test-target | rustia | dense_tables |"));
+        assert!(text.contains("| test-target | koto | sparse_tables |"));
+    }
+
+    #[test]
+    fn write_latest_json_refreshes_target_aware_rows_from_history() {
+        let history = write_temp_history(
+            "latest-json-history",
+            &format!(
+                "{}\n{}\n",
+                sample_history_json(100, "rustia", "luau", "dense_tables"),
+                sample_history_json(101, "koto", "koto", "sparse_tables")
+            ),
+        );
+        let latest = temp_path("latest-json", "json");
+
+        let row_count = write_latest_json(&latest, Some(&history), &[]).expect("write latest JSON");
+        let text = fs::read_to_string(&latest).expect("read latest JSON");
+        let value = serde_json::from_str::<serde_json::Value>(&text).expect("parse latest JSON");
+        let _ = fs::remove_file(&history);
+        let _ = fs::remove_file(&latest);
+
+        assert_eq!(row_count, 2);
+        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["row_count"], 2);
+        assert_eq!(value["targets"][0], "test-target");
+        assert_eq!(value["rows"][0]["target"], "test-target");
+        assert_eq!(value["rows"][0]["engine"], "rustia");
+        assert_eq!(value["rows"][0]["speed_vs_rustia"].as_f64(), Some(1.0));
     }
 
     fn sample_history_json(
