@@ -90,7 +90,9 @@ generate charts from `engine × target × workload` series.
 `--list-json` emits a separate schema-identified metadata document for the
 available engine slots, feature gates, workload IDs, default workload set, and
 result paths. It is intended for tooling; benchmark measurements stay in the
-append-only JSONL history above.
+append-only JSONL history above. In that document, `implemented` means the
+source adapter exists, while `available` means this specific binary was compiled
+with the adapter's feature enabled.
 
 ## Provenance
 

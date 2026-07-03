@@ -174,63 +174,63 @@ const ENGINE_SLOTS: &[EngineSlot] = &[
         dialect: Dialect::JavaScript,
         feature: Some("boa"),
         enabled: cfg!(feature = "boa"),
-        implemented: cfg!(feature = "boa"),
+        implemented: true,
     },
     EngineSlot {
         id: "koto",
         dialect: Dialect::Koto,
         feature: Some("koto"),
         enabled: cfg!(feature = "koto"),
-        implemented: cfg!(feature = "koto"),
+        implemented: true,
     },
     EngineSlot {
         id: "mlua-lua54",
         dialect: Dialect::Lua54,
         feature: Some("mlua-lua54"),
         enabled: cfg!(feature = "mlua-lua54"),
-        implemented: cfg!(feature = "mlua-lua54"),
+        implemented: true,
     },
     EngineSlot {
         id: "mlua-luau",
         dialect: Dialect::Luau,
         feature: Some("mlua-luau"),
         enabled: cfg!(feature = "mlua-luau"),
-        implemented: cfg!(feature = "mlua-luau"),
+        implemented: true,
     },
     EngineSlot {
         id: "rhai",
         dialect: Dialect::Rhai,
         feature: Some("rhai-engine"),
         enabled: cfg!(feature = "rhai-engine"),
-        implemented: cfg!(feature = "rhai-engine"),
+        implemented: true,
     },
     EngineSlot {
         id: "roto",
         dialect: Dialect::Roto,
         feature: Some("roto"),
         enabled: cfg!(feature = "roto"),
-        implemented: cfg!(feature = "roto"),
+        implemented: true,
     },
     EngineSlot {
         id: "rquickjs",
         dialect: Dialect::JavaScript,
         feature: Some("rquickjs-engine"),
         enabled: cfg!(feature = "rquickjs-engine"),
-        implemented: cfg!(feature = "rquickjs-engine"),
+        implemented: true,
     },
     EngineSlot {
         id: "wasmi",
         dialect: Dialect::Wasm,
         feature: Some("wasmi-engine"),
         enabled: cfg!(feature = "wasmi-engine"),
-        implemented: cfg!(feature = "wasmi-engine"),
+        implemented: true,
     },
     EngineSlot {
         id: "wasmtime",
         dialect: Dialect::Wasm,
         feature: Some("wasmtime-engine"),
         enabled: cfg!(feature = "wasmtime-engine"),
-        implemented: cfg!(feature = "wasmtime-engine"),
+        implemented: true,
     },
 ];
 
@@ -506,6 +506,13 @@ fn print_inventory() {
 }
 
 fn print_inventory_json() -> Result<()> {
+    let text = serde_json::to_string_pretty(&inventory_json_value())
+        .map_err(|error| Error::new(format!("inventory JSON failed: {error}")))?;
+    println!("{text}");
+    Ok(())
+}
+
+fn inventory_json_value() -> serde_json::Value {
     let engines = ENGINE_SLOTS
         .iter()
         .map(|slot| {
@@ -535,7 +542,7 @@ fn print_inventory_json() -> Result<()> {
             })
         })
         .collect::<Vec<_>>();
-    let value = serde_json::json!({
+    serde_json::json!({
         "schema_version": 1,
         "binary": "script-bench",
         "history_schema": "jsonl-v1",
@@ -543,11 +550,7 @@ fn print_inventory_json() -> Result<()> {
         "default_results": RESULTS_PATH,
         "engines": engines,
         "workloads": workloads,
-    });
-    let text = serde_json::to_string_pretty(&value)
-        .map_err(|error| Error::new(format!("inventory JSON failed: {error}")))?;
-    println!("{text}");
-    Ok(())
+    })
 }
 
 fn unavailable_reason(slot: &EngineSlot) -> &'static str {
@@ -1480,4 +1483,91 @@ fn unix_time() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inventory_json_reports_source_implemented_slots_independent_of_features() {
+        let value = inventory_json_value();
+        let engines = value
+            .get("engines")
+            .and_then(serde_json::Value::as_array)
+            .expect("engines array");
+
+        assert_eq!(engines.len(), 10);
+        for engine in engines {
+            let id = engine
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .expect("engine id");
+            let enabled = engine
+                .get("enabled")
+                .and_then(serde_json::Value::as_bool)
+                .expect("engine enabled");
+            let implemented = engine
+                .get("implemented")
+                .and_then(serde_json::Value::as_bool)
+                .expect("engine implemented");
+            let available = engine
+                .get("available")
+                .and_then(serde_json::Value::as_bool)
+                .expect("engine available");
+            let status = engine
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .expect("engine status");
+
+            assert!(
+                implemented,
+                "{id} should report the source adapter as implemented"
+            );
+            assert_eq!(
+                available, enabled,
+                "{id} availability should track feature enablement"
+            );
+            if available {
+                assert_eq!(status, "available", "{id} status");
+            } else {
+                assert!(
+                    status.starts_with("compile with --features "),
+                    "{id} disabled status should name the feature, got {status:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inventory_json_preserves_workload_schema_and_defaults() {
+        let value = inventory_json_value();
+        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["binary"], "script-bench");
+        assert_eq!(value["history_schema"], "jsonl-v1");
+        assert_eq!(value["default_history"], HISTORY_PATH);
+        assert_eq!(value["default_results"], RESULTS_PATH);
+
+        let workloads = value
+            .get("workloads")
+            .and_then(serde_json::Value::as_array)
+            .expect("workloads array");
+        assert_eq!(workloads.len(), 11);
+
+        let defaults = workloads
+            .iter()
+            .filter(|workload| workload["default"].as_bool() == Some(true))
+            .map(|workload| workload["id"].as_str().expect("workload id"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            defaults,
+            [
+                "dense_tables",
+                "sparse_tables",
+                "closures_upvalues",
+                "generic_iteration",
+                "stdlib_math_table"
+            ]
+        );
+    }
 }
