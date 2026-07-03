@@ -164,6 +164,10 @@ Requirements:
 - old program remains callable on reload failure.
 - retained handles are versioned or explicitly invalidated across reload.
 
+Current implementation slice: `Exports::generation()`, `Function::generation()`, and `Rustia::generation()`
+report the successful install generation. Failed hot reloads do not advance the generation, and old retained
+function handles remain callable because the VM retains prior dynamic programs.
+
 ### 5. Optional macro/codegen sugar
 
 Macros come after the lower-level API is stable.

@@ -56,6 +56,8 @@ from `publish = false` to publishable.
     deterministic extensions, retained script functions, and serde.
   - `crates/rustia/examples/hot_reload.rs` covers compile/install hot reload
     and retained handles across reload failures.
+- Retained `Function` handles and `Exports` expose install generations, and
+  failed hot reloads leave the current generation unchanged.
 
 ## Runtime Gate
 

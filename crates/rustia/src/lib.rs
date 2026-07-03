@@ -22,6 +22,7 @@ pub use value::{
 
 pub struct Rustia {
     vm: Vm,
+    generation: u64,
 }
 
 impl Rustia {
@@ -32,17 +33,20 @@ impl Rustia {
     pub fn new(profile: Profile) -> Self {
         Self {
             vm: Vm::new(profile),
+            generation: 0,
         }
     }
 
     pub fn with_settings(profile: Profile, settings: VmSettings) -> Self {
         Self {
             vm: Vm::with_settings(profile, settings),
+            generation: 0,
         }
     }
 
     pub fn compile_and_run(&mut self, source: &str) -> Result<Exports> {
-        self.compile_and_run_raw(source).map(Exports::new)
+        let value = self.compile_and_run_raw(source)?;
+        Ok(Exports::new(value, self.generation))
     }
 
     pub fn compile_and_run_exports(&mut self, source: &str) -> Result<Exports> {
@@ -57,7 +61,9 @@ impl Rustia {
     pub(crate) fn compile_and_run_raw(&mut self, source: &str) -> Result<rustia_vm::Value> {
         let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
         let program = rustia_compiler::compile(&chunk).map_err(Error::Compile)?;
-        self.vm.run(&program).map_err(Error::Vm)
+        let value = self.vm.run(&program).map_err(Error::Vm)?;
+        self.advance_generation();
+        Ok(value)
     }
 
     pub fn insert_global<T>(&mut self, name: impl AsRef<str>, value: T) -> Result<()>
@@ -119,15 +125,22 @@ impl Rustia {
     }
 
     pub fn install(&mut self, module: CompiledModule) -> Result<Exports> {
-        self.vm
-            .run(&module.program)
-            .map(Exports::new)
-            .map_err(Error::Vm)
+        let value = self.vm.run(&module.program).map_err(Error::Vm)?;
+        self.advance_generation();
+        Ok(Exports::new(value, self.generation))
     }
 
     pub fn hot_reload(&mut self, source_name: impl Into<String>, source: &str) -> Result<Exports> {
         let module = Self::compile(source_name, source)?;
         self.install(module)
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    fn advance_generation(&mut self) {
+        self.generation = self.generation.saturating_add(1);
     }
 
     #[inline]
@@ -356,10 +369,39 @@ return {
             .hot_reload("ai.luau", "return { decide = function() return 1 end }")
             .unwrap();
         let decide = exports.function(&mut rustia, "decide").unwrap();
+        let generation = rustia.generation();
 
         assert!(rustia.hot_reload("ai.luau", "return {").is_err());
+        assert_eq!(rustia.generation(), generation);
+        assert_eq!(decide.generation(), generation);
         let result: f64 = decide.call(&mut rustia, ()).unwrap();
         assert_eq!(result, 1.0);
+    }
+
+    #[test]
+    fn retained_handles_are_versioned_across_successful_hot_reload() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let first_exports = rustia
+            .hot_reload("ai.luau", "return { decide = function() return 1 end }")
+            .unwrap();
+        let first_generation = first_exports.generation();
+        let first_decide = first_exports.function(&mut rustia, "decide").unwrap();
+
+        let second_exports = rustia
+            .hot_reload("ai.luau", "return { decide = function() return 2 end }")
+            .unwrap();
+        let second_generation = second_exports.generation();
+        let second_decide = second_exports.function(&mut rustia, "decide").unwrap();
+
+        assert!(second_generation > first_generation);
+        assert_eq!(rustia.generation(), second_generation);
+        assert_eq!(first_decide.generation(), first_generation);
+        assert_eq!(second_decide.generation(), second_generation);
+
+        let old_result: f64 = first_decide.call(&mut rustia, ()).unwrap();
+        let new_result: f64 = second_decide.call(&mut rustia, ()).unwrap();
+        assert_eq!(old_result, 1.0);
+        assert_eq!(new_result, 2.0);
     }
 
     #[test]

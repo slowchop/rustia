@@ -39,16 +39,16 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 62,
+      "complete": 63,
       "confidence": 65,
-      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, typed host diagnostic polish, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
+      "state": "Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, typed host diagnostic polish, retained-handle generation semantics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.",
       "future_plan": "Harden P1, finish benchmark gates, then move toward full public Luau parity."
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 66,
+      "complete": 67,
       "confidence": 70,
-      "state": "The rustia facade supports owned values, typed host functions with argument-context diagnostics, retained functions, serde, extensions, hot reload, and compile-checked examples.",
+      "state": "The rustia facade supports owned values, typed host functions with argument-context diagnostics, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.",
       "future_plan": "Stabilize API semantics, diagnostics, capability policy, and migration docs."
     },
     {
@@ -319,17 +319,17 @@
         },
         {
           "name": "Retained handles",
-          "complete": 58,
+          "complete": 64,
           "confidence": 65,
-          "state": "Script function handles can be retained and called.",
-          "future_plan": "Define invalidation/versioning behavior around hot reload."
+          "state": "Script function handles can be retained, called, and inspected for the install generation they came from.",
+          "future_plan": "Document migration guidance and decide whether future invalidation hooks are needed."
         },
         {
           "name": "Hot reload",
-          "complete": 52,
+          "complete": 57,
           "confidence": 65,
-          "state": "Compile/install/hot-reload entry points exist, with an example covering retained handles across reload failure.",
-          "future_plan": "Guarantee old-program survival, diagnostics, and handle semantics with stronger tests and docs."
+          "state": "Compile/install/hot-reload entry points exist; tests cover failed-reload old-program survival and generation-stamped handles across successful reload.",
+          "future_plan": "Add migration docs and broader diagnostics around install-time runtime failures."
         },
         {
           "name": "Macro/codegen sugar",

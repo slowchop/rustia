@@ -401,11 +401,11 @@
       </div>
       <aside class="facts" aria-label="Current facts">
         <div class="fact">
-          <strong>62%</strong>
+          <strong>63%</strong>
           <span>Whole public rustia project, 65% confidence</span>
         </div>
         <div class="fact">
-          <strong>66%</strong>
+          <strong>67%</strong>
           <span>Usable embedded scripting crate, 70% confidence</span>
         </div>
         <div class="fact">
@@ -428,34 +428,34 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Whole public rustia project</h3>
-        <span class="percent">62%</span>
+        <span class="percent">63%</span>
       </div>
 
-    <div class="meter" aria-label="Whole public rustia project: 62% complete">
-      <div class="meter-fill" style="width: 62%"></div>
+    <div class="meter" aria-label="Whole public rustia project: 63% complete">
+      <div class="meter-fill" style="width: 63%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">65% confidence</span>
       </div>
-      <p>Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, typed host diagnostic polish, release preflight, and CI workflow wiring started; release packaging and perf gates remain.</p>
+      <p>Design is locked and production crates are substantial, with crate metadata, examples, CLI ergonomics, typed host diagnostic polish, retained-handle generation semantics, release preflight, and CI workflow wiring started; release packaging and perf gates remain.</p>
       <p class="plan"><strong>Next:</strong> Harden P1, finish benchmark gates, then move toward full public Luau parity.</p>
     </article>
 
     <article class="goal-card">
       <div class="card-head">
         <h3>Usable embedded scripting crate</h3>
-        <span class="percent">66%</span>
+        <span class="percent">67%</span>
       </div>
 
-    <div class="meter" aria-label="Usable embedded scripting crate: 66% complete">
-      <div class="meter-fill" style="width: 66%"></div>
+    <div class="meter" aria-label="Usable embedded scripting crate: 67% complete">
+      <div class="meter-fill" style="width: 67%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">70% confidence</span>
       </div>
-      <p>The rustia facade supports owned values, typed host functions with argument-context diagnostics, retained functions, serde, extensions, hot reload, and compile-checked examples.</p>
+      <p>The rustia facade supports owned values, typed host functions with argument-context diagnostics, retained functions with generation metadata, serde, extensions, hot reload, and compile-checked examples.</p>
       <p class="plan"><strong>Next:</strong> Stabilize API semantics, diagnostics, capability policy, and migration docs.</p>
     </article>
 
@@ -513,7 +513,7 @@
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 62%</a><a href="#embedded-api">Embedded API 60%</a><a href="#benchmarks">Benchmarks 74%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 59%</a><a href="#packaging">Packaging 57%</a>
+      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 62%</a><a href="#embedded-api">Embedded API 62%</a><a href="#benchmarks">Benchmarks 74%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 59%</a><a href="#packaging">Packaging 57%</a>
     </nav>
 
 
@@ -1076,7 +1076,7 @@
           <p>9 tracked items</p>
         </div>
         <div class="area-score">
-          <span>60% avg complete</span>
+          <span>62% avg complete</span>
           <span>71% avg confidence</span>
         </div>
       </div>
@@ -1200,38 +1200,38 @@
       <div class="entry-top">
         <div>
           <h4>Retained handles</h4>
-          <p>Script function handles can be retained and called.</p>
+          <p>Script function handles can be retained, called, and inspected for the install generation they came from.</p>
         </div>
         <div class="entry-score">
-          <strong>58%</strong>
+          <strong>64%</strong>
           <span class="chip medium">65% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Retained handles: 58% complete">
-      <div class="meter-fill" style="width: 58%"></div>
+    <div class="meter" aria-label="Retained handles: 64% complete">
+      <div class="meter-fill" style="width: 64%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Define invalidation/versioning behavior around hot reload.</p>
+      <p class="plan"><strong>Future plan:</strong> Document migration guidance and decide whether future invalidation hooks are needed.</p>
     </article>
 
     <article class="entry">
       <div class="entry-top">
         <div>
           <h4>Hot reload</h4>
-          <p>Compile/install/hot-reload entry points exist, with an example covering retained handles across reload failure.</p>
+          <p>Compile/install/hot-reload entry points exist; tests cover failed-reload old-program survival and generation-stamped handles across successful reload.</p>
         </div>
         <div class="entry-score">
-          <strong>52%</strong>
+          <strong>57%</strong>
           <span class="chip medium">65% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Hot reload: 52% complete">
-      <div class="meter-fill" style="width: 52%"></div>
+    <div class="meter" aria-label="Hot reload: 57% complete">
+      <div class="meter-fill" style="width: 57%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Guarantee old-program survival, diagnostics, and handle semantics with stronger tests and docs.</p>
+      <p class="plan"><strong>Future plan:</strong> Add migration docs and broader diagnostics around install-time runtime failures.</p>
     </article>
 
     <article class="entry">

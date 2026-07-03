@@ -9,11 +9,16 @@ use std::sync::Arc;
 #[derive(Clone, Copy, Debug)]
 pub struct Function {
     value: RawValue,
+    generation: u64,
 }
 
 impl Function {
-    pub(crate) const fn new(value: RawValue) -> Self {
-        Self { value }
+    pub(crate) const fn new(value: RawValue, generation: u64) -> Self {
+        Self { value, generation }
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn call<Args, Return>(&self, rustia: &mut Rustia, args: Args) -> Result<Return>
@@ -41,11 +46,16 @@ impl Function {
 #[derive(Clone, Copy, Debug)]
 pub struct Exports {
     value: RawValue,
+    generation: u64,
 }
 
 impl Exports {
-    pub(crate) const fn new(value: RawValue) -> Self {
-        Self { value }
+    pub(crate) const fn new(value: RawValue, generation: u64) -> Self {
+        Self { value, generation }
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn value(&self, rustia: &mut Rustia) -> Result<OwnedValue> {
@@ -74,7 +84,7 @@ impl Exports {
         if value.kind() != ValueKind::Function {
             return Err(Error::Embed(format!("export `{name}` is not a function")));
         }
-        Ok(Function::new(value))
+        Ok(Function::new(value, self.generation))
     }
 
     fn raw_get(&self, rustia: &mut Rustia, name: &str) -> Result<RawValue> {

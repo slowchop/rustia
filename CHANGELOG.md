@@ -29,6 +29,8 @@ Current unpublished workspace version: `0.0.1`.
   `design/crate-metadata.json` and checked in release preflight.
 - Typed host function conversion errors now include the host function name and
   argument or return position.
+- Retained script functions and export tables now expose the successful install
+  generation they came from, making hot-reload handle semantics explicit.
 - Release-readiness docs now cover package metadata, package file-list audits,
   semver policy, changelog validation, and publish ordering.
 
