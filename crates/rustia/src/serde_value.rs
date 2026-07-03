@@ -63,6 +63,28 @@ impl OwnedValue {
     }
 }
 
+impl OwnedTable {
+    /// Deserializes a string-keyed field through serde.
+    pub fn get_string_deserialized<'de, T>(&'de self, key: &str) -> Result<Option<T>>
+    where
+        T: Deserialize<'de>,
+    {
+        self.get_string(key)
+            .map(OwnedValue::deserialize)
+            .transpose()
+    }
+
+    /// Deserializes an owned-array slot by zero-based Rust index. Luau index 1 is slot 0.
+    pub fn get_array_deserialized<'de, T>(&'de self, index: usize) -> Result<Option<T>>
+    where
+        T: Deserialize<'de>,
+    {
+        self.get_array(index)
+            .map(OwnedValue::deserialize)
+            .transpose()
+    }
+}
+
 struct OwnedDeserializer<'de> {
     value: &'de OwnedValue,
 }

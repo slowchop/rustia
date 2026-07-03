@@ -148,10 +148,14 @@ Also support the reverse direction:
 ```rust
 vm.insert_serde("agent", &agent_state)?;
 let decision: Decision = value.deserialize()?;
+let root = value.table().unwrap();
+let enemies = root.get_string_table("enemies")?.unwrap();
+let first_enemy: EnemySpec = enemies.get_array_deserialized(0)?.unwrap();
 ```
 
-Start with owned-value serde for correctness and ergonomics. Add the zero-copy live-value deserializer after the
-surface is stable, matching the architecture note that zero-copy serde is faster by avoiding the deep-copy
+Start with owned-value serde for correctness and ergonomics; `OwnedValue` plus string-keyed and array-slot
+`OwnedTable` deserialization helpers are the first public slice. Add the zero-copy live-value deserializer after
+the surface is stable, matching the architecture note that zero-copy serde is faster by avoiding the deep-copy
 exports snapshot.
 
 ### 4. Compiled module and hot-reload API

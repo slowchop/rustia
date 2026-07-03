@@ -67,6 +67,8 @@ from `publish = false` to publishable.
   installation.
 - Public examples cover globals, typed functions, serde, extensions, retained
   functions, and hot reload.
+- Owned snapshots expose serde deserialization at the `OwnedValue` level plus
+  string-keyed field and array-slot helpers on `OwnedTable`.
 - Current examples:
   - `crates/rustia/examples/embedding.rs` covers globals, source-named run
     helpers, fallible typed host functions, deterministic extensions, retained

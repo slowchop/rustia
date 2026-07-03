@@ -526,6 +526,79 @@ return {
     }
 
     #[test]
+    fn owned_table_helpers_deserialize_nested_fields() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct SpawnConfig<'a> {
+            kind: &'a str,
+            hp: u32,
+            stats: Vec<u32>,
+        }
+
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Enemy<'a> {
+            kind: &'a str,
+            hp: u32,
+        }
+
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value = rustia
+            .run_owned(
+                "\
+return {
+    config = {
+        kind = 'scout',
+        hp = 5,
+        stats = { 7, 9 },
+    },
+    enemies = {
+        { kind = 'brute', hp = 9 },
+        { kind = 'scout', hp = 5 },
+    },
+}
+",
+            )
+            .unwrap();
+
+        let root = value.table().unwrap();
+        let config = root
+            .get_string_deserialized::<SpawnConfig<'_>>("config")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            config,
+            SpawnConfig {
+                kind: "scout",
+                hp: 5,
+                stats: vec![7, 9]
+            }
+        );
+        assert!(root
+            .get_string_deserialized::<SpawnConfig<'_>>("missing")
+            .unwrap()
+            .is_none());
+
+        let enemies = root.get_string_table("enemies").unwrap().unwrap();
+        assert_eq!(
+            enemies.get_array_deserialized::<Enemy<'_>>(0).unwrap(),
+            Some(Enemy {
+                kind: "brute",
+                hp: 9
+            })
+        );
+        assert_eq!(
+            enemies.get_array_deserialized::<Enemy<'_>>(1).unwrap(),
+            Some(Enemy {
+                kind: "scout",
+                hp: 5
+            })
+        );
+        assert!(enemies
+            .get_array_deserialized::<Enemy<'_>>(2)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
     fn insert_global_accepts_option_vec_and_owned_table() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let named_map = BTreeMap::from([("scout".to_owned(), 5_i32), ("brute".to_owned(), 9_i32)]);

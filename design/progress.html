@@ -405,7 +405,7 @@
           <span>Whole public rustia project, 65% confidence</span>
         </div>
         <div class="fact">
-          <strong>79%</strong>
+          <strong>80%</strong>
           <span>Usable embedded scripting crate, 70% confidence</span>
         </div>
         <div class="fact">
@@ -445,17 +445,17 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Usable embedded scripting crate</h3>
-        <span class="percent">79%</span>
+        <span class="percent">80%</span>
       </div>
 
-    <div class="meter" aria-label="Usable embedded scripting crate: 79% complete">
-      <div class="meter-fill" style="width: 79%"></div>
+    <div class="meter" aria-label="Usable embedded scripting crate: 80% complete">
+      <div class="meter-fill" style="width: 80%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">70% confidence</span>
       </div>
-      <p>The rustia facade supports typed run&lt;T&gt;, source-named run/compile helpers, owned values with Option/Vec/BTreeMap/table conversions plus typed and nested table helpers, typed host functions with argument-context diagnostics and fallible rustia::Result&lt;T&gt; returns, tuple arguments/results through arity 8, pre-install host signature metadata, capability-tagged host helpers, retained functions/exports with generation/freshness metadata and fail-closed current-generation accessors, serde, extensions, hot reload, and compile-checked examples.</p>
+      <p>The rustia facade supports typed run&lt;T&gt;, source-named run/compile helpers, owned values with Option/Vec/BTreeMap/table conversions plus typed and nested table helpers, typed host functions with argument-context diagnostics and fallible rustia::Result&lt;T&gt; returns, tuple arguments/results through arity 8, pre-install host signature metadata, capability-tagged host helpers, retained functions/exports with generation/freshness metadata and fail-closed current-generation accessors, owned-value/table serde, extensions, hot reload, and compile-checked examples.</p>
       <p class="plan"><strong>Next:</strong> Stabilize API semantics, diagnostics, capability policy, and migration docs.</p>
     </article>
 
@@ -1181,16 +1181,16 @@
       <div class="entry-top">
         <div>
           <h4>Serde bridge</h4>
-          <p>Owned-value serde paths exist.</p>
+          <p>Owned-value serde paths exist, and OwnedTable can deserialize string-keyed fields plus array slots through serde.</p>
         </div>
         <div class="entry-score">
-          <strong>62%</strong>
+          <strong>66%</strong>
           <span class="chip medium">70% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Serde bridge: 62% complete">
-      <div class="meter-fill" style="width: 62%"></div>
+    <div class="meter" aria-label="Serde bridge: 66% complete">
+      <div class="meter-fill" style="width: 66%"></div>
     </div>
 
       <p class="plan"><strong>Future plan:</strong> Add zero-copy live-value deserialization after the public surface stabilizes.</p>

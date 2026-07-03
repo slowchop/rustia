@@ -46,9 +46,9 @@
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 79,
+      "complete": 80,
       "confidence": 70,
-      "state": "The rustia facade supports typed run<T>, source-named run/compile helpers, owned values with Option/Vec/BTreeMap/table conversions plus typed and nested table helpers, typed host functions with argument-context diagnostics and fallible rustia::Result<T> returns, tuple arguments/results through arity 8, pre-install host signature metadata, capability-tagged host helpers, retained functions/exports with generation/freshness metadata and fail-closed current-generation accessors, serde, extensions, hot reload, and compile-checked examples.",
+      "state": "The rustia facade supports typed run<T>, source-named run/compile helpers, owned values with Option/Vec/BTreeMap/table conversions plus typed and nested table helpers, typed host functions with argument-context diagnostics and fallible rustia::Result<T> returns, tuple arguments/results through arity 8, pre-install host signature metadata, capability-tagged host helpers, retained functions/exports with generation/freshness metadata and fail-closed current-generation accessors, owned-value/table serde, extensions, hot reload, and compile-checked examples.",
       "future_plan": "Stabilize API semantics, diagnostics, capability policy, and migration docs."
     },
     {
@@ -312,9 +312,9 @@
         },
         {
           "name": "Serde bridge",
-          "complete": 62,
+          "complete": 66,
           "confidence": 70,
-          "state": "Owned-value serde paths exist.",
+          "state": "Owned-value serde paths exist, and OwnedTable can deserialize string-keyed fields plus array slots through serde.",
           "future_plan": "Add zero-copy live-value deserialization after the public surface stabilizes."
         },
         {

@@ -41,6 +41,8 @@ Current unpublished workspace version: `0.0.1`.
   `BTreeMap<String, T>`, direct `OwnedTable` values, typed owned-table
   builders, typed string-key lookup, and nested table/array access for globals,
   host functions, and retained calls.
+- Owned tables can deserialize string-keyed fields and array slots directly
+  through serde.
 - Retained script functions and export tables now expose the successful install
   generation they came from, making hot-reload handle semantics explicit.
 - Retained function/export handles now expose freshness checks, and
