@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "date": "2026-07-03",
+    "scope": "Public rustia project readiness, based on the current workspace and canonical design docs.",
+    "excludes": [
+      "Actual grabby integration work"
+    ],
+    "notes": [
+      "Percentages are rough engineering estimates, not automated metrics.",
+      "The scope tracks public rustia crates, conformance, benchmarks, docs, tooling, and release readiness.",
+      "The public host-bridge remains generic; grabby-specific types and effect catalogs stay outside public rustia."
+    ],
+    "canonical_facts": {
+      "luau_target": "Luau 0.709, standalone surface",
+      "conformance": {
+        "fixtures": 683,
+        "refs": 480,
+        "pending": 0
+      },
+      "benchmark_adapters": {
+        "requested": 10,
+        "present": 10,
+        "names": [
+          "rustia",
+          "boa",
+          "koto",
+          "mlua-lua54",
+          "mlua-luau",
+          "rhai",
+          "roto",
+          "rquickjs",
+          "wasmi",
+          "wasmtime"
+        ],
+        "note": "mlua-lua54 runs separately from mlua-luau because both mlua-sys builds use links = \"lua\"."
+      }
+    }
+  },
+  "overall_goals": [
+    {
+      "name": "Whole public rustia project",
+      "complete": 58,
+      "confidence": 65,
+      "state": "Design is locked and production crates are substantial, but release, CI, and perf gates remain.",
+      "future_plan": "Harden P1, finish benchmark gates, then move toward full public Luau parity."
+    },
+    {
+      "name": "Usable embedded scripting crate",
+      "complete": 64,
+      "confidence": 70,
+      "state": "The rustia facade supports owned values, typed host functions, retained functions, serde, extensions, and hot reload.",
+      "future_plan": "Stabilize API semantics, diagnostics, capability policy, and docs/examples."
+    },
+    {
+      "name": "Full public Luau engine release",
+      "complete": 48,
+      "confidence": 58,
+      "state": "Luau 0.709 target and conformance corpus are strong; production engine still needs perf and parity hardening.",
+      "future_plan": "Complete P1/P2 runtime work, then P4 parity items such as module/loading, typechecker/LSP track, and release packaging."
+    },
+    {
+      "name": "Standalone benchmark OSS project",
+      "complete": 64,
+      "confidence": 80,
+      "state": "Harness, history, static site, five default workload families, and all 10 requested adapters are present.",
+      "future_plan": "Split from workspace, expand workloads, wire CI, and publish charts/history."
+    },
+    {
+      "name": "Public release readiness",
+      "complete": 45,
+      "confidence": 75,
+      "state": "License is set and docs are strong; crates are still workspace-private and CI/release polish is absent.",
+      "future_plan": "Prepare publishable crate metadata, examples, semver policy, and public benchmark claims."
+    }
+  ],
+  "areas": [
+    {
+      "area": "Design",
+      "entries": [
+        {
+          "name": "Constraint and target model",
+          "complete": 95,
+          "confidence": 90,
+          "state": "Core priorities, target matrix, and public/private boundary are documented.",
+          "future_plan": "Keep docs synced as implementation exposes new constraints."
+        },
+        {
+          "name": "Architecture decisions",
+          "complete": 92,
+          "confidence": 85,
+          "state": "All eight architecture axes are decided in design/30-architecture.md.",
+          "future_plan": "Reconfirm value-layout/dispatch on JSC and SpiderMonkey before final P1 lock."
+        },
+        {
+          "name": "Review cleanup",
+          "complete": 95,
+          "confidence": 90,
+          "state": "Third-party review findings are folded into canonical docs.",
+          "future_plan": "Treat new findings as incremental deltas, not a redesign."
+        },
+        {
+          "name": "Current-state tracking",
+          "complete": 88,
+          "confidence": 82,
+          "state": "design/CURRENT.md is authoritative and current for implementation state.",
+          "future_plan": "Keep README, progress data, and design docs aligned after each major implementation slice."
+        },
+        {
+          "name": "Research spikes",
+          "complete": 90,
+          "confidence": 85,
+          "state": "Dispatch, value layout, libm determinism, GC, snapshot, and wasm-JIT directions are backed by spikes.",
+          "future_plan": "Keep spike outputs as evidence, but move production claims to benchmark gates."
+        }
+      ]
+    },
+    {
+      "area": "Luau target",
+      "entries": [
+        {
+          "name": "Luau 0.709 pin",
+          "complete": 95,
+          "confidence": 92,
+          "state": "Target version, standalone surface, vector width, flags posture, and f64-only behavior are documented.",
+          "future_plan": "Watch upstream FFlag::LuauIntegerType2 and update only with explicit evidence."
+        }
+      ]
+    },
+    {
+      "area": "Conformance",
+      "entries": [
+        {
+          "name": "Manifest and refs",
+          "complete": 90,
+          "confidence": 90,
+          "state": "683 fixtures and 480 refs are executable with 0 pending rows.",
+          "future_plan": "Add focused fixtures for newly found gaps instead of reopening bulk inventory."
+        },
+        {
+          "name": "Upstream corpus execution",
+          "complete": 88,
+          "confidence": 85,
+          "state": "Whole upstream Luau 0.709 conformance scripts are represented through executable fixtures.",
+          "future_plan": "Preserve green status while hardening engine internals."
+        },
+        {
+          "name": "Harness and coverage notes",
+          "complete": 86,
+          "confidence": 85,
+          "state": "Runner, manifest validation, and detailed coverage notes are in-tree.",
+          "future_plan": "Add coverage metadata for new public-parity features as they land."
+        }
+      ]
+    },
+    {
+      "area": "Frontend",
+      "entries": [
+        {
+          "name": "Lexer",
+          "complete": 82,
+          "confidence": 70,
+          "state": "Production lexer crate exists with tests.",
+          "future_plan": "Expand edge-case coverage as conformance finds parser/lexer gaps."
+        },
+        {
+          "name": "Parser",
+          "complete": 78,
+          "confidence": 68,
+          "state": "Hand-written parser handles Luau syntax and type-grammar erasure.",
+          "future_plan": "Continue differential and conformance-driven hardening."
+        },
+        {
+          "name": "Type grammar parse-and-erase",
+          "complete": 80,
+          "confidence": 70,
+          "state": "Type syntax is parsed for runtime erasure; no typechecker is intended for P1.",
+          "future_plan": "Defer gradual typechecker/LSP work to public-parity phase."
+        },
+        {
+          "name": "Compiler",
+          "complete": 72,
+          "confidence": 65,
+          "state": "Production compiler emits bytecode and supports conformance-specific paths.",
+          "future_plan": "Harden constant folding, diagnostics, superinstructions, and optimization boundaries."
+        }
+      ]
+    },
+    {
+      "area": "VM/runtime",
+      "entries": [
+        {
+          "name": "Bytecode dispatch core",
+          "complete": 70,
+          "confidence": 65,
+          "state": "Portable interpreter exists; big-match/br-table direction is locked.",
+          "future_plan": "Add hot/cold split, benchmark call_ref, and maintain fusion-invariant fuel."
+        },
+        {
+          "name": "Value representation",
+          "complete": 76,
+          "confidence": 75,
+          "state": "16-byte tagged value direction is implemented and documented.",
+          "future_plan": "Keep representation sealed until JSC/SpiderMonkey measurements close the gate."
+        },
+        {
+          "name": "Heap and GC",
+          "complete": 62,
+          "confidence": 65,
+          "state": "gc-arena direction is chosen and production heap code exists.",
+          "future_plan": "Tune Standard pacing and DeterministicSim instruction-count collection intervals."
+        },
+        {
+          "name": "Tables/metatables",
+          "complete": 78,
+          "confidence": 70,
+          "state": "Broad table, metatable, iteration, and stdlib table behavior is conformance-covered.",
+          "future_plan": "Continue parity hardening and performance work."
+        },
+        {
+          "name": "Functions/coroutines/pcall",
+          "complete": 76,
+          "confidence": 70,
+          "state": "Functions, closures, varargs, coroutines, and protected calls have broad coverage.",
+          "future_plan": "Keep stackless recursion and yield paths covered as runtime changes."
+        },
+        {
+          "name": "Base/math/string/bit32/vector/utf8 stdlib",
+          "complete": 78,
+          "confidence": 68,
+          "state": "Major Luau stdlib surfaces are covered by fixtures.",
+          "future_plan": "Fill remaining public-parity libraries and edge cases."
+        },
+        {
+          "name": "Error/debug behavior",
+          "complete": 72,
+          "confidence": 65,
+          "state": "Debug/error behavior is substantially covered for conformance.",
+          "future_plan": "Tighten diagnostics and source-span reporting for public API use."
+        }
+      ]
+    },
+    {
+      "area": "Determinism",
+      "entries": [
+        {
+          "name": "f64/libm/canonicalization discipline",
+          "complete": 75,
+          "confidence": 75,
+          "state": "Deterministic number policy is documented and partly enforced by tests.",
+          "future_plan": "Keep compiler and VM on the same libm/canonicalization rules."
+        },
+        {
+          "name": "Runtime profiles",
+          "complete": 74,
+          "confidence": 75,
+          "state": "LuauCompat, ReproducibleStandard, and DeterministicSim are defined; public APIs expose profiles.",
+          "future_plan": "Refine exact capability behavior and profile-specific GC policy."
+        },
+        {
+          "name": "Fuel and limits",
+          "complete": 70,
+          "confidence": 70,
+          "state": "Instruction fuel exists and is part of the design contract.",
+          "future_plan": "Version fuel costs and keep superinstructions fuel-invariant."
+        },
+        {
+          "name": "Cross-engine wasm proof",
+          "complete": 30,
+          "confidence": 80,
+          "state": "V8 evidence exists; JSC and SpiderMonkey are still open gates.",
+          "future_plan": "Build real wasm measurement harness and record golden results."
+        }
+      ]
+    },
+    {
+      "area": "Embedded API",
+      "entries": [
+        {
+          "name": "Koto-shaped facade",
+          "complete": 70,
+          "confidence": 75,
+          "state": "Builder, compile/run, globals, exports, and function calls exist.",
+          "future_plan": "Stabilize names, error types, examples, and migration docs."
+        },
+        {
+          "name": "Owned value firewall",
+          "complete": 72,
+          "confidence": 75,
+          "state": "OwnedValue, owned tables/keys, and conversions exist.",
+          "future_plan": "Harden conversion coverage and avoid leaking internal GC lifetimes."
+        },
+        {
+          "name": "Typed host functions",
+          "complete": 68,
+          "confidence": 75,
+          "state": "Plain Rust functions can be registered with typed args/results.",
+          "future_plan": "Expand arity/signature support and improve diagnostics."
+        },
+        {
+          "name": "Extension/linker layer",
+          "complete": 58,
+          "confidence": 70,
+          "state": "Namespaced extensions and coarse capabilities exist.",
+          "future_plan": "Add richer capability metadata, fuel costs, and policy validation."
+        },
+        {
+          "name": "Public host-bridge seam",
+          "complete": 62,
+          "confidence": 75,
+          "state": "The generic seam for deterministic host functions, typed slots, and effect ordering is documented without public grabby types.",
+          "future_plan": "Keep public rustia generic while strengthening capability enforcement and scratch-heap rules."
+        },
+        {
+          "name": "Serde bridge",
+          "complete": 62,
+          "confidence": 70,
+          "state": "Owned-value serde paths exist.",
+          "future_plan": "Add zero-copy live-value deserialization after the public surface stabilizes."
+        },
+        {
+          "name": "Retained handles",
+          "complete": 58,
+          "confidence": 65,
+          "state": "Script function handles can be retained and called.",
+          "future_plan": "Define invalidation/versioning behavior around hot reload."
+        },
+        {
+          "name": "Hot reload",
+          "complete": 50,
+          "confidence": 65,
+          "state": "Compile/install/hot-reload entry points exist.",
+          "future_plan": "Guarantee old-program survival, diagnostics, and handle semantics on reload failure."
+        },
+        {
+          "name": "Macro/codegen sugar",
+          "complete": 35,
+          "confidence": 65,
+          "state": "Macro sugar exists as an early slice, but the lower-level API should lead.",
+          "future_plan": "Delay expansion until the core API stops moving."
+        }
+      ]
+    },
+    {
+      "area": "Benchmarks",
+      "entries": [
+        {
+          "name": "Harness CLI and schema",
+          "complete": 80,
+          "confidence": 85,
+          "state": "bench/ has a standalone-style CLI, JSONL history schema, and generated RESULTS.md.",
+          "future_plan": "Keep JSONL as the source of truth for CI and website data."
+        },
+        {
+          "name": "Adapter matrix",
+          "complete": 100,
+          "confidence": 88,
+          "state": "All 10 requested adapters are implemented; mlua-lua54 runs as a separate binary from Luau because of mlua-sys linking constraints.",
+          "future_plan": "Split adapters into standalone crates/binaries and keep baselines current."
+        },
+        {
+          "name": "Workloads",
+          "complete": 60,
+          "confidence": 78,
+          "state": "Five default workload families are wired, with 11 Luau workload seeds and partial cross-engine coverage present.",
+          "future_plan": "Expand toward the 11-15 workload plan including interop, serde, fuel, and string building."
+        },
+        {
+          "name": "History and static site",
+          "complete": 74,
+          "confidence": 82,
+          "state": "Append-only history, markdown results, and dependency-free dashboard files are present.",
+          "future_plan": "Publish long-run history and richer charts after standalone split."
+        },
+        {
+          "name": "Benchmark CI",
+          "complete": 15,
+          "confidence": 90,
+          "state": "CI workflow wiring is not present.",
+          "future_plan": "Add self-hosted [self-hosted, bench] workflows after runner setup is confirmed."
+        }
+      ]
+    },
+    {
+      "area": "Wasm/perf",
+      "entries": [
+        {
+          "name": "Wasm-emit JIT spike",
+          "complete": 45,
+          "confidence": 70,
+          "state": "Runtime wasm emission is validated in spikes, not production-integrated.",
+          "future_plan": "Add type guards/deopt and interpreter-equivalence checks before production use."
+        },
+        {
+          "name": "Native/wasm matrix",
+          "complete": 30,
+          "confidence": 75,
+          "state": "Native baselines are being recorded; full wasm engine matrix is deferred.",
+          "future_plan": "Measure V8, SpiderMonkey, and JSC on production rustia wasm."
+        }
+      ]
+    },
+    {
+      "area": "Tooling",
+      "entries": [
+        {
+          "name": "Workspace tests",
+          "complete": 72,
+          "confidence": 75,
+          "state": "Production crates have meaningful unit and conformance tests.",
+          "future_plan": "Keep expanding tests with new runtime/API work."
+        },
+        {
+          "name": "CLI",
+          "complete": 55,
+          "confidence": 65,
+          "state": "rustia-cli exists as a runner surface.",
+          "future_plan": "Improve REPL/run ergonomics and diagnostic presentation."
+        },
+        {
+          "name": "Live wasm demo",
+          "complete": 35,
+          "confidence": 70,
+          "state": "demos/live-wasm can build and serve a browser demo outside normal workspace gates.",
+          "future_plan": "Refresh after production wasm/perf work and make it a public example."
+        }
+      ]
+    },
+    {
+      "area": "Packaging",
+      "entries": [
+        {
+          "name": "Crate publishability",
+          "complete": 30,
+          "confidence": 80,
+          "state": "Workspace crates are publish = false.",
+          "future_plan": "Add crate metadata, examples, feature policy, and release checklist."
+        }
+      ]
+    }
+  ]
+}

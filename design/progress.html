@@ -1,0 +1,1545 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rustia progress dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --panel-soft: #eef4f8;
+      --text: #17202a;
+      --muted: #5c6875;
+      --line: #d9e1e8;
+      --accent: #0f766e;
+      --accent-2: #2563eb;
+      --good-bg: #dff6ed;
+      --good-text: #0f5c45;
+      --mid-bg: #e8f0ff;
+      --mid-text: #1d4f91;
+      --low-bg: #fff1d8;
+      --low-text: #8a4b00;
+      --shadow: 0 20px 45px rgba(30, 45, 62, 0.10);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0 56px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.75fr);
+      gap: 20px;
+      align-items: stretch;
+      margin-bottom: 22px;
+    }
+
+    .hero-panel,
+    .goal-card,
+    .area {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+
+    .hero-panel {
+      padding: 30px;
+      border-radius: 8px;
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    p {
+      margin-top: 0;
+    }
+
+    h1 {
+      margin-bottom: 12px;
+      font-size: 54px;
+      line-height: 1.02;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 760px;
+      margin-bottom: 18px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .source-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .source-line code {
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: var(--panel-soft);
+      color: var(--text);
+    }
+
+    .facts {
+      display: grid;
+      gap: 12px;
+    }
+
+    .fact {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .fact strong {
+      display: block;
+      margin-bottom: 2px;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    .fact span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .goals {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 22px;
+    }
+
+    .goal-card {
+      min-width: 0;
+      padding: 18px;
+      border-radius: 8px;
+    }
+
+    .card-head,
+    .entry-top,
+    .area-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .goal-card h3 {
+      margin-bottom: 0;
+      font-size: 16px;
+      line-height: 1.25;
+    }
+
+    .percent {
+      color: var(--accent);
+      font-size: 26px;
+      font-weight: 850;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .meter {
+      height: 9px;
+      margin: 14px 0 12px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e6ebf0;
+    }
+
+    .meter-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    }
+
+    .meta-line {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      width: max-content;
+      max-width: 100%;
+      min-height: 24px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+
+    .chip.high {
+      background: var(--good-bg);
+      color: var(--good-text);
+    }
+
+    .chip.medium {
+      background: var(--mid-bg);
+      color: var(--mid-text);
+    }
+
+    .chip.low {
+      background: var(--low-bg);
+      color: var(--low-text);
+    }
+
+    .goal-card p,
+    .entry p {
+      color: var(--muted);
+    }
+
+    .plan {
+      margin-bottom: 0;
+    }
+
+    .plan strong {
+      color: var(--text);
+    }
+
+    .area-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 20px;
+    }
+
+    .area-nav a {
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .area-nav a:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .area {
+      margin-bottom: 18px;
+      overflow: hidden;
+      border-radius: 8px;
+    }
+
+    .area-head {
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-soft);
+    }
+
+    .area-head h2 {
+      margin-bottom: 2px;
+      font-size: 22px;
+    }
+
+    .area-head p,
+    .area-score span {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .area-score {
+      display: grid;
+      gap: 4px;
+      justify-items: end;
+      white-space: nowrap;
+    }
+
+    .entries {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--line);
+    }
+
+    .entry {
+      min-width: 0;
+      padding: 18px 20px;
+      background: var(--panel);
+    }
+
+    .entry h4 {
+      margin-bottom: 6px;
+      font-size: 16px;
+    }
+
+    .entry-score {
+      display: grid;
+      gap: 8px;
+      justify-items: end;
+      flex: 0 0 auto;
+      text-align: right;
+    }
+
+    .entry-score strong {
+      color: var(--accent);
+      font-size: 22px;
+      line-height: 1;
+    }
+
+    .notes {
+      margin-top: 24px;
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--muted);
+      box-shadow: var(--shadow);
+    }
+
+    .notes h2 {
+      margin-bottom: 8px;
+      color: var(--text);
+      font-size: 18px;
+    }
+
+    .notes ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    @media (max-width: 1020px) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+
+      .goals {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 720px) {
+      main {
+        width: min(100% - 20px, 1180px);
+        padding-top: 18px;
+      }
+
+      .hero-panel,
+      .goal-card,
+      .area-head,
+      .entry,
+      .notes {
+        padding: 16px;
+      }
+
+      h1 {
+        font-size: 36px;
+      }
+
+      .goals,
+      .entries {
+        grid-template-columns: 1fr;
+      }
+
+      .card-head,
+      .entry-top,
+      .area-head {
+        display: grid;
+      }
+
+      .entry-score,
+      .area-score {
+        justify-items: start;
+        text-align: left;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero" aria-labelledby="title">
+      <div class="hero-panel">
+        <p class="eyebrow">Project progress</p>
+        <h1 id="title">rustia progress dashboard</h1>
+        <p class="lead">Public rustia project readiness, based on the current workspace and canonical design docs. Actual grabby integration work is excluded from these estimates.</p>
+        <p class="source-line">
+          <span>Updated 2026-07-03</span>
+          <span>Source <code>design/progress.json</code></span>
+          <span>Generated by <code>design/render-progress.js</code></span>
+        </p>
+      </div>
+      <aside class="facts" aria-label="Current facts">
+        <div class="fact">
+          <strong>58%</strong>
+          <span>Whole public rustia project, 65% confidence</span>
+        </div>
+        <div class="fact">
+          <strong>64%</strong>
+          <span>Usable embedded scripting crate, 70% confidence</span>
+        </div>
+        <div class="fact">
+          <strong>683 / 480 / 0</strong>
+          <span>Conformance fixtures / refs / pending</span>
+        </div>
+        <div class="fact">
+          <strong>10/10</strong>
+          <span>Requested benchmark adapters present</span>
+        </div>
+        <div class="fact">
+          <strong>45%</strong>
+          <span>Public release readiness, 75% confidence</span>
+        </div>
+      </aside>
+    </section>
+
+    <section class="goals" aria-label="Overall goals">
+
+    <article class="goal-card">
+      <div class="card-head">
+        <h3>Whole public rustia project</h3>
+        <span class="percent">58%</span>
+      </div>
+
+    <div class="meter" aria-label="Whole public rustia project: 58% complete">
+      <div class="meter-fill" style="width: 58%"></div>
+    </div>
+
+      <div class="meta-line">
+        <span class="chip medium">65% confidence</span>
+      </div>
+      <p>Design is locked and production crates are substantial, but release, CI, and perf gates remain.</p>
+      <p class="plan"><strong>Next:</strong> Harden P1, finish benchmark gates, then move toward full public Luau parity.</p>
+    </article>
+
+    <article class="goal-card">
+      <div class="card-head">
+        <h3>Usable embedded scripting crate</h3>
+        <span class="percent">64%</span>
+      </div>
+
+    <div class="meter" aria-label="Usable embedded scripting crate: 64% complete">
+      <div class="meter-fill" style="width: 64%"></div>
+    </div>
+
+      <div class="meta-line">
+        <span class="chip medium">70% confidence</span>
+      </div>
+      <p>The rustia facade supports owned values, typed host functions, retained functions, serde, extensions, and hot reload.</p>
+      <p class="plan"><strong>Next:</strong> Stabilize API semantics, diagnostics, capability policy, and docs/examples.</p>
+    </article>
+
+    <article class="goal-card">
+      <div class="card-head">
+        <h3>Full public Luau engine release</h3>
+        <span class="percent">48%</span>
+      </div>
+
+    <div class="meter" aria-label="Full public Luau engine release: 48% complete">
+      <div class="meter-fill" style="width: 48%"></div>
+    </div>
+
+      <div class="meta-line">
+        <span class="chip low">58% confidence</span>
+      </div>
+      <p>Luau 0.709 target and conformance corpus are strong; production engine still needs perf and parity hardening.</p>
+      <p class="plan"><strong>Next:</strong> Complete P1/P2 runtime work, then P4 parity items such as module/loading, typechecker/LSP track, and release packaging.</p>
+    </article>
+
+    <article class="goal-card">
+      <div class="card-head">
+        <h3>Standalone benchmark OSS project</h3>
+        <span class="percent">64%</span>
+      </div>
+
+    <div class="meter" aria-label="Standalone benchmark OSS project: 64% complete">
+      <div class="meter-fill" style="width: 64%"></div>
+    </div>
+
+      <div class="meta-line">
+        <span class="chip high">80% confidence</span>
+      </div>
+      <p>Harness, history, static site, five default workload families, and all 10 requested adapters are present.</p>
+      <p class="plan"><strong>Next:</strong> Split from workspace, expand workloads, wire CI, and publish charts/history.</p>
+    </article>
+
+    <article class="goal-card">
+      <div class="card-head">
+        <h3>Public release readiness</h3>
+        <span class="percent">45%</span>
+      </div>
+
+    <div class="meter" aria-label="Public release readiness: 45% complete">
+      <div class="meter-fill" style="width: 45%"></div>
+    </div>
+
+      <div class="meta-line">
+        <span class="chip medium">75% confidence</span>
+      </div>
+      <p>License is set and docs are strong; crates are still workspace-private and CI/release polish is absent.</p>
+      <p class="plan"><strong>Next:</strong> Prepare publishable crate metadata, examples, semver policy, and public benchmark claims.</p>
+    </article>
+
+    </section>
+
+    <nav class="area-nav" aria-label="Progress areas">
+      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 62%</a><a href="#embedded-api">Embedded API 59%</a><a href="#benchmarks">Benchmarks 66%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 54%</a><a href="#packaging">Packaging 30%</a>
+    </nav>
+
+
+    <section class="area" id="design">
+      <div class="area-head">
+        <div>
+          <h2>Design</h2>
+          <p>5 tracked items</p>
+        </div>
+        <div class="area-score">
+          <span>92% avg complete</span>
+          <span>86% avg confidence</span>
+        </div>
+      </div>
+      <div class="entries">
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Constraint and target model</h4>
+          <p>Core priorities, target matrix, and public/private boundary are documented.</p>
+        </div>
+        <div class="entry-score">
+          <strong>95%</strong>
+          <span class="chip high">90% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Constraint and target model: 95% complete">
+      <div class="meter-fill" style="width: 95%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Keep docs synced as implementation exposes new constraints.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Architecture decisions</h4>
+          <p>All eight architecture axes are decided in design/30-architecture.md.</p>
+        </div>
+        <div class="entry-score">
+          <strong>92%</strong>
+          <span class="chip high">85% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Architecture decisions: 92% complete">
+      <div class="meter-fill" style="width: 92%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Reconfirm value-layout/dispatch on JSC and SpiderMonkey before final P1 lock.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Review cleanup</h4>
+          <p>Third-party review findings are folded into canonical docs.</p>
+        </div>
+        <div class="entry-score">
+          <strong>95%</strong>
+          <span class="chip high">90% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Review cleanup: 95% complete">
+      <div class="meter-fill" style="width: 95%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Treat new findings as incremental deltas, not a redesign.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Current-state tracking</h4>
+          <p>design/CURRENT.md is authoritative and current for implementation state.</p>
+        </div>
+        <div class="entry-score">
+          <strong>88%</strong>
+          <span class="chip high">82% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Current-state tracking: 88% complete">
+      <div class="meter-fill" style="width: 88%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Keep README, progress data, and design docs aligned after each major implementation slice.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Research spikes</h4>
+          <p>Dispatch, value layout, libm determinism, GC, snapshot, and wasm-JIT directions are backed by spikes.</p>
+        </div>
+        <div class="entry-score">
+          <strong>90%</strong>
+          <span class="chip high">85% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Research spikes: 90% complete">
+      <div class="meter-fill" style="width: 90%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Keep spike outputs as evidence, but move production claims to benchmark gates.</p>
+    </article>
+
+      </div>
+    </section>
+
+    <section class="area" id="luau-target">
+      <div class="area-head">
+        <div>
+          <h2>Luau target</h2>
+          <p>1 tracked item</p>
+        </div>
+        <div class="area-score">
+          <span>95% avg complete</span>
+          <span>92% avg confidence</span>
+        </div>
+      </div>
+      <div class="entries">
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Luau 0.709 pin</h4>
+          <p>Target version, standalone surface, vector width, flags posture, and f64-only behavior are documented.</p>
+        </div>
+        <div class="entry-score">
+          <strong>95%</strong>
+          <span class="chip high">92% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Luau 0.709 pin: 95% complete">
+      <div class="meter-fill" style="width: 95%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Watch upstream FFlag::LuauIntegerType2 and update only with explicit evidence.</p>
+    </article>
+
+      </div>
+    </section>
+
+    <section class="area" id="conformance">
+      <div class="area-head">
+        <div>
+          <h2>Conformance</h2>
+          <p>3 tracked items</p>
+        </div>
+        <div class="area-score">
+          <span>88% avg complete</span>
+          <span>87% avg confidence</span>
+        </div>
+      </div>
+      <div class="entries">
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Manifest and refs</h4>
+          <p>683 fixtures and 480 refs are executable with 0 pending rows.</p>
+        </div>
+        <div class="entry-score">
+          <strong>90%</strong>
+          <span class="chip high">90% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Manifest and refs: 90% complete">
+      <div class="meter-fill" style="width: 90%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Add focused fixtures for newly found gaps instead of reopening bulk inventory.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Upstream corpus execution</h4>
+          <p>Whole upstream Luau 0.709 conformance scripts are represented through executable fixtures.</p>
+        </div>
+        <div class="entry-score">
+          <strong>88%</strong>
+          <span class="chip high">85% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Upstream corpus execution: 88% complete">
+      <div class="meter-fill" style="width: 88%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Preserve green status while hardening engine internals.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Harness and coverage notes</h4>
+          <p>Runner, manifest validation, and detailed coverage notes are in-tree.</p>
+        </div>
+        <div class="entry-score">
+          <strong>86%</strong>
+          <span class="chip high">85% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Harness and coverage notes: 86% complete">
+      <div class="meter-fill" style="width: 86%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Add coverage metadata for new public-parity features as they land.</p>
+    </article>
+
+      </div>
+    </section>
+
+    <section class="area" id="frontend">
+      <div class="area-head">
+        <div>
+          <h2>Frontend</h2>
+          <p>4 tracked items</p>
+        </div>
+        <div class="area-score">
+          <span>78% avg complete</span>
+          <span>68% avg confidence</span>
+        </div>
+      </div>
+      <div class="entries">
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Lexer</h4>
+          <p>Production lexer crate exists with tests.</p>
+        </div>
+        <div class="entry-score">
+          <strong>82%</strong>
+          <span class="chip medium">70% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Lexer: 82% complete">
+      <div class="meter-fill" style="width: 82%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Expand edge-case coverage as conformance finds parser/lexer gaps.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Parser</h4>
+          <p>Hand-written parser handles Luau syntax and type-grammar erasure.</p>
+        </div>
+        <div class="entry-score">
+          <strong>78%</strong>
+          <span class="chip medium">68% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Parser: 78% complete">
+      <div class="meter-fill" style="width: 78%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Continue differential and conformance-driven hardening.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Type grammar parse-and-erase</h4>
+          <p>Type syntax is parsed for runtime erasure; no typechecker is intended for P1.</p>
+        </div>
+        <div class="entry-score">
+          <strong>80%</strong>
+          <span class="chip medium">70% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Type grammar parse-and-erase: 80% complete">
+      <div class="meter-fill" style="width: 80%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Defer gradual typechecker/LSP work to public-parity phase.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Compiler</h4>
+          <p>Production compiler emits bytecode and supports conformance-specific paths.</p>
+        </div>
+        <div class="entry-score">
+          <strong>72%</strong>
+          <span class="chip medium">65% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Compiler: 72% complete">
+      <div class="meter-fill" style="width: 72%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Harden constant folding, diagnostics, superinstructions, and optimization boundaries.</p>
+    </article>
+
+      </div>
+    </section>
+
+    <section class="area" id="vm-runtime">
+      <div class="area-head">
+        <div>
+          <h2>VM/runtime</h2>
+          <p>7 tracked items</p>
+        </div>
+        <div class="area-score">
+          <span>73% avg complete</span>
+          <span>68% avg confidence</span>
+        </div>
+      </div>
+      <div class="entries">
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Bytecode dispatch core</h4>
+          <p>Portable interpreter exists; big-match/br-table direction is locked.</p>
+        </div>
+        <div class="entry-score">
+          <strong>70%</strong>
+          <span class="chip medium">65% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Bytecode dispatch core: 70% complete">
+      <div class="meter-fill" style="width: 70%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Add hot/cold split, benchmark call_ref, and maintain fusion-invariant fuel.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Value representation</h4>
+          <p>16-byte tagged value direction is implemented and documented.</p>
+        </div>
+        <div class="entry-score">
+          <strong>76%</strong>
+          <span class="chip medium">75% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Value representation: 76% complete">
+      <div class="meter-fill" style="width: 76%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Keep representation sealed until JSC/SpiderMonkey measurements close the gate.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Heap and GC</h4>
+          <p>gc-arena direction is chosen and production heap code exists.</p>
+        </div>
+        <div class="entry-score">
+          <strong>62%</strong>
+          <span class="chip medium">65% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Heap and GC: 62% complete">
+      <div class="meter-fill" style="width: 62%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Tune Standard pacing and DeterministicSim instruction-count collection intervals.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Tables/metatables</h4>
+          <p>Broad table, metatable, iteration, and stdlib table behavior is conformance-covered.</p>
+        </div>
+        <div class="entry-score">
+          <strong>78%</strong>
+          <span class="chip medium">70% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Tables/metatables: 78% complete">
+      <div class="meter-fill" style="width: 78%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Continue parity hardening and performance work.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Functions/coroutines/pcall</h4>
+          <p>Functions, closures, varargs, coroutines, and protected calls have broad coverage.</p>
+        </div>
+        <div class="entry-score">
+          <strong>76%</strong>
+          <span class="chip medium">70% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Functions/coroutines/pcall: 76% complete">
+      <div class="meter-fill" style="width: 76%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Keep stackless recursion and yield paths covered as runtime changes.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Base/math/string/bit32/vector/utf8 stdlib</h4>
+          <p>Major Luau stdlib surfaces are covered by fixtures.</p>
+        </div>
+        <div class="entry-score">
+          <strong>78%</strong>
+          <span class="chip medium">68% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Base/math/string/bit32/vector/utf8 stdlib: 78% complete">
+      <div class="meter-fill" style="width: 78%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Fill remaining public-parity libraries and edge cases.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Error/debug behavior</h4>
+          <p>Debug/error behavior is substantially covered for conformance.</p>
+        </div>
+        <div class="entry-score">
+          <strong>72%</strong>
+          <span class="chip medium">65% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Error/debug behavior: 72% complete">
+      <div class="meter-fill" style="width: 72%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Tighten diagnostics and source-span reporting for public API use.</p>
+    </article>
+
+      </div>
+    </section>
+
+    <section class="area" id="determinism">
+      <div class="area-head">
+        <div>
+          <h2>Determinism</h2>
+          <p>4 tracked items</p>
+        </div>
+        <div class="area-score">
+          <span>62% avg complete</span>
+          <span>75% avg confidence</span>
+        </div>
+      </div>
+      <div class="entries">
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>f64/libm/canonicalization discipline</h4>
+          <p>Deterministic number policy is documented and partly enforced by tests.</p>
+        </div>
+        <div class="entry-score">
+          <strong>75%</strong>
+          <span class="chip medium">75% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="f64/libm/canonicalization discipline: 75% complete">
+      <div class="meter-fill" style="width: 75%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Keep compiler and VM on the same libm/canonicalization rules.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Runtime profiles</h4>
+          <p>LuauCompat, ReproducibleStandard, and DeterministicSim are defined; public APIs expose profiles.</p>
+        </div>
+        <div class="entry-score">
+          <strong>74%</strong>
+          <span class="chip medium">75% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Runtime profiles: 74% complete">
+      <div class="meter-fill" style="width: 74%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Refine exact capability behavior and profile-specific GC policy.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Fuel and limits</h4>
+          <p>Instruction fuel exists and is part of the design contract.</p>
+        </div>
+        <div class="entry-score">
+          <strong>70%</strong>
+          <span class="chip medium">70% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Fuel and limits: 70% complete">
+      <div class="meter-fill" style="width: 70%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Version fuel costs and keep superinstructions fuel-invariant.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Cross-engine wasm proof</h4>
+          <p>V8 evidence exists; JSC and SpiderMonkey are still open gates.</p>
+        </div>
+        <div class="entry-score">
+          <strong>30%</strong>
+          <span class="chip high">80% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Cross-engine wasm proof: 30% complete">
+      <div class="meter-fill" style="width: 30%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Build real wasm measurement harness and record golden results.</p>
+    </article>
+
+      </div>
+    </section>
+
+    <section class="area" id="embedded-api">
+      <div class="area-head">
+        <div>
+          <h2>Embedded API</h2>
+          <p>9 tracked items</p>
+        </div>
+        <div class="area-score">
+          <span>59% avg complete</span>
+          <span>71% avg confidence</span>
+        </div>
+      </div>
+      <div class="entries">
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Koto-shaped facade</h4>
+          <p>Builder, compile/run, globals, exports, and function calls exist.</p>
+        </div>
+        <div class="entry-score">
+          <strong>70%</strong>
+          <span class="chip medium">75% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Koto-shaped facade: 70% complete">
+      <div class="meter-fill" style="width: 70%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Stabilize names, error types, examples, and migration docs.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Owned value firewall</h4>
+          <p>OwnedValue, owned tables/keys, and conversions exist.</p>
+        </div>
+        <div class="entry-score">
+          <strong>72%</strong>
+          <span class="chip medium">75% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Owned value firewall: 72% complete">
+      <div class="meter-fill" style="width: 72%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Harden conversion coverage and avoid leaking internal GC lifetimes.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Typed host functions</h4>
+          <p>Plain Rust functions can be registered with typed args/results.</p>
+        </div>
+        <div class="entry-score">
+          <strong>68%</strong>
+          <span class="chip medium">75% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Typed host functions: 68% complete">
+      <div class="meter-fill" style="width: 68%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Expand arity/signature support and improve diagnostics.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Extension/linker layer</h4>
+          <p>Namespaced extensions and coarse capabilities exist.</p>
+        </div>
+        <div class="entry-score">
+          <strong>58%</strong>
+          <span class="chip medium">70% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Extension/linker layer: 58% complete">
+      <div class="meter-fill" style="width: 58%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Add richer capability metadata, fuel costs, and policy validation.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Public host-bridge seam</h4>
+          <p>The generic seam for deterministic host functions, typed slots, and effect ordering is documented without public grabby types.</p>
+        </div>
+        <div class="entry-score">
+          <strong>62%</strong>
+          <span class="chip medium">75% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Public host-bridge seam: 62% complete">
+      <div class="meter-fill" style="width: 62%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Keep public rustia generic while strengthening capability enforcement and scratch-heap rules.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Serde bridge</h4>
+          <p>Owned-value serde paths exist.</p>
+        </div>
+        <div class="entry-score">
+          <strong>62%</strong>
+          <span class="chip medium">70% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Serde bridge: 62% complete">
+      <div class="meter-fill" style="width: 62%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Add zero-copy live-value deserialization after the public surface stabilizes.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Retained handles</h4>
+          <p>Script function handles can be retained and called.</p>
+        </div>
+        <div class="entry-score">
+          <strong>58%</strong>
+          <span class="chip medium">65% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Retained handles: 58% complete">
+      <div class="meter-fill" style="width: 58%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Define invalidation/versioning behavior around hot reload.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Hot reload</h4>
+          <p>Compile/install/hot-reload entry points exist.</p>
+        </div>
+        <div class="entry-score">
+          <strong>50%</strong>
+          <span class="chip medium">65% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Hot reload: 50% complete">
+      <div class="meter-fill" style="width: 50%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Guarantee old-program survival, diagnostics, and handle semantics on reload failure.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Macro/codegen sugar</h4>
+          <p>Macro sugar exists as an early slice, but the lower-level API should lead.</p>
+        </div>
+        <div class="entry-score">
+          <strong>35%</strong>
+          <span class="chip medium">65% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Macro/codegen sugar: 35% complete">
+      <div class="meter-fill" style="width: 35%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Delay expansion until the core API stops moving.</p>
+    </article>
+
+      </div>
+    </section>
+
+    <section class="area" id="benchmarks">
+      <div class="area-head">
+        <div>
+          <h2>Benchmarks</h2>
+          <p>5 tracked items</p>
+        </div>
+        <div class="area-score">
+          <span>66% avg complete</span>
+          <span>85% avg confidence</span>
+        </div>
+      </div>
+      <div class="entries">
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Harness CLI and schema</h4>
+          <p>bench/ has a standalone-style CLI, JSONL history schema, and generated RESULTS.md.</p>
+        </div>
+        <div class="entry-score">
+          <strong>80%</strong>
+          <span class="chip high">85% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Harness CLI and schema: 80% complete">
+      <div class="meter-fill" style="width: 80%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Keep JSONL as the source of truth for CI and website data.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Adapter matrix</h4>
+          <p>All 10 requested adapters are implemented; mlua-lua54 runs as a separate binary from Luau because of mlua-sys linking constraints.</p>
+        </div>
+        <div class="entry-score">
+          <strong>100%</strong>
+          <span class="chip high">88% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Adapter matrix: 100% complete">
+      <div class="meter-fill" style="width: 100%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Split adapters into standalone crates/binaries and keep baselines current.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Workloads</h4>
+          <p>Five default workload families are wired, with 11 Luau workload seeds and partial cross-engine coverage present.</p>
+        </div>
+        <div class="entry-score">
+          <strong>60%</strong>
+          <span class="chip medium">78% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Workloads: 60% complete">
+      <div class="meter-fill" style="width: 60%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Expand toward the 11-15 workload plan including interop, serde, fuel, and string building.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>History and static site</h4>
+          <p>Append-only history, markdown results, and dependency-free dashboard files are present.</p>
+        </div>
+        <div class="entry-score">
+          <strong>74%</strong>
+          <span class="chip high">82% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="History and static site: 74% complete">
+      <div class="meter-fill" style="width: 74%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Publish long-run history and richer charts after standalone split.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Benchmark CI</h4>
+          <p>CI workflow wiring is not present.</p>
+        </div>
+        <div class="entry-score">
+          <strong>15%</strong>
+          <span class="chip high">90% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Benchmark CI: 15% complete">
+      <div class="meter-fill" style="width: 15%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Add self-hosted [self-hosted, bench] workflows after runner setup is confirmed.</p>
+    </article>
+
+      </div>
+    </section>
+
+    <section class="area" id="wasm-perf">
+      <div class="area-head">
+        <div>
+          <h2>Wasm/perf</h2>
+          <p>2 tracked items</p>
+        </div>
+        <div class="area-score">
+          <span>38% avg complete</span>
+          <span>73% avg confidence</span>
+        </div>
+      </div>
+      <div class="entries">
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Wasm-emit JIT spike</h4>
+          <p>Runtime wasm emission is validated in spikes, not production-integrated.</p>
+        </div>
+        <div class="entry-score">
+          <strong>45%</strong>
+          <span class="chip medium">70% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Wasm-emit JIT spike: 45% complete">
+      <div class="meter-fill" style="width: 45%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Add type guards/deopt and interpreter-equivalence checks before production use.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Native/wasm matrix</h4>
+          <p>Native baselines are being recorded; full wasm engine matrix is deferred.</p>
+        </div>
+        <div class="entry-score">
+          <strong>30%</strong>
+          <span class="chip medium">75% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Native/wasm matrix: 30% complete">
+      <div class="meter-fill" style="width: 30%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Measure V8, SpiderMonkey, and JSC on production rustia wasm.</p>
+    </article>
+
+      </div>
+    </section>
+
+    <section class="area" id="tooling">
+      <div class="area-head">
+        <div>
+          <h2>Tooling</h2>
+          <p>3 tracked items</p>
+        </div>
+        <div class="area-score">
+          <span>54% avg complete</span>
+          <span>70% avg confidence</span>
+        </div>
+      </div>
+      <div class="entries">
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Workspace tests</h4>
+          <p>Production crates have meaningful unit and conformance tests.</p>
+        </div>
+        <div class="entry-score">
+          <strong>72%</strong>
+          <span class="chip medium">75% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Workspace tests: 72% complete">
+      <div class="meter-fill" style="width: 72%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Keep expanding tests with new runtime/API work.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>CLI</h4>
+          <p>rustia-cli exists as a runner surface.</p>
+        </div>
+        <div class="entry-score">
+          <strong>55%</strong>
+          <span class="chip medium">65% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="CLI: 55% complete">
+      <div class="meter-fill" style="width: 55%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Improve REPL/run ergonomics and diagnostic presentation.</p>
+    </article>
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Live wasm demo</h4>
+          <p>demos/live-wasm can build and serve a browser demo outside normal workspace gates.</p>
+        </div>
+        <div class="entry-score">
+          <strong>35%</strong>
+          <span class="chip medium">70% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Live wasm demo: 35% complete">
+      <div class="meter-fill" style="width: 35%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Refresh after production wasm/perf work and make it a public example.</p>
+    </article>
+
+      </div>
+    </section>
+
+    <section class="area" id="packaging">
+      <div class="area-head">
+        <div>
+          <h2>Packaging</h2>
+          <p>1 tracked item</p>
+        </div>
+        <div class="area-score">
+          <span>30% avg complete</span>
+          <span>80% avg confidence</span>
+        </div>
+      </div>
+      <div class="entries">
+
+    <article class="entry">
+      <div class="entry-top">
+        <div>
+          <h4>Crate publishability</h4>
+          <p>Workspace crates are publish = false.</p>
+        </div>
+        <div class="entry-score">
+          <strong>30%</strong>
+          <span class="chip high">80% confidence</span>
+        </div>
+      </div>
+
+    <div class="meter" aria-label="Crate publishability: 30% complete">
+      <div class="meter-fill" style="width: 30%"></div>
+    </div>
+
+      <p class="plan"><strong>Future plan:</strong> Add crate metadata, examples, feature policy, and release checklist.</p>
+    </article>
+
+      </div>
+    </section>
+
+
+    <section class="notes">
+      <h2>Scope Notes</h2>
+      <ul>
+        <li>Excluded: Actual grabby integration work.</li>
+        <li>mlua-lua54 runs separately from mlua-luau because both mlua-sys builds use links = &quot;lua&quot;.</li>
+        <li>Percentages are rough engineering estimates, not automated metrics.</li>
+        <li>The scope tracks public rustia crates, conformance, benchmarks, docs, tooling, and release readiness.</li>
+        <li>The public host-bridge remains generic; grabby-specific types and effect catalogs stay outside public rustia.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
