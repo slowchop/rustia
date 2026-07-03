@@ -192,7 +192,7 @@ const ENGINE_SLOTS: &[EngineSlot] = &[
         dialect: Dialect::Luau,
         feature: Some("mlua-luau"),
         enabled: cfg!(feature = "mlua-luau"),
-        implemented: false,
+        implemented: cfg!(feature = "mlua-luau"),
     },
     EngineSlot {
         id: "rhai",
@@ -560,6 +560,8 @@ fn prepare(
         "rustia" => Ok(Box::new(RustiaPrepared::new(_workload, _source)?)),
         #[cfg(feature = "koto")]
         "koto" => Ok(Box::new(KotoPrepared::new(_workload, _source)?)),
+        #[cfg(feature = "mlua-luau")]
+        "mlua-luau" => Ok(Box::new(MluaLuauPrepared::new(_workload, _source)?)),
         id => Err(Error::new(format!(
             "engine adapter {id:?} is not implemented yet"
         ))),
@@ -719,6 +721,54 @@ fn koto_checksum(value: &koto::prelude::KValue) -> String {
     }
 }
 
+#[cfg(feature = "mlua-luau")]
+struct MluaLuauPrepared {
+    _lua: mlua::Lua,
+    function: mlua::Function,
+}
+
+#[cfg(feature = "mlua-luau")]
+impl MluaLuauPrepared {
+    fn new(workload: &Workload, source: &str) -> Result<Self> {
+        let lua = mlua::Lua::new();
+        let function = lua
+            .load(source)
+            .eval::<mlua::Function>()
+            .map_err(|error| Error::new(format!("initialize {} failed: {error}", workload.id)))?;
+        Ok(Self {
+            _lua: lua,
+            function,
+        })
+    }
+}
+
+#[cfg(feature = "mlua-luau")]
+impl PreparedWorkload for MluaLuauPrepared {
+    fn run(&mut self, n: u64) -> Result<String> {
+        let n = i64::try_from(n).map_err(|_| Error::new("mlua-luau n exceeded i64::MAX"))?;
+        let result = self
+            .function
+            .call::<mlua::Value>(n)
+            .map_err(|error| Error::new(format!("mlua-luau workload call failed: {error}")))?;
+        Ok(mlua_checksum(&result))
+    }
+}
+
+#[cfg(feature = "mlua-luau")]
+fn mlua_checksum(value: &mlua::Value) -> String {
+    match value {
+        mlua::Value::Nil => "nil".to_owned(),
+        mlua::Value::Boolean(value) => format!("bool:{value}"),
+        mlua::Value::Integer(value) => format!("i64:{value}"),
+        mlua::Value::Number(value) => format!("f64:{value:.17}"),
+        mlua::Value::String(value) => match value.to_str() {
+            Ok(text) => format!("string:{text}"),
+            Err(_) => format!("bytes:{}", value.as_bytes().len()),
+        },
+        other => format!("{}", other.type_name()),
+    }
+}
+
 #[cfg(feature = "rustia-engine")]
 fn value_checksum(vm: &mut Vm, value: Value) -> Result<String> {
     match value.kind() {
@@ -828,7 +878,7 @@ fn json_escape(value: &str) -> String {
 }
 
 fn git_commit() -> String {
-    Command::new("git")
+    let commit = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
         .ok()
@@ -839,7 +889,26 @@ fn git_commit() -> String {
                 .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
         })
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "unknown".to_owned())
+        .unwrap_or_else(|| "unknown".to_owned());
+    if commit != "unknown" && git_worktree_dirty() {
+        format!("{commit}-dirty")
+    } else {
+        commit
+    }
+}
+
+fn git_worktree_dirty() -> bool {
+    let unstaged_dirty = Command::new("git")
+        .args(["diff", "--quiet", "--ignore-submodules", "--"])
+        .status()
+        .map(|status| !status.success())
+        .unwrap_or(false);
+    let staged_dirty = Command::new("git")
+        .args(["diff", "--cached", "--quiet", "--ignore-submodules", "--"])
+        .status()
+        .map(|status| !status.success())
+        .unwrap_or(false);
+    unstaged_dirty || staged_dirty
 }
 
 fn unix_time() -> u64 {

@@ -38,11 +38,12 @@ The matrix switch is present now:
 cargo run -p script-bench-harness --features all-engines -- --list
 ```
 
-In this first slice, `rustia` works through the default `rustia-engine` feature
-and `koto` works with `--features koto`. The crate also builds with
-`--no-default-features` so the standalone harness shell is not tied to rustia
-internals. The other adapters intentionally report `adapter pending`; see
-`ADAPTERS.md` for the dependency split required before wiring them in.
+In this slice, `rustia` works through the default `rustia-engine` feature,
+`koto` works with `--features koto`, and the Luau oracle comparison works with
+`--features mlua-luau`. The crate also builds with `--no-default-features` so
+the standalone harness shell is not tied to rustia internals. The other adapters
+intentionally report `adapter pending`; see `ADAPTERS.md` for the dependency
+split required before wiring them in.
 
 ## History Schema
 

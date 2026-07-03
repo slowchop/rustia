@@ -22,7 +22,7 @@ all-engines = [
 rustia-engine = ["dep:rustia-compiler", "dep:rustia-parser", "dep:rustia-vm"]
 boa = []
 koto = ["dep:koto"]
-mlua-luau = []
+mlua-luau = ["dep:mlua"]
 mlua-lua54 = []
 rhai-engine = []
 roto = []
@@ -35,6 +35,7 @@ rustia-compiler = { workspace = true, optional = true }
 rustia-parser = { workspace = true, optional = true }
 rustia-vm = { workspace = true, optional = true }
 koto = { version = "0.16", default-features = false, features = ["arc"], optional = true }
+mlua = { version = "0.11", default-features = false, features = ["luau"], optional = true }
 
 [lints]
 workspace = true
