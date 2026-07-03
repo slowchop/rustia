@@ -401,7 +401,7 @@
       </div>
       <aside class="facts" aria-label="Current facts">
         <div class="fact">
-          <strong>76%</strong>
+          <strong>77%</strong>
           <span>Whole public rustia project, 65% confidence</span>
         </div>
         <div class="fact">
@@ -428,17 +428,17 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Whole public rustia project</h3>
-        <span class="percent">76%</span>
+        <span class="percent">77%</span>
       </div>
 
-    <div class="meter" aria-label="Whole public rustia project: 76% complete">
-      <div class="meter-fill" style="width: 76%"></div>
+    <div class="meter" aria-label="Whole public rustia project: 77% complete">
+      <div class="meter-fill" style="width: 77%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip medium">65% confidence</span>
       </div>
-      <p>Design is locked and production crates are substantial, with crate metadata, release-preflight-enforced examples, first migration guide, CLI ergonomics including a line-oriented REPL, source-aware CLI diagnostics, public source-span/runtime-location error accessors, source-named facade diagnostics, typed/nested owned-table helpers, typed and fallible host diagnostic polish, host signature/fuel ABI metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics and current-generation accessors, generated leaf package dry-run checks, release preflight, and CI workflow wiring started; release packaging and perf gates remain.</p>
+      <p>Design is locked and production crates are substantial, with crate metadata, release-preflight-enforced examples, first migration guide, CLI ergonomics including a line-oriented REPL, source-aware CLI diagnostics, public source-span/runtime-location error accessors, source-named facade diagnostics, typed/nested owned-table helpers, typed and fallible host diagnostic polish, host signature/fuel ABI metadata, capability-tagged host API helpers, retained-handle generation/freshness semantics and current-generation accessors, generated leaf package dry-run checks, release preflight, CI workflow wiring, and expanded benchmark workload source coverage started; release packaging and perf gates remain.</p>
       <p class="plan"><strong>Next:</strong> Harden P1, finish benchmark gates, then move toward full public Luau parity.</p>
     </article>
 
@@ -479,17 +479,17 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Standalone benchmark OSS project</h3>
-        <span class="percent">72%</span>
+        <span class="percent">73%</span>
       </div>
 
-    <div class="meter" aria-label="Standalone benchmark OSS project: 72% complete">
-      <div class="meter-fill" style="width: 72%"></div>
+    <div class="meter" aria-label="Standalone benchmark OSS project: 73% complete">
+      <div class="meter-fill" style="width: 73%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip high">80% confidence</span>
       </div>
-      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, all 10 requested adapters, and a manual self-hosted measurement workflow are present.</p>
+      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, and a manual self-hosted measurement workflow are present.</p>
       <p class="plan"><strong>Next:</strong> Split from workspace, expand workloads, publish long-run history, and automate tracking charts.</p>
     </article>
 
@@ -513,7 +513,7 @@
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 63%</a><a href="#embedded-api">Embedded API 70%</a><a href="#benchmarks">Benchmarks 74%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 65%</a><a href="#packaging">Packaging 62%</a>
+      <a href="#design">Design 92%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 73%</a><a href="#determinism">Determinism 63%</a><a href="#embedded-api">Embedded API 70%</a><a href="#benchmarks">Benchmarks 75%</a><a href="#wasm-perf">Wasm/perf 38%</a><a href="#tooling">Tooling 65%</a><a href="#packaging">Packaging 62%</a>
     </nav>
 
 
@@ -1263,7 +1263,7 @@
           <p>5 tracked items</p>
         </div>
         <div class="area-score">
-          <span>74% avg complete</span>
+          <span>75% avg complete</span>
           <span>85% avg confidence</span>
         </div>
       </div>
@@ -1311,19 +1311,19 @@
       <div class="entry-top">
         <div>
           <h4>Workloads</h4>
-          <p>Five default workload families are wired, with 11 Luau workload seeds and partial cross-engine coverage present.</p>
+          <p>Five default workload families are wired, with 12 workload entries present; the non-default #15 string-building/concat workload has source coverage and smoke-tested execution across all requested adapters.</p>
         </div>
         <div class="entry-score">
-          <strong>60%</strong>
-          <span class="chip medium">78% confidence</span>
+          <strong>65%</strong>
+          <span class="chip high">80% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Workloads: 60% complete">
-      <div class="meter-fill" style="width: 60%"></div>
+    <div class="meter" aria-label="Workloads: 65% complete">
+      <div class="meter-fill" style="width: 65%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Expand toward the 11-15 workload plan including interop, serde, fuel, and string building.</p>
+      <p class="plan"><strong>Future plan:</strong> Expand the remaining #12 interop, #13 serde, and #14 fuel/limit workload plan, then refresh intentional measurement history.</p>
     </article>
 
     <article class="entry">

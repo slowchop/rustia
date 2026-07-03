@@ -19,6 +19,11 @@ The default build runs the in-repo `rustia` adapter over five workload families:
 - `generic_iteration`
 - `stdlib_math_table`
 
+The inventory currently contains 12 workload entries. Non-default workloads are
+kept out of the committed current-results snapshot until they have intentional
+measurement history; `string_building` is wired across every requested adapter
+as the #15 string/concat workload source set.
+
 ```sh
 cargo run -p script-bench-harness --release -- --history bench/history/runs.jsonl
 ```

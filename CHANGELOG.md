@@ -18,7 +18,8 @@ Current unpublished workspace version: `0.0.1`.
 - `rustia-cli` renders source-aware diagnostics for compile and runtime
   failures when rustia exposes source-span or runtime-line evidence.
 - The benchmark harness has current-results JSON/HTML, generated per-workload
-  claim gating, package-file history, and the requested adapter matrix.
+  claim gating, package-file history, the requested adapter matrix, and
+  cross-adapter source coverage for the non-default `string_building` workload.
 - Release preflight now composes release notes, package files, generated leaf
   package dry runs, progress HTML, benchmark result freshness, and workspace
   tests.

@@ -60,13 +60,14 @@ detail in the repo)
 **Current implementation slice:** `.github/workflows/ci.yml` runs release-preflight checks on hosted Linux CI
 without fresh benchmark measurements. `.github/workflows/benchmarks.yml` is a manual `workflow_dispatch`
 measurement job on `[self-hosted, bench]`; it appends current benchmark history in the checkout, regenerates the
-benchmark artifacts, verifies them, and uploads the resulting files. It does not yet publish the JSONL history
-back to a tracking branch or static host. `tools/check-workflows.js` guards the public workflow policy: hosted
-CI stays hosted, the benchmark job stays manual, and self-hosted labels stay exactly `[self-hosted, bench]`.
+benchmark artifacts, verifies them, and uploads the resulting files. The `bench` crate now enumerates all 10
+requested adapters, five default measured workloads, and 12 workload entries including cross-adapter source
+coverage for #15 `string_building`. It does not yet publish the JSONL history back to a tracking branch or static
+host. `tools/check-workflows.js` guards the public workflow policy: hosted CI stays hosted, the benchmark job
+stays manual, and self-hosted labels stay exactly `[self-hosted, bench]`.
 
-**Reserving rustia's column:** the `bench` crate enumerates engines by **cargo feature**; `rustia` is
-`cfg`-gated to a no-op stub emitting `— (pending P1)`. Baseline engines tracked **now**; flip the feature at P1
-→ column populates with zero CI/schema change.
+**Rustia's column:** the `bench` crate enumerates engines by **cargo feature**; `rustia` now runs through the
+default `rustia-engine` feature while the external adapters stay independently gated for standalone builds.
 
 ## ⚠️ P1-gating (important): the WASM matrix has nothing rustia to run yet
 mlua+Luau is native C; only koto compiles to wasm. So the V8/SpiderMonkey/**JSC** matrix + the JSC-in-CI

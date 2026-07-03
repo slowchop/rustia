@@ -18,8 +18,9 @@ interpreter is validated as **GO** by the earlier spikes and is now backed by th
 performance still needs the continuous benchmark gate before public claims. All 8 architecture axes are decided
 ([`30-architecture.md`](30-architecture.md) v3), 10 conformance-verified improvements are adopted
 ([`55-improvements.md`](55-improvements.md)), and the standalone benchmark harness has the engine/workload/history
-shell, static chart dashboard, and the `rustia`/`boa`/`koto`/`mlua-lua54`/`mlua-luau`/`rhai`/`roto`/`rquickjs`/
-`wasmi`/`wasmtime` native adapters in place.
+shell, static chart dashboard, 12 workload entries including cross-adapter `string_building` source coverage, and
+the `rustia`/`boa`/`koto`/`mlua-lua54`/`mlua-luau`/`rhai`/`roto`/`rquickjs`/`wasmi`/`wasmtime` native adapters in
+place.
 Its generated [`../bench/CLAIMS.md`](../bench/CLAIMS.md) gate keeps public benchmark language per-workload and
 currently approves no blanket speed headline from the committed snapshot.
 The public API now has release-preflight-enforced compile-checked examples for embedding and hot reload, plus a
@@ -41,10 +42,10 @@ benchmark measurement workflow that targets only the generic `[self-hosted, benc
    deterministic f64/libm behavior, table-key `-0` normalization, and profile-specific GC behavior covered by
    tests while performance work proceeds.
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
-   The runner already exposes the requested engine matrix, five default workloads, extra workload slots,
-   append-only JSONL history, package metadata, split notes, static dashboard files, and a manual self-hosted
-   measurement workflow. Next work is the actual standalone-project split, longer-run public history, and
-   automated tracking publication.
+   The runner already exposes the requested engine matrix, five default workloads, 12 workload entries including
+   source-covered `string_building`, append-only JSONL history, package metadata, split notes, static dashboard
+   files, and a manual self-hosted measurement workflow. Next work is the actual standalone-project split,
+   longer-run public history, and automated tracking publication.
 3. **Keep the Luau 0.709 conformance corpus green**. The current repo has 684 executable fixtures covering 481
    behavior refs with no pending rows; new engine work should add focused fixtures rather than re-opening
    pending inventory.
@@ -60,14 +61,15 @@ watch).
 `private/` mount are in [`CLAUDE.md`](../CLAUDE.md); no Linear.
 
 ## Canonical claims (corrected — supersede any stronger wording elsewhere)
-- **Perf — state it PER-WORKLOAD, not as a blanket "~5× koto"** (review H2, now measured on an 11-workload
+- **Perf — state it PER-WORKLOAD, not as a blanket "~5× koto"** (review H2, measured on an 11-workload
   reference-Luau baseline). Reference Luau is **~4.7–9× faster than koto** on tables/closures/coroutines/
   stdlib-math, but **≈ parity on generic iteration** and **koto is *faster* on pcall/xpcall** — so the honest
   public claim is "at/near reference-Luau parity, per-workload," and `generic_iteration` + `pcall` are
   **must-match** workloads. Two distinct koto multipliers: the **float-path ~5–9×** (measured) and the
   **deterministic-path ~30–40×** (the sim's *real* incumbent — host fxmul/curve, per `ai_bakeoff`). The fused-op
-  sub-µs (~0.2 µs) is **bespoke/private-fork, kernel-specific**. The 11-workload suite is now the **CI
-  regression gate**; rustia's own numbers come when the engine boots.
+  sub-µs (~0.2 µs) is **bespoke/private-fork, kernel-specific**. The committed benchmark crate now has five
+  default measured workloads plus a source-covered #15 `string_building` workload; rustia's public numbers still
+  need the continuous benchmark gate before claims.
 - **wasm cross-engine is a PRE-LOCK GATE (still open):** only V8 (Chrome/node/deno) is measured. **JSC
   (Safari/iOS-WKWebView) + SpiderMonkey (Firefox) MUST be measured before the value-layout/wasm lock.**
   Wasm-3.0 pass done: `br_table` dispatch stays (tail-calls/`call_ref` don't reopen it — `call_ref` is a cheap

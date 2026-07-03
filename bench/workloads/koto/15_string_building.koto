@@ -1,0 +1,12 @@
+# Koto equivalent of string_building: interpolation plus repeated string concatenation.
+export f = |n|
+  fragments = ['alpha', 'beta', 'gamma', 'delta']
+  fragment_count = size fragments
+  checksum = 0
+  for it in 0..n
+    s = ''
+    for i in 0..64
+      fragment = fragments[(i + it) % fragment_count]
+      s = s + '{fragment}:{i % 17}:{it % 31}|'
+    checksum += size s
+  checksum

@@ -1,0 +1,31 @@
+// Workload: StringBuf-backed string building.
+// unit = build 64 mixed string/number fragments and measure the result length.
+
+fn fragment(selector: u64) -> String {
+    let index: u64 = selector % 4;
+    if index == 0 {
+        "alpha"
+    } else if index == 1 {
+        "beta"
+    } else if index == 2 {
+        "gamma"
+    } else {
+        "delta"
+    }
+}
+
+fn f(n: u64) -> u64 {
+    let checksum: u64 = 0;
+    let it: u64 = 0;
+    while it < n {
+        let buf = StringBuf.new();
+        let i: u64 = 0;
+        while i < 64 {
+            buf.push_string(f"{fragment(i + it)}:{i % 17}:{it % 31}|");
+            i = i + 1;
+        }
+        checksum = checksum + buf.as_string().bytes().len();
+        it = it + 1;
+    }
+    checksum
+}

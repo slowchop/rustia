@@ -151,6 +151,12 @@ const WORKLOADS: &[Workload] = &[
         unit: "serialize+parse 32-record round trip",
         default: false,
     },
+    Workload {
+        id: "string_building",
+        file_stem: "15_string_building",
+        unit: "build+concat 64 string fragments",
+        default: false,
+    },
 ];
 
 #[derive(Clone, Copy)]
@@ -1148,6 +1154,7 @@ fn rhai_checksum(value: &rhai::Dynamic) -> String {
 #[cfg(feature = "roto")]
 enum RotoFunction {
     I64(roto::TypedFunc<roto::NoCtx, fn(u64) -> i64>),
+    U64(roto::TypedFunc<roto::NoCtx, fn(u64) -> u64>),
     F64(roto::TypedFunc<roto::NoCtx, fn(u64) -> f64>),
 }
 
@@ -1163,22 +1170,24 @@ impl RotoPrepared {
         let mut package = roto::FileTree::test_file(workload.id, source, 0)
             .compile(&runtime)
             .map_err(|error| Error::new(format!("compile {} failed: {error}", workload.id)))?;
-        let function = if workload.id == "stdlib_math_table" {
-            RotoFunction::F64(
+        let function = match workload.id {
+            "stdlib_math_table" => RotoFunction::F64(
                 package
                     .get_function::<fn(u64) -> f64>("f")
                     .map_err(|error| {
                         Error::new(format!("get roto function {} failed: {error}", workload.id))
                     })?,
-            )
-        } else {
-            RotoFunction::I64(
+            ),
+            "string_building" => RotoFunction::U64(
                 package
-                    .get_function::<fn(u64) -> i64>("f")
+                    .get_function::<fn(u64) -> u64>("f")
                     .map_err(|error| {
                         Error::new(format!("get roto function {} failed: {error}", workload.id))
                     })?,
-            )
+            ),
+            _ => RotoFunction::I64(package.get_function::<fn(u64) -> i64>("f").map_err(
+                |error| Error::new(format!("get roto function {} failed: {error}", workload.id)),
+            )?),
         };
         Ok(Self { function })
     }
@@ -1189,6 +1198,7 @@ impl PreparedWorkload for RotoPrepared {
     fn run(&mut self, n: u64) -> Result<String> {
         match &self.function {
             RotoFunction::I64(function) => Ok(format!("i64:{}", function.call(n))),
+            RotoFunction::U64(function) => Ok(format!("u64:{}", function.call(n))),
             RotoFunction::F64(function) => Ok(format!("f64:{:.17}", function.call(n))),
         }
     }
@@ -1967,7 +1977,7 @@ mod tests {
             .get("workloads")
             .and_then(serde_json::Value::as_array)
             .expect("workloads array");
-        assert_eq!(workloads.len(), 11);
+        assert_eq!(workloads.len(), 12);
 
         let defaults = workloads
             .iter()
