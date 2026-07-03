@@ -286,6 +286,31 @@ struct Measurement {
     target: String,
 }
 
+#[derive(Clone, Debug)]
+struct ResultRow {
+    engine: String,
+    workload: String,
+    n: u64,
+    ns_per_unit_min: f64,
+    ns_per_unit_median: f64,
+    units_per_sec: f64,
+    checksum: String,
+}
+
+impl ResultRow {
+    fn from_measurement(record: &Measurement) -> Self {
+        Self {
+            engine: record.engine.clone(),
+            workload: record.workload.clone(),
+            n: record.n,
+            ns_per_unit_min: record.ns_per_unit_min,
+            ns_per_unit_median: record.ns_per_unit_median,
+            units_per_sec: record.units_per_sec,
+            checksum: record.checksum.clone(),
+        }
+    }
+}
+
 trait PreparedWorkload {
     fn run(&mut self, n: u64) -> Result<String>;
 }
@@ -353,7 +378,7 @@ fn run() -> Result<()> {
         append_history(history, &records)?;
     }
     if let Some(results) = &config.results {
-        write_results(results, &records)?;
+        write_results(results, config.history.as_deref(), &records)?;
     }
 
     Ok(())
@@ -1119,39 +1144,154 @@ fn append_history(path: &Path, records: &[Measurement]) -> Result<()> {
     Ok(())
 }
 
-fn write_results(path: &Path, records: &[Measurement]) -> Result<()> {
+fn write_results(path: &Path, history: Option<&Path>, records: &[Measurement]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| Error::io(parent, error))?;
     }
+    let rows = latest_result_rows(history, records)?;
     let mut text = String::new();
     text.push_str("# script-bench-harness Results\n\n");
-    let rustia_baselines = records
+    let rustia_baselines = rows
         .iter()
-        .filter(|record| record.engine == "rustia")
-        .map(|record| (record.workload.as_str(), record.ns_per_unit_min))
+        .filter(|row| row.engine == "rustia")
+        .map(|row| (row.workload.as_str(), row.ns_per_unit_min))
         .collect::<BTreeMap<_, _>>();
     text.push_str(
         "| engine | workload | ns/unit min | ns/unit median | speed vs rustia | units/sec | n | checksum |\n",
     );
     text.push_str("|---|---|---:|---:|---:|---:|---:|---|\n");
-    for record in records {
+    for row in &rows {
         let speed_vs_rustia = rustia_baselines
-            .get(record.workload.as_str())
-            .map(|baseline| format!("{:.2}x", baseline / record.ns_per_unit_min))
+            .get(row.workload.as_str())
+            .map(|baseline| format!("{:.2}x", baseline / row.ns_per_unit_min))
             .unwrap_or_else(|| "n/a".to_owned());
         text.push_str(&format!(
             "| {} | {} | {:.2} | {:.2} | {} | {:.0} | {} | `{}` |\n",
-            record.engine,
-            record.workload,
-            record.ns_per_unit_min,
-            record.ns_per_unit_median,
+            row.engine,
+            row.workload,
+            row.ns_per_unit_min,
+            row.ns_per_unit_median,
             speed_vs_rustia,
-            record.units_per_sec,
-            record.n,
-            record.checksum.replace('|', "\\|")
+            row.units_per_sec,
+            row.n,
+            row.checksum.replace('|', "\\|")
         ));
     }
     fs::write(path, text).map_err(|error| Error::io(path, error))
+}
+
+fn latest_result_rows(history: Option<&Path>, records: &[Measurement]) -> Result<Vec<ResultRow>> {
+    let mut latest = BTreeMap::<(String, String), ResultRow>::new();
+    if let Some(history) = history {
+        for row in read_history_result_rows(history)? {
+            latest.insert((row.engine.clone(), row.workload.clone()), row);
+        }
+    }
+    for record in records {
+        let row = ResultRow::from_measurement(record);
+        latest.insert((row.engine.clone(), row.workload.clone()), row);
+    }
+
+    let mut rows = latest.into_values().collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        engine_order(&left.engine)
+            .cmp(&engine_order(&right.engine))
+            .then_with(|| left.engine.cmp(&right.engine))
+            .then_with(|| workload_order(&left.workload).cmp(&workload_order(&right.workload)))
+            .then_with(|| left.workload.cmp(&right.workload))
+    });
+    Ok(rows)
+}
+
+fn read_history_result_rows(path: &Path) -> Result<Vec<ResultRow>> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(Error::io(path, error)),
+    };
+
+    let mut rows = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        let line_number = index + 1;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let value = serde_json::from_str::<serde_json::Value>(line).map_err(|error| {
+            Error::new(format!(
+                "{} line {line_number}: invalid JSON: {error}",
+                path.display()
+            ))
+        })?;
+        rows.push(ResultRow {
+            engine: json_string(path, line_number, &value, "engine")?,
+            workload: json_string(path, line_number, &value, "workload")?,
+            n: json_u64(path, line_number, &value, "n")?,
+            ns_per_unit_min: json_f64(path, line_number, &value, "ns_per_unit_min")?,
+            ns_per_unit_median: json_f64(path, line_number, &value, "ns_per_unit_median")?,
+            units_per_sec: json_f64(path, line_number, &value, "units_per_sec")?,
+            checksum: json_string(path, line_number, &value, "checksum")?,
+        });
+    }
+    Ok(rows)
+}
+
+fn json_string(
+    path: &Path,
+    line_number: usize,
+    value: &serde_json::Value,
+    field: &str,
+) -> Result<String> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| history_field_error(path, line_number, field, "string"))
+}
+
+fn json_u64(
+    path: &Path,
+    line_number: usize,
+    value: &serde_json::Value,
+    field: &str,
+) -> Result<u64> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| history_field_error(path, line_number, field, "u64"))
+}
+
+fn json_f64(
+    path: &Path,
+    line_number: usize,
+    value: &serde_json::Value,
+    field: &str,
+) -> Result<f64> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_f64)
+        .filter(|value| value.is_finite())
+        .ok_or_else(|| history_field_error(path, line_number, field, "finite number"))
+}
+
+fn history_field_error(path: &Path, line_number: usize, field: &str, expected: &str) -> Error {
+    Error::new(format!(
+        "{} line {line_number}: expected {field:?} to be a {expected}",
+        path.display()
+    ))
+}
+
+fn engine_order(engine: &str) -> usize {
+    ENGINE_SLOTS
+        .iter()
+        .position(|slot| slot.id == engine)
+        .unwrap_or(usize::MAX)
+}
+
+fn workload_order(workload: &str) -> usize {
+    WORKLOADS
+        .iter()
+        .position(|entry| entry.id == workload)
+        .unwrap_or(usize::MAX)
 }
 
 fn record_json(record: &Measurement) -> String {

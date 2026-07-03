@@ -1905,6 +1905,7 @@ dependencies = [
  "rustia-compiler",
  "rustia-parser",
  "rustia-vm",
+ "serde_json",
  "wasmi",
  "wasmtime",
 ]
