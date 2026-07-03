@@ -20,7 +20,7 @@ all-engines = [
     "wasmtime-engine",
 ]
 rustia-engine = ["dep:rustia-compiler", "dep:rustia-parser", "dep:rustia-vm"]
-boa = []
+boa = ["dep:boa_engine"]
 koto = ["dep:koto"]
 mlua-luau = ["dep:mlua"]
 mlua-lua54 = []
@@ -37,6 +37,7 @@ rustia-vm = { workspace = true, optional = true }
 koto = { version = "0.16", default-features = false, features = ["arc"], optional = true }
 mlua = { version = "0.11", default-features = false, features = ["luau"], optional = true }
 rhai = { version = "1.25", optional = true }
+boa_engine = { version = "0.21", optional = true }
 
 [lints]
 workspace = true

@@ -171,7 +171,7 @@ const ENGINE_SLOTS: &[EngineSlot] = &[
         dialect: Dialect::JavaScript,
         feature: Some("boa"),
         enabled: cfg!(feature = "boa"),
-        implemented: false,
+        implemented: cfg!(feature = "boa"),
     },
     EngineSlot {
         id: "koto",
@@ -560,6 +560,8 @@ fn prepare(
         "rustia" => Ok(Box::new(RustiaPrepared::new(_workload, _source)?)),
         #[cfg(feature = "koto")]
         "koto" => Ok(Box::new(KotoPrepared::new(_workload, _source)?)),
+        #[cfg(feature = "boa")]
+        "boa" => Ok(Box::new(BoaPrepared::new(_workload, _source)?)),
         #[cfg(feature = "mlua-luau")]
         "mlua-luau" => Ok(Box::new(MluaLuauPrepared::new(_workload, _source)?)),
         #[cfg(feature = "rhai-engine")]
@@ -721,6 +723,64 @@ fn koto_checksum(value: &koto::prelude::KValue) -> String {
         KValue::Str(value) => format!("string:{}", value.as_str()),
         other => format!("{other:?}"),
     }
+}
+
+#[cfg(feature = "boa")]
+struct BoaPrepared {
+    context: boa_engine::Context,
+    function: boa_engine::object::JsObject,
+}
+
+#[cfg(feature = "boa")]
+impl BoaPrepared {
+    fn new(workload: &Workload, source: &str) -> Result<Self> {
+        let mut context = boa_engine::Context::default();
+        let value = context
+            .eval(boa_engine::Source::from_bytes(source))
+            .map_err(|error| Error::new(format!("initialize {} failed: {error}", workload.id)))?;
+        let function = value.as_callable().ok_or_else(|| {
+            Error::new(format!(
+                "javascript workload {} must evaluate to a function",
+                workload.id
+            ))
+        })?;
+        Ok(Self { context, function })
+    }
+}
+
+#[cfg(feature = "boa")]
+impl PreparedWorkload for BoaPrepared {
+    fn run(&mut self, n: u64) -> Result<String> {
+        let result = self
+            .function
+            .call(
+                &boa_engine::JsValue::undefined(),
+                &[boa_engine::JsValue::new(n as f64)],
+                &mut self.context,
+            )
+            .map_err(|error| Error::new(format!("boa workload call failed: {error}")))?;
+        Ok(boa_checksum(&result))
+    }
+}
+
+#[cfg(feature = "boa")]
+fn boa_checksum(value: &boa_engine::JsValue) -> String {
+    if value.is_undefined() {
+        return "undefined".to_owned();
+    }
+    if value.is_null() {
+        return "null".to_owned();
+    }
+    if let Some(value) = value.as_boolean() {
+        return format!("bool:{value}");
+    }
+    if let Some(value) = value.as_number() {
+        return format!("f64:{value:.17}");
+    }
+    if let Some(value) = value.as_string() {
+        return format!("string:{}", value.to_std_string_escaped());
+    }
+    value.display().to_string()
 }
 
 #[cfg(feature = "mlua-luau")]

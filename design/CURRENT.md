@@ -14,8 +14,9 @@ registration, hot reload, and macro sugar. A from-scratch Rust Luau interpreter 
 earlier spikes and is now backed by the production conformance suite; performance still needs the continuous
 benchmark gate before public claims. All 8 architecture axes are decided ([`30-architecture.md`](30-architecture.md)
 v3), 10 conformance-verified improvements are adopted ([`55-improvements.md`](55-improvements.md)), and the
-standalone benchmark harness has the engine/workload/history shell in place. Future benchmark workflow files may
-target only the generic `[self-hosted, bench]` label; CI workflow wiring is not implemented yet.
+standalone benchmark harness has the engine/workload/history shell, static chart dashboard, and the
+`rustia`/`boa`/`koto`/`mlua-luau`/`rhai` native adapters in place. Future benchmark workflow files may target
+only the generic `[self-hosted, bench]` label; CI workflow wiring is not implemented yet.
 
 ## 🚀 Next actions (cold-start handoff — do in this order)
 **Read order for a fresh agent:** `CLAUDE.md` (auto-loaded) → **this file** → [`30-architecture.md`](30-architecture.md) (the ADR)
@@ -28,8 +29,9 @@ target only the generic `[self-hosted, bench]` label; CI workflow wiring is not 
    tests while performance work proceeds.
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, extra workload slots, and
-   append-only JSONL history. Next work is real adapters beyond `rustia`/`koto`, committed baseline history,
-   generated `RESULTS.md`, and the static chart website.
+   append-only JSONL history. Next work is the remaining adapters beyond
+   `rustia`/`boa`/`koto`/`mlua-luau`/`rhai`, committed baseline history for each completed adapter, generated
+   `RESULTS.md`, and the standalone-project split.
 3. **Keep the Luau 0.709 conformance corpus green**. The current repo has 683 executable fixtures covering 480
    behavior refs with no pending rows; new engine work should add focused fixtures rather than re-opening
    pending inventory.

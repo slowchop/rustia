@@ -16,6 +16,7 @@ The standalone benchmark project tracks these engine slots from the start:
 Implemented adapters:
 
 - `rustia`
+- `boa`
 - `koto`
 - `mlua-luau`
 - `rhai`
@@ -29,7 +30,7 @@ separate runner binaries that emit the same JSONL schema.
 
 Most current feature flags are intentionally dependency-free placeholders. They
 let the CLI expose the public engine matrix without forcing normal rustia builds
-to download heavyweight benchmark dependencies. `koto` is the first optional
-comparison engine wired into the harness, `mlua-luau` is the Luau 0.709 oracle
-comparison, and `rhai` tracks another widely used Rust-native scripting
-baseline.
+to download heavyweight benchmark dependencies. `boa` is the JavaScript
+interpreter baseline, `koto` is the direct migration comparison, `mlua-luau` is
+the Luau 0.709 oracle comparison, and `rhai` tracks another widely used
+Rust-native scripting baseline.
