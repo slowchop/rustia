@@ -128,11 +128,15 @@ jobs:
             git -C "$publish_dir" remote add origin "$BENCH_DATA_REPO"
           fi
           tar -xf "$result_archive" -C "$publish_dir"
+          node tools/render-benchmark-data-readme.js \
+            --source "$publish_dir/bench/current-results.json" \
+            --history "$publish_dir/bench/history/runs.jsonl" \
+            --output "$publish_dir/README.md"
           (
             cd "$publish_dir"
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add $BENCH_RESULT_FILES
+            git add README.md $BENCH_RESULT_FILES
           )
           if git -C "$publish_dir" diff --cached --quiet; then
             echo "No benchmark result changes to commit."
@@ -243,11 +247,15 @@ jobs:
             git -C "$publish_dir" remote add origin "$BENCH_DATA_REPO"
           fi
           tar -xf "$result_archive" -C "$publish_dir"
+          node tools/render-benchmark-data-readme.js \
+            --source "$publish_dir/bench/current-results.json" \
+            --history "$publish_dir/bench/history/runs.jsonl" \
+            --output "$publish_dir/README.md"
           (
             cd "$publish_dir"
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add $BENCH_RESULT_FILES
+            git add README.md $BENCH_RESULT_FILES
           )
           if git -C "$publish_dir" diff --cached --quiet; then
             echo "No benchmark result changes to commit."

@@ -86,8 +86,9 @@ manual dispatch can choose either `rustia` or `full` mode. The workflow requires
 a self-hosted runner with the generic labels `[self-hosted, bench]`. It restores
 prior history from the private `slowchop/rustia-bench-data` repository, appends
 new measurements, regenerates the benchmark reports, and commits the updated
-result files back to that data repository. The runner-label, trigger, storage,
-and mode policy is checked by `tools/check-workflows.js`.
+result files back to that data repository. It also regenerates the data repo's
+root `README.md` with a small latest-results comparison chart. The runner-label,
+trigger, storage, and mode policy is checked by `tools/check-workflows.js`.
 
 `all-engines` intentionally excludes `mlua-lua54` because `mlua-lua54` and
 `mlua-luau` cannot be linked into one binary. Run the Lua 5.4 mlua adapter as a
