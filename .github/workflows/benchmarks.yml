@@ -1,7 +1,21 @@
 name: Benchmark Measurement
 
 "on":
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "17 16 * * *"
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Benchmark scope"
+        required: true
+        default: rustia
+        type: choice
+        options:
+          - rustia
+          - full
 
 permissions:
   contents: read
@@ -11,8 +25,75 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  measure-current:
-    name: Measure current benchmark matrix
+  measure-rustia-current:
+    name: Measure Rustia benchmark matrix
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'rustia')
+    runs-on:
+      - self-hosted
+      - bench
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust stable
+        run: |
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install stable --profile minimal
+
+      - name: Use Rust stable
+        run: rustup default stable
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify clean checkout
+        run: |
+          git diff --quiet --ignore-submodules --
+          git diff --cached --quiet --ignore-submodules --
+
+      - name: Run Rustia benchmark binary
+        run: >
+          cargo run -p script-bench-harness --release --
+          --engines rustia
+          --history bench/history/runs.jsonl
+          --commit "$(git rev-parse --short HEAD)"
+
+      - name: Refresh generated benchmark reports
+        run: |
+          cargo run -p script-bench-harness -- --refresh-results
+          node bench/render-current-results.js
+          node bench/render-claims.js
+
+      - name: Check generated benchmark artifacts
+        run: |
+          node tools/check-benchmark-results.js
+          node bench/render-current-results.js --check
+          node bench/render-claims.js --check
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-rustia-current-results
+          path: |
+            bench/history/runs.jsonl
+            bench/RESULTS.md
+            bench/current-results.json
+            bench/current-results.html
+            bench/CLAIMS.md
+
+  measure-full-current:
+    name: Measure full benchmark matrix
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'full')
     runs-on:
       - self-hosted
       - bench
@@ -75,7 +156,7 @@ jobs:
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-current-results
+          name: benchmark-full-current-results
           path: |
             bench/history/runs.jsonl
             bench/RESULTS.md

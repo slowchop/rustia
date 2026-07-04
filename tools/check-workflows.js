@@ -148,11 +148,11 @@ function checkCi(text) {
 function checkBenchmarks(text) {
   const label = ".github/workflows/benchmarks.yml";
   requireIncludes(text, "name: Benchmark Measurement\n", label);
-  requireIncludes(text, "\"on\":\n  workflow_dispatch:\n", label);
+  requireIncludes(text, "\"on\":\n  push:\n    branches:\n      - main\n  schedule:\n    - cron: \"17 16 * * *\"\n  workflow_dispatch:\n", label);
+  requireIncludes(text, "default: rustia", label);
+  requireIncludes(text, "          - rustia\n          - full", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
   forbidIncludes(text, "pull_request:", label);
-  forbidIncludes(text, "push:", label);
-  forbidIncludes(text, "schedule:", label);
   forbidIncludes(text, "contents: write", label);
   forbidIncludes(text, "git push", label);
   forbidIncludes(text, "secrets.", label);
@@ -162,8 +162,15 @@ function checkBenchmarks(text) {
   }
   requireIncludes(text, "git diff --quiet --ignore-submodules --", label);
   requireIncludes(text, "git diff --cached --quiet --ignore-submodules --", label);
+  requireIncludes(text, "measure-rustia-current:", label);
+  requireIncludes(text, "if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'rustia')", label);
+  requireIncludes(text, "--engines rustia", label);
+  requireIncludes(text, "benchmark-rustia-current-results", label);
+  requireIncludes(text, "measure-full-current:", label);
+  requireIncludes(text, "if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'full')", label);
   requireIncludes(text, "--features all-engines", label);
   requireIncludes(text, "--features mlua-lua54", label);
+  requireIncludes(text, "benchmark-full-current-results", label);
   requireIncludes(text, "--commit \"$(git rev-parse --short HEAD)\"", label);
   requireIncludes(text, "cargo run -p script-bench-harness -- --refresh-results", label);
   requireIncludes(text, "node bench/render-current-results.js", label);
