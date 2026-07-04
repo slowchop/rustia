@@ -8405,27 +8405,16 @@ impl Vm {
 
     fn native_newproxy(&mut self, args: &[Value]) -> Result<Value> {
         validate_native_arity(args, 0, 1, "newproxy argument")?;
-        let metatable = match args.first().copied() {
-            None => None,
-            Some(value) if value.kind() == ValueKind::Nil => None,
-            Some(value) => match value.as_bool() {
-                Some(true) => Some(self.heap.alloc_array_table(&[])),
-                Some(false) => None,
-                None => {
-                    if let Some(userdata) = value.as_userdata() {
-                        self.heap.userdata_metatable(userdata).ok_or_else(|| {
-                            Error::new(ErrorKind::InvalidProgram {
-                                reason: "userdata handle is missing",
-                            })
-                        })?
-                    } else {
-                        return Err(Error::new(ErrorKind::TypeError {
-                            expected: "boolean or userdata",
-                        }));
-                    }
-                }
-            },
+        let needs_metatable = match args.first().copied() {
+            None => false,
+            Some(value) if value.kind() == ValueKind::Nil => false,
+            Some(value) => value.as_bool().ok_or_else(|| {
+                Error::new(ErrorKind::TypeError {
+                    expected: "nil or boolean",
+                })
+            })?,
         };
+        let metatable = needs_metatable.then(|| self.heap.alloc_array_table(&[]));
         let userdata = self.heap.alloc_userdata(metatable).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "userdata handle overflow",

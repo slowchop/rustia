@@ -51,7 +51,7 @@ benchmark measurement workflow that targets only the generic `[self-hosted, benc
    files, an explicit closed wasm pre-lock gate artifact, a wasm target bench for rustia+koto, a `call_ref`
    versus `br_table` dispatch microbench, and a manual self-hosted measurement workflow. Next work is the actual
    standalone-project split, longer-run public history, and automated tracking publication.
-3. **Keep the Luau 0.709 conformance corpus green**. The current repo has 690 executable fixtures covering 489
+3. **Keep the Luau 0.709 conformance corpus green**. The current repo has 691 executable fixtures covering 490
    behavior refs with no pending rows; new engine work should add focused fixtures rather than re-opening
    pending inventory.
 4. **Operationalize benchmark CI** — the public workflow uses only `[self-hosted, bench]`. The owner still needs
@@ -91,7 +91,7 @@ section below for the full list (GC tuning, benchmark publication, `LuauIntegerT
   vector width 3, flags-off — see [`05-luau-target.md`](05-luau-target.md). **f64-only is VERIFIED correct**
   (`math.type==nil`; integers are default-OFF even at HEAD 0.727 behind `FFlag::LuauIntegerType2`).
 - **Conformance corpus is executable and pending-free** (review C2 follow-through): the runner reports
-  **690 fixtures**, **489 refs**, **690 Luau 0.709 oracle-backed rows**, **0 pending-oracle**, **0 pending-impl**,
+  **691 fixtures**, **490 refs**, **691 Luau 0.709 oracle-backed rows**, **0 pending-oracle**, **0 pending-impl**,
   and **0 rustia-only**. The old warning about ~703 model-generated rows is obsolete; future work is incremental
   coverage for newly discovered gaps, not a bulk oracle re-derivation pass.
 
@@ -113,7 +113,7 @@ section below for the full list (GC tuning, benchmark publication, `LuauIntegerT
 | **CURRENT.md** (this) | the live canonical state | authoritative |
 | [`30-architecture.md`](30-architecture.md) | the ADR (8 axes, decided) v3 + v3.1 refinements | authoritative for design |
 | [`05-luau-target.md`](05-luau-target.md) | the pinned-target spec (Luau 0.709) | **authoritative** ✅ |
-| [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 690 fixtures / 489 refs / 0 pending |
+| [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 691 fixtures / 490 refs / 0 pending |
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + deterministic extension/linker plan | **implemented first slice** ✅ |
@@ -133,7 +133,7 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 | # | finding | status |
 |---|---|---|
 | C1 | pin the Luau target | **RESOLVED** → [`05-luau-target.md`](05-luau-target.md): Luau **0.709** (= our oracle), standalone surface, vector-3, flags-off; **f64-only verified** (`math.type==nil`); int64 is a tripwire on `FFlag::LuauIntegerType2`. |
-| C2 | conformance table not trustworthy | **RESOLVED for current corpus** — runner reports 690 Luau 0.709 oracle-backed fixtures, 489 refs, and 0 pending rows. Keep adding targeted oracle fixtures for new bugs/features. |
+| C2 | conformance table not trustworthy | **RESOLVED for current corpus** — runner reports 691 Luau 0.709 oracle-backed fixtures, 490 refs, and 0 pending rows. Keep adding targeted oracle fixtures for new bugs/features. |
 | H1 | version drift | **FIXED** (this file + banners). |
 | H2 | "~5× koto" too narrow | **RESOLVED** — drop the blanket number; state **per-workload** (below). |
 | H3 | wasm gate + Wasm 3.0 | **RESOLVED** — Wasm-3.0 assessed (br_table stays; wasm-GC rejected; relaxed-SIMD banned); V8 + Bun/JSC-family + SpiderMonkey production wasm and `call_ref` dispatch measured. |

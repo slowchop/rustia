@@ -298,7 +298,8 @@ stdlib.tostring-nil	stdlib	conformance/upstream/luau-0.709/tests/conformance/bas
 stdlib.tostring-number	stdlib	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	tostring converts numbers to their Luau text form.
 stdlib.setmetatable	stdlib	conformance/upstream/luau-0.709/tests/conformance/strings.luau	luau-0.709	setmetatable assigns a table metatable and returns the table.
 stdlib.getmetatable	stdlib	conformance/upstream/luau-0.709/tests/conformance/strings.luau	luau-0.709	getmetatable returns table and userdata metatable tables when present.
-stdlib.newproxy	stdlib	conformance/upstream/luau-0.709/tests/conformance/strings.luau	luau-0.709	newproxy creates userdata values with optional fresh or copied metatables.
+stdlib.newproxy	stdlib	conformance/upstream/luau-0.709/tests/conformance/strings.luau	luau-0.709	newproxy creates userdata values without a metatable by default/nil/false, and with a fresh empty metatable for true.
+stdlib.newproxy-arguments	stdlib	upstream-luau-0.709:VM/src/lbaselib.cpp	luau-0.709	newproxy accepts omitted, nil, and boolean arguments only; passing userdata, table, string, number, or function values raises an argument error.
 stdlib.collectgarbage-basic	stdlib	conformance/upstream/luau-0.709/tests/Conformance.test.cpp	luau-0.709	collectgarbage accepts omitted, "collect", and "count" modes in the upstream conformance harness and returns a number for these modes.
 stdlib.collectgarbage-step	stdlib	conformance/upstream/luau-0.709/tests/conformance/gc.luau	luau-0.709	collectgarbage accepts "stop", "restart", and "step" modes with observable step completion.
 stdlib.gcinfo	stdlib	conformance/upstream/luau-0.709/tests/conformance/gc.luau	luau-0.709	gcinfo returns a numeric memory-count result.

@@ -25,8 +25,9 @@ end
 assert(tostring(userdata) == "good")
 assert(string.format("%*", userdata) == "good")
 
-local clone = newproxy(userdata)
-assert(getmetatable(clone) == mt)
-assert(string.format("%*", clone) == "good")
+local other = newproxy(true)
+assert(getmetatable(other) ~= mt)
+getmetatable(other).__tostring = mt.__tostring
+assert(string.format("%*", other) == "good")
 
 return "OK"
