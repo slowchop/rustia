@@ -179,10 +179,11 @@ function checkBenchmarks(text) {
   requireIncludes(text, "git ls-remote --exit-code --heads \"$BENCH_DATA_REPO\" main", label);
   requireIncludes(text, "git clone --depth 1 \"$BENCH_DATA_REPO\"", label);
   requireIncludes(text, "node tools/render-benchmark-data-readme.js", label);
+  requireIncludes(text, "--wasm-source \"$publish_dir/bench/wasm/current-results.json\"", label);
   requireIncludes(text, "--output \"$publish_dir/README.md\"", label);
   requireIncludes(text, "git add README.md $BENCH_RESULT_FILES", label);
   requireIncludes(text, "git -C \"$publish_dir\" push origin \"HEAD:main\"", label);
-  requireRegex(text, /BENCH_RESULT_FILES:[\s\S]*bench\/history\/runs\.jsonl[\s\S]*bench\/CLAIMS\.md/, label, "persist benchmark history and claim artifacts");
+  requireRegex(text, /BENCH_RESULT_FILES:[\s\S]*bench\/history\/runs\.jsonl[\s\S]*bench\/CLAIMS\.md[\s\S]*bench\/wasm-gate\.json[\s\S]*bench\/wasm\/current-results\.json[\s\S]*bench\/wasm\/dispatch-current-results\.json/, label, "persist benchmark history, claim, and wasm result artifacts");
   checkActionPins(text, label);
 }
 

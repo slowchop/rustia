@@ -28,6 +28,9 @@ env:
     bench/current-results.json
     bench/current-results.html
     bench/CLAIMS.md
+    bench/wasm-gate.json
+    bench/wasm/current-results.json
+    bench/wasm/dispatch-current-results.json
 
 concurrency:
   group: benchmarks-${{ github.ref }}
@@ -131,6 +134,7 @@ jobs:
           node tools/render-benchmark-data-readme.js \
             --source "$publish_dir/bench/current-results.json" \
             --history "$publish_dir/bench/history/runs.jsonl" \
+            --wasm-source "$publish_dir/bench/wasm/current-results.json" \
             --output "$publish_dir/README.md"
           (
             cd "$publish_dir"
@@ -250,6 +254,7 @@ jobs:
           node tools/render-benchmark-data-readme.js \
             --source "$publish_dir/bench/current-results.json" \
             --history "$publish_dir/bench/history/runs.jsonl" \
+            --wasm-source "$publish_dir/bench/wasm/current-results.json" \
             --output "$publish_dir/README.md"
           (
             cd "$publish_dir"

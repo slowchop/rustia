@@ -7,6 +7,7 @@ const path = require("path");
 const root = path.resolve(__dirname, "..");
 const sourcePath = resolveArg("--source", path.join(root, "bench", "current-results.json"));
 const historyPath = resolveArg("--history", path.join(root, "bench", "history", "runs.jsonl"));
+const wasmSourcePath = resolveArg("--wasm-source", path.join(root, "bench", "wasm", "current-results.json"));
 const outputPath = argValue("--output");
 const checkOnly = process.argv.includes("--check");
 
@@ -45,6 +46,13 @@ function readJson(filePath) {
   } catch (error) {
     fail(`could not parse ${relative(filePath)}: ${error.message}`);
   }
+}
+
+function readOptionalJson(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  return readJson(filePath);
 }
 
 function readHistoryCount(filePath) {
@@ -92,6 +100,67 @@ function validateRow(row, index) {
   }
   if (row.speed_vs_rustia != null && (!Number.isFinite(row.speed_vs_rustia) || row.speed_vs_rustia <= 0)) {
     fail(`${label}.speed_vs_rustia must be null or a positive finite number`);
+  }
+}
+
+function validateWasmData(data) {
+  if (data == null) {
+    return;
+  }
+  if (data.schema_version !== 1 || data.schema !== "rustia.bench.wasm-gate-current-results.v1") {
+    fail("wasm current results must use rustia.bench.wasm-gate-current-results.v1");
+  }
+  if (!Array.isArray(data.runs)) {
+    fail("wasm current results runs must be an array");
+  }
+  data.runs.forEach(validateWasmRun);
+}
+
+function validateWasmRun(run, index) {
+  const label = `wasm runs[${index}]`;
+  if (run.schema_version !== 1 || run.schema !== "rustia.bench.wasm-runtime-results.v1") {
+    fail(`${label} must use rustia.bench.wasm-runtime-results.v1`);
+  }
+  for (const key of ["target", "commit"]) {
+    if (typeof run[key] !== "string" || run[key].trim() === "") {
+      fail(`${label}.${key} must be a non-empty string`);
+    }
+  }
+  if (!Number.isFinite(run.timestamp_unix) || run.timestamp_unix <= 0) {
+    fail(`${label}.timestamp_unix must be a positive finite number`);
+  }
+  if (!run.runtime || typeof run.runtime !== "object" || Array.isArray(run.runtime)) {
+    fail(`${label}.runtime must be an object`);
+  }
+  for (const key of ["name", "family", "host"]) {
+    if (typeof run.runtime[key] !== "string" || run.runtime[key].trim() === "") {
+      fail(`${label}.runtime.${key} must be a non-empty string`);
+    }
+  }
+  if (!run.adapter || typeof run.adapter !== "object" || Array.isArray(run.adapter)) {
+    fail(`${label}.adapter must be an object`);
+  }
+  for (const key of ["id", "dialect"]) {
+    if (typeof run.adapter[key] !== "string" || run.adapter[key].trim() === "") {
+      fail(`${label}.adapter.${key} must be a non-empty string`);
+    }
+  }
+  if (!Array.isArray(run.rows) || run.rows.length === 0) {
+    fail(`${label}.rows must be a non-empty array`);
+  }
+  run.rows.forEach((row, rowIndex) => validateWasmRow(row, `${label}.rows[${rowIndex}]`));
+}
+
+function validateWasmRow(row, label) {
+  for (const key of ["engine", "dialect", "workload", "unit", "checksum"]) {
+    if (typeof row[key] !== "string" || row[key].trim() === "") {
+      fail(`${label}.${key} must be a non-empty string`);
+    }
+  }
+  for (const key of ["n", "ns_per_unit_min", "ns_per_unit_median", "units_per_sec"]) {
+    if (!Number.isFinite(row[key]) || row[key] <= 0) {
+      fail(`${label}.${key} must be a positive finite number`);
+    }
   }
 }
 
@@ -156,7 +225,7 @@ function comparisonBar(speed) {
   return "#".repeat(length);
 }
 
-function targetSummaries(data) {
+function targetSummaries(data, targetLabels = new Map()) {
   return unique(data.rows.map((row) => row.target)).map((target) => {
     const targetRows = data.rows.filter((row) => row.target === target);
     const workloadGroups = groupBy(targetRows, (row) => row.workload);
@@ -177,11 +246,16 @@ function targetSummaries(data) {
         const rightSpeed = right.geomeanVsRustia ?? -Infinity;
         return rightSpeed - leftSpeed || left.engine.localeCompare(right.engine);
       });
-    return { target, rowsByEngine, workloadCount: workloadGroups.size };
+    return {
+      target,
+      label: targetLabels.get(target) ?? target,
+      rowsByEngine,
+      workloadCount: workloadGroups.size,
+    };
   });
 }
 
-function workloadLeaders(data) {
+function workloadLeaders(data, targetLabels = new Map()) {
   return [...groupBy(data.rows, (row) => `${row.target}\0${row.workload}`).entries()]
     .map(([key, rows]) => {
       const [target, workload] = key.split("\0");
@@ -190,6 +264,7 @@ function workloadLeaders(data) {
       const rank = rustia ? sorted.findIndex((row) => row.engine === "rustia") + 1 : null;
       return {
         target,
+        label: targetLabels.get(target) ?? target,
         workload,
         fastest: sorted[0],
         rustia,
@@ -203,33 +278,66 @@ function workloadLeaders(data) {
     ));
 }
 
-function render(data, historyCount) {
-  const window = data.metadata.measurement_window_unix;
-  const commits = data.metadata.commits ?? [];
-  const targets = targetSummaries(data);
-  const leaders = workloadLeaders(data);
-  const lines = [];
-
-  lines.push("# rustia benchmark data");
-  lines.push("");
-  lines.push("Generated by the `slowchop/rustia` benchmark workflow. Do not edit this file by hand.");
-  lines.push("");
-  lines.push(`- History records: ${formatNumber(historyCount)}`);
-  lines.push(`- Current rows: ${formatNumber(data.rows.length)}`);
-  lines.push(`- Targets: ${data.metadata.targets.map(markdownCell).join(", ")}`);
-  lines.push(`- Workloads: ${data.metadata.workloads.map(markdownCell).join(", ")}`);
-  lines.push(`- Source commits in current snapshot: ${commits.map((commit) => `\`${commit}\``).join(", ")}`);
-  if (window) {
-    lines.push(`- Measurement window: ${formatTime(window.start)} to ${formatTime(window.end)}`);
+function flattenWasmData(wasmData) {
+  if (wasmData == null) {
+    return null;
   }
+  const rows = [];
+  const targetLabels = new Map();
+  for (const run of wasmData.runs) {
+    targetLabels.set(
+      run.target,
+      `${run.target} (${run.runtime.family}/${run.runtime.name} on ${run.runtime.host})`,
+    );
+    for (const row of run.rows) {
+      rows.push({
+        target: run.target,
+        engine: run.adapter.id,
+        dialect: run.adapter.dialect,
+        workload: row.workload,
+        unit: row.unit,
+        commit: run.commit,
+        timestamp_unix: run.timestamp_unix,
+        n: row.n,
+        ns_per_unit_min: row.ns_per_unit_min,
+        ns_per_unit_median: row.ns_per_unit_median,
+        units_per_sec: row.units_per_sec,
+        checksum: row.checksum,
+        speed_vs_rustia: null,
+      });
+    }
+  }
+
+  for (const rowsForWorkload of groupBy(rows, (row) => `${row.target}\0${row.workload}`).values()) {
+    const rustia = rowsForWorkload.find((row) => row.engine === "rustia");
+    if (!rustia) {
+      continue;
+    }
+    for (const row of rowsForWorkload) {
+      row.speed_vs_rustia = rustia.ns_per_unit_median / row.ns_per_unit_median;
+    }
+  }
+
+  return {
+    rows,
+    targetLabels,
+    metadata: {
+      targets: unique(rows.map((row) => row.target)),
+      engines: unique(rows.map((row) => row.engine)),
+      workloads: unique(rows.map((row) => row.workload)),
+      commits: unique(rows.map((row) => row.commit)),
+    },
+  };
+}
+
+function renderComparisonSections(lines, title, description, data, targetLabels = new Map()) {
+  lines.push(`## ${title}`);
   lines.push("");
-  lines.push("## Latest comparison");
-  lines.push("");
-  lines.push("Speed is the geometric mean of latest rows on that target, relative to Rustia. Higher is faster. Bars are log-scaled.");
+  lines.push(description);
   lines.push("");
 
-  for (const target of targets) {
-    lines.push(`### ${target.target}`);
+  for (const target of targetSummaries(data, targetLabels)) {
+    lines.push(`### ${target.label}`);
     lines.push("");
     lines.push("| rank | engine | geomean vs rustia | fastest workloads | measured workloads | chart |");
     lines.push("| ---: | --- | ---: | ---: | ---: | --- |");
@@ -245,14 +353,17 @@ function render(data, historyCount) {
     });
     lines.push("");
   }
+}
 
-  lines.push("## Workload leaders");
+function renderWorkloadLeaders(lines, title, data, targetLabels = new Map()) {
+  const leaders = workloadLeaders(data, targetLabels);
+  lines.push(`## ${title}`);
   lines.push("");
   lines.push("| target | workload | fastest engine | fastest median ns/unit | rustia median ns/unit | rustia rank |");
   lines.push("| --- | --- | --- | ---: | ---: | ---: |");
   for (const row of leaders) {
     lines.push([
-      `| ${markdownCell(row.target)}`,
+      `| ${markdownCell(row.label)}`,
       markdownCell(row.workload),
       markdownCell(row.fastest.engine),
       formatNumber(row.fastest.ns_per_unit_median),
@@ -261,6 +372,53 @@ function render(data, historyCount) {
     ].join(" | "));
   }
   lines.push("");
+}
+
+function render(data, historyCount, wasmData) {
+  const window = data.metadata.measurement_window_unix;
+  const commits = data.metadata.commits ?? [];
+  const wasm = flattenWasmData(wasmData);
+  const lines = [];
+
+  lines.push("# rustia benchmark data");
+  lines.push("");
+  lines.push("Generated by the `slowchop/rustia` benchmark workflow. Do not edit this file by hand.");
+  lines.push("");
+  lines.push(`- History records: ${formatNumber(historyCount)}`);
+  lines.push(`- Current rows: ${formatNumber(data.rows.length)}`);
+  lines.push(`- Targets: ${data.metadata.targets.map(markdownCell).join(", ")}`);
+  if (wasm) {
+    lines.push(`- Wasm adapter rows: ${formatNumber(wasm.rows.length)}`);
+    lines.push(`- Wasm adapter targets: ${wasm.metadata.targets.map((target) => markdownCell(wasm.targetLabels.get(target) ?? target)).join(", ")}`);
+  }
+  lines.push(`- Workloads: ${data.metadata.workloads.map(markdownCell).join(", ")}`);
+  lines.push(`- Source commits in current snapshot: ${commits.map((commit) => `\`${commit}\``).join(", ")}`);
+  if (window) {
+    lines.push(`- Measurement window: ${formatTime(window.start)} to ${formatTime(window.end)}`);
+  }
+  lines.push("");
+  renderComparisonSections(
+    lines,
+    "Native/host comparison",
+    "Speed is the geometric mean of latest rows on that native target, relative to Rustia. Higher is faster. Bars are log-scaled.",
+    data,
+  );
+
+  if (wasm) {
+    renderComparisonSections(
+      lines,
+      "Wasm adapter comparison",
+      "These rows are wasm adapter runs grouped by runtime target. They are intentionally separate from native targets, so `koto` here is not mixed with `koto` on `macos-aarch64`.",
+      wasm,
+      wasm.targetLabels,
+    );
+  }
+
+  renderWorkloadLeaders(lines, "Native workload leaders", data);
+  if (wasm) {
+    renderWorkloadLeaders(lines, "Wasm workload leaders", wasm, wasm.targetLabels);
+  }
+
   lines.push("## Files");
   lines.push("");
   lines.push("- [`bench/history/runs.jsonl`](bench/history/runs.jsonl): append-only measurement history");
@@ -268,6 +426,11 @@ function render(data, historyCount) {
   lines.push("- [`bench/RESULTS.md`](bench/RESULTS.md): generated detailed result table");
   lines.push("- [`bench/current-results.html`](bench/current-results.html): standalone rendered report");
   lines.push("- [`bench/CLAIMS.md`](bench/CLAIMS.md): generated public-claim gate");
+  if (wasm) {
+    lines.push("- [`bench/wasm/current-results.json`](bench/wasm/current-results.json): wasm adapter result snapshot");
+    lines.push("- [`bench/wasm/dispatch-current-results.json`](bench/wasm/dispatch-current-results.json): wasm dispatch microbenchmark snapshot");
+    lines.push("- [`bench/wasm-gate.json`](bench/wasm-gate.json): wasm pre-lock gate tracker");
+  }
   lines.push("");
 
   return `${lines.join("\n")}`;
@@ -279,8 +442,10 @@ if (!outputPath) {
 
 const data = readJson(sourcePath);
 validateData(data);
+const wasmData = readOptionalJson(wasmSourcePath);
+validateWasmData(wasmData);
 const historyCount = readHistoryCount(historyPath);
-const rendered = render(data, historyCount);
+const rendered = render(data, historyCount, wasmData);
 
 if (checkOnly) {
   let existing;
@@ -290,7 +455,7 @@ if (checkOnly) {
     fail(`could not read ${outputPath}: ${error.message}`);
   }
   if (existing !== rendered) {
-    fail(`${outputPath} is stale; run node tools/render-benchmark-data-readme.js --source ${sourcePath} --history ${historyPath} --output ${outputPath}`);
+    fail(`${outputPath} is stale; run node tools/render-benchmark-data-readme.js --source ${sourcePath} --history ${historyPath} --wasm-source ${wasmSourcePath} --output ${outputPath}`);
   }
   console.log(`${outputPath} is current`);
 } else {
