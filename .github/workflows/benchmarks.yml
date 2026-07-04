@@ -20,6 +20,15 @@ name: Benchmark Measurement
 permissions:
   contents: read
 
+env:
+  BENCH_DATA_REPO: git@github.com:slowchop/rustia-bench-data.git
+  BENCH_RESULT_FILES: |
+    bench/history/runs.jsonl
+    bench/RESULTS.md
+    bench/current-results.json
+    bench/current-results.html
+    bench/CLAIMS.md
+
 concurrency:
   group: benchmarks-${{ github.ref }}
   cancel-in-progress: false
@@ -56,10 +65,35 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Configure benchmark data SSH
+        env:
+          BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}
+        run: |
+          key_path="$RUNNER_TEMP/rustia_bench_data_key"
+          known_hosts_path="$RUNNER_TEMP/known_hosts"
+          printf '%s\n' "$BENCH_DATA_DEPLOY_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          ssh-keyscan github.com > "$known_hosts_path"
+          {
+            printf 'GIT_SSH_COMMAND='
+            printf 'ssh -i %q -o IdentitiesOnly=yes -o UserKnownHostsFile=%q' "$key_path" "$known_hosts_path"
+            printf '\n'
+          } >> "$GITHUB_ENV"
+
       - name: Verify clean checkout
         run: |
           git diff --quiet --ignore-submodules --
           git diff --cached --quiet --ignore-submodules --
+
+      - name: Restore benchmark history
+        run: |
+          if git ls-remote --exit-code --heads "$BENCH_DATA_REPO" main >/dev/null 2>&1; then
+            data_dir="$(mktemp -d)"
+            git clone --depth 1 "$BENCH_DATA_REPO" "$data_dir"
+            if [ -f "$data_dir/bench/history/runs.jsonl" ]; then
+              cp "$data_dir/bench/history/runs.jsonl" bench/history/runs.jsonl
+            fi
+          fi
 
       - name: Run Rustia benchmark binary
         run: >
@@ -80,16 +114,33 @@ jobs:
           node bench/render-current-results.js --check
           node bench/render-claims.js --check
 
-      - name: Upload benchmark artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-rustia-current-results
-          path: |
-            bench/history/runs.jsonl
-            bench/RESULTS.md
-            bench/current-results.json
-            bench/current-results.html
-            bench/CLAIMS.md
+      - name: Publish benchmark results
+        run: |
+          result_archive="$(mktemp)"
+          publish_dir="$(mktemp -d)"
+          tar -cf "$result_archive" $BENCH_RESULT_FILES
+          if git ls-remote --exit-code --heads "$BENCH_DATA_REPO" main >/dev/null 2>&1; then
+            rm -rf "$publish_dir"
+            git clone "$BENCH_DATA_REPO" "$publish_dir"
+          else
+            git init "$publish_dir"
+            git -C "$publish_dir" switch -c main
+            git -C "$publish_dir" remote add origin "$BENCH_DATA_REPO"
+          fi
+          tar -xf "$result_archive" -C "$publish_dir"
+          (
+            cd "$publish_dir"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add $BENCH_RESULT_FILES
+          )
+          if git -C "$publish_dir" diff --cached --quiet; then
+            echo "No benchmark result changes to commit."
+            exit 0
+          fi
+          short_sha="$(git rev-parse --short "$GITHUB_SHA")"
+          git -C "$publish_dir" commit -m "Record Rustia benchmark results for ${short_sha}"
+          git -C "$publish_dir" push origin "HEAD:main"
 
   measure-full-current:
     name: Measure full benchmark matrix
@@ -122,10 +173,35 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Configure benchmark data SSH
+        env:
+          BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}
+        run: |
+          key_path="$RUNNER_TEMP/rustia_bench_data_key"
+          known_hosts_path="$RUNNER_TEMP/known_hosts"
+          printf '%s\n' "$BENCH_DATA_DEPLOY_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          ssh-keyscan github.com > "$known_hosts_path"
+          {
+            printf 'GIT_SSH_COMMAND='
+            printf 'ssh -i %q -o IdentitiesOnly=yes -o UserKnownHostsFile=%q' "$key_path" "$known_hosts_path"
+            printf '\n'
+          } >> "$GITHUB_ENV"
+
       - name: Verify clean checkout
         run: |
           git diff --quiet --ignore-submodules --
           git diff --cached --quiet --ignore-submodules --
+
+      - name: Restore benchmark history
+        run: |
+          if git ls-remote --exit-code --heads "$BENCH_DATA_REPO" main >/dev/null 2>&1; then
+            data_dir="$(mktemp -d)"
+            git clone --depth 1 "$BENCH_DATA_REPO" "$data_dir"
+            if [ -f "$data_dir/bench/history/runs.jsonl" ]; then
+              cp "$data_dir/bench/history/runs.jsonl" bench/history/runs.jsonl
+            fi
+          fi
 
       - name: Run all-engines benchmark binary
         run: >
@@ -153,13 +229,30 @@ jobs:
           node bench/render-current-results.js --check
           node bench/render-claims.js --check
 
-      - name: Upload benchmark artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-full-current-results
-          path: |
-            bench/history/runs.jsonl
-            bench/RESULTS.md
-            bench/current-results.json
-            bench/current-results.html
-            bench/CLAIMS.md
+      - name: Publish benchmark results
+        run: |
+          result_archive="$(mktemp)"
+          publish_dir="$(mktemp -d)"
+          tar -cf "$result_archive" $BENCH_RESULT_FILES
+          if git ls-remote --exit-code --heads "$BENCH_DATA_REPO" main >/dev/null 2>&1; then
+            rm -rf "$publish_dir"
+            git clone "$BENCH_DATA_REPO" "$publish_dir"
+          else
+            git init "$publish_dir"
+            git -C "$publish_dir" switch -c main
+            git -C "$publish_dir" remote add origin "$BENCH_DATA_REPO"
+          fi
+          tar -xf "$result_archive" -C "$publish_dir"
+          (
+            cd "$publish_dir"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add $BENCH_RESULT_FILES
+          )
+          if git -C "$publish_dir" diff --cached --quiet; then
+            echo "No benchmark result changes to commit."
+            exit 0
+          fi
+          short_sha="$(git rev-parse --short "$GITHUB_SHA")"
+          git -C "$publish_dir" commit -m "Record full benchmark results for ${short_sha}"
+          git -C "$publish_dir" push origin "HEAD:main"
