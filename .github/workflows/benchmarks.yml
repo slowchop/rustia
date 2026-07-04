@@ -74,7 +74,14 @@ jobs:
           echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.deno/bin:$HOME/.bun/bin:$PATH"
           command -v unzip >/dev/null
-          command -v js115 >/dev/null
+          jsshell_dir="$RUNNER_TEMP/jsshell"
+          mkdir -p "$jsshell_dir"
+          curl -fsSL https://archive.mozilla.org/pub/firefox/nightly/latest-mozilla-central/jsshell-linux-x86_64.zip -o "$RUNNER_TEMP/jsshell.zip"
+          unzip -q -o "$RUNNER_TEMP/jsshell.zip" -d "$jsshell_dir"
+          echo "$jsshell_dir" >> "$GITHUB_PATH"
+          printf 'LD_LIBRARY_PATH=%s%s\n' "$jsshell_dir" "${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          export PATH="$jsshell_dir:$PATH"
+          export LD_LIBRARY_PATH="$jsshell_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           if ! command -v deno >/dev/null 2>&1; then
             curl -fsSL https://deno.land/install.sh | sh
           fi
@@ -83,7 +90,7 @@ jobs:
           fi
           deno --version
           bun --version
-          js115 --version
+          js --version
 
       - name: Configure benchmark data SSH
         env:
@@ -212,7 +219,14 @@ jobs:
           echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.deno/bin:$HOME/.bun/bin:$PATH"
           command -v unzip >/dev/null
-          command -v js115 >/dev/null
+          jsshell_dir="$RUNNER_TEMP/jsshell"
+          mkdir -p "$jsshell_dir"
+          curl -fsSL https://archive.mozilla.org/pub/firefox/nightly/latest-mozilla-central/jsshell-linux-x86_64.zip -o "$RUNNER_TEMP/jsshell.zip"
+          unzip -q -o "$RUNNER_TEMP/jsshell.zip" -d "$jsshell_dir"
+          echo "$jsshell_dir" >> "$GITHUB_PATH"
+          printf 'LD_LIBRARY_PATH=%s%s\n' "$jsshell_dir" "${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          export PATH="$jsshell_dir:$PATH"
+          export LD_LIBRARY_PATH="$jsshell_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           if ! command -v deno >/dev/null 2>&1; then
             curl -fsSL https://deno.land/install.sh | sh
           fi
@@ -221,7 +235,7 @@ jobs:
           fi
           deno --version
           bun --version
-          js115 --version
+          js --version
 
       - name: Configure benchmark data SSH
         env:

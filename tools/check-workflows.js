@@ -158,7 +158,8 @@ function checkBenchmarks(text) {
   requireIncludes(text, "BENCH_DATA_REPO: git@github.com:slowchop/rustia-bench-data.git", label);
   requireIncludes(text, "BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
   requireIncludes(text, "command -v unzip >/dev/null", label);
-  requireIncludes(text, "command -v js115 >/dev/null", label);
+  requireIncludes(text, "jsshell-linux-x86_64.zip", label);
+  requireIncludes(text, "LD_LIBRARY_PATH", label);
   requireIncludes(text, "curl -fsSL https://deno.land/install.sh | sh", label);
   requireIncludes(text, "curl -fsSL https://bun.sh/install | bash", label);
   const labels = benchmarkRunLabels(text);
