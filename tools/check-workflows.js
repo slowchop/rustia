@@ -136,6 +136,7 @@ function checkCi(text) {
   requireIncludes(text, "node design/show-progress.js --no-color --width 88 >/dev/null", label);
   requireIncludes(text, "node tools/check-project-status.js", label);
   requireIncludes(text, "node tools/check-benchmark-results.js", label);
+  requireIncludes(text, "node tools/check-wasm-gate-results.js", label);
   requireIncludes(text, "node bench/render-current-results.js --check", label);
   requireIncludes(text, "node bench/render-claims.js --check", label);
   requireIncludes(text, "node tools/check-benchmark-site.js", label);
@@ -156,6 +157,10 @@ function checkBenchmarks(text) {
   forbidIncludes(text, "actions/upload-artifact", label);
   requireIncludes(text, "BENCH_DATA_REPO: git@github.com:slowchop/rustia-bench-data.git", label);
   requireIncludes(text, "BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
+  requireIncludes(text, "command -v unzip >/dev/null", label);
+  requireIncludes(text, "command -v js115 >/dev/null", label);
+  requireIncludes(text, "curl -fsSL https://deno.land/install.sh | sh", label);
+  requireIncludes(text, "curl -fsSL https://bun.sh/install | bash", label);
   const labels = benchmarkRunLabels(text);
   if (labels.join(",") !== "self-hosted,bench") {
     fail(`${label} runner labels must be exactly self-hosted + bench, got ${labels.join(", ")}`);
@@ -172,6 +177,10 @@ function checkBenchmarks(text) {
   requireIncludes(text, "--features mlua-lua54", label);
   requireIncludes(text, "Record full benchmark results for ${short_sha}", label);
   requireIncludes(text, "--commit \"$(git rev-parse --short HEAD)\"", label);
+  requireIncludes(text, "node tools/run-wasm-gate.js", label);
+  requireIncludes(text, "node tools/run-wasm-dispatch-gate.js", label);
+  requireIncludes(text, "node tools/check-wasm-gate-results.js", label);
+  requireIncludes(text, "node tools/check-benchmark-site.js", label);
   requireIncludes(text, "cargo run -p script-bench-harness -- --refresh-results", label);
   requireIncludes(text, "node bench/render-current-results.js", label);
   requireIncludes(text, "node bench/render-claims.js", label);

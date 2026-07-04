@@ -16,6 +16,13 @@ const adapters = [
     sourceDir: "bench/workloads/koto",
     extension: "koto",
   },
+  {
+    id: "rhai",
+    abi: 4,
+    dialect: "rhai",
+    sourceDir: "bench/workloads/rhai",
+    extension: "rhai",
+  },
 ];
 
 const defaultWorkloads = [
@@ -77,7 +84,7 @@ function parseArgs(argv) {
     targetMs: 80,
     reps: 5,
     maxN: 1_000_000_000,
-    adapters: ["rustia", "koto"],
+    adapters: ["rustia", "koto", "rhai"],
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -351,6 +358,8 @@ function wasmImports() {
     __wbindgen_object_clone_ref: (value) => value,
     __wbg_get_78f252d074a84d0b: (object, key) => object && object[key],
     __wbg_now_390768da5ee9e776: () => performance.now(),
+    __wbg_now_e7c6795a7f81e10f: (value) => Number((value || performance).now()),
+    __wbg_performance_3fcf6e32a7e1ed0a: (value) => value && value.performance ? value.performance : performance,
     __wbg___wbindgen_is_undefined_c05833b95a3cf397: (value) => value === undefined,
     __wbg_static_accessor_GLOBAL_4ef717fb391d88b7: () => globalThis,
     __wbg_static_accessor_GLOBAL_THIS_8d1badc68b5a74f4: () => globalThis,

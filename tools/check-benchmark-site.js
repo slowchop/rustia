@@ -282,8 +282,8 @@ function checkWasmResults(results) {
         fail(`${label}.adapter.${field} must be a non-empty string`);
       }
     }
-    if (!["rustia", "koto"].includes(run.adapter.id)) {
-      fail(`${label}.adapter.id must be rustia or koto for the wasm target bench`);
+    if (!["rustia", "koto", "rhai"].includes(run.adapter.id)) {
+      fail(`${label}.adapter.id must be rustia, koto, or rhai for the wasm target bench`);
     }
     const adapters = adaptersByTarget.get(run.target) ?? new Set();
     adapters.add(run.adapter.id);
@@ -304,7 +304,7 @@ function checkWasmResults(results) {
     }
   }
   for (const [target, adapters] of adaptersByTarget) {
-    for (const adapter of ["rustia", "koto"]) {
+    for (const adapter of ["rustia", "koto", "rhai"]) {
       if (!adapters.has(adapter)) {
         fail(`${relative(wasmResultsPath)} target ${target} is missing ${adapter}`);
       }

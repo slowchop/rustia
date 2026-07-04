@@ -68,6 +68,23 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install wasm JavaScript runtimes
+        run: |
+          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.deno/bin:$HOME/.bun/bin:$PATH"
+          command -v unzip >/dev/null
+          command -v js115 >/dev/null
+          if ! command -v deno >/dev/null 2>&1; then
+            curl -fsSL https://deno.land/install.sh | sh
+          fi
+          if ! command -v bun >/dev/null 2>&1; then
+            curl -fsSL https://bun.sh/install | bash
+          fi
+          deno --version
+          bun --version
+          js115 --version
+
       - name: Configure benchmark data SSH
         env:
           BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}
@@ -105,6 +122,12 @@ jobs:
           --history bench/history/runs.jsonl
           --commit "$(git rev-parse --short HEAD)"
 
+      - name: Run wasm target benchmark
+        run: node tools/run-wasm-gate.js
+
+      - name: Run wasm dispatch benchmark
+        run: node tools/run-wasm-dispatch-gate.js
+
       - name: Refresh generated benchmark reports
         run: |
           cargo run -p script-bench-harness -- --refresh-results
@@ -114,8 +137,10 @@ jobs:
       - name: Check generated benchmark artifacts
         run: |
           node tools/check-benchmark-results.js
+          node tools/check-wasm-gate-results.js
           node bench/render-current-results.js --check
           node bench/render-claims.js --check
+          node tools/check-benchmark-site.js
 
       - name: Publish benchmark results
         run: |
@@ -181,6 +206,23 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install wasm JavaScript runtimes
+        run: |
+          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.deno/bin:$HOME/.bun/bin:$PATH"
+          command -v unzip >/dev/null
+          command -v js115 >/dev/null
+          if ! command -v deno >/dev/null 2>&1; then
+            curl -fsSL https://deno.land/install.sh | sh
+          fi
+          if ! command -v bun >/dev/null 2>&1; then
+            curl -fsSL https://bun.sh/install | bash
+          fi
+          deno --version
+          bun --version
+          js115 --version
+
       - name: Configure benchmark data SSH
         env:
           BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}
@@ -225,6 +267,12 @@ jobs:
           --history bench/history/runs.jsonl
           --commit "$(git rev-parse --short HEAD)"
 
+      - name: Run wasm target benchmark
+        run: node tools/run-wasm-gate.js
+
+      - name: Run wasm dispatch benchmark
+        run: node tools/run-wasm-dispatch-gate.js
+
       - name: Refresh generated benchmark reports
         run: |
           cargo run -p script-bench-harness -- --refresh-results
@@ -234,8 +282,10 @@ jobs:
       - name: Check generated benchmark artifacts
         run: |
           node tools/check-benchmark-results.js
+          node tools/check-wasm-gate-results.js
           node bench/render-current-results.js --check
           node bench/render-claims.js --check
+          node tools/check-benchmark-site.js
 
       - name: Publish benchmark results
         run: |

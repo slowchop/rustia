@@ -6,6 +6,7 @@ use std::str;
 const ADAPTER_RUSTIA: u32 = 1;
 const ADAPTER_KOTO: u32 = 2;
 const ADAPTER_WASMI: u32 = 3;
+const ADAPTER_RHAI: u32 = 4;
 
 thread_local! {
     static BENCH: RefCell<Option<BenchState>> = const { RefCell::new(None) };
@@ -20,6 +21,11 @@ enum BenchState {
     Koto {
         koto: koto::prelude::Koto,
         function: koto::prelude::KValue,
+    },
+    Rhai {
+        engine: rhai::Engine,
+        ast: rhai::AST,
+        scope: rhai::Scope<'static>,
     },
     Wasmi {
         store: wasmi::Store<()>,
@@ -53,7 +59,7 @@ pub extern "C" fn bench_abi_version() -> u32 {
 
 #[no_mangle]
 pub extern "C" fn bench_adapter_mask() -> u32 {
-    (1 << ADAPTER_RUSTIA) | (1 << ADAPTER_KOTO) | (1 << ADAPTER_WASMI)
+    (1 << ADAPTER_RUSTIA) | (1 << ADAPTER_KOTO) | (1 << ADAPTER_WASMI) | (1 << ADAPTER_RHAI)
 }
 
 #[no_mangle]
@@ -119,6 +125,7 @@ fn prepare(adapter: u32, source: &str) -> Result<BenchState, String> {
         ADAPTER_RUSTIA => prepare_rustia(source),
         ADAPTER_KOTO => prepare_koto(source),
         ADAPTER_WASMI => prepare_wasmi(source),
+        ADAPTER_RHAI => prepare_rhai(source),
         _ => Err(format!("unknown adapter id {adapter}")),
     }
 }
@@ -146,6 +153,16 @@ fn prepare_koto(source: &str) -> Result<BenchState, String> {
         .get("f")
         .ok_or_else(|| "koto workload must export function f".to_owned())?;
     Ok(BenchState::Koto { koto, function })
+}
+
+fn prepare_rhai(source: &str) -> Result<BenchState, String> {
+    let engine = rhai::Engine::new();
+    let ast = engine.compile(source).map_err(|error| error.to_string())?;
+    Ok(BenchState::Rhai {
+        engine,
+        ast,
+        scope: rhai::Scope::new(),
+    })
 }
 
 fn prepare_wasmi(source: &str) -> Result<BenchState, String> {
@@ -179,6 +196,24 @@ fn run_prepared(state: &mut BenchState, n: u32) -> Result<f64, String> {
                 KValue::Bool(value) => Ok(if value { 1.0 } else { 0.0 }),
                 other => Err(format!("expected numeric koto result, got {other:?}")),
             }
+        }
+        BenchState::Rhai { engine, ast, scope } => {
+            let result = engine
+                .call_fn::<rhai::Dynamic>(scope, ast, "f", (rhai::INT::from(n),))
+                .map_err(|error| error.to_string())?;
+            if let Ok(value) = result.as_int() {
+                return Ok(value as f64);
+            }
+            if let Ok(value) = result.as_float() {
+                return Ok(value);
+            }
+            if let Some(value) = result.clone().try_cast::<bool>() {
+                return Ok(if value { 1.0 } else { 0.0 });
+            }
+            Err(format!(
+                "expected numeric rhai result, got {}",
+                result.type_name()
+            ))
         }
         BenchState::Wasmi { store, function } => {
             let value = function
