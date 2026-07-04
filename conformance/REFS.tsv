@@ -113,7 +113,8 @@ number.mul	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basi
 number.nan-result	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	NaN-producing numeric operations produce Luau numeric NaN values that tostring renders as "nan".
 number.pow	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Exponentiation uses Luau numeric power semantics for finite numeric results.
 number.sign-of-zero	determinism	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Sign of zero is preserved in numeric values and observable through tostring except at table-key normalization.
-number.string-arithmetic-coercion	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Arithmetic operators coerce numeric strings, including hexadecimal numeric strings, to numbers.
+number.string-arithmetic-coercion	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Arithmetic operators coerce numeric strings, including hexadecimal and hex-float numeric strings, to numbers before using metamethod/error paths.
+number.string-unary-coercion	parser-runtime	upstream-luau-0.709:VM/src/lvmutils.cpp	luau-0.709	Unary minus uses the same Luau numeric-string coercion path as binary arithmetic, including whitespace-trimmed decimal/hex/hex-float strings and rejection of lexer-only runtime strings.
 number.sub	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Number subtraction produces Luau f64 results.
 string.byte-semantics	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/strings.luau	luau-0.709	String values preserve byte values including embedded NUL bytes from decimal escapes.
 string.concat	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	String concatenation joins string operands and is right-associative.
