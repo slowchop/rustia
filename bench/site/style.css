@@ -372,16 +372,36 @@ tbody tr:last-child td {
 }
 
 .engine-target {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 2px 8px;
   min-width: 0;
 }
 
+.engine-target .swatch {
+  margin-top: 0.45em;
+}
+
+.engine-target-main {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.engine-target-kind,
 .engine-target-detail {
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
+}
+
+.engine-target-detail {
+  grid-column: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .target-runtime {

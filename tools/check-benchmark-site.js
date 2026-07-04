@@ -50,6 +50,12 @@ function requireIncludes(text, needle, filePath, description) {
   }
 }
 
+function requireMatches(text, pattern, filePath, description) {
+  if (!pattern.test(text)) {
+    fail(`${relative(filePath)} must include ${description}: ${pattern}`);
+  }
+}
+
 function assertEqual(actual, expected, description) {
   if (actual !== expected) {
     fail(`${description}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
@@ -399,8 +405,8 @@ const wasmGate = parseJson(wasmGatePath);
 const wasmResults = parseJson(wasmResultsPath);
 const wasmDispatch = parseJson(wasmDispatchPath);
 
-requireIncludes(html, '<link rel="stylesheet" href="./style.css">', indexPath, "local stylesheet link");
-requireIncludes(html, '<script src="./app.js" defer></script>', indexPath, "local app script");
+requireMatches(html, /<link\s+rel="stylesheet"\s+href="\.\/style\.css(?:\?[^"]*)?">/, indexPath, "local stylesheet link");
+requireMatches(html, /<script\s+src="\.\/app\.js(?:\?[^"]*)?"\s+defer><\/script>/, indexPath, "local app script");
 requireIncludes(html, 'href="../history/runs.jsonl"', indexPath, "history download link");
 requireIncludes(js, 'fetch("../history/runs.jsonl"', appPath, "relative history fetch");
 requireIncludes(js, 'fetch("../wasm-gate.json"', appPath, "relative wasm gate fetch");

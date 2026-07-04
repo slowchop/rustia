@@ -835,20 +835,43 @@ function engineLabel(engine) {
 }
 
 function engineTargetLabel(engine, target) {
-  const detail = rowElement("span", [
-    document.createTextNode(` (${target})`),
+  const kind = targetKind(target);
+  const targetDetail = target && target !== kind
+    ? rowElement("span", [document.createTextNode(target)])
+    : null;
+  if (targetDetail) {
+    targetDetail.className = "engine-target-detail";
+  }
+  const kindLabel = rowElement("span", [
+    document.createTextNode(`(${kind})`),
   ]);
-  detail.className = "engine-target-detail";
+  kindLabel.className = "engine-target-kind";
   const text = rowElement("span", [
     document.createTextNode(engine),
-    detail,
+    kindLabel,
   ]);
+  text.className = "engine-target-main";
   const label = rowElement("span", [
     colorDot(engineColor(engine)),
     text,
+    ...(targetDetail ? [targetDetail] : []),
   ]);
   label.className = "engine-target";
   return label;
+}
+
+function targetKind(target) {
+  const value = String(target);
+  if (value.startsWith("wasm32")) {
+    return "wasm32";
+  }
+  for (const candidate of ["aarch64", "arm64", "x86_64", "x86", "arm32", "armv7"]) {
+    if (value.includes(candidate)) {
+      return candidate;
+    }
+  }
+  const parts = value.split("-").filter(Boolean);
+  return parts.length === 0 ? value : parts[parts.length - 1];
 }
 
 function colorDot(color) {

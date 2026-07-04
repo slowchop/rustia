@@ -128,6 +128,12 @@
     }
 
     .engine-target {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .engine-target-main {
       display: inline-flex;
       align-items: baseline;
       flex-wrap: wrap;
@@ -135,9 +141,20 @@
       min-width: 0;
     }
 
-    .engine-target span {
+    .engine-target-kind,
+    .engine-target-detail {
       color: var(--muted);
+      font-weight: 700;
+    }
+
+    .engine-target-kind {
       font-size: 13px;
+    }
+
+    .engine-target-detail {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 12px;
       font-weight: 700;
     }
 
@@ -419,14 +436,14 @@
       <div class="section-head">
         <div>
           <h2>Engine Summary</h2>
-          <p>One row per engine/target pair. Geomean uses available speed-vs-rustia ratios from the current snapshot.</p>
+          <p>One row per engine/target pair. Labels show the target kind first, with the full target/runtime underneath.</p>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Engine (target)</th>
+              <th>Engine target</th>
               <th>Geomean vs rustia</th>
               <th>Best results</th>
               <th>Median min ns/unit</th>
@@ -436,7 +453,7 @@
           <tbody>
 
                 <tr>
-                  <td><span class="engine-target"><strong>wasmtime</strong><span>(macos-aarch64)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>wasmtime</strong><span class="engine-target-kind">(aarch64)</span></span><span class="engine-target-detail">macos-aarch64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>235x</span>
@@ -449,7 +466,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>wasmi</strong><span>(macos-aarch64)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>wasmi</strong><span class="engine-target-kind">(aarch64)</span></span><span class="engine-target-detail">macos-aarch64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>61.6x</span>
@@ -462,7 +479,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>mlua-luau</strong><span>(macos-aarch64)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>mlua-luau</strong><span class="engine-target-kind">(aarch64)</span></span><span class="engine-target-detail">macos-aarch64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>13x</span>
@@ -475,7 +492,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>mlua-lua54</strong><span>(macos-aarch64)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>mlua-lua54</strong><span class="engine-target-kind">(aarch64)</span></span><span class="engine-target-detail">macos-aarch64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>10.6x</span>
@@ -488,7 +505,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>roto</strong><span>(macos-aarch64)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>roto</strong><span class="engine-target-kind">(aarch64)</span></span><span class="engine-target-detail">macos-aarch64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>5.111x</span>
@@ -501,7 +518,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>rquickjs</strong><span>(macos-aarch64)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>rquickjs</strong><span class="engine-target-kind">(aarch64)</span></span><span class="engine-target-detail">macos-aarch64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>3.098x</span>
@@ -514,7 +531,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>koto</strong><span>(wasm32 / SpiderMonkey/spidermonkey)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>koto</strong><span class="engine-target-kind">(wasm32)</span></span><span class="engine-target-detail">SpiderMonkey/spidermonkey · wasm32-spidermonkey-spidermonkey-darwin-arm64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>2.793x</span>
@@ -527,7 +544,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>koto</strong><span>(macos-aarch64)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>koto</strong><span class="engine-target-kind">(aarch64)</span></span><span class="engine-target-detail">macos-aarch64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>2.696x</span>
@@ -540,7 +557,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>koto</strong><span>(wasm32 / V8/deno)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>koto</strong><span class="engine-target-kind">(wasm32)</span></span><span class="engine-target-detail">V8/deno · wasm32-v8-deno-darwin-aarch64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>2.526x</span>
@@ -553,7 +570,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>koto</strong><span>(wasm32 / V8/node)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>koto</strong><span class="engine-target-kind">(wasm32)</span></span><span class="engine-target-detail">V8/node · wasm32-v8-node-darwin-arm64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>2.33x</span>
@@ -566,7 +583,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>koto</strong><span>(wasm32 / JavaScriptCore/bun)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>koto</strong><span class="engine-target-kind">(wasm32)</span></span><span class="engine-target-detail">JavaScriptCore/bun · wasm32-javascriptcore-bun-darwin-arm64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>2.28x</span>
@@ -579,7 +596,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>rhai</strong><span>(macos-aarch64)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>rhai</strong><span class="engine-target-kind">(aarch64)</span></span><span class="engine-target-detail">macos-aarch64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>1.418x</span>
@@ -592,7 +609,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>rustia</strong><span>(macos-aarch64)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>rustia</strong><span class="engine-target-kind">(aarch64)</span></span><span class="engine-target-detail">macos-aarch64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>1x</span>
@@ -605,7 +622,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>rustia</strong><span>(wasm32 / JavaScriptCore/bun)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>rustia</strong><span class="engine-target-kind">(wasm32)</span></span><span class="engine-target-detail">JavaScriptCore/bun · wasm32-javascriptcore-bun-darwin-arm64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>1x</span>
@@ -618,7 +635,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>rustia</strong><span>(wasm32 / SpiderMonkey/spidermonkey)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>rustia</strong><span class="engine-target-kind">(wasm32)</span></span><span class="engine-target-detail">SpiderMonkey/spidermonkey · wasm32-spidermonkey-spidermonkey-darwin-arm64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>1x</span>
@@ -631,7 +648,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>rustia</strong><span>(wasm32 / V8/deno)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>rustia</strong><span class="engine-target-kind">(wasm32)</span></span><span class="engine-target-detail">V8/deno · wasm32-v8-deno-darwin-aarch64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>1x</span>
@@ -644,7 +661,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>rustia</strong><span>(wasm32 / V8/node)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>rustia</strong><span class="engine-target-kind">(wasm32)</span></span><span class="engine-target-detail">V8/node · wasm32-v8-node-darwin-arm64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>1x</span>
@@ -657,7 +674,7 @@
                 </tr>
 
                 <tr>
-                  <td><span class="engine-target"><strong>boa</strong><span>(macos-aarch64)</span></span></td>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>boa</strong><span class="engine-target-kind">(aarch64)</span></span><span class="engine-target-detail">macos-aarch64</span></span></td>
                   <td>
                     <div class="bar-cell">
                       <span>0.629x</span>

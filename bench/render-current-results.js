@@ -270,6 +270,20 @@ function runtimeLabel(runtime) {
   return `${runtime.family}/${runtime.name}`;
 }
 
+function targetKind(target) {
+  const value = String(target);
+  if (value.startsWith("wasm32")) {
+    return "wasm32";
+  }
+  for (const candidate of ["aarch64", "arm64", "x86_64", "x86", "arm32", "armv7"]) {
+    if (value.includes(candidate)) {
+      return candidate;
+    }
+  }
+  const parts = value.split("-").filter(Boolean);
+  return parts.length === 0 ? value : parts[parts.length - 1];
+}
+
 function slug(value) {
   return String(value)
     .toLowerCase()
@@ -314,7 +328,8 @@ function summarize(data, wasmRows) {
     ...rows.map((row) => ({
       engine: row.engine,
       target: row.target,
-      targetLabel: row.target,
+      targetKind: targetKind(row.target),
+      targetDetail: row.target,
       workload: row.workload,
       ns_per_unit_min: row.ns_per_unit_min,
       speed_vs_rustia: row.speed_vs_rustia,
@@ -322,7 +337,8 @@ function summarize(data, wasmRows) {
     ...wasmRows.map((row) => ({
       engine: row.adapter,
       target: row.target,
-      targetLabel: `wasm32 / ${row.runtime}`,
+      targetKind: targetKind(row.target),
+      targetDetail: `${row.runtime} · ${row.target}`,
       workload: row.workload,
       ns_per_unit_min: row.ns_per_unit_min,
       speed_vs_rustia: row.speed_vs_rustia,
@@ -338,7 +354,8 @@ function summarize(data, wasmRows) {
       return {
         engine,
         target,
-        targetLabel: values[0].targetLabel,
+        targetKind: values[0].targetKind,
+        targetDetail: values[0].targetDetail,
         workloadCount: unique(values.map((row) => row.workload)).length,
         bestCount: 0,
         geoSpeed: geometricMean(values.map((row) => row.speed_vs_rustia)),
@@ -402,14 +419,14 @@ function engineSummaryTable(engineRows) {
       <div class="section-head">
         <div>
           <h2>Engine Summary</h2>
-          <p>One row per engine/target pair. Geomean uses available speed-vs-rustia ratios from the current snapshot.</p>
+          <p>One row per engine/target pair. Labels show the target kind first, with the full target/runtime underneath.</p>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Engine (target)</th>
+              <th>Engine target</th>
               <th>Geomean vs rustia</th>
               <th>Best results</th>
               <th>Median min ns/unit</th>
@@ -421,7 +438,7 @@ function engineSummaryTable(engineRows) {
               const width = row.geoSpeed ? Math.max(2, (row.geoSpeed / maxSpeed) * 100) : 0;
               return `
                 <tr>
-                  <td>${engineTargetLabel(row.engine, row.targetLabel)}</td>
+                  <td>${engineTargetLabel(row.engine, row.targetKind, row.targetDetail)}</td>
                   <td>
                     <div class="bar-cell">
                       <span>${formatSpeed(row.geoSpeed)}</span>
@@ -441,8 +458,11 @@ function engineSummaryTable(engineRows) {
   `;
 }
 
-function engineTargetLabel(engine, targetLabel) {
-  return `<span class="engine-target"><strong>${escapeHtml(engine)}</strong><span>(${escapeHtml(targetLabel)})</span></span>`;
+function engineTargetLabel(engine, targetKindValue, targetDetail) {
+  const detail = targetDetail && targetDetail !== targetKindValue
+    ? `<span class="engine-target-detail">${escapeHtml(targetDetail)}</span>`
+    : "";
+  return `<span class="engine-target"><span class="engine-target-main"><strong>${escapeHtml(engine)}</strong><span class="engine-target-kind">(${escapeHtml(targetKindValue)})</span></span>${detail}</span>`;
 }
 
 function workloadSection(target, workload, rows) {
@@ -804,6 +824,12 @@ function render(data, wasmResults, wasmDispatchResults) {
     }
 
     .engine-target {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .engine-target-main {
       display: inline-flex;
       align-items: baseline;
       flex-wrap: wrap;
@@ -811,9 +837,20 @@ function render(data, wasmResults, wasmDispatchResults) {
       min-width: 0;
     }
 
-    .engine-target span {
+    .engine-target-kind,
+    .engine-target-detail {
       color: var(--muted);
+      font-weight: 700;
+    }
+
+    .engine-target-kind {
       font-size: 13px;
+    }
+
+    .engine-target-detail {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 12px;
       font-weight: 700;
     }
 

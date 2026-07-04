@@ -30,15 +30,15 @@ snapshot.
 
 These geomeans are useful for triage, but they are not public headline claims.
 
-| engine | geomean vs rustia | fastest workloads | coverage |
-|---|---:|---:|---|
-| wasmtime | 235x | 4 / 5 | 1 targets, 5 workloads |
-| wasmi | 61.61x | 0 / 5 | 1 targets, 5 workloads |
-| mlua-luau | 12.96x | 0 / 5 | 1 targets, 5 workloads |
-| mlua-lua54 | 10.56x | 0 / 5 | 1 targets, 5 workloads |
-| roto | 5.111x | 1 / 5 | 1 targets, 5 workloads |
-| rquickjs | 3.098x | 0 / 5 | 1 targets, 5 workloads |
-| koto | 2.696x | 0 / 5 | 1 targets, 5 workloads |
-| rhai | 1.418x | 0 / 5 | 1 targets, 5 workloads |
-| rustia | 1x | 0 / 5 | 1 targets, 5 workloads |
-| boa | 0.629x | 0 / 5 | 1 targets, 5 workloads |
+| engine target | geomean vs rustia | fastest workloads | target detail | coverage |
+|---|---:|---:|---|---|
+| wasmtime (aarch64) | 235x | 4 / 5 | macos-aarch64 | 5 workloads |
+| wasmi (aarch64) | 61.61x | 0 / 5 | macos-aarch64 | 5 workloads |
+| mlua-luau (aarch64) | 12.96x | 0 / 5 | macos-aarch64 | 5 workloads |
+| mlua-lua54 (aarch64) | 10.56x | 0 / 5 | macos-aarch64 | 5 workloads |
+| roto (aarch64) | 5.111x | 1 / 5 | macos-aarch64 | 5 workloads |
+| rquickjs (aarch64) | 3.098x | 0 / 5 | macos-aarch64 | 5 workloads |
+| koto (aarch64) | 2.696x | 0 / 5 | macos-aarch64 | 5 workloads |
+| rhai (aarch64) | 1.418x | 0 / 5 | macos-aarch64 | 5 workloads |
+| rustia (aarch64) | 1x | 0 / 5 | macos-aarch64 | 5 workloads |
+| boa (aarch64) | 0.629x | 0 / 5 | macos-aarch64 | 5 workloads |
