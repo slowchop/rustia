@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod extension_api;
 mod function;
 mod macros;
@@ -378,6 +380,7 @@ mod tests {
     use rustia_vm::Vm;
     use serde::{Deserialize, Serialize};
     use std::collections::BTreeMap;
+    use std::num::NonZeroU64;
 
     #[test]
     fn compile_and_run_smoke() {
@@ -402,6 +405,766 @@ mod tests {
         assert_eq!(missing, None);
         assert_eq!(named.get("scout"), Some(&5));
         assert_eq!(named.get("brute"), Some(&9));
+    }
+
+    #[test]
+    fn global_reads_track_writes_after_inline_cache_hits() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: f64 = rustia
+            .run(
+                "
+counter = 0
+local total = 0
+for _ = 1, 4 do
+    total = total + counter
+    counter = counter + 1
+end
+return total
+",
+            )
+            .unwrap();
+
+        assert_eq!(value, 6.0);
+    }
+
+    #[test]
+    fn standard_global_inline_cache_is_shadowed_by_assignment() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local function call_type()
+    return type(1)
+end
+
+local before = call_type()
+type = function()
+    return "shadow"
+end
+local after = call_type()
+return before .. "|" .. after
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "number|shadow");
+    }
+
+    #[test]
+    fn table_hash_index_tracks_numeric_key_promotion_to_array() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: f64 = rustia
+            .run(
+                "
+local t = {}
+t[4] = 4
+local before = t[4]
+t[1] = 1
+t[2] = 2
+t[3] = 3
+t[4] = 40
+t[5] = 5
+return before + t[4] + t[5]
+",
+            )
+            .unwrap();
+
+        assert_eq!(value, 49.0);
+    }
+
+    #[test]
+    fn table_hash_index_tracks_delete_and_clear() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local t = { alpha = 1, beta = 2, gamma = 3 }
+t.beta = nil
+local deleted = tostring(t.beta)
+table.clear(t)
+t.alpha = 10
+return deleted .. "|" .. tostring(t.alpha) .. "|" .. tostring(t.gamma)
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "nil|10|nil");
+    }
+
+    #[test]
+    fn table_hash_index_tracks_many_hash_keys() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local t = {}
+for i = 1, 24 do
+    t["k" .. i] = i
+    t[i * 1000] = i * 2
+end
+local before = t["k1"] + t["k24"] + t[24000]
+t["k17"] = nil
+t[2000] = nil
+t[30] = 3000
+local sparse = t[30]
+for i = 1, 30 do
+    t[i] = i
+end
+local promoted = t[30]
+t[30] = 3030
+return table.concat({
+    before,
+    tostring(t["k17"] == nil),
+    tostring(t[2000] == nil),
+    sparse,
+    promoted,
+    t[30],
+    t["k23"],
+    t[23000],
+}, "|")
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "73|true|true|3000|30|3030|23|46");
+    }
+
+    #[test]
+    fn numeric_fast_path_preserves_coercion_and_metamethod_fallbacks() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local mt = {
+    __add = function(lhs, rhs)
+        return lhs.value + rhs
+    end
+}
+local boxed = setmetatable({ value = 5 }, mt)
+return tostring("2" + 3) .. "|" .. tostring(boxed + 7)
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "5|12");
+    }
+
+    #[test]
+    fn arithmetic_metamethod_inline_cache_tracks_left_changes_and_right_fallback() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local function add(lhs, rhs)
+    return lhs + rhs
+end
+
+local mt1 = {
+    __add = function(lhs, rhs)
+        return lhs.value + rhs.value
+    end
+}
+local mt2 = {
+    __add = function(lhs, rhs)
+        return lhs.value * rhs.value
+    end
+}
+local rhs_mt = {
+    __add = function()
+        return 99
+    end
+}
+
+local lhs = setmetatable({ value = 2 }, mt1)
+local rhs = { value = 3 }
+local first = add(lhs, rhs)
+mt1.__add = function(lhs, rhs)
+    return lhs.value - rhs.value
+end
+local second = add(lhs, rhs)
+setmetatable(lhs, mt2)
+local third = add(lhs, rhs)
+mt2.__add = nil
+setmetatable(rhs, rhs_mt)
+local fourth = add(lhs, rhs)
+return table.concat({ first, second, third, fourth }, "|")
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "5|-1|6|99");
+    }
+
+    #[test]
+    fn setmetatable_native_fast_path_preserves_call_edges() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local t = setmetatable({}, { __index = { answer = 42 } })
+local function none()
+end
+local ok_missing = pcall(function()
+    setmetatable({}, none())
+end)
+local protected = setmetatable({}, { __metatable = "locked" })
+local ok_protected, protected_error = pcall(function()
+    setmetatable(protected, {})
+end)
+local local_setmetatable = function()
+    return "shadowed"
+end
+local shadowed = local_setmetatable({}, {})
+setmetatable = function()
+    return "global"
+end
+local replaced = setmetatable({}, {})
+return table.concat({
+    t.answer,
+    tostring(ok_missing),
+    tostring(ok_protected),
+    tostring(string.find(protected_error, "protected") ~= nil),
+    shadowed,
+    replaced,
+}, "|")
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "42|false|false|true|shadowed|global");
+    }
+
+    #[test]
+    fn concat_integer_fast_path_preserves_number_text_edges() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local a = "k" .. 1
+local b = 12 .. "k"
+local c = "n" .. 999999
+local d = "z" .. 0
+local e = "m" .. -0
+local f = "d" .. 1.5
+return table.concat({ a, b, c, d, e, f }, "|")
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "k1|12k|n999999|z0|m-0|d1.5");
+    }
+
+    #[test]
+    fn native_string_len_fast_path_preserves_first_class_coercion() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: f64 = rustia
+            .run(
+                r#"
+local len = string.len
+local s = "abcdef"
+return len("abc") + len(123) + #s
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, 12.0);
+    }
+
+    #[test]
+    fn string_sub_preserves_positive_negative_and_empty_ranges() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local sub = string.sub
+return sub("abcdef", 2, 4) .. "|" .. sub("abcdef", -3, -1) .. "|" .. tostring(#sub("abc", 5, 6))
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "bcd|def|0");
+    }
+
+    #[test]
+    fn string_format_plan_cache_preserves_reused_format_arguments() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local fmt = string.format
+local pattern = "[%d] x=%.3f name=%s hex=%x %% %*"
+local a = fmt(pattern, 7, 10.5, "agent", 255, true)
+local b = fmt(pattern, 8, 12, "bee", 16, false)
+return a .. "|" .. b
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(
+            value,
+            "[7] x=10.500 name=agent hex=ff % true|[8] x=12.000 name=bee hex=10 % false"
+        );
+    }
+
+    #[test]
+    fn string_format_direct_path_preserves_simple_and_padded_specs() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local fmt = string.format
+return table.concat({
+    fmt("%d|%+d|% d", -42, 42, 42),
+    fmt("%u|%o|%x|%X", -1, 511, 48879, 48879),
+    fmt("%c|%s|%.3f|%+f|% f", 65, "ok", 1.5, 2.0, 2.0),
+    fmt("%5d|%.4x|%8s", 7, 255, "hi"),
+}, "|")
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(
+            value,
+            "-42|+42| 42|18446744073709551615|777|beef|BEEF|A|ok|1.500|+2.000000| 2.000000|    7|00ff|      hi"
+        );
+    }
+
+    #[test]
+    fn table_index_fast_path_preserves_index_metamethod_fallbacks() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local mt = {
+    __index = function(_, key)
+        return "fallback:" .. key
+    end
+}
+local t = setmetatable({ present = "raw", erased = "raw" }, mt)
+t.erased = nil
+return t.present .. "|" .. t.missing .. "|" .. t.erased
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "raw|fallback:missing|fallback:erased");
+    }
+
+    #[test]
+    fn array_index_fast_path_preserves_sparse_keys_and_metamethods() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local sparse = {}
+sparse[100000] = 7
+
+local t = setmetatable({ 11, 22 }, {
+    __index = function(_, key)
+        return "fallback:" .. tostring(key)
+    end,
+    __newindex = function(target, key, value)
+        rawset(target, "seen", tostring(key) .. ":" .. tostring(value))
+    end
+})
+
+local before = t[1]
+t[1] = 33
+t[2] = nil
+t[3] = 44
+
+return tostring(sparse[100000])
+    .. "|"
+    .. tostring(before)
+    .. "|"
+    .. tostring(t[1])
+    .. "|"
+    .. tostring(t[2])
+    .. "|"
+    .. tostring(t[3])
+    .. "|"
+    .. tostring(t.seen)
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "7|11|33|fallback:2|fallback:3|3:44");
+    }
+
+    #[test]
+    fn table_get_inline_cache_tracks_static_field_changes() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local t = { value = "a" }
+local function read()
+    return t.value
+end
+
+local a = read()
+local b = read()
+t.value = "b"
+local c = read()
+t.value = nil
+local d = tostring(read())
+return a .. b .. c .. d
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "aabnil");
+    }
+
+    #[test]
+    fn table_get_inline_cache_tracks_metatable_after_nil_hit() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local t = {}
+local function read()
+    return t.missing
+end
+
+local before = tostring(read())
+setmetatable(t, {
+    __index = function(_, key)
+        return "fallback:" .. key
+    end
+})
+local after = read()
+return before .. "|" .. after
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "nil|fallback:missing");
+    }
+
+    #[test]
+    fn table_get_inline_cache_preserves_static_field_metamethod_calls() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local calls = 0
+local t = setmetatable({}, {
+    __index = function(_, key)
+        calls = calls + 1
+        return key .. ":" .. tostring(calls)
+    end
+})
+
+local function read()
+    return t.missing
+end
+
+return read() .. "|" .. read() .. "|" .. tostring(calls)
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "missing:1|missing:2|2");
+    }
+
+    #[test]
+    fn table_get_inline_cache_tracks_index_table_changes_and_raw_overrides() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local proto = { value = "a" }
+local mt = { __index = proto }
+local first = setmetatable({}, mt)
+local second = setmetatable({}, mt)
+
+local function read(object)
+    return object.value
+end
+
+local a = read(first)
+local b = read(second)
+second.value = "local"
+local c = read(second)
+proto.value = "b"
+local d = read(first)
+mt.__index = { value = "c" }
+local e = read(first)
+return table.concat({ a, b, c, d, e }, "|")
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "a|a|local|b|c");
+    }
+
+    #[test]
+    fn len_inline_cache_tracks_table_changes_and_metamethods() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local t = { 1, 2, 3 }
+local out = {}
+for i = 1, 3 do
+    out[i] = #t
+    if i == 1 then
+        t[4] = 4
+    elseif i == 2 then
+        t[4] = nil
+    end
+end
+
+local calls = 0
+local proxy = setmetatable({ 1, 2, 3 }, {
+    __len = function()
+        calls = calls + 1
+        return 40 + calls
+    end
+})
+return table.concat(out, ",") .. "|" .. #proxy .. "|" .. #proxy .. "|" .. calls
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "3,4,3|41|42|2");
+    }
+
+    #[test]
+    fn iter_metamethod_inline_cache_tracks_metatable_changes() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local t = { 1, 2 }
+
+local function walk()
+    local out = {}
+    for k, v in t do
+        out[#out + 1] = tostring(k) .. ":" .. tostring(v)
+    end
+    return table.concat(out, ",")
+end
+
+local before = walk()
+setmetatable(t, {
+    __iter = function(self)
+        local i = 0
+        return function()
+            i = i + 1
+            if i <= 2 then
+                return i, self[i] * 10
+            end
+        end
+    end,
+})
+local installed = walk()
+getmetatable(t).__iter = function()
+    local done = false
+    return function()
+        if not done then
+            done = true
+            return "x", 99
+        end
+    end
+end
+local replaced = walk()
+setmetatable(t, nil)
+local removed = walk()
+return before .. "|" .. installed .. "|" .. replaced .. "|" .. removed
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "1:1,2:2|1:10,2:20|x:99|1:1,2:2");
+    }
+
+    #[test]
+    fn set_index_fast_path_preserves_newindex_metamethod_fallbacks() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local proxy = setmetatable({}, {
+    __newindex = function(target, key, value)
+        rawset(target, "seen", key .. ":" .. tostring(value))
+    end
+})
+proxy.answer = 42
+local direct = setmetatable({ answer = 1 }, {
+    __newindex = function(target, key, value)
+        rawset(target, "seen", key .. ":" .. tostring(value))
+    end
+})
+direct.answer = 2
+local plain = {}
+plain.answer = 42
+return proxy.seen .. "|" .. tostring(direct.answer) .. "|" .. tostring(direct.seen) .. "|" .. tostring(plain.answer)
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "answer:42|2|nil|42");
+    }
+
+    #[test]
+    fn array_set_fast_path_preserves_newindex_and_readonly_edges() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local log = {}
+local proxy = setmetatable({ "a" }, {
+    __newindex = function(target, key, value)
+        log[#log + 1] = tostring(key) .. ":" .. tostring(value)
+        rawset(target, key, value)
+    end
+})
+proxy[2] = "two"
+proxy[1] = "one"
+proxy[3] = nil
+local frozen = table.freeze({ 1 })
+local ok, message = pcall(function()
+    frozen[1] = 2
+end)
+local readonly = string.find(message, "readonly", 1, true) ~= nil
+local frozen_sparse = table.freeze({})
+local sparse_ok, sparse_message = pcall(function()
+    frozen_sparse[100000] = 2
+end)
+local sparse_readonly = string.find(sparse_message, "readonly", 1, true) ~= nil
+return proxy[1]
+    .. "|" .. proxy[2]
+    .. "|" .. tostring(proxy[3])
+    .. "|" .. table.concat(log, ",")
+    .. "|" .. tostring(ok)
+    .. "|" .. tostring(readonly)
+    .. "|" .. tostring(sparse_ok)
+    .. "|" .. tostring(sparse_readonly)
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "one|two|nil|2:two,3:nil|false|true|false|true");
+    }
+
+    #[test]
+    fn table_sort_fast_path_preserves_numeric_and_comparator_results() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local a = { 9, 4, 7, 1, 4 }
+table.sort(a)
+local b = { 1, 4, 7, 9 }
+table.sort(b, function(left, right)
+    return left > right
+end)
+local c = { 0, -0 }
+table.sort(c)
+local d = { 5, -2, 5, -1 }
+table.sort(d)
+return table.concat(a, ",") .. "|" .. table.concat(b, ",") .. "|" .. tostring(c[1]) .. "," .. tostring(c[2]) .. "|" .. table.concat(d, ",")
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "1,4,4,7,9|9,7,4,1|0,-0|-2,-1,5,5");
+    }
+
+    #[test]
+    fn aliased_math_fast_path_preserves_native_call_edges() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local sin, floor, abs = math.sin, math.floor, math.abs
+local ok, message = pcall(function()
+    return abs()
+end)
+local has_missing_abs = string.find(message, "missing argument #1 to 'abs'", 1, true) ~= nil
+return tostring(sin("0", "ignored"))
+    .. "|" .. tostring(floor(2.9, 99))
+    .. "|" .. tostring(abs("-3", "ignored"))
+    .. "|" .. tostring(ok)
+    .. "|" .. tostring(has_missing_abs)
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "0|2|3|false|true");
+    }
+
+    #[test]
+    fn upvalue_peephole_preserves_adjacent_reads_and_return_reload() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let value: String = rustia
+            .run(
+                r#"
+local function make(start, step)
+    local current = start
+    return function()
+        current = current + step
+        return current
+    end
+end
+local a = make(1, 2)
+local b = make(10, -1)
+return table.concat({ a(), a(), b(), a(), b() }, ",")
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(value, "3,5,9,7,8");
+    }
+
+    #[test]
+    fn collectgarbage_sees_current_frame_register_updates() {
+        let settings = VmSettings {
+            deterministic_gc_interval: NonZeroU64::new(u64::MAX).unwrap(),
+            ..VmSettings::default()
+        };
+        let mut rustia = Rustia::with_settings(Profile::ReproducibleStandard, settings);
+        let result = rustia
+            .run_owned(
+                "\
+local weak = setmetatable({}, { __mode = 'v' })
+weak[1] = (function()
+    return {}
+end)()
+local strong = weak[1]
+collectgarbage()
+return strong ~= nil and weak[1] == strong
+",
+            )
+            .unwrap();
+        assert!(bool::from_rustia(result).unwrap());
+    }
+
+    #[test]
+    fn collectgarbage_observes_late_weak_mode_assignment() {
+        let settings = VmSettings {
+            deterministic_gc_interval: NonZeroU64::new(u64::MAX).unwrap(),
+            ..VmSettings::default()
+        };
+        let mut rustia = Rustia::with_settings(Profile::ReproducibleStandard, settings);
+        let result = rustia
+            .run_owned(
+                "\
+local mt = {}
+local weak = setmetatable({}, mt)
+local function put()
+    weak[1] = {}
+end
+put()
+mt.__mode = 'v'
+collectgarbage()
+return weak[1] == nil
+",
+            )
+            .unwrap();
+        assert!(bool::from_rustia(result).unwrap());
     }
 
     #[test]
@@ -1312,6 +2075,29 @@ return tostring(ok) .. \"|\" .. tostring(err) .. \"|\" .. debug.traceback(co)
     }
 
     #[test]
+    fn debug_traceback_for_yielded_coroutine_reports_top_frame() {
+        let source = "\
+function gen()
+    coroutine.yield(42)
+end
+
+local co = coroutine.create(gen)
+local ok, value = coroutine.resume(co)
+return tostring(ok) .. \"|\" .. tostring(value) .. \"|\" .. debug.traceback(co)
+";
+        let chunk = parse_source(source).unwrap();
+        let program = compile_with_options(
+            &chunk,
+            CompileOptions::default().with_source("debug.luau", source),
+        )
+        .unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        let traceback = vm.string_value(result).unwrap().unwrap();
+        assert_eq!(traceback, "true|42|debug.luau:2 function gen\n");
+    }
+
+    #[test]
     fn debug_info_line_defined_precedes_active_line() {
         let source = "\
 function testlinedefined()
@@ -1453,6 +2239,32 @@ return first == 'yielded' and second == 'resume' and third == 42
     }
 
     #[test]
+    fn coroutine_wrap_call_fast_path_observes_metatable_changes() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let result = rustia
+            .run_owned(
+                "\
+local gen = coroutine.wrap(function()
+    return 11
+end)
+local mt = getmetatable(gen)
+local original = mt.__call
+local replaced_self
+mt.__call = function(self)
+    replaced_self = self
+    return 42
+end
+local replaced = gen()
+mt.__call = original
+local resumed = gen()
+return replaced == 42 and replaced_self == gen and resumed == 11
+",
+            )
+            .unwrap();
+        assert!(bool::from_rustia(result).unwrap());
+    }
+
+    #[test]
     fn pcall_can_yield_and_resume_successfully() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let result = rustia
@@ -1468,6 +2280,37 @@ local ok, value = coroutine.resume(co)
 local first = ok and value == 'pause' and coroutine.status(co) == 'suspended'
 local done, protected, a, b, c = coroutine.resume(co)
 return first and done and protected and a == 1 and b == 2 and c == 3
+",
+            )
+            .unwrap();
+        assert!(bool::from_rustia(result).unwrap());
+    }
+
+    #[test]
+    fn fixed_result_protected_calls_can_yield_and_resume_successfully() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let result = rustia
+            .run_owned(
+                "\
+local co = coroutine.create(function()
+    local p_ok, p_value = pcall(function()
+        coroutine.yield('pcall')
+        return 11, 12
+    end)
+    local x_ok, x_value = xpcall(function()
+        coroutine.yield('xpcall')
+        return 21, 22
+    end, function()
+        return -1
+    end)
+    return p_ok, p_value, x_ok, x_value
+end)
+local ok, value = coroutine.resume(co)
+local first = ok and value == 'pcall'
+ok, value = coroutine.resume(co)
+local second = ok and value == 'xpcall'
+local done, p_ok, p_value, x_ok, x_value = coroutine.resume(co)
+return first and second and done and p_ok and p_value == 11 and x_ok and x_value == 21
 ",
             )
             .unwrap();

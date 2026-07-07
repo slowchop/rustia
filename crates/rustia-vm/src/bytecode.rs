@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 #[derive(Clone, Debug)]
 pub struct Program {
     pub main: Function,
     pub constants: Vec<Constant>,
     pub functions: Vec<Function>,
-    pub source_name: Option<String>,
+    pub source_name: Option<Arc<str>>,
 }
 
 #[derive(Clone, Debug)]
@@ -15,7 +17,7 @@ pub struct Function {
     pub upvalues: Vec<UpvalueDescriptor>,
     pub captured_registers: Vec<u8>,
     pub source_map: Vec<InstructionSource>,
-    pub debug_name: Option<String>,
+    pub debug_name: Option<Arc<str>>,
     pub debug_line_defined: Option<u32>,
     pub parameter_types: Vec<RuntimeType>,
 }
@@ -179,7 +181,41 @@ pub enum Opcode {
     CallExpand3 = 123,
     CheckMethod = 124,
     CoerceForNumber = 125,
+    StringFormat = 126,
+    NewRecord = 127,
+    LenPlusOne = 128,
+    StringByteEqual = 129,
+    AddConst = 130,
+    SubConst = 131,
+    MulConst = 132,
+    DivConst = 133,
+    FloorDivConst = 134,
+    ModConst = 135,
+    PowConst = 136,
+    MathSinCosMul = 137,
+    AddUpvalue = 138,
+    ForPrepStepOne = 139,
+    ForLoopStepOne = 140,
+    AddUpvalueConst = 141,
+    ConcatConst = 142,
+    GetIndexConcatConst = 143,
+    SetIndexConcatConst = 144,
+    ClearLocalCells = 145,
+    GetIndexNumber = 146,
+    SetIndexNumber = 147,
+    ConcatRhsConst = 148,
+    GetIndexNumberConst = 149,
+    MulModConst = 150,
+    MulAddModConst = 151,
+    ModAddConst = 152,
+    GetIndexModAddConst = 153,
+    SetIndexMulAddModConst = 154,
+    SetIndexMulModConst = 155,
+    GetIndexMulModConst = 156,
 }
+
+pub const ARRAY_ITERATOR_WRITE_VISIBLE_KEY: u8 = 0;
+pub const ARRAY_ITERATOR_SKIP_VISIBLE_KEY: u8 = 1;
 
 pub const ASSERT_MESSAGE_NONE: i32 = -1;
 pub const ASSERT_MESSAGE_MISSING_ARGUMENT: i32 = -2;
@@ -237,7 +273,7 @@ impl Program {
     }
 
     pub fn with_source_name(mut self, source_name: Option<String>) -> Self {
-        self.source_name = source_name;
+        self.source_name = source_name.map(Arc::from);
         self
     }
 }
@@ -346,7 +382,7 @@ impl Function {
     }
 
     pub fn with_debug_name(mut self, debug_name: Option<String>) -> Self {
-        self.debug_name = debug_name;
+        self.debug_name = debug_name.map(Arc::from);
         self
     }
 

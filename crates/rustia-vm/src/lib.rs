@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Portable rustia VM core.
 //!
 //! This crate is the first P1 production slice from `design/30-architecture.md`: a sealed

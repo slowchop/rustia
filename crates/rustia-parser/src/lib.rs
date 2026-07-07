@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use rustia_lexer::{lex_bytes, LexError, Span, Token, TokenKind};
 use std::collections::BTreeMap;
 use std::fmt;

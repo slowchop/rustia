@@ -1,24 +1,44 @@
 use gc_arena::lock::RefLock;
 use gc_arena::{Arena, Collect, DynamicRootSet, Gc, Rootable, Static};
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 
 use crate::number::table_key_number_bits;
 use crate::value::{Value, ValueKind};
 
 const MAX_LUAU_ARRAY_INDEX: usize = 2_147_483_647;
 const MAX_LUAU_ARRAY_INDEX_F64: f64 = 2_147_483_647.0;
+const INLINE_FUNCTION_UPVALUE_CAPACITY: usize = 4;
+const TABLE_HASH_INDEX_MIN_LEN: usize = 16;
+const CONCAT_INTEGER_DIRECT_CACHE_LEN: usize = 256;
 
 #[derive(Collect)]
 #[collect(no_drop)]
 struct RootData<'gc> {
     _roots: DynamicRootSet<'gc>,
     strings: Vec<Gc<'gc, Static<Vec<u8>>>>,
+    #[collect(require_static)]
+    string_index: HashMap<Vec<u8>, u32>,
+    #[collect(require_static)]
+    string_string_concat_index: HashMap<(u32, u32), u32>,
+    #[collect(require_static)]
+    string_string_concat_direct: [Option<ConcatIntegerCacheEntry>; CONCAT_INTEGER_DIRECT_CACHE_LEN],
+    #[collect(require_static)]
+    string_integer_concat_index: HashMap<u64, u32>,
+    #[collect(require_static)]
+    integer_string_concat_index: HashMap<u64, u32>,
+    #[collect(require_static)]
+    string_integer_concat_direct:
+        [Option<ConcatIntegerCacheEntry>; CONCAT_INTEGER_DIRECT_CACHE_LEN],
+    #[collect(require_static)]
+    integer_string_concat_direct:
+        [Option<ConcatIntegerCacheEntry>; CONCAT_INTEGER_DIRECT_CACHE_LEN],
     tables: Vec<TableData>,
     functions: Vec<FunctionData>,
     upvalues: Vec<UpvalueData>,
     userdatas: Vec<UserdataData>,
     buffers: Vec<BufferData>,
     vectors: Vec<VectorData>,
+    weak_tables_possible: bool,
 }
 
 #[derive(Clone, Collect)]
@@ -26,8 +46,10 @@ struct RootData<'gc> {
 struct TableData {
     array: Vec<Value>,
     hash: Vec<TableEntry>,
+    hash_index: Vec<Option<TableHashIndexEntry>>,
     readonly: bool,
     metatable: Option<u32>,
+    version: u64,
 }
 
 #[derive(Collect)]
@@ -36,6 +58,45 @@ struct FunctionData {
     kind: FunctionKind,
     upvalues: Vec<u32>,
     environment: u32,
+}
+
+pub struct FunctionCallMetadata {
+    pub kind: FunctionKind,
+    pub bytecode_context: Option<FunctionBytecodeContext>,
+}
+
+pub struct FunctionBytecodeContext {
+    pub upvalues: FunctionUpvalueSnapshot,
+    pub environment: u32,
+}
+
+pub enum FunctionUpvalueSnapshot {
+    Inline {
+        len: u8,
+        values: [u32; INLINE_FUNCTION_UPVALUE_CAPACITY],
+    },
+    Heap(Vec<u32>),
+}
+
+impl FunctionUpvalueSnapshot {
+    fn from_slice(upvalues: &[u32]) -> Self {
+        if upvalues.len() <= INLINE_FUNCTION_UPVALUE_CAPACITY {
+            let mut values = [0; INLINE_FUNCTION_UPVALUE_CAPACITY];
+            values[..upvalues.len()].copy_from_slice(upvalues);
+            return Self::Inline {
+                len: upvalues.len() as u8,
+                values,
+            };
+        }
+        Self::Heap(upvalues.to_vec())
+    }
+
+    pub fn as_slice(&self) -> &[u32] {
+        match self {
+            Self::Inline { len, values } => &values[..usize::from(*len)],
+            Self::Heap(values) => values,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Collect)]
@@ -65,6 +126,11 @@ pub(crate) enum UserdataPayload {
         normal: Value,
         uv: Value,
     },
+}
+
+pub(crate) enum TableConcatOutcome {
+    Atom(u32),
+    InvalidValue,
 }
 
 #[derive(Clone, Collect)]
@@ -345,7 +411,21 @@ struct TableEntry {
     value: Value,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Collect)]
+#[derive(Clone, Copy, Collect)]
+#[collect(no_drop)]
+struct TableHashIndexEntry {
+    key: TableKey,
+    index: usize,
+}
+
+#[derive(Clone, Copy, Collect)]
+#[collect(no_drop)]
+struct ConcatIntegerCacheEntry {
+    key: u64,
+    atom: u32,
+}
+
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Collect)]
 #[collect(no_drop)]
 enum TableKey {
     Boolean(bool),
@@ -366,6 +446,29 @@ pub enum TableNext {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ArrayWriteStatus {
+    Stored,
+    Deferred,
+    Readonly,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum HashReadStatus {
+    Hit(Value),
+    Deferred,
+}
+
+pub(crate) enum UpvalueAddStatus {
+    Stored(Value),
+    Deferred(Value, Value),
+}
+
+pub(crate) enum UpvalueAddConstStatus {
+    Stored(Value),
+    Deferred(Value),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TableIterationOrder {
     Insertion,
     LuauHash,
@@ -374,18 +477,9 @@ pub(crate) enum TableIterationOrder {
 type ArenaRoot = Rootable![Gc<'_, RefLock<RootData<'_>>>];
 type VmArena = Arena<ArenaRoot>;
 
-/// The Send unit for one VM lane.
-///
-/// `gc-arena` values and retained roots are not independently thread-safe. The design model is
-/// one VM per lane: the whole arena, root set, and future retained handles move together.
 pub struct VmCell {
     arena: VmArena,
 }
-
-// SAFETY: `VmCell` owns the arena and root set exclusively. Moving the cell transfers the whole
-// GC graph as one unit; callers cannot extract `Gc` values or `DynamicRoot` handles, so no arena
-// allocation or non-atomic root bookkeeping can be touched concurrently from two threads.
-unsafe impl Send for VmCell {}
 
 impl VmCell {
     pub fn new() -> Self {
@@ -396,12 +490,20 @@ impl VmCell {
                     RefLock::new(RootData {
                         _roots: DynamicRootSet::new(mc),
                         strings: Vec::new(),
+                        string_index: HashMap::new(),
+                        string_string_concat_index: HashMap::new(),
+                        string_string_concat_direct: [None; CONCAT_INTEGER_DIRECT_CACHE_LEN],
+                        string_integer_concat_index: HashMap::new(),
+                        integer_string_concat_index: HashMap::new(),
+                        string_integer_concat_direct: [None; CONCAT_INTEGER_DIRECT_CACHE_LEN],
+                        integer_string_concat_direct: [None; CONCAT_INTEGER_DIRECT_CACHE_LEN],
                         tables: Vec::new(),
                         functions: Vec::new(),
                         upvalues: Vec::new(),
                         userdatas: Vec::new(),
                         buffers: Vec::new(),
                         vectors: Vec::new(),
+                        weak_tables_possible: false,
                     }),
                 )
             }),
@@ -415,6 +517,9 @@ impl VmCell {
     pub fn collect_weak_tables_with_roots(&mut self, roots: &[Value]) {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
+            if !root.weak_tables_possible {
+                return;
+            }
             let modes = (0..root.tables.len())
                 .map(|index| table_weak_mode(&root, index))
                 .collect::<Vec<_>>();
@@ -440,17 +545,160 @@ impl VmCell {
     pub fn intern_string_bytes(&mut self, value: &[u8]) -> u32 {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
-            if let Some((index, _)) = root
-                .strings
-                .iter()
-                .enumerate()
-                .find(|(_, existing)| existing.0.as_slice() == value)
-            {
-                return index as u32;
+            if let Some(atom) = root.string_index.get(value) {
+                return *atom;
             }
             let atom = root.strings.len();
             root.strings.push(Gc::new(mc, Static(value.to_vec())));
+            root.string_index.insert(value.to_vec(), atom as u32);
             atom as u32
+        })
+    }
+
+    pub fn intern_concat_string_atoms(&mut self, lhs: u32, rhs: u32) -> Option<u32> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let key = concat_integer_key(lhs, rhs);
+            if let Some(atom) =
+                concat_integer_direct_cache_get(&root.string_string_concat_direct, key)
+            {
+                return Some(atom);
+            }
+            if let Some(atom) = root.string_string_concat_index.get(&(lhs, rhs)) {
+                let atom = *atom;
+                concat_integer_direct_cache_insert(
+                    &mut root.string_string_concat_direct,
+                    key,
+                    atom,
+                );
+                return Some(atom);
+            }
+            let lhs_text = root.strings.get(lhs as usize)?.0.as_slice();
+            let rhs_text = root.strings.get(rhs as usize)?.0.as_slice();
+            let mut value = Vec::with_capacity(lhs_text.len() + rhs_text.len());
+            value.extend_from_slice(lhs_text);
+            value.extend_from_slice(rhs_text);
+            let atom = if let Some(atom) = root.string_index.get(value.as_slice()) {
+                *atom
+            } else {
+                let atom = u32::try_from(root.strings.len()).ok()?;
+                root.strings.push(Gc::new(mc, Static(value.clone())));
+                root.string_index.insert(value, atom);
+                atom
+            };
+            root.string_string_concat_index.insert((lhs, rhs), atom);
+            concat_integer_direct_cache_insert(&mut root.string_string_concat_direct, key, atom);
+            Some(atom)
+        })
+    }
+
+    pub fn intern_concat_string_atom_bytes(&mut self, lhs: u32, rhs: &[u8]) -> Option<u32> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let lhs = root.strings.get(lhs as usize)?.0.as_slice();
+            let mut value = Vec::with_capacity(lhs.len() + rhs.len());
+            value.extend_from_slice(lhs);
+            value.extend_from_slice(rhs);
+            if let Some(atom) = root.string_index.get(value.as_slice()) {
+                return Some(*atom);
+            }
+            let atom = u32::try_from(root.strings.len()).ok()?;
+            root.strings.push(Gc::new(mc, Static(value.clone())));
+            root.string_index.insert(value, atom);
+            Some(atom)
+        })
+    }
+
+    pub fn intern_concat_string_atom_small_integer(&mut self, lhs: u32, rhs: u32) -> Option<u32> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            root.strings.get(lhs as usize)?;
+            let key = concat_integer_key(lhs, rhs);
+            if let Some(atom) =
+                concat_integer_direct_cache_get(&root.string_integer_concat_direct, key)
+            {
+                return Some(atom);
+            }
+            if let Some(atom) = root.string_integer_concat_index.get(&key) {
+                let atom = *atom;
+                concat_integer_direct_cache_insert(
+                    &mut root.string_integer_concat_direct,
+                    key,
+                    atom,
+                );
+                return Some(atom);
+            }
+            let lhs_text = root.strings.get(lhs as usize)?.0.as_slice();
+            let (rhs_text, rhs_len) = small_positive_integer_bytes(rhs)?;
+            let mut value = Vec::with_capacity(lhs_text.len() + rhs_len);
+            value.extend_from_slice(lhs_text);
+            value.extend_from_slice(&rhs_text[..rhs_len]);
+            let atom = if let Some(atom) = root.string_index.get(value.as_slice()) {
+                *atom
+            } else {
+                let atom = u32::try_from(root.strings.len()).ok()?;
+                root.strings.push(Gc::new(mc, Static(value.clone())));
+                root.string_index.insert(value, atom);
+                atom
+            };
+            root.string_integer_concat_index.insert(key, atom);
+            concat_integer_direct_cache_insert(&mut root.string_integer_concat_direct, key, atom);
+            Some(atom)
+        })
+    }
+
+    pub fn intern_concat_bytes_string_atom(&mut self, lhs: &[u8], rhs: u32) -> Option<u32> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let rhs = root.strings.get(rhs as usize)?.0.as_slice();
+            let mut value = Vec::with_capacity(lhs.len() + rhs.len());
+            value.extend_from_slice(lhs);
+            value.extend_from_slice(rhs);
+            if let Some(atom) = root.string_index.get(value.as_slice()) {
+                return Some(*atom);
+            }
+            let atom = u32::try_from(root.strings.len()).ok()?;
+            root.strings.push(Gc::new(mc, Static(value.clone())));
+            root.string_index.insert(value, atom);
+            Some(atom)
+        })
+    }
+
+    pub fn intern_concat_small_integer_string_atom(&mut self, lhs: u32, rhs: u32) -> Option<u32> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            root.strings.get(rhs as usize)?;
+            let key = concat_integer_key(lhs, rhs);
+            if let Some(atom) =
+                concat_integer_direct_cache_get(&root.integer_string_concat_direct, key)
+            {
+                return Some(atom);
+            }
+            if let Some(atom) = root.integer_string_concat_index.get(&key) {
+                let atom = *atom;
+                concat_integer_direct_cache_insert(
+                    &mut root.integer_string_concat_direct,
+                    key,
+                    atom,
+                );
+                return Some(atom);
+            }
+            let rhs_text = root.strings.get(rhs as usize)?.0.as_slice();
+            let (lhs_text, lhs_len) = small_positive_integer_bytes(lhs)?;
+            let mut value = Vec::with_capacity(lhs_len + rhs_text.len());
+            value.extend_from_slice(&lhs_text[..lhs_len]);
+            value.extend_from_slice(rhs_text);
+            let atom = if let Some(atom) = root.string_index.get(value.as_slice()) {
+                *atom
+            } else {
+                let atom = u32::try_from(root.strings.len()).ok()?;
+                root.strings.push(Gc::new(mc, Static(value.clone())));
+                root.string_index.insert(value, atom);
+                atom
+            };
+            root.integer_string_concat_index.insert(key, atom);
+            concat_integer_direct_cache_insert(&mut root.integer_string_concat_direct, key, atom);
+            Some(atom)
         })
     }
 
@@ -474,17 +722,112 @@ impl VmCell {
         })
     }
 
+    pub fn append_string_atom_bytes(&mut self, atom: u32, output: &mut Vec<u8>) -> Option<()> {
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let value = root.strings.get(atom as usize)?;
+            output.extend_from_slice(&value.0);
+            Some(())
+        })
+    }
+
+    pub fn string_atom_byte_len(&mut self, atom: u32) -> Option<usize> {
+        self.arena.mutate(|mc, root| {
+            root.unlock(mc)
+                .borrow()
+                .strings
+                .get(atom as usize)
+                .map(|value| value.0.len())
+        })
+    }
+
+    pub(crate) fn string_atom_byte_at(&mut self, atom: u32, index: usize) -> Option<Option<u8>> {
+        self.arena.mutate(|mc, root| {
+            root.unlock(mc)
+                .borrow()
+                .strings
+                .get(atom as usize)
+                .map(|value| value.0.get(index).copied())
+        })
+    }
+
+    pub fn intern_string_atom_slice(&mut self, atom: u32, start: usize, end: usize) -> Option<u32> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let value = {
+                let source = root.strings.get(atom as usize)?.0.as_slice();
+                let bytes = source.get(start..end)?;
+                if let Some(atom) = root.string_index.get(bytes) {
+                    return Some(*atom);
+                }
+                bytes.to_vec()
+            };
+            let atom = u32::try_from(root.strings.len()).ok()?;
+            root.strings.push(Gc::new(mc, Static(value.clone())));
+            root.string_index.insert(value, atom);
+            Some(atom)
+        })
+    }
+
     pub fn alloc_array_table(&mut self, values: &[Value]) -> u32 {
+        self.alloc_array_table_with_capacity(values, values.len(), 0)
+    }
+
+    pub(crate) fn alloc_array_table_with_capacity(
+        &mut self,
+        values: &[Value],
+        array_capacity_hint: usize,
+        hash_capacity_hint: usize,
+    ) -> u32 {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
             let handle = root.tables.len();
+            let mut array = Vec::with_capacity(values.len().max(array_capacity_hint));
+            array.extend_from_slice(values);
             root.tables.push(TableData {
-                array: values.to_vec(),
-                hash: Vec::new(),
+                array,
+                hash: Vec::with_capacity(hash_capacity_hint),
+                hash_index: Vec::new(),
                 readonly: false,
                 metatable: None,
+                version: 0,
             });
             handle as u32
+        })
+    }
+
+    pub(crate) fn alloc_record_table(&mut self, fields: &[Value]) -> Option<u32> {
+        if fields.len() % 2 != 0 {
+            return None;
+        }
+        let field_count = fields.len() / 2;
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let mut table = TableData {
+                array: Vec::new(),
+                hash: Vec::with_capacity(field_count),
+                hash_index: Vec::new(),
+                readonly: false,
+                metatable: None,
+                version: 0,
+            };
+            for pair in fields.chunks_exact(2) {
+                let atom = pair[0].as_string_atom()?;
+                let value = pair[1];
+                root.strings.get(atom as usize)?;
+                if string_atom_is(&root, atom, b"__mode") {
+                    root.weak_tables_possible = true;
+                }
+                set_hash_key(
+                    &mut table,
+                    TableKey::String(atom),
+                    Value::string_atom(atom),
+                    value,
+                );
+            }
+            let handle = u32::try_from(root.tables.len()).ok()?;
+            root.tables.push(table);
+            Some(handle)
         })
     }
 
@@ -495,8 +838,10 @@ impl VmCell {
             root.tables.push(TableData {
                 array: vec![value; size],
                 hash: Vec::new(),
+                hash_index: Vec::new(),
                 readonly: false,
                 metatable: None,
+                version: 0,
             });
             handle as u32
         })
@@ -606,6 +951,26 @@ impl VmCell {
         })
     }
 
+    pub fn function_call_metadata(&mut self, handle: u32) -> Option<FunctionCallMetadata> {
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let function = root.functions.get(handle as usize)?;
+            let bytecode_context = match function.kind {
+                FunctionKind::Bytecode { .. } | FunctionKind::DynamicMain { .. } => {
+                    Some(FunctionBytecodeContext {
+                        upvalues: FunctionUpvalueSnapshot::from_slice(&function.upvalues),
+                        environment: function.environment,
+                    })
+                }
+                FunctionKind::Host(_) | FunctionKind::Native(_) => None,
+            };
+            Some(FunctionCallMetadata {
+                kind: function.kind,
+                bytecode_context,
+            })
+        })
+    }
+
     pub fn function_environment(&mut self, handle: u32) -> Option<u32> {
         self.arena.mutate(|mc, root| {
             root.unlock(mc)
@@ -641,6 +1006,51 @@ impl VmCell {
                 .upvalues
                 .get(handle as usize)
                 .map(|upvalue| upvalue.value)
+        })
+    }
+
+    pub fn upvalue_get_pair(&mut self, first: u32, second: u32) -> Option<(Value, Value)> {
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let first = root.upvalues.get(first as usize)?.value;
+            let second = root.upvalues.get(second as usize)?.value;
+            Some((first, second))
+        })
+    }
+
+    pub(crate) fn upvalue_add_number_pair(
+        &mut self,
+        target: u32,
+        rhs: u32,
+    ) -> Option<UpvalueAddStatus> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let lhs = root.upvalues.get(target as usize)?.value;
+            let rhs_value = root.upvalues.get(rhs as usize)?.value;
+            let (Some(lhs_number), Some(rhs_number)) = (lhs.as_number(), rhs_value.as_number())
+            else {
+                return Some(UpvalueAddStatus::Deferred(lhs, rhs_value));
+            };
+            let result = Value::number(lhs_number + rhs_number);
+            root.upvalues.get_mut(target as usize)?.value = result;
+            Some(UpvalueAddStatus::Stored(result))
+        })
+    }
+
+    pub(crate) fn upvalue_add_number_const(
+        &mut self,
+        target: u32,
+        rhs: f64,
+    ) -> Option<UpvalueAddConstStatus> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let lhs = root.upvalues.get(target as usize)?.value;
+            let Some(lhs_number) = lhs.as_number() else {
+                return Some(UpvalueAddConstStatus::Deferred(lhs));
+            };
+            let result = Value::number(lhs_number + rhs);
+            root.upvalues.get_mut(target as usize)?.value = result;
+            Some(UpvalueAddConstStatus::Stored(result))
         })
     }
 
@@ -817,93 +1227,286 @@ impl VmCell {
     }
 
     pub fn table_get(&mut self, table: u32, key: Value) -> Option<Value> {
+        self.table_slot(table, key).flatten()
+    }
+
+    pub(crate) fn table_slot(&mut self, table: u32, key: Value) -> Option<Option<Value>> {
         self.arena.mutate(|mc, root| {
             let root = root.unlock(mc).borrow();
             let table = root.tables.get(table as usize)?;
-            let table_key = table_key_from_value(&root, key)?;
+            if let Some(atom) = key.as_string_atom() {
+                return Some(
+                    table_hash_entry(table, TableKey::String(atom)).map(|entry| entry.value),
+                );
+            }
+            let Some(table_key) = table_key_from_value(&root, key) else {
+                return Some(None);
+            };
             if let Some(index) = table_key_array_index(table_key) {
                 if let Some(value) = table.array.get(index - 1) {
-                    return Some(*value);
+                    return Some(Some(*value));
                 }
             }
-            table
-                .hash
-                .iter()
-                .find(|entry| entry.key == table_key)
-                .map(|entry| entry.value)
+            Some(table_hash_entry(table, table_key).map(|entry| entry.value))
         })
     }
 
     pub fn table_set(&mut self, table: u32, key: Value, value: Value) -> Option<()> {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
+            if let Some(atom) = key.as_string_atom() {
+                if string_atom_is(&root, atom, b"__mode") {
+                    root.weak_tables_possible = true;
+                }
+                let table = root.tables.get_mut(table as usize)?;
+                if table.readonly {
+                    return None;
+                }
+                bump_table_version(table);
+                set_hash_key(table, TableKey::String(atom), key, value);
+                return Some(());
+            }
             let table_key = table_key_from_value(&root, key)?;
             let key_value = table_key_visible_value(&mut root, table_key, key)?;
             let table = root.tables.get_mut(table as usize)?;
             if table.readonly {
                 return None;
             }
+            bump_table_version(table);
             if value.kind() == ValueKind::Nil {
                 if let Some(index) = table_key_array_index(table_key) {
                     if let Some(slot) = table.array.get_mut(index - 1) {
                         *slot = Value::nil();
                     }
                 }
-                if let Some(entry) = table.hash.iter_mut().find(|entry| entry.key == table_key) {
+                if let Some(entry) = table_hash_entry_mut(table, table_key) {
                     entry.value = Value::nil();
                 }
                 return Some(());
             }
             if let Some(index) = table_key_array_index(table_key) {
-                if index <= table.array.len() + 1 {
-                    if index > table.array.len() {
-                        table.array.resize(index, Value::nil());
-                    }
+                if index == table.array.len() + 1 {
+                    table.array.push(value);
+                    remove_hash_key(table, table_key);
+                    return Some(());
+                }
+                if index <= table.array.len() {
                     table.array[index - 1] = value;
-                    if let Some(hash_index) =
-                        table.hash.iter().position(|entry| entry.key == table_key)
-                    {
-                        table.hash.remove(hash_index);
-                    }
+                    remove_hash_key(table, table_key);
                     return Some(());
                 }
             }
 
-            if let Some(entry) = table.hash.iter_mut().find(|entry| entry.key == table_key) {
+            if let Some(entry) = table_hash_entry_mut(table, table_key) {
                 entry.value = value;
             } else {
+                let hash_index = table.hash.len();
                 table.hash.push(TableEntry {
                     key: table_key,
                     key_value,
                     value,
                 });
+                record_hash_insert(table, table_key, hash_index);
             }
             Some(())
         })
     }
 
-    pub fn table_set_array_slot(
+    pub(crate) fn table_set_absent(&mut self, table: u32, key: Value, value: Value) -> Option<()> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            if let Some(atom) = key.as_string_atom() {
+                if string_atom_is(&root, atom, b"__mode") {
+                    root.weak_tables_possible = true;
+                }
+                let table = root.tables.get_mut(table as usize)?;
+                if table.readonly {
+                    return None;
+                }
+                bump_table_version(table);
+                if value.kind() != ValueKind::Nil {
+                    insert_hash_key_absent(table, TableKey::String(atom), key, value);
+                }
+                return Some(());
+            }
+            let table_key = table_key_from_value(&root, key)?;
+            let key_value = table_key_visible_value(&mut root, table_key, key)?;
+            let table = root.tables.get_mut(table as usize)?;
+            if table.readonly {
+                return None;
+            }
+            bump_table_version(table);
+            if value.kind() == ValueKind::Nil {
+                return Some(());
+            }
+            if let Some(index) = table_key_array_index(table_key) {
+                if index == table.array.len() + 1 {
+                    table.array.push(value);
+                    return Some(());
+                }
+            }
+            insert_hash_key_absent(table, table_key, key_value, value);
+            Some(())
+        })
+    }
+
+    pub(crate) fn write_array_slot(
         &mut self,
         table: u32,
         one_based_index: usize,
         value: Value,
-    ) -> Option<()> {
-        if one_based_index == 0 {
-            return None;
+    ) -> Option<ArrayWriteStatus> {
+        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
+            return Some(ArrayWriteStatus::Deferred);
         }
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
             let table = root.tables.get_mut(table as usize)?;
-            if table.readonly || one_based_index > MAX_LUAU_ARRAY_INDEX {
-                return None;
+            if table.readonly {
+                return Some(ArrayWriteStatus::Readonly);
+            }
+            bump_table_version(table);
+            if one_based_index == table.array.len().saturating_add(1) {
+                table.array.push(value);
+            } else if one_based_index > table.array.len() {
+                table.array.resize(one_based_index, Value::nil());
+                table.array[one_based_index - 1] = value;
+            } else {
+                table.array[one_based_index - 1] = value;
+            }
+            if !table.hash.is_empty() {
+                let key = number_table_key(one_based_index as f64)?;
+                remove_hash_key(table, key);
+            }
+            Some(ArrayWriteStatus::Stored)
+        })
+    }
+
+    pub(crate) fn write_integer_index_without_metamethod(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+    ) -> Option<ArrayWriteStatus> {
+        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
+            return Some(ArrayWriteStatus::Deferred);
+        }
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let table = root.tables.get_mut(table as usize)?;
+            let array_len = table.array.len();
+            if one_based_index <= array_len.saturating_add(1) {
+                if one_based_index > array_len && value.kind() == ValueKind::Nil {
+                    return Some(ArrayWriteStatus::Deferred);
+                }
+                if table.metatable.is_some() {
+                    let existing = table.array.get(one_based_index - 1).copied();
+                    if !existing.is_some_and(|value| value.kind() != ValueKind::Nil) {
+                        return Some(ArrayWriteStatus::Deferred);
+                    }
+                }
+                if table.readonly {
+                    return Some(ArrayWriteStatus::Readonly);
+                }
+                bump_table_version(table);
+                if one_based_index == table.array.len().saturating_add(1) {
+                    table.array.push(value);
+                } else {
+                    table.array[one_based_index - 1] = value;
+                }
+                if !table.hash.is_empty() {
+                    let key = number_table_key(one_based_index as f64)?;
+                    remove_hash_key(table, key);
+                }
+                return Some(ArrayWriteStatus::Stored);
+            }
+
+            if table.metatable.is_some() {
+                return Some(ArrayWriteStatus::Deferred);
+            }
+            if table.readonly {
+                return Some(ArrayWriteStatus::Readonly);
+            }
+            bump_table_version(table);
+            let key = number_table_key(one_based_index as f64)?;
+            set_hash_key(table, key, Value::number(one_based_index as f64), value);
+            Some(ArrayWriteStatus::Stored)
+        })
+    }
+
+    pub(crate) fn read_integer_hash_key_without_metamethod(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+    ) -> Option<HashReadStatus> {
+        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
+            return Some(HashReadStatus::Deferred);
+        }
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize)?;
+            if one_based_index <= table.array.len() || table.metatable.is_some() {
+                return Some(HashReadStatus::Deferred);
             }
             let key = number_table_key(one_based_index as f64)?;
-            if one_based_index > table.array.len() {
-                table.array.resize(one_based_index, Value::nil());
+            let value = table_hash_entry(table, key).map_or_else(Value::nil, |entry| entry.value);
+            Some(HashReadStatus::Hit(value))
+        })
+    }
+
+    pub(crate) fn read_string_key_without_metamethod(
+        &mut self,
+        table: u32,
+        atom: u32,
+    ) -> Option<HashReadStatus> {
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize)?;
+            let value = table_hash_entry(table, TableKey::String(atom))
+                .map_or_else(Value::nil, |entry| entry.value);
+            if value.kind() != ValueKind::Nil || table.metatable.is_none() {
+                Some(HashReadStatus::Hit(value))
+            } else {
+                Some(HashReadStatus::Deferred)
             }
-            table.array[one_based_index - 1] = value;
-            remove_hash_key(table, key);
-            Some(())
+        })
+    }
+
+    pub fn table_sort_numeric_array(&mut self, table: u32, len: usize) -> Option<bool> {
+        if len < 2 {
+            return Some(true);
+        }
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let table = root.tables.get_mut(table as usize)?;
+            if table.readonly || table.array.len() < len {
+                return None;
+            }
+            if table
+                .hash
+                .iter()
+                .any(|entry| table_key_array_index(entry.key).is_some_and(|index| index <= len))
+            {
+                return Some(false);
+            }
+            let mut values = Vec::with_capacity(len);
+            for value in table.array.iter().copied().take(len) {
+                let Some(number) = value.as_number() else {
+                    return Some(false);
+                };
+                if !number.is_finite() {
+                    return Some(false);
+                }
+                values.push(number);
+            }
+            values.sort_by(|left, right| {
+                left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            bump_table_version(table);
+            for (slot, value) in table.array.iter_mut().zip(values) {
+                *slot = Value::number(value);
+            }
+            Some(true)
         })
     }
 
@@ -924,6 +1527,7 @@ impl VmCell {
                 root.tables.get(metatable as usize)?;
             }
             let table = root.tables.get_mut(table as usize)?;
+            bump_table_version(table);
             table.metatable = metatable;
             Some(())
         })
@@ -934,6 +1538,7 @@ impl VmCell {
             let mut root = root.unlock(mc).borrow_mut();
             let mut clone = root.tables.get(table as usize)?.clone();
             clone.readonly = false;
+            clone.version = 0;
             let handle = u32::try_from(root.tables.len()).ok()?;
             root.tables.push(clone);
             Some(handle)
@@ -941,7 +1546,110 @@ impl VmCell {
     }
 
     pub fn array_get(&mut self, table: u32, one_based_index: usize) -> Option<Value> {
-        self.table_get(table, Value::number(one_based_index as f64))
+        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
+            return self.table_get(table, Value::number(one_based_index as f64));
+        }
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize)?;
+            Some(table_numeric_get(table, one_based_index))
+        })
+    }
+
+    pub(crate) fn intern_table_concat_range<F>(
+        &mut self,
+        table: u32,
+        start: usize,
+        end: usize,
+        separator: &[u8],
+        mut append_number: F,
+    ) -> Option<TableConcatOutcome>
+    where
+        F: FnMut(f64, &mut Vec<u8>),
+    {
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc);
+            let output = {
+                let root = root.borrow();
+                let table = root.tables.get(table as usize)?;
+                let count = end.saturating_sub(start).saturating_add(1);
+                let capacity = count
+                    .min(4096)
+                    .saturating_mul(separator.len().saturating_add(16));
+                let mut output = Vec::with_capacity(capacity);
+                if start > 0 && end <= table.array.len() {
+                    let values = &table.array[start - 1..end];
+                    if separator.is_empty() {
+                        for value in values.iter().copied() {
+                            match value.kind() {
+                                ValueKind::String => {
+                                    let atom = value.as_string_atom()?;
+                                    let bytes = root.strings.get(atom as usize)?;
+                                    output.extend_from_slice(&bytes.0);
+                                }
+                                ValueKind::Number => {
+                                    let number = value.as_number()?;
+                                    append_number(number, &mut output);
+                                }
+                                _ => return Some(TableConcatOutcome::InvalidValue),
+                            }
+                        }
+                    } else {
+                        for (offset, value) in values.iter().copied().enumerate() {
+                            if offset > 0 {
+                                output.extend_from_slice(separator);
+                            }
+                            match value.kind() {
+                                ValueKind::String => {
+                                    let atom = value.as_string_atom()?;
+                                    let bytes = root.strings.get(atom as usize)?;
+                                    output.extend_from_slice(&bytes.0);
+                                }
+                                ValueKind::Number => {
+                                    let number = value.as_number()?;
+                                    append_number(number, &mut output);
+                                }
+                                _ => return Some(TableConcatOutcome::InvalidValue),
+                            }
+                        }
+                    }
+                } else {
+                    for (offset, index) in (start..=end).enumerate() {
+                        if offset > 0 {
+                            output.extend_from_slice(separator);
+                        }
+                        let value = if index == 0 || index > MAX_LUAU_ARRAY_INDEX {
+                            let key = number_table_key(index as f64)?;
+                            table_hash_entry(table, key)
+                                .map_or_else(Value::nil, |entry| entry.value)
+                        } else {
+                            table_numeric_get(table, index)
+                        };
+                        match value.kind() {
+                            ValueKind::String => {
+                                let atom = value.as_string_atom()?;
+                                let bytes = root.strings.get(atom as usize)?;
+                                output.extend_from_slice(&bytes.0);
+                            }
+                            ValueKind::Number => {
+                                let number = value.as_number()?;
+                                append_number(number, &mut output);
+                            }
+                            _ => return Some(TableConcatOutcome::InvalidValue),
+                        }
+                    }
+                }
+                output
+            };
+            let mut root = root.borrow_mut();
+            if let Some(atom) = root.string_index.get(output.as_slice()) {
+                return Some(TableConcatOutcome::Atom(*atom));
+            }
+            let atom = u32::try_from(root.strings.len()).ok()?;
+            root.strings.push(Gc::new(mc, Static(output.clone())));
+            root.string_index.insert(output, atom);
+            Some(TableConcatOutcome::Atom(atom))
+        })
     }
 
     pub fn array_len(&mut self, table: u32) -> Option<usize> {
@@ -951,6 +1659,17 @@ impl VmCell {
                 .tables
                 .get(table as usize)
                 .map(table_array_boundary_len)
+        })
+    }
+
+    pub fn array_slot(&mut self, table: u32, one_based_index: usize) -> Option<Option<Value>> {
+        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
+            return Some(None);
+        }
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize)?;
+            Some(table.array.get(one_based_index - 1).copied())
         })
     }
 
@@ -969,8 +1688,10 @@ impl VmCell {
             if table.readonly {
                 return None;
             }
+            bump_table_version(table);
             table.array.fill(Value::nil());
             table.hash.clear();
+            table.hash_index.clear();
             Some(())
         })
     }
@@ -982,6 +1703,7 @@ impl VmCell {
             if table.readonly {
                 return None;
             }
+            bump_table_version(table);
             let len = table_array_boundary_len(table);
 
             if position >= 1 {
@@ -1009,6 +1731,7 @@ impl VmCell {
             if !(1..=i32::try_from(len).ok()?).contains(&position) {
                 return Some(None);
             }
+            bump_table_version(table);
             let position = position as usize;
             let removed = table_numeric_get(table, position);
             for index in position..len {
@@ -1111,12 +1834,25 @@ impl VmCell {
         })
     }
 
+    pub fn table_version(&mut self, table: u32) -> Option<u64> {
+        self.arena.mutate(|mc, root| {
+            root.unlock(mc)
+                .borrow()
+                .tables
+                .get(table as usize)
+                .map(|table| table.version)
+        })
+    }
+
     pub fn table_freeze(&mut self, table: u32) -> Option<bool> {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
             let table = root.tables.get_mut(table as usize)?;
             let was_readonly = table.readonly;
-            table.readonly = true;
+            if !was_readonly {
+                bump_table_version(table);
+                table.readonly = true;
+            }
             Some(was_readonly)
         })
     }
@@ -1203,14 +1939,18 @@ fn table_numeric_get(table: &TableData, one_based_index: usize) -> Value {
         return *value;
     }
 
+    if table.hash.is_empty() {
+        return Value::nil();
+    }
+
     let Some(key) = number_table_key(one_based_index as f64) else {
         return Value::nil();
     };
-    table
-        .hash
-        .iter()
-        .find(|entry| entry.key == key)
-        .map_or_else(Value::nil, |entry| entry.value)
+    table_hash_entry(table, key).map_or_else(Value::nil, |entry| entry.value)
+}
+
+fn bump_table_version(table: &mut TableData) {
+    table.version = table.version.wrapping_add(1);
 }
 
 fn table_numeric_set(table: &mut TableData, index: i32, value: Value) {
@@ -1224,24 +1964,34 @@ fn table_numeric_set(table: &mut TableData, index: i32, value: Value) {
 }
 
 fn table_numeric_set_array_index(table: &mut TableData, index: usize, value: Value) {
-    let key_value = Value::number(index as f64);
-    let Some(key) = number_table_key(index as f64) else {
-        return;
-    };
-
     if value.kind() == ValueKind::Nil {
         if let Some(slot) = table.array.get_mut(index - 1) {
             *slot = Value::nil();
         }
-        remove_hash_key(table, key);
-    } else if index <= table.array.len() + 1 {
-        if index > table.array.len() {
-            table.array.resize(index, Value::nil());
+        if !table.hash.is_empty() {
+            let Some(key) = number_table_key(index as f64) else {
+                return;
+            };
+            remove_hash_key(table, key);
         }
+    } else if index == table.array.len() + 1 {
+        table.array.push(value);
+        if !table.hash.is_empty() {
+            let Some(key) = number_table_key(index as f64) else {
+                return;
+            };
+            remove_hash_key(table, key);
+        }
+    } else if index <= table.array.len() {
         table.array[index - 1] = value;
-        remove_hash_key(table, key);
+        if !table.hash.is_empty() {
+            let Some(key) = number_table_key(index as f64) else {
+                return;
+            };
+            remove_hash_key(table, key);
+        }
     } else {
-        set_hash_key(table, key, key_value, value);
+        set_hash_number_key(table, index as f64, value);
     }
 }
 
@@ -1256,22 +2006,196 @@ fn set_hash_number_key(table: &mut TableData, number: f64, value: Value) {
     set_hash_key(table, key, key_value, value);
 }
 
-fn set_hash_key(table: &mut TableData, key: TableKey, key_value: Value, value: Value) {
-    if let Some(entry) = table.hash.iter_mut().find(|entry| entry.key == key) {
-        entry.value = value;
-    } else if value.kind() != ValueKind::Nil {
-        table.hash.push(TableEntry {
-            key,
-            key_value,
-            value,
-        });
+fn small_positive_integer_bytes(value: u32) -> Option<([u8; 6], usize)> {
+    if value > 999_999 {
+        return None;
+    }
+    if value == 0 {
+        let mut buffer = [0; 6];
+        buffer[0] = b'0';
+        return Some((buffer, 1));
+    }
+
+    let mut number = value;
+    let mut buffer = [0; 6];
+    let mut cursor = buffer.len();
+    while number >= 10 {
+        cursor -= 1;
+        buffer[cursor] = b'0' + (number % 10) as u8;
+        number /= 10;
+    }
+    cursor -= 1;
+    buffer[cursor] = b'0' + number as u8;
+
+    let len = buffer.len() - cursor;
+    buffer.copy_within(cursor.., 0);
+    Some((buffer, len))
+}
+
+fn concat_integer_key(lhs: u32, rhs: u32) -> u64 {
+    (u64::from(lhs) << 32) | u64::from(rhs)
+}
+
+fn concat_integer_direct_cache_get(
+    cache: &[Option<ConcatIntegerCacheEntry>],
+    key: u64,
+) -> Option<u32> {
+    let entry = cache.get(concat_integer_direct_cache_slot(key))?.as_ref()?;
+    (entry.key == key).then_some(entry.atom)
+}
+
+fn concat_integer_direct_cache_insert(
+    cache: &mut [Option<ConcatIntegerCacheEntry>],
+    key: u64,
+    atom: u32,
+) {
+    let slot = concat_integer_direct_cache_slot(key);
+    if let Some(entry) = cache.get_mut(slot) {
+        *entry = Some(ConcatIntegerCacheEntry { key, atom });
     }
 }
 
-fn remove_hash_key(table: &mut TableData, key: TableKey) {
-    if let Some(hash_index) = table.hash.iter().position(|entry| entry.key == key) {
-        table.hash.remove(hash_index);
+fn concat_integer_direct_cache_slot(key: u64) -> usize {
+    ((key ^ (key >> 32)) as usize) & (CONCAT_INTEGER_DIRECT_CACHE_LEN - 1)
+}
+
+fn set_hash_key(table: &mut TableData, key: TableKey, key_value: Value, value: Value) {
+    if let Some(entry) = table_hash_entry_mut(table, key) {
+        entry.value = value;
+    } else if value.kind() != ValueKind::Nil {
+        insert_hash_key_absent(table, key, key_value, value);
     }
+}
+
+fn insert_hash_key_absent(table: &mut TableData, key: TableKey, key_value: Value, value: Value) {
+    let index = table.hash.len();
+    table.hash.push(TableEntry {
+        key,
+        key_value,
+        value,
+    });
+    record_hash_insert(table, key, index);
+}
+
+fn remove_hash_key(table: &mut TableData, key: TableKey) {
+    if let Some(hash_index) = table_hash_entry_index(table, key) {
+        table.hash.remove(hash_index);
+        record_hash_remove(table, hash_index);
+    }
+}
+
+#[inline(always)]
+fn table_hash_entry(table: &TableData, key: TableKey) -> Option<&TableEntry> {
+    let index = table_hash_entry_index(table, key)?;
+    table.hash.get(index)
+}
+
+#[inline(always)]
+fn table_hash_entry_mut(table: &mut TableData, key: TableKey) -> Option<&mut TableEntry> {
+    let index = table_hash_entry_index(table, key)?;
+    table.hash.get_mut(index)
+}
+
+#[inline(always)]
+fn table_hash_entry_index(table: &TableData, key: TableKey) -> Option<usize> {
+    if table.hash.is_empty() {
+        return None;
+    }
+    if table.hash_index.is_empty() {
+        table.hash.iter().position(|entry| entry.key == key)
+    } else {
+        let mut position = table_hash_index_position(key, table.hash_index.len());
+        for _ in 0..table.hash_index.len() {
+            match table.hash_index[position] {
+                Some(entry) if entry.key == key => return Some(entry.index),
+                Some(_) => position = (position + 1) & (table.hash_index.len() - 1),
+                None => return None,
+            }
+        }
+        None
+    }
+}
+
+fn record_hash_insert(table: &mut TableData, key: TableKey, index: usize) {
+    if table.hash_index.is_empty() {
+        if table.hash.len() >= TABLE_HASH_INDEX_MIN_LEN {
+            rebuild_hash_index(table);
+        }
+        return;
+    }
+    insert_hash_index(table, key, index);
+}
+
+fn insert_hash_index(table: &mut TableData, key: TableKey, index: usize) {
+    if table.hash.len().saturating_mul(2) > table.hash_index.len() {
+        rebuild_hash_index(table);
+        return;
+    }
+    let mut position = table_hash_index_position(key, table.hash_index.len());
+    for _ in 0..table.hash_index.len() {
+        match table.hash_index[position] {
+            Some(entry) if entry.key == key => {
+                table.hash_index[position] = Some(TableHashIndexEntry { key, index });
+                return;
+            }
+            Some(_) => position = (position + 1) & (table.hash_index.len() - 1),
+            None => {
+                table.hash_index[position] = Some(TableHashIndexEntry { key, index });
+                return;
+            }
+        }
+    }
+    rebuild_hash_index(table);
+}
+
+fn record_hash_remove(table: &mut TableData, removed_index: usize) {
+    let _ = removed_index;
+    if table.hash.len() < TABLE_HASH_INDEX_MIN_LEN {
+        table.hash_index.clear();
+        return;
+    }
+    rebuild_hash_index(table);
+}
+
+fn rebuild_hash_index(table: &mut TableData) {
+    table.hash_index.clear();
+    let capacity = table
+        .hash
+        .len()
+        .saturating_mul(4)
+        .next_power_of_two()
+        .max(TABLE_HASH_INDEX_MIN_LEN * 4);
+    table.hash_index.resize(capacity, None);
+    for index in 0..table.hash.len() {
+        let key = table.hash[index].key;
+        insert_hash_index(table, key, index);
+    }
+}
+
+#[inline(always)]
+fn table_hash_index_position(key: TableKey, len: usize) -> usize {
+    debug_assert!(len.is_power_of_two());
+    (table_hash_index_key(key) as usize) & (len - 1)
+}
+
+#[inline(always)]
+fn table_hash_index_key(key: TableKey) -> u64 {
+    let value = match key {
+        TableKey::Boolean(value) => u64::from(value),
+        TableKey::Number(bits) => bits,
+        TableKey::String(handle)
+        | TableKey::Table(handle)
+        | TableKey::Function(handle)
+        | TableKey::Userdata(handle)
+        | TableKey::Buffer(handle) => u64::from(handle),
+        TableKey::Vector(bits) => bits.into_iter().fold(0x9e37_79b9_u64, |hash, bits| {
+            hash ^ u64::from(bits)
+                .wrapping_add(0x9e37_79b9)
+                .wrapping_add(hash << 6)
+                .wrapping_add(hash >> 2)
+        }),
+    };
+    value.wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(23) ^ value.rotate_right(17)
 }
 
 #[derive(Clone, Copy)]
@@ -1326,6 +2250,10 @@ fn table_key_is_string(root: &RootData<'_>, key: TableKey, expected: &[u8]) -> b
     let TableKey::String(atom) = key else {
         return false;
     };
+    string_atom_is(root, atom, expected)
+}
+
+fn string_atom_is(root: &RootData<'_>, atom: u32, expected: &[u8]) -> bool {
     root.strings
         .get(atom as usize)
         .is_some_and(|value| value.0.as_slice() == expected)
@@ -1414,13 +2342,16 @@ fn mark_weak_ref(reference: WeakRef, refs: &mut BTreeSet<WeakRef>, queue: &mut V
 }
 
 fn sweep_weak_table(table: &mut TableData, mode: WeakMode, live: &WeakLiveSet) {
+    let mut changed = false;
     if mode.values {
         for value in &mut table.array {
             if weak_value_is_collectable(*value) && !live.contains_value(*value) {
                 *value = Value::nil();
+                changed = true;
             }
         }
     }
+    let hash_len = table.hash.len();
     table.hash.retain(|entry| {
         let same_identity = table_key_value_same_identity(entry.key, entry.value);
         let remove_key = mode.keys
@@ -1433,6 +2364,13 @@ fn sweep_weak_table(table: &mut TableData, mode: WeakMode, live: &WeakLiveSet) {
             && (mode.keys || !same_identity);
         !(remove_key || remove_value)
     });
+    if table.hash.len() != hash_len {
+        rebuild_hash_index(table);
+        changed = true;
+    }
+    if changed {
+        bump_table_version(table);
+    }
 }
 
 fn table_key_is_collectable(key: TableKey) -> bool {
@@ -1573,11 +2511,12 @@ fn first_hash_entry(
     table: &TableData,
     order: TableIterationOrder,
 ) -> Option<(Value, Value)> {
-    ordered_hash_entries(root, table, order)
-        .into_iter()
-        .find_map(|entry| {
-            (entry.value.kind() != ValueKind::Nil).then_some((entry.key_value, entry.value))
-        })
+    match order {
+        TableIterationOrder::Insertion => table.hash.iter().find_map(hash_entry_pair),
+        TableIterationOrder::LuauHash => luau_hash_nodes(root, table)
+            .into_iter()
+            .find_map(hash_entry_pair),
+    }
 }
 
 fn next_after_hash_key(
@@ -1586,22 +2525,33 @@ fn next_after_hash_key(
     key: TableKey,
     order: TableIterationOrder,
 ) -> Option<Option<(Value, Value)>> {
-    let entries = ordered_hash_entries(root, table, order);
-    let index = entries.iter().position(|entry| entry.key == key)?;
-    Some(entries.into_iter().skip(index + 1).find_map(|entry| {
-        (entry.value.kind() != ValueKind::Nil).then_some((entry.key_value, entry.value))
-    }))
+    match order {
+        TableIterationOrder::Insertion => {
+            let index = table_hash_entry_index(table, key)?;
+            Some(
+                table
+                    .hash
+                    .get(index + 1..)
+                    .unwrap_or(&[])
+                    .iter()
+                    .find_map(hash_entry_pair),
+            )
+        }
+        TableIterationOrder::LuauHash => {
+            let entries = luau_hash_nodes(root, table);
+            let index = entries.iter().position(|entry| entry.key == key)?;
+            Some(
+                entries
+                    .into_iter()
+                    .skip(index + 1)
+                    .find_map(hash_entry_pair),
+            )
+        }
+    }
 }
 
-fn ordered_hash_entries<'a>(
-    root: &RootData<'_>,
-    table: &'a TableData,
-    order: TableIterationOrder,
-) -> Vec<&'a TableEntry> {
-    match order {
-        TableIterationOrder::Insertion => table.hash.iter().collect(),
-        TableIterationOrder::LuauHash => luau_hash_nodes(root, table),
-    }
+fn hash_entry_pair(entry: &TableEntry) -> Option<(Value, Value)> {
+    (entry.value.kind() != ValueKind::Nil).then_some((entry.key_value, entry.value))
 }
 
 fn luau_hash_nodes<'a>(root: &RootData<'_>, table: &'a TableData) -> Vec<&'a TableEntry> {

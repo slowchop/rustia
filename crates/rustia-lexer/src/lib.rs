@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

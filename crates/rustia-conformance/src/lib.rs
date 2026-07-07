@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use rustia_compiler::{compile_with_options, BuiltinEnvironment, CompileOptions};
 use rustia_parser::{parse_source_bytes, SourceError};
 use rustia_vm::{Profile, Program, Value, ValueKind, Vm, VmSettings};

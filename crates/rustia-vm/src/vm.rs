@@ -2,13 +2,15 @@
 
 use crate::bytecode::{
     Constant, Function, Instruction, Opcode, Program, RuntimeType, UpvalueDescriptor,
+    ARRAY_ITERATOR_SKIP_VISIBLE_KEY, ARRAY_ITERATOR_WRITE_VISIBLE_KEY,
     ASSERT_MESSAGE_MISSING_ARGUMENT, ASSERT_MESSAGE_NONE,
 };
 use crate::error::{Error, ErrorKind, ErrorLocation, Result};
 use crate::extension::{validate_registered_op, ExtensionOp, ExtensionRegistry, HostFunctionOp};
 use crate::heap::{
-    FunctionKind, NativeFunction, TableIterationOrder, TableNext, UserdataPayload, VectorData,
-    VmCell,
+    ArrayWriteStatus, FunctionBytecodeContext, FunctionKind, HashReadStatus, NativeFunction,
+    TableConcatOutcome, TableIterationOrder, TableNext, UpvalueAddConstStatus, UpvalueAddStatus,
+    UserdataPayload, VectorData, VmCell,
 };
 use crate::number::{binary, canonicalize_number, NumericOp};
 use crate::profile::Profile;
@@ -27,6 +29,15 @@ const LUAU_RECURSIVE_REVERSE_GSUB_PATTERN: &[u8] = b"(.)(.+)";
 const OS_TIME_NOW_SECONDS: i64 = 1_700_000_000;
 pub const MAX_RECURSION_LIMIT: usize = 512;
 const LUAU_TAIL_CALL_LIMIT: usize = 20_000;
+const GLOBAL_GET_INLINE_CACHE_SLOTS: usize = 1024;
+const STRING_FORMAT_PLAN_CACHE_MAX: usize = 256;
+const REGISTER_POOL_MAX_FRAMES: usize = 64;
+const REGISTER_POOL_MAX_REGISTERS: usize = 256;
+const RESULT_POOL_MAX_FRAMES: usize = 64;
+const RESULT_POOL_MAX_VALUES: usize = 16;
+const CALL_FRAME_POOL_MAX_FRAMES: usize = 64;
+const CALL_FRAME_POOL_MAX_ROOTS: usize = 256;
+const CALL_FRAME_POOL_MAX_STACKLESS_DEBUG_FRAMES: usize = 64;
 
 pub type LoadStringCompiler =
     fn(source: &[u8], source_name: Option<&[u8]>) -> std::result::Result<Program, String>;
@@ -75,6 +86,9 @@ pub struct Vm {
     extensions: ExtensionRegistry,
     host_functions: Vec<HostFunctionOp>,
     dynamic_programs: Vec<Arc<Program>>,
+    register_pool: Vec<Vec<Value>>,
+    result_pool: Vec<Vec<Value>>,
+    call_frame_pool: Vec<CallStackFrame>,
     call_stack: Vec<CallStackFrame>,
     coroutines: Vec<CoroutineState>,
     running_coroutines: Vec<usize>,
@@ -90,6 +104,13 @@ pub struct Vm {
     executed_instructions: u64,
     deterministic_collection_count: u64,
     coverage_hits: BTreeMap<CoverageKey, u64>,
+    global_get_inline_cache: Vec<Option<GlobalGetInlineCacheSlot>>,
+    table_get_inline_cache: Vec<Option<TableGetInlineCacheSlot>>,
+    arithmetic_metamethod_inline_cache: Vec<Option<ArithmeticMetamethodInlineCacheSlot>>,
+    iter_metamethod_inline_cache: Vec<Option<IterMetamethodInlineCacheSlot>>,
+    len_inline_cache: Vec<Option<LenInlineCacheSlot>>,
+    constant_string_atom_cache: BTreeMap<(u32, usize), u32>,
+    string_format_plan_cache: BTreeMap<u32, Arc<[StringFormatPlanItem]>>,
 }
 
 struct FunctionCallContext<'a> {
@@ -101,11 +122,123 @@ struct FunctionCallContext<'a> {
     prototype: Option<u32>,
 }
 
+enum RegisterCallResult {
+    Scalar(Value),
+    Results(Vec<Value>),
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct CoverageKey {
     program: Option<u32>,
     prototype: u32,
     line: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct InlineCacheSite {
+    program: u32,
+    prototype: Option<u32>,
+    pc: usize,
+}
+
+impl InlineCacheSite {
+    fn slot(self) -> usize {
+        let prototype = self.prototype.unwrap_or(u32::MAX);
+        let hash = u64::from(self.program).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ u64::from(prototype).rotate_left(17)
+            ^ (self.pc as u64).rotate_left(32);
+        (hash as usize) % GLOBAL_GET_INLINE_CACHE_SLOTS
+    }
+}
+
+#[derive(Clone, Copy)]
+struct GlobalGetInlineCacheSlot {
+    site: InlineCacheSite,
+    entry: GlobalGetInlineCacheEntry,
+}
+
+#[derive(Clone, Copy)]
+struct GlobalGetInlineCacheEntry {
+    environment: u32,
+    environment_version: u64,
+    source: GlobalGetInlineCacheSource,
+    value: Value,
+}
+
+#[derive(Clone, Copy)]
+enum GlobalGetInlineCacheSource {
+    Environment,
+    StandardGlobals { standard_globals_version: u64 },
+}
+
+#[derive(Clone, Copy)]
+struct TableGetInlineCacheSlot {
+    site: InlineCacheSite,
+    entry: TableGetInlineCacheEntry,
+}
+
+#[derive(Clone, Copy)]
+struct TableGetInlineCacheEntry {
+    key_atom: u32,
+    source: TableGetInlineCacheSource,
+}
+
+#[derive(Clone, Copy)]
+enum TableGetInlineCacheSource {
+    Direct {
+        table: u32,
+        table_version: u64,
+        value: Value,
+    },
+    IndexTable {
+        metatable: u32,
+        metatable_version: u64,
+        index_table: u32,
+        index_table_version: u64,
+        value: Value,
+    },
+}
+
+#[derive(Clone, Copy)]
+struct ArithmeticMetamethodInlineCacheSlot {
+    site: InlineCacheSite,
+    entry: ArithmeticMetamethodInlineCacheEntry,
+}
+
+#[derive(Clone, Copy)]
+struct ArithmeticMetamethodInlineCacheEntry {
+    op: NumericOp,
+    metatable: u32,
+    metatable_version: u64,
+    method: Value,
+}
+
+#[derive(Clone, Copy)]
+struct IterMetamethodInlineCacheSlot {
+    site: InlineCacheSite,
+    entry: IterMetamethodInlineCacheEntry,
+}
+
+#[derive(Clone, Copy)]
+struct IterMetamethodInlineCacheEntry {
+    table: u32,
+    table_version: u64,
+    metatable: Option<u32>,
+    metatable_version: u64,
+    method: Option<Value>,
+}
+
+#[derive(Clone, Copy)]
+struct LenInlineCacheSlot {
+    site: InlineCacheSite,
+    entry: LenInlineCacheEntry,
+}
+
+#[derive(Clone, Copy)]
+struct LenInlineCacheEntry {
+    table: u32,
+    table_version: u64,
+    len: usize,
 }
 
 struct StandardGlobalHandles {
@@ -118,7 +251,7 @@ struct StandardGlobalHandles {
 #[derive(Clone)]
 struct CallStackFrame {
     function: Option<Value>,
-    debug_name: Option<String>,
+    debug_name: Option<Arc<str>>,
     environment: u32,
     call_site: Option<ErrorLocation>,
     roots: Vec<Value>,
@@ -129,7 +262,7 @@ struct CallStackFrame {
 #[derive(Clone)]
 struct StacklessDebugFrame {
     function: Option<Value>,
-    debug_name: Option<String>,
+    debug_name: Option<Arc<str>>,
     environment: u32,
     call_site: Option<ErrorLocation>,
 }
@@ -236,6 +369,7 @@ struct CoroutineState {
     dead: bool,
     error: Option<Value>,
     debug_snapshot: Option<CoroutineDebugSnapshot>,
+    callable_metatable: Option<(u32, u64)>,
 }
 
 #[derive(Clone)]
@@ -387,6 +521,9 @@ impl Vm {
             extensions: ExtensionRegistry::default(),
             host_functions: Vec::new(),
             dynamic_programs: Vec::new(),
+            register_pool: Vec::new(),
+            result_pool: Vec::new(),
+            call_frame_pool: Vec::new(),
             call_stack: Vec::new(),
             coroutines: Vec::new(),
             running_coroutines: Vec::new(),
@@ -402,6 +539,13 @@ impl Vm {
             executed_instructions: 0,
             deterministic_collection_count: 0,
             coverage_hits: BTreeMap::new(),
+            global_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
+            table_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
+            arithmetic_metamethod_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
+            iter_metamethod_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
+            len_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
+            constant_string_atom_cache: BTreeMap::new(),
+            string_format_plan_cache: BTreeMap::new(),
         }
     }
 
@@ -570,6 +714,121 @@ impl Vm {
         self.deterministic_collection_count
     }
 
+    fn take_registers(&mut self, len: usize) -> Vec<Value> {
+        if let Some(index) = self
+            .register_pool
+            .iter()
+            .rposition(|registers| registers.capacity() >= len)
+        {
+            let mut registers = self.register_pool.swap_remove(index);
+            registers.resize(len, Value::nil());
+            return registers;
+        }
+        vec![Value::nil(); len]
+    }
+
+    fn recycle_registers(&mut self, mut registers: Vec<Value>) {
+        if registers.capacity() > REGISTER_POOL_MAX_REGISTERS
+            || self.register_pool.len() >= REGISTER_POOL_MAX_FRAMES
+        {
+            return;
+        }
+        registers.clear();
+        self.register_pool.push(registers);
+    }
+
+    fn take_results(&mut self, len: usize) -> Vec<Value> {
+        if len == 0 {
+            return Vec::new();
+        }
+        if let Some(index) = self
+            .result_pool
+            .iter()
+            .rposition(|results| results.capacity() >= len)
+        {
+            return self.result_pool.swap_remove(index);
+        }
+        Vec::with_capacity(len)
+    }
+
+    fn recycle_results(&mut self, mut results: Vec<Value>) {
+        if results.capacity() > RESULT_POOL_MAX_VALUES
+            || self.result_pool.len() >= RESULT_POOL_MAX_FRAMES
+        {
+            return;
+        }
+        results.clear();
+        self.result_pool.push(results);
+    }
+
+    fn first_result_or_nil_recycle(&mut self, results: Vec<Value>) -> Value {
+        let value = results.first().copied().unwrap_or_else(Value::nil);
+        self.recycle_results(results);
+        value
+    }
+
+    fn take_call_stack_frame(
+        &mut self,
+        function: Option<Value>,
+        debug_name: Option<Arc<str>>,
+        environment: u32,
+        call_site: Option<ErrorLocation>,
+    ) -> CallStackFrame {
+        if let Some(mut frame) = self.call_frame_pool.pop() {
+            frame.function = function;
+            frame.debug_name = debug_name;
+            frame.environment = environment;
+            frame.call_site = call_site;
+            frame.roots.clear();
+            frame.stackless_roots.clear();
+            frame.stackless_debug_frames.clear();
+            return frame;
+        }
+        CallStackFrame {
+            function,
+            debug_name,
+            environment,
+            call_site,
+            roots: Vec::new(),
+            stackless_roots: Vec::new(),
+            stackless_debug_frames: Vec::new(),
+        }
+    }
+
+    fn recycle_call_stack_frame(&mut self, mut frame: CallStackFrame) {
+        if self.call_frame_pool.len() >= CALL_FRAME_POOL_MAX_FRAMES
+            || frame.roots.capacity() > CALL_FRAME_POOL_MAX_ROOTS
+            || frame.stackless_roots.capacity() > CALL_FRAME_POOL_MAX_ROOTS
+            || frame.stackless_debug_frames.capacity() > CALL_FRAME_POOL_MAX_STACKLESS_DEBUG_FRAMES
+        {
+            return;
+        }
+        frame.function = None;
+        frame.debug_name = None;
+        frame.environment = self.globals;
+        frame.call_site = None;
+        frame.roots.clear();
+        frame.stackless_roots.clear();
+        frame.stackless_debug_frames.clear();
+        self.call_frame_pool.push(frame);
+    }
+
+    fn finish_function_results_from_registers(
+        &mut self,
+        pending_prefixes: &mut Vec<Value>,
+        registers: &[Value],
+        first: usize,
+        count: usize,
+    ) -> Vec<Value> {
+        if pending_prefixes.is_empty() {
+            let mut results = self.take_results(count);
+            results.extend_from_slice(&registers[first..first + count]);
+            return results;
+        }
+        pending_prefixes.extend_from_slice(&registers[first..first + count]);
+        std::mem::take(pending_prefixes)
+    }
+
     pub fn run(&mut self, program: &Program) -> Result<Value> {
         let mut fuel = self.settings.initial_fuel;
         let program_id = self.retain_dynamic_program(program.clone())?;
@@ -620,15 +879,13 @@ impl Vm {
         resumed: Option<ResumedFunctionState>,
         fuel: &mut Option<u64>,
     ) -> VmFlowResult<Vec<Value>> {
-        self.call_stack.push(CallStackFrame {
-            function: context.current_function,
-            debug_name: function.debug_name.clone(),
-            environment: context.environment,
-            call_site: context.call_site.clone(),
-            roots: Vec::new(),
-            stackless_roots: Vec::new(),
-            stackless_debug_frames: Vec::new(),
-        });
+        let call_frame = self.take_call_stack_frame(
+            context.current_function,
+            function.debug_name.clone(),
+            context.environment,
+            context.call_site.clone(),
+        );
+        self.call_stack.push(call_frame);
         let result = (|| -> VmFlowResult<Vec<Value>> {
             self.check_recursion_depth(context.depth)?;
             if function.max_registers == 0 {
@@ -668,8 +925,8 @@ impl Vm {
             } else {
                 stackless_self_calls = Vec::new();
                 tail_call_count = 0usize;
-                let mut registers = vec![Value::nil(); function.max_registers];
-                let register_cells = vec![None; function.max_registers];
+                let mut registers = self.take_registers(function.max_registers);
+                let register_cells = fresh_register_cells(function);
                 for (index, arg) in args
                     .iter()
                     .copied()
@@ -691,10 +948,13 @@ impl Vm {
                 self.validate_conformance_native_parameter_types(function, &registers)?;
                 (registers, register_cells, varargs, 0usize, Vec::new(), None)
             };
+            let mut may_have_register_cells = register_cells.iter().any(Option::is_some);
             self.rebuild_stackless_self_call_roots(&mut stackless_self_calls);
+            let mut current_roots_dirty = true;
 
             macro_rules! unwind_stackless_return {
                 ($returned:expr) => {{
+                    self.recycle_registers(std::mem::take(&mut registers));
                     let mut returned = $returned;
                     loop {
                         let Some(frame) = stackless_self_calls.pop() else {
@@ -715,6 +975,7 @@ impl Vm {
                         pc = frame_pc;
                         registers = frame_registers;
                         register_cells = frame_register_cells;
+                        may_have_register_cells = register_cells.iter().any(Option::is_some);
                         varargs = frame_varargs;
                         pending_return_prefixes = frame_pending_return_prefixes;
                         tail_call_count = frame_tail_call_count;
@@ -733,6 +994,7 @@ impl Vm {
                             fuel,
                         );
                         self.truncate_stackless_self_call_roots(root_mark);
+                        current_roots_dirty = true;
                         if let Some(next_returned) = continuation_result? {
                             returned = next_returned;
                             continue;
@@ -746,6 +1008,12 @@ impl Vm {
                 ($error:expr) => {{
                     let error = $error;
                     if error_is_uncatchable(&error) {
+                        self.refresh_current_gc_roots_if_dirty(
+                            &mut current_roots_dirty,
+                            &registers,
+                            &varargs,
+                            &pending_return_prefixes,
+                        );
                         return Err(error);
                     }
                     let mut error = Some(error);
@@ -768,6 +1036,8 @@ impl Vm {
                                 pc = frame_pc;
                                 registers = frame_registers;
                                 register_cells = frame_register_cells;
+                                may_have_register_cells =
+                                    register_cells.iter().any(Option::is_some);
                                 varargs = frame_varargs;
                                 pending_return_prefixes = frame_pending_return_prefixes;
                                 tail_call_count = frame_tail_call_count;
@@ -792,6 +1062,7 @@ impl Vm {
                                 )?;
                                 self.truncate_stackless_self_call_roots(root_mark);
                                 caught = true;
+                                current_roots_dirty = true;
                                 break;
                             }
                             _ => {
@@ -801,18 +1072,35 @@ impl Vm {
                         }
                     }
                     if !caught {
+                        self.refresh_current_gc_roots_if_dirty(
+                            &mut current_roots_dirty,
+                            &registers,
+                            &varargs,
+                            &pending_return_prefixes,
+                        );
                         return Err(error.ok_or_else(|| {
                             Error::new(ErrorKind::InvalidProgram {
                                 reason: "missing propagated stackless error",
                             })
                         })?);
                     }
+                    self.refresh_current_gc_roots_if_dirty(
+                        &mut current_roots_dirty,
+                        &registers,
+                        &varargs,
+                        &pending_return_prefixes,
+                    );
                 }};
             }
 
             'run_function_loop: loop {
                 if let Some((continuation, resume_results)) = resumed_continuation.take() {
-                    self.update_current_gc_roots(&registers, &varargs, &pending_return_prefixes);
+                    self.refresh_current_gc_roots_if_dirty(
+                        &mut current_roots_dirty,
+                        &registers,
+                        &varargs,
+                        &pending_return_prefixes,
+                    );
                     let continuation_root_mark =
                         self.push_bytecode_continuation_roots(&continuation);
                     let continuation_result = self.apply_bytecode_continuation(
@@ -824,6 +1112,7 @@ impl Vm {
                         fuel,
                     );
                     self.truncate_stackless_self_call_roots(continuation_root_mark);
+                    current_roots_dirty = true;
                     match continuation_result {
                         Ok(Some(results)) => {
                             unwind_stackless_return!(results);
@@ -839,11 +1128,6 @@ impl Vm {
 
                 let loop_result = (|| -> VmFlowResult<Vec<Value>> {
                     loop {
-                        self.update_current_gc_roots(
-                            &registers,
-                            &varargs,
-                            &pending_return_prefixes,
-                        );
                         let instruction = *function.code.get(pc).ok_or_else(|| {
                             Error::new(ErrorKind::InvalidProgram {
                                 reason: "program counter ran off the end of the function",
@@ -857,10 +1141,24 @@ impl Vm {
                         charge_fuel(fuel, self.settings.initial_fuel, fuel_cost)
                             .map_err(|error| error.at_pc(pc))?;
                         self.executed_instructions = self.executed_instructions.wrapping_add(1);
-                        self.maybe_collect();
+                        self.maybe_collect(
+                            &mut current_roots_dirty,
+                            &registers,
+                            &varargs,
+                            &pending_return_prefixes,
+                        );
+                        if opcode_may_observe_current_roots(instruction.op) {
+                            self.refresh_current_gc_roots_if_dirty(
+                                &mut current_roots_dirty,
+                                &registers,
+                                &varargs,
+                                &pending_return_prefixes,
+                            );
+                        }
                         self.record_coverage_hit(program_id, context.prototype, function, pc);
 
                         pc += 1;
+                        current_roots_dirty = true;
                         match instruction.op {
                             Opcode::Halt => {
                                 return Ok(VmFlow::Return(finish_function_results(
@@ -886,14 +1184,16 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::GetGlobal => {
-                                let key = self.global_key(program, instruction.aux)?;
-                                let environment =
-                                    self.current_environment().map_err(|e| e.at_pc(pc - 1))?;
+                                let site = program_id.map(|program| InlineCacheSite {
+                                    program,
+                                    prototype: context.prototype,
+                                    pc: pc - 1,
+                                });
                                 let value = self
-                                    .get_table_index_with_metamethod(
+                                    .get_global_with_inline_cache(
                                         program,
-                                        environment,
-                                        key,
+                                        site,
+                                        instruction.aux,
                                         context.depth,
                                         fuel,
                                     )
@@ -931,6 +1231,7 @@ impl Vm {
                                         instruction.b,
                                     )
                                     .map_err(|e| e.at_pc(pc - 1))?;
+                                may_have_register_cells = true;
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -944,14 +1245,144 @@ impl Vm {
                                     value,
                                 )
                                 .map_err(|e| e.at_pc(pc - 1))?;
+                                may_have_register_cells = true;
                             }
                             Opcode::ClearLocalCell => {
-                                clear_register_cell(&mut register_cells, instruction.a)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(&mut registers, instruction.a, Value::nil())
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                clear_register_value_and_cell(
+                                    &mut registers,
+                                    &mut register_cells,
+                                    instruction.a,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::ClearLocalCells => {
+                                clear_register_values_and_cells(
+                                    &mut registers,
+                                    &mut register_cells,
+                                    instruction.a,
+                                    instruction.b,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::GetUpvalue => {
+                                if fuel.is_none() {
+                                    if let Some(next) = function.code.get(pc) {
+                                        if next.op == Opcode::Len && next.b == instruction.a {
+                                            let index = upvalue_index(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?;
+                                            let upvalue = context
+                                                .upvalues
+                                                .get(index)
+                                                .copied()
+                                                .ok_or_else(|| {
+                                                    Error::new(ErrorKind::InvalidProgram {
+                                                        reason: "upvalue index is missing",
+                                                    })
+                                                })
+                                                .map_err(|e| e.at_pc(pc - 1))?;
+                                            let value = self.heap.upvalue_get(upvalue).ok_or_else(
+                                                || {
+                                                    Error::new(ErrorKind::InvalidProgram {
+                                                        reason: "upvalue handle is missing",
+                                                    })
+                                                },
+                                            )?;
+                                            if let (Some(program), Some(table)) =
+                                                (program_id, value.as_table())
+                                            {
+                                                let site = InlineCacheSite {
+                                                    program,
+                                                    prototype: context.prototype,
+                                                    pc,
+                                                };
+                                                if let Some(len) =
+                                                    self.len_inline_cache_hit(site, table)
+                                                {
+                                                    if next.a != instruction.a {
+                                                        set_register(
+                                                            &mut registers,
+                                                            instruction.a,
+                                                            value,
+                                                        )
+                                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                                    }
+                                                    set_register(
+                                                        &mut registers,
+                                                        next.a,
+                                                        Value::number(len as f64),
+                                                    )
+                                                    .map_err(|e| e.at_pc(pc))?;
+                                                    self.executed_instructions =
+                                                        self.executed_instructions.wrapping_add(1);
+                                                    self.record_coverage_hit(
+                                                        program_id,
+                                                        context.prototype,
+                                                        function,
+                                                        pc,
+                                                    );
+                                                    pc += 1;
+                                                    continue;
+                                                }
+                                            }
+                                            set_register(&mut registers, instruction.a, value)
+                                                .map_err(|e| e.at_pc(pc - 1))?;
+                                            continue;
+                                        }
+                                        if next.op == Opcode::GetUpvalue {
+                                            let first_index = upvalue_index(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?;
+                                            let second_index =
+                                                upvalue_index(next.aux).map_err(|e| e.at_pc(pc))?;
+                                            let first_upvalue = context
+                                                .upvalues
+                                                .get(first_index)
+                                                .copied()
+                                                .ok_or_else(|| {
+                                                    Error::new(ErrorKind::InvalidProgram {
+                                                        reason: "upvalue index is missing",
+                                                    })
+                                                })
+                                                .map_err(|e| e.at_pc(pc - 1))?;
+                                            let second_upvalue = context
+                                                .upvalues
+                                                .get(second_index)
+                                                .copied()
+                                                .ok_or_else(|| {
+                                                    Error::new(ErrorKind::InvalidProgram {
+                                                        reason: "upvalue index is missing",
+                                                    })
+                                                })
+                                                .map_err(|e| e.at_pc(pc))?;
+                                            let (first_value, second_value) = self
+                                                .heap
+                                                .upvalue_get_pair(first_upvalue, second_upvalue)
+                                                .ok_or_else(|| {
+                                                    Error::new(ErrorKind::InvalidProgram {
+                                                        reason: "upvalue handle is missing",
+                                                    })
+                                                })
+                                                .map_err(|e| e.at_pc(pc - 1))?;
+                                            set_register(
+                                                &mut registers,
+                                                instruction.a,
+                                                first_value,
+                                            )
+                                            .map_err(|e| e.at_pc(pc - 1))?;
+                                            set_register(&mut registers, next.a, second_value)
+                                                .map_err(|e| e.at_pc(pc))?;
+                                            self.executed_instructions =
+                                                self.executed_instructions.wrapping_add(1);
+                                            self.record_coverage_hit(
+                                                program_id,
+                                                context.prototype,
+                                                function,
+                                                pc,
+                                            );
+                                            pc += 1;
+                                            continue;
+                                        }
+                                    }
+                                }
                                 let upvalue = context
                                     .upvalues
                                     .get(upvalue_index(instruction.aux)?)
@@ -971,9 +1402,10 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::SetUpvalue => {
+                                let upvalue_index = upvalue_index(instruction.aux)?;
                                 let upvalue = context
                                     .upvalues
-                                    .get(upvalue_index(instruction.aux)?)
+                                    .get(upvalue_index)
                                     .copied()
                                     .ok_or_else(|| {
                                         Error::new(ErrorKind::InvalidProgram {
@@ -988,6 +1420,129 @@ impl Vm {
                                         reason: "upvalue handle is missing",
                                     })
                                 })?;
+                                if fuel.is_none() {
+                                    if let Some(register) = same_upvalue_reload_after_set(
+                                        function,
+                                        &context.upvalues,
+                                        pc,
+                                        upvalue,
+                                    ) {
+                                        set_register(&mut registers, register, value)
+                                            .map_err(|e| e.at_pc(pc))?;
+                                        self.executed_instructions =
+                                            self.executed_instructions.wrapping_add(1);
+                                        self.record_coverage_hit(
+                                            program_id,
+                                            context.prototype,
+                                            function,
+                                            pc,
+                                        );
+                                        pc += 1;
+                                        continue;
+                                    }
+                                    if set_upvalue_refresh_skip_count(
+                                        function,
+                                        &context.upvalues,
+                                        &register_cells,
+                                        pc,
+                                        instruction.a,
+                                        upvalue,
+                                    ) == 2
+                                    {
+                                        self.executed_instructions =
+                                            self.executed_instructions.wrapping_add(2);
+                                        self.record_coverage_hit(
+                                            program_id,
+                                            context.prototype,
+                                            function,
+                                            pc,
+                                        );
+                                        self.record_coverage_hit(
+                                            program_id,
+                                            context.prototype,
+                                            function,
+                                            pc + 1,
+                                        );
+                                        pc += 2;
+                                        continue;
+                                    }
+                                }
+                            }
+                            Opcode::AddUpvalue => {
+                                let (upvalue, value) = self
+                                    .add_upvalue(
+                                        program,
+                                        &context.upvalues,
+                                        &mut registers,
+                                        instruction,
+                                        program_id.map(|program| InlineCacheSite {
+                                            program,
+                                            prototype: context.prototype,
+                                            pc: pc - 1,
+                                        }),
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                if fuel.is_none() {
+                                    if let Some(register) = same_upvalue_reload_after_set(
+                                        function,
+                                        &context.upvalues,
+                                        pc,
+                                        upvalue,
+                                    ) {
+                                        set_register(&mut registers, register, value)
+                                            .map_err(|e| e.at_pc(pc))?;
+                                        self.executed_instructions =
+                                            self.executed_instructions.wrapping_add(1);
+                                        self.record_coverage_hit(
+                                            program_id,
+                                            context.prototype,
+                                            function,
+                                            pc,
+                                        );
+                                        pc += 1;
+                                        continue;
+                                    }
+                                }
+                            }
+                            Opcode::AddUpvalueConst => {
+                                let (upvalue, value) = self
+                                    .add_upvalue_const(
+                                        program,
+                                        &context.upvalues,
+                                        &mut registers,
+                                        instruction,
+                                        program_id.map(|program| InlineCacheSite {
+                                            program,
+                                            prototype: context.prototype,
+                                            pc: pc - 1,
+                                        }),
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                if fuel.is_none() {
+                                    if let Some(register) = same_upvalue_reload_after_set(
+                                        function,
+                                        &context.upvalues,
+                                        pc,
+                                        upvalue,
+                                    ) {
+                                        set_register(&mut registers, register, value)
+                                            .map_err(|e| e.at_pc(pc))?;
+                                        self.executed_instructions =
+                                            self.executed_instructions.wrapping_add(1);
+                                        self.record_coverage_hit(
+                                            program_id,
+                                            context.prototype,
+                                            function,
+                                            pc,
+                                        );
+                                        pc += 1;
+                                        continue;
+                                    }
+                                }
                             }
                             Opcode::Add => {
                                 self.numeric_binop(
@@ -995,6 +1550,27 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Add,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::AddConst => {
+                                self.numeric_binop_const(
+                                    program,
+                                    &mut registers,
+                                    instruction,
+                                    NumericOp::Add,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
                                     context.depth,
                                     fuel,
                                 )
@@ -1006,6 +1582,27 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Sub,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::SubConst => {
+                                self.numeric_binop_const(
+                                    program,
+                                    &mut registers,
+                                    instruction,
+                                    NumericOp::Sub,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
                                     context.depth,
                                     fuel,
                                 )
@@ -1017,6 +1614,27 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Mul,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::MulConst => {
+                                self.numeric_binop_const(
+                                    program,
+                                    &mut registers,
+                                    instruction,
+                                    NumericOp::Mul,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
                                     context.depth,
                                     fuel,
                                 )
@@ -1028,6 +1646,27 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Div,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::DivConst => {
+                                self.numeric_binop_const(
+                                    program,
+                                    &mut registers,
+                                    instruction,
+                                    NumericOp::Div,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
                                     context.depth,
                                     fuel,
                                 )
@@ -1039,6 +1678,27 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::FloorDiv,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::FloorDivConst => {
+                                self.numeric_binop_const(
+                                    program,
+                                    &mut registers,
+                                    instruction,
+                                    NumericOp::FloorDiv,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
                                     context.depth,
                                     fuel,
                                 )
@@ -1050,6 +1710,106 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Mod,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::ModConst => {
+                                self.numeric_binop_const(
+                                    program,
+                                    &mut registers,
+                                    instruction,
+                                    NumericOp::Mod,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::MulModConst => {
+                                self.numeric_mul_mod_const(
+                                    program,
+                                    &mut registers,
+                                    instruction,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::MulAddModConst => {
+                                self.numeric_mul_add_mod_const(
+                                    program,
+                                    &mut registers,
+                                    instruction,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::SetIndexMulAddModConst => {
+                                self.set_index_mul_add_mod_const(
+                                    program,
+                                    &registers,
+                                    instruction,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })?;
+                            }
+                            Opcode::SetIndexMulModConst => {
+                                self.set_index_mul_mod_const(
+                                    program,
+                                    &registers,
+                                    instruction,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })?;
+                            }
+                            Opcode::ModAddConst => {
+                                self.numeric_mod_add_const(
+                                    program,
+                                    &mut registers,
+                                    instruction,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
                                     context.depth,
                                     fuel,
                                 )
@@ -1061,6 +1821,27 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Pow,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::PowConst => {
+                                self.numeric_binop_const(
+                                    program,
+                                    &mut registers,
+                                    instruction,
+                                    NumericOp::Pow,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
                                     context.depth,
                                     fuel,
                                 )
@@ -1078,6 +1859,113 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::ConcatConst => {
+                                let value = self
+                                    .concat_const_value(
+                                        program,
+                                        program_id,
+                                        &registers,
+                                        instruction,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                set_register(&mut registers, instruction.a, value)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::ConcatRhsConst => {
+                                let value = self
+                                    .concat_rhs_const_value(
+                                        program,
+                                        program_id,
+                                        &registers,
+                                        instruction,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                set_register(&mut registers, instruction.a, value)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::GetIndexConcatConst => {
+                                let object =
+                                    get_register(&registers, instruction.b).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let key = self
+                                    .concat_const_key(
+                                        program,
+                                        program_id,
+                                        &registers,
+                                        instruction.c,
+                                        instruction.aux,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                if let Some(table) = object.as_table() {
+                                    if let Some(index) =
+                                        key.as_number().and_then(array_iterator_index)
+                                    {
+                                        if let Some(value) = self
+                                            .get_table_integer_index_fast(table, index)
+                                            .map_err(|e| {
+                                                attach_instruction_source(
+                                                    program,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
+                                                )
+                                            })?
+                                        {
+                                            set_register(&mut registers, instruction.a, value)
+                                                .map_err(|e| {
+                                                    attach_instruction_source(
+                                                        program,
+                                                        function,
+                                                        pc - 1,
+                                                        e,
+                                                    )
+                                                })?;
+                                            continue;
+                                        }
+                                    }
+                                    if key.kind() == ValueKind::String {
+                                        if let Some(value) = self
+                                            .get_table_string_index_fast(table, key)
+                                            .map_err(|e| {
+                                                attach_instruction_source(
+                                                    program,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
+                                                )
+                                            })?
+                                        {
+                                            set_register(&mut registers, instruction.a, value)
+                                                .map_err(|e| {
+                                                    attach_instruction_source(
+                                                        program,
+                                                        function,
+                                                        pc - 1,
+                                                        e,
+                                                    )
+                                                })?;
+                                            continue;
+                                        }
+                                    }
+                                }
+                                let value = self
+                                    .get_index_value(program, object, key, context.depth, fuel)
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                set_register(&mut registers, instruction.a, value).map_err(
+                                    |e| attach_instruction_source(program, function, pc - 1, e),
+                                )?;
                             }
                             Opcode::Neg => {
                                 self.numeric_unop(
@@ -1146,9 +2034,11 @@ impl Vm {
                                     })
                                     .at_pc(pc - 1));
                                 }
-                                let returned = finish_function_results(
+                                let returned = self.finish_function_results_from_registers(
                                     &mut pending_return_prefixes,
-                                    registers[first..end].to_vec(),
+                                    &registers,
+                                    first,
+                                    count,
                                 );
                                 unwind_stackless_return!(returned);
                                 continue;
@@ -1429,8 +2319,36 @@ impl Vm {
                                         .map_err(|e| e.at_pc(pc - 1))?;
                                 }
                             }
+                            Opcode::ForPrepStepOne => {
+                                if !numeric_for_step_one_prepare(
+                                    &mut registers,
+                                    &mut register_cells,
+                                    instruction,
+                                    pc - 1,
+                                )
+                                .map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })? {
+                                    pc = checked_jump(instruction.aux)
+                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                }
+                            }
                             Opcode::ForLoop => {
                                 if numeric_for_loop(
+                                    &mut registers,
+                                    &mut register_cells,
+                                    instruction,
+                                    pc - 1,
+                                )
+                                .map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })? {
+                                    pc = checked_jump(instruction.aux)
+                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                }
+                            }
+                            Opcode::ForLoopStepOne => {
+                                if numeric_for_step_one_loop(
                                     &mut registers,
                                     &mut register_cells,
                                     instruction,
@@ -1498,8 +2416,21 @@ impl Vm {
                                     })
                                     .at_pc(pc - 1));
                                 }
-                                let table = self.heap.alloc_array_table(&registers[first..end]);
+                                let (array_capacity_hint, hash_capacity_hint) =
+                                    new_array_capacity_hints(instruction.aux);
+                                let table = self.heap.alloc_array_table_with_capacity(
+                                    &registers[first..end],
+                                    array_capacity_hint,
+                                    hash_capacity_hint,
+                                );
                                 set_register(&mut registers, instruction.a, Value::table(table))
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::NewRecord => {
+                                let value = self
+                                    .new_record_table(&registers, instruction)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::IpairsPrep => {
@@ -1579,6 +2510,11 @@ impl Vm {
                                 }
                             }
                             Opcode::GeneralizedIterPrep => {
+                                let site = program_id.map(|program| InlineCacheSite {
+                                    program,
+                                    prototype: context.prototype,
+                                    pc: pc - 1,
+                                });
                                 if !self
                                     .generalized_iterator_prepare(
                                         program,
@@ -1586,6 +2522,7 @@ impl Vm {
                                         &mut register_cells,
                                         instruction,
                                         context.depth,
+                                        site,
                                         fuel,
                                     )
                                     .map_err(|e| e.at_pc(pc - 1))?
@@ -1611,12 +2548,37 @@ impl Vm {
                                 }
                             }
                             Opcode::Len => {
+                                let site = program_id.map(|program| InlineCacheSite {
+                                    program,
+                                    prototype: context.prototype,
+                                    pc: pc - 1,
+                                });
                                 let value = get_register(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let len = self
-                                    .len_value(program, value, context.depth, fuel)
+                                    .len_value_with_inline_cache(
+                                        program,
+                                        site,
+                                        value,
+                                        context.depth,
+                                        fuel,
+                                    )
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 set_register(&mut registers, instruction.a, len)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::LenPlusOne => {
+                                let site = program_id.map(|program| InlineCacheSite {
+                                    program,
+                                    prototype: context.prototype,
+                                    pc: pc - 1,
+                                });
+                                let value = get_register(&registers, instruction.b)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let key = self
+                                    .len_plus_one_value(program, site, value, context.depth, fuel)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                set_register(&mut registers, instruction.a, key)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::GetIndex => {
@@ -1627,8 +2589,203 @@ impl Vm {
                                 let key = get_register(&registers, instruction.c).map_err(|e| {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })?;
+                                if let Some(table) = object.as_table() {
+                                    if let Some(index) =
+                                        key.as_number().and_then(array_iterator_index)
+                                    {
+                                        if let Some(value) = self
+                                            .get_table_integer_index_fast(table, index)
+                                            .map_err(|e| {
+                                                attach_instruction_source(
+                                                    program,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
+                                                )
+                                            })?
+                                        {
+                                            set_register(&mut registers, instruction.a, value)
+                                                .map_err(|e| {
+                                                    attach_instruction_source(
+                                                        program,
+                                                        function,
+                                                        pc - 1,
+                                                        e,
+                                                    )
+                                                })?;
+                                            continue;
+                                        }
+                                    }
+                                    if let Some(key_atom) = key.as_string_atom() {
+                                        if let Some(site) = static_string_get_index_site(
+                                            program_id,
+                                            context.prototype,
+                                            program,
+                                            function,
+                                            pc - 1,
+                                            instruction.c,
+                                        ) {
+                                            let value = self
+                                                .get_table_string_index_with_inline_cache(
+                                                    program,
+                                                    site,
+                                                    table,
+                                                    key,
+                                                    key_atom,
+                                                    context.depth,
+                                                    fuel,
+                                                )
+                                                .map_err(|e| {
+                                                    attach_instruction_source(
+                                                        program,
+                                                        function,
+                                                        pc - 1,
+                                                        e,
+                                                    )
+                                                })?;
+                                            set_register(&mut registers, instruction.a, value)
+                                                .map_err(|e| {
+                                                    attach_instruction_source(
+                                                        program,
+                                                        function,
+                                                        pc - 1,
+                                                        e,
+                                                    )
+                                                })?;
+                                            continue;
+                                        }
+                                    }
+                                }
                                 let value = self
                                     .get_index_value(program, object, key, context.depth, fuel)
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                set_register(&mut registers, instruction.a, value).map_err(
+                                    |e| attach_instruction_source(program, function, pc - 1, e),
+                                )?;
+                            }
+                            Opcode::GetIndexNumber => {
+                                let object =
+                                    get_register(&registers, instruction.b).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let key = get_register(&registers, instruction.c).map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })?;
+                                if let Some(number) = key.as_number() {
+                                    if let Some(table) = object.as_table() {
+                                        if let Some(index) = array_iterator_index(number) {
+                                            if let Some(value) = self
+                                                .get_table_integer_index_fast(table, index)
+                                                .map_err(|e| {
+                                                    attach_instruction_source(
+                                                        program,
+                                                        function,
+                                                        pc - 1,
+                                                        e,
+                                                    )
+                                                })?
+                                            {
+                                                set_register(&mut registers, instruction.a, value)
+                                                    .map_err(|e| {
+                                                        attach_instruction_source(
+                                                            program,
+                                                            function,
+                                                            pc - 1,
+                                                            e,
+                                                        )
+                                                    })?;
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
+                                let value = self
+                                    .get_index_value(program, object, key, context.depth, fuel)
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                set_register(&mut registers, instruction.a, value).map_err(
+                                    |e| attach_instruction_source(program, function, pc - 1, e),
+                                )?;
+                            }
+                            Opcode::GetIndexNumberConst => {
+                                let object =
+                                    get_register(&registers, instruction.b).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let Some(index) = array_iterator_index(f64::from(instruction.aux))
+                                else {
+                                    return Err(Error::new(ErrorKind::InvalidProgram {
+                                        reason: "invalid constant numeric table index",
+                                    })
+                                    .at_pc(pc - 1));
+                                };
+                                if let Some(table) = object.as_table() {
+                                    if let Some(value) = self
+                                        .get_table_integer_index_fast(table, index)
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })?
+                                    {
+                                        set_register(&mut registers, instruction.a, value)
+                                            .map_err(|e| {
+                                                attach_instruction_source(
+                                                    program,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
+                                                )
+                                            })?;
+                                        continue;
+                                    }
+                                }
+                                let key = Value::number(f64::from(instruction.aux));
+                                let value = self
+                                    .get_index_value(program, object, key, context.depth, fuel)
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                set_register(&mut registers, instruction.a, value).map_err(
+                                    |e| attach_instruction_source(program, function, pc - 1, e),
+                                )?;
+                            }
+                            Opcode::GetIndexModAddConst => {
+                                let value = self
+                                    .get_index_mod_add_const(
+                                        program,
+                                        &registers,
+                                        instruction,
+                                        program_id.map(|program| InlineCacheSite {
+                                            program,
+                                            prototype: context.prototype,
+                                            pc: pc - 1,
+                                        }),
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                set_register(&mut registers, instruction.a, value).map_err(
+                                    |e| attach_instruction_source(program, function, pc - 1, e),
+                                )?;
+                            }
+                            Opcode::GetIndexMulModConst => {
+                                let value = self
+                                    .get_index_mul_mod_const(
+                                        program,
+                                        &registers,
+                                        instruction,
+                                        program_id.map(|program| InlineCacheSite {
+                                            program,
+                                            prototype: context.prototype,
+                                            pc: pc - 1,
+                                        }),
+                                        context.depth,
+                                        fuel,
+                                    )
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
@@ -1657,9 +2814,7 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let key = get_register(&registers, instruction.c)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                let value = self
-                                    .raw_table_get(table, key)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let value = self.raw_table_get_after_table_lookup(table, key);
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -1675,6 +2830,121 @@ impl Vm {
                                     get_register(&registers, instruction.c).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
+                                if let Some(table) = object.as_table() {
+                                    if let Some(index) =
+                                        key.as_number().and_then(array_iterator_index)
+                                    {
+                                        if self
+                                            .set_table_integer_index_fast(table, index, value)
+                                            .map_err(|e| {
+                                                attach_instruction_source(
+                                                    program,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
+                                                )
+                                            })?
+                                        {
+                                            continue;
+                                        }
+                                    }
+                                }
+                                self.set_index_value(
+                                    program,
+                                    object,
+                                    key,
+                                    value,
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })?;
+                            }
+                            Opcode::SetIndexNumber => {
+                                let object =
+                                    get_register(&registers, instruction.a).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let key = get_register(&registers, instruction.b).map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })?;
+                                let value =
+                                    get_register(&registers, instruction.c).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                if let Some(number) = key.as_number() {
+                                    if let Some(table) = object.as_table() {
+                                        if let Some(index) = array_iterator_index(number) {
+                                            if self
+                                                .set_table_integer_index_fast(table, index, value)
+                                                .map_err(|e| {
+                                                    attach_instruction_source(
+                                                        program,
+                                                        function,
+                                                        pc - 1,
+                                                        e,
+                                                    )
+                                                })?
+                                            {
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
+                                self.set_index_value(
+                                    program,
+                                    object,
+                                    key,
+                                    value,
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })?;
+                            }
+                            Opcode::SetIndexConcatConst => {
+                                let object =
+                                    get_register(&registers, instruction.a).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let key = self
+                                    .concat_const_key(
+                                        program,
+                                        program_id,
+                                        &registers,
+                                        instruction.b,
+                                        instruction.aux,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let value =
+                                    get_register(&registers, instruction.c).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                if let Some(table) = object.as_table() {
+                                    if let Some(index) =
+                                        key.as_number().and_then(array_iterator_index)
+                                    {
+                                        if self
+                                            .set_table_integer_index_fast(table, index, value)
+                                            .map_err(|e| {
+                                                attach_instruction_source(
+                                                    program,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
+                                                )
+                                            })?
+                                        {
+                                            continue;
+                                        }
+                                    }
+                                }
                                 self.set_index_value(
                                     program,
                                     object,
@@ -1694,19 +2964,25 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let value = get_register(&registers, instruction.c)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                self.set_table_index(table, key, value)
+                                self.set_table_index_after_table_lookup(table, key, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::TableConcat => {
                                 let table = get_table(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                let separator = self
-                                    .coerce_to_string(&registers, instruction.c)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let separator_storage;
+                                let separator = if instruction.aux == 1 {
+                                    &[][..]
+                                } else {
+                                    separator_storage = self
+                                        .coerce_to_string(&registers, instruction.c)
+                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                    separator_storage.as_slice()
+                                };
                                 let (start, end) = table_concat_range(&registers, instruction)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let value = self
-                                    .table_concat(table, &separator, start, end)
+                                    .table_concat(table, separator, start, end)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
@@ -1787,14 +3063,22 @@ impl Vm {
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
-                            Opcode::StringLen => {
-                                let text = self
-                                    .coerce_to_string(&registers, instruction.b)
+                            Opcode::StringByteEqual => {
+                                let value = self
+                                    .string_byte_equal(&registers, instruction)
                                     .map_err(|e| e.at_pc(pc - 1))?;
+                                set_register(&mut registers, instruction.a, value)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::StringLen => {
+                                let value = get_register(&registers, instruction.b)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let len =
+                                    self.string_byte_len(value).map_err(|e| e.at_pc(pc - 1))?;
                                 set_register(
                                     &mut registers,
                                     instruction.a,
-                                    Value::number(text.len() as f64),
+                                    Value::number(len as f64),
                                 )
                                 .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -1867,6 +3151,24 @@ impl Vm {
                             Opcode::StringSplit => {
                                 let value = self
                                     .string_split(&registers, instruction)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                set_register(&mut registers, instruction.a, value)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::StringFormat => {
+                                let extra_fuel = self
+                                    .string_format_opcode_fuel(&registers, instruction)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                charge_fuel(fuel, self.settings.initial_fuel, extra_fuel)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let value = self
+                                    .string_format(
+                                        program,
+                                        &registers,
+                                        instruction,
+                                        context.depth,
+                                        fuel,
+                                    )
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
@@ -1952,6 +3254,7 @@ impl Vm {
                                     environment,
                                 )
                                 .map_err(|e| e.at_pc(pc - 1))?;
+                                may_have_register_cells = true;
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -2095,8 +3398,8 @@ impl Vm {
                                         debug_frame,
                                     };
                                     stackless_self_calls.push(frame);
-                                    registers = vec![Value::nil(); function.max_registers];
-                                    register_cells = vec![None; function.max_registers];
+                                    registers = self.take_registers(function.max_registers);
+                                    register_cells = fresh_register_cells(function);
                                     for (index, arg) in call_args
                                         .iter()
                                         .copied()
@@ -2129,15 +3432,14 @@ impl Vm {
                                     tail_call_count = 0;
                                     continue;
                                 }
-                                let call_site =
-                                    instruction_source_location(program, function, pc - 1);
-                                let results = match self
-                                    .call_function_resumable(
+                                let call_result = match self
+                                    .call_function_from_registers_resumable_lazy_site(
                                         program,
+                                        callee,
                                         &registers,
                                         instruction,
                                         context.depth,
-                                        call_site,
+                                        || instruction_source_location(program, function, pc - 1),
                                         fuel,
                                     )
                                     .map_err(|e| {
@@ -2162,9 +3464,16 @@ impl Vm {
                                         );
                                     }
                                 };
-                                self.sync_register_cells(&mut registers, &register_cells)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                let value = first_result_or_nil(results);
+                                if may_have_register_cells {
+                                    self.sync_register_cells(&mut registers, &register_cells)
+                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                }
+                                let value = match call_result {
+                                    RegisterCallResult::Scalar(value) => value,
+                                    RegisterCallResult::Results(results) => {
+                                        self.first_result_or_nil_recycle(results)
+                                    }
+                                };
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -2271,8 +3580,8 @@ impl Vm {
                                         debug_frame,
                                     };
                                     stackless_self_calls.push(frame);
-                                    registers = vec![Value::nil(); function.max_registers];
-                                    register_cells = vec![None; function.max_registers];
+                                    registers = self.take_registers(function.max_registers);
+                                    register_cells = fresh_register_cells(function);
                                     for (index, arg) in call_args
                                         .iter()
                                         .copied()
@@ -2337,8 +3646,10 @@ impl Vm {
                                         );
                                     }
                                 }
-                                self.sync_register_cells(&mut registers, &register_cells)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                if may_have_register_cells {
+                                    self.sync_register_cells(&mut registers, &register_cells)
+                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                }
                             }
                             Opcode::CallExpand => {
                                 let call_site =
@@ -2491,8 +3802,10 @@ impl Vm {
                                 };
                                 write_call_results(&mut registers, base, result_count, &results)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                self.sync_register_cells(&mut registers, &register_cells)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                if may_have_register_cells {
+                                    self.sync_register_cells(&mut registers, &register_cells)
+                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                }
                             }
                             Opcode::LoadVarargs => {
                                 let first = usize::from(instruction.a);
@@ -2583,8 +3896,10 @@ impl Vm {
                                         );
                                     }
                                 }
-                                self.sync_register_cells(&mut registers, &register_cells)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                if may_have_register_cells {
+                                    self.sync_register_cells(&mut registers, &register_cells)
+                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                }
                             }
                             Opcode::CallExpand2 => {
                                 let call_site =
@@ -2600,8 +3915,10 @@ impl Vm {
                                 .map_err(|e| {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })?;
-                                self.sync_register_cells(&mut registers, &register_cells)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                if may_have_register_cells {
+                                    self.sync_register_cells(&mut registers, &register_cells)
+                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                }
                             }
                             Opcode::CallExpand3 => {
                                 let call_site =
@@ -2617,8 +3934,10 @@ impl Vm {
                                 .map_err(|e| {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })?;
-                                self.sync_register_cells(&mut registers, &register_cells)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                if may_have_register_cells {
+                                    self.sync_register_cells(&mut registers, &register_cells)
+                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                }
                             }
                             Opcode::CallExpandVarargs => {
                                 let call_site =
@@ -2635,8 +3954,10 @@ impl Vm {
                                 .map_err(|e| {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })?;
-                                self.sync_register_cells(&mut registers, &register_cells)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                if may_have_register_cells {
+                                    self.sync_register_cells(&mut registers, &register_cells)
+                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                }
                             }
                             Opcode::ReturnCallVarargs => {
                                 let prefix_count = usize::from(instruction.b);
@@ -3482,6 +4803,13 @@ impl Vm {
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
+                            Opcode::MathSinCosMul => {
+                                let value = self
+                                    .math_sin_cos_mul(&registers, instruction)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                set_register(&mut registers, instruction.a, value)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                            }
                             Opcode::MathTan => {
                                 let value = self
                                     .math_unary(&registers, instruction, MathUnary::Tan)
@@ -3588,7 +4916,9 @@ impl Vm {
             self.last_error_traceback = Some(self.traceback_snapshot(error.location.clone()));
             self.record_running_coroutine_error_snapshot(error.location.clone());
         }
-        self.call_stack.pop();
+        if let Some(frame) = self.call_stack.pop() {
+            self.recycle_call_stack_frame(frame);
+        }
         result
     }
 
@@ -3727,6 +5057,63 @@ impl Vm {
         })
     }
 
+    fn constant_string_atom(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        index: usize,
+    ) -> Result<Option<u32>> {
+        let constant = program.constants.get(index).ok_or_else(|| {
+            Error::new(ErrorKind::ConstantOutOfBounds {
+                index,
+                len: program.constants.len(),
+            })
+        })?;
+        let Constant::String(value) = constant else {
+            return Ok(None);
+        };
+        let Some(program_id) = program_id else {
+            return Ok(Some(self.heap.intern_string_bytes(value)));
+        };
+        if let Some(atom) = self.constant_string_atom_cache.get(&(program_id, index)) {
+            return Ok(Some(*atom));
+        }
+        let atom = self.heap.intern_string_bytes(value);
+        self.constant_string_atom_cache
+            .insert((program_id, index), atom);
+        Ok(Some(atom))
+    }
+
+    fn number_constant(&self, program: &Program, index: i32) -> Result<f64> {
+        if index < 0 {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "negative numeric constant index",
+            }));
+        }
+        let constant = program.constants.get(index as usize).ok_or_else(|| {
+            Error::new(ErrorKind::ConstantOutOfBounds {
+                index: index as usize,
+                len: program.constants.len(),
+            })
+        })?;
+        let Constant::Number(value) = constant else {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "numeric constant opcode must reference a number",
+            }));
+        };
+        Ok(*value)
+    }
+
+    fn number_constant_pair(&self, program: &Program, aux: i32) -> Result<(f64, f64)> {
+        let packed = aux as u32;
+        let first = (packed >> 16) as i32;
+        let second = (packed & 0xffff) as i32;
+        Ok((
+            self.number_constant(program, first)?,
+            self.number_constant(program, second)?,
+        ))
+    }
+
     fn global_key(&mut self, program: &Program, index: i32) -> Result<Value> {
         if index < 0 {
             return Err(Error::new(ErrorKind::InvalidProgram {
@@ -3745,6 +5132,167 @@ impl Vm {
             }));
         };
         Ok(Value::string_atom(self.heap.intern_string_bytes(name)))
+    }
+
+    fn get_global_with_inline_cache(
+        &mut self,
+        program: &Program,
+        site: Option<InlineCacheSite>,
+        name_index: i32,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        let environment = self.current_environment()?;
+        if let Some(value) = self.global_get_inline_cache_hit(site, environment) {
+            return Ok(value);
+        }
+
+        let key = self.global_key(program, name_index)?;
+        let value = self.get_table_index_with_metamethod(program, environment, key, depth, fuel)?;
+        self.update_global_get_inline_cache(site, environment, key)?;
+        Ok(value)
+    }
+
+    fn global_get_inline_cache_hit(
+        &mut self,
+        site: Option<InlineCacheSite>,
+        environment: u32,
+    ) -> Option<Value> {
+        let site = site?;
+        let slot = self
+            .global_get_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten()?;
+        if slot.site != site {
+            return None;
+        }
+
+        let entry = slot.entry;
+        if entry.environment != environment {
+            return None;
+        }
+        if self.heap.table_version(environment)? != entry.environment_version {
+            return None;
+        }
+        match entry.source {
+            GlobalGetInlineCacheSource::Environment => Some(entry.value),
+            GlobalGetInlineCacheSource::StandardGlobals {
+                standard_globals_version,
+            } => (self.heap.table_version(self.standard_globals)? == standard_globals_version)
+                .then_some(entry.value),
+        }
+    }
+
+    fn update_global_get_inline_cache(
+        &mut self,
+        site: Option<InlineCacheSite>,
+        environment: u32,
+        key: Value,
+    ) -> Result<()> {
+        let Some(site) = site else {
+            return Ok(());
+        };
+        if environment != self.globals {
+            self.clear_global_get_inline_cache_site(site);
+            return Ok(());
+        }
+
+        let environment_version = self.heap.table_version(environment).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "global environment handle is missing",
+            })
+        })?;
+
+        if let Some(value) = self.raw_table_slot(environment, key)? {
+            if value.kind() != ValueKind::Nil
+                || self.standard_global_index_table(environment)?.is_some()
+            {
+                self.store_global_get_inline_cache(
+                    site,
+                    GlobalGetInlineCacheEntry {
+                        environment,
+                        environment_version,
+                        source: GlobalGetInlineCacheSource::Environment,
+                        value,
+                    },
+                );
+                return Ok(());
+            }
+            self.clear_global_get_inline_cache_site(site);
+            return Ok(());
+        }
+
+        if self.standard_global_index_table(environment)?.is_some() {
+            let standard_globals_version = self
+                .heap
+                .table_version(self.standard_globals)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "standard global table handle is missing",
+                    })
+                })?;
+            let standard_metatable = self
+                .heap
+                .table_metatable(self.standard_globals)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "standard global table handle is missing",
+                    })
+                })?;
+            let value = self.raw_table_slot(self.standard_globals, key)?;
+            if let Some(value) = value {
+                if value.kind() != ValueKind::Nil || standard_metatable.is_none() {
+                    self.store_global_get_inline_cache(
+                        site,
+                        GlobalGetInlineCacheEntry {
+                            environment,
+                            environment_version,
+                            source: GlobalGetInlineCacheSource::StandardGlobals {
+                                standard_globals_version,
+                            },
+                            value,
+                        },
+                    );
+                    return Ok(());
+                }
+            } else if standard_metatable.is_none() {
+                self.store_global_get_inline_cache(
+                    site,
+                    GlobalGetInlineCacheEntry {
+                        environment,
+                        environment_version,
+                        source: GlobalGetInlineCacheSource::StandardGlobals {
+                            standard_globals_version,
+                        },
+                        value: Value::nil(),
+                    },
+                );
+                return Ok(());
+            }
+        }
+
+        self.clear_global_get_inline_cache_site(site);
+        Ok(())
+    }
+
+    fn store_global_get_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        entry: GlobalGetInlineCacheEntry,
+    ) {
+        if let Some(slot) = self.global_get_inline_cache.get_mut(site.slot()) {
+            *slot = Some(GlobalGetInlineCacheSlot { site, entry });
+        }
+    }
+
+    fn clear_global_get_inline_cache_site(&mut self, site: InlineCacheSite) {
+        if let Some(slot) = self.global_get_inline_cache.get_mut(site.slot()) {
+            let should_clear = slot.as_ref().is_some_and(|slot| slot.site == site);
+            if should_clear {
+                *slot = None;
+            }
+        }
     }
 
     fn assert_message(&mut self, registers: &[Value], instruction: Instruction) -> Result<String> {
@@ -3814,6 +5362,17 @@ impl Vm {
         Err(Error::new(ErrorKind::TypeError {
             expected: "string or number",
         }))
+    }
+
+    fn string_byte_len(&mut self, value: Value) -> Result<usize> {
+        if let Some(atom) = value.as_string_atom() {
+            return self.heap.string_atom_byte_len(atom).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "string atom is missing",
+                })
+            });
+        }
+        Ok(self.value_to_string(value)?.len())
     }
 
     fn value_to_tostring(&mut self, value: Value) -> Result<Vec<u8>> {
@@ -4034,12 +5593,316 @@ impl Vm {
         registers: &mut [Value],
         instruction: Instruction,
         op: NumericOp,
+        site: Option<InlineCacheSite>,
         depth: usize,
         fuel: &mut Option<u64>,
     ) -> Result<()> {
         let lhs = get_register(registers, instruction.b)?;
         let rhs = get_register(registers, instruction.c)?;
-        let result = self.numeric_binop_value(program, lhs, rhs, op, depth, fuel)?;
+        if let (Some(lhs), Some(rhs)) = (lhs.as_number(), rhs.as_number()) {
+            return set_register(
+                registers,
+                instruction.a,
+                Value::number(binary(op, lhs, rhs)),
+            );
+        }
+        let result = self.numeric_binop_value(program, lhs, rhs, op, site, depth, fuel)?;
+        set_register(registers, instruction.a, result)
+    }
+
+    fn numeric_binop_const(
+        &mut self,
+        program: &Program,
+        registers: &mut [Value],
+        instruction: Instruction,
+        op: NumericOp,
+        site: Option<InlineCacheSite>,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        let lhs = get_register(registers, instruction.b)?;
+        let rhs = self.number_constant(program, instruction.aux)?;
+        if let Some(lhs) = lhs.as_number() {
+            return set_register(
+                registers,
+                instruction.a,
+                Value::number(binary(op, lhs, rhs)),
+            );
+        }
+        let result =
+            self.numeric_binop_value(program, lhs, Value::number(rhs), op, site, depth, fuel)?;
+        set_register(registers, instruction.a, result)
+    }
+
+    fn numeric_mul_mod_const(
+        &mut self,
+        program: &Program,
+        registers: &mut [Value],
+        instruction: Instruction,
+        site: Option<InlineCacheSite>,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        let lhs = get_register(registers, instruction.b)?;
+        let (multiplier, modulus) = self.number_constant_pair(program, instruction.aux)?;
+        if let Some(lhs) = lhs.as_number() {
+            return set_register(
+                registers,
+                instruction.a,
+                Value::number(binary(
+                    NumericOp::Mod,
+                    binary(NumericOp::Mul, lhs, multiplier),
+                    modulus,
+                )),
+            );
+        }
+
+        let product = self.numeric_binop_value(
+            program,
+            lhs,
+            Value::number(multiplier),
+            NumericOp::Mul,
+            site,
+            depth,
+            fuel,
+        )?;
+        let result = if let Some(product) = product.as_number() {
+            Value::number(binary(NumericOp::Mod, product, modulus))
+        } else {
+            self.numeric_binop_value(
+                program,
+                product,
+                Value::number(modulus),
+                NumericOp::Mod,
+                site,
+                depth,
+                fuel,
+            )?
+        };
+        set_register(registers, instruction.a, result)
+    }
+
+    fn numeric_mul_add_mod_const(
+        &mut self,
+        program: &Program,
+        registers: &mut [Value],
+        instruction: Instruction,
+        site: Option<InlineCacheSite>,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        let factor = get_register(registers, instruction.b)?;
+        let addend = get_register(registers, instruction.c)?;
+        let (multiplier, modulus) = self.number_constant_pair(program, instruction.aux)?;
+        if let (Some(factor), Some(addend)) = (factor.as_number(), addend.as_number()) {
+            return set_register(
+                registers,
+                instruction.a,
+                Value::number(binary(
+                    NumericOp::Mod,
+                    binary(
+                        NumericOp::Add,
+                        binary(NumericOp::Mul, factor, multiplier),
+                        addend,
+                    ),
+                    modulus,
+                )),
+            );
+        }
+
+        let product = self.numeric_binop_value(
+            program,
+            factor,
+            Value::number(multiplier),
+            NumericOp::Mul,
+            site,
+            depth,
+            fuel,
+        )?;
+        let sum =
+            self.numeric_binop_value(program, product, addend, NumericOp::Add, site, depth, fuel)?;
+        let result = if let Some(sum) = sum.as_number() {
+            Value::number(binary(NumericOp::Mod, sum, modulus))
+        } else {
+            self.numeric_binop_value(
+                program,
+                sum,
+                Value::number(modulus),
+                NumericOp::Mod,
+                site,
+                depth,
+                fuel,
+            )?
+        };
+        set_register(registers, instruction.a, result)
+    }
+
+    fn set_index_mul_add_mod_const(
+        &mut self,
+        program: &Program,
+        registers: &[Value],
+        instruction: Instruction,
+        site: Option<InlineCacheSite>,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        let object = get_register(registers, instruction.a)?;
+        let key = get_register(registers, instruction.b)?;
+        let addend = get_register(registers, instruction.c)?;
+        let (multiplier, modulus) = self.number_constant_pair(program, instruction.aux)?;
+        let value = if let (Some(factor), Some(addend)) = (key.as_number(), addend.as_number()) {
+            Value::number(binary(
+                NumericOp::Mod,
+                binary(
+                    NumericOp::Add,
+                    binary(NumericOp::Mul, factor, multiplier),
+                    addend,
+                ),
+                modulus,
+            ))
+        } else {
+            let product = self.numeric_binop_value(
+                program,
+                key,
+                Value::number(multiplier),
+                NumericOp::Mul,
+                site,
+                depth,
+                fuel,
+            )?;
+            let sum = self.numeric_binop_value(
+                program,
+                product,
+                addend,
+                NumericOp::Add,
+                site,
+                depth,
+                fuel,
+            )?;
+            if let Some(sum) = sum.as_number() {
+                Value::number(binary(NumericOp::Mod, sum, modulus))
+            } else {
+                self.numeric_binop_value(
+                    program,
+                    sum,
+                    Value::number(modulus),
+                    NumericOp::Mod,
+                    site,
+                    depth,
+                    fuel,
+                )?
+            }
+        };
+
+        if let Some(table) = object.as_table() {
+            if let Some(index) = key.as_number().and_then(array_iterator_index) {
+                if self.set_table_integer_index_fast(table, index, value)? {
+                    return Ok(());
+                }
+            }
+        }
+        self.set_index_value(program, object, key, value, depth, fuel)
+    }
+
+    fn set_index_mul_mod_const(
+        &mut self,
+        program: &Program,
+        registers: &[Value],
+        instruction: Instruction,
+        site: Option<InlineCacheSite>,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        let object = get_register(registers, instruction.a)?;
+        let factor = get_register(registers, instruction.b)?;
+        let value = get_register(registers, instruction.c)?;
+        let (multiplier, modulus) = self.number_constant_pair(program, instruction.aux)?;
+        let key = if let Some(factor) = factor.as_number() {
+            Value::number(binary(
+                NumericOp::Mod,
+                binary(NumericOp::Mul, factor, multiplier),
+                modulus,
+            ))
+        } else {
+            let product = self.numeric_binop_value(
+                program,
+                factor,
+                Value::number(multiplier),
+                NumericOp::Mul,
+                site,
+                depth,
+                fuel,
+            )?;
+            if let Some(product) = product.as_number() {
+                Value::number(binary(NumericOp::Mod, product, modulus))
+            } else {
+                self.numeric_binop_value(
+                    program,
+                    product,
+                    Value::number(modulus),
+                    NumericOp::Mod,
+                    site,
+                    depth,
+                    fuel,
+                )?
+            }
+        };
+
+        if let Some(table) = object.as_table() {
+            if let Some(index) = key.as_number().and_then(array_iterator_index) {
+                if self.set_table_integer_index_fast(table, index, value)? {
+                    return Ok(());
+                }
+            }
+        }
+        self.set_index_value(program, object, key, value, depth, fuel)
+    }
+
+    fn numeric_mod_add_const(
+        &mut self,
+        program: &Program,
+        registers: &mut [Value],
+        instruction: Instruction,
+        site: Option<InlineCacheSite>,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        let lhs = get_register(registers, instruction.b)?;
+        let (modulus, addend) = self.number_constant_pair(program, instruction.aux)?;
+        if let Some(lhs) = lhs.as_number() {
+            return set_register(
+                registers,
+                instruction.a,
+                Value::number(binary(
+                    NumericOp::Add,
+                    binary(NumericOp::Mod, lhs, modulus),
+                    addend,
+                )),
+            );
+        }
+
+        let modulo = self.numeric_binop_value(
+            program,
+            lhs,
+            Value::number(modulus),
+            NumericOp::Mod,
+            site,
+            depth,
+            fuel,
+        )?;
+        let result = if let Some(modulo) = modulo.as_number() {
+            Value::number(binary(NumericOp::Add, modulo, addend))
+        } else {
+            self.numeric_binop_value(
+                program,
+                modulo,
+                Value::number(addend),
+                NumericOp::Add,
+                site,
+                depth,
+                fuel,
+            )?
+        };
         set_register(registers, instruction.a, result)
     }
 
@@ -4053,8 +5916,128 @@ impl Vm {
         fuel: &mut Option<u64>,
     ) -> Result<()> {
         let value = get_register(registers, instruction.b)?;
+        if let Some(number) = value.as_number() {
+            return set_register(
+                registers,
+                instruction.a,
+                Value::number(binary(op, number, 0.0)),
+            );
+        }
         let result = self.numeric_unop_value(program, value, op, depth, fuel)?;
         set_register(registers, instruction.a, result)
+    }
+
+    fn add_upvalue(
+        &mut self,
+        program: &Program,
+        upvalues: &[u32],
+        registers: &mut [Value],
+        instruction: Instruction,
+        site: Option<InlineCacheSite>,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<(u32, Value)> {
+        let target_index = upvalue_index(instruction.aux)?;
+        let target = upvalues.get(target_index).copied().ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "upvalue index is missing",
+            })
+        })?;
+        let rhs = upvalues
+            .get(usize::from(instruction.b))
+            .copied()
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "upvalue index is missing",
+                })
+            })?;
+        if usize::from(instruction.a) >= registers.len() {
+            return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+                register: usize::from(instruction.a),
+                max: registers.len(),
+            }));
+        }
+        let (lhs, rhs_value) =
+            match self
+                .heap
+                .upvalue_add_number_pair(target, rhs)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "upvalue handle is missing",
+                    })
+                })? {
+                UpvalueAddStatus::Stored(result) => {
+                    set_register(registers, instruction.a, result)?;
+                    return Ok((target, result));
+                }
+                UpvalueAddStatus::Deferred(lhs, rhs) => (lhs, rhs),
+            };
+        let result =
+            self.numeric_binop_value(program, lhs, rhs_value, NumericOp::Add, site, depth, fuel)?;
+        self.heap.upvalue_set(target, result).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "upvalue handle is missing",
+            })
+        })?;
+        set_register(registers, instruction.a, result)?;
+        Ok((target, result))
+    }
+
+    fn add_upvalue_const(
+        &mut self,
+        program: &Program,
+        upvalues: &[u32],
+        registers: &mut [Value],
+        instruction: Instruction,
+        site: Option<InlineCacheSite>,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<(u32, Value)> {
+        let target = upvalues
+            .get(usize::from(instruction.b))
+            .copied()
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "upvalue index is missing",
+                })
+            })?;
+        if usize::from(instruction.a) >= registers.len() {
+            return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+                register: usize::from(instruction.a),
+                max: registers.len(),
+            }));
+        }
+        let rhs = self.number_constant(program, instruction.aux)?;
+        let lhs = match self
+            .heap
+            .upvalue_add_number_const(target, rhs)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "upvalue handle is missing",
+                })
+            })? {
+            UpvalueAddConstStatus::Stored(result) => {
+                set_register(registers, instruction.a, result)?;
+                return Ok((target, result));
+            }
+            UpvalueAddConstStatus::Deferred(lhs) => lhs,
+        };
+        let result = self.numeric_binop_value(
+            program,
+            lhs,
+            Value::number(rhs),
+            NumericOp::Add,
+            site,
+            depth,
+            fuel,
+        )?;
+        self.heap.upvalue_set(target, result).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "upvalue handle is missing",
+            })
+        })?;
+        set_register(registers, instruction.a, result)?;
+        Ok((target, result))
     }
 
     fn numeric_binop_value(
@@ -4063,6 +6046,7 @@ impl Vm {
         lhs: Value,
         rhs: Value,
         op: NumericOp,
+        site: Option<InlineCacheSite>,
         depth: usize,
         fuel: &mut Option<u64>,
     ) -> Result<Value> {
@@ -4077,12 +6061,95 @@ impl Vm {
         let Some(method_name) = arithmetic_metamethod_name(op) else {
             return Err(Error::new(ErrorKind::TypeError { expected: "number" }));
         };
-        if let Some(method) = self.binary_metamethod(lhs, rhs, method_name)? {
+        if let Some(method) =
+            self.left_arithmetic_metamethod_with_inline_cache(site, lhs, op, method_name)?
+        {
+            let results =
+                self.call_value(program, method, &[lhs, rhs], depth.saturating_add(1), fuel)?;
+            return Ok(first_result_or_nil(results));
+        }
+        if let Some(method) = self.metamethod_for_value(rhs, method_name)? {
             let results =
                 self.call_value(program, method, &[lhs, rhs], depth.saturating_add(1), fuel)?;
             Ok(first_result_or_nil(results))
         } else {
             Err(arithmetic_error(op, lhs, rhs))
+        }
+    }
+
+    fn left_arithmetic_metamethod_with_inline_cache(
+        &mut self,
+        site: Option<InlineCacheSite>,
+        lhs: Value,
+        op: NumericOp,
+        name: &'static str,
+    ) -> Result<Option<Value>> {
+        if let Some(method) = self.arithmetic_metamethod_inline_cache_hit(site, lhs, op)? {
+            return Ok(Some(method));
+        }
+        let Some(metatable) = self.metatable_for_value(lhs)? else {
+            return Ok(None);
+        };
+        let key = Value::string_atom(self.heap.intern_string(name));
+        let method = self.raw_table_get(metatable, key)?;
+        if method.kind() == ValueKind::Nil {
+            return Ok(None);
+        }
+        if let Some(site) = site {
+            let metatable_version = self.heap.table_version(metatable).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "arithmetic metatable handle is missing",
+                })
+            })?;
+            self.store_arithmetic_metamethod_inline_cache(
+                site,
+                ArithmeticMetamethodInlineCacheEntry {
+                    op,
+                    metatable,
+                    metatable_version,
+                    method,
+                },
+            );
+        }
+        Ok(Some(method))
+    }
+
+    fn arithmetic_metamethod_inline_cache_hit(
+        &mut self,
+        site: Option<InlineCacheSite>,
+        lhs: Value,
+        op: NumericOp,
+    ) -> Result<Option<Value>> {
+        let Some(site) = site else {
+            return Ok(None);
+        };
+        let slot = self
+            .arithmetic_metamethod_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
+        let Some(slot) = slot else {
+            return Ok(None);
+        };
+        if slot.site != site || slot.entry.op != op {
+            return Ok(None);
+        }
+        if self.metatable_for_value(lhs)? != Some(slot.entry.metatable) {
+            return Ok(None);
+        }
+        Ok(
+            (self.heap.table_version(slot.entry.metatable) == Some(slot.entry.metatable_version))
+                .then_some(slot.entry.method),
+        )
+    }
+
+    fn store_arithmetic_metamethod_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        entry: ArithmeticMetamethodInlineCacheEntry,
+    ) {
+        if let Some(slot) = self.arithmetic_metamethod_inline_cache.get_mut(site.slot()) {
+            *slot = Some(ArithmeticMetamethodInlineCacheSlot { site, entry });
         }
     }
 
@@ -4314,6 +6381,98 @@ impl Vm {
         self.concat_operands(program, lhs, rhs, depth, fuel)
     }
 
+    fn concat_const_value(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        registers: &[Value],
+        instruction: Instruction,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        self.concat_const_key(
+            program,
+            program_id,
+            registers,
+            instruction.b,
+            instruction.aux,
+            depth,
+            fuel,
+        )
+    }
+
+    fn concat_rhs_const_value(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        registers: &[Value],
+        instruction: Instruction,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        if instruction.aux < 0 {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "negative concat constant index",
+            }));
+        }
+        let lhs = get_register(registers, instruction.b)?;
+        if let Some(rhs) =
+            self.constant_string_atom(program, program_id, instruction.aux as usize)?
+        {
+            if let Some(lhs) = lhs.as_string_atom() {
+                if let Some(atom) = self.heap.intern_concat_string_atoms(lhs, rhs) {
+                    return Ok(Value::string_atom(atom));
+                }
+            } else if let Some(integer) = lhs.as_number().and_then(small_positive_integer_number) {
+                if let Some(atom) = self
+                    .heap
+                    .intern_concat_small_integer_string_atom(integer, rhs)
+                {
+                    return Ok(Value::string_atom(atom));
+                }
+            }
+        }
+        let rhs = self.load_constant(program, instruction.aux as usize)?;
+        self.concat_operands(program, lhs, rhs, depth, fuel)
+    }
+
+    fn concat_const_key(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        registers: &[Value],
+        rhs_register: u8,
+        constant_index: i32,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        if constant_index < 0 {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "negative concat constant index",
+            }));
+        }
+        if let Some(lhs) =
+            self.constant_string_atom(program, program_id, constant_index as usize)?
+        {
+            let rhs = get_register(registers, rhs_register)?;
+            if let Some(rhs) = rhs.as_string_atom() {
+                if let Some(atom) = self.heap.intern_concat_string_atoms(lhs, rhs) {
+                    return Ok(Value::string_atom(atom));
+                }
+            } else if let Some(integer) = rhs.as_number().and_then(small_positive_integer_number) {
+                if let Some(atom) = self
+                    .heap
+                    .intern_concat_string_atom_small_integer(lhs, integer)
+                {
+                    return Ok(Value::string_atom(atom));
+                }
+            }
+        }
+        let lhs = self.load_constant(program, constant_index as usize)?;
+        let rhs = get_register(registers, rhs_register)?;
+        self.concat_operands(program, lhs, rhs, depth, fuel)
+    }
+
     fn concat_operands(
         &mut self,
         program: &Program,
@@ -4322,6 +6481,9 @@ impl Vm {
         depth: usize,
         fuel: &mut Option<u64>,
     ) -> Result<Value> {
+        if let Some(value) = self.concat_scalar_operands(lhs, rhs)? {
+            return Ok(value);
+        }
         if let (Ok(mut lhs_text), Ok(rhs_text)) =
             (self.value_to_string(lhs), self.value_to_string(rhs))
         {
@@ -4344,14 +6506,62 @@ impl Vm {
         }
     }
 
+    fn concat_scalar_operands(&mut self, lhs: Value, rhs: Value) -> Result<Option<Value>> {
+        let atom = match (lhs.as_string_atom(), rhs.as_string_atom()) {
+            (Some(lhs), Some(rhs)) => self.heap.intern_concat_string_atoms(lhs, rhs),
+            (Some(lhs), None) => {
+                let Some(number) = rhs.as_number() else {
+                    return Ok(None);
+                };
+                if let Some(integer) = small_positive_integer_number(number) {
+                    self.heap
+                        .intern_concat_string_atom_small_integer(lhs, integer)
+                } else {
+                    let text = luau_number_to_string(number);
+                    self.heap
+                        .intern_concat_string_atom_bytes(lhs, text.as_bytes())
+                }
+            }
+            (None, Some(rhs)) => {
+                let Some(number) = lhs.as_number() else {
+                    return Ok(None);
+                };
+                if let Some(integer) = small_positive_integer_number(number) {
+                    self.heap
+                        .intern_concat_small_integer_string_atom(integer, rhs)
+                } else {
+                    let text = luau_number_to_string(number);
+                    self.heap
+                        .intern_concat_bytes_string_atom(text.as_bytes(), rhs)
+                }
+            }
+            (None, None) => {
+                let (Some(lhs), Some(rhs)) = (lhs.as_number(), rhs.as_number()) else {
+                    return Ok(None);
+                };
+                let lhs = luau_number_to_string(lhs);
+                let rhs = luau_number_to_string(rhs);
+                let mut text = Vec::with_capacity(lhs.len() + rhs.len());
+                text.extend_from_slice(lhs.as_bytes());
+                text.extend_from_slice(rhs.as_bytes());
+                Some(self.heap.intern_string_bytes(&text))
+            }
+        };
+        atom.map(|atom| Some(Value::string_atom(atom)))
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "string atom is missing",
+                })
+            })
+    }
+
     fn raw_len_value(&mut self, value: Value) -> Result<usize> {
         if let Some(atom) = value.as_string_atom() {
-            let Some(text) = self.heap.string_bytes(atom) else {
-                return Err(Error::new(ErrorKind::InvalidProgram {
+            return self.heap.string_atom_byte_len(atom).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
                     reason: "string atom is missing",
-                }));
-            };
-            return Ok(text.len());
+                })
+            });
         }
         let Some(table) = value.as_table() else {
             return Err(Error::new(ErrorKind::RuntimeError {
@@ -4398,6 +6608,123 @@ impl Vm {
         }
     }
 
+    fn len_value_with_inline_cache(
+        &mut self,
+        program: &Program,
+        site: Option<InlineCacheSite>,
+        value: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        let Some(table) = value.as_table() else {
+            return self.len_value(program, value, depth, fuel);
+        };
+        let Some(site) = site else {
+            return self.len_value(program, value, depth, fuel);
+        };
+        if let Some(len) = self.len_inline_cache_hit(site, table) {
+            return Ok(Value::number(len as f64));
+        }
+        if let Some(len) = self.try_len_table_for_inline_cache(site, table)? {
+            return Ok(Value::number(len as f64));
+        }
+        self.clear_len_inline_cache_site(site);
+        self.len_value(program, value, depth, fuel)
+    }
+
+    fn len_plus_one_value(
+        &mut self,
+        program: &Program,
+        site: Option<InlineCacheSite>,
+        value: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        if let Some(table) = value.as_table() {
+            if let Some(site) = site {
+                if let Some(len) = self.len_inline_cache_hit(site, table) {
+                    return Ok(Value::number(len as f64 + 1.0));
+                }
+                if let Some(len) = self.try_len_table_for_inline_cache(site, table)? {
+                    return Ok(Value::number(len as f64 + 1.0));
+                }
+                self.clear_len_inline_cache_site(site);
+            }
+        }
+        let len = self.len_value(program, value, depth, fuel)?;
+        self.numeric_binop_value(
+            program,
+            len,
+            Value::number(1.0),
+            NumericOp::Add,
+            None,
+            depth,
+            fuel,
+        )
+    }
+
+    fn len_inline_cache_hit(&mut self, site: InlineCacheSite, table: u32) -> Option<usize> {
+        let slot = self.len_inline_cache.get(site.slot()).copied().flatten()?;
+        if slot.site != site || slot.entry.table != table {
+            return None;
+        }
+        let entry = slot.entry;
+        (self.heap.table_version(table)? == entry.table_version).then_some(entry.len)
+    }
+
+    fn try_len_table_for_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+    ) -> Result<Option<usize>> {
+        let table_version = self.heap.table_version(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?;
+        if self
+            .heap
+            .table_metatable(table)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+            .is_some()
+        {
+            return Ok(None);
+        }
+        let len = self.heap.array_len(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?;
+        self.store_len_inline_cache(
+            site,
+            LenInlineCacheEntry {
+                table,
+                table_version,
+                len,
+            },
+        );
+        Ok(Some(len))
+    }
+
+    fn store_len_inline_cache(&mut self, site: InlineCacheSite, entry: LenInlineCacheEntry) {
+        if let Some(slot) = self.len_inline_cache.get_mut(site.slot()) {
+            *slot = Some(LenInlineCacheSlot { site, entry });
+        }
+    }
+
+    fn clear_len_inline_cache_site(&mut self, site: InlineCacheSite) {
+        if let Some(slot) = self.len_inline_cache.get_mut(site.slot()) {
+            let should_clear = slot.as_ref().is_some_and(|slot| slot.site == site);
+            if should_clear {
+                *slot = None;
+            }
+        }
+    }
+
     fn get_index_value(
         &mut self,
         program: &Program,
@@ -4420,6 +6747,430 @@ impl Vm {
             return self.get_object_index_metamethod(program, object, key, depth, fuel);
         }
         Err(self.index_error(object, key)?)
+    }
+
+    fn get_index_mod_add_const(
+        &mut self,
+        program: &Program,
+        registers: &[Value],
+        instruction: Instruction,
+        site: Option<InlineCacheSite>,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        let object = get_register(registers, instruction.b)?;
+        let factor = get_register(registers, instruction.c)?;
+        let (modulus, addend) = self.number_constant_pair(program, instruction.aux)?;
+        let key = if let Some(factor) = factor.as_number() {
+            Value::number(binary(
+                NumericOp::Add,
+                binary(NumericOp::Mod, factor, modulus),
+                addend,
+            ))
+        } else {
+            let modulo = self.numeric_binop_value(
+                program,
+                factor,
+                Value::number(modulus),
+                NumericOp::Mod,
+                site,
+                depth,
+                fuel,
+            )?;
+            if let Some(modulo) = modulo.as_number() {
+                Value::number(binary(NumericOp::Add, modulo, addend))
+            } else {
+                self.numeric_binop_value(
+                    program,
+                    modulo,
+                    Value::number(addend),
+                    NumericOp::Add,
+                    site,
+                    depth,
+                    fuel,
+                )?
+            }
+        };
+
+        if let Some(table) = object.as_table() {
+            if let Some(index) = key.as_number().and_then(array_iterator_index) {
+                if let Some(value) = self.get_table_integer_index_fast(table, index)? {
+                    return Ok(value);
+                }
+            }
+        }
+        self.get_index_value(program, object, key, depth, fuel)
+    }
+
+    fn get_index_mul_mod_const(
+        &mut self,
+        program: &Program,
+        registers: &[Value],
+        instruction: Instruction,
+        site: Option<InlineCacheSite>,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        let object = get_register(registers, instruction.b)?;
+        let factor = get_register(registers, instruction.c)?;
+        let (multiplier, modulus) = self.number_constant_pair(program, instruction.aux)?;
+        let key = if let Some(factor) = factor.as_number() {
+            Value::number(binary(
+                NumericOp::Mod,
+                binary(NumericOp::Mul, factor, multiplier),
+                modulus,
+            ))
+        } else {
+            let product = self.numeric_binop_value(
+                program,
+                factor,
+                Value::number(multiplier),
+                NumericOp::Mul,
+                site,
+                depth,
+                fuel,
+            )?;
+            if let Some(product) = product.as_number() {
+                Value::number(binary(NumericOp::Mod, product, modulus))
+            } else {
+                self.numeric_binop_value(
+                    program,
+                    product,
+                    Value::number(modulus),
+                    NumericOp::Mod,
+                    site,
+                    depth,
+                    fuel,
+                )?
+            }
+        };
+
+        if let Some(table) = object.as_table() {
+            if let Some(index) = key.as_number().and_then(array_iterator_index) {
+                if let Some(value) = self.get_table_integer_index_fast(table, index)? {
+                    return Ok(value);
+                }
+            }
+        }
+        self.get_index_value(program, object, key, depth, fuel)
+    }
+
+    fn get_table_integer_index_fast(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+    ) -> Result<Option<Value>> {
+        let Some(value) = self
+            .heap
+            .array_slot(table, one_based_index)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+        else {
+            return self.get_table_integer_hash_key_fast(table, one_based_index);
+        };
+        if value.kind() != ValueKind::Nil || self.table_uses_standard_global_type_surface(table)? {
+            return Ok(Some(value));
+        }
+        if self
+            .heap
+            .table_metatable(table)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+            .is_none()
+        {
+            return Ok(Some(Value::nil()));
+        }
+        Ok(None)
+    }
+
+    fn get_table_integer_hash_key_fast(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+    ) -> Result<Option<Value>> {
+        match self
+            .heap
+            .read_integer_hash_key_without_metamethod(table, one_based_index)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })? {
+            HashReadStatus::Hit(value) => Ok(Some(value)),
+            HashReadStatus::Deferred => Ok(None),
+        }
+    }
+
+    fn get_table_string_index_fast(&mut self, table: u32, key: Value) -> Result<Option<Value>> {
+        if table != self.globals {
+            if let Some(atom) = key.as_string_atom() {
+                return match self
+                    .heap
+                    .read_string_key_without_metamethod(table, atom)
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "table handle is missing",
+                        })
+                    })? {
+                    HashReadStatus::Hit(value) => Ok(Some(value)),
+                    HashReadStatus::Deferred => Ok(None),
+                };
+            }
+        }
+        if let Some(value) = self.raw_table_slot(table, key)? {
+            if value.kind() != ValueKind::Nil
+                || self.table_uses_standard_global_type_surface(table)?
+            {
+                return Ok(Some(value));
+            }
+        }
+        if self
+            .heap
+            .table_metatable(table)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+            .is_none()
+        {
+            return Ok(Some(Value::nil()));
+        }
+        Ok(None)
+    }
+
+    fn set_table_integer_index_fast(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+    ) -> Result<bool> {
+        match self
+            .heap
+            .write_integer_index_without_metamethod(table, one_based_index, value)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })? {
+            ArrayWriteStatus::Stored => Ok(true),
+            ArrayWriteStatus::Deferred => Ok(false),
+            ArrayWriteStatus::Readonly => Err(readonly_table_error()),
+        }
+    }
+
+    fn get_table_string_index_with_inline_cache(
+        &mut self,
+        program: &Program,
+        site: InlineCacheSite,
+        table: u32,
+        key: Value,
+        key_atom: u32,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        if let Some(value) = self.table_get_inline_cache_hit(site, table, key, key_atom)? {
+            return Ok(value);
+        }
+        if let Some(value) =
+            self.try_get_table_string_index_for_inline_cache(site, table, key, key_atom)?
+        {
+            return Ok(value);
+        }
+        self.clear_table_get_inline_cache_site(site);
+        self.get_table_index_with_metamethod(program, table, key, depth, fuel)
+    }
+
+    fn table_get_inline_cache_hit(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        key: Value,
+        key_atom: u32,
+    ) -> Result<Option<Value>> {
+        let slot = self
+            .table_get_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
+        let Some(slot) = slot else {
+            return Ok(None);
+        };
+        if slot.site != site {
+            return Ok(None);
+        }
+        let entry = slot.entry;
+        if entry.key_atom != key_atom {
+            return Ok(None);
+        }
+        match entry.source {
+            TableGetInlineCacheSource::Direct {
+                table: cached_table,
+                table_version,
+                value,
+            } => {
+                if cached_table != table {
+                    return Ok(None);
+                }
+                Ok((self.heap.table_version(table) == Some(table_version)).then_some(value))
+            }
+            TableGetInlineCacheSource::IndexTable {
+                metatable,
+                metatable_version,
+                index_table,
+                index_table_version,
+                value,
+            } => {
+                if let Some(raw) = self.raw_table_slot(table, key)? {
+                    if raw.kind() != ValueKind::Nil
+                        || self.table_uses_standard_global_type_surface(table)?
+                    {
+                        return Ok(None);
+                    }
+                }
+                if self.heap.table_metatable(table).ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    })
+                })? != Some(metatable)
+                {
+                    return Ok(None);
+                }
+                if self.heap.table_version(metatable) != Some(metatable_version)
+                    || self.heap.table_version(index_table) != Some(index_table_version)
+                {
+                    return Ok(None);
+                }
+                Ok(Some(value))
+            }
+        }
+    }
+
+    fn try_get_table_string_index_for_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        key: Value,
+        key_atom: u32,
+    ) -> Result<Option<Value>> {
+        let table_version = self.heap.table_version(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?;
+        if let Some(value) = self.raw_table_slot(table, key)? {
+            if value.kind() != ValueKind::Nil
+                || self.table_uses_standard_global_type_surface(table)?
+            {
+                self.store_table_get_inline_cache(
+                    site,
+                    TableGetInlineCacheEntry {
+                        key_atom,
+                        source: TableGetInlineCacheSource::Direct {
+                            table,
+                            table_version,
+                            value,
+                        },
+                    },
+                );
+                return Ok(Some(value));
+            }
+        }
+        let metatable = self.heap.table_metatable(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?;
+        let Some(metatable) = metatable else {
+            let value = Value::nil();
+            self.store_table_get_inline_cache(
+                site,
+                TableGetInlineCacheEntry {
+                    key_atom,
+                    source: TableGetInlineCacheSource::Direct {
+                        table,
+                        table_version,
+                        value,
+                    },
+                },
+            );
+            return Ok(Some(value));
+        };
+        if let Some(value) =
+            self.try_get_table_index_table_for_inline_cache(site, metatable, key, key_atom)?
+        {
+            return Ok(Some(value));
+        }
+        Ok(None)
+    }
+
+    fn try_get_table_index_table_for_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        metatable: u32,
+        key: Value,
+        key_atom: u32,
+    ) -> Result<Option<Value>> {
+        let metatable_version = self.heap.table_version(metatable).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "metatable handle is missing",
+            })
+        })?;
+        let index_key = Value::string_atom(self.heap.intern_string("__index"));
+        let index = self.raw_table_get(metatable, index_key)?;
+        let Some(index_table) = index.as_table() else {
+            return Ok(None);
+        };
+        let index_table_version = self.heap.table_version(index_table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "__index table handle is missing",
+            })
+        })?;
+        let Some(value) = self.raw_table_slot(index_table, key)? else {
+            return Ok(None);
+        };
+        if value.kind() == ValueKind::Nil {
+            return Ok(None);
+        }
+        self.store_table_get_inline_cache(
+            site,
+            TableGetInlineCacheEntry {
+                key_atom,
+                source: TableGetInlineCacheSource::IndexTable {
+                    metatable,
+                    metatable_version,
+                    index_table,
+                    index_table_version,
+                    value,
+                },
+            },
+        );
+        Ok(Some(value))
+    }
+
+    fn store_table_get_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        entry: TableGetInlineCacheEntry,
+    ) {
+        if let Some(slot) = self.table_get_inline_cache.get_mut(site.slot()) {
+            *slot = Some(TableGetInlineCacheSlot { site, entry });
+        }
+    }
+
+    fn clear_table_get_inline_cache_site(&mut self, site: InlineCacheSite) {
+        if let Some(slot) = self.table_get_inline_cache.get_mut(site.slot()) {
+            let should_clear = slot.as_ref().is_some_and(|slot| slot.site == site);
+            if should_clear {
+                *slot = None;
+            }
+        }
     }
 
     fn check_method_value(&mut self, callee: Value, object: Value, key: Value) -> Result<()> {
@@ -4466,6 +7217,18 @@ impl Vm {
             {
                 return Ok(value);
             }
+        }
+        if self
+            .heap
+            .table_metatable(table)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+            .is_none()
+        {
+            return Ok(Value::nil());
         }
         self.get_object_index_metamethod(program, Value::table(table), key, depth, fuel)
     }
@@ -4549,8 +7312,23 @@ impl Vm {
         fuel: &mut Option<u64>,
     ) -> Result<()> {
         self.check_recursion_depth(depth)?;
-        let existing = self.raw_table_get(table, key)?;
-        if existing.kind() != ValueKind::Nil {
+        let existing = self.raw_table_slot(table, key)?;
+        if existing.is_some_and(|value| value.kind() != ValueKind::Nil) {
+            return self.set_table_index(table, key, value);
+        }
+        if self
+            .heap
+            .table_metatable(table)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+            .is_none()
+        {
+            if existing.is_none() {
+                return self.set_table_absent_index(table, key, value);
+            }
             return self.set_table_index(table, key, value);
         }
         if let Some(method) = self.metamethod_for_value(Value::table(table), "__newindex")? {
@@ -4624,6 +7402,136 @@ impl Vm {
         }
     }
 
+    fn table_iter_metamethod_with_inline_cache(
+        &mut self,
+        site: Option<InlineCacheSite>,
+        table: u32,
+    ) -> Result<Option<Value>> {
+        let Some(site) = site else {
+            return self.table_iter_metamethod(table);
+        };
+        if let Some(cached) = self.table_iter_metamethod_inline_cache_hit(site, table)? {
+            return Ok(cached);
+        }
+        let (entry, method) = self.table_iter_metamethod_cache_entry(table)?;
+        self.store_iter_metamethod_inline_cache(site, entry);
+        Ok(method)
+    }
+
+    fn table_iter_metamethod_inline_cache_hit(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+    ) -> Result<Option<Option<Value>>> {
+        let slot = self
+            .iter_metamethod_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
+        let Some(slot) = slot else {
+            return Ok(None);
+        };
+        if slot.site != site || slot.entry.table != table {
+            return Ok(None);
+        }
+        let entry = slot.entry;
+        let table_version = self.heap.table_version(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?;
+        if table_version != entry.table_version {
+            return Ok(None);
+        }
+        if let Some(metatable) = entry.metatable {
+            let metatable_version = self.heap.table_version(metatable).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "__iter metatable handle is missing",
+                })
+            })?;
+            if metatable_version != entry.metatable_version {
+                return Ok(None);
+            }
+        }
+        Ok(Some(entry.method))
+    }
+
+    fn table_iter_metamethod_cache_entry(
+        &mut self,
+        table: u32,
+    ) -> Result<(IterMetamethodInlineCacheEntry, Option<Value>)> {
+        let table_version = self.heap.table_version(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?;
+        let metatable = self.heap.table_metatable(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?;
+        let Some(metatable) = metatable else {
+            return Ok((
+                IterMetamethodInlineCacheEntry {
+                    table,
+                    table_version,
+                    metatable: None,
+                    metatable_version: 0,
+                    method: None,
+                },
+                None,
+            ));
+        };
+        let metatable_version = self.heap.table_version(metatable).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "__iter metatable handle is missing",
+            })
+        })?;
+        let method = self.table_iter_metamethod_from_metatable(metatable)?;
+        Ok((
+            IterMetamethodInlineCacheEntry {
+                table,
+                table_version,
+                metatable: Some(metatable),
+                metatable_version,
+                method,
+            },
+            method,
+        ))
+    }
+
+    fn table_iter_metamethod(&mut self, table: u32) -> Result<Option<Value>> {
+        let Some(metatable) = self.heap.table_metatable(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?
+        else {
+            return Ok(None);
+        };
+        self.table_iter_metamethod_from_metatable(metatable)
+    }
+
+    fn table_iter_metamethod_from_metatable(&mut self, metatable: u32) -> Result<Option<Value>> {
+        let key = Value::string_atom(self.heap.intern_string("__iter"));
+        let method = self.raw_table_get(metatable, key)?;
+        if method.kind() == ValueKind::Nil {
+            Ok(None)
+        } else {
+            Ok(Some(method))
+        }
+    }
+
+    fn store_iter_metamethod_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        entry: IterMetamethodInlineCacheEntry,
+    ) {
+        if let Some(slot) = self.iter_metamethod_inline_cache.get_mut(site.slot()) {
+            *slot = Some(IterMetamethodInlineCacheSlot { site, entry });
+        }
+    }
+
     fn metamethod_for_value(&mut self, value: Value, name: &'static str) -> Result<Option<Value>> {
         let Some(metatable) = self.metatable_for_value(value)? else {
             return Ok(None);
@@ -4653,12 +7561,20 @@ impl Vm {
     }
 
     fn raw_table_slot(&mut self, table: u32, key: Value) -> Result<Option<Value>> {
-        if !self.heap.has_table(table) {
-            return Err(Error::new(ErrorKind::InvalidProgram {
+        self.heap.table_slot(table, key).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
                 reason: "table handle is missing",
-            }));
-        }
-        Ok(self.heap.table_get(table, key))
+            })
+        })
+    }
+
+    fn raw_table_get_after_table_lookup(&mut self, table: u32, key: Value) -> Value {
+        self.raw_table_slot_after_table_lookup(table, key)
+            .unwrap_or_else(Value::nil)
+    }
+
+    fn raw_table_slot_after_table_lookup(&mut self, table: u32, key: Value) -> Option<Value> {
+        self.heap.table_get(table, key)
     }
 
     fn set_table_index(&mut self, table: u32, key: Value, value: Value) -> Result<()> {
@@ -4667,6 +7583,15 @@ impl Vm {
                 reason: "table handle is missing",
             }));
         }
+        self.set_table_index_after_table_lookup(table, key, value)
+    }
+
+    fn set_table_index_after_table_lookup(
+        &mut self,
+        table: u32,
+        key: Value,
+        value: Value,
+    ) -> Result<()> {
         self.validate_table_key(key)?;
         self.ensure_table_writable(table)?;
         self.heap.table_set(table, key, value).ok_or_else(|| {
@@ -4676,9 +7601,25 @@ impl Vm {
         })
     }
 
+    fn set_table_absent_index(&mut self, table: u32, key: Value, value: Value) -> Result<()> {
+        self.validate_table_key(key)?;
+        self.ensure_table_writable(table)?;
+        self.heap
+            .table_set_absent(table, key, value)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "absent table set failed after validation",
+                })
+            })
+    }
+
     fn table_uses_standard_global_type_surface(&mut self, table: u32) -> Result<bool> {
+        Ok(self.standard_global_index_table(table)?.is_some())
+    }
+
+    fn standard_global_index_table(&mut self, table: u32) -> Result<Option<u32>> {
         if table != self.globals {
-            return Ok(false);
+            return Ok(None);
         }
         let Some(metatable) = self.heap.table_metatable(table).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
@@ -4686,26 +7627,30 @@ impl Vm {
             })
         })?
         else {
-            return Ok(false);
+            return Ok(None);
         };
         let index_key = Value::string_atom(self.heap.intern_string("__index"));
-        Ok(self.raw_table_get(metatable, index_key)?.as_table() == Some(self.standard_globals))
+        Ok(
+            (self.raw_table_get(metatable, index_key)?.as_table() == Some(self.standard_globals))
+                .then_some(self.standard_globals),
+        )
     }
 
     fn set_table_array_slot(&mut self, table: u32, index: usize, value: Value) -> Result<()> {
-        if !self.heap.has_table(table) {
-            return Err(Error::new(ErrorKind::InvalidProgram {
-                reason: "table handle is missing",
-            }));
-        }
-        self.ensure_table_writable(table)?;
-        self.heap
-            .table_set_array_slot(table, index, value)
+        match self
+            .heap
+            .write_array_slot(table, index, value)
             .ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
-                    reason: "table array slot set failed after validation",
+                    reason: "table handle is missing",
                 })
-            })
+            })? {
+            ArrayWriteStatus::Stored => Ok(()),
+            ArrayWriteStatus::Readonly => Err(readonly_table_error()),
+            ArrayWriteStatus::Deferred => Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "table array slot set failed after validation",
+            })),
+        }
     }
 
     fn ensure_table_writable(&mut self, table: u32) -> Result<()> {
@@ -4740,20 +7685,26 @@ impl Vm {
         })?;
         let start = start.unwrap_or(1);
         let end = end.unwrap_or(len);
-        let mut output = Vec::new();
         if start > end {
-            let atom = self.heap.intern_string_bytes(&output);
+            let atom = self.heap.intern_string_bytes(&[]);
             return Ok(Value::string_atom(atom));
         }
-        for index in start..=end {
-            if index > start {
-                output.extend_from_slice(separator);
-            }
-            let value = self.heap.array_get(table, index).unwrap_or_else(Value::nil);
-            output.extend_from_slice(&self.value_to_string(value)?);
+        let outcome = self
+            .heap
+            .intern_table_concat_range(table, start, end, separator, |number, output| {
+                output.extend_from_slice(luau_number_to_string(number).as_bytes());
+            })
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?;
+        match outcome {
+            TableConcatOutcome::Atom(atom) => Ok(Value::string_atom(atom)),
+            TableConcatOutcome::InvalidValue => Err(Error::new(ErrorKind::TypeError {
+                expected: "string or number",
+            })),
         }
-        let atom = self.heap.intern_string_bytes(&output);
-        Ok(Value::string_atom(atom))
     }
 
     fn table_find(
@@ -4825,6 +7776,45 @@ impl Vm {
         Ok(Value::table(
             self.heap.alloc_filled_array_table(size, value),
         ))
+    }
+
+    fn new_record_table(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
+        if instruction.aux < 1 || instruction.aux > i32::from(u8::MAX) {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "invalid record table field count",
+            }));
+        }
+        let field_count = instruction.aux as usize;
+        let register_count = field_count.checked_mul(2).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "record table register window overflow",
+            })
+        })?;
+        let start = usize::from(instruction.b);
+        let end = start.checked_add(register_count).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "record table register window overflow",
+            })
+        })?;
+        let window = registers.get(start..end).ok_or_else(|| {
+            Error::new(ErrorKind::RegisterOutOfBounds {
+                register: end,
+                max: registers.len(),
+            })
+        })?;
+        for pair in window.chunks_exact(2) {
+            if pair[0].as_string_atom().is_none() {
+                return Err(Error::new(ErrorKind::InvalidProgram {
+                    reason: "record table key must be a string atom",
+                }));
+            }
+        }
+        let table = self.heap.alloc_record_table(window).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "record table allocation failed",
+            })
+        })?;
+        Ok(Value::table(table))
     }
 
     fn table_insert(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
@@ -5076,17 +8066,43 @@ impl Vm {
         call_site: Option<ErrorLocation>,
         fuel: &mut Option<u64>,
     ) -> VmFlowResult<Vec<Value>> {
+        let callee = get_register(registers, instruction.b)?;
+        self.call_function_from_registers_resumable(
+            program,
+            callee,
+            registers,
+            instruction,
+            depth,
+            call_site,
+            fuel,
+        )
+        .map(|flow| match flow {
+            VmFlow::Return(RegisterCallResult::Scalar(value)) => VmFlow::Return(vec![value]),
+            VmFlow::Return(RegisterCallResult::Results(results)) => VmFlow::Return(results),
+            VmFlow::Yield(suspension) => VmFlow::Yield(suspension),
+        })
+    }
+
+    fn call_function_from_registers_resumable(
+        &mut self,
+        program: &Program,
+        callee: Value,
+        registers: &[Value],
+        instruction: Instruction,
+        depth: usize,
+        call_site: Option<ErrorLocation>,
+        fuel: &mut Option<u64>,
+    ) -> VmFlowResult<RegisterCallResult> {
         if instruction.aux < 0 || instruction.aux > i32::from(u8::MAX) {
             return Err(Error::new(ErrorKind::InvalidProgram {
                 reason: "invalid function call arity",
             }));
         }
-        let callee = get_register(registers, instruction.b)?;
         let argc = instruction.aux as usize;
         let args = if argc == 0 {
-            Vec::new()
+            &[][..]
         } else {
-            let first = instruction.c as usize;
+            let first = usize::from(instruction.c);
             let end = first.checked_add(argc).ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "function argument window overflow",
@@ -5098,9 +8114,130 @@ impl Vm {
                     max: registers.len(),
                 }));
             }
-            registers[first..end].to_vec()
+            &registers[first..end]
         };
-        self.call_value_with_site_resumable(program, callee, &args, depth, call_site, fuel)
+        self.check_recursion_depth(depth)?;
+        let Some(handle) = callee.as_function() else {
+            return self
+                .call_metamethod(program, callee, args, depth, fuel)
+                .map(|results| VmFlow::Return(RegisterCallResult::Results(results)));
+        };
+        let metadata = self.heap.function_call_metadata(handle).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "function handle is missing",
+            })
+        })?;
+        if let FunctionKind::Native(native) = metadata.kind {
+            if let Some(op) = fast_native_math_unary(native) {
+                let value = self.execute_fast_native_math_unary_from_registers(
+                    registers,
+                    instruction,
+                    fuel,
+                    op,
+                )?;
+                return Ok(VmFlow::Return(RegisterCallResult::Scalar(value)));
+            }
+            if native == NativeFunction::SetMetatable {
+                let value =
+                    self.execute_fast_native_setmetatable_from_registers(handle, args, fuel)?;
+                return Ok(VmFlow::Return(RegisterCallResult::Scalar(value)));
+            }
+        }
+        self.call_function_metadata_resumable(
+            program,
+            callee,
+            handle,
+            metadata.kind,
+            metadata.bytecode_context,
+            args,
+            depth,
+            call_site,
+            fuel,
+        )
+        .map(|flow| match flow {
+            VmFlow::Return(results) => VmFlow::Return(RegisterCallResult::Results(results)),
+            VmFlow::Yield(suspension) => VmFlow::Yield(suspension),
+        })
+    }
+
+    fn call_function_from_registers_resumable_lazy_site<F>(
+        &mut self,
+        program: &Program,
+        callee: Value,
+        registers: &[Value],
+        instruction: Instruction,
+        depth: usize,
+        call_site: F,
+        fuel: &mut Option<u64>,
+    ) -> VmFlowResult<RegisterCallResult>
+    where
+        F: FnOnce() -> Option<ErrorLocation>,
+    {
+        if instruction.aux < 0 || instruction.aux > i32::from(u8::MAX) {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "invalid function call arity",
+            }));
+        }
+        let argc = instruction.aux as usize;
+        let args = if argc == 0 {
+            &[][..]
+        } else {
+            let first = usize::from(instruction.c);
+            let end = first.checked_add(argc).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "function argument window overflow",
+                })
+            })?;
+            if end > registers.len() {
+                return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+                    register: end,
+                    max: registers.len(),
+                }));
+            }
+            &registers[first..end]
+        };
+        self.check_recursion_depth(depth)?;
+        let Some(handle) = callee.as_function() else {
+            return self
+                .call_metamethod(program, callee, args, depth, fuel)
+                .map(|results| VmFlow::Return(RegisterCallResult::Results(results)));
+        };
+        let metadata = self.heap.function_call_metadata(handle).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "function handle is missing",
+            })
+        })?;
+        if let FunctionKind::Native(native) = metadata.kind {
+            if let Some(op) = fast_native_math_unary(native) {
+                let value = self.execute_fast_native_math_unary_from_registers(
+                    registers,
+                    instruction,
+                    fuel,
+                    op,
+                )?;
+                return Ok(VmFlow::Return(RegisterCallResult::Scalar(value)));
+            }
+            if native == NativeFunction::SetMetatable {
+                let value =
+                    self.execute_fast_native_setmetatable_from_registers(handle, args, fuel)?;
+                return Ok(VmFlow::Return(RegisterCallResult::Scalar(value)));
+            }
+        }
+        self.call_function_metadata_resumable(
+            program,
+            callee,
+            handle,
+            metadata.kind,
+            metadata.bytecode_context,
+            args,
+            depth,
+            call_site(),
+            fuel,
+        )
+        .map(|flow| match flow {
+            VmFlow::Return(results) => VmFlow::Return(RegisterCallResult::Results(results)),
+            VmFlow::Yield(suspension) => VmFlow::Yield(suspension),
+        })
     }
 
     fn call_value(
@@ -5192,16 +8329,50 @@ impl Vm {
                 .call_metamethod(program, callee, args, depth, fuel)
                 .map(VmFlow::Return);
         };
-        let kind = self.heap.function_kind(handle).ok_or_else(|| {
+        let metadata = self.heap.function_call_metadata(handle).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "function handle is missing",
             })
         })?;
+        self.call_function_metadata_resumable(
+            program,
+            callee,
+            handle,
+            metadata.kind,
+            metadata.bytecode_context,
+            args,
+            depth,
+            call_site,
+            fuel,
+        )
+    }
+
+    fn call_function_metadata_resumable(
+        &mut self,
+        program: &Program,
+        callee: Value,
+        handle: u32,
+        kind: FunctionKind,
+        bytecode_context: Option<FunctionBytecodeContext>,
+        args: &[Value],
+        depth: usize,
+        call_site: Option<ErrorLocation>,
+        fuel: &mut Option<u64>,
+    ) -> VmFlowResult<Vec<Value>> {
         match kind {
             FunctionKind::Bytecode {
                 program: None,
                 prototype,
             } => {
+                let FunctionBytecodeContext {
+                    upvalues,
+                    environment,
+                } = bytecode_context.ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "function bytecode context is missing",
+                    })
+                })?;
+                let upvalue_snapshot = upvalues;
                 let function = program.functions.get(prototype as usize).ok_or_else(|| {
                     Error::new(ErrorKind::InvalidProgram {
                         reason: "function prototype is missing",
@@ -5213,7 +8384,8 @@ impl Vm {
                     Some(prototype),
                     function,
                     callee,
-                    handle,
+                    upvalue_snapshot.as_slice(),
+                    environment,
                     args,
                     depth,
                     call_site,
@@ -5224,6 +8396,15 @@ impl Vm {
                 program: Some(dynamic_program_id),
                 prototype,
             } => {
+                let FunctionBytecodeContext {
+                    upvalues,
+                    environment,
+                } = bytecode_context.ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "function bytecode context is missing",
+                    })
+                })?;
+                let upvalue_snapshot = upvalues;
                 let dynamic_program = self.dynamic_program(dynamic_program_id)?;
                 let function = dynamic_program
                     .functions
@@ -5239,7 +8420,8 @@ impl Vm {
                     Some(prototype),
                     function,
                     callee,
-                    handle,
+                    upvalue_snapshot.as_slice(),
+                    environment,
                     args,
                     depth,
                     call_site,
@@ -5249,6 +8431,15 @@ impl Vm {
             FunctionKind::DynamicMain {
                 program: dynamic_program_id,
             } => {
+                let FunctionBytecodeContext {
+                    upvalues,
+                    environment,
+                } = bytecode_context.ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "function bytecode context is missing",
+                    })
+                })?;
+                let upvalue_snapshot = upvalues;
                 let dynamic_program = self.dynamic_program(dynamic_program_id)?;
                 self.call_bytecode_function(
                     &dynamic_program,
@@ -5256,7 +8447,8 @@ impl Vm {
                     None,
                     &dynamic_program.main,
                     callee,
-                    handle,
+                    upvalue_snapshot.as_slice(),
+                    environment,
                     args,
                     depth,
                     call_site,
@@ -5279,6 +8471,58 @@ impl Vm {
             return false;
         };
         matches!(self.heap.function_kind(handle), Some(FunctionKind::Native(found)) if found == native)
+    }
+
+    fn execute_fast_native_math_unary_from_registers(
+        &mut self,
+        registers: &[Value],
+        instruction: Instruction,
+        fuel: &mut Option<u64>,
+        op: FastNativeMathUnary,
+    ) -> Result<Value> {
+        if instruction.aux < 0 || instruction.aux > i32::from(u8::MAX) {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "invalid function call arity",
+            }));
+        }
+        let argc = instruction.aux as usize;
+        let args = if argc == 0 {
+            &[][..]
+        } else {
+            let first = usize::from(instruction.c);
+            let end = first.checked_add(argc).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "function argument window overflow",
+                })
+            })?;
+            if end > registers.len() {
+                return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+                    register: end,
+                    max: registers.len(),
+                }));
+            }
+            &registers[first..end]
+        };
+        charge_fuel(fuel, self.settings.initial_fuel, 0)?;
+        match op {
+            FastNativeMathUnary::Abs => self.native_math_abs(args),
+            FastNativeMathUnary::Unary(op) => {
+                validate_native_arity(args, 1, u8::MAX as usize, "math argument")?;
+                let value = self.coerce_register_to_number(registers, instruction.c)?;
+                Ok(Value::number(math_unary_result(value, op)))
+            }
+        }
+    }
+
+    fn execute_fast_native_setmetatable_from_registers(
+        &mut self,
+        handle: u32,
+        args: &[Value],
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        let extra_fuel = self.native_extra_fuel_cost(handle, NativeFunction::SetMetatable, args);
+        charge_fuel(fuel, self.settings.initial_fuel, extra_fuel)?;
+        self.native_setmetatable(args)
     }
 
     fn bytecode_protected_call_site(
@@ -5329,22 +8573,13 @@ impl Vm {
         prototype: Option<u32>,
         function: &Function,
         callee: Value,
-        handle: u32,
+        upvalues: &[u32],
+        environment: u32,
         args: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
         fuel: &mut Option<u64>,
     ) -> VmFlowResult<Vec<Value>> {
-        let upvalues = self.heap.function_upvalues(handle).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "function upvalues are missing",
-            })
-        })?;
-        let environment = self.heap.function_environment(handle).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "function environment is missing",
-            })
-        })?;
         self.run_function(
             program,
             program_id,
@@ -5373,7 +8608,27 @@ impl Vm {
         fuel: &mut Option<u64>,
     ) -> Result<Vec<Value>> {
         match callee.kind() {
-            ValueKind::Table | ValueKind::Userdata => {
+            ValueKind::Userdata => {
+                if let Some(coroutine) = self.unmodified_callable_coroutine(callee)? {
+                    let call_depth = depth.saturating_add(1);
+                    self.check_recursion_depth(call_depth)?;
+                    let extra_fuel = usize_to_u64(args.len().saturating_add(1));
+                    charge_fuel(fuel, self.settings.initial_fuel, extra_fuel)?;
+                    return self.call_coroutine_wrapper_by_index(
+                        coroutine, args, program, call_depth, fuel,
+                    );
+                }
+                let Some(method) = self.metamethod_for_value(callee, "__call")? else {
+                    return Err(Error::new(ErrorKind::RuntimeError {
+                        message: format!("attempt to call a {} value", value_type_name(callee)),
+                    }));
+                };
+                let mut call_args = Vec::with_capacity(args.len() + 1);
+                call_args.push(callee);
+                call_args.extend_from_slice(args);
+                self.call_value(program, method, &call_args, depth.saturating_add(1), fuel)
+            }
+            ValueKind::Table => {
                 let Some(method) = self.metamethod_for_value(callee, "__call")? else {
                     return Err(Error::new(ErrorKind::RuntimeError {
                         message: format!("attempt to call a {} value", value_type_name(callee)),
@@ -5387,6 +8642,38 @@ impl Vm {
             _ => Err(Error::new(ErrorKind::RuntimeError {
                 message: format!("attempt to call a {} value", value_type_name(callee)),
             })),
+        }
+    }
+
+    fn unmodified_callable_coroutine(&mut self, value: Value) -> Result<Option<usize>> {
+        let Some(handle) = value.as_userdata() else {
+            return Ok(None);
+        };
+        let Some(coroutine) = self.coroutine_for_handle(handle) else {
+            return Ok(None);
+        };
+        let Some((expected_metatable, expected_version)) =
+            self.coroutines[coroutine].callable_metatable
+        else {
+            return Ok(None);
+        };
+        let metatable = self.heap.userdata_metatable(handle).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "userdata handle is missing",
+            })
+        })?;
+        if metatable != Some(expected_metatable) {
+            return Ok(None);
+        }
+        let version = self.heap.table_version(expected_metatable).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "coroutine wrapper metatable handle is missing",
+            })
+        })?;
+        if version == expected_version {
+            Ok(Some(coroutine))
+        } else {
+            Ok(None)
         }
     }
 
@@ -5425,8 +8712,17 @@ impl Vm {
             }));
         }
 
-        let callee = get_register(registers, instruction.a)?;
-        let args = registers[args_start..args_end].to_vec();
+        if let Some(flow) = self.try_call_protected_fixed_pair(
+            program,
+            registers,
+            instruction,
+            depth,
+            &call_site,
+            fuel,
+        )? {
+            return Ok(flow);
+        }
+
         let synthetic_call = Instruction::with_aux(
             Opcode::Call,
             instruction.a,
@@ -5438,15 +8734,6 @@ impl Vm {
             })?,
             i32::from(instruction.b),
         );
-        set_register(registers, instruction.a, callee)?;
-        for (offset, arg) in args.iter().copied().enumerate() {
-            let register = u8::try_from(args_start + offset).map_err(|_| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "function argument register index overflow",
-                })
-            })?;
-            set_register(registers, register, arg)?;
-        }
 
         let results = match self.call_function_resumable(
             program,
@@ -5468,7 +8755,215 @@ impl Vm {
             })?;
             set_register(registers, register, value)?;
         }
+        self.recycle_results(results);
         Ok(VmFlow::Return(()))
+    }
+
+    fn try_call_protected_fixed_pair(
+        &mut self,
+        program: &Program,
+        registers: &mut [Value],
+        instruction: Instruction,
+        depth: usize,
+        call_site: &Option<ErrorLocation>,
+        fuel: &mut Option<u64>,
+    ) -> std::result::Result<Option<VmFlow<()>>, Error> {
+        let base = usize::from(instruction.a);
+        let argc = usize::from(instruction.b);
+        let result_count = usize::from(instruction.c);
+        if result_count != 2 {
+            return Ok(None);
+        }
+        let args_start = base.checked_add(1).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "function argument window overflow",
+            })
+        })?;
+        let args_end = args_start.checked_add(argc).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "function argument window overflow",
+            })
+        })?;
+        let callee = get_register(registers, instruction.a)?;
+        let Some(handle) = callee.as_function() else {
+            return Ok(None);
+        };
+        let metadata = self.heap.function_call_metadata(handle).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "function handle is missing",
+            })
+        })?;
+        let FunctionKind::Native(native) = metadata.kind else {
+            return Ok(None);
+        };
+        if !matches!(native, NativeFunction::PCall | NativeFunction::XPCall) {
+            return Ok(None);
+        }
+        let args = &registers[args_start..args_end];
+        self.check_recursion_depth(depth)?;
+        let extra_fuel = self.native_extra_fuel_cost(handle, native, args);
+        charge_fuel(fuel, self.settings.initial_fuel, extra_fuel)?;
+
+        match native {
+            NativeFunction::PCall => self.call_pcall_fixed_pair(
+                program,
+                registers,
+                base,
+                args_start,
+                args_end,
+                depth,
+                call_site.clone(),
+                fuel,
+            ),
+            NativeFunction::XPCall => self.call_xpcall_fixed_pair(
+                program,
+                registers,
+                base,
+                args_start,
+                args_end,
+                depth,
+                call_site.clone(),
+                fuel,
+            ),
+            _ => Ok(None),
+        }
+    }
+
+    fn call_pcall_fixed_pair(
+        &mut self,
+        program: &Program,
+        registers: &mut [Value],
+        base: usize,
+        args_start: usize,
+        args_end: usize,
+        depth: usize,
+        call_site: Option<ErrorLocation>,
+        fuel: &mut Option<u64>,
+    ) -> std::result::Result<Option<VmFlow<()>>, Error> {
+        let protected_callee = registers
+            .get(args_start)
+            .copied()
+            .unwrap_or_else(Value::nil);
+        let protected_call_site = self.bytecode_protected_call_site(protected_callee, call_site);
+        let protected_call = {
+            let call_args = registers.get(args_start + 1..args_end).unwrap_or(&[]);
+            self.call_value_with_site_resumable(
+                program,
+                protected_callee,
+                call_args,
+                depth + 1,
+                protected_call_site,
+                fuel,
+            )
+        };
+        match protected_call {
+            Ok(VmFlow::Return(results)) => {
+                write_call_results(
+                    registers,
+                    base,
+                    2,
+                    &[Value::boolean(true), first_result_or_nil(results)],
+                )?;
+                Ok(Some(VmFlow::Return(())))
+            }
+            Ok(VmFlow::Yield(mut suspension)) => {
+                suspension.frames.push(CoroutineFrame::PCall);
+                Ok(Some(VmFlow::Yield(suspension)))
+            }
+            Err(error) if error_is_uncatchable(&error) => Err(error),
+            Err(error) => {
+                self.last_error_traceback = None;
+                let error = self.error_object(error);
+                write_call_results(registers, base, 2, &[Value::boolean(false), error])?;
+                Ok(Some(VmFlow::Return(())))
+            }
+        }
+    }
+
+    fn call_xpcall_fixed_pair(
+        &mut self,
+        program: &Program,
+        registers: &mut [Value],
+        base: usize,
+        args_start: usize,
+        args_end: usize,
+        depth: usize,
+        call_site: Option<ErrorLocation>,
+        fuel: &mut Option<u64>,
+    ) -> std::result::Result<Option<VmFlow<()>>, Error> {
+        let protected_callee = registers
+            .get(args_start)
+            .copied()
+            .unwrap_or_else(Value::nil);
+        let args = &registers[args_start..args_end];
+        let handler = self.xpcall_handler(args)?;
+        let traceback_base = self.current_traceback_base();
+        let protected_call_site = self.bytecode_protected_call_site(protected_callee, call_site);
+        let protected_call = {
+            let call_args = registers.get(args_start + 2..args_end).unwrap_or(&[]);
+            self.call_value_with_site_resumable(
+                program,
+                protected_callee,
+                call_args,
+                depth + 1,
+                protected_call_site,
+                fuel,
+            )
+        };
+        match protected_call {
+            Ok(VmFlow::Return(results)) => {
+                write_call_results(
+                    registers,
+                    base,
+                    2,
+                    &[Value::boolean(true), first_result_or_nil(results)],
+                )?;
+                Ok(Some(VmFlow::Return(())))
+            }
+            Ok(VmFlow::Yield(mut suspension)) => {
+                let program_id = self.retain_dynamic_program(program.clone())?;
+                suspension
+                    .frames
+                    .push(CoroutineFrame::XPCall(SuspendedXPCallFrame {
+                        program_id,
+                        handler,
+                        depth,
+                        traceback_base: 0,
+                    }));
+                Ok(Some(VmFlow::Yield(suspension)))
+            }
+            Err(error) if error_is_uncatchable(&error) => Err(error),
+            Err(error) => {
+                let original_is_out_of_memory = error_is_out_of_memory(&error);
+                let traceback = self.take_error_traceback_after_base(&error, traceback_base);
+                let error_value = self.error_object(error);
+                match self.call_value_non_yieldable_with_traceback_snapshot(
+                    program,
+                    handler,
+                    &[error_value],
+                    depth + 1,
+                    traceback,
+                    fuel,
+                ) {
+                    Ok(results) => {
+                        write_call_results(
+                            registers,
+                            base,
+                            2,
+                            &[Value::boolean(false), first_result_or_nil(results)],
+                        )?;
+                        Ok(Some(VmFlow::Return(())))
+                    }
+                    Err(error) if error_is_uncatchable(&error) => Err(error),
+                    Err(handler_error) => {
+                        let results = self
+                            .xpcall_handler_error_result(original_is_out_of_memory, handler_error);
+                        write_call_results(registers, base, 2, &results)?;
+                        Ok(Some(VmFlow::Return(())))
+                    }
+                }
+            }
+        }
     }
 
     fn call_function_varargs(
@@ -6865,7 +10360,7 @@ impl Vm {
     fn coroutine_debug_traceback_entries(
         &self,
         coroutine: usize,
-    ) -> Vec<(ErrorLocation, Option<String>)> {
+    ) -> Vec<(ErrorLocation, Option<Arc<str>>)> {
         let Some(snapshot) = self
             .coroutines
             .get(coroutine)
@@ -6879,7 +10374,7 @@ impl Vm {
     fn debug_traceback_entries(
         &self,
         call_site: Option<ErrorLocation>,
-    ) -> Vec<(ErrorLocation, Option<String>)> {
+    ) -> Vec<(ErrorLocation, Option<Arc<str>>)> {
         self.debug_traceback_entries_from_frames(&self.call_stack, call_site)
     }
 
@@ -6887,7 +10382,7 @@ impl Vm {
         &self,
         frames: &[CallStackFrame],
         top_location: Option<ErrorLocation>,
-    ) -> Vec<(ErrorLocation, Option<String>)> {
+    ) -> Vec<(ErrorLocation, Option<Arc<str>>)> {
         let frames = logical_debug_frames(frames);
         let mut entries = Vec::new();
         if let Some(location) = top_location {
@@ -6908,7 +10403,7 @@ impl Vm {
     fn debug_traceback_entries_from_error_snapshot(
         &self,
         snapshot: &TracebackSnapshot,
-    ) -> Vec<(ErrorLocation, Option<String>)> {
+    ) -> Vec<(ErrorLocation, Option<Arc<str>>)> {
         let mut entries = Vec::new();
         let frames = logical_debug_frames(&snapshot.frames);
         if let Some(location) = &snapshot.top_location {
@@ -7009,7 +10504,10 @@ impl Vm {
             };
             (
                 frame.function,
-                frame.debug_name.clone().unwrap_or_default(),
+                frame
+                    .debug_name
+                    .as_ref()
+                    .map_or_else(String::new, ToString::to_string),
                 debug_info_logical_frame_location(&frames, frame_index, call_site),
             )
         };
@@ -7028,7 +10526,7 @@ impl Vm {
         };
         target.name = debug_name;
         if let Some(location) = location {
-            target.source = location.source;
+            target.source = location.source.to_string();
             target.line = u32_line_to_i32(location.line);
         }
         Ok(Some(target))
@@ -7061,7 +10559,10 @@ impl Vm {
             };
             (
                 frame.function,
-                frame.debug_name.clone().unwrap_or_default(),
+                frame
+                    .debug_name
+                    .as_ref()
+                    .map_or_else(String::new, ToString::to_string),
                 debug_info_logical_frame_location(&frames, frame_index, snapshot.top_location),
             )
         };
@@ -7080,7 +10581,7 @@ impl Vm {
         };
         target.name = debug_name;
         if let Some(location) = location {
-            target.source = location.source;
+            target.source = location.source.to_string();
             target.line = u32_line_to_i32(location.line);
         }
         Ok(Some(target))
@@ -7373,7 +10874,7 @@ impl Vm {
             return;
         };
         let snapshot = CoroutineDebugSnapshot {
-            frames: self.current_coroutine_frames(),
+            frames: self.current_coroutine_debug_frames(),
             top_location,
             first_debug_info_level: 1,
         };
@@ -7385,7 +10886,7 @@ impl Vm {
             return;
         };
         let snapshot = CoroutineDebugSnapshot {
-            frames: self.current_coroutine_frames(),
+            frames: self.current_coroutine_debug_frames(),
             top_location,
             first_debug_info_level: 0,
         };
@@ -7407,11 +10908,50 @@ impl Vm {
         self.call_stack.get(base..).unwrap_or(&[]).to_vec()
     }
 
+    fn current_coroutine_debug_frames(&self) -> Vec<CallStackFrame> {
+        let base = self
+            .running_coroutine_stack_bases
+            .last()
+            .copied()
+            .unwrap_or(0);
+        self.call_stack
+            .get(base..)
+            .unwrap_or(&[])
+            .iter()
+            .map(debug_only_call_stack_frame)
+            .collect()
+    }
+
     fn traceback_snapshot(&self, top_location: Option<ErrorLocation>) -> TracebackSnapshot {
         let frames = if self.running_coroutines.last().is_some() {
             self.current_coroutine_frames()
         } else {
             self.call_stack.clone()
+        };
+        TracebackSnapshot {
+            frames,
+            top_location,
+        }
+    }
+
+    fn traceback_snapshot_after_base(
+        &self,
+        top_location: Option<ErrorLocation>,
+        traceback_base: usize,
+    ) -> TracebackSnapshot {
+        let frames = if self.running_coroutines.last().is_some() {
+            let stack_base = self
+                .running_coroutine_stack_bases
+                .last()
+                .copied()
+                .unwrap_or(0);
+            let start = stack_base
+                .saturating_add(traceback_base)
+                .min(self.call_stack.len());
+            self.call_stack.get(start..).unwrap_or(&[]).to_vec()
+        } else {
+            let start = traceback_base.min(self.call_stack.len());
+            self.call_stack.get(start..).unwrap_or(&[]).to_vec()
         };
         TracebackSnapshot {
             frames,
@@ -7428,17 +10968,21 @@ impl Vm {
         self.call_stack.len().saturating_sub(stack_base)
     }
 
-    fn take_error_traceback(&mut self, error: &Error) -> TracebackSnapshot {
+    fn take_error_traceback_after_base(
+        &mut self,
+        error: &Error,
+        traceback_base: usize,
+    ) -> TracebackSnapshot {
         if error.location.is_some() {
             if let Some(snapshot) = self.last_error_traceback.take() {
                 if snapshot.top_location == error.location {
-                    return snapshot;
+                    return self.trim_traceback_to_base(snapshot, traceback_base);
                 }
             }
         } else {
             self.last_error_traceback = None;
         }
-        self.traceback_snapshot(error.location.clone())
+        self.traceback_snapshot_after_base(error.location.clone(), traceback_base)
     }
 
     fn trim_traceback_to_base(
@@ -7597,8 +11141,7 @@ impl Vm {
     ) -> Result<Vec<Value>> {
         let program = self.dynamic_program(frame.program_id)?;
         let original_is_out_of_memory = error_is_out_of_memory(&error);
-        let traceback = self.take_error_traceback(&error);
-        let traceback = self.trim_traceback_to_base(traceback, frame.traceback_base);
+        let traceback = self.take_error_traceback_after_base(&error, frame.traceback_base);
         let error_value = self.error_object(error);
         match self.call_value_non_yieldable_with_traceback_snapshot(
             &program,
@@ -7780,6 +11323,23 @@ impl Vm {
             return Err(Error::new(ErrorKind::TypeError { expected: "thread" }));
         };
         let coroutine = self.coroutine_index(wrapper)?;
+        self.call_coroutine_wrapper_by_index(
+            coroutine,
+            args.get(1..).unwrap_or(&[]),
+            program,
+            depth,
+            fuel,
+        )
+    }
+
+    fn call_coroutine_wrapper_by_index(
+        &mut self,
+        coroutine: usize,
+        args: &[Value],
+        program: &Program,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Vec<Value>> {
         if self.coroutines[coroutine].dead {
             return Err(Error::new(ErrorKind::RuntimeError {
                 message: "cannot resume dead coroutine".to_owned(),
@@ -7787,19 +11347,13 @@ impl Vm {
         }
         let flow = if !self.coroutines[coroutine].initialized {
             let callee = self.coroutines[coroutine].callee;
-            let call_args = args.get(1..).unwrap_or(&[]);
-            self.start_coroutine(program, coroutine, callee, call_args, depth, fuel)
+            self.start_coroutine(program, coroutine, callee, args, depth, fuel)
         } else if self.coroutines[coroutine].frames.is_empty() {
             self.coroutines[coroutine].dead = true;
-            return Ok(args.get(1..).unwrap_or(&[]).to_vec());
+            return Ok(args.to_vec());
         } else {
             let frames = std::mem::take(&mut self.coroutines[coroutine].frames);
-            self.resume_coroutine_frames(
-                coroutine,
-                frames,
-                args.get(1..).unwrap_or(&[]).to_vec(),
-                fuel,
-            )
+            self.resume_coroutine_frames(coroutine, frames, args.to_vec(), fuel)
         };
         match flow {
             Ok(VmFlow::Return(results)) => {
@@ -7842,6 +11396,18 @@ impl Vm {
         } else {
             None
         };
+        let callable_metatable = metatable
+            .map(|metatable| {
+                self.heap
+                    .table_version(metatable)
+                    .map(|version| (metatable, version))
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "coroutine wrapper metatable handle is missing",
+                        })
+                    })
+            })
+            .transpose()?;
         let handle = self.heap.alloc_userdata(metatable).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "coroutine handle overflow",
@@ -7855,6 +11421,7 @@ impl Vm {
             dead: false,
             error: None,
             debug_snapshot: None,
+            callable_metatable,
         });
         Ok(handle)
     }
@@ -7975,8 +11542,7 @@ impl Vm {
             Err(error) if error_is_uncatchable(&error) => Err(error),
             Err(error) => {
                 let original_is_out_of_memory = error_is_out_of_memory(&error);
-                let traceback = self.take_error_traceback(&error);
-                let traceback = self.trim_traceback_to_base(traceback, traceback_base);
+                let traceback = self.take_error_traceback_after_base(&error, traceback_base);
                 let error_value = self.error_object(error);
                 match self.call_value_with_traceback_snapshot(
                     program,
@@ -8039,8 +11605,7 @@ impl Vm {
             Err(error) if error_is_uncatchable(&error) => Err(error),
             Err(error) => {
                 let original_is_out_of_memory = error_is_out_of_memory(&error);
-                let traceback = self.take_error_traceback(&error);
-                let traceback = self.trim_traceback_to_base(traceback, traceback_base);
+                let traceback = self.take_error_traceback_after_base(&error, traceback_base);
                 let error_value = self.error_object(error);
                 match self.call_value_non_yieldable_with_traceback_snapshot(
                     program,
@@ -8489,6 +12054,19 @@ impl Vm {
         extend_weak_collectable_roots(&mut frame.roots, registers);
         extend_weak_collectable_roots(&mut frame.roots, varargs);
         extend_weak_collectable_roots(&mut frame.roots, pending_return_prefixes);
+    }
+
+    fn refresh_current_gc_roots_if_dirty(
+        &mut self,
+        roots_dirty: &mut bool,
+        registers: &[Value],
+        varargs: &[Value],
+        pending_return_prefixes: &[Value],
+    ) {
+        if *roots_dirty {
+            self.update_current_gc_roots(registers, varargs, pending_return_prefixes);
+            *roots_dirty = false;
+        }
     }
 
     fn push_stackless_self_call_roots(
@@ -9702,7 +13280,7 @@ impl Vm {
             }));
         }
         let index = number_arg(args[1])?;
-        let next_index = binary(NumericOp::Add, index, 1.0);
+        let next_index = index + 1.0;
         let Some(one_based_index) = array_iterator_index(next_index) else {
             return Ok(vec![Value::nil()]);
         };
@@ -10263,7 +13841,7 @@ impl Vm {
 
     fn native_string_len(&mut self, args: &[Value]) -> Result<Value> {
         validate_native_arity(args, 1, 1, "string.len argument")?;
-        Ok(Value::number(self.value_to_string(args[0])?.len() as f64))
+        Ok(Value::number(self.string_byte_len(args[0])? as f64))
     }
 
     fn native_string_byte(&mut self, args: &[Value]) -> Result<Vec<Value>> {
@@ -11061,10 +14639,45 @@ impl Vm {
         fuel: &mut Option<u64>,
     ) -> Result<Value> {
         validate_native_arity(args, 1, u8::MAX as usize, "string.format arguments")?;
+        if let Some(format_atom) = args[0].as_string_atom() {
+            let plan = self.string_format_plan(format_atom)?;
+            let output = self.luau_string_format_plan(program, &plan, &args[1..], depth, fuel)?;
+            let atom = self.heap.intern_string_bytes(&output);
+            return Ok(Value::string_atom(atom));
+        }
         let format = self.value_to_string(args[0])?;
         let output = self.luau_string_format(program, &format, &args[1..], depth, fuel)?;
         let atom = self.heap.intern_string_bytes(&output);
         Ok(Value::string_atom(atom))
+    }
+
+    fn string_format(
+        &mut self,
+        program: &Program,
+        registers: &[Value],
+        instruction: Instruction,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        let args = string_format_args(registers, instruction)?;
+        self.native_string_format(program, args, depth, fuel)
+    }
+
+    fn string_format_plan(&mut self, format_atom: u32) -> Result<Arc<[StringFormatPlanItem]>> {
+        if let Some(plan) = self.string_format_plan_cache.get(&format_atom) {
+            return Ok(Arc::clone(plan));
+        }
+        let format = self.heap.string_bytes(format_atom).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "string.format atom is missing",
+            })
+        })?;
+        let plan = Arc::<[StringFormatPlanItem]>::from(parse_string_format_plan(&format)?);
+        if self.string_format_plan_cache.len() < STRING_FORMAT_PLAN_CACHE_MAX {
+            self.string_format_plan_cache
+                .insert(format_atom, Arc::clone(&plan));
+        }
+        Ok(plan)
     }
 
     fn native_string_pack(&mut self, args: &[Value]) -> Result<Value> {
@@ -11427,73 +15040,211 @@ impl Vm {
         depth: usize,
         fuel: &mut Option<u64>,
     ) -> Result<Vec<u8>> {
-        let mut output = Vec::new();
+        let plan = parse_string_format_plan(format)?;
+        self.luau_string_format_plan(program, &plan, args, depth, fuel)
+    }
+
+    fn luau_string_format_plan(
+        &mut self,
+        program: &Program,
+        plan: &[StringFormatPlanItem],
+        args: &[Value],
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Vec<u8>> {
+        let mut output = Vec::with_capacity(self.string_format_output_capacity_hint(plan, args));
         let mut arg_index = 0usize;
-        let bytes = format;
-        let mut offset = 0usize;
-
-        while offset < bytes.len() {
-            if bytes[offset] != b'%' {
-                output.push(bytes[offset]);
-                offset += 1;
-                continue;
-            }
-
-            offset += 1;
-            if offset >= bytes.len() {
-                return Err(Error::new(ErrorKind::RuntimeError {
-                    message: "invalid option '%' to 'format'".to_owned(),
-                }));
-            }
-            if bytes[offset] == b'%' {
-                output.push(b'%');
-                offset += 1;
-                continue;
-            }
-            if bytes[offset] == b'*' {
-                let arg = args.get(arg_index).copied().ok_or_else(|| {
-                    Error::new(ErrorKind::RuntimeError {
-                        message: format!("missing argument #{}", arg_index + 2),
-                    })
-                })?;
-                arg_index += 1;
-                output.extend_from_slice(
-                    &self.value_to_tostring_with_metamethod(program, arg, depth, fuel)?,
-                );
-                offset += 1;
-                continue;
-            }
-
-            let (spec, next_offset) = parse_format_spec(bytes, offset)?;
-            offset = next_offset;
-            let arg = args.get(arg_index).copied().ok_or_else(|| {
-                Error::new(ErrorKind::RuntimeError {
-                    message: format!("missing argument #{}", arg_index + 2),
-                })
-            })?;
-            arg_index += 1;
-
-            let formatted = match spec.conversion {
-                FormatConversion::String => self.format_string_argument(arg, spec)?,
-                FormatConversion::Char => self.format_char_argument(arg, spec)?,
-                FormatConversion::Quote => self.format_quoted_argument(arg)?,
-                FormatConversion::SignedDecimal => {
-                    self.format_signed_integer_argument(arg, spec)?
+        for item in plan {
+            match item {
+                StringFormatPlanItem::Literal(bytes) => output.extend_from_slice(bytes),
+                StringFormatPlanItem::Tostring => {
+                    let arg = args.get(arg_index).copied().ok_or_else(|| {
+                        Error::new(ErrorKind::RuntimeError {
+                            message: format!("missing argument #{}", arg_index + 2),
+                        })
+                    })?;
+                    arg_index += 1;
+                    output.extend_from_slice(
+                        &self.value_to_tostring_with_metamethod(program, arg, depth, fuel)?,
+                    );
                 }
-                FormatConversion::UnsignedDecimal
-                | FormatConversion::Octal
-                | FormatConversion::LowerHex
-                | FormatConversion::UpperHex => self.format_unsigned_integer_argument(arg, spec)?,
-                FormatConversion::FloatFixed
-                | FormatConversion::FloatLowerExp
-                | FormatConversion::FloatUpperExp
-                | FormatConversion::FloatLowerGeneral
-                | FormatConversion::FloatUpperGeneral => self.format_float_argument(arg, spec)?,
-            };
-            output.extend_from_slice(&formatted);
+                StringFormatPlanItem::Spec(spec) => {
+                    let arg = args.get(arg_index).copied().ok_or_else(|| {
+                        Error::new(ErrorKind::RuntimeError {
+                            message: format!("missing argument #{}", arg_index + 2),
+                        })
+                    })?;
+                    arg_index += 1;
+
+                    self.append_format_argument(&mut output, arg, *spec)?;
+                }
+            }
         }
 
         Ok(output)
+    }
+
+    fn string_format_output_capacity_hint(
+        &mut self,
+        plan: &[StringFormatPlanItem],
+        args: &[Value],
+    ) -> usize {
+        const MAX_STRING_FORMAT_OUTPUT_CAPACITY_HINT: usize = 4096;
+
+        let mut hint = 0usize;
+        let mut arg_index = 0usize;
+        for item in plan {
+            let addition = match item {
+                StringFormatPlanItem::Literal(bytes) => bytes.len(),
+                StringFormatPlanItem::Tostring => {
+                    arg_index += 1;
+                    16
+                }
+                StringFormatPlanItem::Spec(spec) => {
+                    let arg = args.get(arg_index).copied();
+                    arg_index += 1;
+                    format_spec_capacity_hint(&mut self.heap, *spec, arg)
+                }
+            };
+            hint = hint.saturating_add(addition);
+            if hint >= MAX_STRING_FORMAT_OUTPUT_CAPACITY_HINT {
+                return MAX_STRING_FORMAT_OUTPUT_CAPACITY_HINT;
+            }
+        }
+        hint
+    }
+
+    fn append_format_argument(
+        &mut self,
+        output: &mut Vec<u8>,
+        arg: Value,
+        spec: FormatSpec,
+    ) -> Result<()> {
+        if self.append_simple_format_argument(output, arg, spec)? {
+            return Ok(());
+        }
+
+        let formatted = match spec.conversion {
+            FormatConversion::String => self.format_string_argument(arg, spec)?,
+            FormatConversion::Char => self.format_char_argument(arg, spec)?,
+            FormatConversion::Quote => self.format_quoted_argument(arg)?,
+            FormatConversion::SignedDecimal => self.format_signed_integer_argument(arg, spec)?,
+            FormatConversion::UnsignedDecimal
+            | FormatConversion::Octal
+            | FormatConversion::LowerHex
+            | FormatConversion::UpperHex => self.format_unsigned_integer_argument(arg, spec)?,
+            FormatConversion::FloatFixed
+            | FormatConversion::FloatLowerExp
+            | FormatConversion::FloatUpperExp
+            | FormatConversion::FloatLowerGeneral
+            | FormatConversion::FloatUpperGeneral => self.format_float_argument(arg, spec)?,
+        };
+        output.extend_from_slice(&formatted);
+        Ok(())
+    }
+
+    fn append_simple_format_argument(
+        &mut self,
+        output: &mut Vec<u8>,
+        arg: Value,
+        spec: FormatSpec,
+    ) -> Result<bool> {
+        if spec.width.is_some() {
+            return Ok(false);
+        }
+
+        match spec.conversion {
+            FormatConversion::String if spec.precision.is_none() => {
+                if let Some(atom) = arg.as_string_atom() {
+                    self.heap
+                        .append_string_atom_bytes(atom, output)
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "string atom is missing",
+                            })
+                        })?;
+                    return Ok(true);
+                }
+                if let Some(number) = arg.as_number() {
+                    let text = luau_number_to_string(number);
+                    output.extend_from_slice(text.as_bytes());
+                    return Ok(true);
+                }
+                Ok(false)
+            }
+            FormatConversion::Char if spec.precision.is_none() => {
+                let number = self
+                    .coerce_to_number(arg)?
+                    .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
+                output.push((number as i32) as u8);
+                Ok(true)
+            }
+            FormatConversion::SignedDecimal if spec.precision.is_none() => {
+                let number = self
+                    .coerce_to_number(arg)?
+                    .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
+                let integer = number as i64;
+                if integer < 0 {
+                    output.push(b'-');
+                } else {
+                    if spec.sign_plus {
+                        output.push(b'+');
+                    } else if spec.sign_space {
+                        output.push(b' ');
+                    }
+                }
+                append_u64_decimal(output, integer.unsigned_abs());
+                Ok(true)
+            }
+            FormatConversion::UnsignedDecimal
+            | FormatConversion::Octal
+            | FormatConversion::LowerHex
+            | FormatConversion::UpperHex
+                if spec.precision.is_none() =>
+            {
+                let number = self
+                    .coerce_to_number(arg)?
+                    .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
+                let integer = number as i64 as u64;
+                match spec.conversion {
+                    FormatConversion::UnsignedDecimal => {
+                        append_u64_decimal(output, integer);
+                    }
+                    FormatConversion::Octal => {
+                        append_u64_radix(output, integer, 8, false);
+                    }
+                    FormatConversion::LowerHex => {
+                        append_u64_radix(output, integer, 16, false);
+                    }
+                    FormatConversion::UpperHex => {
+                        append_u64_radix(output, integer, 16, true);
+                    }
+                    _ => unreachable!(
+                        "simple unsigned formatting only handles unsigned integer conversions"
+                    ),
+                }
+                Ok(true)
+            }
+            FormatConversion::FloatFixed => {
+                let number = self
+                    .coerce_to_number(arg)?
+                    .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
+                if number.is_sign_positive() {
+                    if spec.sign_plus {
+                        output.push(b'+');
+                    } else if spec.sign_space {
+                        output.push(b' ');
+                    }
+                }
+                let precision = spec.precision.unwrap_or(6);
+                if append_exact_fixed_decimal(output, number, precision) {
+                    return Ok(true);
+                }
+                append_format_args(output, format_args!("{number:.precision$}"));
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 
     fn format_string_argument(&mut self, arg: Value, spec: FormatSpec) -> Result<Vec<u8>> {
@@ -12001,6 +15752,17 @@ impl Vm {
                 reason: "table handle is missing",
             })
         })?;
+        if comparator.is_none() {
+            match self.heap.table_sort_numeric_array(table, len) {
+                Some(true) => return Ok(Vec::new()),
+                Some(false) => {}
+                None => {
+                    return Err(Error::new(ErrorKind::InvalidProgram {
+                        reason: "table numeric sort failed after validation",
+                    }));
+                }
+            }
+        }
         let mut values = Vec::with_capacity(len);
         for index in 1..=len {
             values.push(self.raw_table_get(table, Value::number(index as f64))?);
@@ -12178,7 +15940,7 @@ impl Vm {
                 reason: "invalid string.sub arity",
             }));
         }
-        let text = self.coerce_to_string(registers, instruction.b)?;
+        let source = get_register(registers, instruction.b)?;
         let start = string_library_index(get_number(registers, instruction.c)?)?;
         let end = if instruction.aux == 3 {
             let register = instruction.c.checked_add(1).ok_or_else(|| {
@@ -12190,9 +15952,81 @@ impl Vm {
         } else {
             -1
         };
-        let output = luau_string_sub(&text, start, end)?;
-        let atom = self.heap.intern_string_bytes(&output);
+        if let Some(source_atom) = source.as_string_atom() {
+            let len = self.heap.string_atom_byte_len(source_atom).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "string atom is missing",
+                })
+            })?;
+            let atom = match luau_string_sub_range(len, start, end)? {
+                Some((start, end)) => self
+                    .heap
+                    .intern_string_atom_slice(source_atom, start, end)
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "string.sub byte range is out of bounds",
+                        })
+                    })?,
+                None => self.heap.intern_string_bytes(&[]),
+            };
+            return Ok(Value::string_atom(atom));
+        }
+        let text = self.value_to_string(source)?;
+        let bytes = match luau_string_sub_range(text.len(), start, end)? {
+            Some((start, end)) => text.get(start..end).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "string.sub byte range is out of bounds",
+                })
+            })?,
+            None => &[],
+        };
+        let atom = self.heap.intern_string_bytes(bytes);
         Ok(Value::string_atom(atom))
+    }
+
+    fn string_byte_equal(
+        &mut self,
+        registers: &[Value],
+        instruction: Instruction,
+    ) -> Result<Value> {
+        if !(0..=0x1ff).contains(&instruction.aux) {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "invalid string byte equality operand",
+            }));
+        }
+        let source = get_register(registers, instruction.b)?;
+        let index = string_library_index(get_number(registers, instruction.c)?)?;
+        let expected = (instruction.aux & 0xff) as u8;
+        let invert = (instruction.aux & 0x100) != 0;
+        let matched = if let Some(source_atom) = source.as_string_atom() {
+            let len = self.heap.string_atom_byte_len(source_atom).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "string atom is missing",
+                })
+            })?;
+            match luau_string_sub_range(len, index, index)? {
+                Some((start, end)) if end == start + 1 => {
+                    self.heap
+                        .string_atom_byte_at(source_atom, start)
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "string atom is missing",
+                            })
+                        })?
+                        == Some(expected)
+                }
+                _ => false,
+            }
+        } else {
+            let text = self.value_to_string(source)?;
+            match luau_string_sub_range(text.len(), index, index)? {
+                Some((start, end)) if end == start + 1 => {
+                    text.get(start).copied() == Some(expected)
+                }
+                _ => false,
+            }
+        };
+        Ok(Value::boolean(matched ^ invert))
     }
 
     fn string_byte(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
@@ -12314,37 +16148,29 @@ impl Vm {
         instruction: Instruction,
         op: MathUnary,
     ) -> Result<Value> {
+        if instruction.aux == 1 {
+            let value = get_register(registers, instruction.b)?;
+            if let Some(number) = value.as_number() {
+                return Ok(Value::number(math_unary_result(number, op)));
+            }
+        }
         validate_math_arity(instruction, 1, "invalid one-argument math arity")?;
         let value = self.coerce_register_to_number(registers, instruction.b)?;
-        let result = match op {
-            MathUnary::Floor => libm::floor(value),
-            MathUnary::Ceil => libm::ceil(value),
-            MathUnary::Round => libm::round(value),
-            MathUnary::Sqrt => libm::sqrt(value),
-            MathUnary::Deg => value * (180.0 / LUAU_PI),
-            MathUnary::Rad => value * (LUAU_PI / 180.0),
-            MathUnary::Sin => libm::sin(value),
-            MathUnary::Cos => libm::cos(value),
-            MathUnary::Tan => libm::tan(value),
-            MathUnary::Asin => libm::asin(value),
-            MathUnary::Acos => libm::acos(value),
-            MathUnary::Atan => libm::atan(value),
-            MathUnary::Sinh => libm::sinh(value),
-            MathUnary::Cosh => libm::cosh(value),
-            MathUnary::Tanh => libm::tanh(value),
-            MathUnary::Exp => libm::exp(value),
-            MathUnary::Log10 => libm::log10(value),
-            MathUnary::Sign => {
-                if value > 0.0 {
-                    1.0
-                } else if value < 0.0 {
-                    -1.0
-                } else {
-                    0.0
-                }
+        Ok(Value::number(math_unary_result(value, op)))
+    }
+
+    fn math_sin_cos_mul(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
+        if instruction.aux == 1 {
+            let value = get_register(registers, instruction.b)?;
+            if let Some(number) = value.as_number() {
+                let (sin, cos) = libm::sincos(number);
+                return Ok(Value::number(sin * cos));
             }
-        };
-        Ok(Value::number(result))
+        }
+        validate_math_arity(instruction, 1, "invalid one-argument math arity")?;
+        let value = self.coerce_register_to_number(registers, instruction.b)?;
+        let (sin, cos) = libm::sincos(value);
+        Ok(Value::number(sin * cos))
     }
 
     fn math_binary(
@@ -12536,21 +16362,31 @@ impl Vm {
         pc: usize,
     ) -> Result<bool> {
         let window = ArrayIteratorRegisters::new(instruction.a)?;
+        let write_visible_key = array_iterator_writes_visible_key(instruction)?;
+        if !write_visible_key {
+            clear_unused_array_iterator_key(registers, register_cells, window)
+                .map_err(|e| e.at_pc(pc))?;
+        }
         let table = get_table(registers, window.table).map_err(|e| e.at_pc(pc))?;
-        if !self.heap.has_table(table) {
-            return Err(Error::new(ErrorKind::InvalidProgram {
+        let first = self.heap.array_get(table, 1).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
                 reason: "ipairs table handle is missing",
             })
-            .at_pc(pc));
-        }
-        let first = self.heap.array_get(table, 1).unwrap_or_else(Value::nil);
+            .at_pc(pc)
+        })?;
         if first.kind() == ValueKind::Nil {
             return Ok(false);
         }
-        set_register(registers, window.index, Value::number(1.0)).map_err(|e| e.at_pc(pc))?;
-        set_register(registers, window.key, Value::number(1.0)).map_err(|e| e.at_pc(pc))?;
-        set_register(registers, window.value, first).map_err(|e| e.at_pc(pc))?;
-        clear_array_iterator_value_cells(register_cells, window).map_err(|e| e.at_pc(pc))?;
+        set_array_iterator_registers(
+            registers,
+            window,
+            Value::number(1.0),
+            first,
+            write_visible_key,
+        )
+        .map_err(|e| e.at_pc(pc))?;
+        clear_array_iterator_value_cells(register_cells, window, write_visible_key)
+            .map_err(|e| e.at_pc(pc))?;
         Ok(true)
     }
 
@@ -12562,33 +16398,35 @@ impl Vm {
         pc: usize,
     ) -> Result<bool> {
         let window = ArrayIteratorRegisters::new(instruction.a)?;
+        let write_visible_key = array_iterator_writes_visible_key(instruction)?;
         let table = get_table(registers, window.table).map_err(|e| e.at_pc(pc))?;
-        if !self.heap.has_table(table) {
-            return Err(Error::new(ErrorKind::InvalidProgram {
-                reason: "ipairs table handle is missing",
-            })
-            .at_pc(pc));
-        }
         let index = get_number(registers, window.index).map_err(|e| e.at_pc(pc))?;
-        let next_index = binary(NumericOp::Add, index, 1.0);
+        let next_index = index + 1.0;
         let Some(one_based_index) = array_iterator_index(next_index) else {
             return Err(Error::new(ErrorKind::InvalidProgram {
                 reason: "ipairs internal index is not a positive integer",
             })
             .at_pc(pc));
         };
-        let value = self
-            .heap
-            .array_get(table, one_based_index)
-            .unwrap_or_else(Value::nil);
+        let value = self.heap.array_get(table, one_based_index).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "ipairs table handle is missing",
+            })
+            .at_pc(pc)
+        })?;
         if value.kind() == ValueKind::Nil {
             return Ok(false);
         }
-        set_register(registers, window.index, Value::number(next_index))
+        set_array_iterator_registers(
+            registers,
+            window,
+            Value::number(next_index),
+            value,
+            write_visible_key,
+        )
+        .map_err(|e| e.at_pc(pc))?;
+        clear_array_iterator_value_cells(register_cells, window, write_visible_key)
             .map_err(|e| e.at_pc(pc))?;
-        set_register(registers, window.key, Value::number(next_index)).map_err(|e| e.at_pc(pc))?;
-        set_register(registers, window.value, value).map_err(|e| e.at_pc(pc))?;
-        clear_array_iterator_value_cells(register_cells, window).map_err(|e| e.at_pc(pc))?;
         Ok(true)
     }
 
@@ -12600,13 +16438,12 @@ impl Vm {
         pc: usize,
     ) -> Result<bool> {
         let window = ArrayIteratorRegisters::new(instruction.a)?;
-        let table = get_table(registers, window.table).map_err(|e| e.at_pc(pc))?;
-        if !self.heap.has_table(table) {
-            return Err(Error::new(ErrorKind::InvalidProgram {
-                reason: "pairs table handle is missing",
-            })
-            .at_pc(pc));
+        let write_visible_key = array_iterator_writes_visible_key(instruction)?;
+        if !write_visible_key {
+            clear_unused_array_iterator_key(registers, register_cells, window)
+                .map_err(|e| e.at_pc(pc))?;
         }
+        let table = get_table(registers, window.table).map_err(|e| e.at_pc(pc))?;
         let (key, value) = match self.table_next_after(table, Value::nil()) {
             Some(TableNext::Entry(key, value)) => (key, value),
             Some(TableNext::End) => return Ok(false),
@@ -12623,10 +16460,10 @@ impl Vm {
                 .at_pc(pc));
             }
         };
-        set_register(registers, window.index, key).map_err(|e| e.at_pc(pc))?;
-        set_register(registers, window.key, key).map_err(|e| e.at_pc(pc))?;
-        set_register(registers, window.value, value).map_err(|e| e.at_pc(pc))?;
-        clear_array_iterator_value_cells(register_cells, window).map_err(|e| e.at_pc(pc))?;
+        set_array_iterator_registers(registers, window, key, value, write_visible_key)
+            .map_err(|e| e.at_pc(pc))?;
+        clear_array_iterator_value_cells(register_cells, window, write_visible_key)
+            .map_err(|e| e.at_pc(pc))?;
         Ok(true)
     }
 
@@ -12638,13 +16475,8 @@ impl Vm {
         pc: usize,
     ) -> Result<bool> {
         let window = ArrayIteratorRegisters::new(instruction.a)?;
+        let write_visible_key = array_iterator_writes_visible_key(instruction)?;
         let table = get_table(registers, window.table).map_err(|e| e.at_pc(pc))?;
-        if !self.heap.has_table(table) {
-            return Err(Error::new(ErrorKind::InvalidProgram {
-                reason: "pairs table handle is missing",
-            })
-            .at_pc(pc));
-        }
         let index = get_register(registers, window.index).map_err(|e| e.at_pc(pc))?;
         let (key, value) = match self.table_next_after(table, index) {
             Some(TableNext::Entry(key, value)) => (key, value),
@@ -12659,10 +16491,10 @@ impl Vm {
                 .at_pc(pc));
             }
         };
-        set_register(registers, window.index, key).map_err(|e| e.at_pc(pc))?;
-        set_register(registers, window.key, key).map_err(|e| e.at_pc(pc))?;
-        set_register(registers, window.value, value).map_err(|e| e.at_pc(pc))?;
-        clear_array_iterator_value_cells(register_cells, window).map_err(|e| e.at_pc(pc))?;
+        set_array_iterator_registers(registers, window, key, value, write_visible_key)
+            .map_err(|e| e.at_pc(pc))?;
+        clear_array_iterator_value_cells(register_cells, window, write_visible_key)
+            .map_err(|e| e.at_pc(pc))?;
         Ok(true)
     }
 
@@ -12695,6 +16527,7 @@ impl Vm {
         register_cells: &mut [Option<u32>],
         instruction: Instruction,
         depth: usize,
+        site: Option<InlineCacheSite>,
         fuel: &mut Option<u64>,
     ) -> Result<bool> {
         let window = GeneralizedIteratorRegisters::new(instruction.a, instruction.c)?;
@@ -12702,8 +16535,13 @@ impl Vm {
 
         let subject = get_register(registers, window.mode)?;
         match subject.kind() {
-            ValueKind::Table | ValueKind::Userdata => {
-                if let Some(method) = self.metamethod_for_value(subject, "__iter")? {
+            ValueKind::Table => {
+                let table = subject.as_table().ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    })
+                })?;
+                if let Some(method) = self.table_iter_metamethod_with_inline_cache(site, table)? {
                     let results = self.call_value(program, method, &[subject], depth, fuel)?;
                     self.sync_register_cells(registers, register_cells)?;
                     self.prepare_call_iterator_from_results(registers, window.call, results)?;
@@ -12717,15 +16555,29 @@ impl Vm {
                         invalid_callee: InvalidIteratorCallee::Call,
                     });
                 }
-                if subject.kind() == ValueKind::Table {
-                    set_register(
+                set_register(
+                    registers,
+                    window.mode,
+                    Value::number(GENERALIZED_ITERATOR_MODE_TABLE),
+                )?;
+                set_register(registers, window.call.state, subject)?;
+                set_register(registers, window.call.control, Value::nil())?;
+                self.table_iterator_step(registers, register_cells, window.call)
+            }
+            ValueKind::Userdata => {
+                if let Some(method) = self.metamethod_for_value(subject, "__iter")? {
+                    let results = self.call_value(program, method, &[subject], depth, fuel)?;
+                    self.sync_register_cells(registers, register_cells)?;
+                    self.prepare_call_iterator_from_results(registers, window.call, results)?;
+                    return self.call_iterator_step(CallIteratorStepContext {
+                        program,
                         registers,
-                        window.mode,
-                        Value::number(GENERALIZED_ITERATOR_MODE_TABLE),
-                    )?;
-                    set_register(registers, window.call.state, subject)?;
-                    set_register(registers, window.call.control, Value::nil())?;
-                    return self.table_iterator_step(registers, register_cells, window.call);
+                        register_cells,
+                        window: window.call,
+                        depth,
+                        fuel,
+                        invalid_callee: InvalidIteratorCallee::Call,
+                    });
                 }
                 Err(iteration_error(subject))
             }
@@ -12834,19 +16686,13 @@ impl Vm {
 
         let first = results.first().copied().unwrap_or_else(Value::nil);
         if first.kind() == ValueKind::Nil {
+            self.recycle_results(results);
             return Ok(false);
         }
 
         set_register(registers, window.control, first)?;
-        for index in 0..window.visible_count {
-            let value = results
-                .get(usize::from(index))
-                .copied()
-                .unwrap_or_else(Value::nil);
-            let register = window.visible_register(index)?;
-            set_register(registers, register, value)?;
-            clear_register_cell(register_cells, register)?;
-        }
+        write_call_iterator_visible_results(registers, register_cells, window, &results)?;
+        self.recycle_results(results);
         Ok(true)
     }
 
@@ -12867,11 +16713,6 @@ impl Vm {
         window: CallIteratorRegisters,
     ) -> Result<bool> {
         let table = get_table(registers, window.state)?;
-        if !self.heap.has_table(table) {
-            return Err(Error::new(ErrorKind::InvalidProgram {
-                reason: "generalized iterator table handle is missing",
-            }));
-        }
         let control = get_register(registers, window.control)?;
         let (key, value) = match self.table_next_after(table, control) {
             Some(TableNext::Entry(key, value)) => (key, value),
@@ -12884,16 +16725,7 @@ impl Vm {
             }
         };
         set_register(registers, window.control, key)?;
-        for index in 0..window.visible_count {
-            let visible = window.visible_register(index)?;
-            let value = match index {
-                0 => key,
-                1 => value,
-                _ => Value::nil(),
-            };
-            set_register(registers, visible, value)?;
-            clear_register_cell(register_cells, visible)?;
-        }
+        write_table_iterator_visible_results(registers, register_cells, window, key, value)?;
         Ok(true)
     }
 
@@ -12923,6 +16755,19 @@ impl Vm {
                 self.value_string_len_for_fuel(pattern)
                     .map_or(0, usize_to_u64),
             ))
+    }
+
+    fn string_format_opcode_fuel(
+        &mut self,
+        registers: &[Value],
+        instruction: Instruction,
+    ) -> Result<u64> {
+        let args = string_format_args(registers, instruction)?;
+        Ok(args
+            .first()
+            .and_then(|value| self.value_string_len_for_fuel(*value))
+            .map_or(0, usize_to_u64)
+            .saturating_add(usize_to_u64(args.len())))
     }
 
     fn call_extension(&self, registers: &[Value], instruction: Instruction) -> Result<Value> {
@@ -12957,12 +16802,24 @@ impl Vm {
         })
     }
 
-    fn maybe_collect(&mut self) {
+    fn maybe_collect(
+        &mut self,
+        roots_dirty: &mut bool,
+        registers: &[Value],
+        varargs: &[Value],
+        pending_return_prefixes: &[Value],
+    ) {
         if self.profile.is_deterministic_sim() {
             if self
                 .executed_instructions
                 .is_multiple_of(self.settings.deterministic_gc_interval.get())
             {
+                self.refresh_current_gc_roots_if_dirty(
+                    roots_dirty,
+                    registers,
+                    varargs,
+                    pending_return_prefixes,
+                );
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(&[]);
                 self.heap.collect_weak_tables_with_roots(&roots);
@@ -12976,6 +16833,12 @@ impl Vm {
                     .executed_instructions
                     .is_multiple_of(self.settings.deterministic_gc_interval.get())
             {
+                self.refresh_current_gc_roots_if_dirty(
+                    roots_dirty,
+                    registers,
+                    varargs,
+                    pending_return_prefixes,
+                );
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(&[]);
                 self.heap.collect_weak_tables_with_roots(&roots);
@@ -13956,6 +17819,18 @@ fn option_values_luau_equal(lhs: Option<Value>, rhs: Option<Value>) -> bool {
     }
 }
 
+fn debug_only_call_stack_frame(frame: &CallStackFrame) -> CallStackFrame {
+    CallStackFrame {
+        function: frame.function,
+        debug_name: frame.debug_name.clone(),
+        environment: frame.environment,
+        call_site: frame.call_site.clone(),
+        roots: Vec::new(),
+        stackless_roots: Vec::new(),
+        stackless_debug_frames: frame.stackless_debug_frames.clone(),
+    }
+}
+
 fn debug_info_level_arg(value: Value) -> Result<usize> {
     let Some(level) = value.as_number() else {
         return Err(debug_info_error("function or level expected"));
@@ -14036,7 +17911,10 @@ fn debug_info_bytecode_target(
     function: &Function,
 ) -> DebugInfoTarget {
     DebugInfoTarget {
-        name: function.debug_name.clone().unwrap_or_default(),
+        name: function
+            .debug_name
+            .as_ref()
+            .map_or_else(String::new, ToString::to_string),
         source: source_name.unwrap_or_default().to_owned(),
         line: function.debug_line_defined.map_or(-1, u32_line_to_i32),
         function: function_value,
@@ -14209,6 +18087,25 @@ fn native_registers(args: &[Value]) -> Result<Vec<Value>> {
     Ok(args.to_vec())
 }
 
+fn string_format_args(registers: &[Value], instruction: Instruction) -> Result<&[Value]> {
+    if instruction.aux < 1 || instruction.aux > i32::from(u8::MAX) {
+        return Err(Error::new(ErrorKind::InvalidProgram {
+            reason: "invalid string.format arity",
+        }));
+    }
+    let start = usize::from(instruction.b);
+    let end = start.checked_add(instruction.aux as usize).ok_or_else(|| {
+        Error::new(ErrorKind::InvalidProgram {
+            reason: "string.format argument register window overflow",
+        })
+    })?;
+    registers.get(start..end).ok_or_else(|| {
+        Error::new(ErrorKind::InvalidProgram {
+            reason: "string.format argument register is out of bounds",
+        })
+    })
+}
+
 fn number_arg(value: Value) -> Result<f64> {
     value
         .as_number()
@@ -14274,6 +18171,202 @@ fn charge_fuel(fuel: &mut Option<u64>, limit: Option<u64>, cost: u64) -> Result<
         *remaining -= cost;
     }
     Ok(())
+}
+
+fn opcode_may_observe_current_roots(op: Opcode) -> bool {
+    // These opcodes can call Luau/native code, trigger metamethods, or otherwise
+    // observe weak-table root snapshots. Keep this match exhaustive so new
+    // opcodes must be classified deliberately.
+    match op {
+        Opcode::Add
+        | Opcode::AddConst
+        | Opcode::AddUpvalue
+        | Opcode::AddUpvalueConst
+        | Opcode::Sub
+        | Opcode::SubConst
+        | Opcode::Mul
+        | Opcode::MulConst
+        | Opcode::MulModConst
+        | Opcode::MulAddModConst
+        | Opcode::SetIndexMulAddModConst
+        | Opcode::SetIndexMulModConst
+        | Opcode::Div
+        | Opcode::DivConst
+        | Opcode::Mod
+        | Opcode::ModConst
+        | Opcode::ModAddConst
+        | Opcode::Neg
+        | Opcode::Equal
+        | Opcode::NotEqual
+        | Opcode::Less
+        | Opcode::LessEqual
+        | Opcode::Greater
+        | Opcode::GreaterEqual
+        | Opcode::FloorDiv
+        | Opcode::FloorDivConst
+        | Opcode::Pow
+        | Opcode::PowConst
+        | Opcode::Concat
+        | Opcode::ConcatConst
+        | Opcode::ConcatRhsConst
+        | Opcode::GetIndexConcatConst
+        | Opcode::GetIndexModAddConst
+        | Opcode::GetIndexMulModConst
+        | Opcode::SetIndexConcatConst
+        | Opcode::GetIndexNumber
+        | Opcode::GetIndexNumberConst
+        | Opcode::SetIndexNumber
+        | Opcode::ConcatArgs
+        | Opcode::ReturnCall
+        | Opcode::Len
+        | Opcode::LenPlusOne
+        | Opcode::GetIndex
+        | Opcode::SetIndex
+        | Opcode::TableFind
+        | Opcode::Call
+        | Opcode::GetGlobal
+        | Opcode::SetGlobal
+        | Opcode::CallMulti
+        | Opcode::CallExpand
+        | Opcode::CallVarargs
+        | Opcode::ReturnCallVarargs
+        | Opcode::ReturnCallExpand
+        | Opcode::CallExpand2
+        | Opcode::CallExpandVarargs
+        | Opcode::ReturnCallExpand2
+        | Opcode::ReturnCallExpandVarargs
+        | Opcode::AppendCall
+        | Opcode::AppendCallVarargs
+        | Opcode::AppendCallExpand
+        | Opcode::ReturnCallExpand2Varargs
+        | Opcode::GenericCallPrep
+        | Opcode::GenericCallLoop
+        | Opcode::GeneralizedIterPrep
+        | Opcode::GeneralizedIterLoop
+        | Opcode::CallExpand3
+        | Opcode::ToString
+        | Opcode::StringFormat => true,
+        Opcode::Halt
+        | Opcode::LoadConst
+        | Opcode::Move
+        | Opcode::Jump
+        | Opcode::JumpIfNot
+        | Opcode::JumpIf
+        | Opcode::Return
+        | Opcode::CallExtension
+        | Opcode::Assert
+        | Opcode::Not
+        | Opcode::ForPrep
+        | Opcode::ForLoop
+        | Opcode::ForPrepStepOne
+        | Opcode::ForLoopStepOne
+        | Opcode::ToNumber
+        | Opcode::NewArray
+        | Opcode::NewRecord
+        | Opcode::IpairsPrep
+        | Opcode::IpairsLoop
+        | Opcode::PairsPrep
+        | Opcode::PairsLoop
+        | Opcode::TableConcat
+        | Opcode::NextKey
+        | Opcode::TypeOf
+        | Opcode::Abs
+        | Opcode::StringSub
+        | Opcode::StringByteEqual
+        | Opcode::StringLen
+        | Opcode::StringByte
+        | Opcode::StringUpper
+        | Opcode::StringLower
+        | Opcode::StringReverse
+        | Opcode::StringRep
+        | Opcode::StringFind
+        | Opcode::StringSplit
+        | Opcode::TableGetN
+        | Opcode::TableMaxN
+        | Opcode::MathFloor
+        | Opcode::MathCeil
+        | Opcode::MathRound
+        | Opcode::MathSign
+        | Opcode::MathClamp
+        | Opcode::MathMap
+        | Opcode::MathLerp
+        | Opcode::MathMin
+        | Opcode::MathMax
+        | Opcode::MathFmod
+        | Opcode::MathPow
+        | Opcode::MathSqrt
+        | Opcode::MathDeg
+        | Opcode::MathRad
+        | Opcode::MathIsNan
+        | Opcode::MathIsInf
+        | Opcode::MathIsFinite
+        | Opcode::MathSin
+        | Opcode::MathCos
+        | Opcode::MathSinCosMul
+        | Opcode::MathTan
+        | Opcode::MathAsin
+        | Opcode::MathAcos
+        | Opcode::MathAtan
+        | Opcode::MathAtan2
+        | Opcode::MathSinh
+        | Opcode::MathCosh
+        | Opcode::MathTanh
+        | Opcode::MathExp
+        | Opcode::MathLog
+        | Opcode::MathLog10
+        | Opcode::MathLdexp
+        | Opcode::RawGet
+        | Opcode::RawSet
+        | Opcode::RawLen
+        | Opcode::TableCreate
+        | Opcode::TableInsert
+        | Opcode::TableRemove
+        | Opcode::LoadFunction
+        | Opcode::LoadCurrentFunction
+        | Opcode::GetLocalCell
+        | Opcode::SetLocalCell
+        | Opcode::GetUpvalue
+        | Opcode::SetUpvalue
+        | Opcode::ClearLocalCell
+        | Opcode::ClearLocalCells
+        | Opcode::LoadVarargs
+        | Opcode::ReturnVarargs
+        | Opcode::AppendVarargs
+        | Opcode::LoadConstWide
+        | Opcode::CheckMethod
+        | Opcode::CoerceForNumber => false,
+    }
+}
+
+fn static_string_get_index_site(
+    program_id: Option<u32>,
+    prototype: Option<u32>,
+    program: &Program,
+    function: &Function,
+    pc: usize,
+    key_register: u8,
+) -> Option<InlineCacheSite> {
+    let program_id = program_id?;
+    let previous = function.code.get(pc.checked_sub(1)?)?;
+    if previous.a != key_register {
+        return None;
+    }
+    let constant_index = match previous.op {
+        Opcode::LoadConst => usize::from(previous.c),
+        Opcode::LoadConstWide if previous.aux >= 0 => previous.aux as usize,
+        _ => return None,
+    };
+    if !matches!(
+        program.constants.get(constant_index),
+        Some(Constant::String(_))
+    ) {
+        return None;
+    }
+    Some(InlineCacheSite {
+        program: program_id,
+        prototype,
+        pc,
+    })
 }
 
 fn usize_to_u64(value: usize) -> u64 {
@@ -14461,6 +18554,48 @@ fn numeric_for_loop(
     }
 }
 
+fn numeric_for_step_one_prepare(
+    registers: &mut [Value],
+    register_cells: &mut [Option<u32>],
+    instruction: Instruction,
+    pc: usize,
+) -> Result<bool> {
+    let window = NumericForStepOneRegisters::new(instruction.a)?;
+    let index = get_numeric_for_number(registers, window.index, "initial value")
+        .map_err(|e| e.at_pc(pc))?;
+    let limit =
+        get_numeric_for_number(registers, window.limit, "limit").map_err(|e| e.at_pc(pc))?;
+    if index <= limit {
+        set_register(registers, window.visible, Value::number(index)).map_err(|e| e.at_pc(pc))?;
+        clear_register_cell(register_cells, window.visible).map_err(|e| e.at_pc(pc))?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+fn numeric_for_step_one_loop(
+    registers: &mut [Value],
+    register_cells: &mut [Option<u32>],
+    instruction: Instruction,
+    pc: usize,
+) -> Result<bool> {
+    let window = NumericForStepOneRegisters::new(instruction.a)?;
+    let index = get_numeric_for_number(registers, window.index, "initial value")
+        .map_err(|e| e.at_pc(pc))?;
+    let limit =
+        get_numeric_for_number(registers, window.limit, "limit").map_err(|e| e.at_pc(pc))?;
+    let next = index + 1.0;
+    set_register(registers, window.index, Value::number(next)).map_err(|e| e.at_pc(pc))?;
+    if next <= limit {
+        set_register(registers, window.visible, Value::number(next)).map_err(|e| e.at_pc(pc))?;
+        clear_register_cell(register_cells, window.visible).map_err(|e| e.at_pc(pc))?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 fn numeric_for_should_continue(index: f64, limit: f64, step: f64) -> bool {
     if step > 0.0 {
         index <= limit
@@ -14472,12 +18607,171 @@ fn numeric_for_should_continue(index: f64, limit: f64, step: f64) -> bool {
 fn clear_array_iterator_value_cells(
     register_cells: &mut [Option<u32>],
     window: ArrayIteratorRegisters,
+    clear_visible_key: bool,
 ) -> Result<()> {
-    clear_register_cell(register_cells, window.key)?;
-    clear_register_cell(register_cells, window.value)
+    if register_cells.is_empty() {
+        return Ok(());
+    }
+    let value_index = usize::from(window.value);
+    if value_index >= register_cells.len() {
+        return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+            register: value_index,
+            max: register_cells.len(),
+        }));
+    }
+    if clear_visible_key {
+        register_cells[usize::from(window.key)] = None;
+    }
+    register_cells[value_index] = None;
+    Ok(())
+}
+
+fn clear_unused_array_iterator_key(
+    registers: &mut [Value],
+    register_cells: &mut [Option<u32>],
+    window: ArrayIteratorRegisters,
+) -> Result<()> {
+    let key_index = usize::from(window.key);
+    if key_index >= registers.len() {
+        return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+            register: key_index,
+            max: registers.len(),
+        }));
+    }
+    registers[key_index] = Value::nil();
+    if !register_cells.is_empty() {
+        if key_index >= register_cells.len() {
+            return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+                register: key_index,
+                max: register_cells.len(),
+            }));
+        }
+        register_cells[key_index] = None;
+    }
+    Ok(())
+}
+
+fn set_array_iterator_registers(
+    registers: &mut [Value],
+    window: ArrayIteratorRegisters,
+    key: Value,
+    value: Value,
+    write_visible_key: bool,
+) -> Result<()> {
+    let value_index = usize::from(window.value);
+    if value_index >= registers.len() {
+        return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+            register: value_index,
+            max: registers.len(),
+        }));
+    }
+    registers[usize::from(window.index)] = key;
+    if write_visible_key {
+        registers[usize::from(window.key)] = key;
+    }
+    registers[value_index] = value;
+    Ok(())
+}
+
+fn array_iterator_writes_visible_key(instruction: Instruction) -> Result<bool> {
+    match instruction.c {
+        ARRAY_ITERATOR_WRITE_VISIBLE_KEY => Ok(true),
+        ARRAY_ITERATOR_SKIP_VISIBLE_KEY => Ok(false),
+        _ => Err(Error::new(ErrorKind::InvalidProgram {
+            reason: "invalid array iterator visible key flag",
+        })),
+    }
+}
+
+fn write_call_iterator_visible_results(
+    registers: &mut [Value],
+    register_cells: &mut [Option<u32>],
+    window: CallIteratorRegisters,
+    results: &[Value],
+) -> Result<()> {
+    let start = usize::from(window.first_visible);
+    let count = usize::from(window.visible_count);
+    validate_iterator_visible_window(registers, register_cells, start, count)?;
+    if count == 2 {
+        registers[start] = results.first().copied().unwrap_or_else(Value::nil);
+        registers[start + 1] = results.get(1).copied().unwrap_or_else(Value::nil);
+        if !register_cells.is_empty() {
+            register_cells[start] = None;
+            register_cells[start + 1] = None;
+        }
+        return Ok(());
+    }
+    for offset in 0..count {
+        registers[start + offset] = results.get(offset).copied().unwrap_or_else(Value::nil);
+        if !register_cells.is_empty() {
+            register_cells[start + offset] = None;
+        }
+    }
+    Ok(())
+}
+
+fn write_table_iterator_visible_results(
+    registers: &mut [Value],
+    register_cells: &mut [Option<u32>],
+    window: CallIteratorRegisters,
+    key: Value,
+    value: Value,
+) -> Result<()> {
+    let start = usize::from(window.first_visible);
+    let count = usize::from(window.visible_count);
+    validate_iterator_visible_window(registers, register_cells, start, count)?;
+    if count == 2 {
+        registers[start] = key;
+        registers[start + 1] = value;
+        if !register_cells.is_empty() {
+            register_cells[start] = None;
+            register_cells[start + 1] = None;
+        }
+        return Ok(());
+    }
+    for offset in 0..count {
+        registers[start + offset] = match offset {
+            0 => key,
+            1 => value,
+            _ => Value::nil(),
+        };
+        if !register_cells.is_empty() {
+            register_cells[start + offset] = None;
+        }
+    }
+    Ok(())
+}
+
+fn validate_iterator_visible_window(
+    registers: &[Value],
+    register_cells: &[Option<u32>],
+    start: usize,
+    count: usize,
+) -> Result<()> {
+    let end = start.checked_add(count).ok_or_else(|| {
+        Error::new(ErrorKind::InvalidProgram {
+            reason: "iterator visible register overflow",
+        })
+    })?;
+    if end > registers.len() {
+        return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+            register: end,
+            max: registers.len(),
+        }));
+    }
+    if !register_cells.is_empty() && end > register_cells.len() {
+        return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+            register: end,
+            max: register_cells.len(),
+        }));
+    }
+    Ok(())
 }
 
 fn clear_register_cell(register_cells: &mut [Option<u32>], register: u8) -> Result<()> {
+    if register_cells.is_empty() {
+        return Ok(());
+    }
     let cell_index = register as usize;
     if cell_index >= register_cells.len() {
         return Err(Error::new(ErrorKind::RegisterOutOfBounds {
@@ -14486,6 +18780,70 @@ fn clear_register_cell(register_cells: &mut [Option<u32>], register: u8) -> Resu
         }));
     }
     register_cells[cell_index] = None;
+    Ok(())
+}
+
+fn clear_register_value_and_cell(
+    registers: &mut [Value],
+    register_cells: &mut [Option<u32>],
+    register: u8,
+) -> Result<()> {
+    let index = register as usize;
+    if index >= registers.len() {
+        return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+            register: index,
+            max: registers.len(),
+        }));
+    }
+    if !register_cells.is_empty() {
+        if index >= register_cells.len() {
+            return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+                register: index,
+                max: register_cells.len(),
+            }));
+        }
+        register_cells[index] = None;
+    }
+    if let Some(slot) = registers.get_mut(index) {
+        *slot = Value::nil();
+        Ok(())
+    } else {
+        Err(Error::new(ErrorKind::RegisterOutOfBounds {
+            register: index,
+            max: registers.len(),
+        }))
+    }
+}
+
+fn clear_register_values_and_cells(
+    registers: &mut [Value],
+    register_cells: &mut [Option<u32>],
+    start: u8,
+    count: u8,
+) -> Result<()> {
+    let start = usize::from(start);
+    let count = usize::from(count);
+    let end = start.checked_add(count).ok_or_else(|| {
+        Error::new(ErrorKind::InvalidProgram {
+            reason: "register clear range overflow",
+        })
+    })?;
+    if end > registers.len() {
+        return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+            register: end,
+            max: registers.len(),
+        }));
+    }
+    if !register_cells.is_empty() {
+        if end > register_cells.len() {
+            return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+                register: end,
+                max: register_cells.len(),
+            }));
+        }
+        register_cells[start..end].fill(None);
+    }
+    registers[start..end].fill(Value::nil());
     Ok(())
 }
 
@@ -14498,6 +18856,13 @@ struct FormatSpec {
     width: Option<usize>,
     precision: Option<usize>,
     conversion: FormatConversion,
+}
+
+#[derive(Clone)]
+enum StringFormatPlanItem {
+    Literal(Vec<u8>),
+    Tostring,
+    Spec(FormatSpec),
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -14515,6 +18880,56 @@ enum FormatConversion {
     FloatUpperExp,
     FloatLowerGeneral,
     FloatUpperGeneral,
+}
+
+fn parse_string_format_plan(bytes: &[u8]) -> Result<Vec<StringFormatPlanItem>> {
+    let mut items = Vec::new();
+    let mut offset = 0usize;
+    let mut literal_start = 0usize;
+
+    while offset < bytes.len() {
+        if bytes[offset] != b'%' {
+            offset += 1;
+            continue;
+        }
+
+        push_format_literal(&mut items, &bytes[literal_start..offset]);
+        offset += 1;
+        if offset >= bytes.len() {
+            return Err(Error::new(ErrorKind::RuntimeError {
+                message: "invalid option '%' to 'format'".to_owned(),
+            }));
+        }
+        match bytes[offset] {
+            b'%' => {
+                push_format_literal(&mut items, b"%");
+                offset += 1;
+            }
+            b'*' => {
+                items.push(StringFormatPlanItem::Tostring);
+                offset += 1;
+            }
+            _ => {
+                let (spec, next_offset) = parse_format_spec(bytes, offset)?;
+                items.push(StringFormatPlanItem::Spec(spec));
+                offset = next_offset;
+            }
+        }
+        literal_start = offset;
+    }
+
+    push_format_literal(&mut items, &bytes[literal_start..]);
+    Ok(items)
+}
+
+fn push_format_literal(items: &mut Vec<StringFormatPlanItem>, bytes: &[u8]) {
+    if bytes.is_empty() {
+        return;
+    }
+    match items.last_mut() {
+        Some(StringFormatPlanItem::Literal(existing)) => existing.extend_from_slice(bytes),
+        _ => items.push(StringFormatPlanItem::Literal(bytes.to_vec())),
+    }
 }
 
 fn parse_format_spec(bytes: &[u8], mut offset: usize) -> Result<(FormatSpec, usize)> {
@@ -14619,6 +19034,121 @@ fn invalid_format_option(option: char) -> Error {
     Error::new(ErrorKind::RuntimeError {
         message: format!("invalid option '%{option}' to 'format'"),
     })
+}
+
+fn format_spec_capacity_hint(heap: &mut VmCell, spec: FormatSpec, arg: Option<Value>) -> usize {
+    let base = match spec.conversion {
+        FormatConversion::String => {
+            if let Some(atom) = arg.and_then(Value::as_string_atom) {
+                let len = heap.string_atom_byte_len(atom).unwrap_or(16);
+                spec.precision.map_or(len, |precision| len.min(precision))
+            } else {
+                spec.precision.unwrap_or(16)
+            }
+        }
+        FormatConversion::Char => 1,
+        FormatConversion::Quote => arg
+            .and_then(Value::as_string_atom)
+            .and_then(|atom| heap.string_atom_byte_len(atom))
+            .map_or(16, |len| len.saturating_add(2)),
+        FormatConversion::SignedDecimal | FormatConversion::UnsignedDecimal => 20,
+        FormatConversion::Octal => 22,
+        FormatConversion::LowerHex | FormatConversion::UpperHex => 16,
+        FormatConversion::FloatFixed => spec.precision.unwrap_or(6).saturating_add(24),
+        FormatConversion::FloatLowerExp
+        | FormatConversion::FloatUpperExp
+        | FormatConversion::FloatLowerGeneral
+        | FormatConversion::FloatUpperGeneral => 32,
+    };
+    spec.width.unwrap_or(0).max(base)
+}
+
+fn append_format_args(output: &mut Vec<u8>, args: std::fmt::Arguments<'_>) {
+    std::io::Write::write_fmt(output, args).expect("formatting into Vec<u8> cannot fail");
+}
+
+fn append_exact_fixed_decimal(output: &mut Vec<u8>, number: f64, precision: usize) -> bool {
+    const POW10: [u64; 10] = [
+        1,
+        10,
+        100,
+        1_000,
+        10_000,
+        100_000,
+        1_000_000,
+        10_000_000,
+        100_000_000,
+        1_000_000_000,
+    ];
+    const MAX_EXACT_F64_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+    let Some(&scale) = POW10.get(precision) else {
+        return false;
+    };
+    if !number.is_finite() {
+        return false;
+    }
+
+    let scaled = number.abs() * scale as f64;
+    if scaled > MAX_EXACT_F64_INTEGER || scaled.fract() != 0.0 {
+        return false;
+    }
+
+    if number.is_sign_negative() {
+        output.push(b'-');
+    }
+
+    let scaled = scaled as u64;
+    append_u64_decimal(output, scaled / scale);
+    if precision > 0 {
+        output.push(b'.');
+        append_zero_padded_u64_decimal(output, scaled % scale, precision);
+    }
+    true
+}
+
+fn append_u64_decimal(output: &mut Vec<u8>, mut value: u64) {
+    let mut buffer = [0u8; 20];
+    let mut index = buffer.len();
+    loop {
+        index -= 1;
+        buffer[index] = b'0' + (value % 10) as u8;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    output.extend_from_slice(&buffer[index..]);
+}
+
+fn append_zero_padded_u64_decimal(output: &mut Vec<u8>, mut value: u64, width: usize) {
+    let mut buffer = [b'0'; 20];
+    let mut index = buffer.len();
+    for _ in 0..width {
+        index -= 1;
+        buffer[index] = b'0' + (value % 10) as u8;
+        value /= 10;
+    }
+    output.extend_from_slice(&buffer[index..]);
+}
+
+fn append_u64_radix(output: &mut Vec<u8>, mut value: u64, radix: u64, uppercase: bool) {
+    let mut buffer = [0u8; 64];
+    let mut index = buffer.len();
+    loop {
+        index -= 1;
+        let digit = (value % radix) as u8;
+        buffer[index] = match digit {
+            0..=9 => b'0' + digit,
+            _ if uppercase => b'A' + digit - 10,
+            _ => b'a' + digit - 10,
+        };
+        value /= radix;
+        if value == 0 {
+            break;
+        }
+    }
+    output.extend_from_slice(&buffer[index..]);
 }
 
 fn normalize_format_exponent(mut text: String) -> String {
@@ -14968,6 +19498,11 @@ fn luau_number_to_string(value: f64) -> String {
         output.insert(0, '-');
     }
     output
+}
+
+fn small_positive_integer_number(value: f64) -> Option<u32> {
+    (value >= 0.0 && value.is_sign_positive() && value <= 999_999.0 && value.fract() == 0.0)
+        .then_some(value as u32)
 }
 
 fn luau_number_magnitude_to_string(magnitude: &str) -> Option<String> {
@@ -15696,6 +20231,57 @@ fn upvalue_index(index: i32) -> Result<usize> {
     })
 }
 
+fn same_upvalue_reload_after_set(
+    function: &Function,
+    upvalues: &[u32],
+    pc: usize,
+    upvalue: u32,
+) -> Option<u8> {
+    let get = function.code.get(pc)?;
+    if get.op != Opcode::GetUpvalue {
+        return None;
+    }
+    let index = upvalue_index(get.aux).ok()?;
+    if upvalues.get(index).copied() == Some(upvalue) {
+        Some(get.a)
+    } else {
+        None
+    }
+}
+
+fn set_upvalue_refresh_skip_count(
+    function: &Function,
+    upvalues: &[u32],
+    register_cells: &[Option<u32>],
+    pc: usize,
+    register: u8,
+    upvalue: u32,
+) -> usize {
+    if !matches!(register_cells.get(register as usize), Some(None)) {
+        return 0;
+    }
+    let Some(clear) = function.code.get(pc) else {
+        return 0;
+    };
+    if clear.op != Opcode::ClearLocalCell || clear.a != register {
+        return 0;
+    }
+    let Some(get) = function.code.get(pc + 1) else {
+        return 0;
+    };
+    if get.op != Opcode::GetUpvalue || get.a != register {
+        return 0;
+    }
+    let Ok(index) = upvalue_index(get.aux) else {
+        return 0;
+    };
+    if upvalues.get(index).copied() == Some(upvalue) {
+        2
+    } else {
+        0
+    }
+}
+
 struct NestedExpandWindow {
     outer_prefix_start: usize,
     middle_callee: usize,
@@ -16083,6 +20669,33 @@ impl NumericForRegisters {
     }
 }
 
+struct NumericForStepOneRegisters {
+    index: u8,
+    limit: u8,
+    visible: u8,
+}
+
+impl NumericForStepOneRegisters {
+    fn new(index: u8) -> Result<Self> {
+        let limit = index.checked_add(1).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "numeric for step-one register window overflow",
+            })
+        })?;
+        let visible = index.checked_add(2).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "numeric for step-one register window overflow",
+            })
+        })?;
+        Ok(Self {
+            index,
+            limit,
+            visible,
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
 struct ArrayIteratorRegisters {
     table: u8,
     index: u8,
@@ -16210,14 +20823,6 @@ impl CallIteratorRegisters {
             }));
         }
         Ok(())
-    }
-
-    fn visible_register(&self, offset: u8) -> Result<u8> {
-        self.first_visible.checked_add(offset).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "iterator visible register overflow",
-            })
-        })
     }
 }
 
@@ -16380,6 +20985,70 @@ enum MathUnary {
     Exp,
     Log10,
     Sign,
+}
+
+#[derive(Clone, Copy)]
+enum FastNativeMathUnary {
+    Abs,
+    Unary(MathUnary),
+}
+
+fn fast_native_math_unary(native: NativeFunction) -> Option<FastNativeMathUnary> {
+    let op = match native {
+        NativeFunction::MathAbs => return Some(FastNativeMathUnary::Abs),
+        NativeFunction::MathFloor => MathUnary::Floor,
+        NativeFunction::MathCeil => MathUnary::Ceil,
+        NativeFunction::MathRound => MathUnary::Round,
+        NativeFunction::MathSign => MathUnary::Sign,
+        NativeFunction::MathSqrt => MathUnary::Sqrt,
+        NativeFunction::MathDeg => MathUnary::Deg,
+        NativeFunction::MathRad => MathUnary::Rad,
+        NativeFunction::MathSin => MathUnary::Sin,
+        NativeFunction::MathCos => MathUnary::Cos,
+        NativeFunction::MathTan => MathUnary::Tan,
+        NativeFunction::MathAsin => MathUnary::Asin,
+        NativeFunction::MathAcos => MathUnary::Acos,
+        NativeFunction::MathAtan => MathUnary::Atan,
+        NativeFunction::MathSinh => MathUnary::Sinh,
+        NativeFunction::MathCosh => MathUnary::Cosh,
+        NativeFunction::MathTanh => MathUnary::Tanh,
+        NativeFunction::MathExp => MathUnary::Exp,
+        NativeFunction::MathLog10 => MathUnary::Log10,
+        _ => return None,
+    };
+    Some(FastNativeMathUnary::Unary(op))
+}
+
+#[inline(always)]
+fn math_unary_result(value: f64, op: MathUnary) -> f64 {
+    match op {
+        MathUnary::Floor => libm::floor(value),
+        MathUnary::Ceil => libm::ceil(value),
+        MathUnary::Round => libm::round(value),
+        MathUnary::Sqrt => libm::sqrt(value),
+        MathUnary::Deg => value * (180.0 / LUAU_PI),
+        MathUnary::Rad => value * (LUAU_PI / 180.0),
+        MathUnary::Sin => libm::sin(value),
+        MathUnary::Cos => libm::cos(value),
+        MathUnary::Tan => libm::tan(value),
+        MathUnary::Asin => libm::asin(value),
+        MathUnary::Acos => libm::acos(value),
+        MathUnary::Atan => libm::atan(value),
+        MathUnary::Sinh => libm::sinh(value),
+        MathUnary::Cosh => libm::cosh(value),
+        MathUnary::Tanh => libm::tanh(value),
+        MathUnary::Exp => libm::exp(value),
+        MathUnary::Log10 => libm::log10(value),
+        MathUnary::Sign => {
+            if value > 0.0 {
+                1.0
+            } else if value < 0.0 {
+                -1.0
+            } else {
+                0.0
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -16656,6 +21325,23 @@ fn reset_current_function_frame(
     Ok(())
 }
 
+fn fresh_register_cells(function: &Function) -> Vec<Option<u32>> {
+    if function_uses_register_cells(function) {
+        vec![None; function.max_registers]
+    } else {
+        Vec::new()
+    }
+}
+
+fn function_uses_register_cells(function: &Function) -> bool {
+    function.code.iter().any(|instruction| {
+        matches!(
+            instruction.op,
+            Opcode::GetLocalCell | Opcode::SetLocalCell | Opcode::LoadFunction
+        )
+    })
+}
+
 fn empty_return_follows(function: &Function, next_pc: usize) -> bool {
     function
         .code
@@ -16750,6 +21436,21 @@ fn table_concat_range(
         None
     };
     Ok((start, end))
+}
+
+fn new_array_capacity_hints(aux: i32) -> (usize, usize) {
+    match aux.cmp(&0) {
+        std::cmp::Ordering::Greater => (aux as usize, 0),
+        std::cmp::Ordering::Equal => (0, 0),
+        std::cmp::Ordering::Less => {
+            let raw = aux.checked_neg().unwrap_or(i32::MAX) as usize;
+            if raw <= u16::MAX as usize {
+                (0, raw)
+            } else {
+                (raw >> 16, raw & u16::MAX as usize)
+            }
+        }
+    }
 }
 
 fn table_concat_index(value: f64) -> Result<usize> {
@@ -17457,8 +22158,8 @@ fn string_library_index(value: f64) -> Result<i64> {
     Ok(value as i64)
 }
 
-fn luau_string_sub(text: &[u8], start: i64, end: i64) -> Result<Vec<u8>> {
-    let len = i64::try_from(text.len()).map_err(|_| {
+fn luau_string_sub_range(len: usize, start: i64, end: i64) -> Result<Option<(usize, usize)>> {
+    let len = i64::try_from(len).map_err(|_| {
         Error::new(ErrorKind::InvalidProgram {
             reason: "string length exceeds i64",
         })
@@ -17466,7 +22167,7 @@ fn luau_string_sub(text: &[u8], start: i64, end: i64) -> Result<Vec<u8>> {
     let start = if start < 0 { len + start + 1 } else { start }.max(1);
     let end = if end < 0 { len + end + 1 } else { end }.min(len);
     if start > end {
-        return Ok(Vec::new());
+        return Ok(None);
     }
     let start = usize::try_from(start - 1).map_err(|_| {
         Error::new(ErrorKind::InvalidProgram {
@@ -17478,12 +22179,7 @@ fn luau_string_sub(text: &[u8], start: i64, end: i64) -> Result<Vec<u8>> {
             reason: "string.sub end index underflow",
         })
     })?;
-    let bytes = text.get(start..end).ok_or_else(|| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string.sub byte range is out of bounds",
-        })
-    })?;
-    Ok(bytes.to_vec())
+    Ok(Some((start, end)))
 }
 
 fn normalize_string_byte_start(

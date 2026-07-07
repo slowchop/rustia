@@ -1,6 +1,7 @@
 use crate::profile::Profile;
 use crate::value::Value;
 use std::fmt;
+use std::sync::Arc;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -14,7 +15,7 @@ pub struct Error {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ErrorLocation {
-    pub source: String,
+    pub source: Arc<str>,
     pub line: u32,
 }
 
@@ -86,7 +87,7 @@ impl Error {
     pub fn at_source(mut self, source: &str, line: u32) -> Self {
         if self.location.is_none() && !self.location_suppressed {
             self.location = Some(ErrorLocation {
-                source: source.to_owned(),
+                source: Arc::from(source),
                 line,
             });
         }
