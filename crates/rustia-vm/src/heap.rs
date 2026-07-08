@@ -33,8 +33,6 @@ struct RootData<'gc> {
     integer_string_concat_direct:
         [Option<ConcatIntegerCacheEntry>; CONCAT_INTEGER_DIRECT_CACHE_LEN],
     tables: Vec<TableData>,
-    #[collect(require_static)]
-    table_shape_index: HashMap<Vec<TableKey>, u32>,
     functions: Vec<FunctionData>,
     upvalues: Vec<UpvalueData>,
     userdatas: Vec<UserdataData>,
@@ -53,7 +51,6 @@ struct TableData {
     metatable: Option<u32>,
     version: u64,
     shape_version: u64,
-    shape_id: Option<u32>,
 }
 
 #[derive(Collect)]
@@ -429,7 +426,7 @@ struct ConcatIntegerCacheEntry {
     atom: u32,
 }
 
-#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd, Collect)]
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Collect)]
 #[collect(no_drop)]
 enum TableKey {
     Boolean(bool),
@@ -478,7 +475,6 @@ pub(crate) struct TableStringHashSlot {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TableStringHashProbe {
     pub shape_version: u64,
-    pub shape_id: Option<u32>,
     pub slot: Option<TableStringHashSlot>,
     pub metatable: Option<u32>,
 }
@@ -548,7 +544,6 @@ impl VmCell {
                         string_integer_concat_direct: [None; CONCAT_INTEGER_DIRECT_CACHE_LEN],
                         integer_string_concat_direct: [None; CONCAT_INTEGER_DIRECT_CACHE_LEN],
                         tables: Vec::new(),
-                        table_shape_index: HashMap::new(),
                         functions: Vec::new(),
                         upvalues: Vec::new(),
                         userdatas: Vec::new(),
@@ -843,7 +838,6 @@ impl VmCell {
                 metatable: None,
                 version: 0,
                 shape_version: 0,
-                shape_id: None,
             });
             handle as u32
         })
@@ -864,7 +858,6 @@ impl VmCell {
                 metatable: None,
                 version: 0,
                 shape_version: 0,
-                shape_id: None,
             };
             for pair in fields.chunks_exact(2) {
                 let atom = pair[0].as_string_atom()?;
@@ -904,7 +897,6 @@ impl VmCell {
                 metatable: None,
                 version: 0,
                 shape_version: 0,
-                shape_id: None,
             };
             for (atom, value) in keys.iter().copied().zip(values.iter().copied()) {
                 root.strings.get(atom as usize)?;
@@ -942,7 +934,6 @@ impl VmCell {
                 metatable: None,
                 version: 0,
                 shape_version: 0,
-                shape_id: None,
             };
             for (atom, value) in keys.iter().copied().zip(values.iter().copied()) {
                 root.strings.get(atom as usize)?;
@@ -958,10 +949,6 @@ impl VmCell {
                 }
             }
             table.shape_version = table.hash.len() as u64;
-            table.shape_id = intern_table_shape(
-                &mut root,
-                table.hash.iter().map(|entry| entry.key).collect(),
-            );
             if table.hash.len() >= TABLE_HASH_INDEX_MIN_LEN {
                 rebuild_hash_index(&mut table);
             }
@@ -983,7 +970,6 @@ impl VmCell {
                 metatable: None,
                 version: 0,
                 shape_version: 0,
-                shape_id: None,
             });
             handle as u32
         })
@@ -1932,7 +1918,6 @@ impl VmCell {
             });
             Some(TableStringHashProbe {
                 shape_version: table.shape_version,
-                shape_id: table.shape_id,
                 slot,
                 metatable: table.metatable,
             })
@@ -1971,28 +1956,6 @@ impl VmCell {
             let root = root.unlock(mc).borrow();
             let table = root.tables.get(table as usize)?;
             if table.shape_version != shape_version {
-                return Some(None);
-            }
-            let Some(entry) = table.hash.get(index) else {
-                return Some(None);
-            };
-            Some(Some(TableStringHashSlotRead {
-                value: entry.value,
-                has_metatable: table.metatable.is_some(),
-            }))
-        })
-    }
-
-    pub(crate) fn read_string_shared_shape_hash_slot_at_index(
-        &mut self,
-        table: u32,
-        shape_id: u32,
-        index: usize,
-    ) -> Option<Option<TableStringHashSlotRead>> {
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
-            let table = root.tables.get(table as usize)?;
-            if table.shape_id != Some(shape_id) {
                 return Some(None);
             }
             let Some(entry) = table.hash.get(index) else {
@@ -2052,39 +2015,6 @@ impl VmCell {
             }
             let table = root.tables.get_mut(table as usize)?;
             if table.shape_version != shape_version {
-                return Some(HashWriteStatus::Deferred);
-            }
-            let has_metatable = table.metatable.is_some();
-            let Some(entry) = table.hash.get_mut(index) else {
-                return Some(HashWriteStatus::Deferred);
-            };
-            if entry.value.kind() == ValueKind::Nil && has_metatable {
-                return Some(HashWriteStatus::Deferred);
-            }
-            if table.readonly {
-                return Some(HashWriteStatus::Readonly);
-            }
-            entry.value = value;
-            bump_table_version(table);
-            Some(HashWriteStatus::Stored)
-        })
-    }
-
-    pub(crate) fn write_string_shared_shape_hash_slot_at_index(
-        &mut self,
-        table: u32,
-        atom: u32,
-        shape_id: u32,
-        index: usize,
-        value: Value,
-    ) -> Option<HashWriteStatus> {
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
-            if string_atom_is(&root, atom, b"__mode") {
-                root.weak_tables_possible = true;
-            }
-            let table = root.tables.get_mut(table as usize)?;
-            if table.shape_id != Some(shape_id) {
                 return Some(HashWriteStatus::Deferred);
             }
             let has_metatable = table.metatable.is_some();
@@ -2646,16 +2576,6 @@ impl VmCell {
         })
     }
 
-    pub(crate) fn table_shape_id(&mut self, table: u32) -> Option<Option<u32>> {
-        self.arena.mutate(|mc, root| {
-            root.unlock(mc)
-                .borrow()
-                .tables
-                .get(table as usize)
-                .map(|table| table.shape_id)
-        })
-    }
-
     pub fn table_freeze(&mut self, table: u32) -> Option<bool> {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
@@ -2767,16 +2687,6 @@ fn bump_table_version(table: &mut TableData) {
 
 fn bump_table_shape_version(table: &mut TableData) {
     table.shape_version = table.shape_version.wrapping_add(1);
-    table.shape_id = None;
-}
-
-fn intern_table_shape(root: &mut RootData<'_>, keys: Vec<TableKey>) -> Option<u32> {
-    if let Some(shape_id) = root.table_shape_index.get(&keys) {
-        return Some(*shape_id);
-    }
-    let shape_id = u32::try_from(root.table_shape_index.len()).ok()?;
-    root.table_shape_index.insert(keys, shape_id);
-    Some(shape_id)
 }
 
 fn table_numeric_set(table: &mut TableData, index: i32, value: Value) {
@@ -3884,103 +3794,6 @@ mod tests {
             assert_eq!(direct_slot.index, generic_slot.index);
             assert_eq!(direct_slot.value.as_number(), Some(index as f64));
         }
-    }
-
-    #[test]
-    fn unique_record_table_builder_reuses_shared_shape_ids() {
-        let mut heap = VmCell::new();
-        let x = heap.intern_string("x");
-        let y = heap.intern_string("y");
-        let first = heap
-            .alloc_unique_record_table_with_string_atoms(
-                &[x, y],
-                &[Value::number(1.0), Value::number(2.0)],
-            )
-            .unwrap();
-        let second = heap
-            .alloc_unique_record_table_with_string_atoms(
-                &[x, y],
-                &[Value::number(3.0), Value::number(4.0)],
-            )
-            .unwrap();
-        let reversed = heap
-            .alloc_unique_record_table_with_string_atoms(
-                &[y, x],
-                &[Value::number(5.0), Value::number(6.0)],
-            )
-            .unwrap();
-
-        assert_eq!(heap.table_shape_id(first), heap.table_shape_id(second));
-        assert_ne!(heap.table_shape_id(first), heap.table_shape_id(reversed));
-    }
-
-    #[test]
-    fn shared_shape_string_slots_read_and_write_matching_record_tables() {
-        let mut heap = VmCell::new();
-        let x = heap.intern_string("x");
-        let y = heap.intern_string("y");
-        let first = heap
-            .alloc_unique_record_table_with_string_atoms(
-                &[x, y],
-                &[Value::number(1.0), Value::number(2.0)],
-            )
-            .unwrap();
-        let second = heap
-            .alloc_unique_record_table_with_string_atoms(
-                &[x, y],
-                &[Value::number(3.0), Value::number(4.0)],
-            )
-            .unwrap();
-        let shape_id = heap.table_shape_id(first).unwrap().unwrap();
-        let slot = heap.table_string_hash_slot(first, x).unwrap().unwrap();
-
-        let read = heap
-            .read_string_shared_shape_hash_slot_at_index(second, shape_id, slot.index)
-            .unwrap()
-            .unwrap();
-        assert_eq!(read.value.as_number(), Some(3.0));
-
-        assert_eq!(
-            heap.write_string_shared_shape_hash_slot_at_index(
-                second,
-                x,
-                shape_id,
-                slot.index,
-                Value::number(7.0),
-            ),
-            Some(HashWriteStatus::Stored)
-        );
-        assert_eq!(
-            heap.table_get(second, Value::string_atom(x))
-                .unwrap()
-                .as_number(),
-            Some(7.0)
-        );
-    }
-
-    #[test]
-    fn shared_shape_id_is_cleared_by_structural_changes() {
-        let mut heap = VmCell::new();
-        let x = heap.intern_string("x");
-        let y = heap.intern_string("y");
-        let z = heap.intern_string("z");
-        let table = heap
-            .alloc_unique_record_table_with_string_atoms(
-                &[x, y],
-                &[Value::number(1.0), Value::number(2.0)],
-            )
-            .unwrap();
-        let shape_id = heap.table_shape_id(table).unwrap().unwrap();
-        let slot = heap.table_string_hash_slot(table, x).unwrap().unwrap();
-
-        heap.table_set(table, Value::string_atom(z), Value::number(3.0))
-            .unwrap();
-
-        assert_eq!(heap.table_shape_id(table), Some(None));
-        assert!(heap
-            .read_string_shared_shape_hash_slot_at_index(table, shape_id, slot.index)
-            .unwrap()
-            .is_none());
     }
 
     #[test]
