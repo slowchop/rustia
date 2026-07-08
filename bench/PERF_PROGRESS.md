@@ -44,6 +44,7 @@ CI bench runner. Do not retry them without a materially different approach.
 | `85c3a86` string-const direct table-get fast path | `ffc4d9d` | runs `28965406975`/`28965521735`: average total median +0.45% vs `1c802df` average, total min +0.63%; dense and stdlib improved, but generic_iteration +1.60% and sparse +0.63% made it a net loss |
 | `ebb5329` table-op `ForLoopStepOne` tail quickening | `7e4e6e8` | run `28966423248`: total median +11.56% and total min +11.39% vs `1c802df` average; every workload regressed, so opportunistic dispatch fusion was worse than the regular loop dispatch |
 | `02c5867` combined sparse read-pair opcode | `9cacc6b` | runs `28967201259`/`28967318773`: average total median -0.64% and sparse median -3.52% vs `1c802df` average, but generic_iteration regressed +5.85%; too much cross-workload damage for a small total win |
+| `757968c` compiled `AddIndexNumber -> ForLoopStepOne` superinstruction | `e3376a7` | runs `28971363588`/`28971475517`: average total median +3.32% and total min +2.11% vs `dda4e76`; the target dense read loop lost one dispatch but dense median still +0.96% and generic_iteration +10.25%, so codegen/layout cost outweighed the dispatch saving |
 
 ## Current Shape Feedback
 
@@ -69,6 +70,9 @@ The failed `02c5867` sparse read-pair opcode showed that even a targeted
 superinstruction can disturb unrelated workloads enough to lose branch/codegen
 locality; future sparse work should measure whole-suite impact before keeping
 small targeted wins.
+The failed `757968c` compiled dense read-loop superinstruction showed the same
+thing for straight-line loop tails: deleting one dispatch in `dense_tables` did
+not pay for the extra opcode surface, and it badly moved `generic_iteration`.
 The kept `474b9da` upvalue-index quickening is intentionally narrow: it only
 skips a following `GetIndex` when the upvalue is a table, the key is a clean
 integer, and the existing direct table integer fast path returns without
