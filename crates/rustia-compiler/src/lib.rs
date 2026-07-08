@@ -11627,6 +11627,98 @@ return a * 10 + b
     }
 
     #[test]
+    fn quickened_index_function_cache_observes_function_reassignment() {
+        let chunk = parse_source(
+            r#"
+local hits = 0
+local mt = {
+    __index = function(_, key)
+        hits = hits + 1
+        if key == "x" then
+            return hits
+        end
+    end,
+}
+local t = {}
+setmetatable(t, mt)
+local a = t.x
+local b = t.x
+mt.__index = function()
+    return 9
+end
+local c = t.x
+return a * 100 + b * 10 + c
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::GetIndexStringConst) >= 3);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(129.0));
+    }
+
+    #[test]
+    fn quickened_index_function_cache_observes_original_slot_creation() {
+        let chunk = parse_source(
+            r#"
+local hits = 0
+local t = {}
+setmetatable(t, {
+    __index = function()
+        hits = hits + 1
+        return 7
+    end,
+})
+local a = t.x
+rawset(t, "x", 5)
+local b = t.x
+return hits * 100 + a * 10 + b
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::GetIndexStringConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(175.0));
+    }
+
+    #[test]
+    fn method_calls_use_index_function_cache_path() {
+        let chunk = parse_source(
+            r#"
+local calls = 0
+local methods = {
+    add = function(self, x)
+        return self.value + x
+    end,
+}
+local t = { value = 5 }
+setmetatable(t, {
+    __index = function(_, key)
+        calls = calls + 1
+        return methods[key]
+    end,
+})
+local a = t:add(1)
+local b = t:add(2)
+return calls * 100 + a * 10 + b
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::GetIndexStringConst) >= 2);
+        assert!(opcode_count(&program, Opcode::CheckMethodStringConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(267.0));
+    }
+
+    #[test]
     fn numeric_index_table_cache_reads_updated_delegate_slots() {
         let chunk = parse_source(
             r#"
