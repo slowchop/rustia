@@ -15,6 +15,7 @@ Baseline for this branch is the old pre-perf CI artifact at `a728ee7`.
 | `441b29b` | spread numeric table hash keys | about 0.5-1.1% faster total median vs prior kept commit; about 9.4-9.9% faster vs old baseline |
 | `8ba5167` | add Rustia bytecode summary | tooling only; exposes table, atom, inline-cache, and quickening candidates |
 | `488b5da` | fuse numeric table read into local self-add | two CI runs averaged 5.4-5.9% faster total median vs `441b29b`, with dense tables 14.7% faster; about 14.4-14.8% faster vs old baseline |
+| `31955f8` | fuse sparse table read-or-zero adds | two CI runs averaged 4.6% faster total median vs `488b5da`, with sparse tables 11.5% faster; about 18.5-18.7% faster vs old baseline |
 
 ## Reverted Candidates
 
@@ -44,7 +45,7 @@ default workload hot shapes:
 | workload | table-related opcodes | main signal |
 | --- | ---: | --- |
 | `dense_tables` | 6 | array writes plus fused `AddIndexNumber` sum reads and numeric `table.sort` |
-| `sparse_tables` | 5 | concat string keys and scattered integer hash keys |
+| `sparse_tables` | 5 | fused read-or-zero adds for concat string keys and scattered integer hash keys |
 | `generic_iteration` | 17 | generalized iteration, pairs/ipairs, table field access |
 | `stdlib_math_table` | 10 | global/string-const reads plus table writes/sort flush |
 
@@ -61,7 +62,7 @@ fresh tables. More tiny table probes have not paid for themselves so far.
    superinstructions that fuse the current benchmark patterns, especially
    numeric-for plus table set/get sequences. `488b5da` shows this can pay when
    it removes an operation from a very hot loop; follow-ups should recover the
-   small sparse/closure/stdlib regressions before adding more dispatch surface.
+   small dense regression from `31955f8` before adding more dispatch surface.
 3. Profile native `table.sort` with a dedicated microbench before changing it
    again. The allocation-free version was slower because comparator overhead
    dominated the saved allocation, and a direct opcode did not hold up enough
