@@ -10797,6 +10797,9 @@ impl Vm {
     }
 
     fn raw_table_get(&mut self, table: u32, key: Value) -> Result<Value> {
+        if let Some(index) = key.as_number().and_then(array_iterator_index) {
+            return self.raw_table_integer_get_after_table_lookup(table, index);
+        }
         Ok(self.raw_table_slot(table, key)?.unwrap_or_else(Value::nil))
     }
 
