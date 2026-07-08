@@ -902,6 +902,48 @@ impl VmCell {
         })
     }
 
+    pub(crate) fn alloc_unique_record_table_with_string_atoms(
+        &mut self,
+        keys: &[u32],
+        values: &[Value],
+    ) -> Option<u32> {
+        if keys.len() != values.len() {
+            return None;
+        }
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let mut table = TableData {
+                array: Vec::new(),
+                hash: Vec::with_capacity(keys.len()),
+                hash_index: Vec::new(),
+                readonly: false,
+                metatable: None,
+                version: 0,
+                shape_version: 0,
+            };
+            for (atom, value) in keys.iter().copied().zip(values.iter().copied()) {
+                root.strings.get(atom as usize)?;
+                if string_atom_is(&root, atom, b"__mode") {
+                    root.weak_tables_possible = true;
+                }
+                if value.kind() != ValueKind::Nil {
+                    table.hash.push(TableEntry {
+                        key: TableKey::String(atom),
+                        key_value: Value::string_atom(atom),
+                        value,
+                    });
+                }
+            }
+            table.shape_version = table.hash.len() as u64;
+            if table.hash.len() >= TABLE_HASH_INDEX_MIN_LEN {
+                rebuild_hash_index(&mut table);
+            }
+            let handle = u32::try_from(root.tables.len()).ok()?;
+            root.tables.push(table);
+            Some(handle)
+        })
+    }
+
     pub fn alloc_filled_array_table(&mut self, size: usize, value: Value) -> u32 {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
@@ -3005,6 +3047,61 @@ mod tests {
         heap.table_set_metatable(table, Some(metatable)).unwrap();
 
         assert_ne!(heap.table_shape_version(table), Some(shape_version));
+    }
+
+    #[test]
+    fn unique_record_table_builder_matches_generic_record_shape() {
+        let mut heap = VmCell::new();
+        let keys = (0..20)
+            .map(|index| heap.intern_string(&format!("k{index}")))
+            .collect::<Vec<_>>();
+        let values = (0..20)
+            .map(|index| Value::number(index as f64))
+            .collect::<Vec<_>>();
+
+        let generic = heap
+            .alloc_record_table_with_string_atoms(&keys, &values)
+            .unwrap();
+        let direct = heap
+            .alloc_unique_record_table_with_string_atoms(&keys, &values)
+            .unwrap();
+
+        assert_eq!(heap.table_shape_version(direct), Some(20));
+        assert_eq!(
+            heap.table_shape_version(direct),
+            heap.table_shape_version(generic)
+        );
+        for (index, key) in keys.iter().copied().enumerate() {
+            let generic_slot = heap.table_string_hash_slot(generic, key).unwrap().unwrap();
+            let direct_slot = heap.table_string_hash_slot(direct, key).unwrap().unwrap();
+            assert_eq!(direct_slot.index, generic_slot.index);
+            assert_eq!(direct_slot.value.as_number(), Some(index as f64));
+        }
+    }
+
+    #[test]
+    fn unique_record_table_builder_skips_initial_nil_values() {
+        let mut heap = VmCell::new();
+        let absent = heap.intern_string("absent");
+        let present = heap.intern_string("present");
+        let table = heap
+            .alloc_unique_record_table_with_string_atoms(
+                &[absent, present],
+                &[Value::nil(), Value::number(4.0)],
+            )
+            .unwrap();
+
+        assert_eq!(heap.table_shape_version(table), Some(1));
+        assert!(heap
+            .table_string_hash_slot(table, absent)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            heap.table_get(table, Value::string_atom(present))
+                .unwrap()
+                .as_number(),
+            Some(4.0)
+        );
     }
 
     #[test]
