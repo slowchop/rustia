@@ -425,7 +425,6 @@ struct StringSlotIndexCache {
 struct TableShapeSlotCache {
     table: u32,
     table_shape_version: u64,
-    table_hash_shape_id: Option<u32>,
     hash_index: usize,
 }
 
@@ -434,14 +433,8 @@ impl TableShapeSlotCache {
         Self {
             table,
             table_shape_version,
-            table_hash_shape_id: None,
             hash_index,
         }
-    }
-
-    fn with_hash_shape_id(mut self, table_hash_shape_id: Option<u32>) -> Self {
-        self.table_hash_shape_id = table_hash_shape_id;
-        self
     }
 }
 
@@ -9492,26 +9485,6 @@ impl Vm {
                         HashWriteStatus::Readonly => return Err(readonly_table_error()),
                     }
                 }
-                if let Some(hash_shape_id) = shape_slot.table_hash_shape_id {
-                    match self
-                        .heap
-                        .write_string_shared_shape_hash_slot_at_index(
-                            table,
-                            key_atom,
-                            hash_shape_id,
-                            shape_slot.hash_index,
-                            value,
-                        )
-                        .ok_or_else(|| {
-                            Error::new(ErrorKind::InvalidProgram {
-                                reason: "table handle is missing",
-                            })
-                        })? {
-                        HashWriteStatus::Stored => return Ok(TableSetInlineCacheHit::Stored),
-                        HashWriteStatus::Deferred => {}
-                        HashWriteStatus::Readonly => return Err(readonly_table_error()),
-                    }
-                }
                 for hash_index in hash_indices.iter() {
                     match self
                         .heap
@@ -9677,12 +9650,6 @@ impl Vm {
                                 reason: "table handle is missing",
                             })
                         })?;
-                    let table_hash_shape_id =
-                        self.heap.table_hash_shape_id(table).ok_or_else(|| {
-                            Error::new(ErrorKind::InvalidProgram {
-                                reason: "table handle is missing",
-                            })
-                        })?;
                     self.store_table_set_inline_cache(
                         site,
                         TableSetInlineCacheEntry {
@@ -9692,8 +9659,7 @@ impl Vm {
                                     table,
                                     table_shape_version,
                                     hash_index,
-                                )
-                                .with_hash_shape_id(Some(table_hash_shape_id)),
+                                ),
                                 hash_indices: self
                                     .table_set_string_slot_indices(site, key_atom, hash_index),
                             },
@@ -9967,23 +9933,6 @@ impl Vm {
                         return Ok(Some(slot.value));
                     }
                 }
-                if let Some(hash_shape_id) = shape_slot.table_hash_shape_id {
-                    let shared_slot = self
-                        .heap
-                        .read_string_shared_shape_hash_slot_at_index(
-                            table,
-                            hash_shape_id,
-                            shape_slot.hash_index,
-                        )
-                        .ok_or_else(|| {
-                            Error::new(ErrorKind::InvalidProgram {
-                                reason: "table handle is missing",
-                            })
-                        })?;
-                    if let Some(slot) = shared_slot {
-                        return Ok(Some(slot.value));
-                    }
-                }
                 for hash_index in hash_indices.iter() {
                     let Some(slot) = self
                         .heap
@@ -10025,11 +9974,6 @@ impl Vm {
                 reason: "table handle is missing",
             })
         })?;
-        let table_hash_shape_id = self.heap.table_hash_shape_id(table).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "table handle is missing",
-            })
-        })?;
         let hash_slot = self
             .heap
             .table_string_hash_slot(table, key_atom)
@@ -10054,8 +9998,7 @@ impl Vm {
                             table,
                             table_shape_version,
                             slot.index,
-                        )
-                        .with_hash_shape_id(Some(table_hash_shape_id)),
+                        ),
                         hash_indices: self
                             .raw_table_string_get_slot_indices(site, key_atom, slot.index),
                     },
@@ -10155,26 +10098,6 @@ impl Vm {
                 HashWriteStatus::Readonly => return Err(readonly_table_error()),
             }
         }
-        if let Some(hash_shape_id) = slot.entry.shape_slot.table_hash_shape_id {
-            match self
-                .heap
-                .write_string_shared_shape_hash_slot_at_index_raw(
-                    table,
-                    key_atom,
-                    hash_shape_id,
-                    slot.entry.shape_slot.hash_index,
-                    value,
-                )
-                .ok_or_else(|| {
-                    Error::new(ErrorKind::InvalidProgram {
-                        reason: "table handle is missing",
-                    })
-                })? {
-                HashWriteStatus::Stored => return Ok(true),
-                HashWriteStatus::Deferred => {}
-                HashWriteStatus::Readonly => return Err(readonly_table_error()),
-            }
-        }
         for hash_index in slot.entry.hash_indices.iter() {
             match self
                 .heap
@@ -10200,11 +10123,6 @@ impl Vm {
         value: Value,
     ) -> Result<bool> {
         let table_shape_version = self.heap.table_shape_version(table).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "table handle is missing",
-            })
-        })?;
-        let table_hash_shape_id = self.heap.table_hash_shape_id(table).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "table handle is missing",
             })
@@ -10237,8 +10155,7 @@ impl Vm {
                             table,
                             table_shape_version,
                             slot.index,
-                        )
-                        .with_hash_shape_id(Some(table_hash_shape_id)),
+                        ),
                         hash_indices: self
                             .raw_table_string_set_slot_indices(site, key_atom, slot.index),
                     },
@@ -10782,29 +10699,6 @@ impl Vm {
                         return Ok(None);
                     }
                 }
-                if let Some(hash_shape_id) = shape_slot.table_hash_shape_id {
-                    let shared_slot = self
-                        .heap
-                        .read_string_shared_shape_hash_slot_at_index(
-                            table,
-                            hash_shape_id,
-                            shape_slot.hash_index,
-                        )
-                        .ok_or_else(|| {
-                            Error::new(ErrorKind::InvalidProgram {
-                                reason: "table handle is missing",
-                            })
-                        })?;
-                    if let Some(slot) = shared_slot {
-                        if slot.value.kind() != ValueKind::Nil
-                            || !slot.has_metatable
-                            || self.table_uses_standard_global_type_surface(table)?
-                        {
-                            return Ok(Some(slot.value));
-                        }
-                        return Ok(None);
-                    }
-                }
                 for hash_index in hash_indices.iter() {
                     let Some(slot) = self
                         .heap
@@ -10983,12 +10877,6 @@ impl Vm {
             if value.kind() != ValueKind::Nil
                 || self.table_uses_standard_global_type_surface(table)?
             {
-                let table_hash_shape_id =
-                    self.heap.table_hash_shape_id(table).ok_or_else(|| {
-                        Error::new(ErrorKind::InvalidProgram {
-                            reason: "table handle is missing",
-                        })
-                    })?;
                 self.store_table_get_inline_cache(
                     site,
                     TableGetInlineCacheEntry {
@@ -10998,8 +10886,7 @@ impl Vm {
                                 table,
                                 probe.shape_version,
                                 slot.index,
-                            )
-                            .with_hash_shape_id(Some(table_hash_shape_id)),
+                            ),
                             hash_indices: self
                                 .table_get_string_slot_indices(site, key_atom, slot.index),
                         },
@@ -11010,30 +10897,16 @@ impl Vm {
         }
         let Some(metatable) = probe.metatable else {
             let value = Value::nil();
-            let source = match probe.slot {
-                None => TableGetInlineCacheSource::DirectAbsent {
+            let source = probe.slot.map_or(
+                TableGetInlineCacheSource::DirectAbsent {
                     table,
                     table_shape_version: probe.shape_version,
                 },
-                Some(slot) => {
-                    let table_hash_shape_id =
-                        self.heap.table_hash_shape_id(table).ok_or_else(|| {
-                            Error::new(ErrorKind::InvalidProgram {
-                                reason: "table handle is missing",
-                            })
-                        })?;
-                    TableGetInlineCacheSource::DirectSlot {
-                        shape_slot: TableShapeSlotCache::new(
-                            table,
-                            probe.shape_version,
-                            slot.index,
-                        )
-                        .with_hash_shape_id(Some(table_hash_shape_id)),
-                        hash_indices: self
-                            .table_get_string_slot_indices(site, key_atom, slot.index),
-                    }
-                }
-            };
+                |slot| TableGetInlineCacheSource::DirectSlot {
+                    shape_slot: TableShapeSlotCache::new(table, probe.shape_version, slot.index),
+                    hash_indices: self.table_get_string_slot_indices(site, key_atom, slot.index),
+                },
+            );
             self.store_table_get_inline_cache(site, TableGetInlineCacheEntry { key_atom, source });
             return Ok(Some(value));
         };
@@ -29091,60 +28964,6 @@ mod tests {
     }
 
     #[test]
-    fn string_get_inline_cache_records_shared_hash_shape() {
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let program = dummy_program();
-        let x = vm.heap.intern_string("x");
-        let y = vm.heap.intern_string("y");
-        let first = vm.heap.alloc_array_table(&[]);
-        let second = vm.heap.alloc_array_table(&[]);
-        for (table, offset) in [(first, 0.0), (second, 10.0)] {
-            vm.heap
-                .table_set(table, Value::string_atom(x), Value::number(1.0 + offset))
-                .unwrap();
-            vm.heap
-                .table_set(table, Value::string_atom(y), Value::number(2.0 + offset))
-                .unwrap();
-        }
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 8,
-        };
-        let mut fuel = None;
-
-        vm.get_table_string_index_with_inline_cache(
-            &program,
-            site,
-            first,
-            Value::string_atom(x),
-            x,
-            0,
-            &mut fuel,
-        )
-        .unwrap();
-        let slot = vm.table_get_inline_cache[site.slot()]
-            .expect("plain string reads should populate the get cache");
-        let TableGetInlineCacheSource::DirectSlot { shape_slot, .. } = slot.entry.source else {
-            panic!("plain string reads should cache a direct slot");
-        };
-        assert_eq!(
-            shape_slot.table_hash_shape_id,
-            Some(vm.heap.table_hash_shape_id(first).unwrap())
-        );
-        assert_eq!(
-            shape_slot.table_hash_shape_id,
-            vm.heap.table_hash_shape_id(second)
-        );
-
-        let value = vm
-            .table_get_inline_cache_hit(site, second, x)
-            .unwrap()
-            .expect("matching hash shape should hit the shared direct slot");
-        assert_eq!(value.as_number(), Some(11.0));
-    }
-
-    #[test]
     fn string_const_get_inline_cache_uses_cached_key_atom() {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let program = dummy_program();
@@ -29216,66 +29035,6 @@ mod tests {
                 .unwrap()
                 .as_number(),
             Some(4.0)
-        );
-    }
-
-    #[test]
-    fn string_set_inline_cache_records_shared_hash_shape() {
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let program = dummy_program();
-        let x = vm.heap.intern_string("x");
-        let y = vm.heap.intern_string("y");
-        let first = vm.heap.alloc_array_table(&[]);
-        let second = vm.heap.alloc_array_table(&[]);
-        for table in [first, second] {
-            vm.heap
-                .table_set(table, Value::string_atom(x), Value::number(1.0))
-                .unwrap();
-            vm.heap
-                .table_set(table, Value::string_atom(y), Value::number(2.0))
-                .unwrap();
-        }
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 8,
-        };
-        let mut fuel = None;
-
-        vm.set_table_string_index_with_inline_cache(
-            &program,
-            site,
-            first,
-            Value::string_atom(x),
-            x,
-            Value::number(3.0),
-            0,
-            &mut fuel,
-        )
-        .unwrap();
-        let slot = vm.table_set_inline_cache[site.slot()]
-            .expect("plain string writes should populate the set cache");
-        let TableSetInlineCacheTarget::DirectSlot { shape_slot, .. } = slot.entry.target else {
-            panic!("plain string writes should cache a direct slot");
-        };
-        assert_eq!(
-            shape_slot.table_hash_shape_id,
-            Some(vm.heap.table_hash_shape_id(first).unwrap())
-        );
-        assert_eq!(
-            shape_slot.table_hash_shape_id,
-            vm.heap.table_hash_shape_id(second)
-        );
-
-        assert!(vm
-            .table_set_inline_cache_hit(site, second, x, Value::number(9.0))
-            .unwrap());
-        assert_eq!(
-            vm.heap
-                .table_get(second, Value::string_atom(x))
-                .unwrap()
-                .as_number(),
-            Some(9.0)
         );
     }
 
