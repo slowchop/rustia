@@ -24,7 +24,7 @@ pub use profile::Profile;
 pub use value::{Value, ValueKind};
 pub use vm::{
     LoadStringCompiler, Vm, VmGlobalGetInlineCacheSnapshot, VmInlineCacheSnapshot,
-    VmRawTableGetInlineCacheSnapshot, VmSettings, VmTableGetInlineCacheSnapshot,
-    VmTableIntegerGetInlineCacheSnapshot, VmTableIntegerSetInlineCacheSnapshot,
-    VmTableSetInlineCacheSnapshot, MAX_RECURSION_LIMIT,
+    VmOpcodeProfileEntry, VmOpcodeProfileSnapshot, VmRawTableGetInlineCacheSnapshot, VmSettings,
+    VmTableGetInlineCacheSnapshot, VmTableIntegerGetInlineCacheSnapshot,
+    VmTableIntegerSetInlineCacheSnapshot, VmTableSetInlineCacheSnapshot, MAX_RECURSION_LIMIT,
 };

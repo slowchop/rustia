@@ -13,7 +13,8 @@ use rustia_compiler::compile_with_options;
 use rustia_parser::parse_source;
 #[cfg(feature = "rustia-engine")]
 use rustia_vm::{
-    Instruction, Opcode, Profile, Program, Value, ValueKind, Vm, VmInlineCacheSnapshot,
+    Function, Instruction, Opcode, Profile, Program, Value, ValueKind, Vm, VmInlineCacheSnapshot,
+    VmSettings,
 };
 
 #[cfg(all(feature = "mlua-luau", feature = "mlua-lua54"))]
@@ -24,6 +25,8 @@ const DEFAULT_REPS: usize = 9;
 const DEFAULT_MAX_N: u64 = 1_000_000_000;
 #[cfg(feature = "rustia-engine")]
 const INLINE_CACHE_SUMMARY_N: u64 = 64;
+#[cfg(feature = "rustia-engine")]
+const HOT_SITE_SUMMARY_N: u64 = 64;
 const HISTORY_PATH: &str = "bench/history/runs.jsonl";
 const RESULTS_PATH: &str = "bench/RESULTS.md";
 const CURRENT_RESULTS_JSON_PATH: &str = "bench/current-results.json";
@@ -262,6 +265,7 @@ struct Config {
     wasm_gate_json: bool,
     rustia_bytecode_summary: bool,
     rustia_inline_cache_summary: bool,
+    rustia_hot_site_summary: bool,
     check_history: bool,
     refresh_results: bool,
 }
@@ -291,6 +295,7 @@ impl Default for Config {
             wasm_gate_json: false,
             rustia_bytecode_summary: false,
             rustia_inline_cache_summary: false,
+            rustia_hot_site_summary: false,
             check_history: false,
             refresh_results: false,
         }
@@ -415,6 +420,12 @@ fn run() -> Result<()> {
         print_rustia_inline_cache_summary(&repo, &selected_workloads)?;
         return Ok(());
     }
+    if config.rustia_hot_site_summary {
+        let repo = repo_root()?;
+        let selected_workloads = select_workloads(&config.workloads)?;
+        print_rustia_hot_site_summary(&repo, &selected_workloads)?;
+        return Ok(());
+    }
     if config.check_history {
         let history = config
             .history
@@ -524,6 +535,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
             "--wasm-gate-json" => config.wasm_gate_json = true,
             "--rustia-bytecode-summary" => config.rustia_bytecode_summary = true,
             "--rustia-inline-cache-summary" => config.rustia_inline_cache_summary = true,
+            "--rustia-hot-site-summary" => config.rustia_hot_site_summary = true,
             "--check-history" => config.check_history = true,
             "--refresh-results" => config.refresh_results = true,
             "--no-history" => config.history = None,
@@ -630,6 +642,7 @@ fn print_usage() {
     println!("  --wasm-gate-json");
     println!("  --rustia-bytecode-summary");
     println!("  --rustia-inline-cache-summary");
+    println!("  --rustia-hot-site-summary");
     println!("  --check-history");
     println!("  --refresh-results");
     println!("  --engines rustia,koto,mlua-luau");
@@ -984,8 +997,12 @@ struct RustiaPrepared {
 #[cfg(feature = "rustia-engine")]
 impl RustiaPrepared {
     fn new(workload: &Workload, source: &str) -> Result<Self> {
+        Self::new_with_settings(workload, source, VmSettings::default())
+    }
+
+    fn new_with_settings(workload: &Workload, source: &str, settings: VmSettings) -> Result<Self> {
         let program = compile_rustia_program(workload, source)?;
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
         let function = vm
             .run(&program)
             .map_err(|error| Error::new(format!("initialize {} failed: {error}", workload.id)))?;
@@ -1004,6 +1021,14 @@ impl RustiaPrepared {
 
     fn inline_cache_snapshot(&self) -> VmInlineCacheSnapshot {
         self.vm.inline_cache_snapshot()
+    }
+
+    fn clear_opcode_profile(&mut self) {
+        self.vm.clear_opcode_profile();
+    }
+
+    fn opcode_profile_snapshot(&self) -> rustia_vm::VmOpcodeProfileSnapshot {
+        self.vm.opcode_profile_snapshot(&self.program)
     }
 }
 
@@ -1145,6 +1170,167 @@ fn print_rustia_inline_cache_summary(_repo: &Path, _workloads: &[&Workload]) -> 
     Err(Error::new(
         "--rustia-inline-cache-summary requires the rustia-engine feature",
     ))
+}
+
+#[cfg(feature = "rustia-engine")]
+#[derive(Default)]
+struct RustiaHotSiteSummary {
+    total_hits: u64,
+    table_hits: u64,
+    iteration_hits: u64,
+    opcodes: BTreeMap<String, u64>,
+    quickening_pairs: BTreeMap<String, u64>,
+    loop_bodies: BTreeMap<String, u64>,
+}
+
+#[cfg(feature = "rustia-engine")]
+fn print_rustia_hot_site_summary(repo: &Path, workloads: &[&Workload]) -> Result<()> {
+    println!("# Rustia Hot-Site Summary\n");
+    println!(
+        "Dynamic opcode hits after running each workload with n={HOT_SITE_SUMMARY_N} and VM opcode profiling enabled."
+    );
+    println!("Use this as feedback for table, atom, inline-cache, and quickening work.\n");
+    println!("| workload | checksum | hits | table hits | iteration hits | hot opcode | hot pair | hot loop |");
+    println!("| --- | --- | ---: | ---: | ---: | --- | --- | --- |");
+
+    let mut summaries = Vec::new();
+    for workload in workloads {
+        let source_path = workload_path(repo, Dialect::Luau, workload)
+            .ok_or_else(|| Error::new(format!("missing Luau source for {}", workload.id)))?;
+        let source =
+            fs::read_to_string(&source_path).map_err(|error| Error::io(&source_path, error))?;
+        let settings = VmSettings {
+            enable_opcode_profiling: true,
+            ..VmSettings::default()
+        };
+        let mut prepared = RustiaPrepared::new_with_settings(workload, &source, settings)?;
+        prepared.clear_opcode_profile();
+        let checksum = prepared.run(HOT_SITE_SUMMARY_N)?;
+        let snapshot = prepared.opcode_profile_snapshot();
+        let summary = summarize_rustia_hot_sites(&prepared.program, &snapshot);
+        println!(
+            "| {} | `{}` | {} | {} | {} | {} | {} | {} |",
+            workload.id,
+            checksum,
+            summary.total_hits,
+            summary.table_hits,
+            summary.iteration_hits,
+            format_top_u64_count(&summary.opcodes),
+            format_top_u64_count(&summary.quickening_pairs),
+            format_top_u64_count(&summary.loop_bodies)
+        );
+        summaries.push((workload.id, summary));
+    }
+
+    for (workload, summary) in summaries {
+        println!("\n## {workload}\n");
+        print_rustia_u64_count_table("Hot Opcodes", "opcode", &summary.opcodes, Some(12));
+        print_rustia_u64_count_table(
+            "Hot Quickening Candidate Pairs",
+            "pair",
+            &summary.quickening_pairs,
+            Some(12),
+        );
+        print_rustia_u64_count_table(
+            "Hot Loop Bodies",
+            "sequence",
+            &summary.loop_bodies,
+            Some(12),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "rustia-engine"))]
+fn print_rustia_hot_site_summary(_repo: &Path, _workloads: &[&Workload]) -> Result<()> {
+    Err(Error::new(
+        "--rustia-hot-site-summary requires the rustia-engine feature",
+    ))
+}
+
+#[cfg(feature = "rustia-engine")]
+fn summarize_rustia_hot_sites(
+    program: &Program,
+    snapshot: &rustia_vm::VmOpcodeProfileSnapshot,
+) -> RustiaHotSiteSummary {
+    let mut summary = RustiaHotSiteSummary::default();
+    summary.total_hits = snapshot.total_hits;
+    for entry in &snapshot.entries {
+        let Some(function) = rustia_profile_function(program, entry.prototype) else {
+            continue;
+        };
+        let Some(instruction) = function.code.get(entry.pc) else {
+            continue;
+        };
+        let opcode = instruction.op;
+        *summary.opcodes.entry(format!("{opcode:?}")).or_default() += entry.hits;
+        if opcode_is_table_related(opcode) {
+            summary.table_hits = summary.table_hits.saturating_add(entry.hits);
+        }
+        if opcode_is_iteration_related(opcode) {
+            summary.iteration_hits = summary.iteration_hits.saturating_add(entry.hits);
+        }
+        if let Some(next) = function.code.get(entry.pc + 1) {
+            if opcode_pair_is_quickening_candidate(opcode, next.op) {
+                *summary
+                    .quickening_pairs
+                    .entry(format!("{opcode:?} -> {:?}", next.op))
+                    .or_default() += entry.hits;
+            }
+        }
+        if opcode_is_loop_backedge(opcode) {
+            let Ok(start) = usize::try_from(instruction.aux) else {
+                continue;
+            };
+            if start < entry.pc && start < function.code.len() {
+                *summary
+                    .loop_bodies
+                    .entry(format_loop_body_sequence(&function.code[start..=entry.pc]))
+                    .or_default() += entry.hits;
+            }
+        }
+    }
+    summary
+}
+
+#[cfg(feature = "rustia-engine")]
+fn rustia_profile_function(program: &Program, prototype: Option<u32>) -> Option<&Function> {
+    match prototype {
+        Some(prototype) => program.functions.get(prototype as usize),
+        None => Some(&program.main),
+    }
+}
+
+#[cfg(feature = "rustia-engine")]
+fn print_rustia_u64_count_table(
+    title: &str,
+    key_header: &str,
+    counts: &BTreeMap<String, u64>,
+    limit: Option<usize>,
+) {
+    println!("### {title}\n");
+    println!("| {key_header} | hits |");
+    println!("| --- | ---: |");
+    let mut entries = counts.iter().collect::<Vec<_>>();
+    entries.sort_by(|left, right| right.1.cmp(left.1).then_with(|| left.0.cmp(right.0)));
+    for (key, count) in entries.into_iter().take(limit.unwrap_or(usize::MAX)) {
+        println!("| {key} | {count} |");
+    }
+    if counts.is_empty() {
+        println!("| none | 0 |");
+    }
+    println!();
+}
+
+#[cfg(feature = "rustia-engine")]
+fn format_top_u64_count(counts: &BTreeMap<String, u64>) -> String {
+    let mut entries = counts.iter().collect::<Vec<_>>();
+    entries.sort_by(|left, right| right.1.cmp(left.1).then_with(|| left.0.cmp(right.0)));
+    entries
+        .into_iter()
+        .next()
+        .map(|(key, count)| format!("{key} ({count})"))
+        .unwrap_or_else(|| "none".to_owned())
 }
 
 #[cfg(feature = "rustia-engine")]

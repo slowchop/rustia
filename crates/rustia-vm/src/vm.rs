@@ -52,6 +52,7 @@ pub struct VmSettings {
     pub deterministic_gc_interval: NonZeroU64,
     pub loadstring_compiler: Option<LoadStringCompiler>,
     pub enable_conformance_coverage: bool,
+    pub enable_opcode_profiling: bool,
     pub enable_conformance_top_level_yield: bool,
     pub enable_conformance_int64_userdata: bool,
     pub enable_conformance_native_userdata: bool,
@@ -68,6 +69,7 @@ impl Default for VmSettings {
                 .expect("default deterministic GC interval is non-zero"),
             loadstring_compiler: None,
             enable_conformance_coverage: false,
+            enable_opcode_profiling: false,
             enable_conformance_top_level_yield: false,
             enable_conformance_int64_userdata: false,
             enable_conformance_native_userdata: false,
@@ -93,6 +95,22 @@ pub struct VmInlineCacheSnapshot {
     pub arithmetic_metamethod: usize,
     pub iter_metamethod: usize,
     pub len: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct VmOpcodeProfileSnapshot {
+    pub total_hits: u64,
+    pub entries: Vec<VmOpcodeProfileEntry>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VmOpcodeProfileEntry {
+    pub program: Option<u32>,
+    pub prototype: Option<u32>,
+    pub pc: usize,
+    pub line: Option<u32>,
+    pub opcode: Opcode,
+    pub hits: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -170,6 +188,7 @@ pub struct Vm {
     next_instruction_collection: u64,
     deterministic_collection_count: u64,
     coverage_hits: BTreeMap<CoverageKey, u64>,
+    opcode_profile_hits: BTreeMap<OpcodeProfileKey, u64>,
     global_get_inline_cache: Vec<Option<GlobalGetInlineCacheSlot>>,
     table_get_inline_cache: Vec<Option<TableGetInlineCacheSlot>>,
     table_set_inline_cache: Vec<Option<TableSetInlineCacheSlot>>,
@@ -205,6 +224,13 @@ struct CoverageKey {
     program: Option<u32>,
     prototype: u32,
     line: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct OpcodeProfileKey {
+    program: Option<u32>,
+    prototype: Option<u32>,
+    pc: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -923,6 +949,7 @@ impl Vm {
             next_instruction_collection,
             deterministic_collection_count: 0,
             coverage_hits: BTreeMap::new(),
+            opcode_profile_hits: BTreeMap::new(),
             global_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             table_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             table_set_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
@@ -1071,6 +1098,51 @@ impl Vm {
         snapshot.iter_metamethod = self.iter_metamethod_inline_cache.iter().flatten().count();
         snapshot.len = self.len_inline_cache.iter().flatten().count();
         snapshot
+    }
+
+    pub fn opcode_profile_snapshot(&self, program: &Program) -> VmOpcodeProfileSnapshot {
+        let mut entries = Vec::new();
+        let mut total_hits = 0u64;
+        for (key, hits) in &self.opcode_profile_hits {
+            let profile_program = match key.program {
+                Some(program_id) => self
+                    .dynamic_programs
+                    .get(program_id as usize)
+                    .map(Arc::as_ref)
+                    .unwrap_or(program),
+                None => program,
+            };
+            let Some(function) = opcode_profile_function(profile_program, key.prototype) else {
+                continue;
+            };
+            let Some(instruction) = function.code.get(key.pc) else {
+                continue;
+            };
+            total_hits = total_hits.saturating_add(*hits);
+            entries.push(VmOpcodeProfileEntry {
+                program: key.program,
+                prototype: key.prototype,
+                pc: key.pc,
+                line: function.source_line_at_or_before(key.pc),
+                opcode: instruction.op,
+                hits: *hits,
+            });
+        }
+        entries.sort_by(|left, right| {
+            right
+                .hits
+                .cmp(&left.hits)
+                .then_with(|| left.prototype.cmp(&right.prototype))
+                .then_with(|| left.pc.cmp(&right.pc))
+        });
+        VmOpcodeProfileSnapshot {
+            total_hits,
+            entries,
+        }
+    }
+
+    pub fn clear_opcode_profile(&mut self) {
+        self.opcode_profile_hits.clear();
     }
 
     pub fn register_extension_op(&mut self, op: ExtensionOp) -> Result<u16> {
@@ -1671,7 +1743,7 @@ impl Vm {
                                 &pending_return_prefixes,
                             );
                         }
-                        self.record_coverage_hit(program_id, context.prototype, function, pc);
+                        self.record_execution_hit(program_id, context.prototype, function, pc);
 
                         pc += 1;
                         current_roots_dirty = true;
@@ -1839,7 +1911,7 @@ impl Vm {
                                                     .map_err(|e| e.at_pc(pc))?;
                                                     self.executed_instructions =
                                                         self.executed_instructions.wrapping_add(1);
-                                                    self.record_coverage_hit(
+                                                    self.record_execution_hit(
                                                         program_id,
                                                         context.prototype,
                                                         function,
@@ -1897,7 +1969,7 @@ impl Vm {
                                                 .map_err(|e| e.at_pc(pc))?;
                                             self.executed_instructions =
                                                 self.executed_instructions.wrapping_add(1);
-                                            self.record_coverage_hit(
+                                            self.record_execution_hit(
                                                 program_id,
                                                 context.prototype,
                                                 function,
@@ -1956,7 +2028,7 @@ impl Vm {
                                             .map_err(|e| e.at_pc(pc))?;
                                         self.executed_instructions =
                                             self.executed_instructions.wrapping_add(1);
-                                        self.record_coverage_hit(
+                                        self.record_execution_hit(
                                             program_id,
                                             context.prototype,
                                             function,
@@ -1976,13 +2048,13 @@ impl Vm {
                                     {
                                         self.executed_instructions =
                                             self.executed_instructions.wrapping_add(2);
-                                        self.record_coverage_hit(
+                                        self.record_execution_hit(
                                             program_id,
                                             context.prototype,
                                             function,
                                             pc,
                                         );
-                                        self.record_coverage_hit(
+                                        self.record_execution_hit(
                                             program_id,
                                             context.prototype,
                                             function,
@@ -2020,7 +2092,7 @@ impl Vm {
                                             .map_err(|e| e.at_pc(pc))?;
                                         self.executed_instructions =
                                             self.executed_instructions.wrapping_add(1);
-                                        self.record_coverage_hit(
+                                        self.record_execution_hit(
                                             program_id,
                                             context.prototype,
                                             function,
@@ -2058,7 +2130,7 @@ impl Vm {
                                             .map_err(|e| e.at_pc(pc))?;
                                         self.executed_instructions =
                                             self.executed_instructions.wrapping_add(1);
-                                        self.record_coverage_hit(
+                                        self.record_execution_hit(
                                             program_id,
                                             context.prototype,
                                             function,
@@ -3304,7 +3376,7 @@ impl Vm {
                                         {
                                             self.executed_instructions =
                                                 self.executed_instructions.wrapping_add(1);
-                                            self.record_coverage_hit(
+                                            self.record_execution_hit(
                                                 program_id,
                                                 context.prototype,
                                                 function,
@@ -3377,7 +3449,7 @@ impl Vm {
                                 {
                                     self.executed_instructions =
                                         self.executed_instructions.wrapping_add(1);
-                                    self.record_coverage_hit(
+                                    self.record_execution_hit(
                                         program_id,
                                         context.prototype,
                                         function,
@@ -21487,28 +21559,44 @@ impl Vm {
         true
     }
 
-    fn record_coverage_hit(
+    #[inline]
+    fn record_execution_hit(
         &mut self,
         program_id: Option<u32>,
         prototype: Option<u32>,
         function: &Function,
         pc: usize,
     ) {
-        if !self.settings.enable_conformance_coverage {
+        if !self.settings.enable_conformance_coverage && !self.settings.enable_opcode_profiling {
             return;
         }
-        let Some(prototype) = prototype else {
-            return;
-        };
-        let Some(line) = function.source_line(pc) else {
-            return;
-        };
-        let key = CoverageKey {
-            program: program_id,
-            prototype,
-            line,
-        };
-        *self.coverage_hits.entry(key).or_insert(0) += 1;
+        if self.settings.enable_conformance_coverage {
+            if let Some(prototype) = prototype {
+                if let Some(line) = function.source_line(pc) {
+                    let key = CoverageKey {
+                        program: program_id,
+                        prototype,
+                        line,
+                    };
+                    *self.coverage_hits.entry(key).or_insert(0) += 1;
+                }
+            }
+        }
+        if self.settings.enable_opcode_profiling {
+            let key = OpcodeProfileKey {
+                program: program_id,
+                prototype,
+                pc,
+            };
+            *self.opcode_profile_hits.entry(key).or_insert(0) += 1;
+        }
+    }
+}
+
+fn opcode_profile_function(program: &Program, prototype: Option<u32>) -> Option<&Function> {
+    match prototype {
+        Some(prototype) => program.functions.get(prototype as usize),
+        None => Some(&program.main),
     }
 }
 
@@ -28912,6 +29000,40 @@ mod tests {
             Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
             vec![],
         )
+    }
+
+    #[test]
+    fn opcode_profile_snapshot_records_hits_when_enabled() {
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::Return, 0, 1, 0),
+                ],
+                1,
+            ),
+            vec![Constant::Number(7.0)],
+        );
+        let mut disabled = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(disabled.run(&program).unwrap().as_number(), Some(7.0));
+        assert_eq!(disabled.opcode_profile_snapshot(&program).total_hits, 0);
+
+        let settings = VmSettings {
+            enable_opcode_profiling: true,
+            ..VmSettings::default()
+        };
+        let mut enabled = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        assert_eq!(enabled.run(&program).unwrap().as_number(), Some(7.0));
+        let snapshot = enabled.opcode_profile_snapshot(&program);
+        assert_eq!(snapshot.total_hits, 2);
+        assert!(snapshot
+            .entries
+            .iter()
+            .any(|entry| entry.pc == 0 && entry.opcode == Opcode::LoadConst && entry.hits == 1));
+        assert!(snapshot
+            .entries
+            .iter()
+            .any(|entry| entry.pc == 1 && entry.opcode == Opcode::Return && entry.hits == 1));
     }
 
     #[test]
