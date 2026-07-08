@@ -205,6 +205,7 @@ struct TableGetInlineCacheEntry {
 #[derive(Clone, Copy)]
 enum TableGetInlineCacheSource {
     DirectSlot {
+        shape_slot: StringShapeSlotCache,
         hash_indices: StringSlotIndexCache,
     },
     DirectAbsent {
@@ -239,6 +240,7 @@ struct TableSetInlineCacheEntry {
 #[derive(Clone, Copy)]
 enum TableSetInlineCacheTarget {
     DirectSlot {
+        shape_slot: StringShapeSlotCache,
         hash_indices: StringSlotIndexCache,
     },
     NewIndexTable {
@@ -397,6 +399,23 @@ struct RawTableIntegerSetInlineCacheEntry {
 struct StringSlotIndexCache {
     len: u8,
     indices: [usize; TABLE_STRING_SLOT_INLINE_CACHE_WAYS],
+}
+
+#[derive(Clone, Copy)]
+struct StringShapeSlotCache {
+    table: u32,
+    table_shape_version: u64,
+    hash_index: usize,
+}
+
+impl StringShapeSlotCache {
+    fn new(table: u32, table_shape_version: u64, hash_index: usize) -> Self {
+        Self {
+            table,
+            table_shape_version,
+            hash_index,
+        }
+    }
 }
 
 impl StringSlotIndexCache {
@@ -9054,7 +9073,30 @@ impl Vm {
             return Ok(false);
         }
         match entry.target {
-            TableSetInlineCacheTarget::DirectSlot { hash_indices } => {
+            TableSetInlineCacheTarget::DirectSlot {
+                shape_slot,
+                hash_indices,
+            } => {
+                if shape_slot.table == table {
+                    match self
+                        .heap
+                        .write_string_shape_hash_slot_at_index(
+                            table,
+                            key_atom,
+                            shape_slot.table_shape_version,
+                            shape_slot.hash_index,
+                            value,
+                        )
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "table handle is missing",
+                            })
+                        })? {
+                        HashWriteStatus::Stored => return Ok(true),
+                        HashWriteStatus::Deferred => {}
+                        HashWriteStatus::Readonly => return Err(readonly_table_error()),
+                    }
+                }
                 for hash_index in hash_indices.iter() {
                     match self
                         .heap
@@ -9194,11 +9236,22 @@ impl Vm {
             })? {
             StringIndexWriteStatus::Stored { hash_index } => {
                 if let Some(hash_index) = hash_index {
+                    let table_shape_version =
+                        self.heap.table_shape_version(table).ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "table handle is missing",
+                            })
+                        })?;
                     self.store_table_set_inline_cache(
                         site,
                         TableSetInlineCacheEntry {
                             key_atom,
                             target: TableSetInlineCacheTarget::DirectSlot {
+                                shape_slot: StringShapeSlotCache::new(
+                                    table,
+                                    table_shape_version,
+                                    hash_index,
+                                ),
                                 hash_indices: self
                                     .table_set_string_slot_indices(site, key_atom, hash_index),
                             },
@@ -9354,7 +9407,7 @@ impl Vm {
             .flatten()
             .filter(|slot| slot.site == site && slot.entry.key_atom == key_atom)
             .and_then(|slot| match slot.entry.target {
-                TableSetInlineCacheTarget::DirectSlot { hash_indices } => Some(hash_indices),
+                TableSetInlineCacheTarget::DirectSlot { hash_indices, .. } => Some(hash_indices),
                 TableSetInlineCacheTarget::NewIndexTable { .. }
                 | TableSetInlineCacheTarget::NewIndexFunction { .. } => None,
             })
@@ -9981,7 +10034,7 @@ impl Vm {
             return Ok(value);
         }
         if let Some(method) =
-            self.try_get_table_index_function_for_inline_cache(site, table, key, key_atom)?
+            self.try_get_table_index_function_for_inline_cache(site, table, key_atom)?
         {
             let results = self.call_value(
                 program,
@@ -10018,7 +10071,33 @@ impl Vm {
             return Ok(None);
         }
         match entry.source {
-            TableGetInlineCacheSource::DirectSlot { hash_indices } => {
+            TableGetInlineCacheSource::DirectSlot {
+                shape_slot,
+                hash_indices,
+            } => {
+                if shape_slot.table == table {
+                    let exact_slot = self
+                        .heap
+                        .read_string_shape_hash_slot_at_index(
+                            table,
+                            shape_slot.table_shape_version,
+                            shape_slot.hash_index,
+                        )
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "table handle is missing",
+                            })
+                        })?;
+                    if let Some(slot) = exact_slot {
+                        if slot.value.kind() != ValueKind::Nil
+                            || !slot.has_metatable
+                            || self.table_uses_standard_global_type_surface(table)?
+                        {
+                            return Ok(Some(slot.value));
+                        }
+                        return Ok(None);
+                    }
+                }
                 for hash_index in hash_indices.iter() {
                     let Some(slot) = self
                         .heap
@@ -10190,6 +10269,11 @@ impl Vm {
                     TableGetInlineCacheEntry {
                         key_atom,
                         source: TableGetInlineCacheSource::DirectSlot {
+                            shape_slot: StringShapeSlotCache::new(
+                                table,
+                                probe.shape_version,
+                                slot.index,
+                            ),
                             hash_indices: self
                                 .table_get_string_slot_indices(site, key_atom, slot.index),
                         },
@@ -10206,6 +10290,7 @@ impl Vm {
                     table_shape_version: probe.shape_version,
                 },
                 |slot| TableGetInlineCacheSource::DirectSlot {
+                    shape_slot: StringShapeSlotCache::new(table, probe.shape_version, slot.index),
                     hash_indices: self.table_get_string_slot_indices(site, key_atom, slot.index),
                 },
             );
@@ -10224,10 +10309,9 @@ impl Vm {
         &mut self,
         site: InlineCacheSite,
         table: u32,
-        key: Value,
         key_atom: u32,
     ) -> Result<Option<Value>> {
-        if let Some(raw) = self.raw_table_slot(table, key)? {
+        if let Some(raw) = self.raw_table_string_slot(table, key_atom)? {
             if raw.kind() != ValueKind::Nil
                 || self.table_uses_standard_global_type_surface(table)?
             {
@@ -10339,7 +10423,7 @@ impl Vm {
             .flatten()
             .filter(|slot| slot.site == site && slot.entry.key_atom == key_atom)
             .and_then(|slot| match slot.entry.source {
-                TableGetInlineCacheSource::DirectSlot { hash_indices } => Some(hash_indices),
+                TableGetInlineCacheSource::DirectSlot { hash_indices, .. } => Some(hash_indices),
                 TableGetInlineCacheSource::DirectAbsent { .. }
                 | TableGetInlineCacheSource::IndexTable { .. }
                 | TableGetInlineCacheSource::IndexFunction { .. } => None,
@@ -27931,10 +28015,14 @@ mod tests {
             .expect("repeated plain string writes should still populate the set cache");
         assert_eq!(slot.site, site);
         assert_eq!(slot.entry.key_atom, key_atom);
-        assert!(matches!(
-            slot.entry.target,
-            TableSetInlineCacheTarget::DirectSlot { .. }
-        ));
+        let shape_version = vm.heap.table_shape_version(table).unwrap();
+        match slot.entry.target {
+            TableSetInlineCacheTarget::DirectSlot { shape_slot, .. } => {
+                assert_eq!(shape_slot.table, table);
+                assert_eq!(shape_slot.table_shape_version, shape_version);
+            }
+            _ => panic!("plain string writes should cache an exact direct slot"),
+        }
         assert_eq!(
             vm.heap
                 .table_get(table, Value::string_atom(key_atom))
@@ -27942,6 +28030,80 @@ mod tests {
                 .as_number(),
             Some(4.0)
         );
+
+        let other_key = vm.heap.intern_string("y");
+        vm.heap
+            .table_set(table, Value::string_atom(other_key), Value::number(9.0))
+            .unwrap();
+        assert!(vm
+            .table_set_inline_cache_hit(site, table, key_atom, Value::number(5.0))
+            .unwrap());
+        assert_eq!(
+            vm.heap
+                .table_get(table, Value::string_atom(key_atom))
+                .unwrap()
+                .as_number(),
+            Some(5.0)
+        );
+    }
+
+    #[test]
+    fn string_get_inline_cache_records_exact_shape_slot() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let key_atom = vm.heap.intern_string("x");
+        let table = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(table, Value::string_atom(key_atom), Value::number(1.0))
+            .unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 8,
+        };
+        let mut fuel = None;
+
+        let value = vm
+            .get_table_string_index_with_inline_cache(
+                &program,
+                site,
+                table,
+                Value::string_atom(key_atom),
+                key_atom,
+                0,
+                &mut fuel,
+            )
+            .unwrap();
+        assert_eq!(value.as_number(), Some(1.0));
+
+        let shape_version = vm.heap.table_shape_version(table).unwrap();
+        let slot = vm.table_get_inline_cache[site.slot()]
+            .expect("plain string reads should populate the get cache");
+        assert_eq!(slot.site, site);
+        assert_eq!(slot.entry.key_atom, key_atom);
+        match slot.entry.source {
+            TableGetInlineCacheSource::DirectSlot {
+                shape_slot,
+                hash_indices,
+            } => {
+                assert_eq!(shape_slot.table, table);
+                assert_eq!(shape_slot.table_shape_version, shape_version);
+                assert_eq!(
+                    hash_indices.iter().collect::<Vec<_>>(),
+                    vec![shape_slot.hash_index]
+                );
+            }
+            _ => panic!("plain string reads should cache an exact direct slot"),
+        }
+
+        vm.heap
+            .table_set(table, Value::string_atom(key_atom), Value::number(2.0))
+            .unwrap();
+        let value = vm
+            .table_get_inline_cache_hit(site, table, key_atom)
+            .unwrap()
+            .expect("unchanged table shape should hit the direct cache");
+        assert_eq!(value.as_number(), Some(2.0));
     }
 
     #[test]
