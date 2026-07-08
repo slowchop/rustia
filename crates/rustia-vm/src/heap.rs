@@ -469,7 +469,6 @@ pub(crate) enum HashWriteStatus {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TableStringHashSlot {
     pub index: usize,
-    pub shape_version: u64,
     pub value: Value,
 }
 
@@ -1513,25 +1512,20 @@ impl VmCell {
             };
             Some(Some(TableStringHashSlot {
                 index,
-                shape_version: table.shape_version,
                 value: entry.value,
             }))
         })
     }
 
-    pub(crate) fn read_string_hash_slot_with_shape(
+    pub(crate) fn read_string_hash_slot_at_index(
         &mut self,
         table: u32,
         atom: u32,
-        shape_version: u64,
         index: usize,
     ) -> Option<Option<TableStringHashSlotRead>> {
         self.arena.mutate(|mc, root| {
             let root = root.unlock(mc).borrow();
             let table = root.tables.get(table as usize)?;
-            if table.shape_version != shape_version {
-                return Some(None);
-            }
             let Some(entry) = table.hash.get(index) else {
                 return Some(None);
             };
@@ -1545,11 +1539,10 @@ impl VmCell {
         })
     }
 
-    pub(crate) fn write_string_hash_slot_with_shape(
+    pub(crate) fn write_string_hash_slot_at_index(
         &mut self,
         table: u32,
         atom: u32,
-        shape_version: u64,
         index: usize,
         value: Value,
     ) -> Option<HashWriteStatus> {
@@ -1559,9 +1552,6 @@ impl VmCell {
                 root.weak_tables_possible = true;
             }
             let table = root.tables.get_mut(table as usize)?;
-            if table.shape_version != shape_version {
-                return Some(HashWriteStatus::Deferred);
-            }
             let has_metatable = table.metatable.is_some();
             let Some(entry) = table.hash.get_mut(index) else {
                 return Some(HashWriteStatus::Deferred);
@@ -2847,13 +2837,13 @@ mod tests {
         heap.table_set(table, Value::string_atom(key), Value::number(1.0))
             .unwrap();
         let slot = heap.table_string_hash_slot(table, key).unwrap().unwrap();
-        let shape_version = slot.shape_version;
+        let shape_version = heap.table_shape_version(table).unwrap();
 
         heap.table_set(table, Value::string_atom(key), Value::number(2.0))
             .unwrap();
         assert_eq!(heap.table_shape_version(table), Some(shape_version));
         let slot_read = heap
-            .read_string_hash_slot_with_shape(table, key, shape_version, slot.index)
+            .read_string_hash_slot_at_index(table, key, slot.index)
             .unwrap()
             .unwrap();
         assert_eq!(slot_read.value.as_number(), Some(2.0));
@@ -2883,23 +2873,50 @@ mod tests {
         heap.table_set(table, Value::string_atom(key), Value::number(1.0))
             .unwrap();
         let slot = heap.table_string_hash_slot(table, key).unwrap().unwrap();
+        let shape_version = heap.table_shape_version(table).unwrap();
 
         assert_eq!(
-            heap.write_string_hash_slot_with_shape(
-                table,
-                key,
-                slot.shape_version,
-                slot.index,
-                Value::number(2.0),
-            ),
+            heap.write_string_hash_slot_at_index(table, key, slot.index, Value::number(2.0)),
             Some(HashWriteStatus::Stored)
         );
-        assert_eq!(heap.table_shape_version(table), Some(slot.shape_version));
+        assert_eq!(heap.table_shape_version(table), Some(shape_version));
         assert_eq!(
             heap.table_get(table, Value::string_atom(key))
                 .unwrap()
                 .as_number(),
             Some(2.0)
         );
+    }
+
+    #[test]
+    fn string_hash_slot_indices_can_be_reused_across_matching_tables() {
+        let mut heap = VmCell::new();
+        let x = heap.intern_string("x");
+        let y = heap.intern_string("y");
+        let first = heap.alloc_array_table(&[]);
+        let second = heap.alloc_array_table(&[]);
+        let different = heap.alloc_array_table(&[]);
+
+        for table in [first, second] {
+            heap.table_set(table, Value::string_atom(x), Value::number(1.0))
+                .unwrap();
+            heap.table_set(table, Value::string_atom(y), Value::number(2.0))
+                .unwrap();
+        }
+        heap.table_set(different, Value::string_atom(y), Value::number(3.0))
+            .unwrap();
+        heap.table_set(different, Value::string_atom(x), Value::number(4.0))
+            .unwrap();
+
+        let x_slot = heap.table_string_hash_slot(first, x).unwrap().unwrap();
+        let second_read = heap
+            .read_string_hash_slot_at_index(second, x, x_slot.index)
+            .unwrap()
+            .unwrap();
+        assert_eq!(second_read.value.as_number(), Some(1.0));
+        assert!(heap
+            .read_string_hash_slot_at_index(different, x, x_slot.index)
+            .unwrap()
+            .is_none());
     }
 }

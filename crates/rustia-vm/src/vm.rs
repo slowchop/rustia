@@ -187,8 +187,6 @@ struct TableGetInlineCacheEntry {
 #[derive(Clone, Copy)]
 enum TableGetInlineCacheSource {
     DirectSlot {
-        table: u32,
-        table_shape_version: u64,
         hash_index: usize,
     },
     DirectAbsent {
@@ -197,10 +195,8 @@ enum TableGetInlineCacheSource {
     },
     IndexTable {
         metatable: u32,
-        metatable_shape_version: u64,
         metatable_hash_index: usize,
         index_table: u32,
-        index_table_shape_version: u64,
         index_table_hash_index: usize,
     },
 }
@@ -213,9 +209,7 @@ struct TableSetInlineCacheSlot {
 
 #[derive(Clone, Copy)]
 struct TableSetInlineCacheEntry {
-    table: u32,
     key_atom: u32,
-    table_shape_version: u64,
     hash_index: usize,
 }
 
@@ -7160,18 +7154,12 @@ impl Vm {
             return Ok(false);
         }
         let entry = slot.entry;
-        if entry.table != table || entry.key_atom != key_atom {
+        if entry.key_atom != key_atom {
             return Ok(false);
         }
         match self
             .heap
-            .write_string_hash_slot_with_shape(
-                table,
-                key_atom,
-                entry.table_shape_version,
-                entry.hash_index,
-                value,
-            )
+            .write_string_hash_slot_at_index(table, key_atom, entry.hash_index, value)
             .ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "table handle is missing",
@@ -7216,13 +7204,7 @@ impl Vm {
         }
         match self
             .heap
-            .write_string_hash_slot_with_shape(
-                table,
-                key_atom,
-                slot.shape_version,
-                slot.index,
-                value,
-            )
+            .write_string_hash_slot_at_index(table, key_atom, slot.index, value)
             .ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "table handle is missing",
@@ -7232,9 +7214,7 @@ impl Vm {
                 self.store_table_set_inline_cache(
                     site,
                     TableSetInlineCacheEntry {
-                        table,
                         key_atom,
-                        table_shape_version: slot.shape_version,
                         hash_index: slot.index,
                     },
                 );
@@ -7309,22 +7289,10 @@ impl Vm {
             return Ok(None);
         }
         match entry.source {
-            TableGetInlineCacheSource::DirectSlot {
-                table: cached_table,
-                table_shape_version,
-                hash_index,
-            } => {
-                if cached_table != table {
-                    return Ok(None);
-                }
+            TableGetInlineCacheSource::DirectSlot { hash_index } => {
                 let Some(slot) = self
                     .heap
-                    .read_string_hash_slot_with_shape(
-                        table,
-                        key_atom,
-                        table_shape_version,
-                        hash_index,
-                    )
+                    .read_string_hash_slot_at_index(table, key_atom, hash_index)
                     .ok_or_else(|| {
                         Error::new(ErrorKind::InvalidProgram {
                             reason: "table handle is missing",
@@ -7366,10 +7334,8 @@ impl Vm {
             }
             TableGetInlineCacheSource::IndexTable {
                 metatable,
-                metatable_shape_version,
                 metatable_hash_index,
                 index_table,
-                index_table_shape_version,
                 index_table_hash_index,
             } => {
                 if let Some(raw) = self.raw_table_slot(table, key)? {
@@ -7390,12 +7356,7 @@ impl Vm {
                 let index_atom = self.heap.intern_string("__index");
                 let Some(index_slot) = self
                     .heap
-                    .read_string_hash_slot_with_shape(
-                        metatable,
-                        index_atom,
-                        metatable_shape_version,
-                        metatable_hash_index,
-                    )
+                    .read_string_hash_slot_at_index(metatable, index_atom, metatable_hash_index)
                     .ok_or_else(|| {
                         Error::new(ErrorKind::InvalidProgram {
                             reason: "__index metatable handle is missing",
@@ -7409,12 +7370,7 @@ impl Vm {
                 }
                 let Some(value_slot) = self
                     .heap
-                    .read_string_hash_slot_with_shape(
-                        index_table,
-                        key_atom,
-                        index_table_shape_version,
-                        index_table_hash_index,
-                    )
+                    .read_string_hash_slot_at_index(index_table, key_atom, index_table_hash_index)
                     .ok_or_else(|| {
                         Error::new(ErrorKind::InvalidProgram {
                             reason: "__index table handle is missing",
@@ -7460,8 +7416,6 @@ impl Vm {
                     TableGetInlineCacheEntry {
                         key_atom,
                         source: TableGetInlineCacheSource::DirectSlot {
-                            table,
-                            table_shape_version: slot.shape_version,
                             hash_index: slot.index,
                         },
                     },
@@ -7482,8 +7436,6 @@ impl Vm {
                     table_shape_version,
                 },
                 |slot| TableGetInlineCacheSource::DirectSlot {
-                    table,
-                    table_shape_version: slot.shape_version,
                     hash_index: slot.index,
                 },
             );
@@ -7540,10 +7492,8 @@ impl Vm {
                 key_atom,
                 source: TableGetInlineCacheSource::IndexTable {
                     metatable,
-                    metatable_shape_version: index_slot.shape_version,
                     metatable_hash_index: index_slot.index,
                     index_table,
-                    index_table_shape_version: value_slot.shape_version,
                     index_table_hash_index: value_slot.index,
                 },
             },
