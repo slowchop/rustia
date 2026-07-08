@@ -1029,6 +1029,8 @@ struct RustiaBytecodeSummary {
     raw_table: usize,
     iteration: usize,
     opcodes: BTreeMap<String, usize>,
+    quickening_pairs: BTreeMap<String, usize>,
+    loop_bodies: BTreeMap<String, usize>,
 }
 
 #[cfg(feature = "rustia-engine")]
@@ -1063,15 +1065,37 @@ fn print_rustia_bytecode_summary(repo: &Path, workloads: &[&Workload]) -> Result
 
     for (workload, summary) in summaries {
         println!("\n## {workload}\n");
-        println!("| opcode | count |");
-        println!("| --- | ---: |");
-        let mut opcodes = summary.opcodes.into_iter().collect::<Vec<_>>();
-        opcodes.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
-        for (opcode, count) in opcodes {
-            println!("| {opcode} | {count} |");
-        }
+        print_rustia_count_table("Opcodes", "opcode", &summary.opcodes, None);
+        print_rustia_count_table(
+            "Quickening Candidate Pairs",
+            "pair",
+            &summary.quickening_pairs,
+            Some(10),
+        );
+        print_rustia_count_table("Loop Bodies", "sequence", &summary.loop_bodies, Some(10));
     }
     Ok(())
+}
+
+#[cfg(feature = "rustia-engine")]
+fn print_rustia_count_table(
+    title: &str,
+    key_header: &str,
+    counts: &BTreeMap<String, usize>,
+    limit: Option<usize>,
+) {
+    println!("### {title}\n");
+    println!("| {key_header} | count |");
+    println!("| --- | ---: |");
+    let mut entries = counts.iter().collect::<Vec<_>>();
+    entries.sort_by(|left, right| right.1.cmp(left.1).then_with(|| left.0.cmp(right.0)));
+    for (key, count) in entries.into_iter().take(limit.unwrap_or(usize::MAX)) {
+        println!("| {key} | {count} |");
+    }
+    if counts.is_empty() {
+        println!("| none | 0 |");
+    }
+    println!();
 }
 
 #[cfg(not(feature = "rustia-engine"))]
@@ -1202,6 +1226,33 @@ fn summarize_rustia_bytecode(program: &Program) -> RustiaBytecodeSummary {
 
 #[cfg(feature = "rustia-engine")]
 fn summarize_rustia_function_bytecode(code: &[Instruction], summary: &mut RustiaBytecodeSummary) {
+    for pair in code.windows(2) {
+        let left = pair[0].op;
+        let right = pair[1].op;
+        if opcode_pair_is_quickening_candidate(left, right) {
+            *summary
+                .quickening_pairs
+                .entry(format!("{left:?} -> {right:?}"))
+                .or_default() += 1;
+        }
+    }
+
+    for (pc, instruction) in code.iter().enumerate() {
+        if !opcode_is_loop_backedge(instruction.op) {
+            continue;
+        }
+        let Ok(start) = usize::try_from(instruction.aux) else {
+            continue;
+        };
+        if start >= pc || start >= code.len() {
+            continue;
+        }
+        *summary
+            .loop_bodies
+            .entry(format_loop_body_sequence(&code[start..=pc]))
+            .or_default() += 1;
+    }
+
     for instruction in code {
         let opcode = instruction.op;
         summary.total += 1;
@@ -1230,6 +1281,43 @@ fn summarize_rustia_function_bytecode(code: &[Instruction], summary: &mut Rustia
             summary.iteration += 1;
         }
     }
+}
+
+#[cfg(feature = "rustia-engine")]
+fn opcode_pair_is_quickening_candidate(left: Opcode, right: Opcode) -> bool {
+    opcode_is_table_related(left)
+        || opcode_is_table_related(right)
+        || opcode_is_iteration_related(left)
+        || opcode_is_iteration_related(right)
+        || opcode_is_loop_backedge(left)
+        || opcode_is_loop_backedge(right)
+}
+
+#[cfg(feature = "rustia-engine")]
+fn opcode_is_loop_backedge(opcode: Opcode) -> bool {
+    matches!(
+        opcode,
+        Opcode::ForLoop
+            | Opcode::ForLoopStepOne
+            | Opcode::IpairsLoop
+            | Opcode::PairsLoop
+            | Opcode::GenericCallLoop
+            | Opcode::GeneralizedIterLoop
+    )
+}
+
+#[cfg(feature = "rustia-engine")]
+fn format_loop_body_sequence(code: &[Instruction]) -> String {
+    const MAX_SEQUENCE_OPCODES: usize = 14;
+    let mut parts = code
+        .iter()
+        .take(MAX_SEQUENCE_OPCODES)
+        .map(|instruction| format!("{:?}", instruction.op))
+        .collect::<Vec<_>>();
+    if code.len() > MAX_SEQUENCE_OPCODES {
+        parts.push("...".to_string());
+    }
+    parts.join(" -> ")
 }
 
 #[cfg(feature = "rustia-engine")]
