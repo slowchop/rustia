@@ -31,6 +31,7 @@ pub const MAX_RECURSION_LIMIT: usize = 512;
 const LUAU_TAIL_CALL_LIMIT: usize = 20_000;
 const GLOBAL_GET_INLINE_CACHE_SLOTS: usize = 1024;
 const DEFAULT_DETERMINISTIC_GC_INTERVAL: u64 = 100_000;
+const GC_DEBT_CHECK_INTERVAL: u64 = 64;
 const STRING_FORMAT_PLAN_CACHE_MAX: usize = 256;
 const REGISTER_POOL_MAX_FRAMES: usize = 64;
 const REGISTER_POOL_MAX_REGISTERS: usize = 256;
@@ -21079,7 +21080,9 @@ impl Vm {
                     self.deterministic_collection_count.wrapping_add(1);
             }
         } else {
-            self.heap.collect_debt();
+            if collection_due || self.executed_instructions % GC_DEBT_CHECK_INTERVAL == 0 {
+                self.heap.collect_debt();
+            }
             if collection_due && !self.gc_stopped {
                 self.refresh_current_gc_roots_if_dirty(
                     roots_dirty,
