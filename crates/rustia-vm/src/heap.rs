@@ -833,7 +833,7 @@ impl VmCell {
             root.tables.push(TableData {
                 array,
                 hash: Vec::with_capacity(hash_capacity_hint),
-                hash_index: Vec::new(),
+                hash_index: initial_hash_index_for_capacity_hint(hash_capacity_hint),
                 readonly: false,
                 metatable: None,
                 version: 0,
@@ -2895,6 +2895,19 @@ fn record_hash_remove(table: &mut TableData, removed_index: usize) {
     rebuild_hash_index(table);
 }
 
+fn initial_hash_index_for_capacity_hint(
+    hash_capacity_hint: usize,
+) -> Vec<Option<TableHashIndexEntry>> {
+    if hash_capacity_hint < TABLE_HASH_INDEX_MIN_LEN {
+        return Vec::new();
+    }
+    let capacity = hash_capacity_hint
+        .saturating_mul(2)
+        .next_power_of_two()
+        .max(TABLE_HASH_INDEX_MIN_LEN * 4);
+    vec![None; capacity]
+}
+
 fn rebuild_hash_index(table: &mut TableData) {
     table.hash_index.clear();
     let capacity = table
@@ -3483,6 +3496,30 @@ mod tests {
             .unwrap();
 
         assert_ne!(heap.table_shape_version(table), Some(shape_version));
+        assert_eq!(
+            heap.table_integer_hash_slot(table, 20)
+                .unwrap()
+                .unwrap()
+                .value
+                .as_number(),
+            Some(7.0)
+        );
+    }
+
+    #[test]
+    fn hash_capacity_hint_initializes_hash_index() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table_with_capacity(&[], 0, 128);
+
+        heap.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize).unwrap();
+            assert_eq!(table.hash.capacity(), 128);
+            assert_eq!(table.hash_index.len(), 256);
+        });
+
+        heap.table_set(table, Value::number(20.0), Value::number(7.0))
+            .unwrap();
         assert_eq!(
             heap.table_integer_hash_slot(table, 20)
                 .unwrap()
