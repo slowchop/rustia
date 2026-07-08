@@ -1362,6 +1362,37 @@ impl Compiler {
             return Ok(true);
         }
 
+        if let SimpleAssignmentKey::Constant(Constant::Number(index)) = &key {
+            if index.is_finite()
+                && index.fract() == 0.0
+                && (1.0..=f64::from(i32::MAX)).contains(index)
+            {
+                self.mark_table_assignment_mutation(
+                    global_field,
+                    stdlib_field,
+                    may_mutate_stdlib_table,
+                );
+                let value_is_scalar_temporary = self.expr_is_known_scalar_temp(value);
+                let value_register = self.compile_expr(value)?;
+                self.emit_source_mapped_instruction(
+                    Instruction::with_aux(
+                        Opcode::SetIndexNumberConst,
+                        table_register,
+                        value_register,
+                        0,
+                        *index as i32,
+                    ),
+                    value.span(),
+                );
+                if value_is_scalar_temporary {
+                    self.free_register_without_clear(value_register);
+                } else {
+                    self.free_register(value_register);
+                }
+                return Ok(true);
+            }
+        }
+
         let key_register;
         let key_is_temporary;
         let key_is_scalar_temporary;
@@ -11376,6 +11407,41 @@ return t[1]
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(1.0));
+    }
+
+    #[test]
+    fn constant_numeric_table_writes_use_direct_opcode() {
+        let chunk = parse_source("local t = {} t[1] = 7 return t[1]").unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::SetIndexNumberConst), 1);
+        assert_eq!(opcode_count(&program, Opcode::SetIndexNumber), 0);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(7.0));
+    }
+
+    #[test]
+    fn constant_numeric_table_writes_preserve_newindex_fallback() {
+        let chunk = parse_source(
+            r#"
+local seen = 0
+local t = setmetatable({}, {
+    __newindex = function(_, k, v)
+        seen = k + v
+    end,
+})
+t[3] = 4
+return seen
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::SetIndexNumberConst), 1);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(7.0));
     }
 
     #[test]

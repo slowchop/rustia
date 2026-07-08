@@ -3023,6 +3023,45 @@ impl Vm {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })?;
                             }
+                            Opcode::SetIndexNumberConst => {
+                                let object =
+                                    get_register(&registers, instruction.a).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let value =
+                                    get_register(&registers, instruction.b).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let Some(index) = array_iterator_index(f64::from(instruction.aux))
+                                else {
+                                    return Err(Error::new(ErrorKind::InvalidProgram {
+                                        reason: "invalid constant numeric table set index",
+                                    })
+                                    .at_pc(pc - 1));
+                                };
+                                if let Some(table) = object.as_table() {
+                                    if self
+                                        .set_table_integer_index_fast(table, index, value)
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })?
+                                    {
+                                        continue;
+                                    }
+                                }
+                                let key = Value::number(f64::from(instruction.aux));
+                                self.set_index_value(
+                                    program,
+                                    object,
+                                    key,
+                                    value,
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })?;
+                            }
                             Opcode::SetIndexStringConst => {
                                 if instruction.aux < 0 {
                                     return Err(Error::new(ErrorKind::InvalidProgram {
@@ -18643,6 +18682,7 @@ fn opcode_may_observe_current_roots(op: Opcode) -> bool {
         | Opcode::GetIndexNumberConst
         | Opcode::GetIndexStringConst
         | Opcode::SetIndexNumber
+        | Opcode::SetIndexNumberConst
         | Opcode::SetIndexStringConst
         | Opcode::ConcatArgs
         | Opcode::ReturnCall
