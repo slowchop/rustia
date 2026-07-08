@@ -1889,23 +1889,25 @@ impl VmCell {
             {
                 return Some(false);
             }
-            let mut values = Vec::with_capacity(len);
-            for value in table.array.iter().copied().take(len) {
-                let Some(number) = value.as_number() else {
-                    return Some(false);
-                };
-                if !number.is_finite() {
-                    return Some(false);
-                }
-                values.push(number);
+            if !table
+                .array
+                .iter()
+                .take(len)
+                .all(|value| value.as_number().is_some_and(f64::is_finite))
+            {
+                return Some(false);
             }
-            values.sort_by(|left, right| {
-                left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
-            });
             bump_table_version(table);
-            for (slot, value) in table.array.iter_mut().zip(values) {
-                *slot = Value::number(value);
-            }
+            table.array[..len].sort_by(|left, right| {
+                let left = left
+                    .as_number()
+                    .expect("numeric table sort validated number values");
+                let right = right
+                    .as_number()
+                    .expect("numeric table sort validated number values");
+                left.partial_cmp(&right)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             Some(true)
         })
     }
@@ -3370,6 +3372,54 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert_eq!(values[0].as_number(), Some(2.0));
         assert_eq!(values[1].as_number(), Some(3.0));
+    }
+
+    #[test]
+    fn table_sort_numeric_array_sorts_number_prefix_in_place() {
+        let mut heap = VmCell::new();
+        let table =
+            heap.alloc_array_table(&[Value::number(3.0), Value::number(1.0), Value::number(2.0)]);
+
+        assert_eq!(heap.table_sort_numeric_array(table, 3), Some(true));
+
+        assert_eq!(
+            heap.array_slot(table, 1).unwrap().unwrap().as_number(),
+            Some(1.0)
+        );
+        assert_eq!(
+            heap.array_slot(table, 2).unwrap().unwrap().as_number(),
+            Some(2.0)
+        );
+        assert_eq!(
+            heap.array_slot(table, 3).unwrap().unwrap().as_number(),
+            Some(3.0)
+        );
+    }
+
+    #[test]
+    fn table_sort_numeric_array_defers_mixed_values() {
+        let mut heap = VmCell::new();
+        let atom = heap.intern_string("a");
+        let table = heap.alloc_array_table(&[
+            Value::number(3.0),
+            Value::string_atom(atom),
+            Value::number(2.0),
+        ]);
+
+        assert_eq!(heap.table_sort_numeric_array(table, 3), Some(false));
+
+        assert_eq!(
+            heap.array_slot(table, 1).unwrap().unwrap().as_number(),
+            Some(3.0)
+        );
+        assert_eq!(
+            heap.array_slot(table, 2).unwrap().unwrap().as_string_atom(),
+            Some(atom)
+        );
+        assert_eq!(
+            heap.array_slot(table, 3).unwrap().unwrap().as_number(),
+            Some(2.0)
+        );
     }
 
     #[test]
