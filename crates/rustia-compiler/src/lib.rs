@@ -3791,15 +3791,7 @@ impl Compiler {
             extra_registers.push(self.alloc_register_at(span)?);
         }
 
-        let prep_instruction =
-            if matches!(iterator, GenericArrayIterator::Ipairs) && skip_visible_key {
-                self.ipairs_field_skip_key_prep_instruction(table_expr, table_register)?
-            } else {
-                None
-            };
-        if prep_instruction.is_none() {
-            self.compile_expr_to(table_expr, table_register)?;
-        }
+        self.compile_expr_to(table_expr, table_register)?;
         if !skip_visible_key {
             self.locals
                 .insert(variables[0].name.clone(), Binding::Register(key_register));
@@ -3820,15 +3812,13 @@ impl Compiler {
         }
 
         let prep_jump = self.code.len();
-        self.code.push(prep_instruction.unwrap_or_else(|| {
-            Instruction::with_aux(
-                iterator.prep_opcode(),
-                table_register,
-                0,
-                iterator_key_flag,
-                0,
-            )
-        }));
+        self.code.push(Instruction::with_aux(
+            iterator.prep_opcode(),
+            table_register,
+            0,
+            iterator_key_flag,
+            0,
+        ));
         let body_start = self.code.len();
         for register in &extra_registers {
             self.clear_local_cell(*register);
@@ -3857,30 +3847,6 @@ impl Compiler {
         self.locals = locals;
         self.next_register = next_register;
         Ok(())
-    }
-
-    fn ipairs_field_skip_key_prep_instruction(
-        &mut self,
-        table_expr: &Expr,
-        table_register: u8,
-    ) -> Result<Option<Instruction>> {
-        let Expr::Field { object, field, .. } = expr_without_parens(table_expr) else {
-            return Ok(None);
-        };
-        let Some(object_register) = self.simple_register_expr(object) else {
-            return Ok(None);
-        };
-        let key = self.string_constant_operand(field.as_bytes())?;
-        let Ok(key) = u8::try_from(key) else {
-            return Ok(None);
-        };
-        Ok(Some(Instruction::with_aux(
-            Opcode::IpairsPrepFieldStringConstSkipKey,
-            table_register,
-            object_register,
-            key,
-            0,
-        )))
     }
 
     fn compile_generic_call_for(
@@ -10576,90 +10542,6 @@ return sum
             let result = vm.run(&program).unwrap();
             assert_eq!(vm.string_value(result).unwrap().as_deref(), Some(expected));
         }
-    }
-
-    #[test]
-    fn ipairs_field_with_unused_key_uses_combined_prep() {
-        let chunk = parse_source(
-            r#"
-local c = { items = { 1, 2, 3 } }
-local acc = 0
-for _, v in ipairs(c.items) do
-    acc = acc + v
-end
-return acc
-"#,
-        )
-        .unwrap();
-        let program = compile(&chunk).unwrap();
-        assert_eq!(
-            opcode_count(&program, Opcode::IpairsPrepFieldStringConstSkipKey),
-            1,
-            "{:?}",
-            program.main.code
-        );
-
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let result = vm.run(&program).unwrap();
-        assert_eq!(result.as_number(), Some(6.0));
-    }
-
-    #[test]
-    fn ipairs_field_combined_prep_preserves_index_fallback() {
-        let chunk = parse_source(
-            r#"
-local c = setmetatable({}, {
-    __index = function(_, key)
-        if key == "items" then
-            return { 4, 5 }
-        end
-    end,
-})
-local acc = 0
-for _, v in ipairs(c.items) do
-    acc = acc + v
-end
-return acc
-"#,
-        )
-        .unwrap();
-        let program = compile(&chunk).unwrap();
-        assert_eq!(
-            opcode_count(&program, Opcode::IpairsPrepFieldStringConstSkipKey),
-            1,
-            "{:?}",
-            program.main.code
-        );
-
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let result = vm.run(&program).unwrap();
-        assert_eq!(result.as_number(), Some(9.0));
-    }
-
-    #[test]
-    fn ipairs_field_keeps_visible_key_path_separate() {
-        let chunk = parse_source(
-            r#"
-local c = { items = { 1, 2, 3 } }
-local acc = 0
-for k, v in ipairs(c.items) do
-    acc = acc + k + v
-end
-return acc
-"#,
-        )
-        .unwrap();
-        let program = compile(&chunk).unwrap();
-        assert_eq!(
-            opcode_count(&program, Opcode::IpairsPrepFieldStringConstSkipKey),
-            0,
-            "{:?}",
-            program.main.code
-        );
-
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let result = vm.run(&program).unwrap();
-        assert_eq!(result.as_number(), Some(12.0));
     }
 
     #[test]
