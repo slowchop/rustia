@@ -19,6 +19,7 @@ Baseline for this branch is the old pre-perf CI artifact at `a728ee7`.
 | `1c802df` | skip fuel cost lookup when fuel is disabled | runs `28964187207`/`28964565694`: average total median 0.8% faster vs `31955f8`, with dense/generic/stdlib/closures faster and sparse median 0.3% slower; about 19.1-19.4% faster vs old baseline |
 | `c669e48` | add quickening sequence feedback to the bytecode summary | tooling only; reports adjacent table/iteration pairs and loop-body opcode sequences so superinstruction candidates are evidence-backed |
 | `9105988` | feature-gate dynamic opcode profiling and hot-site summary | tooling only; runs `28968775343`/`28968901905` averaged total median +0.20% and total min -0.05% vs `1c802df` average, with the second run back at normal `generic_iteration` levels |
+| `474b9da` | quicken `GetUpvalue -> GetIndex` for integer table reads | runs `28969471980`/`28969579753`: average total median 1.17% faster vs `9105988` average and 0.97% faster vs `1c802df` average; `generic_iteration` improved 4.91% vs the noisy `9105988` average but remains 1.41% slower than `1c802df`, while dense regressed 0.77-2.24% |
 
 ## Reverted Candidates
 
@@ -68,6 +69,12 @@ The failed `02c5867` sparse read-pair opcode showed that even a targeted
 superinstruction can disturb unrelated workloads enough to lose branch/codegen
 locality; future sparse work should measure whole-suite impact before keeping
 small targeted wins.
+The kept `474b9da` upvalue-index quickening is intentionally narrow: it only
+skips a following `GetIndex` when the upvalue is a table, the key is a clean
+integer, and the existing direct table integer fast path returns without
+metamethod behavior. It was kept on total-score evidence, but the workload mix
+shows code-layout sensitivity; do not stack more `GetUpvalue` quickening cases
+without repeat CI runs.
 
 `cargo run -p script-bench-harness -- --rustia-inline-cache-summary` runs the
 default workloads with `n=64` and reports final atom/IC side-table occupancy.
