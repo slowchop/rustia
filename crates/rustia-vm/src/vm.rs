@@ -21567,9 +21567,20 @@ impl Vm {
         function: &Function,
         pc: usize,
     ) {
-        if !self.settings.enable_conformance_coverage && !self.settings.enable_opcode_profiling {
-            return;
+        if self.settings.enable_conformance_coverage || self.settings.enable_opcode_profiling {
+            self.record_execution_hit_slow(program_id, prototype, function, pc);
         }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn record_execution_hit_slow(
+        &mut self,
+        program_id: Option<u32>,
+        prototype: Option<u32>,
+        function: &Function,
+        pc: usize,
+    ) {
         if self.settings.enable_conformance_coverage {
             if let Some(prototype) = prototype {
                 if let Some(line) = function.source_line(pc) {
