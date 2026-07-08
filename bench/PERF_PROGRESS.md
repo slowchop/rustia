@@ -32,6 +32,7 @@ CI bench runner. Do not retry them without a materially different approach.
 | `7a9f45a` reuse string hash vacant probe on write | `cda4211` | total median +3.42%, sparse +7.92% |
 | `6834b2d` combined integer table read helper | `b86b693` | run `28959453661`: total median +0.54% vs `441b29b` repeat, sparse +0.71% |
 | `8f366af` in-place numeric `table.sort` | `0350940` | run `28959846761`: total median +3.42% vs `441b29b` repeat, dense +3.83% |
+| `4c9c452` cached inline-cache site slots | `d7b818e` | run `28960416444`: total median +3.21% vs `441b29b` repeat, sparse +7.35% |
 
 ## Current Shape Feedback
 
