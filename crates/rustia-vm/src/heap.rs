@@ -419,12 +419,6 @@ struct TableHashIndexEntry {
     index: usize,
 }
 
-#[derive(Clone, Copy)]
-enum TableHashLookup {
-    Found(usize),
-    Missing { hash_index_position: Option<usize> },
-}
-
 #[derive(Clone, Copy, Collect)]
 #[collect(no_drop)]
 struct ConcatIntegerCacheEntry {
@@ -1488,46 +1482,35 @@ impl VmCell {
             let table = root.tables.get_mut(table as usize)?;
             let has_metatable = table.metatable.is_some();
             let key = TableKey::String(atom);
-            match table_hash_lookup(table, key) {
-                TableHashLookup::Found(index) => {
-                    let Some(entry) = table.hash.get_mut(index) else {
-                        return Some(StringIndexWriteStatus::Deferred);
-                    };
-                    if entry.value.kind() == ValueKind::Nil && has_metatable {
-                        return Some(StringIndexWriteStatus::Deferred);
-                    }
-                    if table.readonly {
-                        return Some(StringIndexWriteStatus::Readonly);
-                    }
-                    entry.value = value;
-                    bump_table_version(table);
-                    return Some(StringIndexWriteStatus::Stored {
-                        hash_index: Some(index),
-                    });
+            if let Some(index) = table_hash_entry_index(table, key) {
+                let Some(entry) = table.hash.get_mut(index) else {
+                    return Some(StringIndexWriteStatus::Deferred);
+                };
+                if entry.value.kind() == ValueKind::Nil && has_metatable {
+                    return Some(StringIndexWriteStatus::Deferred);
                 }
-                TableHashLookup::Missing {
-                    hash_index_position,
-                } => {
-                    if has_metatable {
-                        return Some(StringIndexWriteStatus::Deferred);
-                    }
-                    if table.readonly {
-                        return Some(StringIndexWriteStatus::Readonly);
-                    }
-                    bump_table_version(table);
-                    if value.kind() != ValueKind::Nil {
-                        let index = insert_hash_key_absent_at_position(
-                            table,
-                            key,
-                            Value::string_atom(atom),
-                            value,
-                            hash_index_position,
-                        );
-                        return Some(StringIndexWriteStatus::Stored {
-                            hash_index: Some(index),
-                        });
-                    }
+                if table.readonly {
+                    return Some(StringIndexWriteStatus::Readonly);
                 }
+                entry.value = value;
+                bump_table_version(table);
+                return Some(StringIndexWriteStatus::Stored {
+                    hash_index: Some(index),
+                });
+            }
+            if has_metatable {
+                return Some(StringIndexWriteStatus::Deferred);
+            }
+            if table.readonly {
+                return Some(StringIndexWriteStatus::Readonly);
+            }
+            bump_table_version(table);
+            if value.kind() != ValueKind::Nil {
+                let index = table.hash.len();
+                insert_hash_key_absent(table, key, Value::string_atom(atom), value);
+                return Some(StringIndexWriteStatus::Stored {
+                    hash_index: Some(index),
+                });
             }
             Some(StringIndexWriteStatus::Stored { hash_index: None })
         })
@@ -2813,39 +2796,14 @@ fn concat_integer_direct_cache_slot(key: u64) -> usize {
 }
 
 fn set_hash_key(table: &mut TableData, key: TableKey, key_value: Value, value: Value) {
-    match table_hash_lookup(table, key) {
-        TableHashLookup::Found(index) => {
-            if let Some(entry) = table.hash.get_mut(index) {
-                entry.value = value;
-            }
-        }
-        TableHashLookup::Missing {
-            hash_index_position,
-        } => {
-            if value.kind() != ValueKind::Nil {
-                insert_hash_key_absent_at_position(
-                    table,
-                    key,
-                    key_value,
-                    value,
-                    hash_index_position,
-                );
-            }
-        }
+    if let Some(entry) = table_hash_entry_mut(table, key) {
+        entry.value = value;
+    } else if value.kind() != ValueKind::Nil {
+        insert_hash_key_absent(table, key, key_value, value);
     }
 }
 
 fn insert_hash_key_absent(table: &mut TableData, key: TableKey, key_value: Value, value: Value) {
-    insert_hash_key_absent_at_position(table, key, key_value, value, None);
-}
-
-fn insert_hash_key_absent_at_position(
-    table: &mut TableData,
-    key: TableKey,
-    key_value: Value,
-    value: Value,
-    hash_index_position: Option<usize>,
-) -> usize {
     let index = table.hash.len();
     table.hash.push(TableEntry {
         key,
@@ -2853,8 +2811,7 @@ fn insert_hash_key_absent_at_position(
         value,
     });
     bump_table_shape_version(table);
-    record_hash_insert_at_position(table, key, index, hash_index_position);
-    index
+    record_hash_insert(table, key, index);
 }
 
 fn remove_hash_key(table: &mut TableData, key: TableKey) {
@@ -2879,72 +2836,30 @@ fn table_hash_entry_mut(table: &mut TableData, key: TableKey) -> Option<&mut Tab
 
 #[inline(always)]
 fn table_hash_entry_index(table: &TableData, key: TableKey) -> Option<usize> {
-    match table_hash_lookup(table, key) {
-        TableHashLookup::Found(index) => Some(index),
-        TableHashLookup::Missing { .. } => None,
-    }
-}
-
-#[inline(always)]
-fn table_hash_lookup(table: &TableData, key: TableKey) -> TableHashLookup {
     if table.hash.is_empty() {
-        return if table.hash_index.is_empty() {
-            TableHashLookup::Missing {
-                hash_index_position: None,
-            }
-        } else {
-            TableHashLookup::Missing {
-                hash_index_position: Some(table_hash_index_position(key, table.hash_index.len())),
-            }
-        };
+        return None;
     }
     if table.hash_index.is_empty() {
-        table.hash.iter().position(|entry| entry.key == key).map_or(
-            TableHashLookup::Missing {
-                hash_index_position: None,
-            },
-            TableHashLookup::Found,
-        )
+        table.hash.iter().position(|entry| entry.key == key)
     } else {
         let mut position = table_hash_index_position(key, table.hash_index.len());
         for _ in 0..table.hash_index.len() {
             match table.hash_index[position] {
-                Some(entry) if entry.key == key => return TableHashLookup::Found(entry.index),
+                Some(entry) if entry.key == key => return Some(entry.index),
                 Some(_) => position = (position + 1) & (table.hash_index.len() - 1),
-                None => {
-                    return TableHashLookup::Missing {
-                        hash_index_position: Some(position),
-                    };
-                }
+                None => return None,
             }
         }
-        TableHashLookup::Missing {
-            hash_index_position: None,
-        }
+        None
     }
 }
 
-fn record_hash_insert_at_position(
-    table: &mut TableData,
-    key: TableKey,
-    index: usize,
-    hash_index_position: Option<usize>,
-) {
+fn record_hash_insert(table: &mut TableData, key: TableKey, index: usize) {
     if table.hash_index.is_empty() {
         if table.hash.len() >= TABLE_HASH_INDEX_MIN_LEN {
             rebuild_hash_index(table);
         }
         return;
-    }
-    if table.hash.len().saturating_mul(2) > table.hash_index.len() {
-        rebuild_hash_index(table);
-        return;
-    }
-    if let Some(position) = hash_index_position {
-        if table.hash_index.get(position).is_some_and(Option::is_none) {
-            table.hash_index[position] = Some(TableHashIndexEntry { key, index });
-            return;
-        }
     }
     insert_hash_index(table, key, index);
 }
