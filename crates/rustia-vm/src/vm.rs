@@ -1993,9 +1993,7 @@ impl Vm {
                                                 .map_err(|e| e.at_pc(pc - 1))?;
                                             continue;
                                         }
-                                        if next.op == Opcode::GetIndex
-                                            && (next.b == instruction.a || next.c == instruction.a)
-                                        {
+                                        if next.op == Opcode::GetIndex && next.b == instruction.a {
                                             let index = upvalue_index(instruction.aux)
                                                 .map_err(|e| e.at_pc(pc - 1))?;
                                             let upvalue = context
@@ -2015,50 +2013,46 @@ impl Vm {
                                                     })
                                                 },
                                             )?;
-                                            let object = if next.b == instruction.a {
-                                                value
-                                            } else {
-                                                get_register(&registers, next.b)
-                                                    .map_err(|e| e.at_pc(pc))?
-                                            };
-                                            let key = if next.c == instruction.a {
-                                                value
-                                            } else {
-                                                get_register(&registers, next.c)
-                                                    .map_err(|e| e.at_pc(pc))?
-                                            };
-                                            if let (Some(table), Some(index)) = (
-                                                object.as_table(),
-                                                key.as_number().and_then(array_iterator_index),
-                                            ) {
-                                                if let Some(index_value) = self
-                                                    .get_table_integer_index_fast(table, index)
-                                                    .map_err(|e| e.at_pc(pc))?
+                                            if let Some(table) = value.as_table() {
+                                                let key = if next.c == instruction.a {
+                                                    value
+                                                } else {
+                                                    get_register(&registers, next.c)
+                                                        .map_err(|e| e.at_pc(pc))?
+                                                };
+                                                if let Some(index) =
+                                                    key.as_number().and_then(array_iterator_index)
                                                 {
-                                                    if next.a != instruction.a {
+                                                    if let Some(index_value) = self
+                                                        .get_table_integer_index_fast(table, index)
+                                                        .map_err(|e| e.at_pc(pc))?
+                                                    {
+                                                        if next.a != instruction.a {
+                                                            set_register(
+                                                                &mut registers,
+                                                                instruction.a,
+                                                                value,
+                                                            )
+                                                            .map_err(|e| e.at_pc(pc - 1))?;
+                                                        }
                                                         set_register(
                                                             &mut registers,
-                                                            instruction.a,
-                                                            value,
+                                                            next.a,
+                                                            index_value,
                                                         )
-                                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                                        .map_err(|e| e.at_pc(pc))?;
+                                                        self.executed_instructions = self
+                                                            .executed_instructions
+                                                            .wrapping_add(1);
+                                                        self.record_quickened_execution_pair(
+                                                            program_id,
+                                                            context.prototype,
+                                                            function,
+                                                            pc - 1,
+                                                        );
+                                                        pc += 1;
+                                                        continue;
                                                     }
-                                                    set_register(
-                                                        &mut registers,
-                                                        next.a,
-                                                        index_value,
-                                                    )
-                                                    .map_err(|e| e.at_pc(pc))?;
-                                                    self.executed_instructions =
-                                                        self.executed_instructions.wrapping_add(1);
-                                                    self.record_quickened_execution_pair(
-                                                        program_id,
-                                                        context.prototype,
-                                                        function,
-                                                        pc - 1,
-                                                    );
-                                                    pc += 1;
-                                                    continue;
                                                 }
                                             }
                                             set_register(&mut registers, instruction.a, value)
@@ -29221,12 +29215,12 @@ mod tests {
     fn opcode_profile_snapshot_records_quickened_pairs() {
         let function = Function::with_params(
             vec![
-                Instruction::with_aux(Opcode::GetUpvalue, 1, 0, 0, 0),
+                Instruction::with_aux(Opcode::GetUpvalue, 0, 0, 0, 0),
                 Instruction::new(Opcode::GetIndex, 0, 0, 1),
                 Instruction::new(Opcode::Return, 0, 1, 0),
             ],
             2,
-            1,
+            2,
         );
         let program = Program::with_functions(dummy_program().main, vec![], vec![function]);
         let settings = VmSettings {
@@ -29235,15 +29229,15 @@ mod tests {
         };
         let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
         let table = vm.heap.alloc_array_table(&[Value::number(42.0)]);
-        let index_upvalue = vm.heap.alloc_upvalue(Value::number(1.0)).unwrap();
+        let table_upvalue = vm.heap.alloc_upvalue(Value::table(table)).unwrap();
         let function = Value::function(
             vm.heap
-                .alloc_function(None, 0, vec![index_upvalue], vm.globals)
+                .alloc_function(None, 0, vec![table_upvalue], vm.globals)
                 .unwrap(),
         );
 
         let result = vm
-            .call_function(&program, function, &[Value::table(table)])
+            .call_function(&program, function, &[Value::nil(), Value::number(1.0)])
             .unwrap();
         assert_eq!(result.as_number(), Some(42.0));
 
