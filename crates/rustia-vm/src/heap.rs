@@ -2090,16 +2090,10 @@ impl VmCell {
         })
     }
 
-    pub fn table_sort_numeric_array(
-        &mut self,
-        table: u32,
-        len: usize,
-        numbers: &mut Vec<f64>,
-    ) -> Option<bool> {
+    pub fn table_sort_numeric_array(&mut self, table: u32, len: usize) -> Option<bool> {
         if len < 2 {
             return Some(true);
         }
-        numbers.clear();
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
             let table = root.tables.get_mut(table as usize)?;
@@ -2113,21 +2107,22 @@ impl VmCell {
             {
                 return Some(false);
             }
-            numbers.reserve(len);
             for value in table.array.iter().take(len) {
-                let Some(number) = value.as_number().filter(|number| number.is_finite()) else {
+                if !value.as_number().is_some_and(f64::is_finite) {
                     return Some(false);
-                };
-                numbers.push(number);
+                }
             }
             bump_table_version(table);
-            numbers.sort_by(|left, right| {
-                left.partial_cmp(right)
+            table.array[..len].sort_unstable_by(|left, right| {
+                let left = left
+                    .as_number()
+                    .expect("numeric table sort validated number values");
+                let right = right
+                    .as_number()
+                    .expect("numeric table sort validated number values");
+                left.partial_cmp(&right)
                     .expect("numeric table sort validated finite values")
             });
-            for (slot, number) in table.array[..len].iter_mut().zip(numbers.iter().copied()) {
-                *slot = Value::number(number);
-            }
             Some(true)
         })
     }
@@ -3636,12 +3631,8 @@ mod tests {
         let mut heap = VmCell::new();
         let table =
             heap.alloc_array_table(&[Value::number(3.0), Value::number(1.0), Value::number(2.0)]);
-        let mut scratch = Vec::new();
 
-        assert_eq!(
-            heap.table_sort_numeric_array(table, 3, &mut scratch),
-            Some(true)
-        );
+        assert_eq!(heap.table_sort_numeric_array(table, 3), Some(true));
 
         assert_eq!(
             heap.array_slot(table, 1).unwrap().unwrap().as_number(),
@@ -3666,12 +3657,8 @@ mod tests {
             Value::string_atom(atom),
             Value::number(2.0),
         ]);
-        let mut scratch = Vec::new();
 
-        assert_eq!(
-            heap.table_sort_numeric_array(table, 3, &mut scratch),
-            Some(false)
-        );
+        assert_eq!(heap.table_sort_numeric_array(table, 3), Some(false));
 
         assert_eq!(
             heap.array_slot(table, 1).unwrap().unwrap().as_number(),
