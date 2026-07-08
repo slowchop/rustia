@@ -84,9 +84,11 @@ GitHub Actions runs the same measurement machinery in
 for commit-level signal. A nightly schedule runs the full comparison matrix, and
 manual dispatch can choose either `rustia` or `full` mode. The workflow requires
 a self-hosted runner with the generic labels `[self-hosted, bench]`, regenerates
-the benchmark artifacts, and uploads them as workflow artifacts; it does not yet
-publish history back to a tracking branch or static host. The runner-label,
-trigger, and mode policy is checked by `tools/check-workflows.js`.
+the benchmark artifacts, uploads them as workflow artifacts, and publishes
+trusted runs to `slowchop/rustia-bench-data` with `BENCH_DATA_TOKEN`. Pushes to
+`main` and scheduled full runs publish automatically; manual dispatch can opt in
+with `publish=true`. The runner-label, trigger, and mode policy is checked by
+`tools/check-workflows.js`.
 
 `all-engines` intentionally excludes `mlua-lua54` because `mlua-lua54` and
 `mlua-luau` cannot be linked into one binary. Run the Lua 5.4 mlua adapter as a

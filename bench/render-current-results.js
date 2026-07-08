@@ -5,15 +5,38 @@ const fs = require("fs");
 const path = require("path");
 
 const root = path.resolve(__dirname, "..");
-const sourcePath = path.join(__dirname, "current-results.json");
-const wasmResultsPath = path.join(__dirname, "wasm", "current-results.json");
-const wasmDispatchPath = path.join(__dirname, "wasm", "dispatch-current-results.json");
-const outputPath = path.join(__dirname, "current-results.html");
+const sourcePath = resolveArg("--source", path.join(__dirname, "current-results.json"));
+const wasmResultsPath = resolveArg("--wasm-source", path.join(__dirname, "wasm", "current-results.json"));
+const wasmDispatchPath = resolveArg(
+  "--wasm-dispatch-source",
+  path.join(__dirname, "wasm", "dispatch-current-results.json"),
+);
+const outputPath = resolveArg("--output", path.join(__dirname, "current-results.html"));
 const checkOnly = process.argv.includes("--check");
 
 function fail(message) {
   console.error(`render-current-results: ${message}`);
   process.exit(1);
+}
+
+function argValue(name) {
+  const index = process.argv.indexOf(name);
+  if (index === -1) {
+    return null;
+  }
+  const value = process.argv[index + 1];
+  if (value == null || value.startsWith("--")) {
+    fail(`${name} requires a path`);
+  }
+  return value;
+}
+
+function resolveArg(name, defaultPath) {
+  const value = argValue(name);
+  if (value == null) {
+    return defaultPath;
+  }
+  return path.isAbsolute(value) ? value : path.resolve(root, value);
 }
 
 function readData() {

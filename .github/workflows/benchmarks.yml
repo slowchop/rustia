@@ -16,6 +16,11 @@ name: Benchmark Measurement
         options:
           - rustia
           - full
+      publish:
+        description: "Publish results to slowchop/rustia-bench-data"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -91,6 +96,53 @@ jobs:
             bench/current-results.html
             bench/CLAIMS.md
 
+      - name: Publish benchmark data
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        env:
+          BENCH_DATA_TOKEN: ${{ secrets.BENCH_DATA_TOKEN }}
+          BENCH_DATA_DIR: ${{ runner.temp }}/rustia-bench-data
+        run: |
+          if [ -z "$BENCH_DATA_TOKEN" ]; then
+            echo "BENCH_DATA_TOKEN is required to publish benchmark data"
+            exit 1
+          fi
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          rm -rf "$BENCH_DATA_DIR"
+          git clone "https://x-access-token:${BENCH_DATA_TOKEN}@github.com/slowchop/rustia-bench-data.git" "$BENCH_DATA_DIR"
+
+          node tools/merge-benchmark-history.js \
+            --source bench/history/runs.jsonl \
+            --destination "$BENCH_DATA_DIR/bench/history/runs.jsonl"
+
+          cargo run -p script-bench-harness -- --refresh-results \
+            --history "$BENCH_DATA_DIR/bench/history/runs.jsonl" \
+            --results "$BENCH_DATA_DIR/bench/RESULTS.md" \
+            --latest-json "$BENCH_DATA_DIR/bench/current-results.json"
+
+          cp bench/render-current-results.js "$BENCH_DATA_DIR/bench/render-current-results.js"
+          cp bench/render-claims.js "$BENCH_DATA_DIR/bench/render-claims.js"
+          (
+            cd "$BENCH_DATA_DIR"
+            node bench/render-current-results.js
+            node bench/render-claims.js
+            rm bench/render-current-results.js bench/render-claims.js
+          )
+
+          git -C "$BENCH_DATA_DIR" add \
+            bench/history/runs.jsonl \
+            bench/RESULTS.md \
+            bench/current-results.json \
+            bench/current-results.html \
+            bench/CLAIMS.md
+          if git -C "$BENCH_DATA_DIR" diff --cached --quiet; then
+            echo "No benchmark data changes to publish"
+            exit 0
+          fi
+          git -C "$BENCH_DATA_DIR" commit -m "Record Rustia benchmark results for $(git rev-parse --short HEAD)"
+          git -C "$BENCH_DATA_DIR" push
+
   measure-full-current:
     name: Measure full benchmark matrix
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'full')
@@ -163,3 +215,50 @@ jobs:
             bench/current-results.json
             bench/current-results.html
             bench/CLAIMS.md
+
+      - name: Publish benchmark data
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        env:
+          BENCH_DATA_TOKEN: ${{ secrets.BENCH_DATA_TOKEN }}
+          BENCH_DATA_DIR: ${{ runner.temp }}/rustia-bench-data
+        run: |
+          if [ -z "$BENCH_DATA_TOKEN" ]; then
+            echo "BENCH_DATA_TOKEN is required to publish benchmark data"
+            exit 1
+          fi
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          rm -rf "$BENCH_DATA_DIR"
+          git clone "https://x-access-token:${BENCH_DATA_TOKEN}@github.com/slowchop/rustia-bench-data.git" "$BENCH_DATA_DIR"
+
+          node tools/merge-benchmark-history.js \
+            --source bench/history/runs.jsonl \
+            --destination "$BENCH_DATA_DIR/bench/history/runs.jsonl"
+
+          cargo run -p script-bench-harness -- --refresh-results \
+            --history "$BENCH_DATA_DIR/bench/history/runs.jsonl" \
+            --results "$BENCH_DATA_DIR/bench/RESULTS.md" \
+            --latest-json "$BENCH_DATA_DIR/bench/current-results.json"
+
+          cp bench/render-current-results.js "$BENCH_DATA_DIR/bench/render-current-results.js"
+          cp bench/render-claims.js "$BENCH_DATA_DIR/bench/render-claims.js"
+          (
+            cd "$BENCH_DATA_DIR"
+            node bench/render-current-results.js
+            node bench/render-claims.js
+            rm bench/render-current-results.js bench/render-claims.js
+          )
+
+          git -C "$BENCH_DATA_DIR" add \
+            bench/history/runs.jsonl \
+            bench/RESULTS.md \
+            bench/current-results.json \
+            bench/current-results.html \
+            bench/CLAIMS.md
+          if git -C "$BENCH_DATA_DIR" diff --cached --quiet; then
+            echo "No benchmark data changes to publish"
+            exit 0
+          fi
+          git -C "$BENCH_DATA_DIR" commit -m "Record full benchmark results for $(git rev-parse --short HEAD)"
+          git -C "$BENCH_DATA_DIR" push
