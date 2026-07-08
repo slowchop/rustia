@@ -24,7 +24,9 @@ pub use profile::Profile;
 pub use value::{Value, ValueKind};
 pub use vm::{
     LoadStringCompiler, Vm, VmGlobalGetInlineCacheSnapshot, VmInlineCacheSnapshot,
-    VmOpcodeProfileEntry, VmOpcodeProfileSnapshot, VmRawTableGetInlineCacheSnapshot, VmSettings,
-    VmTableGetInlineCacheSnapshot, VmTableIntegerGetInlineCacheSnapshot,
-    VmTableIntegerSetInlineCacheSnapshot, VmTableSetInlineCacheSnapshot, MAX_RECURSION_LIMIT,
+    VmRawTableGetInlineCacheSnapshot, VmSettings, VmTableGetInlineCacheSnapshot,
+    VmTableIntegerGetInlineCacheSnapshot, VmTableIntegerSetInlineCacheSnapshot,
+    VmTableSetInlineCacheSnapshot, MAX_RECURSION_LIMIT,
 };
+#[cfg(feature = "opcode-profiling")]
+pub use vm::{VmOpcodeProfileEntry, VmOpcodeProfileSnapshot};

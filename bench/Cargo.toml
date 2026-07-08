@@ -26,6 +26,7 @@ all-engines = [
     "wasmtime-engine",
 ]
 rustia-engine = ["dep:rustia-compiler", "dep:rustia-parser", "dep:rustia-vm"]
+rustia-hot-site-summary = ["rustia-engine", "rustia-vm/opcode-profiling"]
 boa = ["dep:boa_engine"]
 koto = ["dep:koto"]
 mlua-luau = ["dep:mlua_luau"]

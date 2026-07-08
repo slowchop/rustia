@@ -52,6 +52,7 @@ pub struct VmSettings {
     pub deterministic_gc_interval: NonZeroU64,
     pub loadstring_compiler: Option<LoadStringCompiler>,
     pub enable_conformance_coverage: bool,
+    #[cfg(feature = "opcode-profiling")]
     pub enable_opcode_profiling: bool,
     pub enable_conformance_top_level_yield: bool,
     pub enable_conformance_int64_userdata: bool,
@@ -69,6 +70,7 @@ impl Default for VmSettings {
                 .expect("default deterministic GC interval is non-zero"),
             loadstring_compiler: None,
             enable_conformance_coverage: false,
+            #[cfg(feature = "opcode-profiling")]
             enable_opcode_profiling: false,
             enable_conformance_top_level_yield: false,
             enable_conformance_int64_userdata: false,
@@ -97,12 +99,14 @@ pub struct VmInlineCacheSnapshot {
     pub len: usize,
 }
 
+#[cfg(feature = "opcode-profiling")]
 #[derive(Clone, Debug, Default)]
 pub struct VmOpcodeProfileSnapshot {
     pub total_hits: u64,
     pub entries: Vec<VmOpcodeProfileEntry>,
 }
 
+#[cfg(feature = "opcode-profiling")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VmOpcodeProfileEntry {
     pub program: Option<u32>,
@@ -188,6 +192,7 @@ pub struct Vm {
     next_instruction_collection: u64,
     deterministic_collection_count: u64,
     coverage_hits: BTreeMap<CoverageKey, u64>,
+    #[cfg(feature = "opcode-profiling")]
     opcode_profile_hits: BTreeMap<OpcodeProfileKey, u64>,
     global_get_inline_cache: Vec<Option<GlobalGetInlineCacheSlot>>,
     table_get_inline_cache: Vec<Option<TableGetInlineCacheSlot>>,
@@ -226,6 +231,7 @@ struct CoverageKey {
     line: u32,
 }
 
+#[cfg(feature = "opcode-profiling")]
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct OpcodeProfileKey {
     program: Option<u32>,
@@ -949,6 +955,7 @@ impl Vm {
             next_instruction_collection,
             deterministic_collection_count: 0,
             coverage_hits: BTreeMap::new(),
+            #[cfg(feature = "opcode-profiling")]
             opcode_profile_hits: BTreeMap::new(),
             global_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             table_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
@@ -1100,6 +1107,7 @@ impl Vm {
         snapshot
     }
 
+    #[cfg(feature = "opcode-profiling")]
     pub fn opcode_profile_snapshot(&self, program: &Program) -> VmOpcodeProfileSnapshot {
         let mut entries = Vec::new();
         let mut total_hits = 0u64;
@@ -1141,6 +1149,7 @@ impl Vm {
         }
     }
 
+    #[cfg(feature = "opcode-profiling")]
     pub fn clear_opcode_profile(&mut self) {
         self.opcode_profile_hits.clear();
     }
@@ -21567,7 +21576,13 @@ impl Vm {
         function: &Function,
         pc: usize,
     ) {
-        if self.settings.enable_conformance_coverage || self.settings.enable_opcode_profiling {
+        #[cfg(feature = "opcode-profiling")]
+        let should_record =
+            self.settings.enable_conformance_coverage || self.settings.enable_opcode_profiling;
+        #[cfg(not(feature = "opcode-profiling"))]
+        let should_record = self.settings.enable_conformance_coverage;
+
+        if should_record {
             self.record_execution_hit_slow(program_id, prototype, function, pc);
         }
     }
@@ -21593,6 +21608,7 @@ impl Vm {
                 }
             }
         }
+        #[cfg(feature = "opcode-profiling")]
         if self.settings.enable_opcode_profiling {
             let key = OpcodeProfileKey {
                 program: program_id,
@@ -21604,6 +21620,7 @@ impl Vm {
     }
 }
 
+#[cfg(feature = "opcode-profiling")]
 fn opcode_profile_function(program: &Program, prototype: Option<u32>) -> Option<&Function> {
     match prototype {
         Some(prototype) => program.functions.get(prototype as usize),
@@ -29013,6 +29030,7 @@ mod tests {
         )
     }
 
+    #[cfg(feature = "opcode-profiling")]
     #[test]
     fn opcode_profile_snapshot_records_hits_when_enabled() {
         let program = Program::new(

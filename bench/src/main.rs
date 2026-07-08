@@ -11,10 +11,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rustia_compiler::compile_with_options;
 #[cfg(feature = "rustia-engine")]
 use rustia_parser::parse_source;
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
+use rustia_vm::{Function, VmSettings};
 #[cfg(feature = "rustia-engine")]
 use rustia_vm::{
-    Function, Instruction, Opcode, Profile, Program, Value, ValueKind, Vm, VmInlineCacheSnapshot,
-    VmSettings,
+    Instruction, Opcode, Profile, Program, Value, ValueKind, Vm, VmInlineCacheSnapshot,
 };
 
 #[cfg(all(feature = "mlua-luau", feature = "mlua-lua54"))]
@@ -25,7 +26,7 @@ const DEFAULT_REPS: usize = 9;
 const DEFAULT_MAX_N: u64 = 1_000_000_000;
 #[cfg(feature = "rustia-engine")]
 const INLINE_CACHE_SUMMARY_N: u64 = 64;
-#[cfg(feature = "rustia-engine")]
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
 const HOT_SITE_SUMMARY_N: u64 = 64;
 const HISTORY_PATH: &str = "bench/history/runs.jsonl";
 const RESULTS_PATH: &str = "bench/RESULTS.md";
@@ -642,7 +643,7 @@ fn print_usage() {
     println!("  --wasm-gate-json");
     println!("  --rustia-bytecode-summary");
     println!("  --rustia-inline-cache-summary");
-    println!("  --rustia-hot-site-summary");
+    println!("  --rustia-hot-site-summary (requires --features rustia-hot-site-summary)");
     println!("  --check-history");
     println!("  --refresh-results");
     println!("  --engines rustia,koto,mlua-luau");
@@ -997,12 +998,19 @@ struct RustiaPrepared {
 #[cfg(feature = "rustia-engine")]
 impl RustiaPrepared {
     fn new(workload: &Workload, source: &str) -> Result<Self> {
-        Self::new_with_settings(workload, source, VmSettings::default())
+        let program = compile_rustia_program(workload, source)?;
+        let vm = Vm::new(Profile::ReproducibleStandard);
+        Self::initialize(workload, program, vm)
     }
 
+    #[cfg(feature = "rustia-hot-site-summary")]
     fn new_with_settings(workload: &Workload, source: &str, settings: VmSettings) -> Result<Self> {
         let program = compile_rustia_program(workload, source)?;
-        let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        let vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        Self::initialize(workload, program, vm)
+    }
+
+    fn initialize(workload: &Workload, program: Program, mut vm: Vm) -> Result<Self> {
         let function = vm
             .run(&program)
             .map_err(|error| Error::new(format!("initialize {} failed: {error}", workload.id)))?;
@@ -1023,10 +1031,12 @@ impl RustiaPrepared {
         self.vm.inline_cache_snapshot()
     }
 
+    #[cfg(feature = "rustia-hot-site-summary")]
     fn clear_opcode_profile(&mut self) {
         self.vm.clear_opcode_profile();
     }
 
+    #[cfg(feature = "rustia-hot-site-summary")]
     fn opcode_profile_snapshot(&self) -> rustia_vm::VmOpcodeProfileSnapshot {
         self.vm.opcode_profile_snapshot(&self.program)
     }
@@ -1172,7 +1182,7 @@ fn print_rustia_inline_cache_summary(_repo: &Path, _workloads: &[&Workload]) -> 
     ))
 }
 
-#[cfg(feature = "rustia-engine")]
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
 #[derive(Default)]
 struct RustiaHotSiteSummary {
     total_hits: u64,
@@ -1183,7 +1193,7 @@ struct RustiaHotSiteSummary {
     loop_bodies: BTreeMap<String, u64>,
 }
 
-#[cfg(feature = "rustia-engine")]
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
 fn print_rustia_hot_site_summary(repo: &Path, workloads: &[&Workload]) -> Result<()> {
     println!("# Rustia Hot-Site Summary\n");
     println!(
@@ -1241,14 +1251,14 @@ fn print_rustia_hot_site_summary(repo: &Path, workloads: &[&Workload]) -> Result
     Ok(())
 }
 
-#[cfg(not(feature = "rustia-engine"))]
+#[cfg(not(all(feature = "rustia-engine", feature = "rustia-hot-site-summary")))]
 fn print_rustia_hot_site_summary(_repo: &Path, _workloads: &[&Workload]) -> Result<()> {
     Err(Error::new(
-        "--rustia-hot-site-summary requires the rustia-engine feature",
+        "--rustia-hot-site-summary requires --features rustia-hot-site-summary",
     ))
 }
 
-#[cfg(feature = "rustia-engine")]
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
 fn summarize_rustia_hot_sites(
     program: &Program,
     snapshot: &rustia_vm::VmOpcodeProfileSnapshot,
@@ -1293,7 +1303,7 @@ fn summarize_rustia_hot_sites(
     summary
 }
 
-#[cfg(feature = "rustia-engine")]
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
 fn rustia_profile_function(program: &Program, prototype: Option<u32>) -> Option<&Function> {
     match prototype {
         Some(prototype) => program.functions.get(prototype as usize),
@@ -1301,7 +1311,7 @@ fn rustia_profile_function(program: &Program, prototype: Option<u32>) -> Option<
     }
 }
 
-#[cfg(feature = "rustia-engine")]
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
 fn print_rustia_u64_count_table(
     title: &str,
     key_header: &str,
@@ -1322,7 +1332,7 @@ fn print_rustia_u64_count_table(
     println!();
 }
 
-#[cfg(feature = "rustia-engine")]
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
 fn format_top_u64_count(counts: &BTreeMap<String, u64>) -> String {
     let mut entries = counts.iter().collect::<Vec<_>>();
     entries.sort_by(|left, right| right.1.cmp(left.1).then_with(|| left.0.cmp(right.0)));
