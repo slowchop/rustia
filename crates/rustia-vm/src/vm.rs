@@ -260,6 +260,12 @@ enum TableSetInlineCacheTarget {
     },
 }
 
+enum TableSetInlineCacheHit {
+    Miss,
+    Stored,
+    NewIndexFunction { key_atom: u32, method: Value },
+}
+
 #[derive(Clone, Copy)]
 struct TableIntegerGetInlineCacheSlot {
     site: InlineCacheSite,
@@ -3039,6 +3045,48 @@ impl Vm {
                                     get_register(&registers, instruction.b).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
+                                let site = program_id.map(|program| InlineCacheSite {
+                                    program,
+                                    prototype: context.prototype,
+                                    pc: pc - 1,
+                                });
+                                if let (Some(table), Some(site)) = (object.as_table(), site) {
+                                    if let Some(value) = self
+                                        .table_get_string_const_inline_cache_hit(site, table)
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })?
+                                    {
+                                        set_register(&mut registers, instruction.a, value)
+                                            .map_err(|e| {
+                                                attach_instruction_source(
+                                                    program,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
+                                                )
+                                            })?;
+                                        if fuel.is_none()
+                                            && quickened_method_check_follows(
+                                                &function.code,
+                                                pc,
+                                                instruction,
+                                                value,
+                                            )
+                                        {
+                                            self.executed_instructions =
+                                                self.executed_instructions.wrapping_add(1);
+                                            self.record_coverage_hit(
+                                                program_id,
+                                                context.prototype,
+                                                function,
+                                                pc,
+                                            );
+                                            pc += 1;
+                                        }
+                                        continue;
+                                    }
+                                }
                                 let key_atom = self
                                     .constant_string_atom(
                                         program,
@@ -3057,11 +3105,7 @@ impl Vm {
                                     })?;
                                 let key = Value::string_atom(key_atom);
                                 let value = if let Some(table) = object.as_table() {
-                                    if let Some(site) = program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
-                                    }) {
+                                    if let Some(site) = site {
                                         self.get_table_string_index_with_inline_cache(
                                             program,
                                             site,
@@ -3624,6 +3668,48 @@ impl Vm {
                                     get_register(&registers, instruction.b).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
+                                let site = program_id.map(|program| InlineCacheSite {
+                                    program,
+                                    prototype: context.prototype,
+                                    pc: pc - 1,
+                                });
+                                if let (Some(table), Some(site)) = (object.as_table(), site) {
+                                    match self
+                                        .table_set_string_const_inline_cache_hit(site, table, value)
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })? {
+                                        TableSetInlineCacheHit::Stored => continue,
+                                        TableSetInlineCacheHit::NewIndexFunction {
+                                            key_atom,
+                                            method,
+                                        } => {
+                                            self.call_value(
+                                                program,
+                                                method,
+                                                &[
+                                                    Value::table(table),
+                                                    Value::string_atom(key_atom),
+                                                    value,
+                                                ],
+                                                context.depth.saturating_add(1),
+                                                fuel,
+                                            )
+                                            .map_err(
+                                                |e| {
+                                                    attach_instruction_source(
+                                                        program,
+                                                        function,
+                                                        pc - 1,
+                                                        e,
+                                                    )
+                                                },
+                                            )?;
+                                            continue;
+                                        }
+                                        TableSetInlineCacheHit::Miss => {}
+                                    }
+                                }
                                 let key_atom = self
                                     .constant_string_atom(
                                         program,
@@ -3642,11 +3728,7 @@ impl Vm {
                                     })?;
                                 let key = Value::string_atom(key_atom);
                                 if let Some(table) = object.as_table() {
-                                    if let Some(site) = program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
-                                    }) {
+                                    if let Some(site) = site {
                                         self.set_table_string_index_with_inline_cache(
                                             program,
                                             site,
@@ -9270,20 +9352,19 @@ impl Vm {
         depth: usize,
         fuel: &mut Option<u64>,
     ) -> Result<()> {
-        if self.table_set_inline_cache_hit(site, table, key_atom, value)? {
-            return Ok(());
-        }
-        if let Some(method) =
-            self.table_set_newindex_function_inline_cache_hit(site, table, key_atom)?
-        {
-            self.call_value(
-                program,
-                method,
-                &[Value::table(table), key, value],
-                depth.saturating_add(1),
-                fuel,
-            )?;
-            return Ok(());
+        match self.table_set_inline_cache_hit_action(site, Some(key_atom), table, value)? {
+            TableSetInlineCacheHit::Stored => return Ok(()),
+            TableSetInlineCacheHit::NewIndexFunction { method, .. } => {
+                self.call_value(
+                    program,
+                    method,
+                    &[Value::table(table), key, value],
+                    depth.saturating_add(1),
+                    fuel,
+                )?;
+                return Ok(());
+            }
+            TableSetInlineCacheHit::Miss => {}
         }
         if self.try_set_table_string_index_for_inline_cache(site, table, key_atom, value)? {
             return Ok(());
@@ -9330,6 +9411,7 @@ impl Vm {
         }
     }
 
+    #[cfg(test)]
     fn table_set_inline_cache_hit(
         &mut self,
         site: InlineCacheSite,
@@ -9337,21 +9419,46 @@ impl Vm {
         key_atom: u32,
         value: Value,
     ) -> Result<bool> {
+        match self.table_set_inline_cache_hit_action(site, Some(key_atom), table, value)? {
+            TableSetInlineCacheHit::Stored => Ok(true),
+            TableSetInlineCacheHit::Miss | TableSetInlineCacheHit::NewIndexFunction { .. } => {
+                Ok(false)
+            }
+        }
+    }
+
+    fn table_set_string_const_inline_cache_hit(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        value: Value,
+    ) -> Result<TableSetInlineCacheHit> {
+        self.table_set_inline_cache_hit_action(site, None, table, value)
+    }
+
+    fn table_set_inline_cache_hit_action(
+        &mut self,
+        site: InlineCacheSite,
+        expected_key_atom: Option<u32>,
+        table: u32,
+        value: Value,
+    ) -> Result<TableSetInlineCacheHit> {
         let slot = self
             .table_set_inline_cache
             .get(site.slot())
             .copied()
             .flatten();
         let Some(slot) = slot else {
-            return Ok(false);
+            return Ok(TableSetInlineCacheHit::Miss);
         };
         if slot.site != site {
-            return Ok(false);
+            return Ok(TableSetInlineCacheHit::Miss);
         }
         let entry = slot.entry;
-        if entry.key_atom != key_atom {
-            return Ok(false);
+        if expected_key_atom.is_some_and(|key_atom| entry.key_atom != key_atom) {
+            return Ok(TableSetInlineCacheHit::Miss);
         }
+        let key_atom = entry.key_atom;
         match entry.target {
             TableSetInlineCacheTarget::DirectSlot {
                 shape_slot,
@@ -9372,7 +9479,7 @@ impl Vm {
                                 reason: "table handle is missing",
                             })
                         })? {
-                        HashWriteStatus::Stored => return Ok(true),
+                        HashWriteStatus::Stored => return Ok(TableSetInlineCacheHit::Stored),
                         HashWriteStatus::Deferred => {}
                         HashWriteStatus::Readonly => return Err(readonly_table_error()),
                     }
@@ -9386,7 +9493,7 @@ impl Vm {
                                 reason: "table handle is missing",
                             })
                         })? {
-                        HashWriteStatus::Stored => return Ok(true),
+                        HashWriteStatus::Stored => return Ok(TableSetInlineCacheHit::Stored),
                         HashWriteStatus::Deferred => {}
                         HashWriteStatus::Readonly => return Err(readonly_table_error()),
                     }
@@ -9404,7 +9511,7 @@ impl Vm {
                     .raw_table_string_slot(table, key_atom)?
                     .is_some_and(|raw| raw.kind() != ValueKind::Nil)
                 {
-                    return Ok(false);
+                    return Ok(TableSetInlineCacheHit::Miss);
                 }
                 if self.heap.table_metatable(table).ok_or_else(|| {
                     Error::new(ErrorKind::InvalidProgram {
@@ -9412,7 +9519,7 @@ impl Vm {
                     })
                 })? != Some(metatable)
                 {
-                    return Ok(false);
+                    return Ok(TableSetInlineCacheHit::Miss);
                 }
 
                 let newindex_atom = self.metamethod_atoms.newindex;
@@ -9448,7 +9555,7 @@ impl Vm {
                 };
                 if !newindex_slot.is_some_and(|slot| slot.value.as_table() == Some(newindex_table))
                 {
-                    return Ok(false);
+                    return Ok(TableSetInlineCacheHit::Miss);
                 }
 
                 if newindex_table_shape_slot.table == newindex_table {
@@ -9466,7 +9573,7 @@ impl Vm {
                                 reason: "__newindex table handle is missing",
                             })
                         })? {
-                        HashWriteStatus::Stored => return Ok(true),
+                        HashWriteStatus::Stored => return Ok(TableSetInlineCacheHit::Stored),
                         HashWriteStatus::Deferred => {}
                         HashWriteStatus::Readonly => return Err(readonly_table_error()),
                     }
@@ -9485,60 +9592,38 @@ impl Vm {
                                 reason: "__newindex table handle is missing",
                             })
                         })? {
-                        HashWriteStatus::Stored => return Ok(true),
+                        HashWriteStatus::Stored => return Ok(TableSetInlineCacheHit::Stored),
                         HashWriteStatus::Deferred => {}
                         HashWriteStatus::Readonly => return Err(readonly_table_error()),
                     }
                 }
             }
-            TableSetInlineCacheTarget::NewIndexFunction { .. } => {}
+            TableSetInlineCacheTarget::NewIndexFunction {
+                metatable,
+                metatable_version,
+                method,
+            } => {
+                if self
+                    .raw_table_string_slot(table, key_atom)?
+                    .is_some_and(|raw| raw.kind() != ValueKind::Nil)
+                {
+                    return Ok(TableSetInlineCacheHit::Miss);
+                }
+                if self.heap.table_metatable(table).ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    })
+                })? != Some(metatable)
+                {
+                    return Ok(TableSetInlineCacheHit::Miss);
+                }
+                if self.heap.table_version(metatable) != Some(metatable_version) {
+                    return Ok(TableSetInlineCacheHit::Miss);
+                }
+                return Ok(TableSetInlineCacheHit::NewIndexFunction { key_atom, method });
+            }
         }
-        Ok(false)
-    }
-
-    fn table_set_newindex_function_inline_cache_hit(
-        &mut self,
-        site: InlineCacheSite,
-        table: u32,
-        key_atom: u32,
-    ) -> Result<Option<Value>> {
-        let slot = self
-            .table_set_inline_cache
-            .get(site.slot())
-            .copied()
-            .flatten();
-        let Some(slot) = slot else {
-            return Ok(None);
-        };
-        if slot.site != site || slot.entry.key_atom != key_atom {
-            return Ok(None);
-        }
-        let TableSetInlineCacheTarget::NewIndexFunction {
-            metatable,
-            metatable_version,
-            method,
-        } = slot.entry.target
-        else {
-            return Ok(None);
-        };
-        if self
-            .raw_table_string_slot(table, key_atom)?
-            .is_some_and(|raw| raw.kind() != ValueKind::Nil)
-        {
-            return Ok(None);
-        }
-        if self.heap.table_metatable(table).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "table handle is missing",
-            })
-        })? != Some(metatable)
-        {
-            return Ok(None);
-        }
-        if self.heap.table_version(metatable) != Some(metatable_version) {
-            return Ok(None);
-        }
-        Ok(Some(method))
+        Ok(TableSetInlineCacheHit::Miss)
     }
 
     fn try_set_table_string_index_for_inline_cache(
@@ -10557,6 +10642,34 @@ impl Vm {
         if entry.key_atom != key_atom {
             return Ok(None);
         }
+        self.table_get_inline_cache_entry_hit(entry, table)
+    }
+
+    fn table_get_string_const_inline_cache_hit(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+    ) -> Result<Option<Value>> {
+        let slot = self
+            .table_get_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
+        let Some(slot) = slot else {
+            return Ok(None);
+        };
+        if slot.site != site {
+            return Ok(None);
+        }
+        self.table_get_inline_cache_entry_hit(slot.entry, table)
+    }
+
+    fn table_get_inline_cache_entry_hit(
+        &mut self,
+        entry: TableGetInlineCacheEntry,
+        table: u32,
+    ) -> Result<Option<Value>> {
+        let key_atom = entry.key_atom;
         match entry.source {
             TableGetInlineCacheSource::DirectSlot {
                 shape_slot,
@@ -28408,7 +28521,8 @@ mod tests {
         mul_mod_const_table_index, native_function_value, quickened_method_check_follows,
         InlineCacheSite, RawTableIntegerGetInlineCacheSource, RawTableStringGetInlineCacheSource,
         StringSlotIndexCache, TableGetInlineCacheSource, TableIntegerGetInlineCacheSource,
-        TableIntegerSetInlineCacheTarget, TableSetInlineCacheTarget, Value, Vm,
+        TableIntegerSetInlineCacheTarget, TableSetInlineCacheHit, TableSetInlineCacheTarget, Value,
+        Vm,
     };
     use crate::heap::NativeFunction;
     use crate::{Constant, Function, Instruction, Opcode, Profile, Program, VmSettings};
@@ -28844,6 +28958,128 @@ mod tests {
             .unwrap()
             .expect("unchanged table shape should hit the direct cache");
         assert_eq!(value.as_number(), Some(2.0));
+    }
+
+    #[test]
+    fn string_const_get_inline_cache_uses_cached_key_atom() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let key_atom = vm.heap.intern_string("x");
+        let table = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(table, Value::string_atom(key_atom), Value::number(1.0))
+            .unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 8,
+        };
+        let mut fuel = None;
+
+        vm.get_table_string_index_with_inline_cache(
+            &program,
+            site,
+            table,
+            Value::string_atom(key_atom),
+            key_atom,
+            0,
+            &mut fuel,
+        )
+        .unwrap();
+        vm.heap
+            .table_set(table, Value::string_atom(key_atom), Value::number(2.0))
+            .unwrap();
+
+        let value = vm
+            .table_get_string_const_inline_cache_hit(site, table)
+            .unwrap()
+            .expect("const string get should hit with the cached key atom");
+        assert_eq!(value.as_number(), Some(2.0));
+    }
+
+    #[test]
+    fn string_const_set_inline_cache_uses_cached_key_atom() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let key_atom = vm.heap.intern_string("x");
+        let table = vm.heap.alloc_array_table(&[]);
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 8,
+        };
+        let mut fuel = None;
+
+        vm.set_table_string_index_with_inline_cache(
+            &program,
+            site,
+            table,
+            Value::string_atom(key_atom),
+            key_atom,
+            Value::number(3.0),
+            0,
+            &mut fuel,
+        )
+        .unwrap();
+        assert!(matches!(
+            vm.table_set_string_const_inline_cache_hit(site, table, Value::number(4.0))
+                .unwrap(),
+            TableSetInlineCacheHit::Stored
+        ));
+        assert_eq!(
+            vm.heap
+                .table_get(table, Value::string_atom(key_atom))
+                .unwrap()
+                .as_number(),
+            Some(4.0)
+        );
+    }
+
+    #[test]
+    fn string_const_set_inline_cache_returns_cached_newindex_function() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let key_atom = vm.heap.intern_string("x");
+        let newindex_atom = vm.heap.intern_string("__newindex");
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let method = native_function_value(&mut vm.heap, NativeFunction::TypeOf, vm.globals);
+        vm.heap
+            .table_set(metatable, Value::string_atom(newindex_atom), method)
+            .unwrap();
+        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 9,
+        };
+        let mut fuel = None;
+
+        vm.set_table_string_index_with_inline_cache(
+            &program,
+            site,
+            table,
+            Value::string_atom(key_atom),
+            key_atom,
+            Value::number(1.0),
+            0,
+            &mut fuel,
+        )
+        .unwrap();
+
+        match vm
+            .table_set_string_const_inline_cache_hit(site, table, Value::number(2.0))
+            .unwrap()
+        {
+            TableSetInlineCacheHit::NewIndexFunction {
+                key_atom: cached_key,
+                method: cached_method,
+            } => {
+                assert_eq!(cached_key, key_atom);
+                assert_eq!(cached_method.as_function(), method.as_function());
+            }
+            _ => panic!("const string set should return the cached __newindex function"),
+        }
     }
 
     #[test]
