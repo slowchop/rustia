@@ -212,6 +212,7 @@ pub enum Opcode {
     SetIndexMulAddModConst = 154,
     SetIndexMulModConst = 155,
     GetIndexMulModConst = 156,
+    GetIndexStringConst = 157,
 }
 
 pub const ARRAY_ITERATOR_WRITE_VISIBLE_KEY: u8 = 0;

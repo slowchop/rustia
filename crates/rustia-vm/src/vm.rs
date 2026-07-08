@@ -2665,6 +2665,74 @@ impl Vm {
                                     |e| attach_instruction_source(program, function, pc - 1, e),
                                 )?;
                             }
+                            Opcode::GetIndexStringConst => {
+                                if instruction.aux < 0 {
+                                    return Err(Error::new(ErrorKind::InvalidProgram {
+                                        reason: "negative string table index constant",
+                                    })
+                                    .at_pc(pc - 1));
+                                }
+                                let object =
+                                    get_register(&registers, instruction.b).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let key_atom = self
+                                    .constant_string_atom(
+                                        program,
+                                        program_id,
+                                        instruction.aux as usize,
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?
+                                    .ok_or_else(|| {
+                                        Error::new(ErrorKind::InvalidProgram {
+                                            reason:
+                                                "string table index opcode must reference a string",
+                                        })
+                                        .at_pc(pc - 1)
+                                    })?;
+                                let key = Value::string_atom(key_atom);
+                                let value = if let Some(table) = object.as_table() {
+                                    if let Some(site) = program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }) {
+                                        self.get_table_string_index_with_inline_cache(
+                                            program,
+                                            site,
+                                            table,
+                                            key,
+                                            key_atom,
+                                            context.depth,
+                                            fuel,
+                                        )
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })?
+                                    } else {
+                                        self.get_table_index_with_metamethod(
+                                            program,
+                                            table,
+                                            key,
+                                            context.depth,
+                                            fuel,
+                                        )
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })?
+                                    }
+                                } else {
+                                    self.get_index_value(program, object, key, context.depth, fuel)
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })?
+                                };
+                                set_register(&mut registers, instruction.a, value).map_err(
+                                    |e| attach_instruction_source(program, function, pc - 1, e),
+                                )?;
+                            }
                             Opcode::GetIndexNumber => {
                                 let object =
                                     get_register(&registers, instruction.b).map_err(|e| {
@@ -18215,6 +18283,7 @@ fn opcode_may_observe_current_roots(op: Opcode) -> bool {
         | Opcode::SetIndexConcatConst
         | Opcode::GetIndexNumber
         | Opcode::GetIndexNumberConst
+        | Opcode::GetIndexStringConst
         | Opcode::SetIndexNumber
         | Opcode::ConcatArgs
         | Opcode::ReturnCall
@@ -20064,36 +20133,16 @@ fn recursive_reverse_caller_matches(
     replacement_prototype: u32,
     global_name: i32,
 ) -> Result<bool> {
-    if function.parameter_count != 1 || function.code.len() < 7 {
+    if function.parameter_count != 1 {
         return Ok(false);
     }
     let code = &function.code;
-    if code[0].op != Opcode::GetGlobal
-        || code[0].a != 1
-        || !constant_string_equals(program, code[0].aux, b"string")
-        || code[1].op != Opcode::LoadConst
-        || code[1].a != 2
-        || !constant_string_equals(program, i32::from(code[1].c), b"gsub")
-        || !instruction_fields(code[2], Opcode::GetIndex, 1, 1, 2, 0)
-        || !instruction_fields(code[3], Opcode::Move, 2, 0, 0, 0)
-        || code[4].op != Opcode::LoadConst
-        || code[4].a != 3
-        || !constant_string_equals(
-            program,
-            i32::from(code[4].c),
-            LUAU_RECURSIVE_REVERSE_GSUB_PATTERN,
-        )
-        || code[5].op != Opcode::LoadFunction
-        || code[5].a != 4
-        || code[5].aux != replacement_prototype as i32
-        || code[6].op != Opcode::ReturnCall
-        || code[6].a != 0
-        || code[6].b != 0
-        || code[6].c != 1
-    {
+    let Some(return_call) =
+        recursive_reverse_caller_return_call(program, code, replacement_prototype)
+    else {
         return Ok(false);
-    }
-    let (args_start, argc) = unpack_return_call_aux(code[6].aux)?;
+    };
+    let (args_start, argc) = unpack_return_call_aux(return_call.aux)?;
     if args_start != 2 || argc != 3 {
         return Ok(false);
     }
@@ -20112,6 +20161,67 @@ fn recursive_reverse_caller_matches(
         return Ok(false);
     };
     Ok(replacement_global == global_name)
+}
+
+fn recursive_reverse_caller_return_call(
+    program: &Program,
+    code: &[Instruction],
+    replacement_prototype: u32,
+) -> Option<Instruction> {
+    if code.len() >= 6
+        && code[0].op == Opcode::GetGlobal
+        && code[0].a == 1
+        && constant_string_equals(program, code[0].aux, b"string")
+        && code[1].op == Opcode::GetIndexStringConst
+        && code[1].a == 1
+        && code[1].b == 1
+        && constant_string_equals(program, code[1].aux, b"gsub")
+        && instruction_fields(code[2], Opcode::Move, 2, 0, 0, 0)
+        && code[3].op == Opcode::LoadConst
+        && code[3].a == 3
+        && constant_string_equals(
+            program,
+            i32::from(code[3].c),
+            LUAU_RECURSIVE_REVERSE_GSUB_PATTERN,
+        )
+        && code[4].op == Opcode::LoadFunction
+        && code[4].a == 4
+        && code[4].aux == replacement_prototype as i32
+        && code[5].op == Opcode::ReturnCall
+        && code[5].a == 0
+        && code[5].b == 0
+        && code[5].c == 1
+    {
+        return Some(code[5]);
+    }
+
+    if code.len() >= 7
+        && code[0].op == Opcode::GetGlobal
+        && code[0].a == 1
+        && constant_string_equals(program, code[0].aux, b"string")
+        && code[1].op == Opcode::LoadConst
+        && code[1].a == 2
+        && constant_string_equals(program, i32::from(code[1].c), b"gsub")
+        && instruction_fields(code[2], Opcode::GetIndex, 1, 1, 2, 0)
+        && instruction_fields(code[3], Opcode::Move, 2, 0, 0, 0)
+        && code[4].op == Opcode::LoadConst
+        && code[4].a == 3
+        && constant_string_equals(
+            program,
+            i32::from(code[4].c),
+            LUAU_RECURSIVE_REVERSE_GSUB_PATTERN,
+        )
+        && code[5].op == Opcode::LoadFunction
+        && code[5].a == 4
+        && code[5].aux == replacement_prototype as i32
+        && code[6].op == Opcode::ReturnCall
+        && code[6].a == 0
+        && code[6].b == 0
+        && code[6].c == 1
+    {
+        return Some(code[6]);
+    }
+    None
 }
 
 fn instruction_fields(instruction: Instruction, op: Opcode, a: u8, b: u8, c: u8, aux: i32) -> bool {

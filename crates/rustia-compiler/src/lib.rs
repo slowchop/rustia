@@ -2767,23 +2767,26 @@ impl Compiler {
         }
         if let Some(object_register) = self.simple_register_expr(object) {
             if target != object_register {
-                let key_register =
-                    self.load_constant(Constant::String(field.as_bytes().to_vec()))?;
+                let key = self.string_constant_operand(field.as_bytes())?;
                 self.emit_source_mapped_instruction(
-                    Instruction::new(Opcode::GetIndex, target, object_register, key_register),
+                    Instruction::with_aux(
+                        Opcode::GetIndexStringConst,
+                        target,
+                        object_register,
+                        0,
+                        key,
+                    ),
                     field_span,
                 );
-                self.free_register(key_register);
                 return Ok(());
             }
         }
         self.compile_expr_to(object, target)?;
-        let key_register = self.load_constant(Constant::String(field.as_bytes().to_vec()))?;
+        let key = self.string_constant_operand(field.as_bytes())?;
         self.emit_source_mapped_instruction(
-            Instruction::new(Opcode::GetIndex, target, target, key_register),
+            Instruction::with_aux(Opcode::GetIndexStringConst, target, target, 0, key),
             field_span,
         );
-        self.free_register(key_register);
         Ok(())
     }
 
@@ -2908,14 +2911,25 @@ impl Compiler {
         let Some(key) = const_eval(index) else {
             return Ok(false);
         };
-        let key_register = self.load_constant(key)?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            target,
-            object_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        if let Constant::String(bytes) = key {
+            let key = self.string_constant_operand(&bytes)?;
+            self.code.push(Instruction::with_aux(
+                Opcode::GetIndexStringConst,
+                target,
+                object_register,
+                0,
+                key,
+            ));
+        } else {
+            let key_register = self.load_constant(key)?;
+            self.code.push(Instruction::new(
+                Opcode::GetIndex,
+                target,
+                object_register,
+                key_register,
+            ));
+            self.free_register(key_register);
+        }
         Ok(true)
     }
 
@@ -6531,6 +6545,11 @@ impl Compiler {
 
     fn global_key_index(&mut self, name: &str) -> Result<i32> {
         i32::try_from(self.constant_index(Constant::String(name.as_bytes().to_vec()))?)
+            .map_err(|_| CompileError::new("constant pool overflow"))
+    }
+
+    fn string_constant_operand(&mut self, bytes: &[u8]) -> Result<i32> {
+        i32::try_from(self.constant_index(Constant::String(bytes.to_vec()))?)
             .map_err(|_| CompileError::new("constant pool overflow"))
     }
 
@@ -11095,13 +11114,49 @@ return t[3]
             .main
             .code
             .iter()
-            .find(|instruction| instruction.op == Opcode::GetIndex)
-            .expect("field read should compile to GetIndex");
+            .find(|instruction| instruction.op == Opcode::GetIndexStringConst)
+            .expect("field read should compile to GetIndexStringConst");
         assert_ne!(get_index.a, get_index.b, "{:?}", program.main.code);
 
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(7.0));
+    }
+
+    #[test]
+    fn static_string_index_reads_use_quickened_opcode() {
+        let chunk = parse_source("local t = { x = 7 } return t[\"x\"]").unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::GetIndexStringConst), 1);
+        assert_eq!(opcode_count(&program, Opcode::GetIndex), 0);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(7.0));
+    }
+
+    #[test]
+    fn quickened_string_index_preserves_metamethod_fallback() {
+        let chunk = parse_source(
+            r#"
+local t = {}
+setmetatable(t, {
+    __index = function(_, key)
+        if key == "missing" then
+            return 9
+        end
+    end,
+})
+return t.missing
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::GetIndexStringConst) >= 1);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(9.0));
     }
 
     #[test]
