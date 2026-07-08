@@ -465,13 +465,6 @@ pub(crate) enum HashReadStatus {
     Deferred,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum IntegerIndexReadStatus {
-    Hit(Value),
-    NilArraySlotWithMetatable,
-    Deferred,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum HashWriteStatus {
     Stored,
@@ -1672,36 +1665,6 @@ impl VmCell {
             let key = number_table_key(one_based_index as f64)?;
             let value = table_hash_entry(table, key).map_or_else(Value::nil, |entry| entry.value);
             Some(HashReadStatus::Hit(value))
-        })
-    }
-
-    pub(crate) fn read_integer_index_without_metamethod(
-        &mut self,
-        table: u32,
-        one_based_index: usize,
-    ) -> Option<IntegerIndexReadStatus> {
-        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
-            return Some(IntegerIndexReadStatus::Deferred);
-        }
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
-            let table = root.tables.get(table as usize)?;
-            if let Some(value) = table.array.get(one_based_index - 1).copied() {
-                if value.kind() != ValueKind::Nil {
-                    return Some(IntegerIndexReadStatus::Hit(value));
-                }
-                return if table.metatable.is_some() {
-                    Some(IntegerIndexReadStatus::NilArraySlotWithMetatable)
-                } else {
-                    Some(IntegerIndexReadStatus::Hit(Value::nil()))
-                };
-            }
-            if table.metatable.is_some() {
-                return Some(IntegerIndexReadStatus::Deferred);
-            }
-            let key = number_table_key(one_based_index as f64)?;
-            let value = table_hash_entry(table, key).map_or_else(Value::nil, |entry| entry.value);
-            Some(IntegerIndexReadStatus::Hit(value))
         })
     }
 
