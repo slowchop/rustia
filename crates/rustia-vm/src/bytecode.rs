@@ -6,6 +6,7 @@ pub struct Program {
     pub constants: Vec<Constant>,
     pub functions: Vec<Function>,
     pub record_key_sets: Vec<Vec<usize>>,
+    pub sparse_read_plans: Vec<SparseReadPlan>,
     pub source_name: Option<Arc<str>>,
 }
 
@@ -45,6 +46,12 @@ pub enum Constant {
     Boolean(bool),
     Number(f64),
     String(Vec<u8>),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SparseReadPlan {
+    pub concat_constant: i32,
+    pub mul_mod_constants: i32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -225,6 +232,7 @@ pub enum Opcode {
     AddIndexNumber = 166,
     AddIndexConcatConstOrZero = 167,
     AddIndexMulModConstOrZero = 168,
+    AddIndexConcatAndMulModConstOrZero = 169,
 }
 
 pub const ARRAY_ITERATOR_WRITE_VISIBLE_KEY: u8 = 0;
@@ -269,6 +277,7 @@ impl Program {
             constants,
             functions: Vec::new(),
             record_key_sets: Vec::new(),
+            sparse_read_plans: Vec::new(),
             source_name: None,
         }
     }
@@ -283,12 +292,18 @@ impl Program {
             constants,
             functions,
             record_key_sets: Vec::new(),
+            sparse_read_plans: Vec::new(),
             source_name: None,
         }
     }
 
     pub fn with_record_key_sets(mut self, record_key_sets: Vec<Vec<usize>>) -> Self {
         self.record_key_sets = record_key_sets;
+        self
+    }
+
+    pub fn with_sparse_read_plans(mut self, sparse_read_plans: Vec<SparseReadPlan>) -> Self {
+        self.sparse_read_plans = sparse_read_plans;
         self
     }
 

@@ -8,8 +8,8 @@ use rustia_parser::{
 };
 use rustia_vm::bytecode::{
     Constant, Function, Instruction, InstructionSource, Opcode, Program, RuntimeType,
-    UpvalueDescriptor, ARRAY_ITERATOR_SKIP_VISIBLE_KEY, ARRAY_ITERATOR_WRITE_VISIBLE_KEY,
-    ASSERT_MESSAGE_MISSING_ARGUMENT, ASSERT_MESSAGE_NONE,
+    SparseReadPlan, UpvalueDescriptor, ARRAY_ITERATOR_SKIP_VISIBLE_KEY,
+    ARRAY_ITERATOR_WRITE_VISIBLE_KEY, ASSERT_MESSAGE_MISSING_ARGUMENT, ASSERT_MESSAGE_NONE,
 };
 use rustia_vm::number::{binary, NumericOp};
 use std::collections::{BTreeMap, BTreeSet};
@@ -170,6 +170,7 @@ struct Compiler {
     constants: Vec<Constant>,
     functions: Vec<Function>,
     record_key_sets: Vec<Vec<usize>>,
+    sparse_read_plans: Vec<SparseReadPlan>,
     code: Vec<Instruction>,
     locals: BTreeMap<String, Binding>,
     assigned_globals: BTreeSet<String>,
@@ -207,6 +208,7 @@ impl Compiler {
             constants: Vec::new(),
             functions: Vec::new(),
             record_key_sets: Vec::new(),
+            sparse_read_plans: Vec::new(),
             code: Vec::new(),
             locals: BTreeMap::new(),
             assigned_globals: BTreeSet::new(),
@@ -263,6 +265,7 @@ impl Compiler {
             self.functions,
         )
         .with_record_key_sets(self.record_key_sets)
+        .with_sparse_read_plans(self.sparse_read_plans)
         .with_source_name(self.options.source_name))
     }
 
@@ -1171,11 +1174,26 @@ impl Compiler {
         self.stdlib_builtin_aliases.remove(&register);
         self.numeric_registers.remove(&register);
         self.fresh_table_registers.remove(&register);
-        for rhs in rhs_operands {
+        let mut rhs_index = 0usize;
+        while rhs_index < rhs_operands.len() {
+            let rhs = rhs_operands[rhs_index];
+            if let Some(next_rhs) = rhs_operands.get(rhs_index + 1).copied() {
+                if self.compile_local_self_add_sparse_read_pair(
+                    register,
+                    rhs,
+                    next_rhs,
+                    value.span(),
+                )? {
+                    rhs_index += 2;
+                    continue;
+                }
+            }
             if self.compile_local_self_add_or_zero_table_index(register, rhs, value.span())? {
+                rhs_index += 1;
                 continue;
             }
             if self.compile_local_self_add_numeric_index(register, rhs, value.span())? {
+                rhs_index += 1;
                 continue;
             }
             let rhs_register = self.compile_expr(rhs)?;
@@ -1192,8 +1210,65 @@ impl Compiler {
                 ));
             }
             self.free_register_without_clear(rhs_register);
+            rhs_index += 1;
         }
         Ok(true)
+    }
+
+    fn compile_local_self_add_sparse_read_pair(
+        &mut self,
+        target: u8,
+        first: &Expr,
+        second: &Expr,
+        span: Span,
+    ) -> Result<bool> {
+        let Some((first_object, concat_constant, suffix)) = read_or_zero_concat_key(first) else {
+            return Ok(false);
+        };
+        let Some((second_object, factor_expr, multiplier, modulus)) =
+            self.read_or_zero_mul_mod_key(second)
+        else {
+            return Ok(false);
+        };
+        let Some(table_register) = self.simple_register_expr(first_object) else {
+            return Ok(false);
+        };
+        if self.simple_register_expr(second_object) != Some(table_register) {
+            return Ok(false);
+        }
+        let Some(suffix_register) = self.simple_register_expr(suffix) else {
+            return Ok(false);
+        };
+        if self.simple_register_expr(factor_expr) != Some(suffix_register) {
+            return Ok(false);
+        }
+        let concat_constant = i32::try_from(self.constant_index(concat_constant)?)
+            .map_err(|_| CompileError::new("constant pool overflow"))?;
+        let Some(mul_mod_constants) = self.number_constant_pair_operand(multiplier, modulus)?
+        else {
+            return Ok(false);
+        };
+        let plan = self.sparse_read_plan_operand(concat_constant, mul_mod_constants, span)?;
+        self.emit_source_mapped_instruction(
+            Instruction::with_aux(
+                Opcode::AddIndexConcatAndMulModConstOrZero,
+                target,
+                table_register,
+                suffix_register,
+                plan,
+            ),
+            span,
+        );
+        Ok(true)
+    }
+
+    fn read_or_zero_mul_mod_key<'a>(
+        &self,
+        expr: &'a Expr,
+    ) -> Option<(&'a Expr, &'a Expr, f64, f64)> {
+        let (object, index) = read_or_zero_index(expr)?;
+        let (factor_expr, multiplier, modulus) = self.mul_mod_number_const_expr(index)?;
+        Some((object, factor_expr, multiplier, modulus))
     }
 
     fn compile_local_self_add_or_zero_table_index(
@@ -7252,6 +7327,31 @@ impl Compiler {
         Ok(self.record_key_sets.len() - 1)
     }
 
+    fn sparse_read_plan_operand(
+        &mut self,
+        concat_constant: i32,
+        mul_mod_constants: i32,
+        span: Span,
+    ) -> Result<i32> {
+        let plan = SparseReadPlan {
+            concat_constant,
+            mul_mod_constants,
+        };
+        if let Some(index) = self
+            .sparse_read_plans
+            .iter()
+            .position(|existing| existing == &plan)
+        {
+            return i32::try_from(index)
+                .map_err(|_| CompileError::at("sparse read plan table overflow", span));
+        }
+        if self.sparse_read_plans.len() >= i32::MAX as usize {
+            return Err(CompileError::at("sparse read plan table overflow", span));
+        }
+        self.sparse_read_plans.push(plan);
+        Ok((self.sparse_read_plans.len() - 1) as i32)
+    }
+
     fn alloc_register_at(&mut self, span: Span) -> Result<u8> {
         if self.next_register > u8::MAX as u16 {
             return Err(CompileError::at("register file overflow", span));
@@ -9780,6 +9880,31 @@ fn lhs_const_concat_key(index: &Expr) -> Option<(Constant, &Expr)> {
     }
 }
 
+fn read_or_zero_index(expr: &Expr) -> Option<(&Expr, &Expr)> {
+    let Expr::Binary {
+        op: BinaryOp::Or,
+        lhs,
+        rhs,
+        ..
+    } = expr_without_parens(expr)
+    else {
+        return None;
+    };
+    if !expr_is_zero(rhs) {
+        return None;
+    }
+    let Expr::Index { object, index, .. } = expr_without_parens(lhs) else {
+        return None;
+    };
+    Some((object, index))
+}
+
+fn read_or_zero_concat_key(expr: &Expr) -> Option<(&Expr, Constant, &Expr)> {
+    let (object, index) = read_or_zero_index(expr)?;
+    let (constant, suffix) = lhs_const_concat_key(index)?;
+    Some((object, constant, suffix))
+}
+
 fn numeric_op_for_binary(op: BinaryOp) -> NumericOp {
     match op {
         BinaryOp::Add => NumericOp::Add,
@@ -11559,10 +11684,15 @@ return acc
         )
         .unwrap();
         let program = compile(&chunk).unwrap();
-        assert_eq!(opcode_count(&program, Opcode::AddIndexConcatConstOrZero), 1);
-        assert_eq!(opcode_count(&program, Opcode::AddIndexMulModConstOrZero), 1);
+        assert_eq!(
+            opcode_count(&program, Opcode::AddIndexConcatAndMulModConstOrZero),
+            1
+        );
+        assert_eq!(opcode_count(&program, Opcode::AddIndexConcatConstOrZero), 0);
+        assert_eq!(opcode_count(&program, Opcode::AddIndexMulModConstOrZero), 0);
         assert_eq!(opcode_count(&program, Opcode::GetIndexConcatConst), 0);
         assert_eq!(opcode_count(&program, Opcode::GetIndexMulModConst), 0);
+        assert_eq!(program.sparse_read_plans.len(), 1);
 
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let result = vm.run(&program).unwrap();
@@ -11590,8 +11720,12 @@ return acc
         )
         .unwrap();
         let program = compile(&chunk).unwrap();
-        assert_eq!(opcode_count(&program, Opcode::AddIndexConcatConstOrZero), 1);
-        assert_eq!(opcode_count(&program, Opcode::AddIndexMulModConstOrZero), 1);
+        assert_eq!(
+            opcode_count(&program, Opcode::AddIndexConcatAndMulModConstOrZero),
+            1
+        );
+        assert_eq!(opcode_count(&program, Opcode::AddIndexConcatConstOrZero), 0);
+        assert_eq!(opcode_count(&program, Opcode::AddIndexMulModConstOrZero), 0);
 
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let result = vm.run(&program).unwrap();
