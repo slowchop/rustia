@@ -2985,8 +2985,8 @@ fn table_hash_index_position(key: TableKey, len: usize) -> usize {
 #[inline(always)]
 fn table_hash_index_key(key: TableKey) -> u64 {
     let value = match key {
+        TableKey::Number(bits) => return table_numeric_hash_index_key(bits),
         TableKey::Boolean(value) => u64::from(value),
-        TableKey::Number(bits) => bits,
         TableKey::String(handle)
         | TableKey::Table(handle)
         | TableKey::Function(handle)
@@ -3000,6 +3000,13 @@ fn table_hash_index_key(key: TableKey) -> u64 {
         }),
     };
     value.wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(23) ^ value.rotate_right(17)
+}
+
+#[inline(always)]
+fn table_numeric_hash_index_key(mut bits: u64) -> u64 {
+    bits ^= bits >> 32;
+    bits = bits.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    bits ^ (bits >> 29)
 }
 
 #[derive(Clone, Copy)]
@@ -3580,6 +3587,28 @@ mod tests {
                 .value
                 .as_number(),
             Some(7.0)
+        );
+    }
+
+    #[test]
+    fn numeric_hash_index_positions_spread_integer_keys() {
+        let sequential_slots = (1..=256)
+            .map(|index| table_hash_index_position(number_table_key(index as f64).unwrap(), 256))
+            .collect::<BTreeSet<_>>();
+        assert!(
+            sequential_slots.len() >= 128,
+            "sequential integer keys should spread across at least half of the hash index"
+        );
+
+        let sparse_slots = (1..=64)
+            .map(|index| {
+                let key = ((index * 7919) % 100_003) as f64;
+                table_hash_index_position(number_table_key(key).unwrap(), 256)
+            })
+            .collect::<BTreeSet<_>>();
+        assert!(
+            sparse_slots.len() >= 48,
+            "benchmark-style sparse integer keys should not collapse into a small probe cluster"
         );
     }
 
