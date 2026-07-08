@@ -110,14 +110,14 @@ Current sample signal from
 
 | workload | IC probe signal |
 | --- | --- |
-| `generic_iteration` | before the IC slot hash fix, two `TableStringGet` sites had 64 probes, 0 hits, 64 misses, and 64 fills each; after changing site hashing to mix low bits, both sites report 64 probes, 63 hits, 1 miss, and 1 fill |
+| `generic_iteration` | before the IC slot hash fix, two `TableStringGet` sites had 64 probes, 0 hits, 64 misses, and 64 fills each; after changing site hashing to keep low bits from `pc`, prototype, and program, both sites report 64 probes, 63 hits, 1 miss, and 1 fill |
 | `dense_tables` | one `TableStringGet` site had 64 probes, 63 hits, 1 miss, and 1 fill; this is the healthy warm-cache shape |
 
 The IC slot hash fix matters because the table uses 1024 slots. The previous
 hash rotated small `pc` and prototype values before taking `% 1024`, which
 dropped those values out of the low bits and made many main-program sites
-collide. The new odd-multiplier mix keeps `program`, `prototype`, and `pc`
-visible to the slot index.
+collide. The new low-bit mix keeps `program`, `prototype`, and `pc` visible to
+the slot index without adding wide multiplication to the hot IC path.
 
 ## Next Serious Bets
 

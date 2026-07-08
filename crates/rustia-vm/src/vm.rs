@@ -312,11 +312,11 @@ struct InlineCacheSite {
 
 impl InlineCacheSite {
     fn slot(self) -> usize {
-        let prototype = self.prototype.unwrap_or(u32::MAX);
-        let hash = (self.program as usize).wrapping_mul(0x9E37_79B1)
-            ^ (prototype as usize).wrapping_mul(0x85EB_CA77)
-            ^ self.pc.wrapping_mul(0xC2B2_AE3D);
-        (hash as usize) % GLOBAL_GET_INLINE_CACHE_SLOTS
+        let prototype = self.prototype.unwrap_or(u32::MAX) as usize;
+        let program = self.program as usize;
+        let hash =
+            self.pc ^ prototype ^ prototype.wrapping_shl(4) ^ program ^ program.wrapping_shl(7);
+        hash % GLOBAL_GET_INLINE_CACHE_SLOTS
     }
 }
 
