@@ -40,7 +40,6 @@ const CALL_FRAME_POOL_MAX_FRAMES: usize = 64;
 const CALL_FRAME_POOL_MAX_ROOTS: usize = 256;
 const CALL_FRAME_POOL_MAX_STACKLESS_DEBUG_FRAMES: usize = 64;
 const TABLE_STRING_SLOT_INLINE_CACHE_WAYS: usize = 4;
-const CONCAT_CONST_KEY_INLINE_CACHE_WAYS: usize = 64;
 
 pub type LoadStringCompiler =
     fn(source: &[u8], source_name: Option<&[u8]>) -> std::result::Result<Program, String>;
@@ -168,19 +167,9 @@ struct RecordKeyAtomPlan {
     has_duplicate_keys: bool,
 }
 
-type ConcatConstIntegerAtomCache =
-    [Option<ConcatConstIntegerAtomCacheEntry>; CONCAT_CONST_KEY_INLINE_CACHE_WAYS];
-
 struct ProgramAtomCache {
     string_atoms: Vec<Option<u32>>,
-    string_integer_concat_atoms: Vec<Option<Box<ConcatConstIntegerAtomCache>>>,
     record_key_plans: Vec<Option<Arc<RecordKeyAtomPlan>>>,
-}
-
-#[derive(Clone, Copy)]
-struct ConcatConstIntegerAtomCacheEntry {
-    rhs_integer: u32,
-    atom: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -7451,12 +7440,10 @@ impl Vm {
                     return Ok(Value::string_atom(atom));
                 }
             } else if let Some(integer) = rhs.as_number().and_then(small_positive_integer_number) {
-                if let Some(atom) = self.concat_const_small_integer_atom(
-                    program_id,
-                    constant_index as usize,
-                    lhs,
-                    integer,
-                ) {
+                if let Some(atom) = self
+                    .heap
+                    .intern_concat_string_atom_small_integer(lhs, integer)
+                {
                     return Ok(Value::string_atom(atom));
                 }
             }
@@ -7464,70 +7451,6 @@ impl Vm {
         let lhs = self.load_constant(program, program_id, constant_index as usize)?;
         let rhs = get_register(registers, rhs_register)?;
         self.concat_operands(program, lhs, rhs, depth, fuel)
-    }
-
-    fn concat_const_small_integer_atom(
-        &mut self,
-        program_id: Option<u32>,
-        constant_index: usize,
-        lhs: u32,
-        rhs_integer: u32,
-    ) -> Option<u32> {
-        if let Some(program_id) = program_id {
-            if let Some(atom) =
-                self.concat_const_integer_atom_cache_get(program_id, constant_index, rhs_integer)
-            {
-                return Some(atom);
-            }
-        }
-        let atom = self
-            .heap
-            .intern_concat_string_atom_small_integer(lhs, rhs_integer)?;
-        if let Some(program_id) = program_id {
-            self.store_concat_const_integer_atom_cache(
-                program_id,
-                constant_index,
-                rhs_integer,
-                atom,
-            );
-        }
-        Some(atom)
-    }
-
-    fn concat_const_integer_atom_cache_get(
-        &self,
-        program_id: u32,
-        constant_index: usize,
-        rhs_integer: u32,
-    ) -> Option<u32> {
-        let cache = self
-            .program_atom_caches
-            .get(program_id as usize)?
-            .string_integer_concat_atoms
-            .get(constant_index)?
-            .as_ref()?;
-        let entry = cache[concat_const_integer_atom_cache_slot(rhs_integer)]?;
-        (entry.rhs_integer == rhs_integer).then_some(entry.atom)
-    }
-
-    fn store_concat_const_integer_atom_cache(
-        &mut self,
-        program_id: u32,
-        constant_index: usize,
-        rhs_integer: u32,
-        atom: u32,
-    ) {
-        let Some(slot) = self
-            .program_atom_caches
-            .get_mut(program_id as usize)
-            .and_then(|cache| cache.string_integer_concat_atoms.get_mut(constant_index))
-        else {
-            return;
-        };
-        let cache =
-            slot.get_or_insert_with(|| Box::new([None; CONCAT_CONST_KEY_INLINE_CACHE_WAYS]));
-        cache[concat_const_integer_atom_cache_slot(rhs_integer)] =
-            Some(ConcatConstIntegerAtomCacheEntry { rhs_integer, atom });
     }
 
     fn concat_operands(
@@ -12708,7 +12631,6 @@ impl Vm {
         })?;
         self.program_atom_caches.push(ProgramAtomCache {
             string_atoms: vec![None; program.constants.len()],
-            string_integer_concat_atoms: vec![None; program.constants.len()],
             record_key_plans: vec![None; program.record_key_sets.len()],
         });
         self.dynamic_programs.push(Arc::new(program));
@@ -23713,10 +23635,6 @@ fn small_positive_integer_number(value: f64) -> Option<u32> {
         .then_some(value as u32)
 }
 
-fn concat_const_integer_atom_cache_slot(rhs_integer: u32) -> usize {
-    (rhs_integer as usize) & (CONCAT_CONST_KEY_INLINE_CACHE_WAYS - 1)
-}
-
 fn luau_number_magnitude_to_string(magnitude: &str) -> Option<String> {
     let (mantissa, exponent) = magnitude
         .split_once('e')
@@ -28487,11 +28405,10 @@ fn table_expected_error() -> Error {
 #[cfg(test)]
 mod tests {
     use super::{
-        concat_const_integer_atom_cache_slot, mul_mod_const_table_index, native_function_value,
-        quickened_method_check_follows, InlineCacheSite, RawTableIntegerGetInlineCacheSource,
-        RawTableStringGetInlineCacheSource, StringSlotIndexCache, TableGetInlineCacheSource,
-        TableIntegerGetInlineCacheSource, TableIntegerSetInlineCacheTarget,
-        TableSetInlineCacheTarget, Value, Vm,
+        mul_mod_const_table_index, native_function_value, quickened_method_check_follows,
+        InlineCacheSite, RawTableIntegerGetInlineCacheSource, RawTableStringGetInlineCacheSource,
+        StringSlotIndexCache, TableGetInlineCacheSource, TableIntegerGetInlineCacheSource,
+        TableIntegerSetInlineCacheTarget, TableSetInlineCacheTarget, Value, Vm,
     };
     use crate::heap::NativeFunction;
     use crate::{Constant, Function, Instruction, Opcode, Profile, Program, VmSettings};
@@ -28673,40 +28590,6 @@ mod tests {
             vm.table_get_inline_cache[get_site.slot()].is_none_or(|slot| slot.site != get_site),
             "dynamic concat string-key reads should not churn the get cache"
         );
-    }
-
-    #[test]
-    fn concat_const_small_integer_keys_use_program_atom_cache() {
-        let program = Program::new(
-            Function::new(
-                vec![
-                    Instruction::with_aux(Opcode::NewArray, 0, 0, 0, 0),
-                    Instruction::new(Opcode::LoadConst, 1, 0, 1),
-                    Instruction::new(Opcode::LoadConst, 2, 0, 2),
-                    Instruction::with_aux(Opcode::SetIndexConcatConst, 0, 1, 2, 0),
-                    Instruction::with_aux(Opcode::GetIndexConcatConst, 3, 0, 1, 0),
-                    Instruction::new(Opcode::Return, 3, 1, 0),
-                ],
-                4,
-            ),
-            vec![
-                Constant::String(b"k".to_vec()),
-                Constant::Number(7.0),
-                Constant::Number(11.0),
-            ],
-        );
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-
-        let result = vm.run(&program).unwrap();
-        assert_eq!(result.as_number(), Some(11.0));
-
-        let cache = vm.program_atom_caches[0].string_integer_concat_atoms[0]
-            .as_ref()
-            .expect("concat atom cache should be initialized");
-        let entry = cache[concat_const_integer_atom_cache_slot(7)]
-            .expect("concat atom cache should store the small integer suffix");
-        assert_eq!(entry.rhs_integer, 7);
-        assert_eq!(vm.heap.string(entry.atom), Some("k7".to_owned()));
     }
 
     #[test]
