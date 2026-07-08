@@ -11648,6 +11648,28 @@ return tostring(ok) .. "|" .. tostring(string.find(err, "readonly", 1, true) ~= 
     }
 
     #[test]
+    fn repeated_named_table_literals_share_record_key_descriptor() {
+        let chunk = parse_source(
+            "local a = { x = 1, y = 2 } local b = { x = 3, y = 4 } return a.x + a.y + b.x + b.y",
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        let records = program
+            .main
+            .code
+            .iter()
+            .filter(|instruction| instruction.op == Opcode::NewRecordConstKeys)
+            .collect::<Vec<_>>();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].aux, records[1].aux);
+        assert_eq!(program.record_key_sets.len(), 1);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(10.0));
+    }
+
+    #[test]
     fn compiles_table_index_assignment() {
         let cases = [
             ("local t = {6, 9, 7} t[2] = 10 return t[2]", 10.0),

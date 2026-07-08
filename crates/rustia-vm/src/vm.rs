@@ -114,6 +114,7 @@ pub struct Vm {
     iter_metamethod_inline_cache: Vec<Option<IterMetamethodInlineCacheSlot>>,
     len_inline_cache: Vec<Option<LenInlineCacheSlot>>,
     constant_string_atom_cache: BTreeMap<(u32, usize), u32>,
+    record_key_atom_cache: BTreeMap<(u32, usize), Arc<[u32]>>,
     string_format_plan_cache: BTreeMap<u32, Arc<[StringFormatPlanItem]>>,
 }
 
@@ -624,6 +625,7 @@ impl Vm {
             iter_metamethod_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             len_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             constant_string_atom_cache: BTreeMap::new(),
+            record_key_atom_cache: BTreeMap::new(),
             string_format_plan_cache: BTreeMap::new(),
         }
     }
@@ -8758,19 +8760,6 @@ impl Vm {
                 reason: "invalid record table field count",
             }));
         }
-        let key_set = program
-            .record_key_sets
-            .get(instruction.aux as usize)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "record key set is missing",
-                })
-            })?;
-        if key_set.len() != field_count {
-            return Err(Error::new(ErrorKind::InvalidProgram {
-                reason: "record key set field count mismatch",
-            }));
-        }
         let start = usize::from(instruction.b);
         let end = start.checked_add(field_count).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
@@ -8783,17 +8772,8 @@ impl Vm {
                 max: registers.len(),
             })
         })?;
-        let mut key_atoms = Vec::with_capacity(field_count);
-        for constant_index in key_set {
-            let atom = self
-                .constant_string_atom(program, program_id, *constant_index)?
-                .ok_or_else(|| {
-                    Error::new(ErrorKind::InvalidProgram {
-                        reason: "record key set must reference string constants",
-                    })
-                })?;
-            key_atoms.push(atom);
-        }
+        let key_atoms =
+            self.record_key_atoms(program, program_id, instruction.aux as usize, field_count)?;
         let table = self
             .heap
             .alloc_record_table_with_string_atoms(&key_atoms, values)
@@ -8803,6 +8783,47 @@ impl Vm {
                 })
             })?;
         Ok(Value::table(table))
+    }
+
+    fn record_key_atoms(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        key_set_index: usize,
+        field_count: usize,
+    ) -> Result<Arc<[u32]>> {
+        let key_set = program.record_key_sets.get(key_set_index).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "record key set is missing",
+            })
+        })?;
+        if key_set.len() != field_count {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "record key set field count mismatch",
+            }));
+        }
+        if let Some(program_id) = program_id {
+            if let Some(atoms) = self.record_key_atom_cache.get(&(program_id, key_set_index)) {
+                return Ok(atoms.clone());
+            }
+        }
+        let mut atoms = Vec::with_capacity(key_set.len());
+        for constant_index in key_set {
+            let atom = self
+                .constant_string_atom(program, program_id, *constant_index)?
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "record key set must reference string constants",
+                    })
+                })?;
+            atoms.push(atom);
+        }
+        let atoms = Arc::<[u32]>::from(atoms);
+        if let Some(program_id) = program_id {
+            self.record_key_atom_cache
+                .insert((program_id, key_set_index), atoms.clone());
+        }
+        Ok(atoms)
     }
 
     fn table_insert(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
