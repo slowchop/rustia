@@ -11863,6 +11863,87 @@ return seen + (t.x == nil and 100 or 0)
     }
 
     #[test]
+    fn newindex_function_write_cache_calls_repeated_function() {
+        let chunk = parse_source(
+            r#"
+local seen = 0
+local t = {}
+setmetatable(t, {
+    __newindex = function(_, key, value)
+        if key == "x" then
+            seen = seen + value
+        end
+    end,
+})
+t.x = 1
+t.x = 2
+return seen
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexStringConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(3.0));
+    }
+
+    #[test]
+    fn newindex_function_write_cache_observes_function_reassignment() {
+        let chunk = parse_source(
+            r#"
+local first = 0
+local second = { x = 0 }
+local mt = {
+    __newindex = function(_, _, value)
+        first = value
+    end,
+}
+local t = {}
+setmetatable(t, mt)
+t.x = 1
+mt.__newindex = second
+t.x = 2
+return first * 10 + second.x
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexStringConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(12.0));
+    }
+
+    #[test]
+    fn newindex_function_write_cache_observes_original_slot_creation() {
+        let chunk = parse_source(
+            r#"
+local seen = 0
+local t = {}
+setmetatable(t, {
+    __newindex = function(_, _, value)
+        seen = value
+    end,
+})
+t.x = 1
+rawset(t, "x", 5)
+t.x = 7
+return seen * 10 + t.x
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexStringConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(17.0));
+    }
+
+    #[test]
     fn newindex_table_write_cache_observes_delegate_reassignment() {
         let chunk = parse_source(
             r#"

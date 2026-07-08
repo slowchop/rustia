@@ -246,6 +246,11 @@ enum TableSetInlineCacheTarget {
         newindex_table: u32,
         newindex_table_hash_indices: StringSlotIndexCache,
     },
+    NewIndexFunction {
+        metatable: u32,
+        metatable_version: u64,
+        method: Value,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -8626,7 +8631,31 @@ impl Vm {
         if self.table_set_inline_cache_hit(site, table, key_atom, value)? {
             return Ok(());
         }
+        if let Some(method) =
+            self.table_set_newindex_function_inline_cache_hit(site, table, key_atom)?
+        {
+            self.call_value(
+                program,
+                method,
+                &[Value::table(table), key, value],
+                depth.saturating_add(1),
+                fuel,
+            )?;
+            return Ok(());
+        }
         if self.try_set_table_string_index_for_inline_cache(site, table, key_atom, value)? {
+            return Ok(());
+        }
+        if let Some(method) =
+            self.try_set_table_newindex_function_for_inline_cache(site, table, key_atom)?
+        {
+            self.call_value(
+                program,
+                method,
+                &[Value::table(table), key, value],
+                depth.saturating_add(1),
+                fuel,
+            )?;
             return Ok(());
         }
         self.clear_table_set_inline_cache_site(site);
@@ -8729,8 +8758,54 @@ impl Vm {
                     }
                 }
             }
+            TableSetInlineCacheTarget::NewIndexFunction { .. } => {}
         }
         Ok(false)
+    }
+
+    fn table_set_newindex_function_inline_cache_hit(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        key_atom: u32,
+    ) -> Result<Option<Value>> {
+        let slot = self
+            .table_set_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
+        let Some(slot) = slot else {
+            return Ok(None);
+        };
+        if slot.site != site || slot.entry.key_atom != key_atom {
+            return Ok(None);
+        }
+        let TableSetInlineCacheTarget::NewIndexFunction {
+            metatable,
+            metatable_version,
+            method,
+        } = slot.entry.target
+        else {
+            return Ok(None);
+        };
+        if self
+            .raw_table_slot(table, Value::string_atom(key_atom))?
+            .is_some_and(|raw| raw.kind() != ValueKind::Nil)
+        {
+            return Ok(None);
+        }
+        if self.heap.table_metatable(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })? != Some(metatable)
+        {
+            return Ok(None);
+        }
+        if self.heap.table_version(metatable) != Some(metatable_version) {
+            return Ok(None);
+        }
+        Ok(Some(method))
     }
 
     fn try_set_table_string_index_for_inline_cache(
@@ -8787,6 +8862,50 @@ impl Vm {
             }
         }
         self.try_set_table_newindex_table_for_inline_cache(site, table, key_atom, value)
+    }
+
+    fn try_set_table_newindex_function_for_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        key_atom: u32,
+    ) -> Result<Option<Value>> {
+        if self
+            .raw_table_slot(table, Value::string_atom(key_atom))?
+            .is_some_and(|raw| raw.kind() != ValueKind::Nil)
+        {
+            return Ok(None);
+        }
+        let Some(metatable) = self.heap.table_metatable(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?
+        else {
+            return Ok(None);
+        };
+        let newindex_atom = self.heap.intern_string("__newindex");
+        let method = self.raw_table_get(metatable, Value::string_atom(newindex_atom))?;
+        if method.kind() != ValueKind::Function {
+            return Ok(None);
+        }
+        let metatable_version = self.heap.table_version(metatable).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "__newindex metatable handle is missing",
+            })
+        })?;
+        self.store_table_set_inline_cache(
+            site,
+            TableSetInlineCacheEntry {
+                key_atom,
+                target: TableSetInlineCacheTarget::NewIndexFunction {
+                    metatable,
+                    metatable_version,
+                    method,
+                },
+            },
+        );
+        Ok(Some(method))
     }
 
     fn try_set_table_newindex_table_for_inline_cache(
@@ -8887,7 +9006,8 @@ impl Vm {
             .filter(|slot| slot.site == site && slot.entry.key_atom == key_atom)
             .and_then(|slot| match slot.entry.target {
                 TableSetInlineCacheTarget::DirectSlot { hash_indices } => Some(hash_indices),
-                TableSetInlineCacheTarget::NewIndexTable { .. } => None,
+                TableSetInlineCacheTarget::NewIndexTable { .. }
+                | TableSetInlineCacheTarget::NewIndexFunction { .. } => None,
             })
             .map(|indices| indices.with_index(hash_index))
             .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
@@ -8912,7 +9032,8 @@ impl Vm {
                     ..
                 } if cached_newindex_table == newindex_table => Some(newindex_table_hash_indices),
                 TableSetInlineCacheTarget::DirectSlot { .. }
-                | TableSetInlineCacheTarget::NewIndexTable { .. } => None,
+                | TableSetInlineCacheTarget::NewIndexTable { .. }
+                | TableSetInlineCacheTarget::NewIndexFunction { .. } => None,
             })
             .map(|indices| indices.with_index(hash_index))
             .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
@@ -27500,6 +27621,134 @@ mod tests {
             )
             .unwrap();
         assert_eq!(value.as_number(), Some(7.0));
+    }
+
+    #[test]
+    fn string_newindex_function_cache_observes_metamethod_reassignment() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let key_atom = vm.heap.intern_string("x");
+        let newindex_atom = vm.heap.intern_string("__newindex");
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let delegate = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(delegate, Value::string_atom(key_atom), Value::number(0.0))
+            .unwrap();
+        let first_method = native_function_value(&mut vm.heap, NativeFunction::TypeOf, vm.globals);
+        vm.heap
+            .table_set(metatable, Value::string_atom(newindex_atom), first_method)
+            .unwrap();
+        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 9,
+        };
+        let key = Value::string_atom(key_atom);
+        let mut fuel = None;
+
+        vm.set_table_string_index_with_inline_cache(
+            &program,
+            site,
+            table,
+            key,
+            key_atom,
+            Value::number(1.0),
+            0,
+            &mut fuel,
+        )
+        .unwrap();
+        let slot = vm.table_set_inline_cache[site.slot()]
+            .expect("__newindex function writes should populate the set cache");
+        assert!(matches!(
+            slot.entry.target,
+            TableSetInlineCacheTarget::NewIndexFunction { method, .. }
+                if method.as_function() == first_method.as_function()
+        ));
+
+        vm.heap
+            .table_set(
+                metatable,
+                Value::string_atom(newindex_atom),
+                Value::table(delegate),
+            )
+            .unwrap();
+        vm.set_table_string_index_with_inline_cache(
+            &program,
+            site,
+            table,
+            key,
+            key_atom,
+            Value::number(2.0),
+            0,
+            &mut fuel,
+        )
+        .unwrap();
+
+        assert_eq!(
+            vm.heap
+                .table_get(delegate, Value::string_atom(key_atom))
+                .unwrap()
+                .as_number(),
+            Some(2.0)
+        );
+    }
+
+    #[test]
+    fn string_newindex_function_cache_defers_to_original_slot() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let key_atom = vm.heap.intern_string("x");
+        let newindex_atom = vm.heap.intern_string("__newindex");
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let method = native_function_value(&mut vm.heap, NativeFunction::TypeOf, vm.globals);
+        vm.heap
+            .table_set(metatable, Value::string_atom(newindex_atom), method)
+            .unwrap();
+        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 9,
+        };
+        let key = Value::string_atom(key_atom);
+        let mut fuel = None;
+
+        vm.set_table_string_index_with_inline_cache(
+            &program,
+            site,
+            table,
+            key,
+            key_atom,
+            Value::number(1.0),
+            0,
+            &mut fuel,
+        )
+        .unwrap();
+        vm.heap
+            .table_set(table, Value::string_atom(key_atom), Value::number(5.0))
+            .unwrap();
+        vm.set_table_string_index_with_inline_cache(
+            &program,
+            site,
+            table,
+            key,
+            key_atom,
+            Value::number(7.0),
+            0,
+            &mut fuel,
+        )
+        .unwrap();
+
+        assert_eq!(
+            vm.heap
+                .table_get(table, Value::string_atom(key_atom))
+                .unwrap()
+                .as_number(),
+            Some(7.0)
+        );
     }
 
     #[test]
