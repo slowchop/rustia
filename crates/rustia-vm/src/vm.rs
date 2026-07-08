@@ -1934,6 +1934,72 @@ impl Vm {
                                                 .map_err(|e| e.at_pc(pc - 1))?;
                                             continue;
                                         }
+                                        if next.op == Opcode::GetIndex && next.b == instruction.a {
+                                            let index = upvalue_index(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?;
+                                            let upvalue = context
+                                                .upvalues
+                                                .get(index)
+                                                .copied()
+                                                .ok_or_else(|| {
+                                                    Error::new(ErrorKind::InvalidProgram {
+                                                        reason: "upvalue index is missing",
+                                                    })
+                                                })
+                                                .map_err(|e| e.at_pc(pc - 1))?;
+                                            let value = self.heap.upvalue_get(upvalue).ok_or_else(
+                                                || {
+                                                    Error::new(ErrorKind::InvalidProgram {
+                                                        reason: "upvalue handle is missing",
+                                                    })
+                                                },
+                                            )?;
+                                            if let Some(table) = value.as_table() {
+                                                let key = if next.c == instruction.a {
+                                                    value
+                                                } else {
+                                                    get_register(&registers, next.c)
+                                                        .map_err(|e| e.at_pc(pc))?
+                                                };
+                                                if let Some(index) =
+                                                    key.as_number().and_then(array_iterator_index)
+                                                {
+                                                    if let Some(index_value) = self
+                                                        .get_table_integer_index_fast(table, index)
+                                                        .map_err(|e| e.at_pc(pc))?
+                                                    {
+                                                        if next.a != instruction.a {
+                                                            set_register(
+                                                                &mut registers,
+                                                                instruction.a,
+                                                                value,
+                                                            )
+                                                            .map_err(|e| e.at_pc(pc - 1))?;
+                                                        }
+                                                        set_register(
+                                                            &mut registers,
+                                                            next.a,
+                                                            index_value,
+                                                        )
+                                                        .map_err(|e| e.at_pc(pc))?;
+                                                        self.executed_instructions = self
+                                                            .executed_instructions
+                                                            .wrapping_add(1);
+                                                        self.record_execution_hit(
+                                                            program_id,
+                                                            context.prototype,
+                                                            function,
+                                                            pc,
+                                                        );
+                                                        pc += 1;
+                                                        continue;
+                                                    }
+                                                }
+                                            }
+                                            set_register(&mut registers, instruction.a, value)
+                                                .map_err(|e| e.at_pc(pc - 1))?;
+                                            continue;
+                                        }
                                         if next.op == Opcode::GetUpvalue {
                                             let first_index = upvalue_index(instruction.aux)
                                                 .map_err(|e| e.at_pc(pc - 1))?;
