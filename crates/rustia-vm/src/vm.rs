@@ -2832,14 +2832,13 @@ impl Vm {
                                         }
                                     }
                                     if let Some(key_atom) = key.as_string_atom() {
-                                        if let Some(site) = static_string_get_index_site(
-                                            program_id,
-                                            context.prototype,
-                                            program,
-                                            function,
-                                            pc - 1,
-                                            instruction.c,
-                                        ) {
+                                        if let Some(site) =
+                                            program_id.map(|program| InlineCacheSite {
+                                                program,
+                                                prototype: context.prototype,
+                                                pc: pc - 1,
+                                            })
+                                        {
                                             let value = self
                                                 .get_table_string_index_with_inline_cache(
                                                     program,
@@ -3280,6 +3279,37 @@ impl Vm {
                                                 )
                                             })?
                                         {
+                                            continue;
+                                        }
+                                    }
+                                    if let Some(key_atom) = key.as_string_atom() {
+                                        if let Some(site) =
+                                            program_id.map(|program| InlineCacheSite {
+                                                program,
+                                                prototype: context.prototype,
+                                                pc: pc - 1,
+                                            })
+                                        {
+                                            self.set_table_string_index_with_inline_cache(
+                                                program,
+                                                site,
+                                                table,
+                                                key,
+                                                key_atom,
+                                                value,
+                                                context.depth,
+                                                fuel,
+                                            )
+                                            .map_err(
+                                                |e| {
+                                                    attach_instruction_source(
+                                                        program,
+                                                        function,
+                                                        pc - 1,
+                                                        e,
+                                                    )
+                                                },
+                                            )?;
                                             continue;
                                         }
                                     }
@@ -20426,37 +20456,6 @@ fn opcode_may_observe_current_roots(op: Opcode) -> bool {
         | Opcode::CheckMethodStringConst
         | Opcode::CoerceForNumber => false,
     }
-}
-
-fn static_string_get_index_site(
-    program_id: Option<u32>,
-    prototype: Option<u32>,
-    program: &Program,
-    function: &Function,
-    pc: usize,
-    key_register: u8,
-) -> Option<InlineCacheSite> {
-    let program_id = program_id?;
-    let previous = function.code.get(pc.checked_sub(1)?)?;
-    if previous.a != key_register {
-        return None;
-    }
-    let constant_index = match previous.op {
-        Opcode::LoadConst => usize::from(previous.c),
-        Opcode::LoadConstWide if previous.aux >= 0 => previous.aux as usize,
-        _ => return None,
-    };
-    if !matches!(
-        program.constants.get(constant_index),
-        Some(Constant::String(_))
-    ) {
-        return None;
-    }
-    Some(InlineCacheSite {
-        program: program_id,
-        prototype,
-        pc,
-    })
 }
 
 fn usize_to_u64(value: usize) -> u64 {

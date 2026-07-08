@@ -11627,6 +11627,58 @@ return a * 10 + b
     }
 
     #[test]
+    fn dynamic_string_index_reads_use_inline_cache_path() {
+        let chunk = parse_source(
+            r#"
+local key = "x"
+local proto = { x = 2 }
+local t = {}
+setmetatable(t, { __index = proto })
+local a = t[key]
+proto.x = 5
+local b = t[key]
+return a * 10 + b
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::GetIndex) >= 2);
+        assert_eq!(opcode_count(&program, Opcode::GetIndexStringConst), 0);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(25.0));
+    }
+
+    #[test]
+    fn dynamic_string_index_writes_use_inline_cache_path() {
+        let chunk = parse_source(
+            r#"
+local seen = 0
+local key = "x"
+local t = { x = 1 }
+setmetatable(t, {
+    __newindex = function(_, _, value)
+        seen = value
+    end,
+})
+t[key] = 2
+t[key] = nil
+t[key] = 5
+return seen + (t.x == nil and 100 or 0)
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndex) >= 3);
+        assert_eq!(opcode_count(&program, Opcode::SetIndexStringConst), 0);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(105.0));
+    }
+
+    #[test]
     fn index_read_lowering_preserves_side_effect_order() {
         let chunk = parse_source(
             r#"
