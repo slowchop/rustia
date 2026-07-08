@@ -148,17 +148,31 @@ struct CoverageKey {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct InlineCacheSite {
     program: u32,
+    slot: u16,
     prototype: Option<u32>,
     pc: usize,
 }
 
 impl InlineCacheSite {
-    fn slot(self) -> usize {
-        let prototype = self.prototype.unwrap_or(u32::MAX);
-        let hash = u64::from(self.program).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+    fn new(program: u32, prototype: Option<u32>, pc: usize) -> Self {
+        Self {
+            program,
+            slot: Self::compute_slot(program, prototype, pc),
+            prototype,
+            pc,
+        }
+    }
+
+    fn compute_slot(program: u32, prototype: Option<u32>, pc: usize) -> u16 {
+        let prototype = prototype.unwrap_or(u32::MAX);
+        let hash = u64::from(program).wrapping_mul(0x9E37_79B9_7F4A_7C15)
             ^ u64::from(prototype).rotate_left(17)
-            ^ (self.pc as u64).rotate_left(32);
-        (hash as usize) % GLOBAL_GET_INLINE_CACHE_SLOTS
+            ^ (pc as u64).rotate_left(32);
+        (hash as usize % GLOBAL_GET_INLINE_CACHE_SLOTS) as u16
+    }
+
+    fn slot(self) -> usize {
+        usize::from(self.slot)
     }
 }
 
@@ -1520,10 +1534,8 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::GetGlobal => {
-                                let site = program_id.map(|program| InlineCacheSite {
-                                    program,
-                                    prototype: context.prototype,
-                                    pc: pc - 1,
+                                let site = program_id.map(|program| {
+                                    InlineCacheSite::new(program, context.prototype, pc - 1)
                                 });
                                 let value = self
                                     .get_global_with_inline_cache(
@@ -1540,10 +1552,8 @@ impl Vm {
                             Opcode::SetGlobal => {
                                 let value = get_register(&registers, instruction.a)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                let site = program_id.map(|program| InlineCacheSite {
-                                    program,
-                                    prototype: context.prototype,
-                                    pc: pc - 1,
+                                let site = program_id.map(|program| {
+                                    InlineCacheSite::new(program, context.prototype, pc - 1)
                                 });
                                 self.set_global_with_inline_cache(
                                     program,
@@ -1628,11 +1638,11 @@ impl Vm {
                                             if let (Some(program), Some(table)) =
                                                 (program_id, value.as_table())
                                             {
-                                                let site = InlineCacheSite {
+                                                let site = InlineCacheSite::new(
                                                     program,
-                                                    prototype: context.prototype,
+                                                    context.prototype,
                                                     pc,
-                                                };
+                                                );
                                                 if let Some(len) =
                                                     self.len_inline_cache_hit(site, table)
                                                 {
@@ -1813,10 +1823,8 @@ impl Vm {
                                         &context.upvalues,
                                         &mut registers,
                                         instruction,
-                                        program_id.map(|program| InlineCacheSite {
-                                            program,
-                                            prototype: context.prototype,
-                                            pc: pc - 1,
+                                        program_id.map(|program| {
+                                            InlineCacheSite::new(program, context.prototype, pc - 1)
                                         }),
                                         context.depth,
                                         fuel,
@@ -1851,10 +1859,8 @@ impl Vm {
                                         &context.upvalues,
                                         &mut registers,
                                         instruction,
-                                        program_id.map(|program| InlineCacheSite {
-                                            program,
-                                            prototype: context.prototype,
-                                            pc: pc - 1,
+                                        program_id.map(|program| {
+                                            InlineCacheSite::new(program, context.prototype, pc - 1)
                                         }),
                                         context.depth,
                                         fuel,
@@ -1888,10 +1894,8 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Add,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -1904,10 +1908,8 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Add,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -1920,10 +1922,8 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Sub,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -1936,10 +1936,8 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Sub,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -1952,10 +1950,8 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Mul,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -1968,10 +1964,8 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Mul,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -1984,10 +1978,8 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Div,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -2000,10 +1992,8 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Div,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -2016,10 +2006,8 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::FloorDiv,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -2032,10 +2020,8 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::FloorDiv,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -2048,10 +2034,8 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Mod,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -2064,10 +2048,8 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Mod,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -2079,10 +2061,8 @@ impl Vm {
                                     program,
                                     &mut registers,
                                     instruction,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -2094,10 +2074,8 @@ impl Vm {
                                     program,
                                     &mut registers,
                                     instruction,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -2109,10 +2087,8 @@ impl Vm {
                                     program,
                                     &registers,
                                     instruction,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -2126,10 +2102,8 @@ impl Vm {
                                     program,
                                     &registers,
                                     instruction,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -2143,10 +2117,8 @@ impl Vm {
                                     program,
                                     &mut registers,
                                     instruction,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -2159,10 +2131,8 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Pow,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -2175,10 +2145,8 @@ impl Vm {
                                     &mut registers,
                                     instruction,
                                     NumericOp::Pow,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
+                                    program_id.map(|program| {
+                                        InlineCacheSite::new(program, context.prototype, pc - 1)
                                     }),
                                     context.depth,
                                     fuel,
@@ -2869,10 +2837,8 @@ impl Vm {
                                 }
                             }
                             Opcode::GeneralizedIterPrep => {
-                                let site = program_id.map(|program| InlineCacheSite {
-                                    program,
-                                    prototype: context.prototype,
-                                    pc: pc - 1,
+                                let site = program_id.map(|program| {
+                                    InlineCacheSite::new(program, context.prototype, pc - 1)
                                 });
                                 if !self
                                     .generalized_iterator_prepare(
@@ -2907,10 +2873,8 @@ impl Vm {
                                 }
                             }
                             Opcode::Len => {
-                                let site = program_id.map(|program| InlineCacheSite {
-                                    program,
-                                    prototype: context.prototype,
-                                    pc: pc - 1,
+                                let site = program_id.map(|program| {
+                                    InlineCacheSite::new(program, context.prototype, pc - 1)
                                 });
                                 let value = get_register(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
@@ -2927,10 +2891,8 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::LenPlusOne => {
-                                let site = program_id.map(|program| InlineCacheSite {
-                                    program,
-                                    prototype: context.prototype,
-                                    pc: pc - 1,
+                                let site = program_id.map(|program| {
+                                    InlineCacheSite::new(program, context.prototype, pc - 1)
                                 });
                                 let value = get_register(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
@@ -2955,10 +2917,12 @@ impl Vm {
                                         if let Some(value) = self
                                             .get_table_integer_index_with_inline_cache(
                                                 program,
-                                                program_id.map(|program| InlineCacheSite {
-                                                    program,
-                                                    prototype: context.prototype,
-                                                    pc: pc - 1,
+                                                program_id.map(|program| {
+                                                    InlineCacheSite::new(
+                                                        program,
+                                                        context.prototype,
+                                                        pc - 1,
+                                                    )
                                                 }),
                                                 table,
                                                 index,
@@ -2987,13 +2951,9 @@ impl Vm {
                                         }
                                     }
                                     if let Some(key_atom) = key.as_string_atom() {
-                                        if let Some(site) =
-                                            program_id.map(|program| InlineCacheSite {
-                                                program,
-                                                prototype: context.prototype,
-                                                pc: pc - 1,
-                                            })
-                                        {
+                                        if let Some(site) = program_id.map(|program| {
+                                            InlineCacheSite::new(program, context.prototype, pc - 1)
+                                        }) {
                                             let value = self
                                                 .get_table_string_index_with_inline_cache(
                                                     program,
@@ -3045,10 +3005,8 @@ impl Vm {
                                     get_register(&registers, instruction.b).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
-                                let site = program_id.map(|program| InlineCacheSite {
-                                    program,
-                                    prototype: context.prototype,
-                                    pc: pc - 1,
+                                let site = program_id.map(|program| {
+                                    InlineCacheSite::new(program, context.prototype, pc - 1)
                                 });
                                 if let (Some(table), Some(site)) = (object.as_table(), site) {
                                     if let Some(value) = self
@@ -3173,10 +3131,12 @@ impl Vm {
                                             if let Some(value) = self
                                                 .get_table_integer_index_with_inline_cache(
                                                     program,
-                                                    program_id.map(|program| InlineCacheSite {
-                                                        program,
-                                                        prototype: context.prototype,
-                                                        pc: pc - 1,
+                                                    program_id.map(|program| {
+                                                        InlineCacheSite::new(
+                                                            program,
+                                                            context.prototype,
+                                                            pc - 1,
+                                                        )
                                                     }),
                                                     table,
                                                     index,
@@ -3231,10 +3191,12 @@ impl Vm {
                                     if let Some(value) = self
                                         .get_table_integer_index_with_inline_cache(
                                             program,
-                                            program_id.map(|program| InlineCacheSite {
-                                                program,
-                                                prototype: context.prototype,
-                                                pc: pc - 1,
+                                            program_id.map(|program| {
+                                                InlineCacheSite::new(
+                                                    program,
+                                                    context.prototype,
+                                                    pc - 1,
+                                                )
                                             }),
                                             table,
                                             index,
@@ -3273,10 +3235,8 @@ impl Vm {
                                         program,
                                         &registers,
                                         instruction,
-                                        program_id.map(|program| InlineCacheSite {
-                                            program,
-                                            prototype: context.prototype,
-                                            pc: pc - 1,
+                                        program_id.map(|program| {
+                                            InlineCacheSite::new(program, context.prototype, pc - 1)
                                         }),
                                         context.depth,
                                         fuel,
@@ -3294,10 +3254,8 @@ impl Vm {
                                         program,
                                         &registers,
                                         instruction,
-                                        program_id.map(|program| InlineCacheSite {
-                                            program,
-                                            prototype: context.prototype,
-                                            pc: pc - 1,
+                                        program_id.map(|program| {
+                                            InlineCacheSite::new(program, context.prototype, pc - 1)
                                         }),
                                         context.depth,
                                         fuel,
@@ -3368,12 +3326,9 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let key = get_register(&registers, instruction.c)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                let value = if let Some(site) =
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
-                                    }) {
+                                let value = if let Some(site) = program_id.map(|program| {
+                                    InlineCacheSite::new(program, context.prototype, pc - 1)
+                                }) {
                                     if let Some(key_atom) = key.as_string_atom() {
                                         self.raw_table_string_get_with_inline_cache(
                                             site, table, key_atom,
@@ -3417,12 +3372,9 @@ impl Vm {
                                         })
                                         .at_pc(pc - 1)
                                     })?;
-                                let value = if let Some(site) =
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
-                                    }) {
+                                let value = if let Some(site) = program_id.map(|program| {
+                                    InlineCacheSite::new(program, context.prototype, pc - 1)
+                                }) {
                                     self.raw_table_string_get_with_inline_cache(
                                         site, table, key_atom,
                                     )
@@ -3446,12 +3398,9 @@ impl Vm {
                                 };
                                 let table = get_table(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                let value = if let Some(site) =
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
-                                    }) {
+                                let value = if let Some(site) = program_id.map(|program| {
+                                    InlineCacheSite::new(program, context.prototype, pc - 1)
+                                }) {
                                     self.raw_table_integer_get_with_inline_cache(site, table, index)
                                         .map_err(|e| e.at_pc(pc - 1))?
                                 } else {
@@ -3480,10 +3429,12 @@ impl Vm {
                                         if self
                                             .set_table_integer_index_with_inline_cache(
                                                 program,
-                                                program_id.map(|program| InlineCacheSite {
-                                                    program,
-                                                    prototype: context.prototype,
-                                                    pc: pc - 1,
+                                                program_id.map(|program| {
+                                                    InlineCacheSite::new(
+                                                        program,
+                                                        context.prototype,
+                                                        pc - 1,
+                                                    )
                                                 }),
                                                 table,
                                                 index,
@@ -3504,13 +3455,9 @@ impl Vm {
                                         }
                                     }
                                     if let Some(key_atom) = key.as_string_atom() {
-                                        if let Some(site) =
-                                            program_id.map(|program| InlineCacheSite {
-                                                program,
-                                                prototype: context.prototype,
-                                                pc: pc - 1,
-                                            })
-                                        {
+                                        if let Some(site) = program_id.map(|program| {
+                                            InlineCacheSite::new(program, context.prototype, pc - 1)
+                                        }) {
                                             self.set_table_string_index_with_inline_cache(
                                                 program,
                                                 site,
@@ -3565,10 +3512,12 @@ impl Vm {
                                             if self
                                                 .set_table_integer_index_with_inline_cache(
                                                     program,
-                                                    program_id.map(|program| InlineCacheSite {
-                                                        program,
-                                                        prototype: context.prototype,
-                                                        pc: pc - 1,
+                                                    program_id.map(|program| {
+                                                        InlineCacheSite::new(
+                                                            program,
+                                                            context.prototype,
+                                                            pc - 1,
+                                                        )
                                                     }),
                                                     table,
                                                     index,
@@ -3622,10 +3571,12 @@ impl Vm {
                                     if self
                                         .set_table_integer_index_with_inline_cache(
                                             program,
-                                            program_id.map(|program| InlineCacheSite {
-                                                program,
-                                                prototype: context.prototype,
-                                                pc: pc - 1,
+                                            program_id.map(|program| {
+                                                InlineCacheSite::new(
+                                                    program,
+                                                    context.prototype,
+                                                    pc - 1,
+                                                )
                                             }),
                                             table,
                                             index,
@@ -3668,10 +3619,8 @@ impl Vm {
                                     get_register(&registers, instruction.b).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
-                                let site = program_id.map(|program| InlineCacheSite {
-                                    program,
-                                    prototype: context.prototype,
-                                    pc: pc - 1,
+                                let site = program_id.map(|program| {
+                                    InlineCacheSite::new(program, context.prototype, pc - 1)
                                 });
                                 if let (Some(table), Some(site)) = (object.as_table(), site) {
                                     match self
@@ -3831,10 +3780,8 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let value = get_register(&registers, instruction.c)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                if let Some(site) = program_id.map(|program| InlineCacheSite {
-                                    program,
-                                    prototype: context.prototype,
-                                    pc: pc - 1,
+                                if let Some(site) = program_id.map(|program| {
+                                    InlineCacheSite::new(program, context.prototype, pc - 1)
                                 }) {
                                     if let Some(key_atom) = key.as_string_atom() {
                                         self.raw_table_string_set_with_inline_cache(
@@ -3881,10 +3828,8 @@ impl Vm {
                                         })
                                         .at_pc(pc - 1)
                                     })?;
-                                if let Some(site) = program_id.map(|program| InlineCacheSite {
-                                    program,
-                                    prototype: context.prototype,
-                                    pc: pc - 1,
+                                if let Some(site) = program_id.map(|program| {
+                                    InlineCacheSite::new(program, context.prototype, pc - 1)
                                 }) {
                                     self.raw_table_string_set_with_inline_cache(
                                         site, table, key_atom, value,
@@ -3911,10 +3856,8 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let value = get_register(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                if let Some(site) = program_id.map(|program| InlineCacheSite {
-                                    program,
-                                    prototype: context.prototype,
-                                    pc: pc - 1,
+                                if let Some(site) = program_id.map(|program| {
+                                    InlineCacheSite::new(program, context.prototype, pc - 1)
                                 }) {
                                     self.raw_table_integer_set_with_inline_cache(
                                         site, table, index, value,
@@ -28685,21 +28628,13 @@ mod tests {
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(9.0));
 
-        let set_site = InlineCacheSite {
-            program: 0,
-            prototype: None,
-            pc: 5,
-        };
+        let set_site = InlineCacheSite::new(0, None, 5);
         assert!(
             vm.table_set_inline_cache[set_site.slot()].is_none_or(|slot| slot.site != set_site),
             "dynamic concat string-key writes should not churn the set cache"
         );
 
-        let get_site = InlineCacheSite {
-            program: 0,
-            prototype: None,
-            pc: 6,
-        };
+        let get_site = InlineCacheSite::new(0, None, 6);
         assert!(
             vm.table_get_inline_cache[get_site.slot()].is_none_or(|slot| slot.site != get_site),
             "dynamic concat string-key reads should not churn the get cache"
@@ -28737,22 +28672,14 @@ mod tests {
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(9.0));
 
-        let set_site = InlineCacheSite {
-            program: 0,
-            prototype: None,
-            pc: 6,
-        };
+        let set_site = InlineCacheSite::new(0, None, 6);
         assert!(
             vm.table_integer_set_inline_cache[set_site.slot()]
                 .is_none_or(|slot| slot.site != set_site),
             "dynamic numeric-key writes should not churn the integer set cache"
         );
 
-        let get_site = InlineCacheSite {
-            program: 0,
-            prototype: None,
-            pc: 7,
-        };
+        let get_site = InlineCacheSite::new(0, None, 7);
         assert!(
             vm.table_integer_get_inline_cache[get_site.slot()]
                 .is_none_or(|slot| slot.site != get_site),
@@ -28797,11 +28724,7 @@ mod tests {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let program = dummy_program();
         let table = vm.heap.alloc_array_table(&[]);
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 7,
-        };
+        let site = InlineCacheSite::new(1, None, 7);
         let mut fuel = None;
 
         assert!(vm
@@ -28828,11 +28751,7 @@ mod tests {
         let program = dummy_program();
         let key_atom = vm.heap.intern_string("x");
         let table = vm.heap.alloc_array_table(&[]);
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 8,
-        };
+        let site = InlineCacheSite::new(1, None, 8);
         let mut fuel = None;
 
         vm.set_table_string_index_with_inline_cache(
@@ -28910,11 +28829,7 @@ mod tests {
         vm.heap
             .table_set(table, Value::string_atom(key_atom), Value::number(1.0))
             .unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 8,
-        };
+        let site = InlineCacheSite::new(1, None, 8);
         let mut fuel = None;
 
         let value = vm
@@ -28969,11 +28884,7 @@ mod tests {
         vm.heap
             .table_set(table, Value::string_atom(key_atom), Value::number(1.0))
             .unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 8,
-        };
+        let site = InlineCacheSite::new(1, None, 8);
         let mut fuel = None;
 
         vm.get_table_string_index_with_inline_cache(
@@ -29003,11 +28914,7 @@ mod tests {
         let program = dummy_program();
         let key_atom = vm.heap.intern_string("x");
         let table = vm.heap.alloc_array_table(&[]);
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 8,
-        };
+        let site = InlineCacheSite::new(1, None, 8);
         let mut fuel = None;
 
         vm.set_table_string_index_with_inline_cache(
@@ -29048,11 +28955,7 @@ mod tests {
             .table_set(metatable, Value::string_atom(newindex_atom), method)
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         vm.set_table_string_index_with_inline_cache(
@@ -29086,11 +28989,7 @@ mod tests {
     fn raw_integer_absent_cache_survives_value_only_table_changes() {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let table = vm.heap.alloc_array_table(&[]);
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 7,
-        };
+        let site = InlineCacheSite::new(1, None, 7);
 
         assert_eq!(
             vm.raw_table_integer_get_with_inline_cache(site, table, 20)
@@ -29125,16 +29024,8 @@ mod tests {
         let table = vm.heap.alloc_array_table(&[]);
         let metatable = vm.heap.alloc_array_table(&[]);
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let get_site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 7,
-        };
-        let set_site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 8,
-        };
+        let get_site = InlineCacheSite::new(1, None, 7);
+        let set_site = InlineCacheSite::new(1, None, 8);
 
         assert_eq!(
             vm.raw_table_integer_get_with_inline_cache(get_site, table, 20)
@@ -29183,11 +29074,7 @@ mod tests {
         vm.heap
             .table_set(table, Value::string_atom(key_atom), Value::number(1.0))
             .unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 7,
-        };
+        let site = InlineCacheSite::new(1, None, 7);
 
         let value = vm
             .raw_table_string_get_with_inline_cache(site, table, key_atom)
@@ -29234,11 +29121,7 @@ mod tests {
             .table_set(table, Value::string_atom(key_atom), Value::number(1.0))
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 8,
-        };
+        let site = InlineCacheSite::new(1, None, 8);
 
         vm.raw_table_string_set_with_inline_cache(site, table, key_atom, Value::nil())
             .unwrap();
@@ -29292,11 +29175,7 @@ mod tests {
         vm.heap
             .table_set(table, Value::number(20.0), Value::number(1.0))
             .unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 7,
-        };
+        let site = InlineCacheSite::new(1, None, 7);
 
         let value = vm
             .raw_table_integer_get_with_inline_cache(site, table, 20)
@@ -29345,11 +29224,7 @@ mod tests {
             .table_set(table, Value::number(20.0), Value::nil())
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 8,
-        };
+        let site = InlineCacheSite::new(1, None, 8);
 
         vm.raw_table_integer_set_with_inline_cache(site, table, 20, Value::number(2.0))
             .unwrap();
@@ -29403,11 +29278,7 @@ mod tests {
             .table_set(metatable, Value::string_atom(iter_atom), method)
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
 
         let cached = vm
             .table_iter_metamethod_with_inline_cache(Some(site), table)
@@ -29439,11 +29310,7 @@ mod tests {
         vm.heap
             .table_set(table, Value::number(20.0), Value::number(1.0))
             .unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 7,
-        };
+        let site = InlineCacheSite::new(1, None, 7);
         let mut fuel = None;
 
         let value = vm
@@ -29497,11 +29364,7 @@ mod tests {
         vm.heap
             .table_set(table, Value::number(20.0), Value::number(1.0))
             .unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 8,
-        };
+        let site = InlineCacheSite::new(1, None, 8);
         let mut fuel = None;
 
         assert!(vm
@@ -29563,11 +29426,7 @@ mod tests {
             )
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         assert_eq!(
@@ -29643,11 +29502,7 @@ mod tests {
             )
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         assert_eq!(
@@ -29716,11 +29571,7 @@ mod tests {
             )
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         assert_eq!(
@@ -29777,11 +29628,7 @@ mod tests {
             )
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         assert_eq!(
@@ -29831,11 +29678,7 @@ mod tests {
             .table_set(metatable, Value::string_atom(index_atom), first_method)
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         let value = vm
@@ -29892,11 +29735,7 @@ mod tests {
             .table_set(metatable, Value::string_atom(index_atom), method)
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         let value = vm
@@ -29950,11 +29789,7 @@ mod tests {
             )
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let key = Value::string_atom(key_atom);
         let mut fuel = None;
 
@@ -30034,11 +29869,7 @@ mod tests {
             .table_set(metatable, Value::string_atom(index_atom), first_method)
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let key = Value::string_atom(key_atom);
         let mut fuel = None;
 
@@ -30084,11 +29915,7 @@ mod tests {
             .table_set(metatable, Value::string_atom(index_atom), method)
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let key = Value::string_atom(key_atom);
         let mut fuel = None;
 
@@ -30127,11 +29954,7 @@ mod tests {
             .table_set(metatable, Value::string_atom(newindex_atom), first_method)
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let key = Value::string_atom(key_atom);
         let mut fuel = None;
 
@@ -30195,11 +30018,7 @@ mod tests {
             .table_set(metatable, Value::string_atom(newindex_atom), method)
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let key = Value::string_atom(key_atom);
         let mut fuel = None;
 
@@ -30270,11 +30089,7 @@ mod tests {
             )
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         vm.set_table_string_index_with_inline_cache(
@@ -30355,11 +30170,7 @@ mod tests {
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
         let metatable_shape_version = vm.heap.table_shape_version(metatable).unwrap();
         let delegate_shape_version = vm.heap.table_shape_version(delegate).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         vm.set_table_string_index_with_inline_cache(
@@ -30434,11 +30245,7 @@ mod tests {
             )
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         vm.set_table_string_index_with_inline_cache(
@@ -30506,11 +30313,7 @@ mod tests {
             )
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         assert!(vm
@@ -30590,11 +30393,7 @@ mod tests {
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
         let metatable_shape_version = vm.heap.table_shape_version(metatable).unwrap();
         let delegate_shape_version = vm.heap.table_shape_version(delegate).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         assert!(vm
@@ -30668,11 +30467,7 @@ mod tests {
             )
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         assert!(vm
@@ -30733,11 +30528,7 @@ mod tests {
             .table_set(metatable, Value::string_atom(newindex_atom), first_method)
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         assert!(vm
@@ -30799,11 +30590,7 @@ mod tests {
             .table_set(metatable, Value::string_atom(newindex_atom), method)
             .unwrap();
         vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
+        let site = InlineCacheSite::new(1, None, 9);
         let mut fuel = None;
 
         assert!(vm
