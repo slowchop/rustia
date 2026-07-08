@@ -10805,8 +10805,13 @@ impl Vm {
 
     fn raw_table_slot(&mut self, table: u32, key: Value) -> Result<Option<Value>> {
         if let Some(index) = key.as_number().and_then(array_iterator_index) {
-            let value = self.raw_table_integer_get_after_table_lookup(table, index)?;
-            return Ok((value.kind() != ValueKind::Nil).then_some(value));
+            if let Some(value) = self.heap.array_slot(table, index).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })? {
+                return Ok(Some(value));
+            }
         }
         self.heap.table_slot(table, key).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
@@ -27846,6 +27851,25 @@ mod tests {
 
         let indices: Vec<_> = cache.iter().collect();
         assert_eq!(indices, vec![50, 40, 30, 20]);
+    }
+
+    #[test]
+    fn raw_integer_slot_preserves_nil_array_slot_presence() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let table = vm
+            .heap
+            .alloc_array_table(&[Value::number(1.0), Value::nil()]);
+
+        assert_eq!(
+            vm.raw_table_slot(table, Value::number(2.0))
+                .unwrap()
+                .map(|value| value.kind()),
+            Some(crate::ValueKind::Nil)
+        );
+        assert!(vm
+            .raw_table_slot(table, Value::number(3.0))
+            .unwrap()
+            .is_none());
     }
 
     #[test]
