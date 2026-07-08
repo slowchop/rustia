@@ -10804,6 +10804,10 @@ impl Vm {
     }
 
     fn raw_table_slot(&mut self, table: u32, key: Value) -> Result<Option<Value>> {
+        if let Some(index) = key.as_number().and_then(array_iterator_index) {
+            let value = self.raw_table_integer_get_after_table_lookup(table, index)?;
+            return Ok((value.kind() != ValueKind::Nil).then_some(value));
+        }
         self.heap.table_slot(table, key).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "table handle is missing",
@@ -10812,6 +10816,9 @@ impl Vm {
     }
 
     fn raw_table_get_after_table_lookup(&mut self, table: u32, key: Value) -> Value {
+        if let Some(index) = key.as_number().and_then(array_iterator_index) {
+            return self.raw_table_integer_get_after_known_table_lookup(table, index);
+        }
         self.raw_table_slot_after_table_lookup(table, key)
             .unwrap_or_else(Value::nil)
     }
@@ -10846,6 +10853,25 @@ impl Vm {
             };
         };
         Ok(value)
+    }
+
+    fn raw_table_integer_get_after_known_table_lookup(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+    ) -> Value {
+        if let Some(Some(value)) = self.heap.array_slot(table, one_based_index) {
+            return value;
+        }
+        match self
+            .heap
+            .read_integer_hash_key_without_metamethod(table, one_based_index)
+        {
+            Some(HashReadStatus::Hit(value)) => value,
+            Some(HashReadStatus::Deferred) | None => self
+                .raw_table_slot_after_table_lookup(table, Value::number(one_based_index as f64))
+                .unwrap_or_else(Value::nil),
+        }
     }
 
     fn raw_table_slot_after_table_lookup(&mut self, table: u32, key: Value) -> Option<Value> {
