@@ -12,7 +12,9 @@ use rustia_compiler::compile_with_options;
 #[cfg(feature = "rustia-engine")]
 use rustia_parser::parse_source;
 #[cfg(feature = "rustia-engine")]
-use rustia_vm::{Instruction, Opcode, Profile, Program, Value, ValueKind, Vm};
+use rustia_vm::{
+    Instruction, Opcode, Profile, Program, Value, ValueKind, Vm, VmInlineCacheSnapshot,
+};
 
 #[cfg(all(feature = "mlua-luau", feature = "mlua-lua54"))]
 compile_error!("features mlua-luau and mlua-lua54 cannot be enabled in the same binary; run them as separate benchmark binaries");
@@ -20,6 +22,8 @@ compile_error!("features mlua-luau and mlua-lua54 cannot be enabled in the same 
 const DEFAULT_TARGET_MS: u64 = 250;
 const DEFAULT_REPS: usize = 9;
 const DEFAULT_MAX_N: u64 = 1_000_000_000;
+#[cfg(feature = "rustia-engine")]
+const INLINE_CACHE_SUMMARY_N: u64 = 64;
 const HISTORY_PATH: &str = "bench/history/runs.jsonl";
 const RESULTS_PATH: &str = "bench/RESULTS.md";
 const CURRENT_RESULTS_JSON_PATH: &str = "bench/current-results.json";
@@ -257,6 +261,7 @@ struct Config {
     list_json: bool,
     wasm_gate_json: bool,
     rustia_bytecode_summary: bool,
+    rustia_inline_cache_summary: bool,
     check_history: bool,
     refresh_results: bool,
 }
@@ -285,6 +290,7 @@ impl Default for Config {
             list_json: false,
             wasm_gate_json: false,
             rustia_bytecode_summary: false,
+            rustia_inline_cache_summary: false,
             check_history: false,
             refresh_results: false,
         }
@@ -403,6 +409,12 @@ fn run() -> Result<()> {
         print_rustia_bytecode_summary(&repo, &selected_workloads)?;
         return Ok(());
     }
+    if config.rustia_inline_cache_summary {
+        let repo = repo_root()?;
+        let selected_workloads = select_workloads(&config.workloads)?;
+        print_rustia_inline_cache_summary(&repo, &selected_workloads)?;
+        return Ok(());
+    }
     if config.check_history {
         let history = config
             .history
@@ -511,6 +523,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
             "--list-json" => config.list_json = true,
             "--wasm-gate-json" => config.wasm_gate_json = true,
             "--rustia-bytecode-summary" => config.rustia_bytecode_summary = true,
+            "--rustia-inline-cache-summary" => config.rustia_inline_cache_summary = true,
             "--check-history" => config.check_history = true,
             "--refresh-results" => config.refresh_results = true,
             "--no-history" => config.history = None,
@@ -616,6 +629,7 @@ fn print_usage() {
     println!("  --list-json");
     println!("  --wasm-gate-json");
     println!("  --rustia-bytecode-summary");
+    println!("  --rustia-inline-cache-summary");
     println!("  --check-history");
     println!("  --refresh-results");
     println!("  --engines rustia,koto,mlua-luau");
@@ -987,6 +1001,10 @@ impl RustiaPrepared {
             function,
         })
     }
+
+    fn inline_cache_snapshot(&self) -> VmInlineCacheSnapshot {
+        self.vm.inline_cache_snapshot()
+    }
 }
 
 #[cfg(feature = "rustia-engine")]
@@ -1061,6 +1079,115 @@ fn print_rustia_bytecode_summary(_repo: &Path, _workloads: &[&Workload]) -> Resu
     Err(Error::new(
         "--rustia-bytecode-summary requires the rustia-engine feature",
     ))
+}
+
+#[cfg(feature = "rustia-engine")]
+fn print_rustia_inline_cache_summary(repo: &Path, workloads: &[&Workload]) -> Result<()> {
+    println!("# Rustia Inline Cache Summary\n");
+    println!(
+        "Final inline-cache side-table occupancy after running each workload with n={INLINE_CACHE_SUMMARY_N}."
+    );
+    println!("Use this as feedback for atom, shape, inline-cache, and quickening work.\n");
+    println!("| workload | checksum | atoms | global get | table get | table set | int get | int set | raw | meta/len |");
+    println!("| --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- |");
+
+    for workload in workloads {
+        let source_path = workload_path(repo, Dialect::Luau, workload)
+            .ok_or_else(|| Error::new(format!("missing Luau source for {}", workload.id)))?;
+        let source =
+            fs::read_to_string(&source_path).map_err(|error| Error::io(&source_path, error))?;
+        let mut prepared = RustiaPrepared::new(workload, &source)?;
+        let checksum = prepared.run(INLINE_CACHE_SUMMARY_N)?;
+        let snapshot = prepared.inline_cache_snapshot();
+        println!(
+            "| {} | `{}` | {} | {} | {} | {} | {} | {} | {} | {} |",
+            workload.id,
+            checksum,
+            snapshot.atom_strings + snapshot.atom_record_key_plans,
+            format_global_get_summary(snapshot),
+            format_table_get_summary(snapshot),
+            format_table_set_summary(snapshot),
+            format_integer_get_summary(snapshot),
+            format_integer_set_summary(snapshot),
+            format_raw_table_summary(snapshot),
+            format_meta_len_summary(snapshot)
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "rustia-engine"))]
+fn print_rustia_inline_cache_summary(_repo: &Path, _workloads: &[&Workload]) -> Result<()> {
+    Err(Error::new(
+        "--rustia-inline-cache-summary requires the rustia-engine feature",
+    ))
+}
+
+#[cfg(feature = "rustia-engine")]
+fn format_global_get_summary(snapshot: VmInlineCacheSnapshot) -> String {
+    format!(
+        "env={} std={}",
+        snapshot.global_get.environment, snapshot.global_get.standard_globals
+    )
+}
+
+#[cfg(feature = "rustia-engine")]
+fn format_table_get_summary(snapshot: VmInlineCacheSnapshot) -> String {
+    format!(
+        "direct={} absent={} meta={}",
+        snapshot.table_get.direct_slot,
+        snapshot.table_get.direct_absent,
+        snapshot.table_get.index_table + snapshot.table_get.index_function
+    )
+}
+
+#[cfg(feature = "rustia-engine")]
+fn format_table_set_summary(snapshot: VmInlineCacheSnapshot) -> String {
+    format!(
+        "direct={} meta={}",
+        snapshot.table_set.direct_slot,
+        snapshot.table_set.newindex_table + snapshot.table_set.newindex_function
+    )
+}
+
+#[cfg(feature = "rustia-engine")]
+fn format_integer_get_summary(snapshot: VmInlineCacheSnapshot) -> String {
+    format!(
+        "direct={} absent={} meta={}",
+        snapshot.table_integer_get.direct_slot,
+        snapshot.table_integer_get.direct_absent,
+        snapshot.table_integer_get.index_table_array_slot
+            + snapshot.table_integer_get.index_table_hash_slot
+            + snapshot.table_integer_get.index_function
+    )
+}
+
+#[cfg(feature = "rustia-engine")]
+fn format_integer_set_summary(snapshot: VmInlineCacheSnapshot) -> String {
+    format!(
+        "direct={} meta={}",
+        snapshot.table_integer_set.direct_hash_slot,
+        snapshot.table_integer_set.newindex_table_hash_slot
+            + snapshot.table_integer_set.newindex_function
+    )
+}
+
+#[cfg(feature = "rustia-engine")]
+fn format_raw_table_summary(snapshot: VmInlineCacheSnapshot) -> String {
+    format!(
+        "get={} absent={} set={}",
+        snapshot.raw_table_string_get.direct_slot + snapshot.raw_table_integer_get.direct_slot,
+        snapshot.raw_table_string_get.direct_absent + snapshot.raw_table_integer_get.direct_absent,
+        snapshot.raw_table_string_set + snapshot.raw_table_integer_set
+    )
+}
+
+#[cfg(feature = "rustia-engine")]
+fn format_meta_len_summary(snapshot: VmInlineCacheSnapshot) -> String {
+    format!(
+        "arith={} iter={} len={}",
+        snapshot.arithmetic_metamethod, snapshot.iter_metamethod, snapshot.len
+    )
 }
 
 #[cfg(feature = "rustia-engine")]

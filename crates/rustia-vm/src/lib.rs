@@ -22,4 +22,9 @@ pub use extension::{
 };
 pub use profile::Profile;
 pub use value::{Value, ValueKind};
-pub use vm::{LoadStringCompiler, Vm, VmSettings, MAX_RECURSION_LIMIT};
+pub use vm::{
+    LoadStringCompiler, Vm, VmGlobalGetInlineCacheSnapshot, VmInlineCacheSnapshot,
+    VmRawTableGetInlineCacheSnapshot, VmSettings, VmTableGetInlineCacheSnapshot,
+    VmTableIntegerGetInlineCacheSnapshot, VmTableIntegerSetInlineCacheSnapshot,
+    VmTableSetInlineCacheSnapshot, MAX_RECURSION_LIMIT,
+};

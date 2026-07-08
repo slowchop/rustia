@@ -77,6 +77,67 @@ impl Default for VmSettings {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct VmInlineCacheSnapshot {
+    pub atom_strings: usize,
+    pub atom_record_key_plans: usize,
+    pub global_get: VmGlobalGetInlineCacheSnapshot,
+    pub table_get: VmTableGetInlineCacheSnapshot,
+    pub table_set: VmTableSetInlineCacheSnapshot,
+    pub table_integer_get: VmTableIntegerGetInlineCacheSnapshot,
+    pub table_integer_set: VmTableIntegerSetInlineCacheSnapshot,
+    pub raw_table_string_get: VmRawTableGetInlineCacheSnapshot,
+    pub raw_table_string_set: usize,
+    pub raw_table_integer_get: VmRawTableGetInlineCacheSnapshot,
+    pub raw_table_integer_set: usize,
+    pub arithmetic_metamethod: usize,
+    pub iter_metamethod: usize,
+    pub len: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct VmGlobalGetInlineCacheSnapshot {
+    pub environment: usize,
+    pub standard_globals: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct VmTableGetInlineCacheSnapshot {
+    pub direct_slot: usize,
+    pub direct_absent: usize,
+    pub index_table: usize,
+    pub index_function: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct VmTableSetInlineCacheSnapshot {
+    pub direct_slot: usize,
+    pub newindex_table: usize,
+    pub newindex_function: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct VmTableIntegerGetInlineCacheSnapshot {
+    pub direct_slot: usize,
+    pub direct_absent: usize,
+    pub index_table_array_slot: usize,
+    pub index_table_hash_slot: usize,
+    pub index_function: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct VmTableIntegerSetInlineCacheSnapshot {
+    pub direct_hash_slot: usize,
+    pub newindex_table_hash_slot: usize,
+    pub newindex_function: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct VmRawTableGetInlineCacheSnapshot {
+    pub direct_slot: usize,
+    pub direct_absent: usize,
+}
+
 pub struct Vm {
     profile: Profile,
     settings: VmSettings,
@@ -887,6 +948,129 @@ impl Vm {
     #[inline]
     pub const fn settings(&self) -> &VmSettings {
         &self.settings
+    }
+
+    pub fn inline_cache_snapshot(&self) -> VmInlineCacheSnapshot {
+        let mut snapshot = VmInlineCacheSnapshot::default();
+        for cache in &self.program_atom_caches {
+            snapshot.atom_strings += cache
+                .string_atoms
+                .iter()
+                .filter(|atom| atom.is_some())
+                .count();
+            snapshot.atom_record_key_plans += cache
+                .record_key_plans
+                .iter()
+                .filter(|plan| plan.is_some())
+                .count();
+        }
+        for slot in self.global_get_inline_cache.iter().flatten() {
+            match slot.entry.source {
+                GlobalGetInlineCacheSource::Environment => snapshot.global_get.environment += 1,
+                GlobalGetInlineCacheSource::StandardGlobals { .. } => {
+                    snapshot.global_get.standard_globals += 1;
+                }
+            }
+        }
+        for slot in self.table_get_inline_cache.iter().flatten() {
+            match slot.entry.source {
+                TableGetInlineCacheSource::DirectSlot { .. } => {
+                    snapshot.table_get.direct_slot += 1;
+                }
+                TableGetInlineCacheSource::DirectAbsent { .. } => {
+                    snapshot.table_get.direct_absent += 1;
+                }
+                TableGetInlineCacheSource::IndexTable { .. } => {
+                    snapshot.table_get.index_table += 1;
+                }
+                TableGetInlineCacheSource::IndexFunction { .. } => {
+                    snapshot.table_get.index_function += 1;
+                }
+            }
+        }
+        for slot in self.table_set_inline_cache.iter().flatten() {
+            match slot.entry.target {
+                TableSetInlineCacheTarget::DirectSlot { .. } => {
+                    snapshot.table_set.direct_slot += 1;
+                }
+                TableSetInlineCacheTarget::NewIndexTable { .. } => {
+                    snapshot.table_set.newindex_table += 1;
+                }
+                TableSetInlineCacheTarget::NewIndexFunction { .. } => {
+                    snapshot.table_set.newindex_function += 1;
+                }
+            }
+        }
+        for slot in self.table_integer_get_inline_cache.iter().flatten() {
+            match slot.entry.source {
+                TableIntegerGetInlineCacheSource::DirectSlot { .. } => {
+                    snapshot.table_integer_get.direct_slot += 1;
+                }
+                TableIntegerGetInlineCacheSource::DirectAbsent { .. } => {
+                    snapshot.table_integer_get.direct_absent += 1;
+                }
+                TableIntegerGetInlineCacheSource::IndexTableArraySlot { .. } => {
+                    snapshot.table_integer_get.index_table_array_slot += 1;
+                }
+                TableIntegerGetInlineCacheSource::IndexTableHashSlot { .. } => {
+                    snapshot.table_integer_get.index_table_hash_slot += 1;
+                }
+                TableIntegerGetInlineCacheSource::IndexFunction { .. } => {
+                    snapshot.table_integer_get.index_function += 1;
+                }
+            }
+        }
+        for slot in self.table_integer_set_inline_cache.iter().flatten() {
+            match slot.entry.target {
+                TableIntegerSetInlineCacheTarget::DirectHashSlot { .. } => {
+                    snapshot.table_integer_set.direct_hash_slot += 1;
+                }
+                TableIntegerSetInlineCacheTarget::NewIndexTableHashSlot { .. } => {
+                    snapshot.table_integer_set.newindex_table_hash_slot += 1;
+                }
+                TableIntegerSetInlineCacheTarget::NewIndexFunction { .. } => {
+                    snapshot.table_integer_set.newindex_function += 1;
+                }
+            }
+        }
+        for slot in self.raw_table_string_get_inline_cache.iter().flatten() {
+            match slot.entry.source {
+                RawTableStringGetInlineCacheSource::DirectSlot { .. } => {
+                    snapshot.raw_table_string_get.direct_slot += 1;
+                }
+                RawTableStringGetInlineCacheSource::DirectAbsent { .. } => {
+                    snapshot.raw_table_string_get.direct_absent += 1;
+                }
+            }
+        }
+        snapshot.raw_table_string_set = self
+            .raw_table_string_set_inline_cache
+            .iter()
+            .flatten()
+            .count();
+        for slot in self.raw_table_integer_get_inline_cache.iter().flatten() {
+            match slot.entry.source {
+                RawTableIntegerGetInlineCacheSource::DirectSlot { .. } => {
+                    snapshot.raw_table_integer_get.direct_slot += 1;
+                }
+                RawTableIntegerGetInlineCacheSource::DirectAbsent { .. } => {
+                    snapshot.raw_table_integer_get.direct_absent += 1;
+                }
+            }
+        }
+        snapshot.raw_table_integer_set = self
+            .raw_table_integer_set_inline_cache
+            .iter()
+            .flatten()
+            .count();
+        snapshot.arithmetic_metamethod = self
+            .arithmetic_metamethod_inline_cache
+            .iter()
+            .flatten()
+            .count();
+        snapshot.iter_metamethod = self.iter_metamethod_inline_cache.iter().flatten().count();
+        snapshot.len = self.len_inline_cache.iter().flatten().count();
+        snapshot
     }
 
     pub fn register_extension_op(&mut self, op: ExtensionOp) -> Result<u16> {
@@ -29153,6 +29337,40 @@ mod tests {
             .unwrap()
             .expect("unchanged table shape should hit the direct cache");
         assert_eq!(value.as_number(), Some(2.0));
+    }
+
+    #[test]
+    fn inline_cache_snapshot_reports_table_get_sources() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let key_atom = vm.heap.intern_string("x");
+        let table = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(table, Value::string_atom(key_atom), Value::number(1.0))
+            .unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 8,
+        };
+        let mut fuel = None;
+
+        vm.get_table_string_index_with_inline_cache(
+            &program,
+            site,
+            table,
+            Value::string_atom(key_atom),
+            key_atom,
+            0,
+            &mut fuel,
+        )
+        .unwrap();
+
+        let snapshot = vm.inline_cache_snapshot();
+        assert_eq!(snapshot.table_get.direct_slot, 1);
+        assert_eq!(snapshot.table_get.direct_absent, 0);
+        assert_eq!(snapshot.table_get.index_table, 0);
+        assert_eq!(snapshot.table_get.index_function, 0);
     }
 
     #[test]

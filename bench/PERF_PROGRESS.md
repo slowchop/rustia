@@ -55,6 +55,17 @@ The compiler already emits specialized opcodes for the obvious sparse and
 string-const patterns, and it already emits hash capacity hints for sparse-like
 fresh tables. More tiny table probes have not paid for themselves so far.
 
+`cargo run -p script-bench-harness -- --rustia-inline-cache-summary` runs the
+default workloads with `n=64` and reports final atom/IC side-table occupancy.
+Current feedback:
+
+| workload | IC signal |
+| --- | --- |
+| `dense_tables` | one direct table-get slot; array writes and dynamic numeric writes do not leave exact-key IC entries |
+| `sparse_tables` | no table IC occupancy; dynamic concat string keys and scattered numeric keys intentionally avoid exact-key IC churn |
+| `generic_iteration` | one direct table-get slot, one direct table-set slot, plus one iter metamethod slot and one len slot |
+| `stdlib_math_table` | one global-get slot and one direct table-get slot from setup; the hot loop is mostly math/table write/sort work |
+
 ## Next Serious Bets
 
 1. Build real feedback-directed quickening for hot table sites instead of
