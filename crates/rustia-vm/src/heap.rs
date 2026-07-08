@@ -1,5 +1,5 @@
 use gc_arena::lock::RefLock;
-use gc_arena::{Arena, Collect, DynamicRootSet, Gc, Rootable, Static};
+use gc_arena::{Arena, Collect, DynamicRootSet, Gc, Mutation, Rootable, Static};
 use std::collections::{BTreeSet, HashMap, VecDeque};
 
 use crate::number::table_key_number_bits;
@@ -486,6 +486,13 @@ pub(crate) struct TableStringHashProbe {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub(crate) struct TableConcatStringHashProbe {
+    pub key_atom: u32,
+    pub slot: Option<TableStringHashSlot>,
+    pub metatable: Option<u32>,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct TableStringHashSlotRead {
     pub value: Value,
     pub has_metatable: bool,
@@ -495,6 +502,13 @@ pub(crate) struct TableStringHashSlotRead {
 pub(crate) enum StringIndexWriteStatus {
     Stored { hash_index: Option<usize> },
     Deferred,
+    Readonly,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ConcatStringIndexWriteStatus {
+    Stored,
+    Deferred { key_atom: u32 },
     Readonly,
 }
 
@@ -664,38 +678,7 @@ impl VmCell {
     pub fn intern_concat_string_atom_small_integer(&mut self, lhs: u32, rhs: u32) -> Option<u32> {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
-            root.strings.get(lhs as usize)?;
-            let key = concat_integer_key(lhs, rhs);
-            if let Some(atom) =
-                concat_integer_direct_cache_get(&root.string_integer_concat_direct, key)
-            {
-                return Some(atom);
-            }
-            if let Some(atom) = root.string_integer_concat_index.get(&key) {
-                let atom = *atom;
-                concat_integer_direct_cache_insert(
-                    &mut root.string_integer_concat_direct,
-                    key,
-                    atom,
-                );
-                return Some(atom);
-            }
-            let lhs_text = root.strings.get(lhs as usize)?.0.as_slice();
-            let (rhs_text, rhs_len) = small_positive_integer_bytes(rhs)?;
-            let mut value = Vec::with_capacity(lhs_text.len() + rhs_len);
-            value.extend_from_slice(lhs_text);
-            value.extend_from_slice(&rhs_text[..rhs_len]);
-            let atom = if let Some(atom) = root.string_index.get(value.as_slice()) {
-                *atom
-            } else {
-                let atom = u32::try_from(root.strings.len()).ok()?;
-                root.strings.push(Gc::new(mc, Static(value.clone())));
-                root.string_index.insert(value, atom);
-                atom
-            };
-            root.string_integer_concat_index.insert(key, atom);
-            concat_integer_direct_cache_insert(&mut root.string_integer_concat_direct, key, atom);
-            Some(atom)
+            intern_concat_string_atom_small_integer_in_root(mc, &mut root, lhs, rhs)
         })
     }
 
@@ -1519,6 +1502,75 @@ impl VmCell {
                 });
             }
             Some(StringIndexWriteStatus::Stored { hash_index: None })
+        })
+    }
+
+    pub(crate) fn table_concat_string_atom_small_integer_hash_probe(
+        &mut self,
+        table: u32,
+        lhs: u32,
+        rhs: u32,
+    ) -> Option<TableConcatStringHashProbe> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let atom = intern_concat_string_atom_small_integer_in_root(mc, &mut root, lhs, rhs)?;
+            let table = root.tables.get(table as usize)?;
+            let key = TableKey::String(atom);
+            let slot = table_hash_entry_index(table, key).and_then(|index| {
+                table.hash.get(index).map(|entry| TableStringHashSlot {
+                    index,
+                    value: entry.value,
+                })
+            });
+            Some(TableConcatStringHashProbe {
+                key_atom: atom,
+                slot,
+                metatable: table.metatable,
+            })
+        })
+    }
+
+    pub(crate) fn write_concat_string_atom_small_integer_index_without_metamethod(
+        &mut self,
+        table: u32,
+        lhs: u32,
+        rhs: u32,
+        value: Value,
+    ) -> Option<ConcatStringIndexWriteStatus> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let atom = intern_concat_string_atom_small_integer_in_root(mc, &mut root, lhs, rhs)?;
+            if string_atom_is(&root, atom, b"__mode") {
+                root.weak_tables_possible = true;
+            }
+            let table = root.tables.get_mut(table as usize)?;
+            let has_metatable = table.metatable.is_some();
+            let key = TableKey::String(atom);
+            if let Some(index) = table_hash_entry_index(table, key) {
+                let Some(entry) = table.hash.get_mut(index) else {
+                    return Some(ConcatStringIndexWriteStatus::Deferred { key_atom: atom });
+                };
+                if entry.value.kind() == ValueKind::Nil && has_metatable {
+                    return Some(ConcatStringIndexWriteStatus::Deferred { key_atom: atom });
+                }
+                if table.readonly {
+                    return Some(ConcatStringIndexWriteStatus::Readonly);
+                }
+                entry.value = value;
+                bump_table_version(table);
+                return Some(ConcatStringIndexWriteStatus::Stored);
+            }
+            if has_metatable {
+                return Some(ConcatStringIndexWriteStatus::Deferred { key_atom: atom });
+            }
+            if table.readonly {
+                return Some(ConcatStringIndexWriteStatus::Readonly);
+            }
+            bump_table_version(table);
+            if value.kind() != ValueKind::Nil {
+                insert_hash_key_absent(table, key, Value::string_atom(atom), value);
+            }
+            Some(ConcatStringIndexWriteStatus::Stored)
         })
     }
 
@@ -2799,6 +2851,39 @@ fn concat_integer_direct_cache_insert(
 
 fn concat_integer_direct_cache_slot(key: u64) -> usize {
     ((key ^ (key >> 32)) as usize) & (CONCAT_INTEGER_DIRECT_CACHE_LEN - 1)
+}
+
+fn intern_concat_string_atom_small_integer_in_root<'gc>(
+    mc: &Mutation<'gc>,
+    root: &mut RootData<'gc>,
+    lhs: u32,
+    rhs: u32,
+) -> Option<u32> {
+    let key = concat_integer_key(lhs, rhs);
+    if let Some(atom) = concat_integer_direct_cache_get(&root.string_integer_concat_direct, key) {
+        return Some(atom);
+    }
+    if let Some(atom) = root.string_integer_concat_index.get(&key) {
+        let atom = *atom;
+        concat_integer_direct_cache_insert(&mut root.string_integer_concat_direct, key, atom);
+        return Some(atom);
+    }
+    let lhs_text = root.strings.get(lhs as usize)?.0.as_slice();
+    let (rhs_text, rhs_len) = small_positive_integer_bytes(rhs)?;
+    let mut value = Vec::with_capacity(lhs_text.len() + rhs_len);
+    value.extend_from_slice(lhs_text);
+    value.extend_from_slice(&rhs_text[..rhs_len]);
+    let atom = if let Some(atom) = root.string_index.get(value.as_slice()) {
+        *atom
+    } else {
+        let atom = u32::try_from(root.strings.len()).ok()?;
+        root.strings.push(Gc::new(mc, Static(value.clone())));
+        root.string_index.insert(value, atom);
+        atom
+    };
+    root.string_integer_concat_index.insert(key, atom);
+    concat_integer_direct_cache_insert(&mut root.string_integer_concat_direct, key, atom);
+    Some(atom)
 }
 
 fn set_hash_key(table: &mut TableData, key: TableKey, key_value: Value, value: Value) {

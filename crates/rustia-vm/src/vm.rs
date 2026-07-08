@@ -8,9 +8,10 @@ use crate::bytecode::{
 use crate::error::{Error, ErrorKind, ErrorLocation, Result};
 use crate::extension::{validate_registered_op, ExtensionOp, ExtensionRegistry, HostFunctionOp};
 use crate::heap::{
-    ArrayWriteStatus, FunctionBytecodeContext, FunctionKind, HashReadStatus, HashWriteStatus,
-    NativeFunction, StringIndexWriteStatus, TableConcatOutcome, TableIterationOrder, TableNext,
-    UpvalueAddConstStatus, UpvalueAddStatus, UserdataPayload, VectorData, VmCell,
+    ArrayWriteStatus, ConcatStringIndexWriteStatus, FunctionBytecodeContext, FunctionKind,
+    HashReadStatus, HashWriteStatus, NativeFunction, StringIndexWriteStatus, TableConcatOutcome,
+    TableIterationOrder, TableNext, UpvalueAddConstStatus, UpvalueAddStatus, UserdataPayload,
+    VectorData, VmCell,
 };
 use crate::number::{binary, canonicalize_number, NumericOp};
 use crate::profile::Profile;
@@ -2232,6 +2233,25 @@ impl Vm {
                                     get_register(&registers, instruction.b).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
+                                if let Some(value) = self
+                                    .try_get_index_concat_const_string_integer_fast(
+                                        program,
+                                        program_id,
+                                        object,
+                                        &registers,
+                                        instruction,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?
+                                {
+                                    set_register(&mut registers, instruction.a, value).map_err(
+                                        |e| attach_instruction_source(program, function, pc - 1, e),
+                                    )?;
+                                    continue;
+                                }
                                 let key = self
                                     .concat_const_key(
                                         program,
@@ -3763,6 +3783,27 @@ impl Vm {
                                     get_register(&registers, instruction.a).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
+                                let value =
+                                    get_register(&registers, instruction.c).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                if self
+                                    .try_set_index_concat_const_string_integer_fast(
+                                        program,
+                                        program_id,
+                                        object,
+                                        &registers,
+                                        instruction,
+                                        value,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?
+                                {
+                                    continue;
+                                }
                                 let key = self
                                     .concat_const_key(
                                         program,
@@ -3774,10 +3815,6 @@ impl Vm {
                                         fuel,
                                     )
                                     .map_err(|e| {
-                                        attach_instruction_source(program, function, pc - 1, e)
-                                    })?;
-                                let value =
-                                    get_register(&registers, instruction.c).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
                                 if let Some(table) = object.as_table() {
@@ -7497,6 +7534,106 @@ impl Vm {
         }
         let rhs = self.load_constant(program, program_id, instruction.aux as usize)?;
         self.concat_operands(program, lhs, rhs, depth, fuel)
+    }
+
+    fn try_get_index_concat_const_string_integer_fast(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        object: Value,
+        registers: &[Value],
+        instruction: Instruction,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Option<Value>> {
+        let Some(table) = object.as_table() else {
+            return Ok(None);
+        };
+        if instruction.aux < 0 {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "negative concat constant index",
+            }));
+        }
+        let Some(lhs) = self.constant_string_atom(program, program_id, instruction.aux as usize)?
+        else {
+            return Ok(None);
+        };
+        let rhs = get_register(registers, instruction.c)?;
+        let Some(rhs) = rhs.as_number().and_then(small_positive_integer_number) else {
+            return Ok(None);
+        };
+        let probe = self
+            .heap
+            .table_concat_string_atom_small_integer_hash_probe(table, lhs, rhs)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?;
+        if let Some(slot) = probe.slot {
+            if slot.value.kind() != ValueKind::Nil
+                || self.table_uses_standard_global_type_surface(table)?
+            {
+                return Ok(Some(slot.value));
+            }
+        }
+        if probe.metatable.is_none() {
+            return Ok(Some(Value::nil()));
+        }
+        let key = Value::string_atom(probe.key_atom);
+        self.get_object_index_metamethod(program, Value::table(table), key, depth, fuel)
+            .map(Some)
+    }
+
+    fn try_set_index_concat_const_string_integer_fast(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        object: Value,
+        registers: &[Value],
+        instruction: Instruction,
+        value: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<bool> {
+        let Some(table) = object.as_table() else {
+            return Ok(false);
+        };
+        if instruction.aux < 0 {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "negative concat constant index",
+            }));
+        }
+        let Some(lhs) = self.constant_string_atom(program, program_id, instruction.aux as usize)?
+        else {
+            return Ok(false);
+        };
+        let rhs = get_register(registers, instruction.b)?;
+        let Some(rhs) = rhs.as_number().and_then(small_positive_integer_number) else {
+            return Ok(false);
+        };
+        match self
+            .heap
+            .write_concat_string_atom_small_integer_index_without_metamethod(table, lhs, rhs, value)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })? {
+            ConcatStringIndexWriteStatus::Stored => Ok(true),
+            ConcatStringIndexWriteStatus::Deferred { key_atom } => {
+                self.set_table_index_with_metamethod(
+                    program,
+                    table,
+                    Value::string_atom(key_atom),
+                    value,
+                    depth,
+                    fuel,
+                )?;
+                Ok(true)
+            }
+            ConcatStringIndexWriteStatus::Readonly => Err(readonly_table_error()),
+        }
     }
 
     fn concat_const_key(
