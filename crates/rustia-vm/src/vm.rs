@@ -10896,6 +10896,18 @@ impl Vm {
         key: Value,
         value: Value,
     ) -> Result<()> {
+        if let Some(index) = key.as_number().and_then(array_iterator_index) {
+            return self.set_table_integer_index_after_table_lookup(table, index, value);
+        }
+        self.set_table_index_generic_after_table_lookup(table, key, value)
+    }
+
+    fn set_table_index_generic_after_table_lookup(
+        &mut self,
+        table: u32,
+        key: Value,
+        value: Value,
+    ) -> Result<()> {
         self.validate_table_key(key)?;
         self.ensure_table_writable(table)?;
         self.heap.table_set(table, key, value).ok_or_else(|| {
@@ -10914,7 +10926,11 @@ impl Vm {
         if self.set_table_integer_index_fast(table, one_based_index, value)? {
             return Ok(());
         }
-        self.set_table_index_after_table_lookup(table, Value::number(one_based_index as f64), value)
+        self.set_table_index_generic_after_table_lookup(
+            table,
+            Value::number(one_based_index as f64),
+            value,
+        )
     }
 
     fn set_table_absent_index(&mut self, table: u32, key: Value, value: Value) -> Result<()> {
