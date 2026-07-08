@@ -2312,46 +2312,6 @@ impl Vm {
                                 )
                                 .map_err(|e| e.at_pc(pc - 1))?;
                             }
-                            Opcode::AddIndexNumberForLoopStepOne => {
-                                let (loop_register, body_start) =
-                                    unpack_add_index_loop_step_one_aux(instruction.aux)
-                                        .map_err(|e| e.at_pc(pc - 1))?;
-                                self.add_index_number(
-                                    program,
-                                    &mut registers,
-                                    Instruction::new(
-                                        Opcode::AddIndexNumber,
-                                        instruction.a,
-                                        instruction.b,
-                                        instruction.c,
-                                    ),
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
-                                    }),
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                                if numeric_for_step_one_loop(
-                                    &mut registers,
-                                    &mut register_cells,
-                                    Instruction::with_aux(
-                                        Opcode::ForLoopStepOne,
-                                        loop_register,
-                                        0,
-                                        0,
-                                        body_start,
-                                    ),
-                                    pc - 1,
-                                )
-                                .map_err(|e| {
-                                    attach_instruction_source(program, function, pc - 1, e)
-                                })? {
-                                    pc = checked_jump(body_start).map_err(|e| e.at_pc(pc - 1))?;
-                                }
-                            }
                             Opcode::AddIndexConcatConstOrZero => {
                                 self.add_index_concat_const_or_zero(
                                     program,
@@ -21613,8 +21573,6 @@ impl Vm {
         if instruction.op == Opcode::CallExtension {
             let op = self.extension(instruction)?;
             Ok(u64::from(op.fuel_cost))
-        } else if instruction.op == Opcode::AddIndexNumberForLoopStepOne {
-            Ok(2)
         } else {
             Ok(1)
         }
@@ -23130,7 +23088,6 @@ fn opcode_may_observe_current_roots(op: Opcode) -> bool {
     match op {
         Opcode::Add
         | Opcode::AddIndexNumber
-        | Opcode::AddIndexNumberForLoopStepOne
         | Opcode::AddIndexConcatConstOrZero
         | Opcode::AddIndexMulModConstOrZero
         | Opcode::AddConst
@@ -26199,13 +26156,6 @@ fn checked_jump(aux: i32) -> Result<usize> {
         }));
     }
     Ok(aux as usize)
-}
-
-fn unpack_add_index_loop_step_one_aux(aux: i32) -> Result<(u8, i32)> {
-    let packed = aux as u32;
-    let loop_register = (packed >> 24) as u8;
-    let body_start = (packed & 0x00FF_FFFF) as i32;
-    Ok((loop_register, body_start))
 }
 
 fn get_register(registers: &[Value], register: u8) -> Result<Value> {

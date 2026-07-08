@@ -1932,11 +1932,6 @@ impl Compiler {
         self.table_reset_capacity_hints = table_reset_capacity_hints;
         body_result?;
         let continue_target = self.code.len();
-        let has_loop_tail_jump = self
-            .loop_continues
-            .last()
-            .is_some_and(|continues| !continues.is_empty())
-            || self.loop_tail_is_jump_target(continue_target);
         self.patch_loop_continues_to(continue_target, span)?;
         let body_start = self.jump_target(body_start, span)?;
         let loop_opcode = if step_register.is_some() {
@@ -1944,19 +1939,10 @@ impl Compiler {
         } else {
             Opcode::ForLoopStepOne
         };
-        if loop_opcode != Opcode::ForLoopStepOne
-            || has_loop_tail_jump
-            || !self.try_fuse_add_index_number_for_loop_step_one(
-                index_register,
-                body_start,
-                span,
-            )?
-        {
-            self.emit_source_mapped_instruction(
-                Instruction::with_aux(loop_opcode, index_register, 0, 0, body_start),
-                span,
-            );
-        }
+        self.emit_source_mapped_instruction(
+            Instruction::with_aux(loop_opcode, index_register, 0, 0, body_start),
+            span,
+        );
 
         let clear_start = self.code.len();
         self.clear_local_cells_from(next_register)?;
@@ -4076,49 +4062,6 @@ impl Compiler {
 
     fn patch_jump_to_here(&mut self, instruction_index: usize, span: Span) -> Result<()> {
         self.patch_jump_to(instruction_index, self.code.len(), span)
-    }
-
-    fn loop_tail_is_jump_target(&self, target: usize) -> bool {
-        let Ok(target) = i32::try_from(target) else {
-            return true;
-        };
-        self.code.iter().any(|instruction| {
-            matches!(
-                instruction.op,
-                Opcode::Jump
-                    | Opcode::JumpIf
-                    | Opcode::JumpIfNot
-                    | Opcode::ForPrep
-                    | Opcode::ForLoop
-                    | Opcode::ForPrepStepOne
-                    | Opcode::ForLoopStepOne
-                    | Opcode::IpairsPrep
-                    | Opcode::IpairsLoop
-                    | Opcode::PairsPrep
-                    | Opcode::PairsLoop
-                    | Opcode::GenericCallPrep
-                    | Opcode::GenericCallLoop
-                    | Opcode::GeneralizedIterPrep
-                    | Opcode::GeneralizedIterLoop
-            ) && instruction.aux == target
-        })
-    }
-
-    fn try_fuse_add_index_number_for_loop_step_one(
-        &mut self,
-        loop_register: u8,
-        body_start: i32,
-        span: Span,
-    ) -> Result<bool> {
-        let Some(instruction) = self.code.last_mut() else {
-            return Ok(false);
-        };
-        if instruction.op != Opcode::AddIndexNumber {
-            return Ok(false);
-        }
-        instruction.op = Opcode::AddIndexNumberForLoopStepOne;
-        instruction.aux = pack_add_index_loop_step_one_aux(loop_register, body_start, span)?;
-        Ok(true)
     }
 
     fn patch_loop_breaks_to(&mut self, target: usize, span: Span) -> Result<()> {
@@ -7694,15 +7637,6 @@ fn pack_return_call_aux(args_start: u8, argc: usize, span: Span) -> Result<i32> 
     let argc = u8::try_from(argc)
         .map_err(|_| CompileError::at("function call has too many arguments", span))?;
     Ok((i32::from(args_start) << 8) | i32::from(argc))
-}
-
-fn pack_add_index_loop_step_one_aux(loop_register: u8, body_start: i32, span: Span) -> Result<i32> {
-    let body_start = u32::try_from(body_start)
-        .map_err(|_| CompileError::at("negative loop body target", span))?;
-    if body_start > 0x00FF_FFFF {
-        return Err(CompileError::at("function body too large", span));
-    }
-    Ok(((u32::from(loop_register) << 24) | body_start) as i32)
 }
 
 fn pack_call_expand_aux(prefix_count: usize, trailing_argc: usize, span: Span) -> Result<i32> {
@@ -11578,11 +11512,7 @@ return acc
         )
         .unwrap();
         let program = compile(&chunk).unwrap();
-        assert_eq!(
-            opcode_count(&program, Opcode::AddIndexNumberForLoopStepOne),
-            1
-        );
-        assert_eq!(opcode_count(&program, Opcode::AddIndexNumber), 0);
+        assert_eq!(opcode_count(&program, Opcode::AddIndexNumber), 1);
         assert_eq!(opcode_count(&program, Opcode::GetIndexNumber), 0);
 
         let mut vm = Vm::new(Profile::ReproducibleStandard);
@@ -11608,70 +11538,11 @@ return acc
         )
         .unwrap();
         let program = compile(&chunk).unwrap();
-        assert_eq!(
-            opcode_count(&program, Opcode::AddIndexNumberForLoopStepOne),
-            1
-        );
-        assert_eq!(opcode_count(&program, Opcode::AddIndexNumber), 0);
+        assert_eq!(opcode_count(&program, Opcode::AddIndexNumber), 1);
 
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(11.0));
-    }
-
-    #[test]
-    fn self_add_numeric_table_read_loop_tail_fusion_skips_continue_targets() {
-        let chunk = parse_source(
-            r#"
-local t = {10, 20, 30}
-local acc = 0
-for i = 1, 3 do
-    if i == 2 then
-        continue
-    end
-    acc = acc + t[i]
-end
-return acc
-"#,
-        )
-        .unwrap();
-        let program = compile(&chunk).unwrap();
-        assert_eq!(
-            opcode_count(&program, Opcode::AddIndexNumberForLoopStepOne),
-            0
-        );
-        assert_eq!(opcode_count(&program, Opcode::AddIndexNumber), 1);
-
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let result = vm.run(&program).unwrap();
-        assert_eq!(result.as_number(), Some(40.0));
-    }
-
-    #[test]
-    fn self_add_numeric_table_read_loop_tail_fusion_skips_conditional_tail_jumps() {
-        let chunk = parse_source(
-            r#"
-local t = {10, 20, 30}
-local acc = 0
-for i = 1, 3 do
-    if i ~= 2 then
-        acc = acc + t[i]
-    end
-end
-return acc
-"#,
-        )
-        .unwrap();
-        let program = compile(&chunk).unwrap();
-        assert_eq!(
-            opcode_count(&program, Opcode::AddIndexNumberForLoopStepOne),
-            0
-        );
-        assert_eq!(opcode_count(&program, Opcode::AddIndexNumber), 1);
-
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let result = vm.run(&program).unwrap();
-        assert_eq!(result.as_number(), Some(40.0));
     }
 
     #[test]
