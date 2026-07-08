@@ -30,6 +30,7 @@ const OS_TIME_NOW_SECONDS: i64 = 1_700_000_000;
 pub const MAX_RECURSION_LIMIT: usize = 512;
 const LUAU_TAIL_CALL_LIMIT: usize = 20_000;
 const GLOBAL_GET_INLINE_CACHE_SLOTS: usize = 1024;
+const DEFAULT_DETERMINISTIC_GC_INTERVAL: u64 = 100_000;
 const STRING_FORMAT_PLAN_CACHE_MAX: usize = 256;
 const REGISTER_POOL_MAX_FRAMES: usize = 64;
 const REGISTER_POOL_MAX_REGISTERS: usize = 256;
@@ -62,7 +63,7 @@ impl Default for VmSettings {
         Self {
             initial_fuel: None,
             recursion_limit: MAX_RECURSION_LIMIT,
-            deterministic_gc_interval: NonZeroU64::new(10_000)
+            deterministic_gc_interval: NonZeroU64::new(DEFAULT_DETERMINISTIC_GC_INTERVAL)
                 .expect("default deterministic GC interval is non-zero"),
             loadstring_compiler: None,
             enable_conformance_coverage: false,

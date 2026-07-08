@@ -144,7 +144,8 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 ## What's next (the genuine remaining gates before P1 lock)
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items:
 1. **Tune the GC intervals** (Deterministic instruction-count interval = determinism ABI; Standard paced-debt
-   multiplier) on realistic heap sizes at P1.
+   multiplier) on realistic heap sizes at P1. First profiling pass raised the default instruction-count
+   collection interval to 100,000 to reduce table-heavy benchmark GC churn; keep validating on CI heap sizes.
 2. **Record production benchmark baselines** for rustia and each completed external adapter, then make
    `RESULTS.md` and the future static website consume the same JSONL history.
 3. **Watch `FFlag::LuauIntegerType2`** upstream (the f64-only tripwire).
