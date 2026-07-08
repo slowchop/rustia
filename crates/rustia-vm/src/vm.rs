@@ -264,6 +264,17 @@ enum TableIntegerGetInlineCacheSource {
         table: u32,
         table_shape_version: u64,
     },
+    IndexTableArraySlot {
+        metatable: u32,
+        metatable_hash_index: usize,
+        index_table: u32,
+    },
+    IndexTableHashSlot {
+        metatable: u32,
+        metatable_hash_index: usize,
+        index_table: u32,
+        index_table_hash_indices: StringSlotIndexCache,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -7730,6 +7741,13 @@ impl Vm {
             )? {
                 return Ok(Some(value));
             }
+            if let Some(value) = self.try_get_table_integer_index_table_for_inline_cache(
+                site,
+                table,
+                one_based_index,
+            )? {
+                return Ok(Some(value));
+            }
             self.clear_table_integer_get_inline_cache_site(site);
             return self.get_table_integer_hash_key_fast(table, one_based_index);
         };
@@ -7748,6 +7766,17 @@ impl Vm {
         {
             return Ok(Some(Value::nil()));
         }
+        if let Some(value) =
+            self.table_integer_get_inline_cache_hit(site, table, one_based_index)?
+        {
+            return Ok(Some(value));
+        }
+        if let Some(value) =
+            self.try_get_table_integer_index_table_for_inline_cache(site, table, one_based_index)?
+        {
+            return Ok(Some(value));
+        }
+        self.clear_table_integer_get_inline_cache_site(site);
         Ok(None)
     }
 
@@ -7814,6 +7843,108 @@ impl Vm {
                     return Ok(None);
                 }
                 Ok(Some(Value::nil()))
+            }
+            TableIntegerGetInlineCacheSource::IndexTableArraySlot {
+                metatable,
+                metatable_hash_index,
+                index_table,
+            } => {
+                if self.table_integer_raw_slot_is_nonnil(table, one_based_index)?
+                    || self.table_uses_standard_global_type_surface(table)?
+                {
+                    return Ok(None);
+                }
+                if self.heap.table_metatable(table).ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    })
+                })? != Some(metatable)
+                {
+                    return Ok(None);
+                }
+                let index_atom = self.heap.intern_string("__index");
+                let Some(index_slot) = self
+                    .heap
+                    .read_string_hash_slot_at_index(metatable, index_atom, metatable_hash_index)
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "__index metatable handle is missing",
+                        })
+                    })?
+                else {
+                    return Ok(None);
+                };
+                if index_slot.value.as_table() != Some(index_table) {
+                    return Ok(None);
+                }
+                let Some(value) = self
+                    .heap
+                    .array_slot(index_table, one_based_index)
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "__index table handle is missing",
+                        })
+                    })?
+                else {
+                    return Ok(None);
+                };
+                if value.kind() == ValueKind::Nil {
+                    return Ok(None);
+                }
+                Ok(Some(value))
+            }
+            TableIntegerGetInlineCacheSource::IndexTableHashSlot {
+                metatable,
+                metatable_hash_index,
+                index_table,
+                index_table_hash_indices,
+            } => {
+                if self.table_integer_raw_slot_is_nonnil(table, one_based_index)?
+                    || self.table_uses_standard_global_type_surface(table)?
+                {
+                    return Ok(None);
+                }
+                if self.heap.table_metatable(table).ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    })
+                })? != Some(metatable)
+                {
+                    return Ok(None);
+                }
+                let index_atom = self.heap.intern_string("__index");
+                let Some(index_slot) = self
+                    .heap
+                    .read_string_hash_slot_at_index(metatable, index_atom, metatable_hash_index)
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "__index metatable handle is missing",
+                        })
+                    })?
+                else {
+                    return Ok(None);
+                };
+                if index_slot.value.as_table() != Some(index_table) {
+                    return Ok(None);
+                }
+                for hash_index in index_table_hash_indices.iter() {
+                    let Some(slot) = self
+                        .heap
+                        .read_integer_hash_slot_at_index(index_table, one_based_index, hash_index)
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "__index table handle is missing",
+                            })
+                        })?
+                    else {
+                        continue;
+                    };
+                    if slot.value.kind() == ValueKind::Nil {
+                        return Ok(None);
+                    }
+                    return Ok(Some(slot.value));
+                }
+                Ok(None)
             }
         }
     }
@@ -7891,6 +8022,100 @@ impl Vm {
         Ok(Some(Value::nil()))
     }
 
+    fn try_get_table_integer_index_table_for_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+    ) -> Result<Option<Value>> {
+        if self.table_integer_raw_slot_is_nonnil(table, one_based_index)?
+            || self.table_uses_standard_global_type_surface(table)?
+        {
+            return Ok(None);
+        }
+        let Some(metatable) = self.heap.table_metatable(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?
+        else {
+            return Ok(None);
+        };
+        let index_atom = self.heap.intern_string("__index");
+        let Some(index_slot) = self
+            .heap
+            .table_string_hash_slot(metatable, index_atom)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "metatable handle is missing",
+                })
+            })?
+        else {
+            return Ok(None);
+        };
+        let Some(index_table) = index_slot.value.as_table() else {
+            return Ok(None);
+        };
+        if let Some(value) = self
+            .heap
+            .array_slot(index_table, one_based_index)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "__index table handle is missing",
+                })
+            })?
+        {
+            if value.kind() == ValueKind::Nil {
+                return Ok(None);
+            }
+            self.store_table_integer_get_inline_cache(
+                site,
+                TableIntegerGetInlineCacheEntry {
+                    one_based_index,
+                    source: TableIntegerGetInlineCacheSource::IndexTableArraySlot {
+                        metatable,
+                        metatable_hash_index: index_slot.index,
+                        index_table,
+                    },
+                },
+            );
+            return Ok(Some(value));
+        }
+        let Some(value_slot) = self
+            .heap
+            .table_integer_hash_slot(index_table, one_based_index)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "__index table handle is missing",
+                })
+            })?
+        else {
+            return Ok(None);
+        };
+        let value = value_slot.value;
+        if value.kind() == ValueKind::Nil {
+            return Ok(None);
+        }
+        self.store_table_integer_get_inline_cache(
+            site,
+            TableIntegerGetInlineCacheEntry {
+                one_based_index,
+                source: TableIntegerGetInlineCacheSource::IndexTableHashSlot {
+                    metatable,
+                    metatable_hash_index: index_slot.index,
+                    index_table,
+                    index_table_hash_indices: self.table_integer_get_index_table_slot_indices(
+                        site,
+                        one_based_index,
+                        index_table,
+                        value_slot.index,
+                    ),
+                },
+            },
+        );
+        Ok(Some(value))
+    }
+
     fn store_table_integer_get_inline_cache(
         &mut self,
         site: InlineCacheSite,
@@ -7914,7 +8139,36 @@ impl Vm {
             .filter(|slot| slot.site == site && slot.entry.one_based_index == one_based_index)
             .and_then(|slot| match slot.entry.source {
                 TableIntegerGetInlineCacheSource::DirectSlot { hash_indices } => Some(hash_indices),
-                TableIntegerGetInlineCacheSource::DirectAbsent { .. } => None,
+                TableIntegerGetInlineCacheSource::DirectAbsent { .. }
+                | TableIntegerGetInlineCacheSource::IndexTableArraySlot { .. }
+                | TableIntegerGetInlineCacheSource::IndexTableHashSlot { .. } => None,
+            })
+            .map(|indices| indices.with_index(hash_index))
+            .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
+    }
+
+    fn table_integer_get_index_table_slot_indices(
+        &self,
+        site: InlineCacheSite,
+        one_based_index: usize,
+        index_table: u32,
+        hash_index: usize,
+    ) -> StringSlotIndexCache {
+        self.table_integer_get_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten()
+            .filter(|slot| slot.site == site && slot.entry.one_based_index == one_based_index)
+            .and_then(|slot| match slot.entry.source {
+                TableIntegerGetInlineCacheSource::IndexTableHashSlot {
+                    index_table: cached_index_table,
+                    index_table_hash_indices,
+                    ..
+                } if cached_index_table == index_table => Some(index_table_hash_indices),
+                TableIntegerGetInlineCacheSource::DirectSlot { .. }
+                | TableIntegerGetInlineCacheSource::DirectAbsent { .. }
+                | TableIntegerGetInlineCacheSource::IndexTableArraySlot { .. }
+                | TableIntegerGetInlineCacheSource::IndexTableHashSlot { .. } => None,
             })
             .map(|indices| indices.with_index(hash_index))
             .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
@@ -26721,7 +26975,8 @@ fn table_expected_error() -> Error {
 mod tests {
     use super::{
         InlineCacheSite, RawTableIntegerGetInlineCacheSource, StringSlotIndexCache,
-        TableIntegerSetInlineCacheTarget, TableSetInlineCacheTarget, Value, Vm,
+        TableIntegerGetInlineCacheSource, TableIntegerSetInlineCacheTarget,
+        TableSetInlineCacheTarget, Value, Vm,
     };
     use crate::{Function, Instruction, Opcode, Profile, Program};
 
@@ -26835,6 +27090,197 @@ mod tests {
                 .unwrap()
                 .as_number(),
             Some(7.0)
+        );
+    }
+
+    #[test]
+    fn integer_index_table_get_cache_reads_updated_delegate_hash_slots() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let index_atom = vm.heap.intern_string("__index");
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let delegate = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(delegate, Value::number(20.0), Value::number(1.0))
+            .unwrap();
+        vm.heap
+            .table_set(
+                metatable,
+                Value::string_atom(index_atom),
+                Value::table(delegate),
+            )
+            .unwrap();
+        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 9,
+        };
+
+        assert_eq!(
+            vm.get_table_integer_index_with_inline_cache(Some(site), table, 20)
+                .unwrap()
+                .and_then(Value::as_number),
+            Some(1.0)
+        );
+        let slot = vm.table_integer_get_inline_cache[site.slot()]
+            .expect("numeric __index table reads should populate the get cache");
+        assert!(matches!(
+            slot.entry.source,
+            TableIntegerGetInlineCacheSource::IndexTableHashSlot {
+                index_table,
+                ..
+            } if index_table == delegate
+        ));
+
+        vm.heap
+            .table_set(delegate, Value::number(20.0), Value::number(3.0))
+            .unwrap();
+        assert_eq!(
+            vm.get_table_integer_index_with_inline_cache(Some(site), table, 20)
+                .unwrap()
+                .and_then(Value::as_number),
+            Some(3.0)
+        );
+    }
+
+    #[test]
+    fn integer_index_table_get_cache_reads_updated_delegate_array_slots() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let index_atom = vm.heap.intern_string("__index");
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let delegate = vm
+            .heap
+            .alloc_array_table(&[Value::number(10.0), Value::number(20.0)]);
+        vm.heap
+            .table_set(
+                metatable,
+                Value::string_atom(index_atom),
+                Value::table(delegate),
+            )
+            .unwrap();
+        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 9,
+        };
+
+        assert_eq!(
+            vm.get_table_integer_index_with_inline_cache(Some(site), table, 2)
+                .unwrap()
+                .and_then(Value::as_number),
+            Some(20.0)
+        );
+        let slot = vm.table_integer_get_inline_cache[site.slot()]
+            .expect("numeric __index table array reads should populate the get cache");
+        assert!(matches!(
+            slot.entry.source,
+            TableIntegerGetInlineCacheSource::IndexTableArraySlot {
+                index_table,
+                ..
+            } if index_table == delegate
+        ));
+
+        vm.heap
+            .write_array_slot(delegate, 2, Value::number(30.0))
+            .unwrap();
+        assert_eq!(
+            vm.get_table_integer_index_with_inline_cache(Some(site), table, 2)
+                .unwrap()
+                .and_then(Value::as_number),
+            Some(30.0)
+        );
+    }
+
+    #[test]
+    fn integer_index_table_get_cache_observes_delegate_reassignment() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let index_atom = vm.heap.intern_string("__index");
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let first_delegate = vm.heap.alloc_array_table(&[]);
+        let second_delegate = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(first_delegate, Value::number(20.0), Value::number(1.0))
+            .unwrap();
+        vm.heap
+            .table_set(second_delegate, Value::number(20.0), Value::number(2.0))
+            .unwrap();
+        vm.heap
+            .table_set(
+                metatable,
+                Value::string_atom(index_atom),
+                Value::table(first_delegate),
+            )
+            .unwrap();
+        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 9,
+        };
+
+        assert_eq!(
+            vm.get_table_integer_index_with_inline_cache(Some(site), table, 20)
+                .unwrap()
+                .and_then(Value::as_number),
+            Some(1.0)
+        );
+        vm.heap
+            .table_set(
+                metatable,
+                Value::string_atom(index_atom),
+                Value::table(second_delegate),
+            )
+            .unwrap();
+        assert_eq!(
+            vm.get_table_integer_index_with_inline_cache(Some(site), table, 20)
+                .unwrap()
+                .and_then(Value::as_number),
+            Some(2.0)
+        );
+    }
+
+    #[test]
+    fn integer_index_table_get_cache_defers_to_original_slot() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let index_atom = vm.heap.intern_string("__index");
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let delegate = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(delegate, Value::number(20.0), Value::number(1.0))
+            .unwrap();
+        vm.heap
+            .table_set(
+                metatable,
+                Value::string_atom(index_atom),
+                Value::table(delegate),
+            )
+            .unwrap();
+        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 9,
+        };
+
+        assert_eq!(
+            vm.get_table_integer_index_with_inline_cache(Some(site), table, 20)
+                .unwrap()
+                .and_then(Value::as_number),
+            Some(1.0)
+        );
+        vm.heap
+            .table_set(table, Value::number(20.0), Value::number(5.0))
+            .unwrap();
+        assert_eq!(
+            vm.get_table_integer_index_with_inline_cache(Some(site), table, 20)
+                .unwrap()
+                .and_then(Value::as_number),
+            Some(5.0)
         );
     }
 

@@ -11627,6 +11627,98 @@ return a * 10 + b
     }
 
     #[test]
+    fn numeric_index_table_cache_reads_updated_delegate_slots() {
+        let chunk = parse_source(
+            r#"
+local proto = { [20] = 1, [30] = 2 }
+local t = {}
+setmetatable(t, { __index = proto })
+local a = t[20]
+proto[20] = 3
+local b = t[20]
+proto[30] = 4
+local c = t[20]
+return a * 100 + b * 10 + c
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::GetIndexNumberConst) >= 3);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(133.0));
+    }
+
+    #[test]
+    fn numeric_index_table_cache_reads_updated_delegate_array_slots() {
+        let chunk = parse_source(
+            r#"
+local proto = { 10, 20 }
+local t = {}
+setmetatable(t, { __index = proto })
+local a = t[2]
+proto[2] = 30
+local b = t[2]
+return a * 10 + b
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::GetIndexNumberConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(230.0));
+    }
+
+    #[test]
+    fn numeric_index_table_cache_observes_index_table_reassignment() {
+        let chunk = parse_source(
+            r#"
+local first = { [20] = 1 }
+local second = { [20] = 2 }
+local mt = { __index = first }
+local t = {}
+setmetatable(t, mt)
+local a = t[20]
+mt.__index = second
+local b = t[20]
+return a * 10 + b
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::GetIndexNumberConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(12.0));
+    }
+
+    #[test]
+    fn numeric_index_table_cache_observes_original_slot_creation() {
+        let chunk = parse_source(
+            r#"
+local proto = { [20] = 1 }
+local t = {}
+setmetatable(t, { __index = proto })
+local a = t[20]
+rawset(t, 20, 5)
+local b = t[20]
+return a * 10 + b
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::GetIndexNumberConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(15.0));
+    }
+
+    #[test]
     fn dynamic_string_index_reads_use_inline_cache_path() {
         let chunk = parse_source(
             r#"
