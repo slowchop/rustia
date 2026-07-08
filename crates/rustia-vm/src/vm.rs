@@ -9,8 +9,8 @@ use crate::error::{Error, ErrorKind, ErrorLocation, Result};
 use crate::extension::{validate_registered_op, ExtensionOp, ExtensionRegistry, HostFunctionOp};
 use crate::heap::{
     ArrayWriteStatus, FunctionBytecodeContext, FunctionKind, HashReadStatus, HashWriteStatus,
-    NativeFunction, TableConcatOutcome, TableIterationOrder, TableNext, UpvalueAddConstStatus,
-    UpvalueAddStatus, UserdataPayload, VectorData, VmCell,
+    NativeFunction, StringIndexWriteStatus, TableConcatOutcome, TableIterationOrder, TableNext,
+    UpvalueAddConstStatus, UpvalueAddStatus, UserdataPayload, VectorData, VmCell,
 };
 use crate::number::{binary, canonicalize_number, NumericOp};
 use crate::profile::Profile;
@@ -9182,63 +9182,31 @@ impl Vm {
         key_atom: u32,
         value: Value,
     ) -> Result<bool> {
-        let slot = self
-            .heap
-            .table_string_hash_slot(table, key_atom)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "table handle is missing",
-                })
-            })?;
-        if let Some(slot) = slot {
-            if slot.value.kind() != ValueKind::Nil
-                || self
-                    .heap
-                    .table_metatable(table)
-                    .ok_or_else(|| {
-                        Error::new(ErrorKind::InvalidProgram {
-                            reason: "table handle is missing",
-                        })
-                    })?
-                    .is_none()
-            {
-                return match self
-                    .heap
-                    .write_string_hash_slot_at_index(table, key_atom, slot.index, value)
-                    .ok_or_else(|| {
-                        Error::new(ErrorKind::InvalidProgram {
-                            reason: "table handle is missing",
-                        })
-                    })? {
-                    HashWriteStatus::Stored => {
-                        self.store_table_set_inline_cache(
-                            site,
-                            TableSetInlineCacheEntry {
-                                key_atom,
-                                target: TableSetInlineCacheTarget::DirectSlot {
-                                    hash_indices: self
-                                        .table_set_string_slot_indices(site, key_atom, slot.index),
-                                },
-                            },
-                        );
-                        Ok(true)
-                    }
-                    HashWriteStatus::Deferred => Ok(false),
-                    HashWriteStatus::Readonly => Err(readonly_table_error()),
-                };
-            }
-        }
         match self
             .heap
-            .write_absent_string_index_without_metamethod(table, key_atom, value)
+            .write_string_index_without_metamethod(table, key_atom, value)
             .ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "table handle is missing",
                 })
             })? {
-            HashWriteStatus::Stored => return Ok(true),
-            HashWriteStatus::Deferred => {}
-            HashWriteStatus::Readonly => return Err(readonly_table_error()),
+            StringIndexWriteStatus::Stored { hash_index } => {
+                if let Some(hash_index) = hash_index {
+                    self.store_table_set_inline_cache(
+                        site,
+                        TableSetInlineCacheEntry {
+                            key_atom,
+                            target: TableSetInlineCacheTarget::DirectSlot {
+                                hash_indices: self
+                                    .table_set_string_slot_indices(site, key_atom, hash_index),
+                            },
+                        },
+                    );
+                }
+                return Ok(true);
+            }
+            StringIndexWriteStatus::Deferred => {}
+            StringIndexWriteStatus::Readonly => return Err(readonly_table_error()),
         }
         self.try_set_table_newindex_table_for_inline_cache(site, table, key_atom, value)
     }
@@ -10204,20 +10172,15 @@ impl Vm {
         table: u32,
         key_atom: u32,
     ) -> Result<Option<Value>> {
-        let table_shape_version = self.heap.table_shape_version(table).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "table handle is missing",
-            })
-        })?;
-        let hash_slot = self
+        let probe = self
             .heap
-            .table_string_hash_slot(table, key_atom)
+            .table_string_hash_probe(table, key_atom)
             .ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "table handle is missing",
                 })
             })?;
-        if let Some(slot) = hash_slot {
+        if let Some(slot) = probe.slot {
             let value = slot.value;
             if value.kind() != ValueKind::Nil
                 || self.table_uses_standard_global_type_surface(table)?
@@ -10235,17 +10198,12 @@ impl Vm {
                 return Ok(Some(value));
             }
         }
-        let metatable = self.heap.table_metatable(table).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "table handle is missing",
-            })
-        })?;
-        let Some(metatable) = metatable else {
+        let Some(metatable) = probe.metatable else {
             let value = Value::nil();
-            let source = hash_slot.map_or(
+            let source = probe.slot.map_or(
                 TableGetInlineCacheSource::DirectAbsent {
                     table,
-                    table_shape_version,
+                    table_shape_version: probe.shape_version,
                 },
                 |slot| TableGetInlineCacheSource::DirectSlot {
                     hash_indices: self.table_get_string_slot_indices(site, key_atom, slot.index),

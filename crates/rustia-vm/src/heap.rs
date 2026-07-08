@@ -473,9 +473,23 @@ pub(crate) struct TableStringHashSlot {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub(crate) struct TableStringHashProbe {
+    pub shape_version: u64,
+    pub slot: Option<TableStringHashSlot>,
+    pub metatable: Option<u32>,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct TableStringHashSlotRead {
     pub value: Value,
     pub has_metatable: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum StringIndexWriteStatus {
+    Stored { hash_index: Option<usize> },
+    Deferred,
+    Readonly,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1454,37 +1468,51 @@ impl VmCell {
         })
     }
 
-    pub(crate) fn write_absent_string_index_without_metamethod(
+    pub(crate) fn write_string_index_without_metamethod(
         &mut self,
         table: u32,
         atom: u32,
         value: Value,
-    ) -> Option<HashWriteStatus> {
+    ) -> Option<StringIndexWriteStatus> {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
             if string_atom_is(&root, atom, b"__mode") {
                 root.weak_tables_possible = true;
             }
             let table = root.tables.get_mut(table as usize)?;
-            if table.metatable.is_some() {
-                return Some(HashWriteStatus::Deferred);
+            let has_metatable = table.metatable.is_some();
+            let key = TableKey::String(atom);
+            if let Some(index) = table_hash_entry_index(table, key) {
+                let Some(entry) = table.hash.get_mut(index) else {
+                    return Some(StringIndexWriteStatus::Deferred);
+                };
+                if entry.value.kind() == ValueKind::Nil && has_metatable {
+                    return Some(StringIndexWriteStatus::Deferred);
+                }
+                if table.readonly {
+                    return Some(StringIndexWriteStatus::Readonly);
+                }
+                entry.value = value;
+                bump_table_version(table);
+                return Some(StringIndexWriteStatus::Stored {
+                    hash_index: Some(index),
+                });
             }
-            if table_hash_entry(table, TableKey::String(atom)).is_some() {
-                return Some(HashWriteStatus::Deferred);
+            if has_metatable {
+                return Some(StringIndexWriteStatus::Deferred);
             }
             if table.readonly {
-                return Some(HashWriteStatus::Readonly);
+                return Some(StringIndexWriteStatus::Readonly);
             }
             bump_table_version(table);
             if value.kind() != ValueKind::Nil {
-                insert_hash_key_absent(
-                    table,
-                    TableKey::String(atom),
-                    Value::string_atom(atom),
-                    value,
-                );
+                let index = table.hash.len();
+                insert_hash_key_absent(table, key, Value::string_atom(atom), value);
+                return Some(StringIndexWriteStatus::Stored {
+                    hash_index: Some(index),
+                });
             }
-            Some(HashWriteStatus::Stored)
+            Some(StringIndexWriteStatus::Stored { hash_index: None })
         })
     }
 
@@ -1736,6 +1764,29 @@ impl VmCell {
                 index,
                 value: entry.value,
             }))
+        })
+    }
+
+    pub(crate) fn table_string_hash_probe(
+        &mut self,
+        table: u32,
+        atom: u32,
+    ) -> Option<TableStringHashProbe> {
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize)?;
+            let key = TableKey::String(atom);
+            let slot = table_hash_entry_index(table, key).and_then(|index| {
+                table.hash.get(index).map(|entry| TableStringHashSlot {
+                    index,
+                    value: entry.value,
+                })
+            });
+            Some(TableStringHashProbe {
+                shape_version: table.shape_version,
+                slot,
+                metatable: table.metatable,
+            })
         })
     }
 
@@ -3244,10 +3295,13 @@ mod tests {
         let key = heap.intern_string("x");
         let table = heap.alloc_array_table(&[]);
 
-        assert_eq!(
-            heap.write_absent_string_index_without_metamethod(table, key, Value::number(3.0)),
-            Some(HashWriteStatus::Stored)
-        );
+        let status = heap.write_string_index_without_metamethod(table, key, Value::number(3.0));
+        let Some(StringIndexWriteStatus::Stored {
+            hash_index: Some(index),
+        }) = status
+        else {
+            panic!("absent plain string write should insert a hash slot");
+        };
         assert_eq!(
             heap.table_get(table, Value::string_atom(key))
                 .unwrap()
@@ -3255,8 +3309,16 @@ mod tests {
             Some(3.0)
         );
         assert_eq!(
-            heap.write_absent_string_index_without_metamethod(table, key, Value::number(4.0)),
-            Some(HashWriteStatus::Deferred)
+            heap.write_string_index_without_metamethod(table, key, Value::number(4.0)),
+            Some(StringIndexWriteStatus::Stored {
+                hash_index: Some(index)
+            })
+        );
+        assert_eq!(
+            heap.table_get(table, Value::string_atom(key))
+                .unwrap()
+                .as_number(),
+            Some(4.0)
         );
     }
 
@@ -3269,10 +3331,32 @@ mod tests {
         heap.table_set_metatable(table, Some(metatable)).unwrap();
 
         assert_eq!(
-            heap.write_absent_string_index_without_metamethod(table, key, Value::number(3.0)),
-            Some(HashWriteStatus::Deferred)
+            heap.write_string_index_without_metamethod(table, key, Value::number(3.0)),
+            Some(StringIndexWriteStatus::Deferred)
         );
         assert!(heap.table_get(table, Value::string_atom(key)).is_none());
+    }
+
+    #[test]
+    fn table_string_hash_probe_reads_shape_slot_and_metatable() {
+        let mut heap = VmCell::new();
+        let key = heap.intern_string("x");
+        let table = heap.alloc_array_table(&[]);
+        let metatable = heap.alloc_array_table(&[]);
+        heap.table_set(table, Value::string_atom(key), Value::number(9.0))
+            .unwrap();
+        heap.table_set_metatable(table, Some(metatable)).unwrap();
+
+        let probe = heap
+            .table_string_hash_probe(table, key)
+            .expect("probe should find table");
+
+        assert_eq!(probe.metatable, Some(metatable));
+        assert_eq!(
+            probe.shape_version,
+            heap.table_shape_version(table).unwrap()
+        );
+        assert_eq!(probe.slot.unwrap().value.as_number(), Some(9.0));
     }
 
     #[test]
