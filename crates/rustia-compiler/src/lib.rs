@@ -6055,23 +6055,47 @@ impl Compiler {
             return Err(CompileError::at("unsupported rawget arity", span));
         }
         self.compile_expr_to(&args[0], target)?;
-        if let Some(Constant::String(key)) = const_eval(&args[1]) {
-            let key = self.string_constant_operand(&key)?;
-            let mut ignored_registers = Vec::new();
-            for arg in args.iter().skip(2) {
-                ignored_registers.push(self.compile_expr(arg)?);
+        if let Some(constant) = const_eval(&args[1]) {
+            match constant {
+                Constant::String(key) => {
+                    let key = self.string_constant_operand(&key)?;
+                    let mut ignored_registers = Vec::new();
+                    for arg in args.iter().skip(2) {
+                        ignored_registers.push(self.compile_expr(arg)?);
+                    }
+                    self.code.push(Instruction::with_aux(
+                        Opcode::RawGetStringConst,
+                        target,
+                        target,
+                        0,
+                        key,
+                    ));
+                    for register in ignored_registers.into_iter().rev() {
+                        self.free_register(register);
+                    }
+                    return Ok(());
+                }
+                Constant::Number(key) => {
+                    if let Some(key) = constant_table_integer_index_operand(key) {
+                        let mut ignored_registers = Vec::new();
+                        for arg in args.iter().skip(2) {
+                            ignored_registers.push(self.compile_expr(arg)?);
+                        }
+                        self.code.push(Instruction::with_aux(
+                            Opcode::RawGetNumberConst,
+                            target,
+                            target,
+                            0,
+                            key,
+                        ));
+                        for register in ignored_registers.into_iter().rev() {
+                            self.free_register(register);
+                        }
+                        return Ok(());
+                    }
+                }
+                Constant::Nil | Constant::Boolean(_) => {}
             }
-            self.code.push(Instruction::with_aux(
-                Opcode::RawGetStringConst,
-                target,
-                target,
-                0,
-                key,
-            ));
-            for register in ignored_registers.into_iter().rev() {
-                self.free_register(register);
-            }
-            return Ok(());
         }
         let key_register = self.compile_expr(&args[1])?;
         let mut ignored_registers = Vec::new();
@@ -6096,27 +6120,55 @@ impl Compiler {
             return Err(CompileError::at("unsupported rawset arity", span));
         }
         self.compile_expr_to(&args[0], target)?;
-        if let Some(Constant::String(key)) = const_eval(&args[1]) {
-            let key = self.string_constant_operand(&key)?;
-            let value_register = self.compile_expr(&args[2])?;
-            let mut ignored_registers = Vec::new();
-            for arg in args.iter().skip(3) {
-                ignored_registers.push(self.compile_expr(arg)?);
+        if let Some(constant) = const_eval(&args[1]) {
+            match constant {
+                Constant::String(key) => {
+                    let key = self.string_constant_operand(&key)?;
+                    let value_register = self.compile_expr(&args[2])?;
+                    let mut ignored_registers = Vec::new();
+                    for arg in args.iter().skip(3) {
+                        ignored_registers.push(self.compile_expr(arg)?);
+                    }
+                    self.code.push(Instruction::with_aux(
+                        Opcode::RawSetStringConst,
+                        target,
+                        value_register,
+                        0,
+                        key,
+                    ));
+                    for register in ignored_registers.into_iter().rev() {
+                        self.free_register(register);
+                    }
+                    self.free_register(value_register);
+                    self.mark_rawset_mutation(args);
+                    self.stdlib_tables_may_be_mutated = true;
+                    return Ok(());
+                }
+                Constant::Number(key) => {
+                    if let Some(key) = constant_table_integer_index_operand(key) {
+                        let value_register = self.compile_expr(&args[2])?;
+                        let mut ignored_registers = Vec::new();
+                        for arg in args.iter().skip(3) {
+                            ignored_registers.push(self.compile_expr(arg)?);
+                        }
+                        self.code.push(Instruction::with_aux(
+                            Opcode::RawSetNumberConst,
+                            target,
+                            value_register,
+                            0,
+                            key,
+                        ));
+                        for register in ignored_registers.into_iter().rev() {
+                            self.free_register(register);
+                        }
+                        self.free_register(value_register);
+                        self.mark_rawset_mutation(args);
+                        self.stdlib_tables_may_be_mutated = true;
+                        return Ok(());
+                    }
+                }
+                Constant::Nil | Constant::Boolean(_) => {}
             }
-            self.code.push(Instruction::with_aux(
-                Opcode::RawSetStringConst,
-                target,
-                value_register,
-                0,
-                key,
-            ));
-            for register in ignored_registers.into_iter().rev() {
-                self.free_register(register);
-            }
-            self.free_register(value_register);
-            self.mark_rawset_mutation(args);
-            self.stdlib_tables_may_be_mutated = true;
-            return Ok(());
         }
         let key_register = self.compile_expr(&args[1])?;
         let value_register = self.compile_expr(&args[2])?;
@@ -9475,6 +9527,11 @@ fn const_eval(expr: &Expr) -> Option<Constant> {
     }
 }
 
+fn constant_table_integer_index_operand(value: f64) -> Option<i32> {
+    (value.is_finite() && value.fract() == 0.0 && (1.0..=f64::from(i32::MAX)).contains(&value))
+        .then_some(value as i32)
+}
+
 fn constant_is_scalar_temp(constant: &Constant) -> bool {
     matches!(
         constant,
@@ -10048,9 +10105,27 @@ mod tests {
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(7.0));
 
+        let chunk =
+            parse_source("local t = { 6, 9, 7 } local r = rawget(t, 2, 'ignored') return r")
+                .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::RawGetNumberConst), 1);
+        assert_eq!(opcode_count(&program, Opcode::RawGet), 0);
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(9.0));
+
         let chunk = parse_source("local t = {} rawset(t, 'x', 7) return t.x").unwrap();
         let program = compile(&chunk).unwrap();
         assert_eq!(opcode_count(&program, Opcode::RawSetStringConst), 1);
+        assert_eq!(opcode_count(&program, Opcode::RawSet), 0);
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(7.0));
+
+        let chunk = parse_source("local t = {} rawset(t, 2, 7, 'ignored') return t[2]").unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::RawSetNumberConst), 1);
         assert_eq!(opcode_count(&program, Opcode::RawSet), 0);
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let result = vm.run(&program).unwrap();

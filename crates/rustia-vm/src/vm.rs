@@ -3095,6 +3095,22 @@ impl Vm {
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
+                            Opcode::RawGetNumberConst => {
+                                let Some(index) = array_iterator_index(f64::from(instruction.aux))
+                                else {
+                                    return Err(Error::new(ErrorKind::InvalidProgram {
+                                        reason: "invalid constant numeric rawget index",
+                                    })
+                                    .at_pc(pc - 1));
+                                };
+                                let table = get_table(&registers, instruction.b)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let value = self
+                                    .raw_table_integer_get_after_table_lookup(table, index)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                set_register(&mut registers, instruction.a, value)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                            }
                             Opcode::SetIndex => {
                                 let object =
                                     get_register(&registers, instruction.a).map_err(|e| {
@@ -3413,6 +3429,23 @@ impl Vm {
                                     table,
                                     Value::string_atom(key_atom),
                                     value,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::RawSetNumberConst => {
+                                let Some(index) = array_iterator_index(f64::from(instruction.aux))
+                                else {
+                                    return Err(Error::new(ErrorKind::InvalidProgram {
+                                        reason: "invalid constant numeric rawset index",
+                                    })
+                                    .at_pc(pc - 1));
+                                };
+                                let table = get_table(&registers, instruction.a)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let value = get_register(&registers, instruction.b)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                self.set_table_integer_index_after_table_lookup(
+                                    table, index, value,
                                 )
                                 .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -8666,6 +8699,38 @@ impl Vm {
             .unwrap_or_else(Value::nil)
     }
 
+    fn raw_table_integer_get_after_table_lookup(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+    ) -> Result<Value> {
+        let Some(value) = self
+            .heap
+            .array_slot(table, one_based_index)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+        else {
+            return match self
+                .heap
+                .read_integer_hash_key_without_metamethod(table, one_based_index)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    })
+                })? {
+                HashReadStatus::Hit(value) => Ok(value),
+                HashReadStatus::Deferred => Ok(self.raw_table_get_after_table_lookup(
+                    table,
+                    Value::number(one_based_index as f64),
+                )),
+            };
+        };
+        Ok(value)
+    }
+
     fn raw_table_slot_after_table_lookup(&mut self, table: u32, key: Value) -> Option<Value> {
         self.heap.table_get(table, key)
     }
@@ -8692,6 +8757,18 @@ impl Vm {
                 reason: "table set failed after validation",
             })
         })
+    }
+
+    fn set_table_integer_index_after_table_lookup(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+    ) -> Result<()> {
+        if self.set_table_integer_index_fast(table, one_based_index, value)? {
+            return Ok(());
+        }
+        self.set_table_index_after_table_lookup(table, Value::number(one_based_index as f64), value)
     }
 
     fn set_table_absent_index(&mut self, table: u32, key: Value, value: Value) -> Result<()> {
@@ -19534,8 +19611,10 @@ fn opcode_may_observe_current_roots(op: Opcode) -> bool {
         | Opcode::MathLdexp
         | Opcode::RawGet
         | Opcode::RawGetStringConst
+        | Opcode::RawGetNumberConst
         | Opcode::RawSet
         | Opcode::RawSetStringConst
+        | Opcode::RawSetNumberConst
         | Opcode::RawLen
         | Opcode::TableCreate
         | Opcode::TableInsert
