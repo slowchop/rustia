@@ -2848,6 +2848,23 @@ impl Compiler {
         Ok(())
     }
 
+    fn emit_method_lookup(
+        &mut self,
+        callee_register: u8,
+        self_register: u8,
+        method: &str,
+    ) -> Result<i32> {
+        let key = self.string_constant_operand(method.as_bytes())?;
+        self.code.push(Instruction::with_aux(
+            Opcode::GetIndexStringConst,
+            callee_register,
+            self_register,
+            0,
+            key,
+        ));
+        Ok(key)
+    }
+
     fn compile_simple_index_to(&mut self, object: &Expr, index: &Expr, target: u8) -> Result<bool> {
         let Some(object_register) = self.simple_register_expr(object) else {
             return Ok(false);
@@ -3431,15 +3448,7 @@ impl Compiler {
                 )?;
                 let self_register = checked_register_offset(callee_register, 1, expr.span())?;
                 self.compile_expr_to(object, self_register)?;
-                let key_register =
-                    self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-                self.code.push(Instruction::new(
-                    Opcode::GetIndex,
-                    callee_register,
-                    self_register,
-                    key_register,
-                ));
-                self.free_register(key_register);
+                self.emit_method_lookup(callee_register, self_register, method)?;
                 if self.method_call_has_expandable_trailing_arg(args) {
                     let trailing_index = args.len().checked_sub(1).ok_or_else(|| {
                         CompileError::at(
@@ -3618,14 +3627,7 @@ impl Compiler {
         let callee_register = self.alloc_register_window_at(window_len, span)?;
         let self_register = checked_register_offset(callee_register, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            callee_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_method_lookup(callee_register, self_register, method)?;
         for (index, arg) in args[..trailing_index].iter().enumerate() {
             let register = checked_register_offset(callee_register, index + 2, span)?;
             self.compile_expr_to(arg, register)?;
@@ -5094,14 +5096,7 @@ impl Compiler {
         let callee_register = self.alloc_register_at(span)?;
         let self_register = self.alloc_register_at(span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            callee_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_method_lookup(callee_register, self_register, method)?;
 
         for arg in args {
             self.compile_expr(arg)?;
@@ -5152,14 +5147,7 @@ impl Compiler {
         let call_base = self.alloc_register_window_at(window_len, span)?;
         let self_register = checked_register_offset(call_base, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            call_base,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_method_lookup(call_base, self_register, method)?;
         for (index, arg) in args[..trailing_index].iter().enumerate() {
             let register = checked_register_offset(call_base, index + 2, span)?;
             self.compile_expr_to(arg, register)?;
@@ -5212,14 +5200,7 @@ impl Compiler {
         let callee_register = self.alloc_register_at(span)?;
         let self_register = self.alloc_register_at(span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            callee_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_method_lookup(callee_register, self_register, method)?;
 
         for arg in &args[..trailing_index] {
             self.compile_expr(arg)?;
@@ -5638,15 +5619,7 @@ impl Compiler {
             } => {
                 let self_register = checked_register_offset(callee_register, 1, span)?;
                 self.compile_expr_to(object, self_register)?;
-                let key_register =
-                    self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-                self.code.push(Instruction::new(
-                    Opcode::GetIndex,
-                    callee_register,
-                    self_register,
-                    key_register,
-                ));
-                self.free_register(key_register);
+                self.emit_method_lookup(callee_register, self_register, method)?;
                 for (index, arg) in args.iter().enumerate() {
                     let register = checked_register_offset(callee_register, index + 2, span)?;
                     self.compile_expr_to(arg, register)?;
@@ -5681,15 +5654,7 @@ impl Compiler {
             } => {
                 let self_register = checked_register_offset(callee_register, 1, span)?;
                 self.compile_expr_to(object, self_register)?;
-                let key_register =
-                    self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-                self.code.push(Instruction::new(
-                    Opcode::GetIndex,
-                    callee_register,
-                    self_register,
-                    key_register,
-                ));
-                self.free_register(key_register);
+                self.emit_method_lookup(callee_register, self_register, method)?;
                 for (index, arg) in args[..shape.scalar_arg_count].iter().enumerate() {
                     let register = checked_register_offset(callee_register, index + 2, span)?;
                     self.compile_expr_to(arg, register)?;
@@ -5740,14 +5705,7 @@ impl Compiler {
 
         let self_register = checked_register_offset(first_register, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            first_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_method_lookup(first_register, self_register, method)?;
 
         for (index, arg) in args.iter().enumerate() {
             let register = checked_register_offset(first_register, index + 2, span)?;
@@ -5796,18 +5754,17 @@ impl Compiler {
 
         let self_register = self.alloc_register_at(span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            target,
-            self_register,
-            key_register,
-        ));
+        let key = self.emit_method_lookup(target, self_register, method)?;
         self.emit_source_mapped_instruction(
-            Instruction::new(Opcode::CheckMethod, target, self_register, key_register),
+            Instruction::with_aux(
+                Opcode::CheckMethodStringConst,
+                target,
+                self_register,
+                0,
+                key,
+            ),
             span,
         );
-        self.free_register(key_register);
 
         let mut arg_registers = Vec::with_capacity(args.len());
         for arg in args {
@@ -5863,14 +5820,7 @@ impl Compiler {
 
         let self_register = checked_register_offset(first_register, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            first_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_method_lookup(first_register, self_register, method)?;
         for (index, arg) in args[..trailing_index].iter().enumerate() {
             let register = checked_register_offset(first_register, index + 2, span)?;
             self.compile_expr_to(arg, register)?;
@@ -5923,14 +5873,7 @@ impl Compiler {
 
         let self_register = checked_register_offset(first_register, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            first_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_method_lookup(first_register, self_register, method)?;
 
         for (index, arg) in args[..trailing_index].iter().enumerate() {
             let register = checked_register_offset(first_register, index + 2, span)?;
@@ -14856,6 +14799,54 @@ return #s * 1000 + string.byte(s, 256)
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let result = vm.run(&program).unwrap();
         assert_eq!(vm.string_value(result).unwrap().as_deref(), Some("ab"));
+    }
+
+    #[test]
+    fn method_calls_use_static_string_lookup() {
+        let chunk = parse_source(
+            "local t = { add = function(self, x) return x + 1 end } local y = t:add(5) return y",
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::GetIndexStringConst), 1);
+        assert_eq!(opcode_count(&program, Opcode::CheckMethodStringConst), 1);
+        assert_eq!(opcode_count(&program, Opcode::CheckMethod), 0);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(6.0));
+    }
+
+    #[test]
+    fn tail_method_calls_use_static_string_lookup() {
+        let chunk =
+            parse_source("local t = { add = function(self, x) return x + 1 end } return t:add(5)")
+                .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::GetIndexStringConst), 1);
+        assert_eq!(opcode_count(&program, Opcode::ReturnCall), 1);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(6.0));
+    }
+
+    #[test]
+    fn method_calls_keep_missing_method_name_in_error() {
+        let chunk = parse_source("local t = {} local y = t:missing() return y").unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::CheckMethodStringConst), 1);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let error = vm.run(&program).unwrap_err();
+        assert!(
+            matches!(
+                error.kind,
+                ErrorKind::RuntimeError { ref message }
+                    if message == "attempt to call missing method 'missing' of table"
+            ),
+            "{error}"
+        );
     }
 
     #[test]

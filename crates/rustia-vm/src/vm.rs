@@ -2928,6 +2928,44 @@ impl Vm {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })?;
                             }
+                            Opcode::CheckMethodStringConst => {
+                                if instruction.aux < 0 {
+                                    return Err(Error::new(ErrorKind::InvalidProgram {
+                                        reason: "negative method name constant",
+                                    })
+                                    .at_pc(pc - 1));
+                                }
+                                let callee =
+                                    get_register(&registers, instruction.a).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                if callee.kind() != ValueKind::Nil {
+                                    continue;
+                                }
+                                let object =
+                                    get_register(&registers, instruction.b).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let key_atom = self
+                                    .constant_string_atom(
+                                        program,
+                                        program_id,
+                                        instruction.aux as usize,
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?
+                                    .ok_or_else(|| {
+                                        Error::new(ErrorKind::InvalidProgram {
+                                            reason: "method check opcode must reference a string",
+                                        })
+                                        .at_pc(pc - 1)
+                                    })?;
+                                let key = Value::string_atom(key_atom);
+                                self.check_method_value(callee, object, key).map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })?;
+                            }
                             Opcode::RawGet => {
                                 let table = get_table(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
@@ -18802,6 +18840,7 @@ fn opcode_may_observe_current_roots(op: Opcode) -> bool {
         | Opcode::AppendVarargs
         | Opcode::LoadConstWide
         | Opcode::CheckMethod
+        | Opcode::CheckMethodStringConst
         | Opcode::CoerceForNumber => false,
     }
 }

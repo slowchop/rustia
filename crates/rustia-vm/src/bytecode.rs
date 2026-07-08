@@ -215,6 +215,7 @@ pub enum Opcode {
     GetIndexStringConst = 157,
     SetIndexStringConst = 158,
     SetIndexNumberConst = 159,
+    CheckMethodStringConst = 160,
 }
 
 pub const ARRAY_ITERATOR_WRITE_VISIBLE_KEY: u8 = 0;
