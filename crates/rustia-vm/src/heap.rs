@@ -2107,25 +2107,21 @@ impl VmCell {
             {
                 return Some(false);
             }
-            if !table
-                .array
-                .iter()
-                .take(len)
-                .all(|value| value.as_number().is_some_and(f64::is_finite))
-            {
-                return Some(false);
+            let mut numbers = Vec::with_capacity(len);
+            for value in table.array.iter().take(len) {
+                let Some(number) = value.as_number().filter(|number| number.is_finite()) else {
+                    return Some(false);
+                };
+                numbers.push(number);
             }
             bump_table_version(table);
-            table.array[..len].sort_by(|left, right| {
-                let left = left
-                    .as_number()
-                    .expect("numeric table sort validated number values");
-                let right = right
-                    .as_number()
-                    .expect("numeric table sort validated number values");
-                left.partial_cmp(&right)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+            numbers.sort_by(|left, right| {
+                left.partial_cmp(right)
+                    .expect("numeric table sort validated finite values")
             });
+            for (slot, number) in table.array[..len].iter_mut().zip(numbers) {
+                *slot = Value::number(number);
+            }
             Some(true)
         })
     }
