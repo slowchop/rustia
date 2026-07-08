@@ -185,10 +185,14 @@ struct TableGetInlineCacheEntry {
 
 #[derive(Clone, Copy)]
 enum TableGetInlineCacheSource {
-    Direct {
+    DirectSlot {
         table: u32,
-        table_version: u64,
-        value: Value,
+        table_shape_version: u64,
+        hash_index: usize,
+    },
+    DirectAbsent {
+        table: u32,
+        table_shape_version: u64,
     },
     IndexTable {
         metatable: u32,
@@ -7078,15 +7082,60 @@ impl Vm {
             return Ok(None);
         }
         match entry.source {
-            TableGetInlineCacheSource::Direct {
+            TableGetInlineCacheSource::DirectSlot {
                 table: cached_table,
-                table_version,
-                value,
+                table_shape_version,
+                hash_index,
             } => {
                 if cached_table != table {
                     return Ok(None);
                 }
-                Ok((self.heap.table_version(table) == Some(table_version)).then_some(value))
+                let Some(slot) = self
+                    .heap
+                    .read_string_hash_slot_with_shape(
+                        table,
+                        key_atom,
+                        table_shape_version,
+                        hash_index,
+                    )
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "table handle is missing",
+                        })
+                    })?
+                else {
+                    return Ok(None);
+                };
+                if slot.value.kind() != ValueKind::Nil
+                    || !slot.has_metatable
+                    || self.table_uses_standard_global_type_surface(table)?
+                {
+                    return Ok(Some(slot.value));
+                }
+                Ok(None)
+            }
+            TableGetInlineCacheSource::DirectAbsent {
+                table: cached_table,
+                table_shape_version,
+            } => {
+                if cached_table != table
+                    || self.heap.table_shape_version(table) != Some(table_shape_version)
+                {
+                    return Ok(None);
+                }
+                if self
+                    .heap
+                    .table_metatable(table)
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "table handle is missing",
+                        })
+                    })?
+                    .is_some()
+                {
+                    return Ok(None);
+                }
+                Ok(Some(Value::nil()))
             }
             TableGetInlineCacheSource::IndexTable {
                 metatable,
@@ -7127,12 +7176,21 @@ impl Vm {
         key: Value,
         key_atom: u32,
     ) -> Result<Option<Value>> {
-        let table_version = self.heap.table_version(table).ok_or_else(|| {
+        let table_shape_version = self.heap.table_shape_version(table).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "table handle is missing",
             })
         })?;
-        if let Some(value) = self.raw_table_slot(table, key)? {
+        let hash_slot = self
+            .heap
+            .table_string_hash_slot(table, key_atom)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?;
+        if let Some(slot) = hash_slot {
+            let value = slot.value;
             if value.kind() != ValueKind::Nil
                 || self.table_uses_standard_global_type_surface(table)?
             {
@@ -7140,10 +7198,10 @@ impl Vm {
                     site,
                     TableGetInlineCacheEntry {
                         key_atom,
-                        source: TableGetInlineCacheSource::Direct {
+                        source: TableGetInlineCacheSource::DirectSlot {
                             table,
-                            table_version,
-                            value,
+                            table_shape_version: slot.shape_version,
+                            hash_index: slot.index,
                         },
                     },
                 );
@@ -7157,17 +7215,18 @@ impl Vm {
         })?;
         let Some(metatable) = metatable else {
             let value = Value::nil();
-            self.store_table_get_inline_cache(
-                site,
-                TableGetInlineCacheEntry {
-                    key_atom,
-                    source: TableGetInlineCacheSource::Direct {
-                        table,
-                        table_version,
-                        value,
-                    },
+            let source = hash_slot.map_or(
+                TableGetInlineCacheSource::DirectAbsent {
+                    table,
+                    table_shape_version,
+                },
+                |slot| TableGetInlineCacheSource::DirectSlot {
+                    table,
+                    table_shape_version: slot.shape_version,
+                    hash_index: slot.index,
                 },
             );
+            self.store_table_get_inline_cache(site, TableGetInlineCacheEntry { key_atom, source });
             return Ok(Some(value));
         };
         if let Some(value) =
