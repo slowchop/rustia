@@ -19097,6 +19097,30 @@ impl Vm {
         }
         table_move_destination_end(bounds.destination_start, count)?;
 
+        if let (Ok(start), Ok(destination_start)) = (
+            usize::try_from(bounds.start),
+            usize::try_from(bounds.destination_start),
+        ) {
+            match self
+                .heap
+                .table_move_integer_range(
+                    bounds.source,
+                    start,
+                    bounds.destination,
+                    destination_start,
+                    count,
+                )
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table.move table handle is missing",
+                    })
+                })? {
+                ArrayWriteStatus::Stored => return Ok(Value::table(bounds.destination)),
+                ArrayWriteStatus::Readonly => return Err(readonly_table_error()),
+                ArrayWriteStatus::Deferred => {}
+            }
+        }
+
         let copy_backward = bounds.source == bounds.destination
             && bounds.destination_start > bounds.start
             && bounds.destination_start <= bounds.end;

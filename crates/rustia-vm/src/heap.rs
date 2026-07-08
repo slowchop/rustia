@@ -1885,6 +1885,49 @@ impl VmCell {
         })
     }
 
+    pub(crate) fn table_move_integer_range(
+        &mut self,
+        source: u32,
+        start: usize,
+        destination: u32,
+        destination_start: usize,
+        count: usize,
+    ) -> Option<ArrayWriteStatus> {
+        if start == 0 || destination_start == 0 {
+            return Some(ArrayWriteStatus::Deferred);
+        }
+        if count == 0 {
+            return Some(ArrayWriteStatus::Stored);
+        }
+        let source_end = start.checked_add(count - 1)?;
+        if source_end > MAX_LUAU_ARRAY_INDEX {
+            return Some(ArrayWriteStatus::Deferred);
+        }
+        let destination_end = destination_start.checked_add(count - 1)?;
+        if destination_end > MAX_LUAU_ARRAY_INDEX {
+            return Some(ArrayWriteStatus::Deferred);
+        }
+
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let values = {
+                let source = root.tables.get(source as usize)?;
+                (start..=source_end)
+                    .map(|index| table_numeric_get(source, index))
+                    .collect::<Vec<_>>()
+            };
+            let destination = root.tables.get_mut(destination as usize)?;
+            if destination.readonly {
+                return Some(ArrayWriteStatus::Readonly);
+            }
+            bump_table_version(destination);
+            for (offset, value) in values.into_iter().enumerate() {
+                table_numeric_set_array_index(destination, destination_start + offset, value);
+            }
+            Some(ArrayWriteStatus::Stored)
+        })
+    }
+
     pub fn table_metatable(&mut self, table: u32) -> Option<Option<u32>> {
         self.arena.mutate(|mc, root| {
             root.unlock(mc)
@@ -3204,6 +3247,66 @@ mod tests {
                 .unwrap()
                 .as_number(),
             Some(10.0)
+        );
+    }
+
+    #[test]
+    fn table_move_integer_range_copies_array_values_in_bulk() {
+        let mut heap = VmCell::new();
+        let source = heap.alloc_array_table(&[
+            Value::number(10.0),
+            Value::number(20.0),
+            Value::number(30.0),
+        ]);
+        let destination = heap.alloc_array_table(&[
+            Value::number(1.0),
+            Value::number(2.0),
+            Value::number(3.0),
+            Value::number(4.0),
+            Value::number(5.0),
+        ]);
+
+        assert_eq!(
+            heap.table_move_integer_range(source, 1, destination, 2, 3),
+            Some(ArrayWriteStatus::Stored)
+        );
+
+        let values = heap
+            .table_array_range_values(destination, 1, 5)
+            .unwrap()
+            .unwrap();
+        let numbers = values
+            .into_iter()
+            .map(|value| value.as_number())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            numbers,
+            vec![Some(1.0), Some(10.0), Some(20.0), Some(30.0), Some(5.0)]
+        );
+    }
+
+    #[test]
+    fn table_move_integer_range_preserves_self_overlap() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[
+            Value::number(10.0),
+            Value::number(20.0),
+            Value::number(30.0),
+        ]);
+
+        assert_eq!(
+            heap.table_move_integer_range(table, 1, table, 2, 3),
+            Some(ArrayWriteStatus::Stored)
+        );
+
+        let values = heap.table_array_range_values(table, 1, 4).unwrap().unwrap();
+        let numbers = values
+            .into_iter()
+            .map(|value| value.as_number())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            numbers,
+            vec![Some(10.0), Some(10.0), Some(20.0), Some(30.0)]
         );
     }
 
