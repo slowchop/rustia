@@ -1186,10 +1186,14 @@ fn print_rustia_inline_cache_summary(_repo: &Path, _workloads: &[&Workload]) -> 
 #[derive(Default)]
 struct RustiaHotSiteSummary {
     total_hits: u64,
+    total_quickened_pairs: u64,
     table_hits: u64,
     iteration_hits: u64,
     opcodes: BTreeMap<String, u64>,
     quickening_pairs: BTreeMap<String, u64>,
+    quickening_sites: BTreeMap<String, u64>,
+    taken_quickened_pairs: BTreeMap<String, u64>,
+    taken_quickened_sites: BTreeMap<String, u64>,
     loop_bodies: BTreeMap<String, u64>,
 }
 
@@ -1200,8 +1204,8 @@ fn print_rustia_hot_site_summary(repo: &Path, workloads: &[&Workload]) -> Result
         "Dynamic opcode hits after running each workload with n={HOT_SITE_SUMMARY_N} and VM opcode profiling enabled."
     );
     println!("Use this as feedback for table, atom, inline-cache, and quickening work.\n");
-    println!("| workload | checksum | hits | table hits | iteration hits | hot opcode | hot pair | hot loop |");
-    println!("| --- | --- | ---: | ---: | ---: | --- | --- | --- |");
+    println!("| workload | checksum | hits | quickened | table hits | iteration hits | hot opcode | hot pair | taken pair | hot loop |");
+    println!("| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- |");
 
     let mut summaries = Vec::new();
     for workload in workloads {
@@ -1219,14 +1223,16 @@ fn print_rustia_hot_site_summary(repo: &Path, workloads: &[&Workload]) -> Result
         let snapshot = prepared.opcode_profile_snapshot();
         let summary = summarize_rustia_hot_sites(&prepared.program, &snapshot);
         println!(
-            "| {} | `{}` | {} | {} | {} | {} | {} | {} |",
+            "| {} | `{}` | {} | {} | {} | {} | {} | {} | {} | {} |",
             workload.id,
             checksum,
             summary.total_hits,
+            summary.total_quickened_pairs,
             summary.table_hits,
             summary.iteration_hits,
             format_top_u64_count(&summary.opcodes),
             format_top_u64_count(&summary.quickening_pairs),
+            format_top_u64_count(&summary.taken_quickened_pairs),
             format_top_u64_count(&summary.loop_bodies)
         );
         summaries.push((workload.id, summary));
@@ -1239,6 +1245,24 @@ fn print_rustia_hot_site_summary(repo: &Path, workloads: &[&Workload]) -> Result
             "Hot Quickening Candidate Pairs",
             "pair",
             &summary.quickening_pairs,
+            Some(12),
+        );
+        print_rustia_u64_count_table(
+            "Hot Quickening Candidate Sites",
+            "site",
+            &summary.quickening_sites,
+            Some(12),
+        );
+        print_rustia_u64_count_table(
+            "Taken Quickened Pairs",
+            "pair",
+            &summary.taken_quickened_pairs,
+            Some(12),
+        );
+        print_rustia_u64_count_table(
+            "Taken Quickened Sites",
+            "site",
+            &summary.taken_quickened_sites,
             Some(12),
         );
         print_rustia_u64_count_table(
@@ -1265,6 +1289,7 @@ fn summarize_rustia_hot_sites(
 ) -> RustiaHotSiteSummary {
     let mut summary = RustiaHotSiteSummary::default();
     summary.total_hits = snapshot.total_hits;
+    summary.total_quickened_pairs = snapshot.total_quickened_pairs;
     for entry in &snapshot.entries {
         let Some(function) = rustia_profile_function(program, entry.prototype) else {
             continue;
@@ -1286,6 +1311,15 @@ fn summarize_rustia_hot_sites(
                     .quickening_pairs
                     .entry(format!("{opcode:?} -> {:?}", next.op))
                     .or_default() += entry.hits;
+                *summary
+                    .quickening_sites
+                    .entry(format_instruction_pair_site(
+                        entry.prototype,
+                        entry.pc,
+                        instruction,
+                        next,
+                    ))
+                    .or_default() += entry.hits;
             }
         }
         if opcode_is_loop_backedge(opcode) {
@@ -1296,6 +1330,30 @@ fn summarize_rustia_hot_sites(
                 *summary
                     .loop_bodies
                     .entry(format_loop_body_sequence(&function.code[start..=entry.pc]))
+                    .or_default() += entry.hits;
+            }
+        }
+    }
+    for entry in &snapshot.quickened_pairs {
+        *summary
+            .taken_quickened_pairs
+            .entry(format!(
+                "{:?} -> {:?}",
+                entry.left_opcode, entry.right_opcode
+            ))
+            .or_default() += entry.hits;
+        if let Some(function) = rustia_profile_function(program, entry.prototype) {
+            if let (Some(left), Some(right)) =
+                (function.code.get(entry.pc), function.code.get(entry.pc + 1))
+            {
+                *summary
+                    .taken_quickened_sites
+                    .entry(format_instruction_pair_site(
+                        entry.prototype,
+                        entry.pc,
+                        left,
+                        right,
+                    ))
                     .or_default() += entry.hits;
             }
         }
@@ -1330,6 +1388,31 @@ fn print_rustia_u64_count_table(
         println!("| none | 0 |");
     }
     println!();
+}
+
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
+fn format_instruction_pair_site(
+    prototype: Option<u32>,
+    pc: usize,
+    left: &Instruction,
+    right: &Instruction,
+) -> String {
+    format!(
+        "{}:{pc} {} -> {}",
+        prototype
+            .map(|prototype| format!("p{prototype}"))
+            .unwrap_or_else(|| "main".to_owned()),
+        format_instruction_shape(left),
+        format_instruction_shape(right)
+    )
+}
+
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
+fn format_instruction_shape(instruction: &Instruction) -> String {
+    format!(
+        "{:?}({}, {}, {}; {})",
+        instruction.op, instruction.a, instruction.b, instruction.c, instruction.aux
+    )
 }
 
 #[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]

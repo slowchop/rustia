@@ -104,6 +104,8 @@ pub struct VmInlineCacheSnapshot {
 pub struct VmOpcodeProfileSnapshot {
     pub total_hits: u64,
     pub entries: Vec<VmOpcodeProfileEntry>,
+    pub total_quickened_pairs: u64,
+    pub quickened_pairs: Vec<VmOpcodeProfilePairEntry>,
 }
 
 #[cfg(feature = "opcode-profiling")]
@@ -114,6 +116,18 @@ pub struct VmOpcodeProfileEntry {
     pub pc: usize,
     pub line: Option<u32>,
     pub opcode: Opcode,
+    pub hits: u64,
+}
+
+#[cfg(feature = "opcode-profiling")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VmOpcodeProfilePairEntry {
+    pub program: Option<u32>,
+    pub prototype: Option<u32>,
+    pub pc: usize,
+    pub line: Option<u32>,
+    pub left_opcode: Opcode,
+    pub right_opcode: Opcode,
     pub hits: u64,
 }
 
@@ -194,6 +208,8 @@ pub struct Vm {
     coverage_hits: BTreeMap<CoverageKey, u64>,
     #[cfg(feature = "opcode-profiling")]
     opcode_profile_hits: BTreeMap<OpcodeProfileKey, u64>,
+    #[cfg(feature = "opcode-profiling")]
+    opcode_profile_quickened_pairs: BTreeMap<OpcodeProfileKey, u64>,
     global_get_inline_cache: Vec<Option<GlobalGetInlineCacheSlot>>,
     table_get_inline_cache: Vec<Option<TableGetInlineCacheSlot>>,
     table_set_inline_cache: Vec<Option<TableSetInlineCacheSlot>>,
@@ -957,6 +973,8 @@ impl Vm {
             coverage_hits: BTreeMap::new(),
             #[cfg(feature = "opcode-profiling")]
             opcode_profile_hits: BTreeMap::new(),
+            #[cfg(feature = "opcode-profiling")]
+            opcode_profile_quickened_pairs: BTreeMap::new(),
             global_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             table_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             table_set_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
@@ -1143,15 +1161,56 @@ impl Vm {
                 .then_with(|| left.prototype.cmp(&right.prototype))
                 .then_with(|| left.pc.cmp(&right.pc))
         });
+        let mut quickened_pairs = Vec::new();
+        let mut total_quickened_pairs = 0u64;
+        for (key, hits) in &self.opcode_profile_quickened_pairs {
+            let profile_program = match key.program {
+                Some(program_id) => self
+                    .dynamic_programs
+                    .get(program_id as usize)
+                    .map(Arc::as_ref)
+                    .unwrap_or(program),
+                None => program,
+            };
+            let Some(function) = opcode_profile_function(profile_program, key.prototype) else {
+                continue;
+            };
+            let Some(left) = function.code.get(key.pc) else {
+                continue;
+            };
+            let Some(right) = function.code.get(key.pc.saturating_add(1)) else {
+                continue;
+            };
+            total_quickened_pairs = total_quickened_pairs.saturating_add(*hits);
+            quickened_pairs.push(VmOpcodeProfilePairEntry {
+                program: key.program,
+                prototype: key.prototype,
+                pc: key.pc,
+                line: function.source_line_at_or_before(key.pc),
+                left_opcode: left.op,
+                right_opcode: right.op,
+                hits: *hits,
+            });
+        }
+        quickened_pairs.sort_by(|left, right| {
+            right
+                .hits
+                .cmp(&left.hits)
+                .then_with(|| left.prototype.cmp(&right.prototype))
+                .then_with(|| left.pc.cmp(&right.pc))
+        });
         VmOpcodeProfileSnapshot {
             total_hits,
             entries,
+            total_quickened_pairs,
+            quickened_pairs,
         }
     }
 
     #[cfg(feature = "opcode-profiling")]
     pub fn clear_opcode_profile(&mut self) {
         self.opcode_profile_hits.clear();
+        self.opcode_profile_quickened_pairs.clear();
     }
 
     pub fn register_extension_op(&mut self, op: ExtensionOp) -> Result<u16> {
@@ -1920,11 +1979,11 @@ impl Vm {
                                                     .map_err(|e| e.at_pc(pc))?;
                                                     self.executed_instructions =
                                                         self.executed_instructions.wrapping_add(1);
-                                                    self.record_execution_hit(
+                                                    self.record_quickened_execution_pair(
                                                         program_id,
                                                         context.prototype,
                                                         function,
-                                                        pc,
+                                                        pc - 1,
                                                     );
                                                     pc += 1;
                                                     continue;
@@ -1934,7 +1993,9 @@ impl Vm {
                                                 .map_err(|e| e.at_pc(pc - 1))?;
                                             continue;
                                         }
-                                        if next.op == Opcode::GetIndex && next.b == instruction.a {
+                                        if next.op == Opcode::GetIndex
+                                            && (next.b == instruction.a || next.c == instruction.a)
+                                        {
                                             let index = upvalue_index(instruction.aux)
                                                 .map_err(|e| e.at_pc(pc - 1))?;
                                             let upvalue = context
@@ -1954,46 +2015,50 @@ impl Vm {
                                                     })
                                                 },
                                             )?;
-                                            if let Some(table) = value.as_table() {
-                                                let key = if next.c == instruction.a {
-                                                    value
-                                                } else {
-                                                    get_register(&registers, next.c)
-                                                        .map_err(|e| e.at_pc(pc))?
-                                                };
-                                                if let Some(index) =
-                                                    key.as_number().and_then(array_iterator_index)
+                                            let object = if next.b == instruction.a {
+                                                value
+                                            } else {
+                                                get_register(&registers, next.b)
+                                                    .map_err(|e| e.at_pc(pc))?
+                                            };
+                                            let key = if next.c == instruction.a {
+                                                value
+                                            } else {
+                                                get_register(&registers, next.c)
+                                                    .map_err(|e| e.at_pc(pc))?
+                                            };
+                                            if let (Some(table), Some(index)) = (
+                                                object.as_table(),
+                                                key.as_number().and_then(array_iterator_index),
+                                            ) {
+                                                if let Some(index_value) = self
+                                                    .get_table_integer_index_fast(table, index)
+                                                    .map_err(|e| e.at_pc(pc))?
                                                 {
-                                                    if let Some(index_value) = self
-                                                        .get_table_integer_index_fast(table, index)
-                                                        .map_err(|e| e.at_pc(pc))?
-                                                    {
-                                                        if next.a != instruction.a {
-                                                            set_register(
-                                                                &mut registers,
-                                                                instruction.a,
-                                                                value,
-                                                            )
-                                                            .map_err(|e| e.at_pc(pc - 1))?;
-                                                        }
+                                                    if next.a != instruction.a {
                                                         set_register(
                                                             &mut registers,
-                                                            next.a,
-                                                            index_value,
+                                                            instruction.a,
+                                                            value,
                                                         )
-                                                        .map_err(|e| e.at_pc(pc))?;
-                                                        self.executed_instructions = self
-                                                            .executed_instructions
-                                                            .wrapping_add(1);
-                                                        self.record_execution_hit(
-                                                            program_id,
-                                                            context.prototype,
-                                                            function,
-                                                            pc,
-                                                        );
-                                                        pc += 1;
-                                                        continue;
+                                                        .map_err(|e| e.at_pc(pc - 1))?;
                                                     }
+                                                    set_register(
+                                                        &mut registers,
+                                                        next.a,
+                                                        index_value,
+                                                    )
+                                                    .map_err(|e| e.at_pc(pc))?;
+                                                    self.executed_instructions =
+                                                        self.executed_instructions.wrapping_add(1);
+                                                    self.record_quickened_execution_pair(
+                                                        program_id,
+                                                        context.prototype,
+                                                        function,
+                                                        pc - 1,
+                                                    );
+                                                    pc += 1;
+                                                    continue;
                                                 }
                                             }
                                             set_register(&mut registers, instruction.a, value)
@@ -2044,11 +2109,11 @@ impl Vm {
                                                 .map_err(|e| e.at_pc(pc))?;
                                             self.executed_instructions =
                                                 self.executed_instructions.wrapping_add(1);
-                                            self.record_execution_hit(
+                                            self.record_quickened_execution_pair(
                                                 program_id,
                                                 context.prototype,
                                                 function,
-                                                pc,
+                                                pc - 1,
                                             );
                                             pc += 1;
                                             continue;
@@ -2103,11 +2168,11 @@ impl Vm {
                                             .map_err(|e| e.at_pc(pc))?;
                                         self.executed_instructions =
                                             self.executed_instructions.wrapping_add(1);
-                                        self.record_execution_hit(
+                                        self.record_quickened_execution_pair(
                                             program_id,
                                             context.prototype,
                                             function,
-                                            pc,
+                                            pc - 1,
                                         );
                                         pc += 1;
                                         continue;
@@ -2123,17 +2188,17 @@ impl Vm {
                                     {
                                         self.executed_instructions =
                                             self.executed_instructions.wrapping_add(2);
-                                        self.record_execution_hit(
+                                        self.record_quickened_execution_pair(
+                                            program_id,
+                                            context.prototype,
+                                            function,
+                                            pc - 1,
+                                        );
+                                        self.record_quickened_execution_pair(
                                             program_id,
                                             context.prototype,
                                             function,
                                             pc,
-                                        );
-                                        self.record_execution_hit(
-                                            program_id,
-                                            context.prototype,
-                                            function,
-                                            pc + 1,
                                         );
                                         pc += 2;
                                         continue;
@@ -2167,11 +2232,11 @@ impl Vm {
                                             .map_err(|e| e.at_pc(pc))?;
                                         self.executed_instructions =
                                             self.executed_instructions.wrapping_add(1);
-                                        self.record_execution_hit(
+                                        self.record_quickened_execution_pair(
                                             program_id,
                                             context.prototype,
                                             function,
-                                            pc,
+                                            pc - 1,
                                         );
                                         pc += 1;
                                         continue;
@@ -2205,11 +2270,11 @@ impl Vm {
                                             .map_err(|e| e.at_pc(pc))?;
                                         self.executed_instructions =
                                             self.executed_instructions.wrapping_add(1);
-                                        self.record_execution_hit(
+                                        self.record_quickened_execution_pair(
                                             program_id,
                                             context.prototype,
                                             function,
-                                            pc,
+                                            pc - 1,
                                         );
                                         pc += 1;
                                         continue;
@@ -3451,11 +3516,11 @@ impl Vm {
                                         {
                                             self.executed_instructions =
                                                 self.executed_instructions.wrapping_add(1);
-                                            self.record_execution_hit(
+                                            self.record_quickened_execution_pair(
                                                 program_id,
                                                 context.prototype,
                                                 function,
-                                                pc,
+                                                pc - 1,
                                             );
                                             pc += 1;
                                         }
@@ -3524,11 +3589,11 @@ impl Vm {
                                 {
                                     self.executed_instructions =
                                         self.executed_instructions.wrapping_add(1);
-                                    self.record_execution_hit(
+                                    self.record_quickened_execution_pair(
                                         program_id,
                                         context.prototype,
                                         function,
-                                        pc,
+                                        pc - 1,
                                     );
                                     pc += 1;
                                     continue;
@@ -21653,6 +21718,26 @@ impl Vm {
         }
     }
 
+    #[inline]
+    fn record_quickened_execution_pair(
+        &mut self,
+        program_id: Option<u32>,
+        prototype: Option<u32>,
+        function: &Function,
+        left_pc: usize,
+    ) {
+        self.record_execution_hit(program_id, prototype, function, left_pc.saturating_add(1));
+        #[cfg(feature = "opcode-profiling")]
+        if self.settings.enable_opcode_profiling {
+            let key = OpcodeProfileKey {
+                program: program_id,
+                prototype,
+                pc: left_pc,
+            };
+            *self.opcode_profile_quickened_pairs.entry(key).or_insert(0) += 1;
+        }
+    }
+
     #[cold]
     #[inline(never)]
     fn record_execution_hit_slow(
@@ -29129,6 +29214,47 @@ mod tests {
             .entries
             .iter()
             .any(|entry| entry.pc == 1 && entry.opcode == Opcode::Return && entry.hits == 1));
+    }
+
+    #[cfg(feature = "opcode-profiling")]
+    #[test]
+    fn opcode_profile_snapshot_records_quickened_pairs() {
+        let function = Function::with_params(
+            vec![
+                Instruction::with_aux(Opcode::GetUpvalue, 1, 0, 0, 0),
+                Instruction::new(Opcode::GetIndex, 0, 0, 1),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+            ],
+            2,
+            1,
+        );
+        let program = Program::with_functions(dummy_program().main, vec![], vec![function]);
+        let settings = VmSettings {
+            enable_opcode_profiling: true,
+            ..VmSettings::default()
+        };
+        let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        let table = vm.heap.alloc_array_table(&[Value::number(42.0)]);
+        let index_upvalue = vm.heap.alloc_upvalue(Value::number(1.0)).unwrap();
+        let function = Value::function(
+            vm.heap
+                .alloc_function(None, 0, vec![index_upvalue], vm.globals)
+                .unwrap(),
+        );
+
+        let result = vm
+            .call_function(&program, function, &[Value::table(table)])
+            .unwrap();
+        assert_eq!(result.as_number(), Some(42.0));
+
+        let snapshot = vm.opcode_profile_snapshot(&program);
+        assert_eq!(snapshot.total_quickened_pairs, 1);
+        assert!(snapshot.quickened_pairs.iter().any(|entry| {
+            entry.pc == 0
+                && entry.left_opcode == Opcode::GetUpvalue
+                && entry.right_opcode == Opcode::GetIndex
+                && entry.hits == 1
+        }));
     }
 
     #[test]
