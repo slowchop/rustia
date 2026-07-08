@@ -5,6 +5,7 @@ pub struct Program {
     pub main: Function,
     pub constants: Vec<Constant>,
     pub functions: Vec<Function>,
+    pub record_key_sets: Vec<Vec<usize>>,
     pub source_name: Option<Arc<str>>,
 }
 
@@ -216,6 +217,7 @@ pub enum Opcode {
     SetIndexStringConst = 158,
     SetIndexNumberConst = 159,
     CheckMethodStringConst = 160,
+    NewRecordConstKeys = 161,
 }
 
 pub const ARRAY_ITERATOR_WRITE_VISIBLE_KEY: u8 = 0;
@@ -259,6 +261,7 @@ impl Program {
             main,
             constants,
             functions: Vec::new(),
+            record_key_sets: Vec::new(),
             source_name: None,
         }
     }
@@ -272,8 +275,14 @@ impl Program {
             main,
             constants,
             functions,
+            record_key_sets: Vec::new(),
             source_name: None,
         }
+    }
+
+    pub fn with_record_key_sets(mut self, record_key_sets: Vec<Vec<usize>>) -> Self {
+        self.record_key_sets = record_key_sets;
+        self
     }
 
     pub fn with_source_name(mut self, source_name: Option<String>) -> Self {

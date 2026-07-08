@@ -2520,6 +2520,18 @@ impl Vm {
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
+                            Opcode::NewRecordConstKeys => {
+                                let value = self
+                                    .new_record_table_const_keys(
+                                        program,
+                                        program_id,
+                                        &registers,
+                                        instruction,
+                                    )
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                set_register(&mut registers, instruction.a, value)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                            }
                             Opcode::IpairsPrep => {
                                 if !self.ipairs_prepare(
                                     &mut registers,
@@ -8725,6 +8737,71 @@ impl Vm {
                 reason: "record table allocation failed",
             })
         })?;
+        Ok(Value::table(table))
+    }
+
+    fn new_record_table_const_keys(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        registers: &[Value],
+        instruction: Instruction,
+    ) -> Result<Value> {
+        if instruction.aux < 0 {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "negative record key set index",
+            }));
+        }
+        let field_count = usize::from(instruction.c);
+        if field_count == 0 {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "invalid record table field count",
+            }));
+        }
+        let key_set = program
+            .record_key_sets
+            .get(instruction.aux as usize)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "record key set is missing",
+                })
+            })?;
+        if key_set.len() != field_count {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "record key set field count mismatch",
+            }));
+        }
+        let start = usize::from(instruction.b);
+        let end = start.checked_add(field_count).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "record table register window overflow",
+            })
+        })?;
+        let values = registers.get(start..end).ok_or_else(|| {
+            Error::new(ErrorKind::RegisterOutOfBounds {
+                register: end,
+                max: registers.len(),
+            })
+        })?;
+        let mut key_atoms = Vec::with_capacity(field_count);
+        for constant_index in key_set {
+            let atom = self
+                .constant_string_atom(program, program_id, *constant_index)?
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "record key set must reference string constants",
+                    })
+                })?;
+            key_atoms.push(atom);
+        }
+        let table = self
+            .heap
+            .alloc_record_table_with_string_atoms(&key_atoms, values)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "record table allocation failed",
+                })
+            })?;
         Ok(Value::table(table))
     }
 
@@ -19177,6 +19254,7 @@ fn opcode_may_observe_current_roots(op: Opcode) -> bool {
         | Opcode::ToNumber
         | Opcode::NewArray
         | Opcode::NewRecord
+        | Opcode::NewRecordConstKeys
         | Opcode::IpairsPrep
         | Opcode::IpairsLoop
         | Opcode::PairsPrep

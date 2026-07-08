@@ -865,6 +865,43 @@ impl VmCell {
         })
     }
 
+    pub(crate) fn alloc_record_table_with_string_atoms(
+        &mut self,
+        keys: &[u32],
+        values: &[Value],
+    ) -> Option<u32> {
+        if keys.len() != values.len() {
+            return None;
+        }
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let mut table = TableData {
+                array: Vec::new(),
+                hash: Vec::with_capacity(keys.len()),
+                hash_index: Vec::new(),
+                readonly: false,
+                metatable: None,
+                version: 0,
+                shape_version: 0,
+            };
+            for (atom, value) in keys.iter().copied().zip(values.iter().copied()) {
+                root.strings.get(atom as usize)?;
+                if string_atom_is(&root, atom, b"__mode") {
+                    root.weak_tables_possible = true;
+                }
+                set_hash_key(
+                    &mut table,
+                    TableKey::String(atom),
+                    Value::string_atom(atom),
+                    value,
+                );
+            }
+            let handle = u32::try_from(root.tables.len()).ok()?;
+            root.tables.push(table);
+            Some(handle)
+        })
+    }
+
     pub fn alloc_filled_array_table(&mut self, size: usize, value: Value) -> u32 {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();

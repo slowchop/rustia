@@ -169,6 +169,7 @@ struct Compiler {
     options: CompileOptions,
     constants: Vec<Constant>,
     functions: Vec<Function>,
+    record_key_sets: Vec<Vec<usize>>,
     code: Vec<Instruction>,
     locals: BTreeMap<String, Binding>,
     assigned_globals: BTreeSet<String>,
@@ -205,6 +206,7 @@ impl Compiler {
             options,
             constants: Vec::new(),
             functions: Vec::new(),
+            record_key_sets: Vec::new(),
             code: Vec::new(),
             locals: BTreeMap::new(),
             assigned_globals: BTreeSet::new(),
@@ -260,6 +262,7 @@ impl Compiler {
             self.constants,
             self.functions,
         )
+        .with_record_key_sets(self.record_key_sets)
         .with_source_name(self.options.source_name))
     }
 
@@ -3257,26 +3260,22 @@ impl Compiler {
             TableField::Named { span, .. } => *span,
             _ => unreachable!("named-only record table was checked above"),
         };
-        let window_len = fields
-            .len()
-            .checked_mul(2)
-            .ok_or_else(|| CompileError::at("record table register window overflow", span))?;
-        let first_register = self.alloc_register_window_at(window_len, span)?;
+        let record_key_set = self.record_key_set_index(fields, span)?;
+        let first_register = self.alloc_register_window_at(fields.len(), span)?;
         for (index, field) in fields.iter().enumerate() {
             let TableField::Named { name, value, .. } = field else {
                 unreachable!("named-only record table was checked above");
             };
-            let key_register = checked_register_offset(first_register, index * 2, span)?;
-            let value_register = checked_register_offset(first_register, index * 2 + 1, span)?;
-            self.load_constant_to(key_register, Constant::String(name.as_bytes().to_vec()))?;
+            let value_register = checked_register_offset(first_register, index, span)?;
             self.compile_expr_to_with_debug_name(value, value_register, Some(name.clone()))?;
         }
         self.code.push(Instruction::with_aux(
-            Opcode::NewRecord,
+            Opcode::NewRecordConstKeys,
             target,
             first_register,
-            0,
-            i32::try_from(fields.len())
+            u8::try_from(fields.len())
+                .map_err(|_| CompileError::at("unsupported record table field count", span))?,
+            i32::try_from(record_key_set)
                 .map_err(|_| CompileError::at("unsupported record table field count", span))?,
         ));
         self.free_registers_back_to(u16::from(first_register));
@@ -7034,6 +7033,28 @@ impl Compiler {
         }
         self.constants.push(constant);
         Ok(self.constants.len() - 1)
+    }
+
+    fn record_key_set_index(&mut self, fields: &[TableField], span: Span) -> Result<usize> {
+        let mut key_set = Vec::with_capacity(fields.len());
+        for field in fields {
+            let TableField::Named { name, .. } = field else {
+                unreachable!("named-only record table was checked before key set construction");
+            };
+            key_set.push(self.constant_index(Constant::String(name.as_bytes().to_vec()))?);
+        }
+        if let Some(index) = self
+            .record_key_sets
+            .iter()
+            .position(|existing| existing == &key_set)
+        {
+            return Ok(index);
+        }
+        if self.record_key_sets.len() >= i32::MAX as usize {
+            return Err(CompileError::at("record key set table overflow", span));
+        }
+        self.record_key_sets.push(key_set);
+        Ok(self.record_key_sets.len() - 1)
     }
 
     fn alloc_register_at(&mut self, span: Span) -> Result<u8> {
@@ -11584,11 +11605,23 @@ return tostring(ok) .. "|" .. tostring(string.find(err, "readonly", 1, true) ~= 
     fn named_table_literals_use_record_opcode() {
         let chunk = parse_source("local t = { id = 1, x = 2, id = 3 } return t.id + t.x").unwrap();
         let program = compile(&chunk).unwrap();
-        assert!(program
+        let record = program
             .main
             .code
             .iter()
-            .any(|instruction| instruction.op == Opcode::NewRecord));
+            .find(|instruction| instruction.op == Opcode::NewRecordConstKeys)
+            .unwrap();
+        assert_eq!(record.c, 3);
+        let key_set = &program.record_key_sets[record.aux as usize];
+        assert_eq!(key_set.len(), 3);
+        let keys = key_set
+            .iter()
+            .map(|index| match &program.constants[*index] {
+                Constant::String(bytes) => std::str::from_utf8(bytes).unwrap(),
+                _ => panic!("record key set must point to string constants"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(keys, ["id", "x", "id"]);
         assert!(program
             .main
             .code
