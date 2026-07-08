@@ -41,6 +41,7 @@ CI bench runner. Do not retry them without a materially different approach.
 | `f2669e8` combined `ipairs(c.items)` field prep | `1a67c03` | runs `28963553868`/`28963671573`: average total median +0.04% vs `31955f8` average, total min +0.11%, and targeted `generic_iteration` median +0.61%; extra bytecode surface without a proven win |
 | `85c3a86` string-const direct table-get fast path | `ffc4d9d` | runs `28965406975`/`28965521735`: average total median +0.45% vs `1c802df` average, total min +0.63%; dense and stdlib improved, but generic_iteration +1.60% and sparse +0.63% made it a net loss |
 | `ebb5329` table-op `ForLoopStepOne` tail quickening | `7e4e6e8` | run `28966423248`: total median +11.56% and total min +11.39% vs `1c802df` average; every workload regressed, so opportunistic dispatch fusion was worse than the regular loop dispatch |
+| `02c5867` combined sparse read-pair opcode | `9cacc6b` | runs `28967201259`/`28967318773`: average total median -0.64% and sparse median -3.52% vs `1c802df` average, but generic_iteration regressed +5.85%; too much cross-workload damage for a small total win |
 
 ## Current Shape Feedback
 
@@ -62,6 +63,10 @@ The failed `ebb5329` experiment also shows that blindly folding the loop tail
 after table ops is not enough; any next dispatch-reduction attempt needs to
 remove more work than a single `ForLoopStepOne` dispatch or use a narrower
 compiled superinstruction with better register/branch locality.
+The failed `02c5867` sparse read-pair opcode showed that even a targeted
+superinstruction can disturb unrelated workloads enough to lose branch/codegen
+locality; future sparse work should measure whole-suite impact before keeping
+small targeted wins.
 
 `cargo run -p script-bench-harness -- --rustia-inline-cache-summary` runs the
 default workloads with `n=64` and reports final atom/IC side-table occupancy.
