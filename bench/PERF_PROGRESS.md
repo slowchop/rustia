@@ -16,6 +16,7 @@ Baseline for this branch is the old pre-perf CI artifact at `a728ee7`.
 | `8ba5167` | add Rustia bytecode summary | tooling only; exposes table, atom, inline-cache, and quickening candidates |
 | `488b5da` | fuse numeric table read into local self-add | two CI runs averaged 5.4-5.9% faster total median vs `441b29b`, with dense tables 14.7% faster; about 14.4-14.8% faster vs old baseline |
 | `31955f8` | fuse sparse table read-or-zero adds | two CI runs averaged 4.6% faster total median vs `488b5da`, with sparse tables 11.5% faster; about 18.5-18.7% faster vs old baseline |
+| `1c802df` | skip fuel cost lookup when fuel is disabled | runs `28964187207`/`28964565694`: average total median 0.8% faster vs `31955f8`, with dense/generic/stdlib/closures faster and sparse median 0.3% slower; about 19.1-19.4% faster vs old baseline |
 
 ## Reverted Candidates
 
