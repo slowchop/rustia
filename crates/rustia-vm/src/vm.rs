@@ -2238,14 +2238,9 @@ impl Vm {
                                     if let Some(index) =
                                         key.as_number().and_then(array_iterator_index)
                                     {
-                                        if let Some(value) = self
-                                            .get_table_integer_index_with_inline_cache(
+                                        let value = self
+                                            .get_table_integer_index_without_inline_cache(
                                                 program,
-                                                program_id.map(|program| InlineCacheSite {
-                                                    program,
-                                                    prototype: context.prototype,
-                                                    pc: pc - 1,
-                                                }),
                                                 table,
                                                 index,
                                                 context.depth,
@@ -2258,57 +2253,46 @@ impl Vm {
                                                     pc - 1,
                                                     e,
                                                 )
-                                            })?
-                                        {
-                                            set_register(&mut registers, instruction.a, value)
-                                                .map_err(|e| {
-                                                    attach_instruction_source(
-                                                        program,
-                                                        function,
-                                                        pc - 1,
-                                                        e,
-                                                    )
-                                                })?;
-                                            continue;
-                                        }
+                                            })?;
+                                        set_register(&mut registers, instruction.a, value)
+                                            .map_err(|e| {
+                                                attach_instruction_source(
+                                                    program,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
+                                                )
+                                            })?;
+                                        continue;
                                     }
                                     if let Some(key_atom) = key.as_string_atom() {
-                                        if let Some(site) =
-                                            program_id.map(|program| InlineCacheSite {
+                                        let value = self
+                                            .get_table_string_index_without_inline_cache(
                                                 program,
-                                                prototype: context.prototype,
-                                                pc: pc - 1,
-                                            })
-                                        {
-                                            let value = self
-                                                .get_table_string_index_with_inline_cache(
+                                                table,
+                                                key,
+                                                key_atom,
+                                                context.depth,
+                                                fuel,
+                                            )
+                                            .map_err(|e| {
+                                                attach_instruction_source(
                                                     program,
-                                                    site,
-                                                    table,
-                                                    key,
-                                                    key_atom,
-                                                    context.depth,
-                                                    fuel,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
                                                 )
-                                                .map_err(|e| {
-                                                    attach_instruction_source(
-                                                        program,
-                                                        function,
-                                                        pc - 1,
-                                                        e,
-                                                    )
-                                                })?;
-                                            set_register(&mut registers, instruction.a, value)
-                                                .map_err(|e| {
-                                                    attach_instruction_source(
-                                                        program,
-                                                        function,
-                                                        pc - 1,
-                                                        e,
-                                                    )
-                                                })?;
-                                            continue;
-                                        }
+                                            })?;
+                                        set_register(&mut registers, instruction.a, value)
+                                            .map_err(|e| {
+                                                attach_instruction_source(
+                                                    program,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
+                                                )
+                                            })?;
+                                        continue;
                                     }
                                 }
                                 let value = self
@@ -3713,62 +3697,33 @@ impl Vm {
                                     if let Some(index) =
                                         key.as_number().and_then(array_iterator_index)
                                     {
-                                        if self
-                                            .set_table_integer_index_with_inline_cache(
-                                                program,
-                                                program_id.map(|program| InlineCacheSite {
-                                                    program,
-                                                    prototype: context.prototype,
-                                                    pc: pc - 1,
-                                                }),
-                                                table,
-                                                index,
-                                                value,
-                                                context.depth,
-                                                fuel,
-                                            )
-                                            .map_err(|e| {
-                                                attach_instruction_source(
-                                                    program,
-                                                    function,
-                                                    pc - 1,
-                                                    e,
-                                                )
-                                            })?
-                                        {
-                                            continue;
-                                        }
+                                        self.set_table_integer_index_without_inline_cache(
+                                            program,
+                                            table,
+                                            index,
+                                            value,
+                                            context.depth,
+                                            fuel,
+                                        )
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })?;
+                                        continue;
                                     }
                                     if let Some(key_atom) = key.as_string_atom() {
-                                        if let Some(site) =
-                                            program_id.map(|program| InlineCacheSite {
-                                                program,
-                                                prototype: context.prototype,
-                                                pc: pc - 1,
-                                            })
-                                        {
-                                            self.set_table_string_index_with_inline_cache(
-                                                program,
-                                                site,
-                                                table,
-                                                key,
-                                                key_atom,
-                                                value,
-                                                context.depth,
-                                                fuel,
-                                            )
-                                            .map_err(
-                                                |e| {
-                                                    attach_instruction_source(
-                                                        program,
-                                                        function,
-                                                        pc - 1,
-                                                        e,
-                                                    )
-                                                },
-                                            )?;
-                                            continue;
-                                        }
+                                        self.set_table_string_index_without_inline_cache(
+                                            program,
+                                            table,
+                                            key,
+                                            key_atom,
+                                            value,
+                                            context.depth,
+                                            fuel,
+                                        )
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })?;
+                                        continue;
                                     }
                                 }
                                 self.set_index_value(
@@ -6833,11 +6788,9 @@ impl Vm {
         let (multiplier, modulus) = self.number_constant_pair(program, instruction.aux)?;
         if let (Some(table), Some(factor_number)) = (object.as_table(), factor.as_number()) {
             if let Some(index) = mul_mod_const_table_index(factor_number, multiplier, modulus) {
-                if self.set_table_integer_index_with_inline_cache(
-                    program, site, table, index, value, depth, fuel,
-                )? {
-                    return Ok(());
-                }
+                return self.set_table_integer_index_without_inline_cache(
+                    program, table, index, value, depth, fuel,
+                );
             }
         }
         let key = if let Some(factor) = factor.as_number() {
@@ -6873,11 +6826,9 @@ impl Vm {
 
         if let Some(table) = object.as_table() {
             if let Some(index) = key.as_number().and_then(array_iterator_index) {
-                if self.set_table_integer_index_with_inline_cache(
-                    program, site, table, index, value, depth, fuel,
-                )? {
-                    return Ok(());
-                }
+                return self.set_table_integer_index_without_inline_cache(
+                    program, table, index, value, depth, fuel,
+                );
             }
         }
         self.set_index_value(program, object, key, value, depth, fuel)
@@ -7819,11 +7770,9 @@ impl Vm {
 
         if let Some(table) = object.as_table() {
             if let Some(index) = key.as_number().and_then(array_iterator_index) {
-                if let Some(value) = self.get_table_integer_index_with_inline_cache(
-                    program, site, table, index, depth, fuel,
-                )? {
-                    return Ok(value);
-                }
+                return self.get_table_integer_index_without_inline_cache(
+                    program, table, index, depth, fuel,
+                );
             }
         }
         self.get_index_value(program, object, key, depth, fuel)
@@ -7843,11 +7792,9 @@ impl Vm {
         let (multiplier, modulus) = self.number_constant_pair(program, instruction.aux)?;
         if let (Some(table), Some(factor_number)) = (object.as_table(), factor.as_number()) {
             if let Some(index) = mul_mod_const_table_index(factor_number, multiplier, modulus) {
-                if let Some(value) = self.get_table_integer_index_with_inline_cache(
-                    program, site, table, index, depth, fuel,
-                )? {
-                    return Ok(value);
-                }
+                return self.get_table_integer_index_without_inline_cache(
+                    program, table, index, depth, fuel,
+                );
             }
         }
         let key = if let Some(factor) = factor.as_number() {
@@ -7883,11 +7830,9 @@ impl Vm {
 
         if let Some(table) = object.as_table() {
             if let Some(index) = key.as_number().and_then(array_iterator_index) {
-                if let Some(value) = self.get_table_integer_index_with_inline_cache(
-                    program, site, table, index, depth, fuel,
-                )? {
-                    return Ok(value);
-                }
+                return self.get_table_integer_index_without_inline_cache(
+                    program, table, index, depth, fuel,
+                );
             }
         }
         self.get_index_value(program, object, key, depth, fuel)
@@ -7925,6 +7870,26 @@ impl Vm {
             return Ok(Some(Value::nil()));
         }
         Ok(None)
+    }
+
+    fn get_table_integer_index_without_inline_cache(
+        &mut self,
+        program: &Program,
+        table: u32,
+        one_based_index: usize,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        if let Some(value) = self.get_table_integer_index_fast(table, one_based_index)? {
+            return Ok(value);
+        }
+        self.get_table_index_with_metamethod(
+            program,
+            table,
+            Value::number(one_based_index as f64),
+            depth,
+            fuel,
+        )
     }
 
     fn get_table_integer_index_with_inline_cache(
@@ -8675,6 +8640,28 @@ impl Vm {
         }
     }
 
+    fn set_table_integer_index_without_inline_cache(
+        &mut self,
+        program: &Program,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        if self.set_table_integer_index_fast(table, one_based_index, value)? {
+            return Ok(());
+        }
+        self.set_table_index_with_metamethod(
+            program,
+            table,
+            Value::number(one_based_index as f64),
+            value,
+            depth,
+            fuel,
+        )
+    }
+
     fn set_table_integer_array_index_fast(
         &mut self,
         table: u32,
@@ -9311,6 +9298,32 @@ impl Vm {
         }
         self.clear_table_set_inline_cache_site(site);
         self.set_table_index_with_metamethod(program, table, key, value, depth, fuel)
+    }
+
+    fn set_table_string_index_without_inline_cache(
+        &mut self,
+        program: &Program,
+        table: u32,
+        key: Value,
+        key_atom: u32,
+        value: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        match self
+            .heap
+            .write_string_index_without_metamethod(table, key_atom, value)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })? {
+            StringIndexWriteStatus::Stored { .. } => Ok(()),
+            StringIndexWriteStatus::Deferred => {
+                self.set_table_index_with_metamethod(program, table, key, value, depth, fuel)
+            }
+            StringIndexWriteStatus::Readonly => Err(readonly_table_error()),
+        }
     }
 
     fn table_set_inline_cache_hit(
@@ -10487,6 +10500,36 @@ impl Vm {
         }
         self.clear_table_get_inline_cache_site(site);
         self.get_table_index_with_metamethod(program, table, key, depth, fuel)
+    }
+
+    fn get_table_string_index_without_inline_cache(
+        &mut self,
+        program: &Program,
+        table: u32,
+        key: Value,
+        key_atom: u32,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        let probe = self
+            .heap
+            .table_string_hash_probe(table, key_atom)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?;
+        if let Some(slot) = probe.slot {
+            if slot.value.kind() != ValueKind::Nil
+                || self.table_uses_standard_global_type_surface(table)?
+            {
+                return Ok(slot.value);
+            }
+        }
+        if probe.metatable.is_none() {
+            return Ok(Value::nil());
+        }
+        self.get_object_index_metamethod(program, Value::table(table), key, depth, fuel)
     }
 
     fn table_get_inline_cache_hit(
@@ -28463,7 +28506,7 @@ mod tests {
     }
 
     #[test]
-    fn concat_const_string_index_opcodes_populate_inline_caches() {
+    fn concat_const_string_index_opcodes_avoid_string_inline_cache_churn() {
         let program = Program::new(
             Function::new(
                 vec![
@@ -28490,34 +28533,79 @@ mod tests {
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(9.0));
 
-        let key_atom = vm.heap.intern_string("kx");
         let set_site = InlineCacheSite {
             program: 0,
             prototype: None,
             pc: 5,
         };
-        let set_slot = vm.table_set_inline_cache[set_site.slot()]
-            .expect("concat string-key writes should populate the set cache");
-        assert_eq!(set_slot.site, set_site);
-        assert_eq!(set_slot.entry.key_atom, key_atom);
-        assert!(matches!(
-            set_slot.entry.target,
-            TableSetInlineCacheTarget::DirectSlot { .. }
-        ));
+        assert!(
+            vm.table_set_inline_cache[set_site.slot()].is_none_or(|slot| slot.site != set_site),
+            "dynamic concat string-key writes should not churn the set cache"
+        );
 
         let get_site = InlineCacheSite {
             program: 0,
             prototype: None,
             pc: 6,
         };
-        let get_slot = vm.table_get_inline_cache[get_site.slot()]
-            .expect("concat string-key reads should populate the get cache");
-        assert_eq!(get_slot.site, get_site);
-        assert_eq!(get_slot.entry.key_atom, key_atom);
-        assert!(matches!(
-            get_slot.entry.source,
-            TableGetInlineCacheSource::DirectSlot { .. }
-        ));
+        assert!(
+            vm.table_get_inline_cache[get_site.slot()].is_none_or(|slot| slot.site != get_site),
+            "dynamic concat string-key reads should not churn the get cache"
+        );
+    }
+
+    #[test]
+    fn mul_mod_table_index_opcodes_avoid_integer_inline_cache_churn() {
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::with_aux(Opcode::NewArray, 0, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 2),
+                    Instruction::new(Opcode::LoadConst, 2, 0, 3),
+                    Instruction::with_aux(Opcode::SetIndexMulModConst, 0, 1, 2, 1),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 4),
+                    Instruction::new(Opcode::LoadConst, 2, 0, 5),
+                    Instruction::with_aux(Opcode::SetIndexMulModConst, 0, 1, 2, 1),
+                    Instruction::with_aux(Opcode::GetIndexMulModConst, 3, 0, 1, 1),
+                    Instruction::new(Opcode::Return, 3, 1, 0),
+                ],
+                4,
+            ),
+            vec![
+                Constant::Number(7919.0),
+                Constant::Number(100003.0),
+                Constant::Number(1.0),
+                Constant::Number(7.0),
+                Constant::Number(2.0),
+                Constant::Number(9.0),
+            ],
+        );
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(9.0));
+
+        let set_site = InlineCacheSite {
+            program: 0,
+            prototype: None,
+            pc: 6,
+        };
+        assert!(
+            vm.table_integer_set_inline_cache[set_site.slot()]
+                .is_none_or(|slot| slot.site != set_site),
+            "dynamic numeric-key writes should not churn the integer set cache"
+        );
+
+        let get_site = InlineCacheSite {
+            program: 0,
+            prototype: None,
+            pc: 7,
+        };
+        assert!(
+            vm.table_integer_get_inline_cache[get_site.slot()]
+                .is_none_or(|slot| slot.site != get_site),
+            "dynamic numeric-key reads should not churn the integer get cache"
+        );
     }
 
     #[test]
