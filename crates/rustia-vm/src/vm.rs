@@ -476,7 +476,7 @@ struct IterMetamethodInlineCacheSlot {
 #[derive(Clone, Copy)]
 struct IterMetamethodInlineCacheEntry {
     table: u32,
-    table_version: u64,
+    table_shape_version: u64,
     metatable: Option<u32>,
     metatable_version: u64,
     method: Option<Value>,
@@ -10910,12 +10910,12 @@ impl Vm {
             return Ok(None);
         }
         let entry = slot.entry;
-        let table_version = self.heap.table_version(table).ok_or_else(|| {
+        let table_shape_version = self.heap.table_shape_version(table).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "table handle is missing",
             })
         })?;
-        if table_version != entry.table_version {
+        if table_shape_version != entry.table_shape_version {
             return Ok(None);
         }
         if let Some(metatable) = entry.metatable {
@@ -10935,7 +10935,7 @@ impl Vm {
         &mut self,
         table: u32,
     ) -> Result<(IterMetamethodInlineCacheEntry, Option<Value>)> {
-        let table_version = self.heap.table_version(table).ok_or_else(|| {
+        let table_shape_version = self.heap.table_shape_version(table).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "table handle is missing",
             })
@@ -10949,7 +10949,7 @@ impl Vm {
             return Ok((
                 IterMetamethodInlineCacheEntry {
                     table,
-                    table_version,
+                    table_shape_version,
                     metatable: None,
                     metatable_version: 0,
                     method: None,
@@ -10966,7 +10966,7 @@ impl Vm {
         Ok((
             IterMetamethodInlineCacheEntry {
                 table,
-                table_version,
+                table_shape_version,
                 metatable: Some(metatable),
                 metatable_version,
                 method,
@@ -28618,6 +28618,49 @@ mod tests {
                 .as_number(),
             Some(4.0)
         );
+    }
+
+    #[test]
+    fn iter_metamethod_cache_survives_value_only_table_changes() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let key_atom = vm.heap.intern_string("x");
+        let iter_atom = vm.heap.intern_string("__iter");
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let method = native_function_value(&mut vm.heap, NativeFunction::TypeOf, vm.globals);
+        vm.heap
+            .table_set(table, Value::string_atom(key_atom), Value::number(1.0))
+            .unwrap();
+        vm.heap
+            .table_set(metatable, Value::string_atom(iter_atom), method)
+            .unwrap();
+        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 9,
+        };
+
+        let cached = vm
+            .table_iter_metamethod_with_inline_cache(Some(site), table)
+            .unwrap()
+            .expect("__iter method should be cached");
+        assert_eq!(cached.as_function(), method.as_function());
+
+        let version = vm.heap.table_version(table).unwrap();
+        let shape_version = vm.heap.table_shape_version(table).unwrap();
+        vm.heap
+            .table_set(table, Value::string_atom(key_atom), Value::number(2.0))
+            .unwrap();
+        assert_ne!(vm.heap.table_version(table), Some(version));
+        assert_eq!(vm.heap.table_shape_version(table), Some(shape_version));
+
+        let cached = vm
+            .table_iter_metamethod_inline_cache_hit(site, table)
+            .unwrap()
+            .expect("value-only table changes should keep the __iter cache valid")
+            .expect("__iter method should still be cached");
+        assert_eq!(cached.as_function(), method.as_function());
     }
 
     #[test]
