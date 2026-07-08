@@ -12,7 +12,7 @@ use rustia_compiler::compile_with_options;
 #[cfg(feature = "rustia-engine")]
 use rustia_parser::parse_source;
 #[cfg(feature = "rustia-engine")]
-use rustia_vm::{Profile, Program, Value, ValueKind, Vm};
+use rustia_vm::{Instruction, Opcode, Profile, Program, Value, ValueKind, Vm};
 
 #[cfg(all(feature = "mlua-luau", feature = "mlua-lua54"))]
 compile_error!("features mlua-luau and mlua-lua54 cannot be enabled in the same binary; run them as separate benchmark binaries");
@@ -256,6 +256,7 @@ struct Config {
     list: bool,
     list_json: bool,
     wasm_gate_json: bool,
+    rustia_bytecode_summary: bool,
     check_history: bool,
     refresh_results: bool,
 }
@@ -283,6 +284,7 @@ impl Default for Config {
             list: false,
             list_json: false,
             wasm_gate_json: false,
+            rustia_bytecode_summary: false,
             check_history: false,
             refresh_results: false,
         }
@@ -395,6 +397,12 @@ fn run() -> Result<()> {
         print_inventory();
         return Ok(());
     }
+    if config.rustia_bytecode_summary {
+        let repo = repo_root()?;
+        let selected_workloads = select_workloads(&config.workloads)?;
+        print_rustia_bytecode_summary(&repo, &selected_workloads)?;
+        return Ok(());
+    }
     if config.check_history {
         let history = config
             .history
@@ -502,6 +510,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
             "--list" => config.list = true,
             "--list-json" => config.list_json = true,
             "--wasm-gate-json" => config.wasm_gate_json = true,
+            "--rustia-bytecode-summary" => config.rustia_bytecode_summary = true,
             "--check-history" => config.check_history = true,
             "--refresh-results" => config.refresh_results = true,
             "--no-history" => config.history = None,
@@ -606,6 +615,7 @@ fn print_usage() {
     println!("  --list");
     println!("  --list-json");
     println!("  --wasm-gate-json");
+    println!("  --rustia-bytecode-summary");
     println!("  --check-history");
     println!("  --refresh-results");
     println!("  --engines rustia,koto,mlua-luau");
@@ -960,13 +970,7 @@ struct RustiaPrepared {
 #[cfg(feature = "rustia-engine")]
 impl RustiaPrepared {
     fn new(workload: &Workload, source: &str) -> Result<Self> {
-        let chunk = parse_source(source)
-            .map_err(|error| Error::new(format!("parse {} failed: {error}", workload.id)))?;
-        let program = compile_with_options(
-            &chunk,
-            rustia_compiler::CompileOptions::default().with_source(workload.id, source),
-        )
-        .map_err(|error| Error::new(format!("compile {} failed: {error}", workload.id)))?;
+        let program = compile_rustia_program(workload, source)?;
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let function = vm
             .run(&program)
@@ -983,6 +987,225 @@ impl RustiaPrepared {
             function,
         })
     }
+}
+
+#[cfg(feature = "rustia-engine")]
+fn compile_rustia_program(workload: &Workload, source: &str) -> Result<Program> {
+    let chunk = parse_source(source)
+        .map_err(|error| Error::new(format!("parse {} failed: {error}", workload.id)))?;
+    compile_with_options(
+        &chunk,
+        rustia_compiler::CompileOptions::default().with_source(workload.id, source),
+    )
+    .map_err(|error| Error::new(format!("compile {} failed: {error}", workload.id)))
+}
+
+#[cfg(feature = "rustia-engine")]
+#[derive(Default)]
+struct RustiaBytecodeSummary {
+    total: usize,
+    table_related: usize,
+    string_key: usize,
+    numeric_key: usize,
+    concat_key: usize,
+    raw_table: usize,
+    iteration: usize,
+    opcodes: BTreeMap<String, usize>,
+}
+
+#[cfg(feature = "rustia-engine")]
+fn print_rustia_bytecode_summary(repo: &Path, workloads: &[&Workload]) -> Result<()> {
+    println!("# Rustia Bytecode Summary\n");
+    println!("Static opcode counts for selected Luau workloads compiled by rustia.");
+    println!("Use this as shape feedback for table, atom, inline-cache, and quickening work.\n");
+    println!("| workload | instructions | table-related | string-key | numeric-key | concat-key | raw table | iteration |");
+    println!("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+
+    let mut summaries = Vec::new();
+    for workload in workloads {
+        let source_path = workload_path(repo, Dialect::Luau, workload)
+            .ok_or_else(|| Error::new(format!("missing Luau source for {}", workload.id)))?;
+        let source =
+            fs::read_to_string(&source_path).map_err(|error| Error::io(&source_path, error))?;
+        let program = compile_rustia_program(workload, &source)?;
+        let summary = summarize_rustia_bytecode(&program);
+        println!(
+            "| {} | {} | {} | {} | {} | {} | {} | {} |",
+            workload.id,
+            summary.total,
+            summary.table_related,
+            summary.string_key,
+            summary.numeric_key,
+            summary.concat_key,
+            summary.raw_table,
+            summary.iteration
+        );
+        summaries.push((workload.id, summary));
+    }
+
+    for (workload, summary) in summaries {
+        println!("\n## {workload}\n");
+        println!("| opcode | count |");
+        println!("| --- | ---: |");
+        let mut opcodes = summary.opcodes.into_iter().collect::<Vec<_>>();
+        opcodes.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+        for (opcode, count) in opcodes {
+            println!("| {opcode} | {count} |");
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "rustia-engine"))]
+fn print_rustia_bytecode_summary(_repo: &Path, _workloads: &[&Workload]) -> Result<()> {
+    Err(Error::new(
+        "--rustia-bytecode-summary requires the rustia-engine feature",
+    ))
+}
+
+#[cfg(feature = "rustia-engine")]
+fn summarize_rustia_bytecode(program: &Program) -> RustiaBytecodeSummary {
+    let mut summary = RustiaBytecodeSummary::default();
+    summarize_rustia_function_bytecode(&program.main.code, &mut summary);
+    for function in &program.functions {
+        summarize_rustia_function_bytecode(&function.code, &mut summary);
+    }
+    summary
+}
+
+#[cfg(feature = "rustia-engine")]
+fn summarize_rustia_function_bytecode(code: &[Instruction], summary: &mut RustiaBytecodeSummary) {
+    for instruction in code {
+        let opcode = instruction.op;
+        summary.total += 1;
+        *summary.opcodes.entry(format!("{opcode:?}")).or_default() += 1;
+        if opcode_is_table_related(opcode) {
+            summary.table_related += 1;
+        }
+        if opcode_is_string_key_related(opcode) {
+            summary.string_key += 1;
+        }
+        if opcode_is_numeric_key_related(opcode) {
+            summary.numeric_key += 1;
+        }
+        if matches!(
+            opcode,
+            Opcode::GetIndexConcatConst | Opcode::SetIndexConcatConst
+        ) {
+            summary.concat_key += 1;
+        }
+        if opcode_is_raw_table_related(opcode) {
+            summary.raw_table += 1;
+        }
+        if opcode_is_iteration_related(opcode) {
+            summary.iteration += 1;
+        }
+    }
+}
+
+#[cfg(feature = "rustia-engine")]
+fn opcode_is_table_related(opcode: Opcode) -> bool {
+    matches!(
+        opcode,
+        Opcode::GetIndex
+            | Opcode::SetIndex
+            | Opcode::GetIndexConcatConst
+            | Opcode::SetIndexConcatConst
+            | Opcode::GetIndexNumber
+            | Opcode::SetIndexNumber
+            | Opcode::GetIndexNumberConst
+            | Opcode::SetIndexNumberConst
+            | Opcode::GetIndexStringConst
+            | Opcode::SetIndexStringConst
+            | Opcode::GetIndexModAddConst
+            | Opcode::GetIndexMulModConst
+            | Opcode::SetIndexMulAddModConst
+            | Opcode::SetIndexMulModConst
+            | Opcode::RawGet
+            | Opcode::RawSet
+            | Opcode::RawGetStringConst
+            | Opcode::RawSetStringConst
+            | Opcode::RawGetNumberConst
+            | Opcode::RawSetNumberConst
+            | Opcode::RawLen
+            | Opcode::Len
+            | Opcode::LenPlusOne
+            | Opcode::NewArray
+            | Opcode::NewRecord
+            | Opcode::NewRecordConstKeys
+            | Opcode::TableCreate
+            | Opcode::TableInsert
+            | Opcode::TableRemove
+            | Opcode::TableConcat
+            | Opcode::TableGetN
+            | Opcode::TableMaxN
+            | Opcode::PairsPrep
+            | Opcode::PairsLoop
+            | Opcode::IpairsPrep
+            | Opcode::IpairsLoop
+            | Opcode::NextKey
+            | Opcode::GeneralizedIterPrep
+            | Opcode::GeneralizedIterLoop
+    )
+}
+
+#[cfg(feature = "rustia-engine")]
+fn opcode_is_string_key_related(opcode: Opcode) -> bool {
+    matches!(
+        opcode,
+        Opcode::GetIndexStringConst
+            | Opcode::SetIndexStringConst
+            | Opcode::GetIndexConcatConst
+            | Opcode::SetIndexConcatConst
+            | Opcode::RawGetStringConst
+            | Opcode::RawSetStringConst
+            | Opcode::CheckMethodStringConst
+    )
+}
+
+#[cfg(feature = "rustia-engine")]
+fn opcode_is_numeric_key_related(opcode: Opcode) -> bool {
+    matches!(
+        opcode,
+        Opcode::GetIndexNumber
+            | Opcode::SetIndexNumber
+            | Opcode::GetIndexNumberConst
+            | Opcode::SetIndexNumberConst
+            | Opcode::GetIndexModAddConst
+            | Opcode::GetIndexMulModConst
+            | Opcode::SetIndexMulAddModConst
+            | Opcode::SetIndexMulModConst
+            | Opcode::RawGetNumberConst
+            | Opcode::RawSetNumberConst
+    )
+}
+
+#[cfg(feature = "rustia-engine")]
+fn opcode_is_raw_table_related(opcode: Opcode) -> bool {
+    matches!(
+        opcode,
+        Opcode::RawGet
+            | Opcode::RawSet
+            | Opcode::RawGetStringConst
+            | Opcode::RawSetStringConst
+            | Opcode::RawGetNumberConst
+            | Opcode::RawSetNumberConst
+            | Opcode::RawLen
+    )
+}
+
+#[cfg(feature = "rustia-engine")]
+fn opcode_is_iteration_related(opcode: Opcode) -> bool {
+    matches!(
+        opcode,
+        Opcode::PairsPrep
+            | Opcode::PairsLoop
+            | Opcode::IpairsPrep
+            | Opcode::IpairsLoop
+            | Opcode::NextKey
+            | Opcode::GeneralizedIterPrep
+            | Opcode::GeneralizedIterLoop
+    )
 }
 
 #[cfg(feature = "rustia-engine")]

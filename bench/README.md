@@ -51,6 +51,14 @@ Emit the wasm pre-lock gate tracker as deterministic JSON:
 cargo run -p script-bench-harness -- --wasm-gate-json
 ```
 
+Emit static Rustia bytecode counts for selected Luau workloads. This is useful
+for spotting table, atom, inline-cache, and quickening candidates before adding
+new VM hot-path machinery:
+
+```sh
+cargo run -p script-bench-harness -- --rustia-bytecode-summary
+```
+
 Measure the `call_ref` versus `br_table` wasm dispatch gate across available
 JavaScript runtimes:
 
