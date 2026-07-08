@@ -32,7 +32,6 @@ const LUAU_TAIL_CALL_LIMIT: usize = 20_000;
 const GLOBAL_GET_INLINE_CACHE_SLOTS: usize = 1024;
 const DEFAULT_DETERMINISTIC_GC_INTERVAL: u64 = 100_000;
 const GC_DEBT_CHECK_INTERVAL: u64 = 64;
-const CONCAT_INTEGER_ATOM_CACHE_SLOTS: usize = 256;
 const STRING_FORMAT_PLAN_CACHE_MAX: usize = 256;
 const REGISTER_POOL_MAX_FRAMES: usize = 64;
 const REGISTER_POOL_MAX_REGISTERS: usize = 256;
@@ -123,8 +122,6 @@ pub struct Vm {
     iter_metamethod_inline_cache: Vec<Option<IterMetamethodInlineCacheSlot>>,
     len_inline_cache: Vec<Option<LenInlineCacheSlot>>,
     program_atom_caches: Vec<ProgramAtomCache>,
-    string_integer_concat_atom_cache: Vec<Option<ConcatIntegerAtomCacheEntry>>,
-    integer_string_concat_atom_cache: Vec<Option<ConcatIntegerAtomCacheEntry>>,
     string_format_plan_cache: BTreeMap<u32, Arc<[StringFormatPlanItem]>>,
 }
 
@@ -174,12 +171,6 @@ struct RecordKeyAtomPlan {
 struct ProgramAtomCache {
     string_atoms: Vec<Option<u32>>,
     record_key_plans: Vec<Option<Arc<RecordKeyAtomPlan>>>,
-}
-
-#[derive(Clone, Copy)]
-struct ConcatIntegerAtomCacheEntry {
-    key: u64,
-    atom: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -884,8 +875,6 @@ impl Vm {
             iter_metamethod_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             len_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             program_atom_caches: Vec::new(),
-            string_integer_concat_atom_cache: vec![None; CONCAT_INTEGER_ATOM_CACHE_SLOTS],
-            integer_string_concat_atom_cache: vec![None; CONCAT_INTEGER_ATOM_CACHE_SLOTS],
             string_format_plan_cache: BTreeMap::new(),
         }
     }
@@ -7498,8 +7487,9 @@ impl Vm {
                     return Ok(Value::string_atom(atom));
                 }
             } else if let Some(integer) = lhs.as_number().and_then(small_positive_integer_number) {
-                if let Some(atom) =
-                    self.intern_concat_small_integer_string_atom_cached(integer, rhs)
+                if let Some(atom) = self
+                    .heap
+                    .intern_concat_small_integer_string_atom(integer, rhs)
                 {
                     return Ok(Value::string_atom(atom));
                 }
@@ -7533,8 +7523,9 @@ impl Vm {
                     return Ok(Value::string_atom(atom));
                 }
             } else if let Some(integer) = rhs.as_number().and_then(small_positive_integer_number) {
-                if let Some(atom) =
-                    self.intern_concat_string_atom_small_integer_cached(lhs, integer)
+                if let Some(atom) = self
+                    .heap
+                    .intern_concat_string_atom_small_integer(lhs, integer)
                 {
                     return Ok(Value::string_atom(atom));
                 }
@@ -7543,42 +7534,6 @@ impl Vm {
         let lhs = self.load_constant(program, program_id, constant_index as usize)?;
         let rhs = get_register(registers, rhs_register)?;
         self.concat_operands(program, lhs, rhs, depth, fuel)
-    }
-
-    fn intern_concat_string_atom_small_integer_cached(
-        &mut self,
-        lhs: u32,
-        rhs: u32,
-    ) -> Option<u32> {
-        let key = concat_integer_atom_cache_key(lhs, rhs);
-        if let Some(atom) =
-            concat_integer_atom_cache_get(&self.string_integer_concat_atom_cache, key)
-        {
-            return Some(atom);
-        }
-        let atom = self
-            .heap
-            .intern_concat_string_atom_small_integer(lhs, rhs)?;
-        concat_integer_atom_cache_insert(&mut self.string_integer_concat_atom_cache, key, atom);
-        Some(atom)
-    }
-
-    fn intern_concat_small_integer_string_atom_cached(
-        &mut self,
-        lhs: u32,
-        rhs: u32,
-    ) -> Option<u32> {
-        let key = concat_integer_atom_cache_key(lhs, rhs);
-        if let Some(atom) =
-            concat_integer_atom_cache_get(&self.integer_string_concat_atom_cache, key)
-        {
-            return Some(atom);
-        }
-        let atom = self
-            .heap
-            .intern_concat_small_integer_string_atom(lhs, rhs)?;
-        concat_integer_atom_cache_insert(&mut self.integer_string_concat_atom_cache, key, atom);
-        Some(atom)
     }
 
     fn concat_operands(
@@ -7622,7 +7577,8 @@ impl Vm {
                     return Ok(None);
                 };
                 if let Some(integer) = small_positive_integer_number(number) {
-                    self.intern_concat_string_atom_small_integer_cached(lhs, integer)
+                    self.heap
+                        .intern_concat_string_atom_small_integer(lhs, integer)
                 } else {
                     let text = luau_number_to_string(number);
                     self.heap
@@ -7634,7 +7590,8 @@ impl Vm {
                     return Ok(None);
                 };
                 if let Some(integer) = small_positive_integer_number(number) {
-                    self.intern_concat_small_integer_string_atom_cached(integer, rhs)
+                    self.heap
+                        .intern_concat_small_integer_string_atom(integer, rhs)
                 } else {
                     let text = luau_number_to_string(number);
                     self.heap
@@ -23792,31 +23749,6 @@ fn luau_number_to_string(value: f64) -> String {
 fn small_positive_integer_number(value: f64) -> Option<u32> {
     (value >= 0.0 && value.is_sign_positive() && value <= 999_999.0 && value.fract() == 0.0)
         .then_some(value as u32)
-}
-
-fn concat_integer_atom_cache_key(lhs: u32, rhs: u32) -> u64 {
-    (u64::from(lhs) << 32) | u64::from(rhs)
-}
-
-fn concat_integer_atom_cache_get(
-    cache: &[Option<ConcatIntegerAtomCacheEntry>],
-    key: u64,
-) -> Option<u32> {
-    let entry = cache.get(concat_integer_atom_cache_slot(key))?.as_ref()?;
-    (entry.key == key).then_some(entry.atom)
-}
-
-fn concat_integer_atom_cache_insert(
-    cache: &mut [Option<ConcatIntegerAtomCacheEntry>],
-    key: u64,
-    atom: u32,
-) {
-    let slot = concat_integer_atom_cache_slot(key);
-    cache[slot] = Some(ConcatIntegerAtomCacheEntry { key, atom });
-}
-
-fn concat_integer_atom_cache_slot(key: u64) -> usize {
-    ((key ^ (key >> 32)) as usize) & (CONCAT_INTEGER_ATOM_CACHE_SLOTS - 1)
 }
 
 fn luau_number_magnitude_to_string(magnitude: &str) -> Option<String> {
