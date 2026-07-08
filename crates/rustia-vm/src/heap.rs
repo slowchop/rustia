@@ -833,7 +833,7 @@ impl VmCell {
             root.tables.push(TableData {
                 array,
                 hash: Vec::with_capacity(hash_capacity_hint),
-                hash_index: Vec::new(),
+                hash_index: hash_index_for_capacity_hint(hash_capacity_hint),
                 readonly: false,
                 metatable: None,
                 version: 0,
@@ -2901,17 +2901,27 @@ fn record_hash_remove(table: &mut TableData, removed_index: usize) {
 
 fn rebuild_hash_index(table: &mut TableData) {
     table.hash_index.clear();
-    let capacity = table
-        .hash
-        .len()
-        .saturating_mul(4)
-        .next_power_of_two()
-        .max(TABLE_HASH_INDEX_MIN_LEN * 4);
+    let capacity = hash_index_capacity(table.hash.len());
     table.hash_index.resize(capacity, None);
     for index in 0..table.hash.len() {
         let key = table.hash[index].key;
         insert_hash_index(table, key, index);
     }
+}
+
+fn hash_index_for_capacity_hint(hash_capacity_hint: usize) -> Vec<Option<TableHashIndexEntry>> {
+    if hash_capacity_hint < TABLE_HASH_INDEX_MIN_LEN {
+        Vec::new()
+    } else {
+        vec![None; hash_index_capacity(hash_capacity_hint)]
+    }
+}
+
+fn hash_index_capacity(hash_len: usize) -> usize {
+    hash_len
+        .saturating_mul(4)
+        .next_power_of_two()
+        .max(TABLE_HASH_INDEX_MIN_LEN * 4)
 }
 
 #[inline(always)]
@@ -3450,6 +3460,37 @@ fn vector_table_key_bits(value: f32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hash_capacity_hint_preallocates_hash_index() {
+        let mut heap = VmCell::new();
+        let string_key = heap.intern_string("x");
+        let table = heap.alloc_array_table_with_capacity(&[], 0, 128);
+
+        heap.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize).unwrap();
+            assert!(table.hash_index.len() >= 128 * 4);
+        });
+
+        heap.table_set(table, Value::string_atom(string_key), Value::number(1.0))
+            .unwrap();
+        heap.table_set(table, Value::number(20.0), Value::number(2.0))
+            .unwrap();
+
+        assert_eq!(
+            heap.table_get(table, Value::string_atom(string_key))
+                .unwrap()
+                .as_number(),
+            Some(1.0)
+        );
+        assert_eq!(
+            heap.table_get(table, Value::number(20.0))
+                .unwrap()
+                .as_number(),
+            Some(2.0)
+        );
+    }
 
     #[test]
     fn table_shape_version_tracks_hash_shape_not_hash_values() {
