@@ -1683,24 +1683,6 @@ impl VmCell {
         })
     }
 
-    pub(crate) fn read_string_key_without_metamethod(
-        &mut self,
-        table: u32,
-        atom: u32,
-    ) -> Option<HashReadStatus> {
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
-            let table = root.tables.get(table as usize)?;
-            let value = table_hash_entry(table, TableKey::String(atom))
-                .map_or_else(Value::nil, |entry| entry.value);
-            if value.kind() != ValueKind::Nil || table.metatable.is_none() {
-                Some(HashReadStatus::Hit(value))
-            } else {
-                Some(HashReadStatus::Deferred)
-            }
-        })
-    }
-
     pub(crate) fn table_string_hash_slot(
         &mut self,
         table: u32,

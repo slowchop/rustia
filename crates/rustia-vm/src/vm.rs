@@ -2242,18 +2242,32 @@ impl Vm {
                                             continue;
                                         }
                                     }
-                                    if key.kind() == ValueKind::String {
-                                        if let Some(value) = self
-                                            .get_table_string_index_fast(table, key)
-                                            .map_err(|e| {
-                                                attach_instruction_source(
-                                                    program,
-                                                    function,
-                                                    pc - 1,
-                                                    e,
-                                                )
-                                            })?
+                                    if let Some(key_atom) = key.as_string_atom() {
+                                        if let Some(site) =
+                                            program_id.map(|program| InlineCacheSite {
+                                                program,
+                                                prototype: context.prototype,
+                                                pc: pc - 1,
+                                            })
                                         {
+                                            let value = self
+                                                .get_table_string_index_with_inline_cache(
+                                                    program,
+                                                    site,
+                                                    table,
+                                                    key,
+                                                    key_atom,
+                                                    context.depth,
+                                                    fuel,
+                                                )
+                                                .map_err(|e| {
+                                                    attach_instruction_source(
+                                                        program,
+                                                        function,
+                                                        pc - 1,
+                                                        e,
+                                                    )
+                                                })?;
                                             set_register(&mut registers, instruction.a, value)
                                                 .map_err(|e| {
                                                     attach_instruction_source(
@@ -3673,6 +3687,37 @@ impl Vm {
                                                 )
                                             })?
                                         {
+                                            continue;
+                                        }
+                                    }
+                                    if let Some(key_atom) = key.as_string_atom() {
+                                        if let Some(site) =
+                                            program_id.map(|program| InlineCacheSite {
+                                                program,
+                                                prototype: context.prototype,
+                                                pc: pc - 1,
+                                            })
+                                        {
+                                            self.set_table_string_index_with_inline_cache(
+                                                program,
+                                                site,
+                                                table,
+                                                key,
+                                                key_atom,
+                                                value,
+                                                context.depth,
+                                                fuel,
+                                            )
+                                            .map_err(
+                                                |e| {
+                                                    attach_instruction_source(
+                                                        program,
+                                                        function,
+                                                        pc - 1,
+                                                        e,
+                                                    )
+                                                },
+                                            )?;
                                             continue;
                                         }
                                     }
@@ -8446,44 +8491,6 @@ impl Vm {
             HashReadStatus::Hit(value) => Ok(Some(value)),
             HashReadStatus::Deferred => Ok(None),
         }
-    }
-
-    fn get_table_string_index_fast(&mut self, table: u32, key: Value) -> Result<Option<Value>> {
-        if table != self.globals {
-            if let Some(atom) = key.as_string_atom() {
-                return match self
-                    .heap
-                    .read_string_key_without_metamethod(table, atom)
-                    .ok_or_else(|| {
-                        Error::new(ErrorKind::InvalidProgram {
-                            reason: "table handle is missing",
-                        })
-                    })? {
-                    HashReadStatus::Hit(value) => Ok(Some(value)),
-                    HashReadStatus::Deferred => Ok(None),
-                };
-            }
-        }
-        if let Some(value) = self.raw_table_slot(table, key)? {
-            if value.kind() != ValueKind::Nil
-                || self.table_uses_standard_global_type_surface(table)?
-            {
-                return Ok(Some(value));
-            }
-        }
-        if self
-            .heap
-            .table_metatable(table)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "table handle is missing",
-                })
-            })?
-            .is_none()
-        {
-            return Ok(Some(Value::nil()));
-        }
-        Ok(None)
     }
 
     fn set_table_integer_index_fast(
@@ -27610,13 +27617,71 @@ mod tests {
         TableIntegerSetInlineCacheTarget, TableSetInlineCacheTarget, Value, Vm,
     };
     use crate::heap::NativeFunction;
-    use crate::{Function, Instruction, Opcode, Profile, Program};
+    use crate::{Constant, Function, Instruction, Opcode, Profile, Program};
 
     fn dummy_program() -> Program {
         Program::new(
             Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
             vec![],
         )
+    }
+
+    #[test]
+    fn concat_const_string_index_opcodes_populate_inline_caches() {
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::with_aux(Opcode::NewArray, 0, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                    Instruction::new(Opcode::LoadConst, 2, 0, 2),
+                    Instruction::with_aux(Opcode::SetIndexConcatConst, 0, 1, 2, 0),
+                    Instruction::new(Opcode::LoadConst, 2, 0, 3),
+                    Instruction::with_aux(Opcode::SetIndexConcatConst, 0, 1, 2, 0),
+                    Instruction::with_aux(Opcode::GetIndexConcatConst, 3, 0, 1, 0),
+                    Instruction::new(Opcode::Return, 3, 1, 0),
+                ],
+                4,
+            ),
+            vec![
+                Constant::String(b"k".to_vec()),
+                Constant::String(b"x".to_vec()),
+                Constant::Number(7.0),
+                Constant::Number(9.0),
+            ],
+        );
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(9.0));
+
+        let key_atom = vm.heap.intern_string("kx");
+        let set_site = InlineCacheSite {
+            program: 0,
+            prototype: None,
+            pc: 5,
+        };
+        let set_slot = vm.table_set_inline_cache[set_site.slot()]
+            .expect("concat string-key writes should populate the set cache");
+        assert_eq!(set_slot.site, set_site);
+        assert_eq!(set_slot.entry.key_atom, key_atom);
+        assert!(matches!(
+            set_slot.entry.target,
+            TableSetInlineCacheTarget::DirectSlot { .. }
+        ));
+
+        let get_site = InlineCacheSite {
+            program: 0,
+            prototype: None,
+            pc: 6,
+        };
+        let get_slot = vm.table_get_inline_cache[get_site.slot()]
+            .expect("concat string-key reads should populate the get cache");
+        assert_eq!(get_slot.site, get_site);
+        assert_eq!(get_slot.entry.key_atom, key_atom);
+        assert!(matches!(
+            get_slot.entry.source,
+            TableGetInlineCacheSource::DirectSlot { .. }
+        ));
     }
 
     #[test]
