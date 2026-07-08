@@ -17,6 +17,7 @@ Baseline for this branch is the old pre-perf CI artifact at `a728ee7`.
 | `488b5da` | fuse numeric table read into local self-add | two CI runs averaged 5.4-5.9% faster total median vs `441b29b`, with dense tables 14.7% faster; about 14.4-14.8% faster vs old baseline |
 | `31955f8` | fuse sparse table read-or-zero adds | two CI runs averaged 4.6% faster total median vs `488b5da`, with sparse tables 11.5% faster; about 18.5-18.7% faster vs old baseline |
 | `1c802df` | skip fuel cost lookup when fuel is disabled | runs `28964187207`/`28964565694`: average total median 0.8% faster vs `31955f8`, with dense/generic/stdlib/closures faster and sparse median 0.3% slower; about 19.1-19.4% faster vs old baseline |
+| `c669e48` | add quickening sequence feedback to the bytecode summary | tooling only; reports adjacent table/iteration pairs and loop-body opcode sequences so superinstruction candidates are evidence-backed |
 
 ## Reverted Candidates
 
@@ -39,11 +40,13 @@ CI bench runner. Do not retry them without a materially different approach.
 | `0505391` direct builtin `table.sort` opcode | `f321452` | runs `28961247501`/`28961367517`: average total median -0.33% vs `441b29b` repeat, but dense median +0.42% and closures +13.86%; too small and noisy to keep |
 | `f2669e8` combined `ipairs(c.items)` field prep | `1a67c03` | runs `28963553868`/`28963671573`: average total median +0.04% vs `31955f8` average, total min +0.11%, and targeted `generic_iteration` median +0.61%; extra bytecode surface without a proven win |
 | `85c3a86` string-const direct table-get fast path | `ffc4d9d` | runs `28965406975`/`28965521735`: average total median +0.45% vs `1c802df` average, total min +0.63%; dense and stdlib improved, but generic_iteration +1.60% and sparse +0.63% made it a net loss |
+| `ebb5329` table-op `ForLoopStepOne` tail quickening | `7e4e6e8` | run `28966423248`: total median +11.56% and total min +11.39% vs `1c802df` average; every workload regressed, so opportunistic dispatch fusion was worse than the regular loop dispatch |
 
 ## Current Shape Feedback
 
 `cargo run -p script-bench-harness -- --rustia-bytecode-summary` shows the
-default workload hot shapes:
+default workload hot shapes, adjacent table/iteration opcode pairs, and
+loop-body opcode sequences:
 
 | workload | table-related opcodes | main signal |
 | --- | ---: | --- |
@@ -55,6 +58,10 @@ default workload hot shapes:
 The compiler already emits specialized opcodes for the obvious sparse and
 string-const patterns, and it already emits hash capacity hints for sparse-like
 fresh tables. More tiny table probes have not paid for themselves so far.
+The failed `ebb5329` experiment also shows that blindly folding the loop tail
+after table ops is not enough; any next dispatch-reduction attempt needs to
+remove more work than a single `ForLoopStepOne` dispatch or use a narrower
+compiled superinstruction with better register/branch locality.
 
 `cargo run -p script-bench-harness -- --rustia-inline-cache-summary` runs the
 default workloads with `n=64` and reports final atom/IC side-table occupancy.
