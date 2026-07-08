@@ -38,6 +38,7 @@ const RESULT_POOL_MAX_VALUES: usize = 16;
 const CALL_FRAME_POOL_MAX_FRAMES: usize = 64;
 const CALL_FRAME_POOL_MAX_ROOTS: usize = 256;
 const CALL_FRAME_POOL_MAX_STACKLESS_DEBUG_FRAMES: usize = 64;
+const TABLE_STRING_SLOT_INLINE_CACHE_WAYS: usize = 4;
 
 pub type LoadStringCompiler =
     fn(source: &[u8], source_name: Option<&[u8]>) -> std::result::Result<Program, String>;
@@ -187,7 +188,7 @@ struct TableGetInlineCacheEntry {
 #[derive(Clone, Copy)]
 enum TableGetInlineCacheSource {
     DirectSlot {
-        hash_index: usize,
+        hash_indices: StringSlotIndexCache,
     },
     DirectAbsent {
         table: u32,
@@ -210,7 +211,42 @@ struct TableSetInlineCacheSlot {
 #[derive(Clone, Copy)]
 struct TableSetInlineCacheEntry {
     key_atom: u32,
-    hash_index: usize,
+    hash_indices: StringSlotIndexCache,
+}
+
+#[derive(Clone, Copy)]
+struct StringSlotIndexCache {
+    len: u8,
+    indices: [usize; TABLE_STRING_SLOT_INLINE_CACHE_WAYS],
+}
+
+impl StringSlotIndexCache {
+    fn single(index: usize) -> Self {
+        let mut indices = [0; TABLE_STRING_SLOT_INLINE_CACHE_WAYS];
+        indices[0] = index;
+        Self { len: 1, indices }
+    }
+
+    fn iter(self) -> impl Iterator<Item = usize> {
+        (0..usize::from(self.len)).map(move |index| self.indices[index])
+    }
+
+    fn with_index(mut self, index: usize) -> Self {
+        let len = usize::from(self.len);
+        if self.indices[..len].contains(&index) {
+            return self;
+        }
+        let capped_len = len.min(TABLE_STRING_SLOT_INLINE_CACHE_WAYS - 1);
+        if capped_len > 0 {
+            self.indices.copy_within(0..capped_len, 1);
+        }
+        self.indices[0] = index;
+        self.len = self
+            .len
+            .saturating_add(1)
+            .min(TABLE_STRING_SLOT_INLINE_CACHE_WAYS as u8);
+        self
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -7157,18 +7193,21 @@ impl Vm {
         if entry.key_atom != key_atom {
             return Ok(false);
         }
-        match self
-            .heap
-            .write_string_hash_slot_at_index(table, key_atom, entry.hash_index, value)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "table handle is missing",
-                })
-            })? {
-            HashWriteStatus::Stored => Ok(true),
-            HashWriteStatus::Deferred => Ok(false),
-            HashWriteStatus::Readonly => Err(readonly_table_error()),
+        for hash_index in entry.hash_indices.iter() {
+            match self
+                .heap
+                .write_string_hash_slot_at_index(table, key_atom, hash_index, value)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    })
+                })? {
+                HashWriteStatus::Stored => return Ok(true),
+                HashWriteStatus::Deferred => {}
+                HashWriteStatus::Readonly => return Err(readonly_table_error()),
+            }
         }
+        Ok(false)
     }
 
     fn try_set_table_string_index_for_inline_cache(
@@ -7215,7 +7254,8 @@ impl Vm {
                     site,
                     TableSetInlineCacheEntry {
                         key_atom,
-                        hash_index: slot.index,
+                        hash_indices: self
+                            .table_set_string_slot_indices(site, key_atom, slot.index),
                     },
                 );
                 Ok(true)
@@ -7233,6 +7273,21 @@ impl Vm {
         if let Some(slot) = self.table_set_inline_cache.get_mut(site.slot()) {
             *slot = Some(TableSetInlineCacheSlot { site, entry });
         }
+    }
+
+    fn table_set_string_slot_indices(
+        &self,
+        site: InlineCacheSite,
+        key_atom: u32,
+        hash_index: usize,
+    ) -> StringSlotIndexCache {
+        self.table_set_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten()
+            .filter(|slot| slot.site == site && slot.entry.key_atom == key_atom)
+            .map(|slot| slot.entry.hash_indices.with_index(hash_index))
+            .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
     }
 
     fn clear_table_set_inline_cache_site(&mut self, site: InlineCacheSite) {
@@ -7289,23 +7344,26 @@ impl Vm {
             return Ok(None);
         }
         match entry.source {
-            TableGetInlineCacheSource::DirectSlot { hash_index } => {
-                let Some(slot) = self
-                    .heap
-                    .read_string_hash_slot_at_index(table, key_atom, hash_index)
-                    .ok_or_else(|| {
-                        Error::new(ErrorKind::InvalidProgram {
-                            reason: "table handle is missing",
-                        })
-                    })?
-                else {
+            TableGetInlineCacheSource::DirectSlot { hash_indices } => {
+                for hash_index in hash_indices.iter() {
+                    let Some(slot) = self
+                        .heap
+                        .read_string_hash_slot_at_index(table, key_atom, hash_index)
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "table handle is missing",
+                            })
+                        })?
+                    else {
+                        continue;
+                    };
+                    if slot.value.kind() != ValueKind::Nil
+                        || !slot.has_metatable
+                        || self.table_uses_standard_global_type_surface(table)?
+                    {
+                        return Ok(Some(slot.value));
+                    }
                     return Ok(None);
-                };
-                if slot.value.kind() != ValueKind::Nil
-                    || !slot.has_metatable
-                    || self.table_uses_standard_global_type_surface(table)?
-                {
-                    return Ok(Some(slot.value));
                 }
                 Ok(None)
             }
@@ -7416,7 +7474,8 @@ impl Vm {
                     TableGetInlineCacheEntry {
                         key_atom,
                         source: TableGetInlineCacheSource::DirectSlot {
-                            hash_index: slot.index,
+                            hash_indices: self
+                                .table_get_string_slot_indices(site, key_atom, slot.index),
                         },
                     },
                 );
@@ -7436,7 +7495,7 @@ impl Vm {
                     table_shape_version,
                 },
                 |slot| TableGetInlineCacheSource::DirectSlot {
-                    hash_index: slot.index,
+                    hash_indices: self.table_get_string_slot_indices(site, key_atom, slot.index),
                 },
             );
             self.store_table_get_inline_cache(site, TableGetInlineCacheEntry { key_atom, source });
@@ -7509,6 +7568,26 @@ impl Vm {
         if let Some(slot) = self.table_get_inline_cache.get_mut(site.slot()) {
             *slot = Some(TableGetInlineCacheSlot { site, entry });
         }
+    }
+
+    fn table_get_string_slot_indices(
+        &self,
+        site: InlineCacheSite,
+        key_atom: u32,
+        hash_index: usize,
+    ) -> StringSlotIndexCache {
+        self.table_get_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten()
+            .filter(|slot| slot.site == site && slot.entry.key_atom == key_atom)
+            .and_then(|slot| match slot.entry.source {
+                TableGetInlineCacheSource::DirectSlot { hash_indices } => Some(hash_indices),
+                TableGetInlineCacheSource::DirectAbsent { .. }
+                | TableGetInlineCacheSource::IndexTable { .. } => None,
+            })
+            .map(|indices| indices.with_index(hash_index))
+            .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
     }
 
     fn clear_table_get_inline_cache_site(&mut self, site: InlineCacheSite) {
@@ -24574,4 +24653,22 @@ fn table_expected_error() -> Error {
     Error::new(ErrorKind::RuntimeError {
         message: "table expected".to_owned(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StringSlotIndexCache;
+
+    #[test]
+    fn string_slot_index_cache_keeps_four_unique_recent_indices() {
+        let cache = StringSlotIndexCache::single(10)
+            .with_index(20)
+            .with_index(30)
+            .with_index(40)
+            .with_index(50)
+            .with_index(30);
+
+        let indices: Vec<_> = cache.iter().collect();
+        assert_eq!(indices, vec![50, 40, 30, 20]);
+    }
 }
