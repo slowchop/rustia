@@ -18,6 +18,7 @@ Baseline for this branch is the old pre-perf CI artifact at `a728ee7`.
 | `31955f8` | fuse sparse table read-or-zero adds | two CI runs averaged 4.6% faster total median vs `488b5da`, with sparse tables 11.5% faster; about 18.5-18.7% faster vs old baseline |
 | `1c802df` | skip fuel cost lookup when fuel is disabled | runs `28964187207`/`28964565694`: average total median 0.8% faster vs `31955f8`, with dense/generic/stdlib/closures faster and sparse median 0.3% slower; about 19.1-19.4% faster vs old baseline |
 | `c669e48` | add quickening sequence feedback to the bytecode summary | tooling only; reports adjacent table/iteration pairs and loop-body opcode sequences so superinstruction candidates are evidence-backed |
+| `9105988` | feature-gate dynamic opcode profiling and hot-site summary | tooling only; runs `28968775343`/`28968901905` averaged total median +0.20% and total min -0.05% vs `1c802df` average, with the second run back at normal `generic_iteration` levels |
 
 ## Reverted Candidates
 
@@ -78,6 +79,13 @@ Current feedback:
 | `sparse_tables` | no table IC occupancy; dynamic concat string keys and scattered numeric keys intentionally avoid exact-key IC churn |
 | `generic_iteration` | one direct table-get slot, one direct table-set slot, plus one iter metamethod slot and one len slot |
 | `stdlib_math_table` | one global-get slot and one direct table-get slot from setup; the hot loop is mostly math/table write/sort work |
+
+`cargo run -p script-bench-harness --features rustia-hot-site-summary -- --rustia-hot-site-summary`
+runs the default workloads with `n=64` and dynamic VM opcode profiling enabled.
+The profiling code is behind the non-default `rustia-hot-site-summary` bench
+feature, which enables the VM's non-default `opcode-profiling` feature, so
+normal benchmark and release builds do not compile the opcode profiling field,
+API, or dispatch-path branch.
 
 ## Next Serious Bets
 
