@@ -222,6 +222,7 @@ pub enum Opcode {
     RawSetStringConst = 163,
     RawGetNumberConst = 164,
     RawSetNumberConst = 165,
+    TableSort = 166,
 }
 
 pub const ARRAY_ITERATOR_WRITE_VISIBLE_KEY: u8 = 0;

@@ -4201,6 +4201,19 @@ impl Vm {
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
+                            Opcode::TableSort => {
+                                let value = self
+                                    .table_sort(
+                                        program,
+                                        &registers,
+                                        instruction,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                set_register(&mut registers, instruction.a, value)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                            }
                             Opcode::LoadFunction => {
                                 let environment =
                                     self.current_environment().map_err(|e| e.at_pc(pc - 1))?;
@@ -12094,6 +12107,22 @@ impl Vm {
             })
         })?;
         Ok(removed.unwrap_or_else(Value::nil))
+    }
+
+    fn table_sort(
+        &mut self,
+        program: &Program,
+        registers: &[Value],
+        instruction: Instruction,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        let table = get_table(registers, instruction.b)?;
+        let args = [Value::table(table)];
+        let extra_fuel = self.native_table_sort_fuel(&args);
+        charge_fuel(fuel, self.settings.initial_fuel, extra_fuel)?;
+        self.native_table_sort(&args, program, depth, fuel)?;
+        Ok(Value::nil())
     }
 
     fn get_register_cell_value(
@@ -22494,6 +22523,7 @@ fn opcode_may_observe_current_roots(op: Opcode) -> bool {
         | Opcode::GetIndex
         | Opcode::SetIndex
         | Opcode::TableFind
+        | Opcode::TableSort
         | Opcode::Call
         | Opcode::GetGlobal
         | Opcode::SetGlobal
