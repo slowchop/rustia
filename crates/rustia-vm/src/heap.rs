@@ -1454,6 +1454,40 @@ impl VmCell {
         })
     }
 
+    pub(crate) fn write_absent_string_index_without_metamethod(
+        &mut self,
+        table: u32,
+        atom: u32,
+        value: Value,
+    ) -> Option<HashWriteStatus> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            if string_atom_is(&root, atom, b"__mode") {
+                root.weak_tables_possible = true;
+            }
+            let table = root.tables.get_mut(table as usize)?;
+            if table.metatable.is_some() {
+                return Some(HashWriteStatus::Deferred);
+            }
+            if table_hash_entry(table, TableKey::String(atom)).is_some() {
+                return Some(HashWriteStatus::Deferred);
+            }
+            if table.readonly {
+                return Some(HashWriteStatus::Readonly);
+            }
+            bump_table_version(table);
+            if value.kind() != ValueKind::Nil {
+                insert_hash_key_absent(
+                    table,
+                    TableKey::String(atom),
+                    Value::string_atom(atom),
+                    value,
+                );
+            }
+            Some(HashWriteStatus::Stored)
+        })
+    }
+
     pub(crate) fn write_array_slot(
         &mut self,
         table: u32,
@@ -3202,6 +3236,43 @@ mod tests {
         heap.table_set_metatable(table, Some(metatable)).unwrap();
 
         assert_ne!(heap.table_shape_version(table), Some(shape_version));
+    }
+
+    #[test]
+    fn absent_string_write_fast_path_requires_plain_table() {
+        let mut heap = VmCell::new();
+        let key = heap.intern_string("x");
+        let table = heap.alloc_array_table(&[]);
+
+        assert_eq!(
+            heap.write_absent_string_index_without_metamethod(table, key, Value::number(3.0)),
+            Some(HashWriteStatus::Stored)
+        );
+        assert_eq!(
+            heap.table_get(table, Value::string_atom(key))
+                .unwrap()
+                .as_number(),
+            Some(3.0)
+        );
+        assert_eq!(
+            heap.write_absent_string_index_without_metamethod(table, key, Value::number(4.0)),
+            Some(HashWriteStatus::Deferred)
+        );
+    }
+
+    #[test]
+    fn absent_string_write_fast_path_defers_with_metatable() {
+        let mut heap = VmCell::new();
+        let key = heap.intern_string("x");
+        let table = heap.alloc_array_table(&[]);
+        let metatable = heap.alloc_array_table(&[]);
+        heap.table_set_metatable(table, Some(metatable)).unwrap();
+
+        assert_eq!(
+            heap.write_absent_string_index_without_metamethod(table, key, Value::number(3.0)),
+            Some(HashWriteStatus::Deferred)
+        );
+        assert!(heap.table_get(table, Value::string_atom(key)).is_none());
     }
 
     #[test]

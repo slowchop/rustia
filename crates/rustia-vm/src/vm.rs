@@ -8735,7 +8735,7 @@ impl Vm {
                 })
             })?
         else {
-            return Ok(false);
+            return self.set_table_integer_index_fast(table, one_based_index, value);
         };
         match self
             .heap
@@ -9227,6 +9227,18 @@ impl Vm {
                     HashWriteStatus::Readonly => Err(readonly_table_error()),
                 };
             }
+        }
+        match self
+            .heap
+            .write_absent_string_index_without_metamethod(table, key_atom, value)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })? {
+            HashWriteStatus::Stored => return Ok(true),
+            HashWriteStatus::Deferred => {}
+            HashWriteStatus::Readonly => return Err(readonly_table_error()),
         }
         self.try_set_table_newindex_table_for_inline_cache(site, table, key_atom, value)
     }
@@ -27870,6 +27882,96 @@ mod tests {
             .raw_table_slot(table, Value::number(3.0))
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn integer_set_inline_cache_miss_appends_plain_array() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let table = vm.heap.alloc_array_table(&[]);
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 7,
+        };
+        let mut fuel = None;
+
+        assert!(vm
+            .set_table_integer_index_with_inline_cache(
+                &program,
+                Some(site),
+                table,
+                1,
+                Value::number(42.0),
+                0,
+                &mut fuel,
+            )
+            .unwrap());
+
+        assert_eq!(
+            vm.heap.array_slot(table, 1).unwrap().unwrap().as_number(),
+            Some(42.0)
+        );
+    }
+
+    #[test]
+    fn string_set_inline_cache_miss_inserts_plain_absent_key() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let key_atom = vm.heap.intern_string("x");
+        let table = vm.heap.alloc_array_table(&[]);
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 8,
+        };
+        let mut fuel = None;
+
+        vm.set_table_string_index_with_inline_cache(
+            &program,
+            site,
+            table,
+            Value::string_atom(key_atom),
+            key_atom,
+            Value::number(3.0),
+            0,
+            &mut fuel,
+        )
+        .unwrap();
+        assert_eq!(
+            vm.heap
+                .table_get(table, Value::string_atom(key_atom))
+                .unwrap()
+                .as_number(),
+            Some(3.0)
+        );
+
+        vm.set_table_string_index_with_inline_cache(
+            &program,
+            site,
+            table,
+            Value::string_atom(key_atom),
+            key_atom,
+            Value::number(4.0),
+            0,
+            &mut fuel,
+        )
+        .unwrap();
+        let slot = vm.table_set_inline_cache[site.slot()]
+            .expect("repeated plain string writes should still populate the set cache");
+        assert_eq!(slot.site, site);
+        assert_eq!(slot.entry.key_atom, key_atom);
+        assert!(matches!(
+            slot.entry.target,
+            TableSetInlineCacheTarget::DirectSlot { .. }
+        ));
+        assert_eq!(
+            vm.heap
+                .table_get(table, Value::string_atom(key_atom))
+                .unwrap()
+                .as_number(),
+            Some(4.0)
+        );
     }
 
     #[test]
