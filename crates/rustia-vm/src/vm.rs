@@ -214,9 +214,9 @@ enum TableGetInlineCacheSource {
     },
     IndexTable {
         metatable: u32,
-        metatable_hash_index: usize,
+        metatable_shape_slot: TableShapeSlotCache,
         index_table: u32,
-        index_table_hash_index: usize,
+        index_table_shape_slot: TableShapeSlotCache,
     },
     IndexFunction {
         metatable: u32,
@@ -280,13 +280,14 @@ enum TableIntegerGetInlineCacheSource {
     },
     IndexTableArraySlot {
         metatable: u32,
-        metatable_hash_index: usize,
+        metatable_shape_slot: TableShapeSlotCache,
         index_table: u32,
     },
     IndexTableHashSlot {
         metatable: u32,
-        metatable_hash_index: usize,
+        metatable_shape_slot: TableShapeSlotCache,
         index_table: u32,
+        index_table_shape_slot: TableShapeSlotCache,
         index_table_hash_indices: StringSlotIndexCache,
     },
     IndexFunction {
@@ -8102,7 +8103,7 @@ impl Vm {
             }
             TableIntegerGetInlineCacheSource::IndexTableArraySlot {
                 metatable,
-                metatable_hash_index,
+                metatable_shape_slot,
                 index_table,
             } => {
                 if self.table_integer_raw_slot_is_nonnil(table, one_based_index)?
@@ -8118,10 +8119,16 @@ impl Vm {
                 {
                     return Ok(None);
                 }
-                let index_atom = self.metamethod_atoms.index;
+                if metatable_shape_slot.table != metatable {
+                    return Ok(None);
+                }
                 let Some(index_slot) = self
                     .heap
-                    .read_string_hash_slot_at_index(metatable, index_atom, metatable_hash_index)
+                    .read_string_shape_hash_slot_at_index(
+                        metatable,
+                        metatable_shape_slot.table_shape_version,
+                        metatable_shape_slot.hash_index,
+                    )
                     .ok_or_else(|| {
                         Error::new(ErrorKind::InvalidProgram {
                             reason: "__index metatable handle is missing",
@@ -8151,8 +8158,9 @@ impl Vm {
             }
             TableIntegerGetInlineCacheSource::IndexTableHashSlot {
                 metatable,
-                metatable_hash_index,
+                metatable_shape_slot,
                 index_table,
+                index_table_shape_slot,
                 index_table_hash_indices,
             } => {
                 if self.table_integer_raw_slot_is_nonnil(table, one_based_index)?
@@ -8168,10 +8176,16 @@ impl Vm {
                 {
                     return Ok(None);
                 }
-                let index_atom = self.metamethod_atoms.index;
+                if metatable_shape_slot.table != metatable {
+                    return Ok(None);
+                }
                 let Some(index_slot) = self
                     .heap
-                    .read_string_hash_slot_at_index(metatable, index_atom, metatable_hash_index)
+                    .read_string_shape_hash_slot_at_index(
+                        metatable,
+                        metatable_shape_slot.table_shape_version,
+                        metatable_shape_slot.hash_index,
+                    )
                     .ok_or_else(|| {
                         Error::new(ErrorKind::InvalidProgram {
                             reason: "__index metatable handle is missing",
@@ -8182,6 +8196,27 @@ impl Vm {
                 };
                 if index_slot.value.as_table() != Some(index_table) {
                     return Ok(None);
+                }
+                if index_table_shape_slot.table == index_table {
+                    let exact_slot = self
+                        .heap
+                        .read_integer_shape_hash_slot_at_index(
+                            index_table,
+                            one_based_index,
+                            index_table_shape_slot.table_shape_version,
+                            index_table_shape_slot.hash_index,
+                        )
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "__index table handle is missing",
+                            })
+                        })?;
+                    if let Some(slot) = exact_slot {
+                        if slot.value.kind() == ValueKind::Nil {
+                            return Ok(None);
+                        }
+                        return Ok(Some(slot.value));
+                    }
                 }
                 for hash_index in index_table_hash_indices.iter() {
                     let Some(slot) = self
@@ -8362,6 +8397,12 @@ impl Vm {
         let Some(index_table) = index_slot.value.as_table() else {
             return Ok(None);
         };
+        let metatable_shape_version =
+            self.heap.table_shape_version(metatable).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "metatable handle is missing",
+                })
+            })?;
         if let Some(value) = self
             .heap
             .array_slot(index_table, one_based_index)
@@ -8380,7 +8421,11 @@ impl Vm {
                     one_based_index,
                     source: TableIntegerGetInlineCacheSource::IndexTableArraySlot {
                         metatable,
-                        metatable_hash_index: index_slot.index,
+                        metatable_shape_slot: TableShapeSlotCache::new(
+                            metatable,
+                            metatable_shape_version,
+                            index_slot.index,
+                        ),
                         index_table,
                     },
                 },
@@ -8402,14 +8447,29 @@ impl Vm {
         if value.kind() == ValueKind::Nil {
             return Ok(None);
         }
+        let index_table_shape_version =
+            self.heap.table_shape_version(index_table).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "__index table handle is missing",
+                })
+            })?;
         self.store_table_integer_get_inline_cache(
             site,
             TableIntegerGetInlineCacheEntry {
                 one_based_index,
                 source: TableIntegerGetInlineCacheSource::IndexTableHashSlot {
                     metatable,
-                    metatable_hash_index: index_slot.index,
+                    metatable_shape_slot: TableShapeSlotCache::new(
+                        metatable,
+                        metatable_shape_version,
+                        index_slot.index,
+                    ),
                     index_table,
+                    index_table_shape_slot: TableShapeSlotCache::new(
+                        index_table,
+                        index_table_shape_version,
+                        value_slot.index,
+                    ),
                     index_table_hash_indices: self.table_integer_get_index_table_slot_indices(
                         site,
                         one_based_index,
@@ -10352,9 +10412,9 @@ impl Vm {
             }
             TableGetInlineCacheSource::IndexTable {
                 metatable,
-                metatable_hash_index,
+                metatable_shape_slot,
                 index_table,
-                index_table_hash_index,
+                index_table_shape_slot,
             } => {
                 if let Some(raw) = self.raw_table_string_slot(table, key_atom)? {
                     if raw.kind() != ValueKind::Nil
@@ -10371,10 +10431,18 @@ impl Vm {
                 {
                     return Ok(None);
                 }
-                let index_atom = self.metamethod_atoms.index;
+                if metatable_shape_slot.table != metatable
+                    || index_table_shape_slot.table != index_table
+                {
+                    return Ok(None);
+                }
                 let Some(index_slot) = self
                     .heap
-                    .read_string_hash_slot_at_index(metatable, index_atom, metatable_hash_index)
+                    .read_string_shape_hash_slot_at_index(
+                        metatable,
+                        metatable_shape_slot.table_shape_version,
+                        metatable_shape_slot.hash_index,
+                    )
                     .ok_or_else(|| {
                         Error::new(ErrorKind::InvalidProgram {
                             reason: "__index metatable handle is missing",
@@ -10388,7 +10456,11 @@ impl Vm {
                 }
                 let Some(value_slot) = self
                     .heap
-                    .read_string_hash_slot_at_index(index_table, key_atom, index_table_hash_index)
+                    .read_string_shape_hash_slot_at_index(
+                        index_table,
+                        index_table_shape_slot.table_shape_version,
+                        index_table_shape_slot.hash_index,
+                    )
                     .ok_or_else(|| {
                         Error::new(ErrorKind::InvalidProgram {
                             reason: "__index table handle is missing",
@@ -10578,6 +10650,18 @@ impl Vm {
         let Some(index_table) = index_slot.value.as_table() else {
             return Ok(None);
         };
+        let metatable_shape_version =
+            self.heap.table_shape_version(metatable).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "metatable handle is missing",
+                })
+            })?;
+        let index_table_shape_version =
+            self.heap.table_shape_version(index_table).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "__index table handle is missing",
+                })
+            })?;
         let Some(value_slot) = self
             .heap
             .table_string_hash_slot(index_table, key_atom)
@@ -10599,9 +10683,17 @@ impl Vm {
                 key_atom,
                 source: TableGetInlineCacheSource::IndexTable {
                     metatable,
-                    metatable_hash_index: index_slot.index,
+                    metatable_shape_slot: TableShapeSlotCache::new(
+                        metatable,
+                        metatable_shape_version,
+                        index_slot.index,
+                    ),
                     index_table,
-                    index_table_hash_index: value_slot.index,
+                    index_table_shape_slot: TableShapeSlotCache::new(
+                        index_table,
+                        index_table_shape_version,
+                        value_slot.index,
+                    ),
                 },
             },
         );
@@ -28817,30 +28909,44 @@ mod tests {
         );
         let slot = vm.table_integer_get_inline_cache[site.slot()]
             .expect("numeric __index table reads should populate the get cache");
-        assert!(matches!(
-            slot.entry.source,
+        let metatable_shape_version = vm.heap.table_shape_version(metatable).unwrap();
+        let delegate_shape_version = vm.heap.table_shape_version(delegate).unwrap();
+        match slot.entry.source {
             TableIntegerGetInlineCacheSource::IndexTableHashSlot {
+                metatable: cached_metatable,
+                metatable_shape_slot,
                 index_table,
-                ..
-            } if index_table == delegate
-        ));
+                index_table_shape_slot,
+                index_table_hash_indices,
+            } => {
+                assert_eq!(cached_metatable, metatable);
+                assert_eq!(metatable_shape_slot.table, metatable);
+                assert_eq!(
+                    metatable_shape_slot.table_shape_version,
+                    metatable_shape_version
+                );
+                assert_eq!(index_table, delegate);
+                assert_eq!(index_table_shape_slot.table, delegate);
+                assert_eq!(
+                    index_table_shape_slot.table_shape_version,
+                    delegate_shape_version
+                );
+                assert_eq!(
+                    index_table_hash_indices.iter().collect::<Vec<_>>(),
+                    vec![index_table_shape_slot.hash_index]
+                );
+            }
+            _ => panic!("numeric __index table hash reads should cache exact delegate slots"),
+        }
 
         vm.heap
             .table_set(delegate, Value::number(20.0), Value::number(3.0))
             .unwrap();
-        assert_eq!(
-            vm.get_table_integer_index_with_inline_cache(
-                &program,
-                Some(site),
-                table,
-                20,
-                0,
-                &mut fuel,
-            )
+        let value = vm
+            .table_integer_get_inline_cache_hit(site, table, 20)
             .unwrap()
-            .and_then(Value::as_number),
-            Some(3.0)
-        );
+            .expect("value-only delegate changes should hit the integer __index cache");
+        assert_eq!(value.as_number(), Some(3.0));
     }
 
     #[test]
@@ -28883,30 +28989,32 @@ mod tests {
         );
         let slot = vm.table_integer_get_inline_cache[site.slot()]
             .expect("numeric __index table array reads should populate the get cache");
-        assert!(matches!(
-            slot.entry.source,
+        let metatable_shape_version = vm.heap.table_shape_version(metatable).unwrap();
+        match slot.entry.source {
             TableIntegerGetInlineCacheSource::IndexTableArraySlot {
+                metatable: cached_metatable,
+                metatable_shape_slot,
                 index_table,
-                ..
-            } if index_table == delegate
-        ));
+            } => {
+                assert_eq!(cached_metatable, metatable);
+                assert_eq!(metatable_shape_slot.table, metatable);
+                assert_eq!(
+                    metatable_shape_slot.table_shape_version,
+                    metatable_shape_version
+                );
+                assert_eq!(index_table, delegate);
+            }
+            _ => panic!("numeric __index table array reads should cache exact metatable slots"),
+        }
 
         vm.heap
             .write_array_slot(delegate, 2, Value::number(30.0))
             .unwrap();
-        assert_eq!(
-            vm.get_table_integer_index_with_inline_cache(
-                &program,
-                Some(site),
-                table,
-                2,
-                0,
-                &mut fuel,
-            )
+        let value = vm
+            .table_integer_get_inline_cache_hit(site, table, 2)
             .unwrap()
-            .and_then(Value::as_number),
-            Some(30.0)
-        );
+            .expect("value-only array delegate changes should hit the integer __index cache");
+        assert_eq!(value.as_number(), Some(30.0));
     }
 
     #[test]
@@ -29144,6 +29252,93 @@ mod tests {
             .and_then(Value::as_number),
             Some(7.0)
         );
+    }
+
+    #[test]
+    fn string_index_table_get_cache_records_exact_shape_slots() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let key_atom = vm.heap.intern_string("x");
+        let index_atom = vm.heap.intern_string("__index");
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let delegate = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(delegate, Value::string_atom(key_atom), Value::number(1.0))
+            .unwrap();
+        vm.heap
+            .table_set(
+                metatable,
+                Value::string_atom(index_atom),
+                Value::table(delegate),
+            )
+            .unwrap();
+        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 9,
+        };
+        let key = Value::string_atom(key_atom);
+        let mut fuel = None;
+
+        let value = vm
+            .get_table_string_index_with_inline_cache(
+                &program, site, table, key, key_atom, 0, &mut fuel,
+            )
+            .unwrap();
+        assert_eq!(value.as_number(), Some(1.0));
+
+        let metatable_shape_version = vm.heap.table_shape_version(metatable).unwrap();
+        let delegate_shape_version = vm.heap.table_shape_version(delegate).unwrap();
+        let slot = vm.table_get_inline_cache[site.slot()]
+            .expect("string __index table reads should populate the get cache");
+        match slot.entry.source {
+            TableGetInlineCacheSource::IndexTable {
+                metatable: cached_metatable,
+                metatable_shape_slot,
+                index_table,
+                index_table_shape_slot,
+            } => {
+                assert_eq!(cached_metatable, metatable);
+                assert_eq!(metatable_shape_slot.table, metatable);
+                assert_eq!(
+                    metatable_shape_slot.table_shape_version,
+                    metatable_shape_version
+                );
+                assert_eq!(index_table, delegate);
+                assert_eq!(index_table_shape_slot.table, delegate);
+                assert_eq!(
+                    index_table_shape_slot.table_shape_version,
+                    delegate_shape_version
+                );
+            }
+            _ => panic!("string __index table reads should cache exact delegate slots"),
+        }
+
+        vm.heap
+            .table_set(delegate, Value::string_atom(key_atom), Value::number(2.0))
+            .unwrap();
+        let value = vm
+            .table_get_inline_cache_hit(site, table, key_atom)
+            .unwrap()
+            .expect("value-only delegate changes should hit the __index table cache");
+        assert_eq!(value.as_number(), Some(2.0));
+
+        let other_atom = vm.heap.intern_string("y");
+        vm.heap
+            .table_set(delegate, Value::string_atom(other_atom), Value::number(9.0))
+            .unwrap();
+        assert!(vm
+            .table_get_inline_cache_hit(site, table, key_atom)
+            .unwrap()
+            .is_none());
+        let value = vm
+            .get_table_string_index_with_inline_cache(
+                &program, site, table, key, key_atom, 0, &mut fuel,
+            )
+            .unwrap();
+        assert_eq!(value.as_number(), Some(2.0));
     }
 
     #[test]
