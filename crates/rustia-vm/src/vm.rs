@@ -5945,6 +5945,17 @@ impl Vm {
         program_id: Option<u32>,
         index: usize,
     ) -> Result<Option<u32>> {
+        if let Some(program_id) = program_id {
+            if let Some(atom) = self
+                .program_atom_caches
+                .get(program_id as usize)
+                .and_then(|cache| cache.string_atoms.get(index))
+                .copied()
+                .flatten()
+            {
+                return Ok(Some(atom));
+            }
+        }
         let constant = program.constants.get(index).ok_or_else(|| {
             Error::new(ErrorKind::ConstantOutOfBounds {
                 index,
@@ -5957,15 +5968,6 @@ impl Vm {
         let Some(program_id) = program_id else {
             return Ok(Some(self.heap.intern_string_bytes(value)));
         };
-        if let Some(atom) = self
-            .program_atom_caches
-            .get(program_id as usize)
-            .and_then(|cache| cache.string_atoms.get(index))
-            .copied()
-            .flatten()
-        {
-            return Ok(Some(atom));
-        }
         let atom = self.heap.intern_string_bytes(value);
         let cache = self
             .program_atom_caches
@@ -9075,7 +9077,7 @@ impl Vm {
                 newindex_table_hash_indices,
             } => {
                 if self
-                    .raw_table_slot(table, Value::string_atom(key_atom))?
+                    .raw_table_string_slot(table, key_atom)?
                     .is_some_and(|raw| raw.kind() != ValueKind::Nil)
                 {
                     return Ok(false);
@@ -9156,7 +9158,7 @@ impl Vm {
             return Ok(None);
         };
         if self
-            .raw_table_slot(table, Value::string_atom(key_atom))?
+            .raw_table_string_slot(table, key_atom)?
             .is_some_and(|raw| raw.kind() != ValueKind::Nil)
         {
             return Ok(None);
@@ -9218,7 +9220,7 @@ impl Vm {
         key_atom: u32,
     ) -> Result<Option<Value>> {
         if self
-            .raw_table_slot(table, Value::string_atom(key_atom))?
+            .raw_table_string_slot(table, key_atom)?
             .is_some_and(|raw| raw.kind() != ValueKind::Nil)
         {
             return Ok(None);
@@ -9958,11 +9960,11 @@ impl Vm {
         depth: usize,
         fuel: &mut Option<u64>,
     ) -> Result<Value> {
-        if let Some(value) = self.table_get_inline_cache_hit(site, table, key, key_atom)? {
+        if let Some(value) = self.table_get_inline_cache_hit(site, table, key_atom)? {
             return Ok(value);
         }
         if let Some(method) =
-            self.table_get_index_function_inline_cache_hit(site, table, key, key_atom)?
+            self.table_get_index_function_inline_cache_hit(site, table, key_atom)?
         {
             let results = self.call_value(
                 program,
@@ -9998,7 +10000,6 @@ impl Vm {
         &mut self,
         site: InlineCacheSite,
         table: u32,
-        key: Value,
         key_atom: u32,
     ) -> Result<Option<Value>> {
         let slot = self
@@ -10069,7 +10070,7 @@ impl Vm {
                 index_table,
                 index_table_hash_index,
             } => {
-                if let Some(raw) = self.raw_table_slot(table, key)? {
+                if let Some(raw) = self.raw_table_string_slot(table, key_atom)? {
                     if raw.kind() != ValueKind::Nil
                         || self.table_uses_standard_global_type_surface(table)?
                     {
@@ -10123,7 +10124,6 @@ impl Vm {
         &mut self,
         site: InlineCacheSite,
         table: u32,
-        key: Value,
         key_atom: u32,
     ) -> Result<Option<Value>> {
         let slot = self
@@ -10145,7 +10145,7 @@ impl Vm {
         else {
             return Ok(None);
         };
-        if let Some(raw) = self.raw_table_slot(table, key)? {
+        if let Some(raw) = self.raw_table_string_slot(table, key_atom)? {
             if raw.kind() != ValueKind::Nil
                 || self.table_uses_standard_global_type_surface(table)?
             {
@@ -10788,6 +10788,18 @@ impl Vm {
                 reason: "table handle is missing",
             })
         })
+    }
+
+    fn raw_table_string_slot(&mut self, table: u32, key_atom: u32) -> Result<Option<Value>> {
+        Ok(self
+            .heap
+            .table_string_hash_slot(table, key_atom)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+            .map(|slot| slot.value))
     }
 
     fn raw_table_get_after_table_lookup(&mut self, table: u32, key: Value) -> Value {
