@@ -91,6 +91,7 @@ pub struct Vm {
     dynamic_programs: Vec<Arc<Program>>,
     register_pool: Vec<Vec<Value>>,
     result_pool: Vec<Vec<Value>>,
+    table_sort_number_scratch: Vec<f64>,
     call_frame_pool: Vec<CallStackFrame>,
     call_stack: Vec<CallStackFrame>,
     coroutines: Vec<CoroutineState>,
@@ -844,6 +845,7 @@ impl Vm {
             dynamic_programs: Vec::new(),
             register_pool: Vec::new(),
             result_pool: Vec::new(),
+            table_sort_number_scratch: Vec::new(),
             call_frame_pool: Vec::new(),
             call_stack: Vec::new(),
             coroutines: Vec::new(),
@@ -19979,7 +19981,11 @@ impl Vm {
             })
         })?;
         if comparator.is_none() {
-            match self.heap.table_sort_numeric_array(table, len) {
+            match self.heap.table_sort_numeric_array(
+                table,
+                len,
+                &mut self.table_sort_number_scratch,
+            ) {
                 Some(true) => return Ok(Vec::new()),
                 Some(false) => {}
                 None => {
