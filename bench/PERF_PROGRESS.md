@@ -38,6 +38,7 @@ CI bench runner. Do not retry them without a materially different approach.
 | `4c9c452` cached inline-cache site slots | `d7b818e` | run `28960416444`: total median +3.21% vs `441b29b` repeat, sparse +7.35% |
 | `0505391` direct builtin `table.sort` opcode | `f321452` | runs `28961247501`/`28961367517`: average total median -0.33% vs `441b29b` repeat, but dense median +0.42% and closures +13.86%; too small and noisy to keep |
 | `f2669e8` combined `ipairs(c.items)` field prep | `1a67c03` | runs `28963553868`/`28963671573`: average total median +0.04% vs `31955f8` average, total min +0.11%, and targeted `generic_iteration` median +0.61%; extra bytecode surface without a proven win |
+| `85c3a86` string-const direct table-get fast path | `ffc4d9d` | runs `28965406975`/`28965521735`: average total median +0.45% vs `1c802df` average, total min +0.63%; dense and stdlib improved, but generic_iteration +1.60% and sparse +0.63% made it a net loss |
 
 ## Current Shape Feedback
 
