@@ -18818,9 +18818,27 @@ impl Vm {
             return Ok(Vec::new());
         }
         let count = unpack_result_count(start, end)?;
+        if let (Ok(start), Ok(end)) = (usize::try_from(start), usize::try_from(end)) {
+            if let Some(values) = self
+                .heap
+                .table_array_range_values(table, start, end)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table.unpack table handle is missing",
+                    })
+                })?
+            {
+                return Ok(values);
+            }
+        }
         let mut results = Vec::with_capacity(count);
         for index in start..=end {
-            results.push(self.raw_table_get(table, Value::number(index as f64))?);
+            let value = if let Ok(index) = usize::try_from(index) {
+                self.raw_table_integer_get_after_table_lookup(table, index)?
+            } else {
+                self.raw_table_get(table, Value::number(index as f64))?
+            };
+            results.push(value);
         }
         Ok(results)
     }
@@ -19167,10 +19185,25 @@ impl Vm {
                 }
             }
         }
-        let mut values = Vec::with_capacity(len);
-        for index in 1..=len {
-            values.push(self.raw_table_get(table, Value::number(index as f64))?);
-        }
+        let mut values = if len == 0 {
+            Vec::new()
+        } else if let Some(values) = self
+            .heap
+            .table_array_range_values(table, 1, len)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table sort table handle is missing",
+                })
+            })?
+        {
+            values
+        } else {
+            let mut values = Vec::with_capacity(len);
+            for index in 1..=len {
+                values.push(self.raw_table_integer_get_after_table_lookup(table, index)?);
+            }
+            values
+        };
 
         let initial_storage_len = self.heap.table_storage_len(table).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
@@ -19187,8 +19220,21 @@ impl Vm {
             fuel,
         )?;
 
-        for (index, value) in values.into_iter().enumerate() {
-            self.set_table_index(table, Value::number((index + 1) as f64), value)?;
+        match self
+            .heap
+            .write_array_prefix(table, &values)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table sort table handle is missing",
+                })
+            })? {
+            ArrayWriteStatus::Stored => {}
+            ArrayWriteStatus::Readonly => return Err(readonly_table_error()),
+            ArrayWriteStatus::Deferred => {
+                for (index, value) in values.into_iter().enumerate() {
+                    self.set_table_index(table, Value::number((index + 1) as f64), value)?;
+                }
+            }
         }
         Ok(Vec::new())
     }

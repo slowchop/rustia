@@ -1825,6 +1825,66 @@ impl VmCell {
         })
     }
 
+    pub(crate) fn table_array_range_values(
+        &mut self,
+        table: u32,
+        start: usize,
+        end: usize,
+    ) -> Option<Option<Vec<Value>>> {
+        if start == 0 || end < start {
+            return Some(None);
+        }
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize)?;
+            if end > table.array.len() {
+                return Some(None);
+            }
+            if table.hash.iter().any(|entry| {
+                table_key_array_index(entry.key).is_some_and(|index| (start..=end).contains(&index))
+            }) {
+                return Some(None);
+            }
+            Some(Some(table.array[start - 1..end].to_vec()))
+        })
+    }
+
+    pub(crate) fn write_array_prefix(
+        &mut self,
+        table: u32,
+        values: &[Value],
+    ) -> Option<ArrayWriteStatus> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let table = root.tables.get_mut(table as usize)?;
+            if table.readonly {
+                return Some(ArrayWriteStatus::Readonly);
+            }
+            if table.array.len() < values.len() {
+                return Some(ArrayWriteStatus::Deferred);
+            }
+            if !values.is_empty() {
+                bump_table_version(table);
+                table.array[..values.len()].copy_from_slice(values);
+            }
+            if !table.hash.is_empty() {
+                let keys = table
+                    .hash
+                    .iter()
+                    .filter_map(|entry| {
+                        table_key_array_index(entry.key)
+                            .is_some_and(|index| index <= values.len())
+                            .then_some(entry.key)
+                    })
+                    .collect::<Vec<_>>();
+                for key in keys {
+                    remove_hash_key(table, key);
+                }
+            }
+            Some(ArrayWriteStatus::Stored)
+        })
+    }
+
     pub fn table_metatable(&mut self, table: u32) -> Option<Option<u32>> {
         self.arena.mutate(|mc, root| {
             root.unlock(mc)
@@ -3099,6 +3159,52 @@ mod tests {
         heap.table_set_metatable(table, Some(metatable)).unwrap();
 
         assert_ne!(heap.table_shape_version(table), Some(shape_version));
+    }
+
+    #[test]
+    fn table_array_range_values_reads_plain_array_ranges() {
+        let mut heap = VmCell::new();
+        let table =
+            heap.alloc_array_table(&[Value::number(1.0), Value::number(2.0), Value::number(3.0)]);
+
+        let values = heap.table_array_range_values(table, 2, 3).unwrap().unwrap();
+
+        assert_eq!(values.len(), 2);
+        assert_eq!(values[0].as_number(), Some(2.0));
+        assert_eq!(values[1].as_number(), Some(3.0));
+    }
+
+    #[test]
+    fn table_array_prefix_write_updates_only_existing_array_prefix() {
+        let mut heap = VmCell::new();
+        let table =
+            heap.alloc_array_table(&[Value::number(1.0), Value::number(2.0), Value::number(3.0)]);
+        heap.table_set(table, Value::number(10.0), Value::number(10.0))
+            .unwrap();
+
+        assert_eq!(
+            heap.write_array_prefix(table, &[Value::number(4.0), Value::number(5.0)]),
+            Some(ArrayWriteStatus::Stored)
+        );
+
+        assert_eq!(
+            heap.array_slot(table, 1).unwrap().unwrap().as_number(),
+            Some(4.0)
+        );
+        assert_eq!(
+            heap.array_slot(table, 2).unwrap().unwrap().as_number(),
+            Some(5.0)
+        );
+        assert_eq!(
+            heap.array_slot(table, 3).unwrap().unwrap().as_number(),
+            Some(3.0)
+        );
+        assert_eq!(
+            heap.table_get(table, Value::number(10.0))
+                .unwrap()
+                .as_number(),
+            Some(10.0)
+        );
     }
 
     #[test]
