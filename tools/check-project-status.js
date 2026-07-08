@@ -133,6 +133,12 @@ function checkProgressGoals(progress, readme) {
   requireIncludes(
     "README.md",
     readme,
+    "[`design/progress.md`](design/progress.md)",
+    "the generated Markdown progress report",
+  );
+  requireIncludes(
+    "README.md",
+    readme,
     "actual grabby integration work is explicitly out of scope",
     "the grabby integration exclusion",
   );

@@ -31,10 +31,10 @@ native and wasm results, total score, ratio to Rustia, and unsupported/missing a
   accessors, owned-value/table serde, deterministic extensions, hot reload, and macro sugar.
 
 ## Project Progress
-The detailed progress view is generated from [`design/progress.json`](design/progress.json) into
-[`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-04 for the
-public rustia project; actual grabby integration work is explicitly out of scope. Use `just show-progress` for
-a terminal summary of the same source data.
+The detailed progress report is [`design/progress.md`](design/progress.md), with the generated HTML dashboard
+at [`design/progress.html`](design/progress.html). Both are generated from [`design/progress.json`](design/progress.json).
+These are rough engineering estimates as of 2026-07-04 for the public rustia project; actual grabby integration work is explicitly out of scope.
+Use `just show-progress` for a terminal summary of the same source data.
 
 | goal | complete | confidence |
 |---|---:|---:|

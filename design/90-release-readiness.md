@@ -116,9 +116,9 @@ from `publish = false` to publishable.
 ## Release Process Gate
 
 - `just release-preflight` passes before any publishability flip. It checks
-  release notes, package file lists, generated progress HTML, benchmark result
-  freshness, crate metadata, workflow policy, example compilation, and the
-  workspace test suite.
+  release notes, package file lists, generated progress Markdown/HTML,
+  benchmark result freshness, crate metadata, workflow policy, example
+  compilation, and the workspace test suite.
 - `just check-crate-metadata` passes and `design/crate-metadata.json` is
   current.
 - `just check-workflows` passes and keeps the hosted CI workflow, manual
