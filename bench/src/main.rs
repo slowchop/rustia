@@ -1578,6 +1578,7 @@ fn opcode_is_loop_backedge(opcode: Opcode) -> bool {
         opcode,
         Opcode::ForLoop
             | Opcode::ForLoopStepOne
+            | Opcode::AddIndexNumberForLoopStepOne
             | Opcode::IpairsLoop
             | Opcode::PairsLoop
             | Opcode::GenericCallLoop
@@ -1605,6 +1606,7 @@ fn opcode_is_table_related(opcode: Opcode) -> bool {
         opcode,
         Opcode::GetIndex
             | Opcode::AddIndexNumber
+            | Opcode::AddIndexNumberForLoopStepOne
             | Opcode::AddIndexConcatConstOrZero
             | Opcode::AddIndexMulModConstOrZero
             | Opcode::SetIndex
@@ -1669,6 +1671,7 @@ fn opcode_is_numeric_key_related(opcode: Opcode) -> bool {
         opcode,
         Opcode::GetIndexNumber
             | Opcode::AddIndexNumber
+            | Opcode::AddIndexNumberForLoopStepOne
             | Opcode::AddIndexMulModConstOrZero
             | Opcode::SetIndexNumber
             | Opcode::GetIndexNumberConst

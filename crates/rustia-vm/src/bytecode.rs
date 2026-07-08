@@ -225,6 +225,7 @@ pub enum Opcode {
     AddIndexNumber = 166,
     AddIndexConcatConstOrZero = 167,
     AddIndexMulModConstOrZero = 168,
+    AddIndexNumberForLoopStepOne = 169,
 }
 
 pub const ARRAY_ITERATOR_WRITE_VISIBLE_KEY: u8 = 0;
