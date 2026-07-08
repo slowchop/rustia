@@ -81,6 +81,7 @@ pub struct Vm {
     heap: VmCell,
     globals: u32,
     standard_globals: u32,
+    metamethod_atoms: MetamethodAtoms,
     conformance_int64_metatable: Option<u32>,
     conformance_vec2_metatable: Option<u32>,
     conformance_vertex_metatable: Option<u32>,
@@ -476,6 +477,57 @@ struct StandardGlobalHandles {
     conformance_vertex_metatable: Option<u32>,
 }
 
+#[derive(Clone, Copy)]
+struct MetamethodAtoms {
+    add: u32,
+    call: u32,
+    concat: u32,
+    div: u32,
+    eq: u32,
+    idiv: u32,
+    index: u32,
+    iter: u32,
+    le: u32,
+    len: u32,
+    lt: u32,
+    metatable: u32,
+    mod_: u32,
+    mul: u32,
+    namecall: u32,
+    newindex: u32,
+    pow: u32,
+    sub: u32,
+    tostring: u32,
+    unm: u32,
+}
+
+impl MetamethodAtoms {
+    fn intern(heap: &mut VmCell) -> Self {
+        Self {
+            add: heap.intern_string("__add"),
+            call: heap.intern_string("__call"),
+            concat: heap.intern_string("__concat"),
+            div: heap.intern_string("__div"),
+            eq: heap.intern_string("__eq"),
+            idiv: heap.intern_string("__idiv"),
+            index: heap.intern_string("__index"),
+            iter: heap.intern_string("__iter"),
+            le: heap.intern_string("__le"),
+            len: heap.intern_string("__len"),
+            lt: heap.intern_string("__lt"),
+            metatable: heap.intern_string("__metatable"),
+            mod_: heap.intern_string("__mod"),
+            mul: heap.intern_string("__mul"),
+            namecall: heap.intern_string("__namecall"),
+            newindex: heap.intern_string("__newindex"),
+            pow: heap.intern_string("__pow"),
+            sub: heap.intern_string("__sub"),
+            tostring: heap.intern_string("__tostring"),
+            unm: heap.intern_string("__unm"),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct CallStackFrame {
     function: Option<Value>,
@@ -736,6 +788,7 @@ impl Vm {
             settings.enable_conformance_native_type_checks,
             settings.enable_conformance_pcall_helpers,
         );
+        let metamethod_atoms = MetamethodAtoms::intern(&mut heap);
         let rng_state = pcg32_seed(0);
         Self {
             profile,
@@ -743,6 +796,7 @@ impl Vm {
             heap,
             globals,
             standard_globals: standard_globals.standard_globals,
+            metamethod_atoms,
             conformance_int64_metatable: standard_globals.conformance_int64_metatable,
             conformance_vec2_metatable: standard_globals.conformance_vec2_metatable,
             conformance_vertex_metatable: standard_globals.conformance_vertex_metatable,
@@ -6355,7 +6409,7 @@ impl Vm {
         let Some(metatable) = self.metatable_for_value(value)? else {
             return Ok(None);
         };
-        let key = Value::string_atom(self.heap.intern_string("__tostring"));
+        let key = Value::string_atom(self.metamethod_atoms.tostring);
         let method = self.raw_table_get(metatable, key)?;
         if method.kind() == ValueKind::Nil {
             Ok(None)
@@ -6395,7 +6449,7 @@ impl Vm {
     }
 
     fn protected_metatable_value(&mut self, metatable: u32) -> Result<Option<Value>> {
-        let key = Value::string_atom(self.heap.intern_string("__metatable"));
+        let key = Value::string_atom(self.metamethod_atoms.metatable);
         let value = self.raw_table_get(metatable, key)?;
         if value.kind() == ValueKind::Nil {
             Ok(None)
@@ -7965,7 +8019,7 @@ impl Vm {
                 {
                     return Ok(None);
                 }
-                let index_atom = self.heap.intern_string("__index");
+                let index_atom = self.metamethod_atoms.index;
                 let Some(index_slot) = self
                     .heap
                     .read_string_hash_slot_at_index(metatable, index_atom, metatable_hash_index)
@@ -8015,7 +8069,7 @@ impl Vm {
                 {
                     return Ok(None);
                 }
-                let index_atom = self.heap.intern_string("__index");
+                let index_atom = self.metamethod_atoms.index;
                 let Some(index_slot) = self
                     .heap
                     .read_string_hash_slot_at_index(metatable, index_atom, metatable_hash_index)
@@ -8189,7 +8243,7 @@ impl Vm {
         else {
             return Ok(None);
         };
-        let index_atom = self.heap.intern_string("__index");
+        let index_atom = self.metamethod_atoms.index;
         let Some(index_slot) = self
             .heap
             .table_string_hash_slot(metatable, index_atom)
@@ -8283,7 +8337,7 @@ impl Vm {
         else {
             return Ok(None);
         };
-        let index_atom = self.heap.intern_string("__index");
+        let index_atom = self.metamethod_atoms.index;
         let method = self.raw_table_get(metatable, Value::string_atom(index_atom))?;
         if method.kind() != ValueKind::Function {
             return Ok(None);
@@ -8575,7 +8629,7 @@ impl Vm {
                     return Ok(false);
                 }
 
-                let newindex_atom = self.heap.intern_string("__newindex");
+                let newindex_atom = self.metamethod_atoms.newindex;
                 let Some(newindex_slot) = self
                     .heap
                     .read_string_hash_slot_at_index(metatable, newindex_atom, metatable_hash_index)
@@ -8723,7 +8777,7 @@ impl Vm {
         else {
             return Ok(false);
         };
-        let newindex_atom = self.heap.intern_string("__newindex");
+        let newindex_atom = self.metamethod_atoms.newindex;
         let Some(newindex_slot) = self
             .heap
             .table_string_hash_slot(metatable, newindex_atom)
@@ -8805,7 +8859,7 @@ impl Vm {
         else {
             return Ok(None);
         };
-        let newindex_atom = self.heap.intern_string("__newindex");
+        let newindex_atom = self.metamethod_atoms.newindex;
         let method = self.raw_table_get(metatable, Value::string_atom(newindex_atom))?;
         if method.kind() != ValueKind::Function {
             return Ok(None);
@@ -9028,7 +9082,7 @@ impl Vm {
                     return Ok(false);
                 }
 
-                let newindex_atom = self.heap.intern_string("__newindex");
+                let newindex_atom = self.metamethod_atoms.newindex;
                 let Some(newindex_slot) = self
                     .heap
                     .read_string_hash_slot_at_index(metatable, newindex_atom, metatable_hash_index)
@@ -9190,7 +9244,7 @@ impl Vm {
         else {
             return Ok(None);
         };
-        let newindex_atom = self.heap.intern_string("__newindex");
+        let newindex_atom = self.metamethod_atoms.newindex;
         let method = self.raw_table_get(metatable, Value::string_atom(newindex_atom))?;
         if method.kind() != ValueKind::Function {
             return Ok(None);
@@ -9229,7 +9283,7 @@ impl Vm {
         else {
             return Ok(false);
         };
-        let newindex_atom = self.heap.intern_string("__newindex");
+        let newindex_atom = self.metamethod_atoms.newindex;
         let Some(newindex_slot) = self
             .heap
             .table_string_hash_slot(metatable, newindex_atom)
@@ -10043,7 +10097,7 @@ impl Vm {
                 {
                     return Ok(None);
                 }
-                let index_atom = self.heap.intern_string("__index");
+                let index_atom = self.metamethod_atoms.index;
                 let Some(index_slot) = self
                     .heap
                     .read_string_hash_slot_at_index(metatable, index_atom, metatable_hash_index)
@@ -10211,7 +10265,7 @@ impl Vm {
         else {
             return Ok(None);
         };
-        let index_atom = self.heap.intern_string("__index");
+        let index_atom = self.metamethod_atoms.index;
         let method = self.raw_table_get(metatable, Value::string_atom(index_atom))?;
         if method.kind() != ValueKind::Function {
             return Ok(None);
@@ -10241,7 +10295,7 @@ impl Vm {
         metatable: u32,
         key_atom: u32,
     ) -> Result<Option<Value>> {
-        let index_atom = self.heap.intern_string("__index");
+        let index_atom = self.metamethod_atoms.index;
         let Some(index_slot) = self
             .heap
             .table_string_hash_slot(metatable, index_atom)
@@ -10666,7 +10720,7 @@ impl Vm {
     }
 
     fn table_iter_metamethod_from_metatable(&mut self, metatable: u32) -> Result<Option<Value>> {
-        let key = Value::string_atom(self.heap.intern_string("__iter"));
+        let key = Value::string_atom(self.metamethod_atoms.iter);
         let method = self.raw_table_get(metatable, key)?;
         if method.kind() == ValueKind::Nil {
             Ok(None)
@@ -10685,11 +10739,37 @@ impl Vm {
         }
     }
 
+    fn metamethod_atom(&mut self, name: &'static str) -> u32 {
+        match name {
+            "__add" => self.metamethod_atoms.add,
+            "__call" => self.metamethod_atoms.call,
+            "__concat" => self.metamethod_atoms.concat,
+            "__div" => self.metamethod_atoms.div,
+            "__eq" => self.metamethod_atoms.eq,
+            "__idiv" => self.metamethod_atoms.idiv,
+            "__index" => self.metamethod_atoms.index,
+            "__iter" => self.metamethod_atoms.iter,
+            "__le" => self.metamethod_atoms.le,
+            "__len" => self.metamethod_atoms.len,
+            "__lt" => self.metamethod_atoms.lt,
+            "__metatable" => self.metamethod_atoms.metatable,
+            "__mod" => self.metamethod_atoms.mod_,
+            "__mul" => self.metamethod_atoms.mul,
+            "__namecall" => self.metamethod_atoms.namecall,
+            "__newindex" => self.metamethod_atoms.newindex,
+            "__pow" => self.metamethod_atoms.pow,
+            "__sub" => self.metamethod_atoms.sub,
+            "__tostring" => self.metamethod_atoms.tostring,
+            "__unm" => self.metamethod_atoms.unm,
+            _ => self.heap.intern_string(name),
+        }
+    }
+
     fn metamethod_for_value(&mut self, value: Value, name: &'static str) -> Result<Option<Value>> {
         let Some(metatable) = self.metatable_for_value(value)? else {
             return Ok(None);
         };
-        let key = Value::string_atom(self.heap.intern_string(name));
+        let key = Value::string_atom(self.metamethod_atom(name));
         let method = self.raw_table_get(metatable, key)?;
         if method.kind() == ValueKind::Nil {
             Ok(None)
@@ -10826,7 +10906,7 @@ impl Vm {
         else {
             return Ok(None);
         };
-        let index_key = Value::string_atom(self.heap.intern_string("__index"));
+        let index_key = Value::string_atom(self.metamethod_atoms.index);
         Ok(
             (self.raw_table_get(metatable, index_key)?.as_table() == Some(self.standard_globals))
                 .then_some(self.standard_globals),
