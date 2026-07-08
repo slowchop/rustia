@@ -116,10 +116,13 @@ jobs:
             --source bench/history/runs.jsonl \
             --destination "$BENCH_DATA_DIR/bench/history/runs.jsonl"
 
-          cargo run -p script-bench-harness -- --refresh-results \
-            --history "$BENCH_DATA_DIR/bench/history/runs.jsonl" \
-            --results "$BENCH_DATA_DIR/bench/RESULTS.md" \
-            --latest-json "$BENCH_DATA_DIR/bench/current-results.json"
+          (
+            cd "$BENCH_DATA_DIR"
+            cargo run --manifest-path "$GITHUB_WORKSPACE/Cargo.toml" -p script-bench-harness -- --refresh-results \
+              --history bench/history/runs.jsonl \
+              --results bench/RESULTS.md \
+              --latest-json bench/current-results.json
+          )
 
           cp bench/render-current-results.js "$BENCH_DATA_DIR/bench/render-current-results.js"
           cp bench/render-claims.js "$BENCH_DATA_DIR/bench/render-claims.js"
@@ -129,8 +132,10 @@ jobs:
             node bench/render-claims.js
             rm bench/render-current-results.js bench/render-claims.js
           )
+          node tools/render-benchmark-data-readme.js --data-dir "$BENCH_DATA_DIR"
 
           git -C "$BENCH_DATA_DIR" add \
+            README.md \
             bench/history/runs.jsonl \
             bench/RESULTS.md \
             bench/current-results.json \
@@ -236,10 +241,13 @@ jobs:
             --source bench/history/runs.jsonl \
             --destination "$BENCH_DATA_DIR/bench/history/runs.jsonl"
 
-          cargo run -p script-bench-harness -- --refresh-results \
-            --history "$BENCH_DATA_DIR/bench/history/runs.jsonl" \
-            --results "$BENCH_DATA_DIR/bench/RESULTS.md" \
-            --latest-json "$BENCH_DATA_DIR/bench/current-results.json"
+          (
+            cd "$BENCH_DATA_DIR"
+            cargo run --manifest-path "$GITHUB_WORKSPACE/Cargo.toml" -p script-bench-harness -- --refresh-results \
+              --history bench/history/runs.jsonl \
+              --results bench/RESULTS.md \
+              --latest-json bench/current-results.json
+          )
 
           cp bench/render-current-results.js "$BENCH_DATA_DIR/bench/render-current-results.js"
           cp bench/render-claims.js "$BENCH_DATA_DIR/bench/render-claims.js"
@@ -249,8 +257,10 @@ jobs:
             node bench/render-claims.js
             rm bench/render-current-results.js bench/render-claims.js
           )
+          node tools/render-benchmark-data-readme.js --data-dir "$BENCH_DATA_DIR"
 
           git -C "$BENCH_DATA_DIR" add \
+            README.md \
             bench/history/runs.jsonl \
             bench/RESULTS.md \
             bench/current-results.json \

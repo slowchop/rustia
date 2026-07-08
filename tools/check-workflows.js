@@ -158,6 +158,7 @@ function checkBenchmarks(text) {
   requireIncludes(text, "BENCH_DATA_TOKEN: ${{ secrets.BENCH_DATA_TOKEN }}", label);
   requireIncludes(text, "github.com/slowchop/rustia-bench-data.git", label);
   requireIncludes(text, "node tools/merge-benchmark-history.js", label);
+  requireIncludes(text, "node tools/render-benchmark-data-readme.js --data-dir \"$BENCH_DATA_DIR\"", label);
   requireIncludes(text, "git -C \"$BENCH_DATA_DIR\" push", label);
   const labels = benchmarkRunLabels(text);
   if (labels.join(",") !== "self-hosted,bench") {
