@@ -10858,6 +10858,9 @@ impl Vm {
                 reason: "table handle is missing",
             }));
         }
+        if let Some(index) = key.as_number().and_then(array_iterator_index) {
+            return self.set_table_integer_index_after_table_lookup(table, index, value);
+        }
         self.set_table_index_after_table_lookup(table, key, value)
     }
 
