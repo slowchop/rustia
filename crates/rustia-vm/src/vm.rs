@@ -1641,46 +1641,6 @@ impl Vm {
                 }
 
                 let loop_result = (|| -> VmFlowResult<Vec<Value>> {
-                    macro_rules! try_quicken_next_for_loop_step_one {
-                        () => {{
-                            if fuel.is_none() {
-                                if let Some(loop_instruction) = function.code.get(pc).copied() {
-                                    if loop_instruction.op == Opcode::ForLoopStepOne {
-                                        self.executed_instructions =
-                                            self.executed_instructions.wrapping_add(1);
-                                        self.maybe_collect(
-                                            &mut current_roots_dirty,
-                                            &registers,
-                                            &varargs,
-                                            &pending_return_prefixes,
-                                        );
-                                        self.record_coverage_hit(
-                                            program_id,
-                                            context.prototype,
-                                            function,
-                                            pc,
-                                        );
-                                        if numeric_for_step_one_loop(
-                                            &mut registers,
-                                            &mut register_cells,
-                                            loop_instruction,
-                                            pc,
-                                        )
-                                        .map_err(|e| {
-                                            attach_instruction_source(program, function, pc, e)
-                                        })? {
-                                            pc = checked_jump(loop_instruction.aux)
-                                                .map_err(|e| e.at_pc(pc))?;
-                                        } else {
-                                            pc += 1;
-                                        }
-                                        current_roots_dirty = true;
-                                    }
-                                }
-                            }
-                        }};
-                    }
-
                     loop {
                         let instruction = *function.code.get(pc).ok_or_else(|| {
                             Error::new(ErrorKind::InvalidProgram {
@@ -2139,7 +2099,6 @@ impl Vm {
                                     fuel,
                                 )
                                 .map_err(|e| e.at_pc(pc - 1))?;
-                                try_quicken_next_for_loop_step_one!();
                             }
                             Opcode::AddIndexConcatConstOrZero => {
                                 self.add_index_concat_const_or_zero(
@@ -2166,7 +2125,6 @@ impl Vm {
                                     fuel,
                                 )
                                 .map_err(|e| e.at_pc(pc - 1))?;
-                                try_quicken_next_for_loop_step_one!();
                             }
                             Opcode::AddConst => {
                                 self.numeric_binop_const(
@@ -2390,7 +2348,6 @@ impl Vm {
                                 .map_err(|e| {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })?;
-                                try_quicken_next_for_loop_step_one!();
                             }
                             Opcode::SetIndexMulModConst => {
                                 self.set_index_mul_mod_const(
@@ -2408,7 +2365,6 @@ impl Vm {
                                 .map_err(|e| {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })?;
-                                try_quicken_next_for_loop_step_one!();
                             }
                             Opcode::ModAddConst => {
                                 self.numeric_mod_add_const(
@@ -3857,7 +3813,6 @@ impl Vm {
                                                     )
                                                 })?
                                             {
-                                                try_quicken_next_for_loop_step_one!();
                                                 continue;
                                             }
                                         }
@@ -3874,7 +3829,6 @@ impl Vm {
                                 .map_err(|e| {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })?;
-                                try_quicken_next_for_loop_step_one!();
                             }
                             Opcode::SetIndexNumberConst => {
                                 let object =
