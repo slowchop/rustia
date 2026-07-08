@@ -50,6 +50,16 @@ CI bench runner. Do not retry them without a materially different approach.
 | `2798365`/`b1a94b8`/`5f2fee6` IC site slot hash mixes | `6b50587` | hot-site profiling improved `generic_iteration` string-get IC sites from 0% hits to 98.4% hits, but CI did not support keeping it: the heavy mix regressed total median +3.55% vs `c4c190b`, the cheap mix regressed +1.42%, and the minimal mix averaged +0.66% median vs `c4c190b` across runs `28974027833`/`28974129768`; better hit rate did not translate to whole-suite speed |
 | `7426bf2` secondary table-get cache slot | `99f96ad` | hot-site profiling fixed the same `generic_iteration` string-get collision as the slot-hash mixes, moving two hot sites from 0% hits to 98.4% hits, but runs `28975757937`/`28975884145` averaged total median +1.73% and total min +1.78% vs `e62cae7`; `generic_iteration` median was +1.27% and sparse median +4.15%, so extra cache probing/layout cost outweighed the higher hit rate |
 
+## Local Probes Rejected Before CI
+
+These were investigated locally but intentionally not committed as performance
+candidates because hot-site evidence showed they would not affect the real
+benchmark shape.
+
+| probe | result |
+| --- | --- |
+| fold `GetUpvalue -> Len -> LessEqual -> JumpIfNot` | the synthetic unit test passed, but `generic_iteration` bytecode does not have `LessEqual -> JumpIfNot` adjacent to the hot `Len -> LessEqual` site; a reporting-only hot-pair probe showed no taken `LessEqual -> JumpIfNot` pair, so the branch-fold experiment was backed out before CI |
+
 ## Current Shape Feedback
 
 `cargo run -p script-bench-harness -- --rustia-bytecode-summary` shows the
