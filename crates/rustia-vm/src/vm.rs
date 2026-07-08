@@ -160,25 +160,6 @@ impl InlineCacheSite {
             ^ (self.pc as u64).rotate_left(32);
         (hash as usize) % GLOBAL_GET_INLINE_CACHE_SLOTS
     }
-
-    fn string_key_slot(self, key_atom: u32) -> usize {
-        self.keyed_slot(u64::from(key_atom) ^ 0xA076_1D64_78BD_642F)
-    }
-
-    fn integer_key_slot(self, one_based_index: usize) -> usize {
-        self.keyed_slot((one_based_index as u64) ^ 0xE703_7ED1_A0B4_28DB)
-    }
-
-    fn keyed_slot(self, discriminator: u64) -> usize {
-        let prototype = self.prototype.unwrap_or(u32::MAX);
-        let hash = u64::from(self.program).wrapping_mul(0x9E37_79B9_7F4A_7C15)
-            ^ u64::from(prototype).rotate_left(17)
-            ^ (self.pc as u64).rotate_left(32)
-            ^ discriminator
-                .wrapping_mul(0xD6E8_FEB8_6659_FD93)
-                .rotate_left(23);
-        (hash as usize) % GLOBAL_GET_INLINE_CACHE_SLOTS
-    }
 }
 
 struct RecordKeyAtomPlan {
@@ -2240,11 +2221,6 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::GetIndexConcatConst => {
-                                let site = program_id.map(|program| InlineCacheSite {
-                                    program,
-                                    prototype: context.prototype,
-                                    pc: pc - 1,
-                                });
                                 let object =
                                     get_register(&registers, instruction.b).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
@@ -2266,10 +2242,9 @@ impl Vm {
                                     if let Some(index) =
                                         key.as_number().and_then(array_iterator_index)
                                     {
-                                        if let Some(value) = self
-                                            .get_table_integer_index_with_inline_cache(
+                                        let value = self
+                                            .get_table_integer_index_without_inline_cache(
                                                 program,
-                                                site,
                                                 table,
                                                 index,
                                                 context.depth,
@@ -2282,58 +2257,36 @@ impl Vm {
                                                     pc - 1,
                                                     e,
                                                 )
-                                            })?
-                                        {
-                                            set_register(&mut registers, instruction.a, value)
-                                                .map_err(|e| {
-                                                    attach_instruction_source(
-                                                        program,
-                                                        function,
-                                                        pc - 1,
-                                                        e,
-                                                    )
-                                                })?;
-                                            continue;
-                                        }
+                                            })?;
+                                        set_register(&mut registers, instruction.a, value)
+                                            .map_err(|e| {
+                                                attach_instruction_source(
+                                                    program,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
+                                                )
+                                            })?;
+                                        continue;
                                     }
                                     if let Some(key_atom) = key.as_string_atom() {
-                                        let value =
-                                            if let Some(site) = site {
-                                                self.get_table_string_index_with_inline_cache(
+                                        let value = self
+                                            .get_table_string_index_without_inline_cache(
+                                                program,
+                                                table,
+                                                key,
+                                                key_atom,
+                                                context.depth,
+                                                fuel,
+                                            )
+                                            .map_err(|e| {
+                                                attach_instruction_source(
                                                     program,
-                                                    site,
-                                                    table,
-                                                    key,
-                                                    key_atom,
-                                                    context.depth,
-                                                    fuel,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
                                                 )
-                                                .map_err(|e| {
-                                                    attach_instruction_source(
-                                                        program,
-                                                        function,
-                                                        pc - 1,
-                                                        e,
-                                                    )
-                                                })?
-                                            } else {
-                                                self.get_table_string_index_without_inline_cache(
-                                                    program,
-                                                    table,
-                                                    key,
-                                                    key_atom,
-                                                    context.depth,
-                                                    fuel,
-                                                )
-                                                .map_err(|e| {
-                                                    attach_instruction_source(
-                                                        program,
-                                                        function,
-                                                        pc - 1,
-                                                        e,
-                                                    )
-                                                })?
-                                            };
+                                            })?;
                                         set_register(&mut registers, instruction.a, value)
                                             .map_err(|e| {
                                                 attach_instruction_source(
@@ -7821,11 +7774,9 @@ impl Vm {
 
         if let Some(table) = object.as_table() {
             if let Some(index) = key.as_number().and_then(array_iterator_index) {
-                if let Some(value) = self.get_table_integer_index_with_inline_cache(
-                    program, site, table, index, depth, fuel,
-                )? {
-                    return Ok(value);
-                }
+                return self.get_table_integer_index_without_inline_cache(
+                    program, table, index, depth, fuel,
+                );
             }
         }
         self.get_index_value(program, object, key, depth, fuel)
@@ -7845,11 +7796,9 @@ impl Vm {
         let (multiplier, modulus) = self.number_constant_pair(program, instruction.aux)?;
         if let (Some(table), Some(factor_number)) = (object.as_table(), factor.as_number()) {
             if let Some(index) = mul_mod_const_table_index(factor_number, multiplier, modulus) {
-                if let Some(value) = self.get_table_integer_index_with_inline_cache(
-                    program, site, table, index, depth, fuel,
-                )? {
-                    return Ok(value);
-                }
+                return self.get_table_integer_index_without_inline_cache(
+                    program, table, index, depth, fuel,
+                );
             }
         }
         let key = if let Some(factor) = factor.as_number() {
@@ -7885,11 +7834,9 @@ impl Vm {
 
         if let Some(table) = object.as_table() {
             if let Some(index) = key.as_number().and_then(array_iterator_index) {
-                if let Some(value) = self.get_table_integer_index_with_inline_cache(
-                    program, site, table, index, depth, fuel,
-                )? {
-                    return Ok(value);
-                }
+                return self.get_table_integer_index_without_inline_cache(
+                    program, table, index, depth, fuel,
+                );
             }
         }
         self.get_index_value(program, object, key, depth, fuel)
@@ -7927,6 +7874,26 @@ impl Vm {
             return Ok(Some(Value::nil()));
         }
         Ok(None)
+    }
+
+    fn get_table_integer_index_without_inline_cache(
+        &mut self,
+        program: &Program,
+        table: u32,
+        one_based_index: usize,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        if let Some(value) = self.get_table_integer_index_fast(table, one_based_index)? {
+            return Ok(value);
+        }
+        self.get_table_index_with_metamethod(
+            program,
+            table,
+            Value::number(one_based_index as f64),
+            depth,
+            fuel,
+        )
     }
 
     fn get_table_integer_index_with_inline_cache(
@@ -7995,7 +7962,7 @@ impl Vm {
                 )?;
                 return Ok(Some(first_result_or_nil(results)));
             }
-            self.clear_table_integer_get_inline_cache_site(site, one_based_index);
+            self.clear_table_integer_get_inline_cache_site(site);
             return self.get_table_integer_hash_key_fast(table, one_based_index);
         };
         if value.kind() != ValueKind::Nil || self.table_uses_standard_global_type_surface(table)? {
@@ -8049,7 +8016,7 @@ impl Vm {
             )?;
             return Ok(Some(first_result_or_nil(results)));
         }
-        self.clear_table_integer_get_inline_cache_site(site, one_based_index);
+        self.clear_table_integer_get_inline_cache_site(site);
         Ok(None)
     }
 
@@ -8061,7 +8028,7 @@ impl Vm {
     ) -> Result<Option<Value>> {
         let slot = self
             .table_integer_get_inline_cache
-            .get(site.integer_key_slot(one_based_index))
+            .get(site.slot())
             .copied()
             .flatten();
         let Some(slot) = slot else {
@@ -8292,7 +8259,7 @@ impl Vm {
     ) -> Result<Option<Value>> {
         let slot = self
             .table_integer_get_inline_cache
-            .get(site.integer_key_slot(one_based_index))
+            .get(site.slot())
             .copied()
             .flatten();
         let Some(slot) = slot else {
@@ -8573,10 +8540,7 @@ impl Vm {
         site: InlineCacheSite,
         entry: TableIntegerGetInlineCacheEntry,
     ) {
-        if let Some(slot) = self
-            .table_integer_get_inline_cache
-            .get_mut(site.integer_key_slot(entry.one_based_index))
-        {
+        if let Some(slot) = self.table_integer_get_inline_cache.get_mut(site.slot()) {
             *slot = Some(TableIntegerGetInlineCacheSlot { site, entry });
         }
     }
@@ -8588,7 +8552,7 @@ impl Vm {
         hash_index: usize,
     ) -> StringSlotIndexCache {
         self.table_integer_get_inline_cache
-            .get(site.integer_key_slot(one_based_index))
+            .get(site.slot())
             .copied()
             .flatten()
             .filter(|slot| slot.site == site && slot.entry.one_based_index == one_based_index)
@@ -8613,7 +8577,7 @@ impl Vm {
         hash_index: usize,
     ) -> StringSlotIndexCache {
         self.table_integer_get_inline_cache
-            .get(site.integer_key_slot(one_based_index))
+            .get(site.slot())
             .copied()
             .flatten()
             .filter(|slot| slot.site == site && slot.entry.one_based_index == one_based_index)
@@ -8633,15 +8597,8 @@ impl Vm {
             .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
     }
 
-    fn clear_table_integer_get_inline_cache_site(
-        &mut self,
-        site: InlineCacheSite,
-        one_based_index: usize,
-    ) {
-        if let Some(slot) = self
-            .table_integer_get_inline_cache
-            .get_mut(site.integer_key_slot(one_based_index))
-        {
+    fn clear_table_integer_get_inline_cache_site(&mut self, site: InlineCacheSite) {
+        if let Some(slot) = self.table_integer_get_inline_cache.get_mut(site.slot()) {
             let should_clear = slot.as_ref().is_some_and(|slot| slot.site == site);
             if should_clear {
                 *slot = None;
@@ -8798,7 +8755,7 @@ impl Vm {
             )?;
             return Ok(true);
         }
-        self.clear_table_integer_set_inline_cache_site(site, one_based_index);
+        self.clear_table_integer_set_inline_cache_site(site);
         self.set_table_integer_index_fast(table, one_based_index, value)
     }
 
@@ -8811,7 +8768,7 @@ impl Vm {
     ) -> Result<bool> {
         let slot = self
             .table_integer_set_inline_cache
-            .get(site.integer_key_slot(one_based_index))
+            .get(site.slot())
             .copied()
             .flatten();
         let Some(slot) = slot else {
@@ -8969,7 +8926,7 @@ impl Vm {
     ) -> Result<Option<Value>> {
         let slot = self
             .table_integer_set_inline_cache
-            .get(site.integer_key_slot(one_based_index))
+            .get(site.slot())
             .copied()
             .flatten();
         let Some(slot) = slot else {
@@ -9213,10 +9170,7 @@ impl Vm {
         site: InlineCacheSite,
         entry: TableIntegerSetInlineCacheEntry,
     ) {
-        if let Some(slot) = self
-            .table_integer_set_inline_cache
-            .get_mut(site.integer_key_slot(entry.one_based_index))
-        {
+        if let Some(slot) = self.table_integer_set_inline_cache.get_mut(site.slot()) {
             *slot = Some(TableIntegerSetInlineCacheSlot { site, entry });
         }
     }
@@ -9228,7 +9182,7 @@ impl Vm {
         hash_index: usize,
     ) -> StringSlotIndexCache {
         self.table_integer_set_inline_cache
-            .get(site.integer_key_slot(one_based_index))
+            .get(site.slot())
             .copied()
             .flatten()
             .filter(|slot| slot.site == site && slot.entry.one_based_index == one_based_index)
@@ -9251,7 +9205,7 @@ impl Vm {
         hash_index: usize,
     ) -> StringSlotIndexCache {
         self.table_integer_set_inline_cache
-            .get(site.integer_key_slot(one_based_index))
+            .get(site.slot())
             .copied()
             .flatten()
             .filter(|slot| slot.site == site && slot.entry.one_based_index == one_based_index)
@@ -9269,15 +9223,8 @@ impl Vm {
             .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
     }
 
-    fn clear_table_integer_set_inline_cache_site(
-        &mut self,
-        site: InlineCacheSite,
-        one_based_index: usize,
-    ) {
-        if let Some(slot) = self
-            .table_integer_set_inline_cache
-            .get_mut(site.integer_key_slot(one_based_index))
-        {
+    fn clear_table_integer_set_inline_cache_site(&mut self, site: InlineCacheSite) {
+        if let Some(slot) = self.table_integer_set_inline_cache.get_mut(site.slot()) {
             let should_clear = slot.as_ref().is_some_and(|slot| slot.site == site);
             if should_clear {
                 *slot = None;
@@ -9353,7 +9300,7 @@ impl Vm {
             )?;
             return Ok(());
         }
-        self.clear_table_set_inline_cache_site(site, key_atom);
+        self.clear_table_set_inline_cache_site(site);
         self.set_table_index_with_metamethod(program, table, key, value, depth, fuel)
     }
 
@@ -9392,7 +9339,7 @@ impl Vm {
     ) -> Result<bool> {
         let slot = self
             .table_set_inline_cache
-            .get(site.string_key_slot(key_atom))
+            .get(site.slot())
             .copied()
             .flatten();
         let Some(slot) = slot else {
@@ -9557,7 +9504,7 @@ impl Vm {
     ) -> Result<Option<Value>> {
         let slot = self
             .table_set_inline_cache
-            .get(site.string_key_slot(key_atom))
+            .get(site.slot())
             .copied()
             .flatten();
         let Some(slot) = slot else {
@@ -9789,10 +9736,7 @@ impl Vm {
         site: InlineCacheSite,
         entry: TableSetInlineCacheEntry,
     ) {
-        if let Some(slot) = self
-            .table_set_inline_cache
-            .get_mut(site.string_key_slot(entry.key_atom))
-        {
+        if let Some(slot) = self.table_set_inline_cache.get_mut(site.slot()) {
             *slot = Some(TableSetInlineCacheSlot { site, entry });
         }
     }
@@ -9804,7 +9748,7 @@ impl Vm {
         hash_index: usize,
     ) -> StringSlotIndexCache {
         self.table_set_inline_cache
-            .get(site.string_key_slot(key_atom))
+            .get(site.slot())
             .copied()
             .flatten()
             .filter(|slot| slot.site == site && slot.entry.key_atom == key_atom)
@@ -9825,7 +9769,7 @@ impl Vm {
         hash_index: usize,
     ) -> StringSlotIndexCache {
         self.table_set_inline_cache
-            .get(site.string_key_slot(key_atom))
+            .get(site.slot())
             .copied()
             .flatten()
             .filter(|slot| slot.site == site && slot.entry.key_atom == key_atom)
@@ -9843,11 +9787,8 @@ impl Vm {
             .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
     }
 
-    fn clear_table_set_inline_cache_site(&mut self, site: InlineCacheSite, key_atom: u32) {
-        if let Some(slot) = self
-            .table_set_inline_cache
-            .get_mut(site.string_key_slot(key_atom))
-        {
+    fn clear_table_set_inline_cache_site(&mut self, site: InlineCacheSite) {
+        if let Some(slot) = self.table_set_inline_cache.get_mut(site.slot()) {
             let should_clear = slot.as_ref().is_some_and(|slot| slot.site == site);
             if should_clear {
                 *slot = None;
@@ -10561,7 +10502,7 @@ impl Vm {
             )?;
             return Ok(first_result_or_nil(results));
         }
-        self.clear_table_get_inline_cache_site(site, key_atom);
+        self.clear_table_get_inline_cache_site(site);
         self.get_table_index_with_metamethod(program, table, key, depth, fuel)
     }
 
@@ -10603,7 +10544,7 @@ impl Vm {
     ) -> Result<Option<Value>> {
         let slot = self
             .table_get_inline_cache
-            .get(site.string_key_slot(key_atom))
+            .get(site.slot())
             .copied()
             .flatten();
         let Some(slot) = slot else {
@@ -10765,7 +10706,7 @@ impl Vm {
     ) -> Result<Option<Value>> {
         let slot = self
             .table_get_inline_cache
-            .get(site.string_key_slot(key_atom))
+            .get(site.slot())
             .copied()
             .flatten();
         let Some(slot) = slot else {
@@ -10984,10 +10925,7 @@ impl Vm {
         site: InlineCacheSite,
         entry: TableGetInlineCacheEntry,
     ) {
-        if let Some(slot) = self
-            .table_get_inline_cache
-            .get_mut(site.string_key_slot(entry.key_atom))
-        {
+        if let Some(slot) = self.table_get_inline_cache.get_mut(site.slot()) {
             *slot = Some(TableGetInlineCacheSlot { site, entry });
         }
     }
@@ -10999,7 +10937,7 @@ impl Vm {
         hash_index: usize,
     ) -> StringSlotIndexCache {
         self.table_get_inline_cache
-            .get(site.string_key_slot(key_atom))
+            .get(site.slot())
             .copied()
             .flatten()
             .filter(|slot| slot.site == site && slot.entry.key_atom == key_atom)
@@ -11013,11 +10951,8 @@ impl Vm {
             .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
     }
 
-    fn clear_table_get_inline_cache_site(&mut self, site: InlineCacheSite, key_atom: u32) {
-        if let Some(slot) = self
-            .table_get_inline_cache
-            .get_mut(site.string_key_slot(key_atom))
-        {
+    fn clear_table_get_inline_cache_site(&mut self, site: InlineCacheSite) {
+        if let Some(slot) = self.table_get_inline_cache.get_mut(site.slot()) {
             let should_clear = slot.as_ref().is_some_and(|slot| slot.site == site);
             if should_clear {
                 *slot = None;
@@ -28609,7 +28544,7 @@ mod tests {
     }
 
     #[test]
-    fn concat_const_string_reads_use_keyed_inline_cache_without_write_churn() {
+    fn concat_const_string_index_opcodes_avoid_string_inline_cache_churn() {
         let program = Program::new(
             Function::new(
                 vec![
@@ -28635,7 +28570,6 @@ mod tests {
 
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(9.0));
-        let key_atom = vm.heap.intern_string("kx");
 
         let set_site = InlineCacheSite {
             program: 0,
@@ -28643,9 +28577,8 @@ mod tests {
             pc: 5,
         };
         assert!(
-            vm.table_set_inline_cache[set_site.string_key_slot(key_atom)]
-                .is_none_or(|slot| slot.site != set_site),
-            "dynamic concat string-key writes should avoid fresh-table set-cache churn"
+            vm.table_set_inline_cache[set_site.slot()].is_none_or(|slot| slot.site != set_site),
+            "dynamic concat string-key writes should not churn the set cache"
         );
 
         let get_site = InlineCacheSite {
@@ -28653,14 +28586,14 @@ mod tests {
             prototype: None,
             pc: 6,
         };
-        let get_slot = vm.table_get_inline_cache[get_site.string_key_slot(key_atom)]
-            .expect("dynamic concat string-key reads should populate the keyed get cache");
-        assert_eq!(get_slot.site, get_site);
-        assert_eq!(get_slot.entry.key_atom, key_atom);
+        assert!(
+            vm.table_get_inline_cache[get_site.slot()].is_none_or(|slot| slot.site != get_site),
+            "dynamic concat string-key reads should not churn the get cache"
+        );
     }
 
     #[test]
-    fn mul_mod_table_index_opcodes_use_keyed_integer_get_cache() {
+    fn mul_mod_table_index_opcodes_avoid_integer_inline_cache_churn() {
         let program = Program::new(
             Function::new(
                 vec![
@@ -28696,9 +28629,9 @@ mod tests {
             pc: 6,
         };
         assert!(
-            vm.table_integer_set_inline_cache[set_site.integer_key_slot((2 * 7919) % 100003)]
+            vm.table_integer_set_inline_cache[set_site.slot()]
                 .is_none_or(|slot| slot.site != set_site),
-            "first dynamic numeric-key insert should not fabricate a set cache"
+            "dynamic numeric-key writes should not churn the integer set cache"
         );
 
         let get_site = InlineCacheSite {
@@ -28706,111 +28639,10 @@ mod tests {
             prototype: None,
             pc: 7,
         };
-        let get_index = (2 * 7919) % 100003;
-        let get_slot = vm.table_integer_get_inline_cache[get_site.integer_key_slot(get_index)]
-            .expect("dynamic numeric-key reads should populate the keyed get cache");
-        assert_eq!(get_slot.site, get_site);
-        assert_eq!(get_slot.entry.one_based_index, get_index);
-    }
-
-    #[test]
-    fn keyed_string_table_cache_keeps_dynamic_keys_apart() {
-        let program = dummy_program();
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let table = vm.heap.alloc_array_table(&[]);
-        let first = vm.heap.intern_string("k1");
-        let second = vm.heap.intern_string("k2");
-        let site = InlineCacheSite {
-            program: 0,
-            prototype: None,
-            pc: 42,
-        };
-        let mut fuel = None;
-
-        vm.set_table_string_index_with_inline_cache(
-            &program,
-            site,
-            table,
-            Value::string_atom(first),
-            first,
-            Value::number(1.0),
-            0,
-            &mut fuel,
-        )
-        .unwrap();
-        vm.set_table_string_index_with_inline_cache(
-            &program,
-            site,
-            table,
-            Value::string_atom(second),
-            second,
-            Value::number(2.0),
-            0,
-            &mut fuel,
-        )
-        .unwrap();
-
-        let first_slot_index = site.string_key_slot(first);
-        let second_slot_index = site.string_key_slot(second);
-        assert_ne!(first_slot_index, second_slot_index);
-        assert_eq!(
-            vm.table_set_inline_cache[first_slot_index]
-                .expect("first string key should have a keyed set cache")
-                .entry
-                .key_atom,
-            first
-        );
-        assert_eq!(
-            vm.table_set_inline_cache[second_slot_index]
-                .expect("second string key should have a keyed set cache")
-                .entry
-                .key_atom,
-            second
-        );
-    }
-
-    #[test]
-    fn keyed_integer_table_cache_keeps_dynamic_indices_apart() {
-        let program = dummy_program();
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let table = vm.heap.alloc_array_table(&[]);
-        let site = InlineCacheSite {
-            program: 0,
-            prototype: None,
-            pc: 43,
-        };
-        let mut fuel = None;
-
-        for (index, value) in [(20, 1.0), (40, 2.0), (20, 3.0), (40, 4.0)] {
-            assert!(vm
-                .set_table_integer_index_with_inline_cache(
-                    &program,
-                    Some(site),
-                    table,
-                    index,
-                    Value::number(value),
-                    0,
-                    &mut fuel,
-                )
-                .unwrap());
-        }
-
-        let first_slot_index = site.integer_key_slot(20);
-        let second_slot_index = site.integer_key_slot(40);
-        assert_ne!(first_slot_index, second_slot_index);
-        assert_eq!(
-            vm.table_integer_set_inline_cache[first_slot_index]
-                .expect("first integer key should have a keyed set cache")
-                .entry
-                .one_based_index,
-            20
-        );
-        assert_eq!(
-            vm.table_integer_set_inline_cache[second_slot_index]
-                .expect("second integer key should have a keyed set cache")
-                .entry
-                .one_based_index,
-            40
+        assert!(
+            vm.table_integer_get_inline_cache[get_site.slot()]
+                .is_none_or(|slot| slot.site != get_site),
+            "dynamic numeric-key reads should not churn the integer get cache"
         );
     }
 
@@ -28919,7 +28751,7 @@ mod tests {
             &mut fuel,
         )
         .unwrap();
-        let slot = vm.table_set_inline_cache[site.string_key_slot(key_atom)]
+        let slot = vm.table_set_inline_cache[site.slot()]
             .expect("repeated plain string writes should still populate the set cache");
         assert_eq!(slot.site, site);
         assert_eq!(slot.entry.key_atom, key_atom);
@@ -28985,7 +28817,7 @@ mod tests {
         assert_eq!(value.as_number(), Some(1.0));
 
         let shape_version = vm.heap.table_shape_version(table).unwrap();
-        let slot = vm.table_get_inline_cache[site.string_key_slot(key_atom)]
+        let slot = vm.table_get_inline_cache[site.slot()]
             .expect("plain string reads should populate the get cache");
         assert_eq!(slot.site, site);
         assert_eq!(slot.entry.key_atom, key_atom);
@@ -29392,7 +29224,7 @@ mod tests {
         assert_eq!(value.as_number(), Some(1.0));
 
         let shape_version = vm.heap.table_shape_version(table).unwrap();
-        let slot = vm.table_integer_get_inline_cache[site.integer_key_slot(20)]
+        let slot = vm.table_integer_get_inline_cache[site.slot()]
             .expect("integer hash reads should populate the get cache");
         assert_eq!(slot.site, site);
         assert_eq!(slot.entry.one_based_index, 20);
@@ -29449,7 +29281,7 @@ mod tests {
             .unwrap());
 
         let shape_version = vm.heap.table_shape_version(table).unwrap();
-        let slot = vm.table_integer_set_inline_cache[site.integer_key_slot(20)]
+        let slot = vm.table_integer_set_inline_cache[site.slot()]
             .expect("integer hash writes should populate the set cache");
         assert_eq!(slot.site, site);
         assert_eq!(slot.entry.one_based_index, 20);
@@ -29515,7 +29347,7 @@ mod tests {
             .and_then(Value::as_number),
             Some(1.0)
         );
-        let slot = vm.table_integer_get_inline_cache[site.integer_key_slot(20)]
+        let slot = vm.table_integer_get_inline_cache[site.slot()]
             .expect("numeric __index table reads should populate the get cache");
         let metatable_shape_version = vm.heap.table_shape_version(metatable).unwrap();
         let delegate_shape_version = vm.heap.table_shape_version(delegate).unwrap();
@@ -29595,7 +29427,7 @@ mod tests {
             .and_then(Value::as_number),
             Some(20.0)
         );
-        let slot = vm.table_integer_get_inline_cache[site.integer_key_slot(2)]
+        let slot = vm.table_integer_get_inline_cache[site.slot()]
             .expect("numeric __index table array reads should populate the get cache");
         let metatable_shape_version = vm.heap.table_shape_version(metatable).unwrap();
         match slot.entry.source {
@@ -29782,7 +29614,7 @@ mod tests {
             .unwrap()
             .expect("__index function should return a value");
         assert_eq!(vm.string_value(value).unwrap().as_deref(), Some("table"));
-        let slot = vm.table_integer_get_inline_cache[site.integer_key_slot(20)]
+        let slot = vm.table_integer_get_inline_cache[site.slot()]
             .expect("numeric __index function reads should populate the get cache");
         assert!(matches!(
             slot.entry.source,
@@ -29899,7 +29731,7 @@ mod tests {
 
         let metatable_shape_version = vm.heap.table_shape_version(metatable).unwrap();
         let delegate_shape_version = vm.heap.table_shape_version(delegate).unwrap();
-        let slot = vm.table_get_inline_cache[site.string_key_slot(key_atom)]
+        let slot = vm.table_get_inline_cache[site.slot()]
             .expect("string __index table reads should populate the get cache");
         match slot.entry.source {
             TableGetInlineCacheSource::IndexTable {
@@ -29980,7 +29812,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(vm.string_value(value).unwrap().as_deref(), Some("table"));
-        let slot = vm.table_get_inline_cache[site.string_key_slot(key_atom)]
+        let slot = vm.table_get_inline_cache[site.slot()]
             .expect("__index function reads should populate the table get cache");
         assert!(matches!(
             slot.entry.source,
@@ -30078,7 +29910,7 @@ mod tests {
             &mut fuel,
         )
         .unwrap();
-        let slot = vm.table_set_inline_cache[site.string_key_slot(key_atom)]
+        let slot = vm.table_set_inline_cache[site.slot()]
             .expect("__newindex function writes should populate the set cache");
         assert!(matches!(
             slot.entry.target,
@@ -30220,7 +30052,7 @@ mod tests {
             &mut fuel,
         )
         .unwrap();
-        let slot = vm.table_set_inline_cache[site.string_key_slot(key_atom)]
+        let slot = vm.table_set_inline_cache[site.slot()]
             .expect("newindex table writes should populate the set cache");
         assert!(matches!(
             slot.entry.target,
@@ -30306,7 +30138,7 @@ mod tests {
         )
         .unwrap();
 
-        let slot = vm.table_set_inline_cache[site.string_key_slot(key_atom)]
+        let slot = vm.table_set_inline_cache[site.slot()]
             .expect("newindex table writes should populate the set cache");
         match slot.entry.target {
             TableSetInlineCacheTarget::NewIndexTable {
@@ -30456,7 +30288,7 @@ mod tests {
                 &mut fuel,
             )
             .unwrap());
-        let slot = vm.table_integer_set_inline_cache[site.integer_key_slot(20)]
+        let slot = vm.table_integer_set_inline_cache[site.slot()]
             .expect("numeric newindex table writes should populate the set cache");
         assert!(matches!(
             slot.entry.target,
@@ -30541,7 +30373,7 @@ mod tests {
             )
             .unwrap());
 
-        let slot = vm.table_integer_set_inline_cache[site.integer_key_slot(20)]
+        let slot = vm.table_integer_set_inline_cache[site.slot()]
             .expect("numeric newindex table writes should populate the set cache");
         match slot.entry.target {
             TableIntegerSetInlineCacheTarget::NewIndexTableHashSlot {
@@ -30683,7 +30515,7 @@ mod tests {
                 &mut fuel,
             )
             .unwrap());
-        let slot = vm.table_integer_set_inline_cache[site.integer_key_slot(20)]
+        let slot = vm.table_integer_set_inline_cache[site.slot()]
             .expect("numeric __newindex function writes should populate the set cache");
         assert!(matches!(
             slot.entry.target,
