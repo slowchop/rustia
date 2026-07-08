@@ -1488,22 +1488,21 @@ impl VmCell {
             let table = root.tables.get_mut(table as usize)?;
             let has_metatable = table.metatable.is_some();
             let key = TableKey::String(atom);
-            let lookup = table_hash_lookup(table, key);
-            if let TableHashLookup::Found(index) = lookup {
-                if let Some(entry) = table.hash.get_mut(index) {
-                    if entry.value.kind() == ValueKind::Nil && has_metatable {
-                        return Some(StringIndexWriteStatus::Deferred);
-                    }
-                    if table.readonly {
-                        return Some(StringIndexWriteStatus::Readonly);
-                    }
-                    entry.value = value;
-                    bump_table_version(table);
-                    return Some(StringIndexWriteStatus::Stored {
-                        hash_index: Some(index),
-                    });
+            if let Some(index) = table_hash_entry_index(table, key) {
+                let Some(entry) = table.hash.get_mut(index) else {
+                    return Some(StringIndexWriteStatus::Deferred);
+                };
+                if entry.value.kind() == ValueKind::Nil && has_metatable {
+                    return Some(StringIndexWriteStatus::Deferred);
                 }
-                return Some(StringIndexWriteStatus::Deferred);
+                if table.readonly {
+                    return Some(StringIndexWriteStatus::Readonly);
+                }
+                entry.value = value;
+                bump_table_version(table);
+                return Some(StringIndexWriteStatus::Stored {
+                    hash_index: Some(index),
+                });
             }
             if has_metatable {
                 return Some(StringIndexWriteStatus::Deferred);
@@ -1514,17 +1513,7 @@ impl VmCell {
             bump_table_version(table);
             if value.kind() != ValueKind::Nil {
                 let index = table.hash.len();
-                let vacant_hash_index = match lookup {
-                    TableHashLookup::Found(_) => None,
-                    TableHashLookup::Vacant(index) => index,
-                };
-                insert_hash_key_absent_with_vacant_index(
-                    table,
-                    key,
-                    Value::string_atom(atom),
-                    value,
-                    vacant_hash_index,
-                );
+                insert_hash_key_absent(table, key, Value::string_atom(atom), value);
                 return Some(StringIndexWriteStatus::Stored {
                     hash_index: Some(index),
                 });
