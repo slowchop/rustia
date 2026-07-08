@@ -9771,6 +9771,50 @@ mod tests {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(4.0));
+
+        let chunk = parse_source(
+            r#"
+local t = {}
+local sum = 0
+for i = 1, 5 do
+    if i == 3 then
+        t[20] = 7
+    end
+    sum += t[20] or 1
+end
+return sum
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::GetIndexNumberConst) >= 1);
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(23.0));
+
+        let chunk = parse_source(
+            r#"
+local t = {}
+local sum = 0
+for i = 1, 5 do
+    if i == 3 then
+        setmetatable(t, {
+            __index = function(_, key)
+                return key + 1
+            end,
+        })
+    end
+    sum += t[20] or 1
+end
+return sum
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::GetIndexNumberConst) >= 1);
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(65.0));
     }
 
     #[test]

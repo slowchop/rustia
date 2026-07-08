@@ -239,7 +239,18 @@ struct TableIntegerGetInlineCacheSlot {
 #[derive(Clone, Copy)]
 struct TableIntegerGetInlineCacheEntry {
     one_based_index: usize,
-    hash_indices: StringSlotIndexCache,
+    source: TableIntegerGetInlineCacheSource,
+}
+
+#[derive(Clone, Copy)]
+enum TableIntegerGetInlineCacheSource {
+    DirectSlot {
+        hash_indices: StringSlotIndexCache,
+    },
+    DirectAbsent {
+        table: u32,
+        table_shape_version: u64,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -7650,27 +7661,54 @@ impl Vm {
         if slot.site != site || slot.entry.one_based_index != one_based_index {
             return Ok(None);
         }
-        for hash_index in slot.entry.hash_indices.iter() {
-            let Some(slot) = self
-                .heap
-                .read_integer_hash_slot_at_index(table, one_based_index, hash_index)
-                .ok_or_else(|| {
-                    Error::new(ErrorKind::InvalidProgram {
-                        reason: "table handle is missing",
-                    })
-                })?
-            else {
-                continue;
-            };
-            if slot.value.kind() != ValueKind::Nil
-                || !slot.has_metatable
-                || self.table_uses_standard_global_type_surface(table)?
-            {
-                return Ok(Some(slot.value));
+        match slot.entry.source {
+            TableIntegerGetInlineCacheSource::DirectSlot { hash_indices } => {
+                for hash_index in hash_indices.iter() {
+                    let Some(slot) = self
+                        .heap
+                        .read_integer_hash_slot_at_index(table, one_based_index, hash_index)
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "table handle is missing",
+                            })
+                        })?
+                    else {
+                        continue;
+                    };
+                    if slot.value.kind() != ValueKind::Nil
+                        || !slot.has_metatable
+                        || self.table_uses_standard_global_type_surface(table)?
+                    {
+                        return Ok(Some(slot.value));
+                    }
+                    return Ok(None);
+                }
+                Ok(None)
             }
-            return Ok(None);
+            TableIntegerGetInlineCacheSource::DirectAbsent {
+                table: cached_table,
+                table_shape_version,
+            } => {
+                if cached_table != table
+                    || self.heap.table_shape_version(table) != Some(table_shape_version)
+                {
+                    return Ok(None);
+                }
+                if self
+                    .heap
+                    .table_metatable(table)
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "table handle is missing",
+                        })
+                    })?
+                    .is_some()
+                {
+                    return Ok(None);
+                }
+                Ok(Some(Value::nil()))
+            }
         }
-        Ok(None)
     }
 
     fn try_get_table_integer_hash_index_for_inline_cache(
@@ -7679,27 +7717,57 @@ impl Vm {
         table: u32,
         one_based_index: usize,
     ) -> Result<Option<Value>> {
-        let Some(slot) = self
+        let table_shape_version = self.heap.table_shape_version(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?;
+        let hash_slot = self
             .heap
             .table_integer_hash_slot(table, one_based_index)
             .ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "table handle is missing",
                 })
+            })?;
+        if let Some(slot) = hash_slot {
+            if slot.value.kind() == ValueKind::Nil
+                && self
+                    .heap
+                    .table_metatable(table)
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "table handle is missing",
+                        })
+                    })?
+                    .is_some()
+            {
+                return Ok(None);
+            }
+            self.store_table_integer_get_inline_cache(
+                site,
+                TableIntegerGetInlineCacheEntry {
+                    one_based_index,
+                    source: TableIntegerGetInlineCacheSource::DirectSlot {
+                        hash_indices: self.table_integer_get_slot_indices(
+                            site,
+                            one_based_index,
+                            slot.index,
+                        ),
+                    },
+                },
+            );
+            return Ok(Some(slot.value));
+        }
+        if self
+            .heap
+            .table_metatable(table)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
             })?
-        else {
-            return Ok(None);
-        };
-        if slot.value.kind() == ValueKind::Nil
-            && self
-                .heap
-                .table_metatable(table)
-                .ok_or_else(|| {
-                    Error::new(ErrorKind::InvalidProgram {
-                        reason: "table handle is missing",
-                    })
-                })?
-                .is_some()
+            .is_some()
         {
             return Ok(None);
         }
@@ -7707,14 +7775,13 @@ impl Vm {
             site,
             TableIntegerGetInlineCacheEntry {
                 one_based_index,
-                hash_indices: self.table_integer_get_slot_indices(
-                    site,
-                    one_based_index,
-                    slot.index,
-                ),
+                source: TableIntegerGetInlineCacheSource::DirectAbsent {
+                    table,
+                    table_shape_version,
+                },
             },
         );
-        Ok(Some(slot.value))
+        Ok(Some(Value::nil()))
     }
 
     fn store_table_integer_get_inline_cache(
@@ -7738,7 +7805,11 @@ impl Vm {
             .copied()
             .flatten()
             .filter(|slot| slot.site == site && slot.entry.one_based_index == one_based_index)
-            .map(|slot| slot.entry.hash_indices.with_index(hash_index))
+            .and_then(|slot| match slot.entry.source {
+                TableIntegerGetInlineCacheSource::DirectSlot { hash_indices } => Some(hash_indices),
+                TableIntegerGetInlineCacheSource::DirectAbsent { .. } => None,
+            })
+            .map(|indices| indices.with_index(hash_index))
             .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
     }
 
