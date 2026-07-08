@@ -10,6 +10,8 @@ Split notes are tracked in [`STANDALONE.md`](STANDALONE.md).
 Start with [`SCOREBOARD.md`](SCOREBOARD.md) for the latest human-readable
 target-by-target comparison. It includes native and wasm targets, aggregate
 score, ratio to Rustia, measured workload counts, and unsupported adapter rows.
+Use [`PERF_PROGRESS.md`](PERF_PROGRESS.md) for the working log of kept wins,
+reverted VM experiments, and next performance bets.
 
 The harness writes one JSONL record per completed engine/workload measurement,
 so history can be committed, served statically, or uploaded by CI without needing

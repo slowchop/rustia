@@ -11,6 +11,8 @@ at full Luau parity.
 
 **Benchmarks:** [`bench/SCOREBOARD.md`](bench/SCOREBOARD.md) is the target-by-target scoreboard with
 native and wasm results, total score, ratio to Rustia, and unsupported/missing adapter rows.
+The working perf log is [`bench/PERF_PROGRESS.md`](bench/PERF_PROGRESS.md), including kept wins,
+reverted experiments, and next table/atom/inline-cache/quickening bets.
 
 ## Highlights (spikes validated the direction; production gates are now in-tree)
 - Designed to run at/near reference-Luau parity on measured workloads, with koto comparisons tracked
