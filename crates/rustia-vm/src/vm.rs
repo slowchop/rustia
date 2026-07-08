@@ -2845,6 +2845,26 @@ impl Vm {
                                         .map_err(|e| e.at_pc(pc - 1))?;
                                 }
                             }
+                            Opcode::IpairsPrepFieldStringConstSkipKey => {
+                                if !self.ipairs_prepare_field_string_const_skip_key(
+                                    program,
+                                    program_id,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    &mut registers,
+                                    &mut register_cells,
+                                    instruction,
+                                    pc - 1,
+                                    context.depth,
+                                    fuel,
+                                )? {
+                                    pc = checked_jump(instruction.aux)
+                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                }
+                            }
                             Opcode::IpairsLoop => {
                                 if self.ipairs_loop(
                                     &mut registers,
@@ -20832,6 +20852,61 @@ impl Vm {
         Ok(true)
     }
 
+    fn ipairs_prepare_field_string_const_skip_key(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        site: Option<InlineCacheSite>,
+        registers: &mut [Value],
+        register_cells: &mut [Option<u32>],
+        instruction: Instruction,
+        pc: usize,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<bool> {
+        let window = ArrayIteratorRegisters::new(instruction.a)?;
+        clear_unused_array_iterator_key(registers, register_cells, window)
+            .map_err(|e| e.at_pc(pc))?;
+        let object = get_register(registers, instruction.b).map_err(|e| e.at_pc(pc))?;
+        let key_atom = self
+            .constant_string_atom(program, program_id, usize::from(instruction.c))
+            .map_err(|e| e.at_pc(pc))?
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "ipairs field prep opcode must reference a string",
+                })
+                .at_pc(pc)
+            })?;
+        let key = Value::string_atom(key_atom);
+        let table_value = if let Some(table) = object.as_table() {
+            if let Some(site) = site {
+                self.get_table_string_index_with_inline_cache(
+                    program, site, table, key, key_atom, depth, fuel,
+                )
+                .map_err(|e| e.at_pc(pc))?
+            } else {
+                self.get_table_index_with_metamethod(program, table, key, depth, fuel)
+                    .map_err(|e| e.at_pc(pc))?
+            }
+        } else {
+            self.get_index_value(program, object, key, depth, fuel)
+                .map_err(|e| e.at_pc(pc))?
+        };
+        set_register(registers, window.table, table_value).map_err(|e| e.at_pc(pc))?;
+        self.ipairs_prepare(
+            registers,
+            register_cells,
+            Instruction::with_aux(
+                Opcode::IpairsPrep,
+                instruction.a,
+                0,
+                ARRAY_ITERATOR_SKIP_VISIBLE_KEY,
+                instruction.aux,
+            ),
+            pc,
+        )
+    }
+
     fn ipairs_loop(
         &mut self,
         registers: &mut [Value],
@@ -22702,6 +22777,7 @@ fn opcode_may_observe_current_roots(op: Opcode) -> bool {
         | Opcode::ReturnCallExpand2Varargs
         | Opcode::GenericCallPrep
         | Opcode::GenericCallLoop
+        | Opcode::IpairsPrepFieldStringConstSkipKey
         | Opcode::GeneralizedIterPrep
         | Opcode::GeneralizedIterLoop
         | Opcode::CallExpand3

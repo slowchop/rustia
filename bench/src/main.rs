@@ -1146,6 +1146,7 @@ fn opcode_is_table_related(opcode: Opcode) -> bool {
             | Opcode::TableMaxN
             | Opcode::PairsPrep
             | Opcode::PairsLoop
+            | Opcode::IpairsPrepFieldStringConstSkipKey
             | Opcode::IpairsPrep
             | Opcode::IpairsLoop
             | Opcode::NextKey
@@ -1160,6 +1161,7 @@ fn opcode_is_string_key_related(opcode: Opcode) -> bool {
         opcode,
         Opcode::GetIndexStringConst
             | Opcode::AddIndexConcatConstOrZero
+            | Opcode::IpairsPrepFieldStringConstSkipKey
             | Opcode::SetIndexStringConst
             | Opcode::GetIndexConcatConst
             | Opcode::SetIndexConcatConst
@@ -1208,6 +1210,7 @@ fn opcode_is_iteration_related(opcode: Opcode) -> bool {
         opcode,
         Opcode::PairsPrep
             | Opcode::PairsLoop
+            | Opcode::IpairsPrepFieldStringConstSkipKey
             | Opcode::IpairsPrep
             | Opcode::IpairsLoop
             | Opcode::NextKey
