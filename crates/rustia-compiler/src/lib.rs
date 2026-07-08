@@ -11868,6 +11868,39 @@ return concat(pcall(function () return 1,2,3 end))
     }
 
     #[test]
+    fn global_assignment_fast_path_preserves_newindex_fallbacks() {
+        let chunk = parse_source(
+            r#"
+local hits = 0
+local env = setmetatable({ existing = 0 }, {
+    __newindex = function(_, _, value)
+        hits = hits + value
+    end,
+})
+setfenv(1, env)
+for _ = 1, 3 do
+    existing = existing + 1
+end
+for i = 1, 3 do
+    missing = i
+end
+return existing + hits
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(program
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::SetGlobal));
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(9.0));
+    }
+
+    #[test]
     fn compiles_luau_vector_core_and_library_surface() {
         let chunk = parse_source(
             r#"

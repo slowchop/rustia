@@ -1288,15 +1288,17 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::SetGlobal => {
-                                let key = self.global_key(program, instruction.aux)?;
-                                let environment =
-                                    self.current_environment().map_err(|e| e.at_pc(pc - 1))?;
                                 let value = get_register(&registers, instruction.a)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                self.set_table_index_with_metamethod(
+                                let site = program_id.map(|program| InlineCacheSite {
                                     program,
-                                    environment,
-                                    key,
+                                    prototype: context.prototype,
+                                    pc: pc - 1,
+                                });
+                                self.set_global_with_inline_cache(
+                                    program,
+                                    site,
+                                    instruction.aux,
                                     value,
                                     context.depth,
                                     fuel,
@@ -5492,23 +5494,28 @@ impl Vm {
     }
 
     fn global_key(&mut self, program: &Program, index: i32) -> Result<Value> {
+        Ok(Value::string_atom(
+            self.global_key_atom(program, None, index)?,
+        ))
+    }
+
+    fn global_key_atom(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        index: i32,
+    ) -> Result<u32> {
         if index < 0 {
             return Err(Error::new(ErrorKind::InvalidProgram {
                 reason: "negative global constant index",
             }));
         }
-        let constant = program.constants.get(index as usize).ok_or_else(|| {
-            Error::new(ErrorKind::ConstantOutOfBounds {
-                index: index as usize,
-                len: program.constants.len(),
+        self.constant_string_atom(program, program_id, index as usize)?
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "global key constant must be a string",
+                })
             })
-        })?;
-        let Constant::String(name) = constant else {
-            return Err(Error::new(ErrorKind::InvalidProgram {
-                reason: "global key constant must be a string",
-            }));
-        };
-        Ok(Value::string_atom(self.heap.intern_string_bytes(name)))
     }
 
     fn get_global_with_inline_cache(
@@ -5528,6 +5535,41 @@ impl Vm {
         let value = self.get_table_index_with_metamethod(program, environment, key, depth, fuel)?;
         self.update_global_get_inline_cache(site, environment, key)?;
         Ok(value)
+    }
+
+    fn set_global_with_inline_cache(
+        &mut self,
+        program: &Program,
+        site: Option<InlineCacheSite>,
+        name_index: i32,
+        value: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        let program_id = site.map(|site| site.program);
+        let key_atom = self.global_key_atom(program, program_id, name_index)?;
+        let key = Value::string_atom(key_atom);
+        let environment = self.current_environment()?;
+        let Some(site) = site else {
+            return self.set_table_index_with_metamethod(
+                program,
+                environment,
+                key,
+                value,
+                depth,
+                fuel,
+            );
+        };
+        self.set_table_string_index_with_inline_cache(
+            program,
+            site,
+            environment,
+            key,
+            key_atom,
+            value,
+            depth,
+            fuel,
+        )
     }
 
     fn global_get_inline_cache_hit(
