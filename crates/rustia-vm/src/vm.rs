@@ -1465,11 +1465,13 @@ impl Vm {
                             .at_pc(pc)
                         })?;
 
-                        let fuel_cost = self
-                            .instruction_fuel_cost(instruction)
-                            .map_err(|e| e.at_pc(pc))?;
-                        charge_fuel(fuel, self.settings.initial_fuel, fuel_cost)
-                            .map_err(|error| error.at_pc(pc))?;
+                        if fuel.is_some() {
+                            let fuel_cost = self
+                                .instruction_fuel_cost(instruction)
+                                .map_err(|e| e.at_pc(pc))?;
+                            charge_fuel(fuel, self.settings.initial_fuel, fuel_cost)
+                                .map_err(|error| error.at_pc(pc))?;
+                        }
                         self.executed_instructions = self.executed_instructions.wrapping_add(1);
                         self.maybe_collect(
                             &mut current_roots_dirty,
