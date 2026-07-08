@@ -280,6 +280,7 @@ struct TableIntegerGetInlineCacheEntry {
 
 #[derive(Clone, Copy)]
 enum TableIntegerGetInlineCacheSource {
+    DirectArraySlot,
     DirectSlot {
         shape_slot: TableShapeSlotCache,
         hash_indices: StringSlotIndexCache,
@@ -321,6 +322,7 @@ struct TableIntegerSetInlineCacheEntry {
 
 #[derive(Clone, Copy)]
 enum TableIntegerSetInlineCacheTarget {
+    DirectArraySlot,
     DirectHashSlot {
         shape_slot: TableShapeSlotCache,
         hash_indices: StringSlotIndexCache,
@@ -3220,6 +3222,30 @@ impl Vm {
                                     get_register(&registers, instruction.b).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
+                                let site = program_id.map(|program| InlineCacheSite {
+                                    program,
+                                    prototype: context.prototype,
+                                    pc: pc - 1,
+                                });
+                                if let (Some(table), Some(site)) = (object.as_table(), site) {
+                                    if let Some(value) = self
+                                        .table_integer_get_const_inline_cache_hit(site, table)
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })?
+                                    {
+                                        set_register(&mut registers, instruction.a, value)
+                                            .map_err(|e| {
+                                                attach_instruction_source(
+                                                    program,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
+                                                )
+                                            })?;
+                                        continue;
+                                    }
+                                }
                                 let Some(index) = array_iterator_index(f64::from(instruction.aux))
                                 else {
                                     return Err(Error::new(ErrorKind::InvalidProgram {
@@ -3228,23 +3254,29 @@ impl Vm {
                                     .at_pc(pc - 1));
                                 };
                                 if let Some(table) = object.as_table() {
-                                    if let Some(value) = self
-                                        .get_table_integer_index_with_inline_cache(
+                                    let value = if let Some(site) = site {
+                                        self.get_table_integer_const_index_with_inline_cache(
                                             program,
-                                            program_id.map(|program| InlineCacheSite {
-                                                program,
-                                                prototype: context.prototype,
-                                                pc: pc - 1,
-                                            }),
+                                            site,
                                             table,
                                             index,
                                             context.depth,
                                             fuel,
                                         )
-                                        .map_err(|e| {
-                                            attach_instruction_source(program, function, pc - 1, e)
-                                        })?
-                                    {
+                                    } else {
+                                        self.get_table_integer_index_with_inline_cache(
+                                            program,
+                                            None,
+                                            table,
+                                            index,
+                                            context.depth,
+                                            fuel,
+                                        )
+                                    }
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                    if let Some(value) = value {
                                         set_register(&mut registers, instruction.a, value)
                                             .map_err(|e| {
                                                 attach_instruction_source(
@@ -3611,6 +3643,23 @@ impl Vm {
                                     get_register(&registers, instruction.b).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
+                                let site = program_id.map(|program| InlineCacheSite {
+                                    program,
+                                    prototype: context.prototype,
+                                    pc: pc - 1,
+                                });
+                                if let (Some(table), Some(site)) = (object.as_table(), site) {
+                                    if self
+                                        .table_integer_set_const_inline_cache_hit(
+                                            site, table, value,
+                                        )
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })?
+                                    {
+                                        continue;
+                                    }
+                                }
                                 let Some(index) = array_iterator_index(f64::from(instruction.aux))
                                 else {
                                     return Err(Error::new(ErrorKind::InvalidProgram {
@@ -3619,24 +3668,31 @@ impl Vm {
                                     .at_pc(pc - 1));
                                 };
                                 if let Some(table) = object.as_table() {
-                                    if self
-                                        .set_table_integer_index_with_inline_cache(
+                                    let stored = if let Some(site) = site {
+                                        self.set_table_integer_const_index_with_inline_cache(
                                             program,
-                                            program_id.map(|program| InlineCacheSite {
-                                                program,
-                                                prototype: context.prototype,
-                                                pc: pc - 1,
-                                            }),
+                                            site,
                                             table,
                                             index,
                                             value,
                                             context.depth,
                                             fuel,
                                         )
-                                        .map_err(|e| {
-                                            attach_instruction_source(program, function, pc - 1, e)
-                                        })?
-                                    {
+                                    } else {
+                                        self.set_table_integer_index_with_inline_cache(
+                                            program,
+                                            None,
+                                            table,
+                                            index,
+                                            value,
+                                            context.depth,
+                                            fuel,
+                                        )
+                                    }
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                    if stored {
                                         continue;
                                     }
                                 }
@@ -8102,6 +8158,72 @@ impl Vm {
         Ok(None)
     }
 
+    fn get_table_integer_const_index_with_inline_cache(
+        &mut self,
+        program: &Program,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Option<Value>> {
+        let Some(value) = self
+            .heap
+            .array_slot(table, one_based_index)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+        else {
+            return self.get_table_integer_index_with_inline_cache(
+                program,
+                Some(site),
+                table,
+                one_based_index,
+                depth,
+                fuel,
+            );
+        };
+        if value.kind() != ValueKind::Nil || self.table_uses_standard_global_type_surface(table)? {
+            self.store_table_integer_get_inline_cache(
+                site,
+                TableIntegerGetInlineCacheEntry {
+                    one_based_index,
+                    source: TableIntegerGetInlineCacheSource::DirectArraySlot,
+                },
+            );
+            return Ok(Some(value));
+        }
+        if self
+            .heap
+            .table_metatable(table)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+            .is_none()
+        {
+            self.store_table_integer_get_inline_cache(
+                site,
+                TableIntegerGetInlineCacheEntry {
+                    one_based_index,
+                    source: TableIntegerGetInlineCacheSource::DirectArraySlot,
+                },
+            );
+            return Ok(Some(Value::nil()));
+        }
+        self.get_table_integer_index_with_inline_cache(
+            program,
+            Some(site),
+            table,
+            one_based_index,
+            depth,
+            fuel,
+        )
+    }
+
     fn table_integer_get_inline_cache_hit(
         &mut self,
         site: InlineCacheSite,
@@ -8119,7 +8241,66 @@ impl Vm {
         if slot.site != site || slot.entry.one_based_index != one_based_index {
             return Ok(None);
         }
-        match slot.entry.source {
+        self.table_integer_get_inline_cache_entry_hit(slot.entry, table)
+    }
+
+    fn table_integer_get_const_inline_cache_hit(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+    ) -> Result<Option<Value>> {
+        let slot = self
+            .table_integer_get_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
+        let Some(slot) = slot else {
+            return Ok(None);
+        };
+        if slot.site != site {
+            return Ok(None);
+        }
+        self.table_integer_get_inline_cache_entry_hit(slot.entry, table)
+    }
+
+    fn table_integer_get_inline_cache_entry_hit(
+        &mut self,
+        entry: TableIntegerGetInlineCacheEntry,
+        table: u32,
+    ) -> Result<Option<Value>> {
+        let one_based_index = entry.one_based_index;
+        match entry.source {
+            TableIntegerGetInlineCacheSource::DirectArraySlot => {
+                let Some(value) =
+                    self.heap
+                        .array_slot(table, one_based_index)
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "table handle is missing",
+                            })
+                        })?
+                else {
+                    return Ok(None);
+                };
+                if value.kind() != ValueKind::Nil
+                    || self.table_uses_standard_global_type_surface(table)?
+                {
+                    return Ok(Some(value));
+                }
+                if self
+                    .heap
+                    .table_metatable(table)
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "table handle is missing",
+                        })
+                    })?
+                    .is_none()
+                {
+                    return Ok(Some(Value::nil()));
+                }
+                Ok(None)
+            }
             TableIntegerGetInlineCacheSource::DirectSlot {
                 shape_slot,
                 hash_indices,
@@ -8642,7 +8823,8 @@ impl Vm {
                 TableIntegerGetInlineCacheSource::DirectSlot { hash_indices, .. } => {
                     Some(hash_indices)
                 }
-                TableIntegerGetInlineCacheSource::DirectAbsent { .. }
+                TableIntegerGetInlineCacheSource::DirectArraySlot
+                | TableIntegerGetInlineCacheSource::DirectAbsent { .. }
                 | TableIntegerGetInlineCacheSource::IndexTableArraySlot { .. }
                 | TableIntegerGetInlineCacheSource::IndexTableHashSlot { .. }
                 | TableIntegerGetInlineCacheSource::IndexFunction { .. } => None,
@@ -8669,7 +8851,8 @@ impl Vm {
                     index_table_hash_indices,
                     ..
                 } if cached_index_table == index_table => Some(index_table_hash_indices),
-                TableIntegerGetInlineCacheSource::DirectSlot { .. }
+                TableIntegerGetInlineCacheSource::DirectArraySlot
+                | TableIntegerGetInlineCacheSource::DirectSlot { .. }
                 | TableIntegerGetInlineCacheSource::DirectAbsent { .. }
                 | TableIntegerGetInlineCacheSource::IndexTableArraySlot { .. }
                 | TableIntegerGetInlineCacheSource::IndexTableHashSlot { .. }
@@ -8841,6 +9024,37 @@ impl Vm {
         self.set_table_integer_index_fast(table, one_based_index, value)
     }
 
+    fn set_table_integer_const_index_with_inline_cache(
+        &mut self,
+        program: &Program,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<bool> {
+        if self.set_table_integer_array_index_fast(table, one_based_index, value)? {
+            self.store_table_integer_set_inline_cache(
+                site,
+                TableIntegerSetInlineCacheEntry {
+                    one_based_index,
+                    target: TableIntegerSetInlineCacheTarget::DirectArraySlot,
+                },
+            );
+            return Ok(true);
+        }
+        self.set_table_integer_index_with_inline_cache(
+            program,
+            Some(site),
+            table,
+            one_based_index,
+            value,
+            depth,
+            fuel,
+        )
+    }
+
     fn table_integer_set_inline_cache_hit(
         &mut self,
         site: InlineCacheSite,
@@ -8859,7 +9073,42 @@ impl Vm {
         if slot.site != site || slot.entry.one_based_index != one_based_index {
             return Ok(false);
         }
-        match slot.entry.target {
+        self.table_integer_set_inline_cache_entry_hit(slot.entry, table, value)
+    }
+
+    fn table_integer_set_const_inline_cache_hit(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        value: Value,
+    ) -> Result<bool> {
+        let slot = self
+            .table_integer_set_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
+        let Some(slot) = slot else {
+            return Ok(false);
+        };
+        if slot.site != site {
+            return Ok(false);
+        }
+        self.table_integer_set_inline_cache_entry_hit(slot.entry, table, value)
+    }
+
+    fn table_integer_set_inline_cache_entry_hit(
+        &mut self,
+        entry: TableIntegerSetInlineCacheEntry,
+        table: u32,
+        value: Value,
+    ) -> Result<bool> {
+        let one_based_index = entry.one_based_index;
+        match entry.target {
+            TableIntegerSetInlineCacheTarget::DirectArraySlot => {
+                if self.set_table_integer_array_index_fast(table, one_based_index, value)? {
+                    return Ok(true);
+                }
+            }
             TableIntegerSetInlineCacheTarget::DirectHashSlot {
                 shape_slot,
                 hash_indices,
@@ -9272,7 +9521,8 @@ impl Vm {
                 TableIntegerSetInlineCacheTarget::DirectHashSlot { hash_indices, .. } => {
                     Some(hash_indices)
                 }
-                TableIntegerSetInlineCacheTarget::NewIndexTableHashSlot { .. }
+                TableIntegerSetInlineCacheTarget::DirectArraySlot
+                | TableIntegerSetInlineCacheTarget::NewIndexTableHashSlot { .. }
                 | TableIntegerSetInlineCacheTarget::NewIndexFunction { .. } => None,
             })
             .map(|indices| indices.with_index(hash_index))
@@ -9297,7 +9547,8 @@ impl Vm {
                     newindex_table_hash_indices,
                     ..
                 } if cached_newindex_table == newindex_table => Some(newindex_table_hash_indices),
-                TableIntegerSetInlineCacheTarget::DirectHashSlot { .. }
+                TableIntegerSetInlineCacheTarget::DirectArraySlot
+                | TableIntegerSetInlineCacheTarget::DirectHashSlot { .. }
                 | TableIntegerSetInlineCacheTarget::NewIndexTableHashSlot { .. }
                 | TableIntegerSetInlineCacheTarget::NewIndexFunction { .. } => None,
             })
@@ -29540,6 +29791,85 @@ mod tests {
                 .table_get(table, Value::number(20.0))
                 .unwrap()
                 .as_number(),
+            Some(3.0)
+        );
+    }
+
+    #[test]
+    fn integer_const_get_inline_cache_uses_cached_array_index() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let table = vm.heap.alloc_array_table(&[Value::number(1.0)]);
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 8,
+        };
+        let mut fuel = None;
+
+        let value = vm
+            .get_table_integer_const_index_with_inline_cache(&program, site, table, 1, 0, &mut fuel)
+            .unwrap()
+            .expect("const array read should produce a value");
+        assert_eq!(value.as_number(), Some(1.0));
+
+        let slot = vm.table_integer_get_inline_cache[site.slot()]
+            .expect("const array reads should populate the get cache");
+        assert_eq!(slot.site, site);
+        assert_eq!(slot.entry.one_based_index, 1);
+        assert!(matches!(
+            slot.entry.source,
+            TableIntegerGetInlineCacheSource::DirectArraySlot
+        ));
+
+        vm.heap
+            .write_array_slot(table, 1, Value::number(2.0))
+            .unwrap();
+        let value = vm
+            .table_integer_get_const_inline_cache_hit(site, table)
+            .unwrap()
+            .expect("const array cache should hit without decoding the index again");
+        assert_eq!(value.as_number(), Some(2.0));
+    }
+
+    #[test]
+    fn integer_const_set_inline_cache_uses_cached_array_index() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let table = vm.heap.alloc_array_table(&[Value::number(1.0)]);
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 8,
+        };
+        let mut fuel = None;
+
+        assert!(vm
+            .set_table_integer_const_index_with_inline_cache(
+                &program,
+                site,
+                table,
+                1,
+                Value::number(2.0),
+                0,
+                &mut fuel,
+            )
+            .unwrap());
+
+        let slot = vm.table_integer_set_inline_cache[site.slot()]
+            .expect("const array writes should populate the set cache");
+        assert_eq!(slot.site, site);
+        assert_eq!(slot.entry.one_based_index, 1);
+        assert!(matches!(
+            slot.entry.target,
+            TableIntegerSetInlineCacheTarget::DirectArraySlot
+        ));
+
+        assert!(vm
+            .table_integer_set_const_inline_cache_hit(site, table, Value::number(3.0))
+            .unwrap());
+        assert_eq!(
+            vm.heap.array_slot(table, 1).unwrap().unwrap().as_number(),
             Some(3.0)
         );
     }
