@@ -1411,17 +1411,7 @@ impl VmCell {
                 }
             }
 
-            if let Some(entry) = table_hash_entry_mut(table, table_key) {
-                entry.value = value;
-            } else {
-                let hash_index = table.hash.len();
-                table.hash.push(TableEntry {
-                    key: table_key,
-                    key_value,
-                    value,
-                });
-                record_hash_insert(table, table_key, hash_index);
-            }
+            set_hash_key(table, table_key, key_value, value);
             Some(())
         })
     }
@@ -3095,6 +3085,26 @@ mod tests {
         heap.table_set(table, Value::string_atom(other_key), Value::number(3.0))
             .unwrap();
         assert_ne!(heap.table_shape_version(table), Some(shape_version));
+    }
+
+    #[test]
+    fn table_shape_version_tracks_numeric_hash_insertions() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+        let shape_version = heap.table_shape_version(table).unwrap();
+
+        heap.table_set(table, Value::number(20.0), Value::number(7.0))
+            .unwrap();
+
+        assert_ne!(heap.table_shape_version(table), Some(shape_version));
+        assert_eq!(
+            heap.table_integer_hash_slot(table, 20)
+                .unwrap()
+                .unwrap()
+                .value
+                .as_number(),
+            Some(7.0)
+        );
     }
 
     #[test]

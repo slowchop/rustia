@@ -314,8 +314,13 @@ struct RawTableIntegerGetInlineCacheEntry {
 
 #[derive(Clone, Copy)]
 enum RawTableIntegerGetInlineCacheSource {
-    DirectSlot { hash_indices: StringSlotIndexCache },
-    DirectAbsent { table: u32, table_version: u64 },
+    DirectSlot {
+        hash_indices: StringSlotIndexCache,
+    },
+    DirectAbsent {
+        table: u32,
+        table_shape_version: u64,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -8558,9 +8563,11 @@ impl Vm {
             }
             RawTableIntegerGetInlineCacheSource::DirectAbsent {
                 table: cached_table,
-                table_version,
+                table_shape_version,
             } => {
-                if cached_table == table && self.heap.table_version(table) == Some(table_version) {
+                if cached_table == table
+                    && self.heap.table_shape_version(table) == Some(table_shape_version)
+                {
                     return Ok(Some(Value::nil()));
                 }
                 Ok(None)
@@ -8574,7 +8581,7 @@ impl Vm {
         table: u32,
         one_based_index: usize,
     ) -> Result<Value> {
-        let table_version = self.heap.table_version(table).ok_or_else(|| {
+        let table_shape_version = self.heap.table_shape_version(table).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "table handle is missing",
             })
@@ -8592,7 +8599,7 @@ impl Vm {
                 Value::nil(),
                 RawTableIntegerGetInlineCacheSource::DirectAbsent {
                     table,
-                    table_version,
+                    table_shape_version,
                 },
             ),
             |slot| {
@@ -26312,7 +26319,10 @@ fn table_expected_error() -> Error {
 
 #[cfg(test)]
 mod tests {
-    use super::StringSlotIndexCache;
+    use super::{
+        InlineCacheSite, RawTableIntegerGetInlineCacheSource, StringSlotIndexCache, Value, Vm,
+    };
+    use crate::Profile;
 
     #[test]
     fn string_slot_index_cache_keeps_four_unique_recent_indices() {
@@ -26325,5 +26335,98 @@ mod tests {
 
         let indices: Vec<_> = cache.iter().collect();
         assert_eq!(indices, vec![50, 40, 30, 20]);
+    }
+
+    #[test]
+    fn raw_integer_absent_cache_survives_value_only_table_changes() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let table = vm.heap.alloc_array_table(&[]);
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 7,
+        };
+
+        assert_eq!(
+            vm.raw_table_integer_get_with_inline_cache(site, table, 20)
+                .unwrap()
+                .kind(),
+            crate::ValueKind::Nil
+        );
+        let slot = vm.raw_table_integer_get_inline_cache[site.slot()]
+            .expect("raw integer get should cache absent hash slots");
+        assert!(matches!(
+            slot.entry.source,
+            RawTableIntegerGetInlineCacheSource::DirectAbsent { .. }
+        ));
+
+        let version = vm.heap.table_version(table).unwrap();
+        let shape_version = vm.heap.table_shape_version(table).unwrap();
+        vm.heap.write_array_slot(table, 1, Value::number(42.0));
+        assert_ne!(vm.heap.table_version(table), Some(version));
+        assert_eq!(vm.heap.table_shape_version(table), Some(shape_version));
+
+        assert_eq!(
+            vm.raw_table_integer_get_inline_cache_hit(site, table, 20)
+                .unwrap()
+                .map(|value| value.kind()),
+            Some(crate::ValueKind::Nil)
+        );
+    }
+
+    #[test]
+    fn raw_integer_absent_cache_observes_rawset_insertion() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
+        let get_site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 7,
+        };
+        let set_site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 8,
+        };
+
+        assert_eq!(
+            vm.raw_table_integer_get_with_inline_cache(get_site, table, 20)
+                .unwrap()
+                .kind(),
+            crate::ValueKind::Nil
+        );
+        assert!(vm
+            .heap
+            .table_integer_hash_slot(table, 20)
+            .unwrap()
+            .is_none());
+        let shape_version = vm.heap.table_shape_version(table).unwrap();
+        vm.raw_table_integer_set_with_inline_cache(set_site, table, 20, Value::number(7.0))
+            .unwrap();
+        assert_eq!(
+            vm.raw_table_get_after_table_lookup(table, Value::number(20.0))
+                .as_number(),
+            Some(7.0)
+        );
+        assert!(vm.heap.array_slot(table, 20).unwrap().is_none());
+        assert_eq!(
+            vm.heap
+                .table_integer_hash_slot(table, 20)
+                .unwrap()
+                .unwrap()
+                .value
+                .as_number(),
+            Some(7.0)
+        );
+        assert_ne!(vm.heap.table_shape_version(table), Some(shape_version));
+
+        assert_eq!(
+            vm.raw_table_integer_get_with_inline_cache(get_site, table, 20)
+                .unwrap()
+                .as_number(),
+            Some(7.0)
+        );
     }
 }
