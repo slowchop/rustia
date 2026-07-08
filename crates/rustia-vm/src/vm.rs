@@ -314,8 +314,7 @@ impl InlineCacheSite {
     fn slot(self) -> usize {
         let prototype = self.prototype.unwrap_or(u32::MAX) as usize;
         let program = self.program as usize;
-        let hash =
-            self.pc ^ prototype ^ prototype.wrapping_shl(4) ^ program ^ program.wrapping_shl(7);
+        let hash = self.pc ^ prototype.wrapping_shl(4) ^ program.wrapping_shl(8);
         hash % GLOBAL_GET_INLINE_CACHE_SLOTS
     }
 }
