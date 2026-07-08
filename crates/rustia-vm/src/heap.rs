@@ -2116,7 +2116,7 @@ impl VmCell {
                 return Some(false);
             }
             bump_table_version(table);
-            table.array[..len].sort_unstable_by(|left, right| {
+            table.array[..len].sort_by(|left, right| {
                 let left = left
                     .as_number()
                     .expect("numeric table sort validated number values");
