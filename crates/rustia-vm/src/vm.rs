@@ -6808,6 +6808,15 @@ impl Vm {
         let factor = get_register(registers, instruction.b)?;
         let value = get_register(registers, instruction.c)?;
         let (multiplier, modulus) = self.number_constant_pair(program, instruction.aux)?;
+        if let (Some(table), Some(factor_number)) = (object.as_table(), factor.as_number()) {
+            if let Some(index) = mul_mod_const_table_index(factor_number, multiplier, modulus) {
+                if self.set_table_integer_index_with_inline_cache(
+                    program, site, table, index, value, depth, fuel,
+                )? {
+                    return Ok(());
+                }
+            }
+        }
         let key = if let Some(factor) = factor.as_number() {
             Value::number(binary(
                 NumericOp::Mod,
@@ -7809,6 +7818,15 @@ impl Vm {
         let object = get_register(registers, instruction.b)?;
         let factor = get_register(registers, instruction.c)?;
         let (multiplier, modulus) = self.number_constant_pair(program, instruction.aux)?;
+        if let (Some(table), Some(factor_number)) = (object.as_table(), factor.as_number()) {
+            if let Some(index) = mul_mod_const_table_index(factor_number, multiplier, modulus) {
+                if let Some(value) = self.get_table_integer_index_with_inline_cache(
+                    program, site, table, index, depth, fuel,
+                )? {
+                    return Ok(value);
+                }
+            }
+        }
         let key = if let Some(factor) = factor.as_number() {
             Value::number(binary(
                 NumericOp::Mod,
@@ -25133,6 +25151,32 @@ fn array_iterator_index(value: f64) -> Option<usize> {
     }
 }
 
+fn mul_mod_const_table_index(factor: f64, multiplier: f64, modulus: f64) -> Option<usize> {
+    const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+    let factor = exact_nonnegative_integer(factor, MAX_EXACT_INTEGER)?;
+    let multiplier = exact_nonnegative_integer(multiplier, MAX_EXACT_INTEGER)?;
+    let modulus = exact_positive_integer(modulus, MAX_EXACT_INTEGER)?;
+    if multiplier != 0 && factor > (MAX_EXACT_INTEGER as u64) / multiplier {
+        return None;
+    }
+    let index = factor.checked_mul(multiplier)? % modulus;
+    if index == 0 || index > MAX_LUAU_TABLE_INDEX as u64 {
+        return None;
+    }
+    Some(index as usize)
+}
+
+fn exact_nonnegative_integer(value: f64, max: f64) -> Option<u64> {
+    (value.is_finite() && value >= 0.0 && value <= max && value.fract() == 0.0)
+        .then_some(value as u64)
+}
+
+fn exact_positive_integer(value: f64, max: f64) -> Option<u64> {
+    let value = exact_nonnegative_integer(value, max)?;
+    (value != 0).then_some(value)
+}
+
 fn checked_jump(aux: i32) -> Result<usize> {
     if aux < 0 {
         return Err(Error::new(ErrorKind::InvalidProgram {
@@ -28133,10 +28177,10 @@ fn table_expected_error() -> Error {
 #[cfg(test)]
 mod tests {
     use super::{
-        native_function_value, InlineCacheSite, RawTableIntegerGetInlineCacheSource,
-        RawTableStringGetInlineCacheSource, StringSlotIndexCache, TableGetInlineCacheSource,
-        TableIntegerGetInlineCacheSource, TableIntegerSetInlineCacheTarget,
-        TableSetInlineCacheTarget, Value, Vm,
+        mul_mod_const_table_index, native_function_value, InlineCacheSite,
+        RawTableIntegerGetInlineCacheSource, RawTableStringGetInlineCacheSource,
+        StringSlotIndexCache, TableGetInlineCacheSource, TableIntegerGetInlineCacheSource,
+        TableIntegerSetInlineCacheTarget, TableSetInlineCacheTarget, Value, Vm,
     };
     use crate::heap::NativeFunction;
     use crate::{Constant, Function, Instruction, Opcode, Profile, Program};
@@ -28146,6 +28190,21 @@ mod tests {
             Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
             vec![],
         )
+    }
+
+    #[test]
+    fn mul_mod_const_table_index_uses_exact_positive_integer_path() {
+        assert_eq!(
+            mul_mod_const_table_index(64.0, 7919.0, 100003.0),
+            Some((64 * 7919) % 100003)
+        );
+        assert_eq!(mul_mod_const_table_index(0.0, 7919.0, 100003.0), None);
+        assert_eq!(mul_mod_const_table_index(1.5, 7919.0, 100003.0), None);
+        assert_eq!(mul_mod_const_table_index(64.0, 7919.0, 0.0), None);
+        assert_eq!(
+            mul_mod_const_table_index(9_007_199_254_740_991.0, 2.0, 100003.0),
+            None
+        );
     }
 
     #[test]
