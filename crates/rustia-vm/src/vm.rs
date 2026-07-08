@@ -9,8 +9,9 @@ use crate::error::{Error, ErrorKind, ErrorLocation, Result};
 use crate::extension::{validate_registered_op, ExtensionOp, ExtensionRegistry, HostFunctionOp};
 use crate::heap::{
     ArrayWriteStatus, FunctionBytecodeContext, FunctionKind, HashReadStatus, HashWriteStatus,
-    NativeFunction, StringIndexWriteStatus, TableConcatOutcome, TableIterationOrder, TableNext,
-    UpvalueAddConstStatus, UpvalueAddStatus, UserdataPayload, VectorData, VmCell,
+    IntegerIndexReadStatus, NativeFunction, StringIndexWriteStatus, TableConcatOutcome,
+    TableIterationOrder, TableNext, UpvalueAddConstStatus, UpvalueAddStatus, UserdataPayload,
+    VectorData, VmCell,
 };
 use crate::number::{binary, canonicalize_number, NumericOp};
 use crate::profile::Profile;
@@ -7930,33 +7931,24 @@ impl Vm {
         table: u32,
         one_based_index: usize,
     ) -> Result<Option<Value>> {
-        let Some(value) = self
+        match self
             .heap
-            .array_slot(table, one_based_index)
+            .read_integer_index_without_metamethod(table, one_based_index)
             .ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "table handle is missing",
                 })
-            })?
-        else {
-            return self.get_table_integer_hash_key_fast(table, one_based_index);
-        };
-        if value.kind() != ValueKind::Nil || self.table_uses_standard_global_type_surface(table)? {
-            return Ok(Some(value));
+            })? {
+            IntegerIndexReadStatus::Hit(value) => Ok(Some(value)),
+            IntegerIndexReadStatus::NilArraySlotWithMetatable => {
+                if self.table_uses_standard_global_type_surface(table)? {
+                    Ok(Some(Value::nil()))
+                } else {
+                    Ok(None)
+                }
+            }
+            IntegerIndexReadStatus::Deferred => Ok(None),
         }
-        if self
-            .heap
-            .table_metatable(table)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "table handle is missing",
-                })
-            })?
-            .is_none()
-        {
-            return Ok(Some(Value::nil()));
-        }
-        Ok(None)
     }
 
     fn get_table_integer_index_without_inline_cache(
