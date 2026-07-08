@@ -310,6 +310,11 @@ enum TableIntegerSetInlineCacheTarget {
         newindex_table: u32,
         newindex_table_hash_indices: StringSlotIndexCache,
     },
+    NewIndexFunction {
+        metatable: u32,
+        metatable_version: u64,
+        method: Value,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -3308,6 +3313,7 @@ impl Vm {
                                     {
                                         if self
                                             .set_table_integer_index_with_inline_cache(
+                                                program,
                                                 program_id.map(|program| InlineCacheSite {
                                                     program,
                                                     prototype: context.prototype,
@@ -3316,6 +3322,8 @@ impl Vm {
                                                 table,
                                                 index,
                                                 value,
+                                                context.depth,
+                                                fuel,
                                             )
                                             .map_err(|e| {
                                                 attach_instruction_source(
@@ -3390,6 +3398,7 @@ impl Vm {
                                         if let Some(index) = array_iterator_index(number) {
                                             if self
                                                 .set_table_integer_index_with_inline_cache(
+                                                    program,
                                                     program_id.map(|program| InlineCacheSite {
                                                         program,
                                                         prototype: context.prototype,
@@ -3398,6 +3407,8 @@ impl Vm {
                                                     table,
                                                     index,
                                                     value,
+                                                    context.depth,
+                                                    fuel,
                                                 )
                                                 .map_err(|e| {
                                                     attach_instruction_source(
@@ -3444,6 +3455,7 @@ impl Vm {
                                 if let Some(table) = object.as_table() {
                                     if self
                                         .set_table_integer_index_with_inline_cache(
+                                            program,
                                             program_id.map(|program| InlineCacheSite {
                                                 program,
                                                 prototype: context.prototype,
@@ -3452,6 +3464,8 @@ impl Vm {
                                             table,
                                             index,
                                             value,
+                                            context.depth,
+                                            fuel,
                                         )
                                         .map_err(|e| {
                                             attach_instruction_source(program, function, pc - 1, e)
@@ -3567,6 +3581,7 @@ impl Vm {
                                     {
                                         if self
                                             .set_table_integer_index_with_inline_cache(
+                                                program,
                                                 program_id.map(|program| InlineCacheSite {
                                                     program,
                                                     prototype: context.prototype,
@@ -3575,6 +3590,8 @@ impl Vm {
                                                 table,
                                                 index,
                                                 value,
+                                                context.depth,
+                                                fuel,
                                             )
                                             .map_err(|e| {
                                                 attach_instruction_source(
@@ -6624,7 +6641,9 @@ impl Vm {
 
         if let Some(table) = object.as_table() {
             if let Some(index) = key.as_number().and_then(array_iterator_index) {
-                if self.set_table_integer_index_with_inline_cache(site, table, index, value)? {
+                if self.set_table_integer_index_with_inline_cache(
+                    program, site, table, index, value, depth, fuel,
+                )? {
                     return Ok(());
                 }
             }
@@ -6678,7 +6697,9 @@ impl Vm {
 
         if let Some(table) = object.as_table() {
             if let Some(index) = key.as_number().and_then(array_iterator_index) {
-                if self.set_table_integer_index_with_inline_cache(site, table, index, value)? {
+                if self.set_table_integer_index_with_inline_cache(
+                    program, site, table, index, value, depth, fuel,
+                )? {
                     return Ok(());
                 }
             }
@@ -8271,15 +8292,34 @@ impl Vm {
 
     fn set_table_integer_index_with_inline_cache(
         &mut self,
+        program: &Program,
         site: Option<InlineCacheSite>,
         table: u32,
         one_based_index: usize,
         value: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
     ) -> Result<bool> {
         let Some(site) = site else {
             return self.set_table_integer_index_fast(table, one_based_index, value);
         };
         if self.table_integer_set_inline_cache_hit(site, table, one_based_index, value)? {
+            return Ok(true);
+        }
+        if let Some(method) =
+            self.table_integer_newindex_function_inline_cache_hit(site, table, one_based_index)?
+        {
+            self.call_value(
+                program,
+                method,
+                &[
+                    Value::table(table),
+                    Value::number(one_based_index as f64),
+                    value,
+                ],
+                depth.saturating_add(1),
+                fuel,
+            )?;
             return Ok(true);
         }
         if self.try_set_table_integer_hash_index_for_inline_cache(
@@ -8296,6 +8336,24 @@ impl Vm {
             one_based_index,
             value,
         )? {
+            return Ok(true);
+        }
+        if let Some(method) = self.try_set_table_integer_newindex_function_for_inline_cache(
+            site,
+            table,
+            one_based_index,
+        )? {
+            self.call_value(
+                program,
+                method,
+                &[
+                    Value::table(table),
+                    Value::number(one_based_index as f64),
+                    value,
+                ],
+                depth.saturating_add(1),
+                fuel,
+            )?;
             return Ok(true);
         }
         self.clear_table_integer_set_inline_cache_site(site);
@@ -8391,8 +8449,51 @@ impl Vm {
                     }
                 }
             }
+            TableIntegerSetInlineCacheTarget::NewIndexFunction { .. } => {}
         }
         Ok(false)
+    }
+
+    fn table_integer_newindex_function_inline_cache_hit(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+    ) -> Result<Option<Value>> {
+        let slot = self
+            .table_integer_set_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
+        let Some(slot) = slot else {
+            return Ok(None);
+        };
+        if slot.site != site || slot.entry.one_based_index != one_based_index {
+            return Ok(None);
+        }
+        let TableIntegerSetInlineCacheTarget::NewIndexFunction {
+            metatable,
+            metatable_version,
+            method,
+        } = slot.entry.target
+        else {
+            return Ok(None);
+        };
+        if self.table_integer_raw_slot_is_nonnil(table, one_based_index)? {
+            return Ok(None);
+        }
+        if self.heap.table_metatable(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })? != Some(metatable)
+        {
+            return Ok(None);
+        }
+        if self.heap.table_version(metatable) != Some(metatable_version) {
+            return Ok(None);
+        }
+        Ok(Some(method))
     }
 
     fn try_set_table_integer_hash_index_for_inline_cache(
@@ -8525,6 +8626,47 @@ impl Vm {
         }
     }
 
+    fn try_set_table_integer_newindex_function_for_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+    ) -> Result<Option<Value>> {
+        if self.table_integer_raw_slot_is_nonnil(table, one_based_index)? {
+            return Ok(None);
+        }
+        let Some(metatable) = self.heap.table_metatable(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?
+        else {
+            return Ok(None);
+        };
+        let newindex_atom = self.heap.intern_string("__newindex");
+        let method = self.raw_table_get(metatable, Value::string_atom(newindex_atom))?;
+        if method.kind() != ValueKind::Function {
+            return Ok(None);
+        }
+        let metatable_version = self.heap.table_version(metatable).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "__newindex metatable handle is missing",
+            })
+        })?;
+        self.store_table_integer_set_inline_cache(
+            site,
+            TableIntegerSetInlineCacheEntry {
+                one_based_index,
+                target: TableIntegerSetInlineCacheTarget::NewIndexFunction {
+                    metatable,
+                    metatable_version,
+                    method,
+                },
+            },
+        );
+        Ok(Some(method))
+    }
+
     fn store_table_integer_set_inline_cache(
         &mut self,
         site: InlineCacheSite,
@@ -8550,7 +8692,8 @@ impl Vm {
                 TableIntegerSetInlineCacheTarget::DirectHashSlot { hash_indices } => {
                     Some(hash_indices)
                 }
-                TableIntegerSetInlineCacheTarget::NewIndexTableHashSlot { .. } => None,
+                TableIntegerSetInlineCacheTarget::NewIndexTableHashSlot { .. }
+                | TableIntegerSetInlineCacheTarget::NewIndexFunction { .. } => None,
             })
             .map(|indices| indices.with_index(hash_index))
             .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
@@ -8575,7 +8718,8 @@ impl Vm {
                     ..
                 } if cached_newindex_table == newindex_table => Some(newindex_table_hash_indices),
                 TableIntegerSetInlineCacheTarget::DirectHashSlot { .. }
-                | TableIntegerSetInlineCacheTarget::NewIndexTableHashSlot { .. } => None,
+                | TableIntegerSetInlineCacheTarget::NewIndexTableHashSlot { .. }
+                | TableIntegerSetInlineCacheTarget::NewIndexFunction { .. } => None,
             })
             .map(|indices| indices.with_index(hash_index))
             .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
@@ -27918,6 +28062,7 @@ mod tests {
     #[test]
     fn integer_newindex_table_set_cache_observes_delegate_reassignment() {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
         let newindex_atom = vm.heap.intern_string("__newindex");
         let table = vm.heap.alloc_array_table(&[]);
         let metatable = vm.heap.alloc_array_table(&[]);
@@ -27942,9 +28087,18 @@ mod tests {
             prototype: None,
             pc: 9,
         };
+        let mut fuel = None;
 
         assert!(vm
-            .set_table_integer_index_with_inline_cache(Some(site), table, 20, Value::number(1.0),)
+            .set_table_integer_index_with_inline_cache(
+                &program,
+                Some(site),
+                table,
+                20,
+                Value::number(1.0),
+                0,
+                &mut fuel,
+            )
             .unwrap());
         let slot = vm.table_integer_set_inline_cache[site.slot()]
             .expect("numeric newindex table writes should populate the set cache");
@@ -27964,7 +28118,15 @@ mod tests {
             )
             .unwrap();
         assert!(vm
-            .set_table_integer_index_with_inline_cache(Some(site), table, 20, Value::number(2.0),)
+            .set_table_integer_index_with_inline_cache(
+                &program,
+                Some(site),
+                table,
+                20,
+                Value::number(2.0),
+                0,
+                &mut fuel,
+            )
             .unwrap());
 
         assert_eq!(
@@ -27986,6 +28148,7 @@ mod tests {
     #[test]
     fn integer_newindex_table_set_cache_defers_to_original_slot() {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
         let newindex_atom = vm.heap.intern_string("__newindex");
         let table = vm.heap.alloc_array_table(&[]);
         let metatable = vm.heap.alloc_array_table(&[]);
@@ -28006,15 +28169,32 @@ mod tests {
             prototype: None,
             pc: 9,
         };
+        let mut fuel = None;
 
         assert!(vm
-            .set_table_integer_index_with_inline_cache(Some(site), table, 20, Value::number(1.0),)
+            .set_table_integer_index_with_inline_cache(
+                &program,
+                Some(site),
+                table,
+                20,
+                Value::number(1.0),
+                0,
+                &mut fuel,
+            )
             .unwrap());
         vm.heap
             .table_set(table, Value::number(20.0), Value::number(5.0))
             .unwrap();
         assert!(vm
-            .set_table_integer_index_with_inline_cache(Some(site), table, 20, Value::number(7.0),)
+            .set_table_integer_index_with_inline_cache(
+                &program,
+                Some(site),
+                table,
+                20,
+                Value::number(7.0),
+                0,
+                &mut fuel,
+            )
             .unwrap());
 
         assert_eq!(
@@ -28024,6 +28204,130 @@ mod tests {
                 .as_number(),
             Some(1.0)
         );
+        assert_eq!(
+            vm.heap
+                .table_get(table, Value::number(20.0))
+                .unwrap()
+                .as_number(),
+            Some(7.0)
+        );
+    }
+
+    #[test]
+    fn integer_newindex_function_set_cache_observes_metamethod_reassignment() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let newindex_atom = vm.heap.intern_string("__newindex");
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let delegate = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(delegate, Value::number(20.0), Value::number(0.0))
+            .unwrap();
+        let first_method = native_function_value(&mut vm.heap, NativeFunction::TypeOf, vm.globals);
+        vm.heap
+            .table_set(metatable, Value::string_atom(newindex_atom), first_method)
+            .unwrap();
+        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 9,
+        };
+        let mut fuel = None;
+
+        assert!(vm
+            .set_table_integer_index_with_inline_cache(
+                &program,
+                Some(site),
+                table,
+                20,
+                Value::number(1.0),
+                0,
+                &mut fuel,
+            )
+            .unwrap());
+        let slot = vm.table_integer_set_inline_cache[site.slot()]
+            .expect("numeric __newindex function writes should populate the set cache");
+        assert!(matches!(
+            slot.entry.target,
+            TableIntegerSetInlineCacheTarget::NewIndexFunction { method, .. }
+                if method.as_function() == first_method.as_function()
+        ));
+
+        vm.heap
+            .table_set(
+                metatable,
+                Value::string_atom(newindex_atom),
+                Value::table(delegate),
+            )
+            .unwrap();
+        assert!(vm
+            .set_table_integer_index_with_inline_cache(
+                &program,
+                Some(site),
+                table,
+                20,
+                Value::number(2.0),
+                0,
+                &mut fuel,
+            )
+            .unwrap());
+
+        assert_eq!(
+            vm.heap
+                .table_get(delegate, Value::number(20.0))
+                .unwrap()
+                .as_number(),
+            Some(2.0)
+        );
+    }
+
+    #[test]
+    fn integer_newindex_function_set_cache_defers_to_original_slot() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let newindex_atom = vm.heap.intern_string("__newindex");
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let method = native_function_value(&mut vm.heap, NativeFunction::TypeOf, vm.globals);
+        vm.heap
+            .table_set(metatable, Value::string_atom(newindex_atom), method)
+            .unwrap();
+        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 9,
+        };
+        let mut fuel = None;
+
+        assert!(vm
+            .set_table_integer_index_with_inline_cache(
+                &program,
+                Some(site),
+                table,
+                20,
+                Value::number(1.0),
+                0,
+                &mut fuel,
+            )
+            .unwrap());
+        vm.heap
+            .table_set(table, Value::number(20.0), Value::number(5.0))
+            .unwrap();
+        assert!(vm
+            .set_table_integer_index_with_inline_cache(
+                &program,
+                Some(site),
+                table,
+                20,
+                Value::number(7.0),
+                0,
+                &mut fuel,
+            )
+            .unwrap());
+
         assert_eq!(
             vm.heap
                 .table_get(table, Value::number(20.0))

@@ -12090,6 +12090,87 @@ return seen + (delegate[20] == nil and 100 or 0)
     }
 
     #[test]
+    fn numeric_newindex_function_write_cache_calls_repeated_function() {
+        let chunk = parse_source(
+            r#"
+local seen = 0
+local t = {}
+setmetatable(t, {
+    __newindex = function(_, key, value)
+        if key == 20 then
+            seen = seen + value
+        end
+    end,
+})
+t[20] = 1
+t[20] = 2
+return seen
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexNumberConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(3.0));
+    }
+
+    #[test]
+    fn numeric_newindex_function_write_cache_observes_function_reassignment() {
+        let chunk = parse_source(
+            r#"
+local first = 0
+local second = { [20] = 0 }
+local mt = {
+    __newindex = function(_, _, value)
+        first = value
+    end,
+}
+local t = {}
+setmetatable(t, mt)
+t[20] = 1
+mt.__newindex = second
+t[20] = 2
+return first * 10 + second[20]
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexNumberConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(12.0));
+    }
+
+    #[test]
+    fn numeric_newindex_function_write_cache_observes_original_slot_creation() {
+        let chunk = parse_source(
+            r#"
+local seen = 0
+local t = {}
+setmetatable(t, {
+    __newindex = function(_, _, value)
+        seen = value
+    end,
+})
+t[20] = 1
+rawset(t, 20, 5)
+t[20] = 7
+return seen * 10 + t[20]
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexNumberConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(17.0));
+    }
+
+    #[test]
     fn index_read_lowering_preserves_side_effect_order() {
         let chunk = parse_source(
             r#"
