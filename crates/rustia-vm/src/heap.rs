@@ -1806,6 +1806,37 @@ impl VmCell {
         })
     }
 
+    pub(crate) fn write_integer_shape_hash_slot_at_index_raw(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+        shape_version: u64,
+        index: usize,
+        value: Value,
+    ) -> Option<HashWriteStatus> {
+        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
+            return Some(HashWriteStatus::Deferred);
+        }
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let table = root.tables.get_mut(table as usize)?;
+            if one_based_index <= table.array.len().saturating_add(1)
+                || table.shape_version != shape_version
+            {
+                return Some(HashWriteStatus::Deferred);
+            }
+            let Some(entry) = table.hash.get_mut(index) else {
+                return Some(HashWriteStatus::Deferred);
+            };
+            if table.readonly {
+                return Some(HashWriteStatus::Readonly);
+            }
+            entry.value = value;
+            bump_table_version(table);
+            Some(HashWriteStatus::Stored)
+        })
+    }
+
     pub(crate) fn table_string_hash_slot(
         &mut self,
         table: u32,
@@ -1979,6 +2010,35 @@ impl VmCell {
             if entry.key != TableKey::String(atom) {
                 return Some(HashWriteStatus::Deferred);
             }
+            if table.readonly {
+                return Some(HashWriteStatus::Readonly);
+            }
+            entry.value = value;
+            bump_table_version(table);
+            Some(HashWriteStatus::Stored)
+        })
+    }
+
+    pub(crate) fn write_string_shape_hash_slot_at_index_raw(
+        &mut self,
+        table: u32,
+        atom: u32,
+        shape_version: u64,
+        index: usize,
+        value: Value,
+    ) -> Option<HashWriteStatus> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            if string_atom_is(&root, atom, b"__mode") {
+                root.weak_tables_possible = true;
+            }
+            let table = root.tables.get_mut(table as usize)?;
+            if table.shape_version != shape_version {
+                return Some(HashWriteStatus::Deferred);
+            }
+            let Some(entry) = table.hash.get_mut(index) else {
+                return Some(HashWriteStatus::Deferred);
+            };
             if table.readonly {
                 return Some(HashWriteStatus::Readonly);
             }
