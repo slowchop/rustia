@@ -1755,6 +1755,34 @@ impl VmCell {
         })
     }
 
+    pub(crate) fn write_string_hash_slot_at_index_raw(
+        &mut self,
+        table: u32,
+        atom: u32,
+        index: usize,
+        value: Value,
+    ) -> Option<HashWriteStatus> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            if string_atom_is(&root, atom, b"__mode") {
+                root.weak_tables_possible = true;
+            }
+            let table = root.tables.get_mut(table as usize)?;
+            let Some(entry) = table.hash.get_mut(index) else {
+                return Some(HashWriteStatus::Deferred);
+            };
+            if entry.key != TableKey::String(atom) {
+                return Some(HashWriteStatus::Deferred);
+            }
+            if table.readonly {
+                return Some(HashWriteStatus::Readonly);
+            }
+            entry.value = value;
+            bump_table_version(table);
+            Some(HashWriteStatus::Stored)
+        })
+    }
+
     pub fn table_sort_numeric_array(&mut self, table: u32, len: usize) -> Option<bool> {
         if len < 2 {
             return Some(true);

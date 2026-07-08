@@ -10131,6 +10131,59 @@ mod tests {
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(7.0));
 
+        let cache_cases = [
+            (
+                "\
+                local t = {}
+                local sum = 0
+                for i = 1, 5 do
+                    if i == 3 then
+                        rawset(t, 'x', 7)
+                    end
+                    local v = rawget(t, 'x')
+                    sum += v or 1
+                end
+                return sum
+                ",
+                23.0,
+            ),
+            (
+                "\
+                local mt = {
+                    __index = { x = 99 },
+                    __newindex = function()
+                        error('rawset should not call __newindex')
+                    end,
+                }
+                local t = { x = 1 }
+                setmetatable(t, mt)
+                local sum = 0
+                for i = 1, 5 do
+                    if i == 2 then
+                        rawset(t, 'x', nil)
+                    end
+                    if i == 4 then
+                        rawset(t, 'x', 3)
+                    end
+                    local v = rawget(t, 'x')
+                    sum += v or 10
+                end
+                return sum
+                ",
+                27.0,
+            ),
+        ];
+
+        for (source, expected) in cache_cases {
+            let chunk = parse_source(source).unwrap();
+            let program = compile(&chunk).unwrap();
+            assert!(opcode_count(&program, Opcode::RawGetStringConst) >= 1);
+            assert!(opcode_count(&program, Opcode::RawSetStringConst) >= 1);
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            let result = vm.run(&program).unwrap();
+            assert_eq!(result.as_number(), Some(expected));
+        }
+
         let nil_cases = [
             "local t = {} return rawget(t, nil)",
             "local t = {} return rawget(t, 0/0)",
