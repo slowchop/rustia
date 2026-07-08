@@ -11029,6 +11029,35 @@ impl Vm {
                 reason: "table handle is missing",
             }));
         }
+        if table_find_can_bulk_scan(needle) {
+            let len = self.heap.array_len(table).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?;
+            if start <= len {
+                if let Some(values) = self
+                    .heap
+                    .table_array_range_values(table, start, len)
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "table handle is missing",
+                        })
+                    })?
+                {
+                    for (offset, value) in values.into_iter().enumerate() {
+                        if value.kind() == ValueKind::Nil {
+                            return Ok(Value::nil());
+                        }
+                        let index = start + offset;
+                        if self.equal_values(program, value, needle, depth, fuel)? {
+                            return Ok(Value::number(index as f64));
+                        }
+                    }
+                    return Ok(Value::nil());
+                }
+            }
+        }
         let mut index = start;
         loop {
             let value = self.raw_table_get(table, Value::number(index as f64))?;
@@ -24968,6 +24997,10 @@ fn table_find_start(value: f64) -> Result<usize> {
         }));
     }
     Ok(value as usize)
+}
+
+fn table_find_can_bulk_scan(needle: Value) -> bool {
+    !matches!(needle.kind(), ValueKind::Table | ValueKind::Userdata)
 }
 
 fn table_create_size(value: f64) -> Result<usize> {
