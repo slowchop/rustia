@@ -161,6 +161,14 @@ impl InlineCacheSite {
             ^ (self.pc as u64).rotate_left(32);
         (hash as usize) % GLOBAL_GET_INLINE_CACHE_SLOTS
     }
+
+    fn keyed_by_atom(self, key_atom: u32) -> Self {
+        let salt = (u64::from(key_atom) + 1).wrapping_mul(0xBF58_476D_1CE4_E5B9) as usize;
+        Self {
+            pc: self.pc ^ salt.rotate_left(13),
+            ..self
+        }
+    }
 }
 
 struct RecordKeyAtomPlan {
@@ -2277,8 +2285,25 @@ impl Vm {
                                         continue;
                                     }
                                     if let Some(key_atom) = key.as_string_atom() {
-                                        let value = self
-                                            .get_table_string_index_without_inline_cache(
+                                        let value = if let Some(site) = program_id.map(|program| {
+                                            InlineCacheSite {
+                                                program,
+                                                prototype: context.prototype,
+                                                pc: pc - 1,
+                                            }
+                                            .keyed_by_atom(key_atom)
+                                        }) {
+                                            self.get_table_string_index_with_inline_cache(
+                                                program,
+                                                site,
+                                                table,
+                                                key,
+                                                key_atom,
+                                                context.depth,
+                                                fuel,
+                                            )
+                                        } else {
+                                            self.get_table_string_index_without_inline_cache(
                                                 program,
                                                 table,
                                                 key,
@@ -2286,14 +2311,10 @@ impl Vm {
                                                 context.depth,
                                                 fuel,
                                             )
-                                            .map_err(|e| {
-                                                attach_instruction_source(
-                                                    program,
-                                                    function,
-                                                    pc - 1,
-                                                    e,
-                                                )
-                                            })?;
+                                        }
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })?;
                                         set_register(&mut registers, instruction.a, value)
                                             .map_err(|e| {
                                                 attach_instruction_source(
@@ -2988,13 +3009,14 @@ impl Vm {
                                         }
                                     }
                                     if let Some(key_atom) = key.as_string_atom() {
-                                        if let Some(site) =
-                                            program_id.map(|program| InlineCacheSite {
+                                        if let Some(site) = program_id.map(|program| {
+                                            InlineCacheSite {
                                                 program,
                                                 prototype: context.prototype,
                                                 pc: pc - 1,
-                                            })
-                                        {
+                                            }
+                                            .keyed_by_atom(key_atom)
+                                        }) {
                                             let value = self
                                                 .get_table_string_index_with_inline_cache(
                                                     program,
@@ -3505,13 +3527,14 @@ impl Vm {
                                         }
                                     }
                                     if let Some(key_atom) = key.as_string_atom() {
-                                        if let Some(site) =
-                                            program_id.map(|program| InlineCacheSite {
+                                        if let Some(site) = program_id.map(|program| {
+                                            InlineCacheSite {
                                                 program,
                                                 prototype: context.prototype,
                                                 pc: pc - 1,
-                                            })
-                                        {
+                                            }
+                                            .keyed_by_atom(key_atom)
+                                        }) {
                                             self.set_table_string_index_with_inline_cache(
                                                 program,
                                                 site,
@@ -3798,15 +3821,35 @@ impl Vm {
                                         continue;
                                     }
                                     if let Some(key_atom) = key.as_string_atom() {
-                                        self.set_table_string_index_without_inline_cache(
-                                            program,
-                                            table,
-                                            key,
-                                            key_atom,
-                                            value,
-                                            context.depth,
-                                            fuel,
-                                        )
+                                        if let Some(site) = program_id.map(|program| {
+                                            InlineCacheSite {
+                                                program,
+                                                prototype: context.prototype,
+                                                pc: pc - 1,
+                                            }
+                                            .keyed_by_atom(key_atom)
+                                        }) {
+                                            self.set_table_string_index_with_inline_cache(
+                                                program,
+                                                site,
+                                                table,
+                                                key,
+                                                key_atom,
+                                                value,
+                                                context.depth,
+                                                fuel,
+                                            )
+                                        } else {
+                                            self.set_table_string_index_without_inline_cache(
+                                                program,
+                                                table,
+                                                key,
+                                                key_atom,
+                                                value,
+                                                context.depth,
+                                                fuel,
+                                            )
+                                        }
                                         .map_err(|e| {
                                             attach_instruction_source(program, function, pc - 1, e)
                                         })?;
@@ -28697,6 +28740,12 @@ mod tests {
             vm.table_set_inline_cache[set_site.slot()].is_none_or(|slot| slot.site != set_site),
             "dynamic concat string-key writes should not churn the set cache"
         );
+        let key_atom = vm.heap.intern_string("kx");
+        let keyed_set_site = set_site.keyed_by_atom(key_atom);
+        let keyed_set_slot = vm.table_set_inline_cache[keyed_set_site.slot()]
+            .expect("dynamic concat string-key writes should populate a keyed set cache");
+        assert_eq!(keyed_set_slot.site, keyed_set_site);
+        assert_eq!(keyed_set_slot.entry.key_atom, key_atom);
 
         let get_site = InlineCacheSite {
             program: 0,
@@ -28707,6 +28756,11 @@ mod tests {
             vm.table_get_inline_cache[get_site.slot()].is_none_or(|slot| slot.site != get_site),
             "dynamic concat string-key reads should not churn the get cache"
         );
+        let keyed_get_site = get_site.keyed_by_atom(key_atom);
+        let keyed_get_slot = vm.table_get_inline_cache[keyed_get_site.slot()]
+            .expect("dynamic concat string-key reads should populate a keyed get cache");
+        assert_eq!(keyed_get_slot.site, keyed_get_site);
+        assert_eq!(keyed_get_slot.entry.key_atom, key_atom);
     }
 
     #[test]
