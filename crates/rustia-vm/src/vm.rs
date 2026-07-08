@@ -8574,6 +8574,26 @@ impl Vm {
         }
     }
 
+    fn set_table_integer_array_index_fast(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+    ) -> Result<bool> {
+        match self
+            .heap
+            .write_integer_array_index_without_metamethod(table, one_based_index, value)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })? {
+            ArrayWriteStatus::Stored => Ok(true),
+            ArrayWriteStatus::Deferred => Ok(false),
+            ArrayWriteStatus::Readonly => Err(readonly_table_error()),
+        }
+    }
+
     fn set_table_integer_index_with_inline_cache(
         &mut self,
         program: &Program,
@@ -8587,6 +8607,9 @@ impl Vm {
         let Some(site) = site else {
             return self.set_table_integer_index_fast(table, one_based_index, value);
         };
+        if self.set_table_integer_array_index_fast(table, one_based_index, value)? {
+            return Ok(true);
+        }
         if self.table_integer_set_inline_cache_hit(site, table, one_based_index, value)? {
             return Ok(true);
         }

@@ -1548,6 +1548,48 @@ impl VmCell {
         })
     }
 
+    pub(crate) fn write_integer_array_index_without_metamethod(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+    ) -> Option<ArrayWriteStatus> {
+        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
+            return Some(ArrayWriteStatus::Deferred);
+        }
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let table = root.tables.get_mut(table as usize)?;
+            let array_len = table.array.len();
+            if one_based_index > array_len.saturating_add(1) {
+                return Some(ArrayWriteStatus::Deferred);
+            }
+            if one_based_index > array_len && value.kind() == ValueKind::Nil {
+                return Some(ArrayWriteStatus::Deferred);
+            }
+            if table.metatable.is_some() {
+                let existing = table.array.get(one_based_index - 1).copied();
+                if !existing.is_some_and(|value| value.kind() != ValueKind::Nil) {
+                    return Some(ArrayWriteStatus::Deferred);
+                }
+            }
+            if table.readonly {
+                return Some(ArrayWriteStatus::Readonly);
+            }
+            bump_table_version(table);
+            if one_based_index == table.array.len().saturating_add(1) {
+                table.array.push(value);
+            } else {
+                table.array[one_based_index - 1] = value;
+            }
+            if !table.hash.is_empty() {
+                let key = number_table_key(one_based_index as f64)?;
+                remove_hash_key(table, key);
+            }
+            Some(ArrayWriteStatus::Stored)
+        })
+    }
+
     pub(crate) fn write_integer_index_without_metamethod(
         &mut self,
         table: u32,
@@ -3909,6 +3951,48 @@ mod tests {
             .read_integer_hash_slot_at_index(different, 8, slot.index)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn integer_array_write_fast_path_appends_dense_slots() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+
+        assert_eq!(
+            heap.write_integer_array_index_without_metamethod(table, 1, Value::number(7.0)),
+            Some(ArrayWriteStatus::Stored)
+        );
+        assert_eq!(
+            heap.array_slot(table, 1).unwrap().unwrap().as_number(),
+            Some(7.0)
+        );
+        assert!(heap.table_integer_hash_slot(table, 1).unwrap().is_none());
+    }
+
+    #[test]
+    fn integer_array_write_fast_path_defers_sparse_slots() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+
+        assert_eq!(
+            heap.write_integer_array_index_without_metamethod(table, 8, Value::number(7.0)),
+            Some(ArrayWriteStatus::Deferred)
+        );
+        assert!(heap.table_integer_hash_slot(table, 8).unwrap().is_none());
+    }
+
+    #[test]
+    fn integer_array_write_fast_path_defers_absent_metatable_slots() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+        let metatable = heap.alloc_array_table(&[]);
+        heap.table_set_metatable(table, Some(metatable)).unwrap();
+
+        assert_eq!(
+            heap.write_integer_array_index_without_metamethod(table, 1, Value::number(7.0)),
+            Some(ArrayWriteStatus::Deferred)
+        );
+        assert!(heap.array_slot(table, 1).unwrap().is_none());
     }
 
     #[test]
