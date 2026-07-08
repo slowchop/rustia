@@ -11035,7 +11035,74 @@ impl Vm {
         if slot.site != site {
             return Ok(None);
         }
-        self.table_get_inline_cache_entry_hit(slot.entry, table)
+        let entry = slot.entry;
+        if let TableGetInlineCacheSource::DirectSlot {
+            shape_slot,
+            hash_indices,
+        } = entry.source
+        {
+            return self.table_get_direct_slot_inline_cache_hit(
+                table,
+                entry.key_atom,
+                shape_slot,
+                hash_indices,
+            );
+        }
+        self.table_get_inline_cache_entry_hit(entry, table)
+    }
+
+    #[inline]
+    fn table_get_direct_slot_inline_cache_hit(
+        &mut self,
+        table: u32,
+        key_atom: u32,
+        shape_slot: TableShapeSlotCache,
+        hash_indices: StringSlotIndexCache,
+    ) -> Result<Option<Value>> {
+        if shape_slot.table == table {
+            let exact_slot = self
+                .heap
+                .read_string_shape_hash_slot_at_index(
+                    table,
+                    shape_slot.table_shape_version,
+                    shape_slot.hash_index,
+                )
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    })
+                })?;
+            if let Some(slot) = exact_slot {
+                if slot.value.kind() != ValueKind::Nil
+                    || !slot.has_metatable
+                    || self.table_uses_standard_global_type_surface(table)?
+                {
+                    return Ok(Some(slot.value));
+                }
+                return Ok(None);
+            }
+        }
+        for hash_index in hash_indices.iter() {
+            let Some(slot) = self
+                .heap
+                .read_string_hash_slot_at_index(table, key_atom, hash_index)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    })
+                })?
+            else {
+                continue;
+            };
+            if slot.value.kind() != ValueKind::Nil
+                || !slot.has_metatable
+                || self.table_uses_standard_global_type_surface(table)?
+            {
+                return Ok(Some(slot.value));
+            }
+            return Ok(None);
+        }
+        Ok(None)
     }
 
     fn table_get_inline_cache_entry_hit(
@@ -11048,52 +11115,12 @@ impl Vm {
             TableGetInlineCacheSource::DirectSlot {
                 shape_slot,
                 hash_indices,
-            } => {
-                if shape_slot.table == table {
-                    let exact_slot = self
-                        .heap
-                        .read_string_shape_hash_slot_at_index(
-                            table,
-                            shape_slot.table_shape_version,
-                            shape_slot.hash_index,
-                        )
-                        .ok_or_else(|| {
-                            Error::new(ErrorKind::InvalidProgram {
-                                reason: "table handle is missing",
-                            })
-                        })?;
-                    if let Some(slot) = exact_slot {
-                        if slot.value.kind() != ValueKind::Nil
-                            || !slot.has_metatable
-                            || self.table_uses_standard_global_type_surface(table)?
-                        {
-                            return Ok(Some(slot.value));
-                        }
-                        return Ok(None);
-                    }
-                }
-                for hash_index in hash_indices.iter() {
-                    let Some(slot) = self
-                        .heap
-                        .read_string_hash_slot_at_index(table, key_atom, hash_index)
-                        .ok_or_else(|| {
-                            Error::new(ErrorKind::InvalidProgram {
-                                reason: "table handle is missing",
-                            })
-                        })?
-                    else {
-                        continue;
-                    };
-                    if slot.value.kind() != ValueKind::Nil
-                        || !slot.has_metatable
-                        || self.table_uses_standard_global_type_surface(table)?
-                    {
-                        return Ok(Some(slot.value));
-                    }
-                    return Ok(None);
-                }
-                Ok(None)
-            }
+            } => self.table_get_direct_slot_inline_cache_hit(
+                table,
+                key_atom,
+                shape_slot,
+                hash_indices,
+            ),
             TableGetInlineCacheSource::DirectAbsent {
                 table: cached_table,
                 table_shape_version,
