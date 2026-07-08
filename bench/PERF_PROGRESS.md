@@ -91,7 +91,7 @@ Current feedback:
 | --- | --- |
 | `dense_tables` | one direct table-get slot; array writes and dynamic numeric writes do not leave exact-key IC entries |
 | `sparse_tables` | no table IC occupancy; dynamic concat string keys and scattered numeric keys intentionally avoid exact-key IC churn |
-| `generic_iteration` | one direct table-get slot, one direct table-set slot, plus one iter metamethod slot and one len slot |
+| `generic_iteration` | two direct table-get slots after fixing IC site hashing, one direct table-set slot, plus one iter metamethod slot and one len slot |
 | `stdlib_math_table` | one global-get slot and one direct table-get slot from setup; the hot loop is mostly math/table write/sort work |
 
 `cargo run -p script-bench-harness --features rustia-hot-site-summary -- --rustia-hot-site-summary`
@@ -110,8 +110,14 @@ Current sample signal from
 
 | workload | IC probe signal |
 | --- | --- |
-| `generic_iteration` | two `TableStringGet` sites had 64 probes, 0 hits, 64 misses, and 64 fills each; these sites refill every outer call and never become reusable |
+| `generic_iteration` | before the IC slot hash fix, two `TableStringGet` sites had 64 probes, 0 hits, 64 misses, and 64 fills each; after changing site hashing to mix low bits, both sites report 64 probes, 63 hits, 1 miss, and 1 fill |
 | `dense_tables` | one `TableStringGet` site had 64 probes, 63 hits, 1 miss, and 1 fill; this is the healthy warm-cache shape |
+
+The IC slot hash fix matters because the table uses 1024 slots. The previous
+hash rotated small `pc` and prototype values before taking `% 1024`, which
+dropped those values out of the low bits and made many main-program sites
+collide. The new odd-multiplier mix keeps `program`, `prototype`, and `pc`
+visible to the slot index.
 
 ## Next Serious Bets
 

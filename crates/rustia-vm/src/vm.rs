@@ -313,9 +313,9 @@ struct InlineCacheSite {
 impl InlineCacheSite {
     fn slot(self) -> usize {
         let prototype = self.prototype.unwrap_or(u32::MAX);
-        let hash = u64::from(self.program).wrapping_mul(0x9E37_79B9_7F4A_7C15)
-            ^ u64::from(prototype).rotate_left(17)
-            ^ (self.pc as u64).rotate_left(32);
+        let hash = (self.program as usize).wrapping_mul(0x9E37_79B1)
+            ^ (prototype as usize).wrapping_mul(0x85EB_CA77)
+            ^ self.pc.wrapping_mul(0xC2B2_AE3D);
         (hash as usize) % GLOBAL_GET_INLINE_CACHE_SLOTS
     }
 }
@@ -29362,6 +29362,29 @@ mod tests {
             Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
             vec![],
         )
+    }
+
+    #[test]
+    fn inline_cache_site_slot_mixes_program_prototype_and_pc() {
+        let first = InlineCacheSite {
+            program: 0,
+            prototype: Some(0),
+            pc: 3,
+        };
+        let second = InlineCacheSite {
+            program: 0,
+            prototype: Some(3),
+            pc: 24,
+        };
+        let third = InlineCacheSite {
+            program: 0,
+            prototype: Some(0),
+            pc: 24,
+        };
+
+        assert_ne!(first.slot(), second.slot());
+        assert_ne!(first.slot(), third.slot());
+        assert_ne!(second.slot(), third.slot());
     }
 
     #[cfg(feature = "opcode-profiling")]
