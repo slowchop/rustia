@@ -71,6 +71,7 @@ jobs:
           node tools/check-benchmark-results.js
           node bench/render-current-results.js --check
           node bench/render-claims.js --check
+          node bench/render-scoreboard.js --check
           node tools/check-benchmark-site.js
 
       - name: Check rustia examples

@@ -10,6 +10,7 @@ const root = path.resolve(__dirname, "..");
 const expectedResults = path.join(root, "bench", "RESULTS.md");
 const expectedJson = path.join(root, "bench", "current-results.json");
 const expectedClaims = path.join(root, "bench", "CLAIMS.md");
+const expectedScoreboard = path.join(root, "bench", "SCOREBOARD.md");
 
 function fail(message) {
   console.error(`check-benchmark-results: ${message}`);
@@ -74,6 +75,7 @@ try {
   const actualResults = path.join(tempDir, "RESULTS.md");
   const actualJson = path.join(tempDir, "current-results.json");
   const actualClaims = path.join(tempDir, "CLAIMS.md");
+  const actualScoreboard = path.join(tempDir, "SCOREBOARD.md");
   runCargo([
     "run",
     "-p",
@@ -95,7 +97,17 @@ try {
     actualClaims,
   ]);
   compare(expectedClaims, actualClaims, "just gen-current-results");
-  console.log("benchmark markdown, JSON, and claim results are current");
+  runNode([
+    path.join(root, "bench", "render-scoreboard.js"),
+    "--source",
+    actualJson,
+    "--wasm-source",
+    path.join(root, "bench", "wasm", "current-results.json"),
+    "--output",
+    actualScoreboard,
+  ]);
+  compare(expectedScoreboard, actualScoreboard, "just gen-current-results");
+  console.log("benchmark markdown, JSON, claim, and scoreboard results are current");
 } finally {
   fs.rmSync(tempDir, { recursive: true, force: true });
 }

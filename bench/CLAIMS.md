@@ -9,17 +9,22 @@ snapshot.
 ## Snapshot
 
 - Source history: `bench/history/runs.jsonl`
-- Rows: 50
-- Targets: `macos-aarch64`
+- Rows: 100
+- Targets: `linux-x86_64`, `macos-aarch64`
 - Workloads: `closures_upvalues`, `dense_tables`, `generic_iteration`, `sparse_tables`, `stdlib_math_table`
-- Measurement window: 2026-07-03 01:53:44 UTC to 2026-07-03 02:27:20 UTC
+- Measurement window: 2026-07-03 01:53:44 UTC to 2026-07-07 23:48:18 UTC
 - Global public speed headline: **not approved from this snapshot**
-- Reason: 5 of 5 current workload claims are not public-ready against the mlua-luau reference row.
+- Reason: 10 of 10 current workload claims are not public-ready against the mlua-luau reference row.
 
 ## Per-Workload Claim Gate
 
 | target | workload | unit | rustia min ns/unit | rustia rank | fastest engine | fastest vs rustia | mlua-luau vs rustia | koto vs rustia | claim posture |
 |---|---|---|---:|---:|---|---:|---:|---:|---|
+| linux-x86_64 | closures_upvalues | one upvalue-mutating closure call | 318 | 7 / 10 | roto | 64.84x | 5.984x | 1.121x | not public-ready: rustia trails mlua-luau by 5.984x |
+| linux-x86_64 | dense_tables | build+sum+sort of 256-elem array | 34,222 | 4 / 10 | wasmtime | 75.73x | 1.973x | 0.141x | not public-ready: rustia trails mlua-luau by 1.973x |
+| linux-x86_64 | generic_iteration | __iter(32)+pairs(5)+ipairs(32) pass | 17,336 | 9 / 10 | wasmtime | 172x | 4.576x | 3.038x | not public-ready: rustia trails mlua-luau by 4.576x |
+| linux-x86_64 | sparse_tables | fill+read 128 hash entries | 38,831 | 5 / 10 | wasmtime | 86.42x | 2.108x | 0.306x | not public-ready: rustia trails mlua-luau by 2.108x |
+| linux-x86_64 | stdlib_math_table | math fastcalls + buffered push | 499 | 6 / 10 | wasmtime | 85.89x | 2.389x | 0.358x | not public-ready: rustia trails mlua-luau by 2.389x |
 | macos-aarch64 | closures_upvalues | one upvalue-mutating closure call | 421 | 8 / 10 | roto | 111x | 19.91x | 3.48x | not public-ready: rustia trails mlua-luau by 19.91x |
 | macos-aarch64 | dense_tables | build+sum+sort of 256-elem array | 132,121 | 8 / 10 | wasmtime | 685x | 13.54x | 1.336x | not public-ready: rustia trails mlua-luau by 13.54x |
 | macos-aarch64 | generic_iteration | __iter(32)+pairs(5)+ipairs(32) pass | 17,533 | 10 / 10 | wasmtime | 222x | 8.247x | 7.56x | not public-ready: rustia trails mlua-luau by 8.247x |
@@ -33,12 +38,22 @@ These geomeans are useful for triage, but they are not public headline claims.
 | engine target | geomean vs rustia | fastest workloads | target detail | coverage |
 |---|---:|---:|---|---|
 | wasmtime (aarch64) | 235x | 4 / 5 | macos-aarch64 | 5 workloads |
+| wasmtime (x86_64) | 64.16x | 4 / 5 | linux-x86_64 | 5 workloads |
 | wasmi (aarch64) | 61.61x | 0 / 5 | macos-aarch64 | 5 workloads |
+| wasmi (x86_64) | 13.68x | 0 / 5 | linux-x86_64 | 5 workloads |
 | mlua-luau (aarch64) | 12.96x | 0 / 5 | macos-aarch64 | 5 workloads |
 | mlua-lua54 (aarch64) | 10.56x | 0 / 5 | macos-aarch64 | 5 workloads |
 | roto (aarch64) | 5.111x | 1 / 5 | macos-aarch64 | 5 workloads |
 | rquickjs (aarch64) | 3.098x | 0 / 5 | macos-aarch64 | 5 workloads |
+| mlua-luau (x86_64) | 3.069x | 0 / 5 | linux-x86_64 | 5 workloads |
+| mlua-lua54 (x86_64) | 2.823x | 0 / 5 | linux-x86_64 | 5 workloads |
 | koto (aarch64) | 2.696x | 0 / 5 | macos-aarch64 | 5 workloads |
+| roto (x86_64) | 1.926x | 1 / 5 | linux-x86_64 | 5 workloads |
 | rhai (aarch64) | 1.418x | 0 / 5 | macos-aarch64 | 5 workloads |
+| rustia (x86_64) | 1x | 0 / 5 | linux-x86_64 | 5 workloads |
 | rustia (aarch64) | 1x | 0 / 5 | macos-aarch64 | 5 workloads |
+| rquickjs (x86_64) | 0.863x | 0 / 5 | linux-x86_64 | 5 workloads |
 | boa (aarch64) | 0.629x | 0 / 5 | macos-aarch64 | 5 workloads |
+| koto (x86_64) | 0.555x | 0 / 5 | linux-x86_64 | 5 workloads |
+| rhai (x86_64) | 0.265x | 0 / 5 | linux-x86_64 | 5 workloads |
+| boa (x86_64) | 0.148x | 0 / 5 | linux-x86_64 | 5 workloads |

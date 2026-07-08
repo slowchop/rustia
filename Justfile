@@ -42,6 +42,7 @@ check-benchmark-results:
     node tools/check-benchmark-results.js
     node bench/render-current-results.js --check
     node bench/render-claims.js --check
+    node bench/render-scoreboard.js --check
     node tools/check-benchmark-site.js
 
 check-examples:
@@ -71,5 +72,6 @@ gen-current-results:
     cargo run -p script-bench-harness -- --refresh-results
     node bench/render-current-results.js
     node bench/render-claims.js
+    node bench/render-scoreboard.js
 
 gen-benchmark-results: gen-current-results

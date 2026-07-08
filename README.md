@@ -9,6 +9,9 @@ at full Luau parity.
 > Read **[`design/CURRENT.md`](design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](design/README.md) for the full doc map.
 
+**Benchmarks:** [`bench/SCOREBOARD.md`](bench/SCOREBOARD.md) is the target-by-target scoreboard with
+native and wasm results, total score, ratio to Rustia, and unsupported/missing adapter rows.
+
 ## Highlights (spikes validated the direction; production gates are now in-tree)
 - Designed to run at/near reference-Luau parity on measured workloads, with koto comparisons tracked
   per-workload; **near-native on hot numeric paths** via a runtime wasm-emit JIT (~176× the interpreter in V8,

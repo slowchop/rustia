@@ -179,8 +179,9 @@ function checkBenchmarks(text) {
   requireIncludes(text, "cargo run -p script-bench-harness -- --refresh-results", label);
   requireIncludes(text, "node bench/render-current-results.js", label);
   requireIncludes(text, "node bench/render-claims.js", label);
+  requireIncludes(text, "node bench/render-scoreboard.js", label);
   requireIncludes(text, "uses: actions/upload-artifact@v4", label);
-  requireRegex(text, /bench\/history\/runs\.jsonl[\s\S]*bench\/CLAIMS\.md/, label, "upload benchmark history and claim artifacts");
+  requireRegex(text, /bench\/history\/runs\.jsonl[\s\S]*bench\/SCOREBOARD\.md/, label, "upload benchmark history, claim, and scoreboard artifacts");
   checkActionPins(text, label);
 }
 

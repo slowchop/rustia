@@ -78,12 +78,14 @@ jobs:
           cargo run -p script-bench-harness -- --refresh-results
           node bench/render-current-results.js
           node bench/render-claims.js
+          node bench/render-scoreboard.js
 
       - name: Check generated benchmark artifacts
         run: |
           node tools/check-benchmark-results.js
           node bench/render-current-results.js --check
           node bench/render-claims.js --check
+          node bench/render-scoreboard.js --check
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4
@@ -95,6 +97,7 @@ jobs:
             bench/current-results.json
             bench/current-results.html
             bench/CLAIMS.md
+            bench/SCOREBOARD.md
 
       - name: Publish benchmark data
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)
@@ -126,11 +129,13 @@ jobs:
 
           cp bench/render-current-results.js "$BENCH_DATA_DIR/bench/render-current-results.js"
           cp bench/render-claims.js "$BENCH_DATA_DIR/bench/render-claims.js"
+          cp bench/render-scoreboard.js "$BENCH_DATA_DIR/bench/render-scoreboard.js"
           (
             cd "$BENCH_DATA_DIR"
             node bench/render-current-results.js
             node bench/render-claims.js
-            rm bench/render-current-results.js bench/render-claims.js
+            node bench/render-scoreboard.js
+            rm bench/render-current-results.js bench/render-claims.js bench/render-scoreboard.js
           )
           node tools/render-benchmark-data-readme.js --data-dir "$BENCH_DATA_DIR"
 
@@ -140,7 +145,8 @@ jobs:
             bench/RESULTS.md \
             bench/current-results.json \
             bench/current-results.html \
-            bench/CLAIMS.md
+            bench/CLAIMS.md \
+            bench/SCOREBOARD.md
           if git -C "$BENCH_DATA_DIR" diff --cached --quiet; then
             echo "No benchmark data changes to publish"
             exit 0
@@ -203,12 +209,14 @@ jobs:
           cargo run -p script-bench-harness -- --refresh-results
           node bench/render-current-results.js
           node bench/render-claims.js
+          node bench/render-scoreboard.js
 
       - name: Check generated benchmark artifacts
         run: |
           node tools/check-benchmark-results.js
           node bench/render-current-results.js --check
           node bench/render-claims.js --check
+          node bench/render-scoreboard.js --check
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4
@@ -220,6 +228,7 @@ jobs:
             bench/current-results.json
             bench/current-results.html
             bench/CLAIMS.md
+            bench/SCOREBOARD.md
 
       - name: Publish benchmark data
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.publish)
@@ -251,11 +260,13 @@ jobs:
 
           cp bench/render-current-results.js "$BENCH_DATA_DIR/bench/render-current-results.js"
           cp bench/render-claims.js "$BENCH_DATA_DIR/bench/render-claims.js"
+          cp bench/render-scoreboard.js "$BENCH_DATA_DIR/bench/render-scoreboard.js"
           (
             cd "$BENCH_DATA_DIR"
             node bench/render-current-results.js
             node bench/render-claims.js
-            rm bench/render-current-results.js bench/render-claims.js
+            node bench/render-scoreboard.js
+            rm bench/render-current-results.js bench/render-claims.js bench/render-scoreboard.js
           )
           node tools/render-benchmark-data-readme.js --data-dir "$BENCH_DATA_DIR"
 
@@ -265,7 +276,8 @@ jobs:
             bench/RESULTS.md \
             bench/current-results.json \
             bench/current-results.html \
-            bench/CLAIMS.md
+            bench/CLAIMS.md \
+            bench/SCOREBOARD.md
           if git -C "$BENCH_DATA_DIR" diff --cached --quiet; then
             echo "No benchmark data changes to publish"
             exit 0
