@@ -3107,6 +3107,25 @@ impl Vm {
                                 set_register(&mut registers, instruction.a, value).map_err(
                                     |e| attach_instruction_source(program, function, pc - 1, e),
                                 )?;
+                                if fuel.is_none()
+                                    && quickened_method_check_follows(
+                                        &function.code,
+                                        pc,
+                                        instruction,
+                                        value,
+                                    )
+                                {
+                                    self.executed_instructions =
+                                        self.executed_instructions.wrapping_add(1);
+                                    self.record_coverage_hit(
+                                        program_id,
+                                        context.prototype,
+                                        function,
+                                        pc,
+                                    );
+                                    pc += 1;
+                                    continue;
+                                }
                             }
                             Opcode::GetIndexNumber => {
                                 let object =
@@ -28304,6 +28323,21 @@ fn readonly_table_error() -> Error {
     })
 }
 
+fn quickened_method_check_follows(
+    code: &[Instruction],
+    next_pc: usize,
+    instruction: Instruction,
+    value: Value,
+) -> bool {
+    value.kind() != ValueKind::Nil
+        && code.get(next_pc).is_some_and(|next| {
+            next.op == Opcode::CheckMethodStringConst
+                && next.a == instruction.a
+                && next.b == instruction.b
+                && next.aux == instruction.aux
+        })
+}
+
 fn table_expected_error() -> Error {
     Error::new(ErrorKind::RuntimeError {
         message: "table expected".to_owned(),
@@ -28313,8 +28347,8 @@ fn table_expected_error() -> Error {
 #[cfg(test)]
 mod tests {
     use super::{
-        mul_mod_const_table_index, native_function_value, InlineCacheSite,
-        RawTableIntegerGetInlineCacheSource, RawTableStringGetInlineCacheSource,
+        mul_mod_const_table_index, native_function_value, quickened_method_check_follows,
+        InlineCacheSite, RawTableIntegerGetInlineCacheSource, RawTableStringGetInlineCacheSource,
         StringSlotIndexCache, TableGetInlineCacheSource, TableIntegerGetInlineCacheSource,
         TableIntegerSetInlineCacheTarget, TableSetInlineCacheTarget, Value, Vm,
     };
@@ -28341,6 +28375,91 @@ mod tests {
             mul_mod_const_table_index(9_007_199_254_740_991.0, 2.0, 100003.0),
             None
         );
+    }
+
+    #[test]
+    fn string_method_check_quickening_matches_only_adjacent_successful_checks() {
+        let get = Instruction::with_aux(Opcode::GetIndexStringConst, 1, 0, 0, 2);
+        let matching_check = Instruction::with_aux(Opcode::CheckMethodStringConst, 1, 0, 0, 2);
+        let wrong_key = Instruction::with_aux(Opcode::CheckMethodStringConst, 1, 0, 0, 3);
+        let wrong_target = Instruction::with_aux(Opcode::CheckMethodStringConst, 2, 0, 0, 2);
+        let wrong_object = Instruction::with_aux(Opcode::CheckMethodStringConst, 1, 2, 0, 2);
+        let wrong_op = Instruction::with_aux(Opcode::GetIndexStringConst, 1, 0, 0, 2);
+
+        assert!(quickened_method_check_follows(
+            &[get, matching_check],
+            1,
+            get,
+            Value::number(1.0),
+        ));
+        assert!(!quickened_method_check_follows(
+            &[get, matching_check],
+            1,
+            get,
+            Value::nil(),
+        ));
+        assert!(!quickened_method_check_follows(
+            &[get, wrong_key],
+            1,
+            get,
+            Value::number(1.0),
+        ));
+        assert!(!quickened_method_check_follows(
+            &[get, wrong_target],
+            1,
+            get,
+            Value::number(1.0),
+        ));
+        assert!(!quickened_method_check_follows(
+            &[get, wrong_object],
+            1,
+            get,
+            Value::number(1.0),
+        ));
+        assert!(!quickened_method_check_follows(
+            &[get, wrong_op],
+            1,
+            get,
+            Value::number(1.0),
+        ));
+    }
+
+    #[test]
+    fn string_method_check_quickening_counts_skipped_check() {
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::with_aux(Opcode::GetGlobal, 0, 0, 0, 0),
+                    Instruction::with_aux(Opcode::GetIndexStringConst, 1, 0, 0, 1),
+                    Instruction::with_aux(Opcode::CheckMethodStringConst, 1, 0, 0, 1),
+                    Instruction::new(Opcode::Return, 1, 1, 0),
+                ],
+                2,
+            ),
+            vec![
+                Constant::String(b"t".to_vec()),
+                Constant::String(b"add".to_vec()),
+            ],
+        );
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let table = vm.heap.alloc_array_table(&[]);
+        let add_atom = vm.heap.intern_string("add");
+        let method = native_function_value(&mut vm.heap, NativeFunction::TypeOf, vm.globals);
+        vm.heap
+            .table_set(table, Value::string_atom(add_atom), method)
+            .unwrap();
+        let table_atom = vm.heap.intern_string("t");
+        vm.heap
+            .table_set(
+                vm.globals,
+                Value::string_atom(table_atom),
+                Value::table(table),
+            )
+            .unwrap();
+
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_function(), method.as_function());
+        assert_eq!(vm.executed_instructions, 4);
     }
 
     #[test]
