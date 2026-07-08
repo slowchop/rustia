@@ -227,7 +227,20 @@ struct TableSetInlineCacheSlot {
 #[derive(Clone, Copy)]
 struct TableSetInlineCacheEntry {
     key_atom: u32,
-    hash_indices: StringSlotIndexCache,
+    target: TableSetInlineCacheTarget,
+}
+
+#[derive(Clone, Copy)]
+enum TableSetInlineCacheTarget {
+    DirectSlot {
+        hash_indices: StringSlotIndexCache,
+    },
+    NewIndexTable {
+        metatable: u32,
+        metatable_hash_index: usize,
+        newindex_table: u32,
+        newindex_table_hash_indices: StringSlotIndexCache,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -8161,18 +8174,79 @@ impl Vm {
         if entry.key_atom != key_atom {
             return Ok(false);
         }
-        for hash_index in entry.hash_indices.iter() {
-            match self
-                .heap
-                .write_string_hash_slot_at_index(table, key_atom, hash_index, value)
-                .ok_or_else(|| {
+        match entry.target {
+            TableSetInlineCacheTarget::DirectSlot { hash_indices } => {
+                for hash_index in hash_indices.iter() {
+                    match self
+                        .heap
+                        .write_string_hash_slot_at_index(table, key_atom, hash_index, value)
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "table handle is missing",
+                            })
+                        })? {
+                        HashWriteStatus::Stored => return Ok(true),
+                        HashWriteStatus::Deferred => {}
+                        HashWriteStatus::Readonly => return Err(readonly_table_error()),
+                    }
+                }
+            }
+            TableSetInlineCacheTarget::NewIndexTable {
+                metatable,
+                metatable_hash_index,
+                newindex_table,
+                newindex_table_hash_indices,
+            } => {
+                if self
+                    .raw_table_slot(table, Value::string_atom(key_atom))?
+                    .is_some_and(|raw| raw.kind() != ValueKind::Nil)
+                {
+                    return Ok(false);
+                }
+                if self.heap.table_metatable(table).ok_or_else(|| {
                     Error::new(ErrorKind::InvalidProgram {
                         reason: "table handle is missing",
                     })
-                })? {
-                HashWriteStatus::Stored => return Ok(true),
-                HashWriteStatus::Deferred => {}
-                HashWriteStatus::Readonly => return Err(readonly_table_error()),
+                })? != Some(metatable)
+                {
+                    return Ok(false);
+                }
+
+                let newindex_atom = self.heap.intern_string("__newindex");
+                let Some(newindex_slot) = self
+                    .heap
+                    .read_string_hash_slot_at_index(metatable, newindex_atom, metatable_hash_index)
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "__newindex metatable handle is missing",
+                        })
+                    })?
+                else {
+                    return Ok(false);
+                };
+                if newindex_slot.value.as_table() != Some(newindex_table) {
+                    return Ok(false);
+                }
+
+                for hash_index in newindex_table_hash_indices.iter() {
+                    match self
+                        .heap
+                        .write_string_hash_slot_at_index(
+                            newindex_table,
+                            key_atom,
+                            hash_index,
+                            value,
+                        )
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "__newindex table handle is missing",
+                            })
+                        })? {
+                        HashWriteStatus::Stored => return Ok(true),
+                        HashWriteStatus::Deferred => {}
+                        HashWriteStatus::Readonly => return Err(readonly_table_error()),
+                    }
+                }
             }
         }
         Ok(false)
@@ -8185,36 +8259,102 @@ impl Vm {
         key_atom: u32,
         value: Value,
     ) -> Result<bool> {
-        let Some(slot) = self
+        let slot = self
             .heap
             .table_string_hash_slot(table, key_atom)
             .ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "table handle is missing",
                 })
+            })?;
+        if let Some(slot) = slot {
+            if slot.value.kind() != ValueKind::Nil
+                || self
+                    .heap
+                    .table_metatable(table)
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "table handle is missing",
+                        })
+                    })?
+                    .is_none()
+            {
+                return match self
+                    .heap
+                    .write_string_hash_slot_at_index(table, key_atom, slot.index, value)
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "table handle is missing",
+                        })
+                    })? {
+                    HashWriteStatus::Stored => {
+                        self.store_table_set_inline_cache(
+                            site,
+                            TableSetInlineCacheEntry {
+                                key_atom,
+                                target: TableSetInlineCacheTarget::DirectSlot {
+                                    hash_indices: self
+                                        .table_set_string_slot_indices(site, key_atom, slot.index),
+                                },
+                            },
+                        );
+                        Ok(true)
+                    }
+                    HashWriteStatus::Deferred => Ok(false),
+                    HashWriteStatus::Readonly => Err(readonly_table_error()),
+                };
+            }
+        }
+        self.try_set_table_newindex_table_for_inline_cache(site, table, key_atom, value)
+    }
+
+    fn try_set_table_newindex_table_for_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        key_atom: u32,
+        value: Value,
+    ) -> Result<bool> {
+        let Some(metatable) = self.heap.table_metatable(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?
+        else {
+            return Ok(false);
+        };
+        let newindex_atom = self.heap.intern_string("__newindex");
+        let Some(newindex_slot) = self
+            .heap
+            .table_string_hash_slot(metatable, newindex_atom)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "metatable handle is missing",
+                })
             })?
         else {
             return Ok(false);
         };
-        if slot.value.kind() == ValueKind::Nil
-            && self
-                .heap
-                .table_metatable(table)
-                .ok_or_else(|| {
-                    Error::new(ErrorKind::InvalidProgram {
-                        reason: "table handle is missing",
-                    })
-                })?
-                .is_some()
-        {
+        let Some(newindex_table) = newindex_slot.value.as_table() else {
             return Ok(false);
-        }
-        match self
+        };
+        let Some(value_slot) = self
             .heap
-            .write_string_hash_slot_at_index(table, key_atom, slot.index, value)
+            .table_string_hash_slot(newindex_table, key_atom)
             .ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
-                    reason: "table handle is missing",
+                    reason: "__newindex table handle is missing",
+                })
+            })?
+        else {
+            return Ok(false);
+        };
+        match self
+            .heap
+            .write_string_hash_slot_at_index(newindex_table, key_atom, value_slot.index, value)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "__newindex table handle is missing",
                 })
             })? {
             HashWriteStatus::Stored => {
@@ -8222,8 +8362,18 @@ impl Vm {
                     site,
                     TableSetInlineCacheEntry {
                         key_atom,
-                        hash_indices: self
-                            .table_set_string_slot_indices(site, key_atom, slot.index),
+                        target: TableSetInlineCacheTarget::NewIndexTable {
+                            metatable,
+                            metatable_hash_index: newindex_slot.index,
+                            newindex_table,
+                            newindex_table_hash_indices: self
+                                .table_set_newindex_table_slot_indices(
+                                    site,
+                                    key_atom,
+                                    newindex_table,
+                                    value_slot.index,
+                                ),
+                        },
                     },
                 );
                 Ok(true)
@@ -8254,7 +8404,36 @@ impl Vm {
             .copied()
             .flatten()
             .filter(|slot| slot.site == site && slot.entry.key_atom == key_atom)
-            .map(|slot| slot.entry.hash_indices.with_index(hash_index))
+            .and_then(|slot| match slot.entry.target {
+                TableSetInlineCacheTarget::DirectSlot { hash_indices } => Some(hash_indices),
+                TableSetInlineCacheTarget::NewIndexTable { .. } => None,
+            })
+            .map(|indices| indices.with_index(hash_index))
+            .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
+    }
+
+    fn table_set_newindex_table_slot_indices(
+        &self,
+        site: InlineCacheSite,
+        key_atom: u32,
+        newindex_table: u32,
+        hash_index: usize,
+    ) -> StringSlotIndexCache {
+        self.table_set_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten()
+            .filter(|slot| slot.site == site && slot.entry.key_atom == key_atom)
+            .and_then(|slot| match slot.entry.target {
+                TableSetInlineCacheTarget::NewIndexTable {
+                    newindex_table: cached_newindex_table,
+                    newindex_table_hash_indices,
+                    ..
+                } if cached_newindex_table == newindex_table => Some(newindex_table_hash_indices),
+                TableSetInlineCacheTarget::DirectSlot { .. }
+                | TableSetInlineCacheTarget::NewIndexTable { .. } => None,
+            })
+            .map(|indices| indices.with_index(hash_index))
             .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
     }
 
@@ -26319,9 +26498,17 @@ fn table_expected_error() -> Error {
 #[cfg(test)]
 mod tests {
     use super::{
-        InlineCacheSite, RawTableIntegerGetInlineCacheSource, StringSlotIndexCache, Value, Vm,
+        InlineCacheSite, RawTableIntegerGetInlineCacheSource, StringSlotIndexCache,
+        TableSetInlineCacheTarget, Value, Vm,
     };
-    use crate::Profile;
+    use crate::{Function, Instruction, Opcode, Profile, Program};
+
+    fn dummy_program() -> Program {
+        Program::new(
+            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            vec![],
+        )
+    }
 
     #[test]
     fn string_slot_index_cache_keeps_four_unique_recent_indices() {
@@ -26423,6 +26610,170 @@ mod tests {
 
         assert_eq!(
             vm.raw_table_integer_get_with_inline_cache(get_site, table, 20)
+                .unwrap()
+                .as_number(),
+            Some(7.0)
+        );
+    }
+
+    #[test]
+    fn string_newindex_table_set_cache_observes_delegate_reassignment() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let key_atom = vm.heap.intern_string("x");
+        let newindex_atom = vm.heap.intern_string("__newindex");
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let first_delegate = vm.heap.alloc_array_table(&[]);
+        let second_delegate = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(
+                first_delegate,
+                Value::string_atom(key_atom),
+                Value::number(0.0),
+            )
+            .unwrap();
+        vm.heap
+            .table_set(
+                second_delegate,
+                Value::string_atom(key_atom),
+                Value::number(0.0),
+            )
+            .unwrap();
+        vm.heap
+            .table_set(
+                metatable,
+                Value::string_atom(newindex_atom),
+                Value::table(first_delegate),
+            )
+            .unwrap();
+        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 9,
+        };
+        let mut fuel = None;
+
+        vm.set_table_string_index_with_inline_cache(
+            &program,
+            site,
+            table,
+            Value::string_atom(key_atom),
+            key_atom,
+            Value::number(1.0),
+            0,
+            &mut fuel,
+        )
+        .unwrap();
+        let slot = vm.table_set_inline_cache[site.slot()]
+            .expect("newindex table writes should populate the set cache");
+        assert!(matches!(
+            slot.entry.target,
+            TableSetInlineCacheTarget::NewIndexTable {
+                newindex_table,
+                ..
+            } if newindex_table == first_delegate
+        ));
+
+        vm.heap
+            .table_set(
+                metatable,
+                Value::string_atom(newindex_atom),
+                Value::table(second_delegate),
+            )
+            .unwrap();
+        vm.set_table_string_index_with_inline_cache(
+            &program,
+            site,
+            table,
+            Value::string_atom(key_atom),
+            key_atom,
+            Value::number(2.0),
+            0,
+            &mut fuel,
+        )
+        .unwrap();
+
+        assert_eq!(
+            vm.heap
+                .table_get(first_delegate, Value::string_atom(key_atom))
+                .unwrap()
+                .as_number(),
+            Some(1.0)
+        );
+        assert_eq!(
+            vm.heap
+                .table_get(second_delegate, Value::string_atom(key_atom))
+                .unwrap()
+                .as_number(),
+            Some(2.0)
+        );
+    }
+
+    #[test]
+    fn string_newindex_table_set_cache_defers_to_original_slot() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let key_atom = vm.heap.intern_string("x");
+        let newindex_atom = vm.heap.intern_string("__newindex");
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let delegate = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(delegate, Value::string_atom(key_atom), Value::number(0.0))
+            .unwrap();
+        vm.heap
+            .table_set(
+                metatable,
+                Value::string_atom(newindex_atom),
+                Value::table(delegate),
+            )
+            .unwrap();
+        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 9,
+        };
+        let mut fuel = None;
+
+        vm.set_table_string_index_with_inline_cache(
+            &program,
+            site,
+            table,
+            Value::string_atom(key_atom),
+            key_atom,
+            Value::number(1.0),
+            0,
+            &mut fuel,
+        )
+        .unwrap();
+        vm.heap
+            .table_set(table, Value::string_atom(key_atom), Value::number(5.0))
+            .unwrap();
+        vm.set_table_string_index_with_inline_cache(
+            &program,
+            site,
+            table,
+            Value::string_atom(key_atom),
+            key_atom,
+            Value::number(7.0),
+            0,
+            &mut fuel,
+        )
+        .unwrap();
+
+        assert_eq!(
+            vm.heap
+                .table_get(delegate, Value::string_atom(key_atom))
+                .unwrap()
+                .as_number(),
+            Some(1.0)
+        );
+        assert_eq!(
+            vm.heap
+                .table_get(table, Value::string_atom(key_atom))
                 .unwrap()
                 .as_number(),
             Some(7.0)

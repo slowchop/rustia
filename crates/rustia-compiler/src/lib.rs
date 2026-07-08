@@ -11679,6 +11679,79 @@ return seen + (t.x == nil and 100 or 0)
     }
 
     #[test]
+    fn newindex_table_write_cache_observes_delegate_reassignment() {
+        let chunk = parse_source(
+            r#"
+local first = { x = 0 }
+local second = { x = 0 }
+local mt = { __newindex = first }
+local t = {}
+setmetatable(t, mt)
+t.x = 1
+mt.__newindex = second
+t.x = 2
+return first.x * 10 + second.x
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexStringConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(12.0));
+    }
+
+    #[test]
+    fn newindex_table_write_cache_observes_original_slot_creation() {
+        let chunk = parse_source(
+            r#"
+local delegate = { x = 0 }
+local t = {}
+setmetatable(t, { __newindex = delegate })
+t.x = 1
+rawset(t, "x", 5)
+t.x = 7
+return delegate.x * 10 + t.x
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexStringConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(17.0));
+    }
+
+    #[test]
+    fn newindex_table_write_cache_defers_nil_delegate_slots_with_metamethod() {
+        let chunk = parse_source(
+            r#"
+local seen = 0
+local delegate = { x = 1 }
+delegate.x = nil
+setmetatable(delegate, {
+    __newindex = function(_, _, value)
+        seen = value
+    end,
+})
+local t = {}
+setmetatable(t, { __newindex = delegate })
+t.x = 9
+return seen + (delegate.x == nil and 100 or 0)
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexStringConst) >= 1);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(109.0));
+    }
+
+    #[test]
     fn index_read_lowering_preserves_side_effect_order() {
         let chunk = parse_source(
             r#"
