@@ -279,13 +279,6 @@ struct TableIntegerGetInlineCacheEntry {
 }
 
 #[derive(Clone, Copy)]
-enum TableIntegerArrayRead {
-    Hit(Value),
-    Absent,
-    Deferred,
-}
-
-#[derive(Clone, Copy)]
 enum TableIntegerGetInlineCacheSource {
     DirectSlot {
         shape_slot: TableShapeSlotCache,
@@ -2959,30 +2952,8 @@ impl Vm {
                                     if let Some(index) =
                                         key.as_number().and_then(array_iterator_index)
                                     {
-                                        let array_read = self
-                                            .read_table_integer_array_index_fast(table, index)
-                                            .map_err(|e| {
-                                                attach_instruction_source(
-                                                    program,
-                                                    function,
-                                                    pc - 1,
-                                                    e,
-                                                )
-                                            })?;
-                                        if let TableIntegerArrayRead::Hit(value) = array_read {
-                                            set_register(&mut registers, instruction.a, value)
-                                                .map_err(|e| {
-                                                    attach_instruction_source(
-                                                        program,
-                                                        function,
-                                                        pc - 1,
-                                                        e,
-                                                    )
-                                                })?;
-                                            continue;
-                                        }
                                         if let Some(value) = self
-                                            .get_table_integer_index_after_array_read_with_inline_cache(
+                                            .get_table_integer_index_with_inline_cache(
                                                 program,
                                                 program_id.map(|program| InlineCacheSite {
                                                     program,
@@ -2991,7 +2962,6 @@ impl Vm {
                                                 }),
                                                 table,
                                                 index,
-                                                array_read,
                                                 context.depth,
                                                 fuel,
                                             )
@@ -3200,30 +3170,8 @@ impl Vm {
                                 if let Some(number) = key.as_number() {
                                     if let Some(table) = object.as_table() {
                                         if let Some(index) = array_iterator_index(number) {
-                                            let array_read = self
-                                                .read_table_integer_array_index_fast(table, index)
-                                                .map_err(|e| {
-                                                    attach_instruction_source(
-                                                        program,
-                                                        function,
-                                                        pc - 1,
-                                                        e,
-                                                    )
-                                                })?;
-                                            if let TableIntegerArrayRead::Hit(value) = array_read {
-                                                set_register(&mut registers, instruction.a, value)
-                                                    .map_err(|e| {
-                                                        attach_instruction_source(
-                                                            program,
-                                                            function,
-                                                            pc - 1,
-                                                            e,
-                                                        )
-                                                    })?;
-                                                continue;
-                                            }
                                             if let Some(value) = self
-                                                .get_table_integer_index_after_array_read_with_inline_cache(
+                                                .get_table_integer_index_with_inline_cache(
                                                     program,
                                                     program_id.map(|program| InlineCacheSite {
                                                         program,
@@ -3232,7 +3180,6 @@ impl Vm {
                                                     }),
                                                     table,
                                                     index,
-                                                    array_read,
                                                     context.depth,
                                                     fuel,
                                                 )
@@ -3281,25 +3228,8 @@ impl Vm {
                                     .at_pc(pc - 1));
                                 };
                                 if let Some(table) = object.as_table() {
-                                    let array_read = self
-                                        .read_table_integer_array_index_fast(table, index)
-                                        .map_err(|e| {
-                                            attach_instruction_source(program, function, pc - 1, e)
-                                        })?;
-                                    if let TableIntegerArrayRead::Hit(value) = array_read {
-                                        set_register(&mut registers, instruction.a, value)
-                                            .map_err(|e| {
-                                                attach_instruction_source(
-                                                    program,
-                                                    function,
-                                                    pc - 1,
-                                                    e,
-                                                )
-                                            })?;
-                                        continue;
-                                    }
                                     if let Some(value) = self
-                                        .get_table_integer_index_after_array_read_with_inline_cache(
+                                        .get_table_integer_index_with_inline_cache(
                                             program,
                                             program_id.map(|program| InlineCacheSite {
                                                 program,
@@ -3308,7 +3238,6 @@ impl Vm {
                                             }),
                                             table,
                                             index,
-                                            array_read,
                                             context.depth,
                                             fuel,
                                         )
@@ -3549,48 +3478,19 @@ impl Vm {
                                         key.as_number().and_then(array_iterator_index)
                                     {
                                         if self
-                                            .set_table_integer_array_index_fast(table, index, value)
-                                            .map_err(|e| {
-                                                attach_instruction_source(
-                                                    program,
-                                                    function,
-                                                    pc - 1,
-                                                    e,
-                                                )
-                                            })?
-                                        {
-                                            continue;
-                                        }
-                                        if let Some(site) =
-                                            program_id.map(|program| InlineCacheSite {
+                                            .set_table_integer_index_with_inline_cache(
                                                 program,
-                                                prototype: context.prototype,
-                                                pc: pc - 1,
-                                            })
-                                        {
-                                            if self
-                                                .set_table_integer_index_after_array_write_with_inline_cache(
+                                                program_id.map(|program| InlineCacheSite {
                                                     program,
-                                                    site,
-                                                    table,
-                                                    index,
-                                                    value,
-                                                    context.depth,
-                                                    fuel,
-                                                )
-                                                .map_err(|e| {
-                                                    attach_instruction_source(
-                                                        program,
-                                                        function,
-                                                        pc - 1,
-                                                        e,
-                                                    )
-                                                })?
-                                            {
-                                                continue;
-                                            }
-                                        } else if self
-                                            .set_table_integer_index_fast(table, index, value)
+                                                    prototype: context.prototype,
+                                                    pc: pc - 1,
+                                                }),
+                                                table,
+                                                index,
+                                                value,
+                                                context.depth,
+                                                fuel,
+                                            )
                                             .map_err(|e| {
                                                 attach_instruction_source(
                                                     program,
@@ -3663,50 +3563,19 @@ impl Vm {
                                     if let Some(table) = object.as_table() {
                                         if let Some(index) = array_iterator_index(number) {
                                             if self
-                                                .set_table_integer_array_index_fast(
-                                                    table, index, value,
-                                                )
-                                                .map_err(|e| {
-                                                    attach_instruction_source(
-                                                        program,
-                                                        function,
-                                                        pc - 1,
-                                                        e,
-                                                    )
-                                                })?
-                                            {
-                                                continue;
-                                            }
-                                            if let Some(site) =
-                                                program_id.map(|program| InlineCacheSite {
+                                                .set_table_integer_index_with_inline_cache(
                                                     program,
-                                                    prototype: context.prototype,
-                                                    pc: pc - 1,
-                                                })
-                                            {
-                                                if self
-                                                    .set_table_integer_index_after_array_write_with_inline_cache(
+                                                    program_id.map(|program| InlineCacheSite {
                                                         program,
-                                                        site,
-                                                        table,
-                                                        index,
-                                                        value,
-                                                        context.depth,
-                                                        fuel,
-                                                    )
-                                                    .map_err(|e| {
-                                                        attach_instruction_source(
-                                                            program,
-                                                            function,
-                                                            pc - 1,
-                                                            e,
-                                                        )
-                                                    })?
-                                                {
-                                                    continue;
-                                                }
-                                            } else if self
-                                                .set_table_integer_index_fast(table, index, value)
+                                                        prototype: context.prototype,
+                                                        pc: pc - 1,
+                                                    }),
+                                                    table,
+                                                    index,
+                                                    value,
+                                                    context.depth,
+                                                    fuel,
+                                                )
                                                 .map_err(|e| {
                                                     attach_instruction_source(
                                                         program,
@@ -3751,41 +3620,19 @@ impl Vm {
                                 };
                                 if let Some(table) = object.as_table() {
                                     if self
-                                        .set_table_integer_array_index_fast(table, index, value)
-                                        .map_err(|e| {
-                                            attach_instruction_source(program, function, pc - 1, e)
-                                        })?
-                                    {
-                                        continue;
-                                    }
-                                    if let Some(site) = program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
-                                    }) {
-                                        if self
-                                            .set_table_integer_index_after_array_write_with_inline_cache(
+                                        .set_table_integer_index_with_inline_cache(
+                                            program,
+                                            program_id.map(|program| InlineCacheSite {
                                                 program,
-                                                site,
-                                                table,
-                                                index,
-                                                value,
-                                                context.depth,
-                                                fuel,
-                                            )
-                                            .map_err(|e| {
-                                                attach_instruction_source(
-                                                    program,
-                                                    function,
-                                                    pc - 1,
-                                                    e,
-                                                )
-                                            })?
-                                        {
-                                            continue;
-                                        }
-                                    } else if self
-                                        .set_table_integer_index_fast(table, index, value)
+                                                prototype: context.prototype,
+                                                pc: pc - 1,
+                                            }),
+                                            table,
+                                            index,
+                                            value,
+                                            context.depth,
+                                            fuel,
+                                        )
                                         .map_err(|e| {
                                             attach_instruction_source(program, function, pc - 1, e)
                                         })?
@@ -8077,11 +7924,11 @@ impl Vm {
         self.get_index_value(program, object, key, depth, fuel)
     }
 
-    fn read_table_integer_array_index_fast(
+    fn get_table_integer_index_fast(
         &mut self,
         table: u32,
         one_based_index: usize,
-    ) -> Result<TableIntegerArrayRead> {
+    ) -> Result<Option<Value>> {
         let Some(value) = self
             .heap
             .array_slot(table, one_based_index)
@@ -8091,10 +7938,10 @@ impl Vm {
                 })
             })?
         else {
-            return Ok(TableIntegerArrayRead::Absent);
+            return self.get_table_integer_hash_key_fast(table, one_based_index);
         };
         if value.kind() != ValueKind::Nil || self.table_uses_standard_global_type_surface(table)? {
-            return Ok(TableIntegerArrayRead::Hit(value));
+            return Ok(Some(value));
         }
         if self
             .heap
@@ -8106,23 +7953,9 @@ impl Vm {
             })?
             .is_none()
         {
-            return Ok(TableIntegerArrayRead::Hit(Value::nil()));
+            return Ok(Some(Value::nil()));
         }
-        Ok(TableIntegerArrayRead::Deferred)
-    }
-
-    fn get_table_integer_index_fast(
-        &mut self,
-        table: u32,
-        one_based_index: usize,
-    ) -> Result<Option<Value>> {
-        match self.read_table_integer_array_index_fast(table, one_based_index)? {
-            TableIntegerArrayRead::Hit(value) => Ok(Some(value)),
-            TableIntegerArrayRead::Absent => {
-                self.get_table_integer_hash_key_fast(table, one_based_index)
-            }
-            TableIntegerArrayRead::Deferred => Ok(None),
-        }
+        Ok(None)
     }
 
     fn get_table_integer_index_without_inline_cache(
@@ -8145,7 +7978,6 @@ impl Vm {
         )
     }
 
-    #[cfg(test)]
     fn get_table_integer_index_with_inline_cache(
         &mut self,
         program: &Program,
@@ -8155,42 +7987,18 @@ impl Vm {
         depth: usize,
         fuel: &mut Option<u64>,
     ) -> Result<Option<Value>> {
-        let array_read = self.read_table_integer_array_index_fast(table, one_based_index)?;
-        self.get_table_integer_index_after_array_read_with_inline_cache(
-            program,
-            site,
-            table,
-            one_based_index,
-            array_read,
-            depth,
-            fuel,
-        )
-    }
-
-    fn get_table_integer_index_after_array_read_with_inline_cache(
-        &mut self,
-        program: &Program,
-        site: Option<InlineCacheSite>,
-        table: u32,
-        one_based_index: usize,
-        array_read: TableIntegerArrayRead,
-        depth: usize,
-        fuel: &mut Option<u64>,
-    ) -> Result<Option<Value>> {
-        match array_read {
-            TableIntegerArrayRead::Hit(value) => return Ok(Some(value)),
-            TableIntegerArrayRead::Absent | TableIntegerArrayRead::Deferred => {}
-        }
         let Some(site) = site else {
-            return match array_read {
-                TableIntegerArrayRead::Hit(value) => Ok(Some(value)),
-                TableIntegerArrayRead::Absent => {
-                    self.get_table_integer_hash_key_fast(table, one_based_index)
-                }
-                TableIntegerArrayRead::Deferred => Ok(None),
-            };
+            return self.get_table_integer_index_fast(table, one_based_index);
         };
-        if matches!(array_read, TableIntegerArrayRead::Absent) {
+        let Some(value) = self
+            .heap
+            .array_slot(table, one_based_index)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+        else {
             if let Some(value) =
                 self.table_integer_get_inline_cache_hit(site, table, one_based_index)?
             {
@@ -8238,6 +8046,21 @@ impl Vm {
             }
             self.clear_table_integer_get_inline_cache_site(site);
             return self.get_table_integer_hash_key_fast(table, one_based_index);
+        };
+        if value.kind() != ValueKind::Nil || self.table_uses_standard_global_type_surface(table)? {
+            return Ok(Some(value));
+        }
+        if self
+            .heap
+            .table_metatable(table)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+            .is_none()
+        {
+            return Ok(Some(Value::nil()));
         }
         if let Some(value) =
             self.table_integer_get_inline_cache_hit(site, table, one_based_index)?
@@ -8961,27 +8784,6 @@ impl Vm {
         if self.set_table_integer_array_index_fast(table, one_based_index, value)? {
             return Ok(true);
         }
-        self.set_table_integer_index_after_array_write_with_inline_cache(
-            program,
-            site,
-            table,
-            one_based_index,
-            value,
-            depth,
-            fuel,
-        )
-    }
-
-    fn set_table_integer_index_after_array_write_with_inline_cache(
-        &mut self,
-        program: &Program,
-        site: InlineCacheSite,
-        table: u32,
-        one_based_index: usize,
-        value: Value,
-        depth: usize,
-        fuel: &mut Option<u64>,
-    ) -> Result<bool> {
         if self.table_integer_set_inline_cache_hit(site, table, one_based_index, value)? {
             return Ok(true);
         }
