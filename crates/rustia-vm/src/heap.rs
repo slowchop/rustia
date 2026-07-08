@@ -1677,6 +1677,32 @@ impl VmCell {
         })
     }
 
+    pub(crate) fn read_integer_shape_hash_slot_at_index(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+        shape_version: u64,
+        index: usize,
+    ) -> Option<Option<TableIntegerHashSlotRead>> {
+        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
+            return Some(None);
+        }
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize)?;
+            if one_based_index <= table.array.len() || table.shape_version != shape_version {
+                return Some(None);
+            }
+            let Some(entry) = table.hash.get(index) else {
+                return Some(None);
+            };
+            Some(Some(TableIntegerHashSlotRead {
+                value: entry.value,
+                has_metatable: table.metatable.is_some(),
+            }))
+        })
+    }
+
     pub(crate) fn write_integer_hash_slot_at_index(
         &mut self,
         table: u32,
@@ -1701,6 +1727,41 @@ impl VmCell {
             if entry.key != key {
                 return Some(HashWriteStatus::Deferred);
             }
+            if entry.value.kind() == ValueKind::Nil && has_metatable {
+                return Some(HashWriteStatus::Deferred);
+            }
+            if table.readonly {
+                return Some(HashWriteStatus::Readonly);
+            }
+            entry.value = value;
+            bump_table_version(table);
+            Some(HashWriteStatus::Stored)
+        })
+    }
+
+    pub(crate) fn write_integer_shape_hash_slot_at_index(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+        shape_version: u64,
+        index: usize,
+        value: Value,
+    ) -> Option<HashWriteStatus> {
+        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
+            return Some(HashWriteStatus::Deferred);
+        }
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let table = root.tables.get_mut(table as usize)?;
+            if one_based_index <= table.array.len().saturating_add(1)
+                || table.shape_version != shape_version
+            {
+                return Some(HashWriteStatus::Deferred);
+            }
+            let has_metatable = table.metatable.is_some();
+            let Some(entry) = table.hash.get_mut(index) else {
+                return Some(HashWriteStatus::Deferred);
+            };
             if entry.value.kind() == ValueKind::Nil && has_metatable {
                 return Some(HashWriteStatus::Deferred);
             }
@@ -3788,6 +3849,88 @@ mod tests {
             .read_integer_hash_slot_at_index(different, 8, slot.index)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn integer_shape_hash_slot_reads_only_matching_shape() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+        assert_eq!(
+            heap.write_integer_index_without_metamethod(table, 8, Value::number(1.0)),
+            Some(ArrayWriteStatus::Stored)
+        );
+        let slot = heap.table_integer_hash_slot(table, 8).unwrap().unwrap();
+        let shape_version = heap.table_shape_version(table).unwrap();
+
+        assert_eq!(
+            heap.write_integer_hash_slot_at_index(table, 8, slot.index, Value::number(2.0)),
+            Some(HashWriteStatus::Stored)
+        );
+        let slot_read = heap
+            .read_integer_shape_hash_slot_at_index(table, 8, shape_version, slot.index)
+            .unwrap()
+            .unwrap();
+        assert_eq!(slot_read.value.as_number(), Some(2.0));
+
+        assert_eq!(
+            heap.write_integer_index_without_metamethod(table, 9, Value::number(3.0)),
+            Some(ArrayWriteStatus::Stored)
+        );
+        assert!(heap
+            .read_integer_shape_hash_slot_at_index(table, 8, shape_version, slot.index)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn integer_shape_hash_slot_writes_only_matching_shape() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+        assert_eq!(
+            heap.write_integer_index_without_metamethod(table, 8, Value::number(1.0)),
+            Some(ArrayWriteStatus::Stored)
+        );
+        let slot = heap.table_integer_hash_slot(table, 8).unwrap().unwrap();
+        let shape_version = heap.table_shape_version(table).unwrap();
+
+        assert_eq!(
+            heap.write_integer_shape_hash_slot_at_index(
+                table,
+                8,
+                shape_version,
+                slot.index,
+                Value::number(2.0),
+            ),
+            Some(HashWriteStatus::Stored)
+        );
+        assert_eq!(heap.table_shape_version(table), Some(shape_version));
+        assert_eq!(
+            heap.table_get(table, Value::number(8.0))
+                .unwrap()
+                .as_number(),
+            Some(2.0)
+        );
+
+        assert_eq!(
+            heap.write_integer_index_without_metamethod(table, 9, Value::number(3.0)),
+            Some(ArrayWriteStatus::Stored)
+        );
+        assert_eq!(
+            heap.write_integer_shape_hash_slot_at_index(
+                table,
+                8,
+                shape_version,
+                slot.index,
+                Value::number(4.0),
+            ),
+            Some(HashWriteStatus::Deferred)
+        );
+        assert_eq!(
+            heap.table_get(table, Value::number(8.0))
+                .unwrap()
+                .as_number(),
+            Some(2.0)
+        );
     }
 
     #[test]

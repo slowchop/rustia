@@ -205,7 +205,7 @@ struct TableGetInlineCacheEntry {
 #[derive(Clone, Copy)]
 enum TableGetInlineCacheSource {
     DirectSlot {
-        shape_slot: StringShapeSlotCache,
+        shape_slot: TableShapeSlotCache,
         hash_indices: StringSlotIndexCache,
     },
     DirectAbsent {
@@ -240,7 +240,7 @@ struct TableSetInlineCacheEntry {
 #[derive(Clone, Copy)]
 enum TableSetInlineCacheTarget {
     DirectSlot {
-        shape_slot: StringShapeSlotCache,
+        shape_slot: TableShapeSlotCache,
         hash_indices: StringSlotIndexCache,
     },
     NewIndexTable {
@@ -271,6 +271,7 @@ struct TableIntegerGetInlineCacheEntry {
 #[derive(Clone, Copy)]
 enum TableIntegerGetInlineCacheSource {
     DirectSlot {
+        shape_slot: TableShapeSlotCache,
         hash_indices: StringSlotIndexCache,
     },
     DirectAbsent {
@@ -310,6 +311,7 @@ struct TableIntegerSetInlineCacheEntry {
 #[derive(Clone, Copy)]
 enum TableIntegerSetInlineCacheTarget {
     DirectHashSlot {
+        shape_slot: TableShapeSlotCache,
         hash_indices: StringSlotIndexCache,
     },
     NewIndexTableHashSlot {
@@ -402,13 +404,13 @@ struct StringSlotIndexCache {
 }
 
 #[derive(Clone, Copy)]
-struct StringShapeSlotCache {
+struct TableShapeSlotCache {
     table: u32,
     table_shape_version: u64,
     hash_index: usize,
 }
 
-impl StringShapeSlotCache {
+impl TableShapeSlotCache {
     fn new(table: u32, table_shape_version: u64, hash_index: usize) -> Self {
         Self {
             table,
@@ -8021,7 +8023,34 @@ impl Vm {
             return Ok(None);
         }
         match slot.entry.source {
-            TableIntegerGetInlineCacheSource::DirectSlot { hash_indices } => {
+            TableIntegerGetInlineCacheSource::DirectSlot {
+                shape_slot,
+                hash_indices,
+            } => {
+                if shape_slot.table == table {
+                    let exact_slot = self
+                        .heap
+                        .read_integer_shape_hash_slot_at_index(
+                            table,
+                            one_based_index,
+                            shape_slot.table_shape_version,
+                            shape_slot.hash_index,
+                        )
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "table handle is missing",
+                            })
+                        })?;
+                    if let Some(slot) = exact_slot {
+                        if slot.value.kind() != ValueKind::Nil
+                            || !slot.has_metatable
+                            || self.table_uses_standard_global_type_surface(table)?
+                        {
+                            return Ok(Some(slot.value));
+                        }
+                        return Ok(None);
+                    }
+                }
                 for hash_index in hash_indices.iter() {
                     let Some(slot) = self
                         .heap
@@ -8255,6 +8284,11 @@ impl Vm {
                 TableIntegerGetInlineCacheEntry {
                     one_based_index,
                     source: TableIntegerGetInlineCacheSource::DirectSlot {
+                        shape_slot: TableShapeSlotCache::new(
+                            table,
+                            table_shape_version,
+                            slot.index,
+                        ),
                         hash_indices: self.table_integer_get_slot_indices(
                             site,
                             one_based_index,
@@ -8449,7 +8483,9 @@ impl Vm {
             .flatten()
             .filter(|slot| slot.site == site && slot.entry.one_based_index == one_based_index)
             .and_then(|slot| match slot.entry.source {
-                TableIntegerGetInlineCacheSource::DirectSlot { hash_indices } => Some(hash_indices),
+                TableIntegerGetInlineCacheSource::DirectSlot { hash_indices, .. } => {
+                    Some(hash_indices)
+                }
                 TableIntegerGetInlineCacheSource::DirectAbsent { .. }
                 | TableIntegerGetInlineCacheSource::IndexTableArraySlot { .. }
                 | TableIntegerGetInlineCacheSource::IndexTableHashSlot { .. }
@@ -8623,7 +8659,30 @@ impl Vm {
             return Ok(false);
         }
         match slot.entry.target {
-            TableIntegerSetInlineCacheTarget::DirectHashSlot { hash_indices } => {
+            TableIntegerSetInlineCacheTarget::DirectHashSlot {
+                shape_slot,
+                hash_indices,
+            } => {
+                if shape_slot.table == table {
+                    match self
+                        .heap
+                        .write_integer_shape_hash_slot_at_index(
+                            table,
+                            one_based_index,
+                            shape_slot.table_shape_version,
+                            shape_slot.hash_index,
+                            value,
+                        )
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "table handle is missing",
+                            })
+                        })? {
+                        HashWriteStatus::Stored => return Ok(true),
+                        HashWriteStatus::Deferred => {}
+                        HashWriteStatus::Readonly => return Err(readonly_table_error()),
+                    }
+                }
                 for hash_index in hash_indices.iter() {
                     match self
                         .heap
@@ -8747,6 +8806,11 @@ impl Vm {
         one_based_index: usize,
         value: Value,
     ) -> Result<bool> {
+        let table_shape_version = self.heap.table_shape_version(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?;
         let Some(slot) = self
             .heap
             .table_integer_hash_slot(table, one_based_index)
@@ -8772,6 +8836,11 @@ impl Vm {
                     TableIntegerSetInlineCacheEntry {
                         one_based_index,
                         target: TableIntegerSetInlineCacheTarget::DirectHashSlot {
+                            shape_slot: TableShapeSlotCache::new(
+                                table,
+                                table_shape_version,
+                                slot.index,
+                            ),
                             hash_indices: self.table_integer_set_slot_indices(
                                 site,
                                 one_based_index,
@@ -8933,7 +9002,7 @@ impl Vm {
             .flatten()
             .filter(|slot| slot.site == site && slot.entry.one_based_index == one_based_index)
             .and_then(|slot| match slot.entry.target {
-                TableIntegerSetInlineCacheTarget::DirectHashSlot { hash_indices } => {
+                TableIntegerSetInlineCacheTarget::DirectHashSlot { hash_indices, .. } => {
                     Some(hash_indices)
                 }
                 TableIntegerSetInlineCacheTarget::NewIndexTableHashSlot { .. }
@@ -9247,7 +9316,7 @@ impl Vm {
                         TableSetInlineCacheEntry {
                             key_atom,
                             target: TableSetInlineCacheTarget::DirectSlot {
-                                shape_slot: StringShapeSlotCache::new(
+                                shape_slot: TableShapeSlotCache::new(
                                     table,
                                     table_shape_version,
                                     hash_index,
@@ -10269,7 +10338,7 @@ impl Vm {
                     TableGetInlineCacheEntry {
                         key_atom,
                         source: TableGetInlineCacheSource::DirectSlot {
-                            shape_slot: StringShapeSlotCache::new(
+                            shape_slot: TableShapeSlotCache::new(
                                 table,
                                 probe.shape_version,
                                 slot.index,
@@ -10290,7 +10359,7 @@ impl Vm {
                     table_shape_version: probe.shape_version,
                 },
                 |slot| TableGetInlineCacheSource::DirectSlot {
-                    shape_slot: StringShapeSlotCache::new(table, probe.shape_version, slot.index),
+                    shape_slot: TableShapeSlotCache::new(table, probe.shape_version, slot.index),
                     hash_indices: self.table_get_string_slot_indices(site, key_atom, slot.index),
                 },
             );
@@ -28196,6 +28265,119 @@ mod tests {
                 .unwrap()
                 .as_number(),
             Some(7.0)
+        );
+    }
+
+    #[test]
+    fn integer_get_inline_cache_records_exact_shape_slot() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let table = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(table, Value::number(20.0), Value::number(1.0))
+            .unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 7,
+        };
+        let mut fuel = None;
+
+        let value = vm
+            .get_table_integer_index_with_inline_cache(
+                &program,
+                Some(site),
+                table,
+                20,
+                0,
+                &mut fuel,
+            )
+            .unwrap()
+            .expect("integer hash read should produce a value");
+        assert_eq!(value.as_number(), Some(1.0));
+
+        let shape_version = vm.heap.table_shape_version(table).unwrap();
+        let slot = vm.table_integer_get_inline_cache[site.slot()]
+            .expect("integer hash reads should populate the get cache");
+        assert_eq!(slot.site, site);
+        assert_eq!(slot.entry.one_based_index, 20);
+        match slot.entry.source {
+            TableIntegerGetInlineCacheSource::DirectSlot {
+                shape_slot,
+                hash_indices,
+            } => {
+                assert_eq!(shape_slot.table, table);
+                assert_eq!(shape_slot.table_shape_version, shape_version);
+                assert_eq!(
+                    hash_indices.iter().collect::<Vec<_>>(),
+                    vec![shape_slot.hash_index]
+                );
+            }
+            _ => panic!("integer hash reads should cache an exact direct slot"),
+        }
+
+        vm.heap
+            .table_set(table, Value::number(20.0), Value::number(2.0))
+            .unwrap();
+        let value = vm
+            .table_integer_get_inline_cache_hit(site, table, 20)
+            .unwrap()
+            .expect("unchanged table shape should hit the direct integer cache");
+        assert_eq!(value.as_number(), Some(2.0));
+    }
+
+    #[test]
+    fn integer_set_inline_cache_records_exact_shape_slot() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program = dummy_program();
+        let table = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(table, Value::number(20.0), Value::number(1.0))
+            .unwrap();
+        let site = InlineCacheSite {
+            program: 1,
+            prototype: None,
+            pc: 8,
+        };
+        let mut fuel = None;
+
+        assert!(vm
+            .set_table_integer_index_with_inline_cache(
+                &program,
+                Some(site),
+                table,
+                20,
+                Value::number(2.0),
+                0,
+                &mut fuel,
+            )
+            .unwrap());
+
+        let shape_version = vm.heap.table_shape_version(table).unwrap();
+        let slot = vm.table_integer_set_inline_cache[site.slot()]
+            .expect("integer hash writes should populate the set cache");
+        assert_eq!(slot.site, site);
+        assert_eq!(slot.entry.one_based_index, 20);
+        match slot.entry.target {
+            TableIntegerSetInlineCacheTarget::DirectHashSlot { shape_slot, .. } => {
+                assert_eq!(shape_slot.table, table);
+                assert_eq!(shape_slot.table_shape_version, shape_version);
+            }
+            _ => panic!("integer hash writes should cache an exact direct slot"),
+        }
+
+        vm.heap
+            .table_set(table, Value::number(21.0), Value::number(9.0))
+            .unwrap();
+        assert!(vm
+            .table_integer_set_inline_cache_hit(site, table, 20, Value::number(3.0))
+            .unwrap());
+        assert_eq!(
+            vm.heap
+                .table_get(table, Value::number(20.0))
+                .unwrap()
+                .as_number(),
+            Some(3.0)
         );
     }
 
