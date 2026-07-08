@@ -1,6 +1,7 @@
 use gc_arena::lock::RefLock;
 use gc_arena::{Arena, Collect, DynamicRootSet, Gc, Rootable, Static};
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::num::NonZeroU32;
 
 use crate::number::table_key_number_bits;
 use crate::value::{Value, ValueKind};
@@ -10,6 +11,7 @@ const MAX_LUAU_ARRAY_INDEX_F64: f64 = 2_147_483_647.0;
 const INLINE_FUNCTION_UPVALUE_CAPACITY: usize = 4;
 const TABLE_HASH_INDEX_MIN_LEN: usize = 16;
 const CONCAT_INTEGER_DIRECT_CACHE_LEN: usize = 256;
+const EMPTY_TABLE_HASH_SHAPE_ID: u32 = 0;
 
 #[derive(Collect)]
 #[collect(no_drop)]
@@ -32,6 +34,10 @@ struct RootData<'gc> {
     #[collect(require_static)]
     integer_string_concat_direct:
         [Option<ConcatIntegerCacheEntry>; CONCAT_INTEGER_DIRECT_CACHE_LEN],
+    #[collect(require_static)]
+    table_hash_shapes: Vec<Vec<TableKey>>,
+    #[collect(require_static)]
+    table_hash_shape_index: BTreeMap<Vec<TableKey>, u32>,
     tables: Vec<TableData>,
     functions: Vec<FunctionData>,
     upvalues: Vec<UpvalueData>,
@@ -51,6 +57,8 @@ struct TableData {
     metatable: Option<u32>,
     version: u64,
     shape_version: u64,
+    #[collect(require_static)]
+    hash_shape_id: Option<NonZeroU32>,
 }
 
 #[derive(Collect)]
@@ -529,6 +537,12 @@ pub(crate) enum TableIterationOrder {
 type ArenaRoot = Rootable![Gc<'_, RefLock<RootData<'_>>>];
 type VmArena = Arena<ArenaRoot>;
 
+fn initial_table_hash_shape_index() -> BTreeMap<Vec<TableKey>, u32> {
+    let mut index = BTreeMap::new();
+    index.insert(Vec::new(), EMPTY_TABLE_HASH_SHAPE_ID);
+    index
+}
+
 pub struct VmCell {
     arena: VmArena,
 }
@@ -549,6 +563,8 @@ impl VmCell {
                         integer_string_concat_index: HashMap::new(),
                         string_integer_concat_direct: [None; CONCAT_INTEGER_DIRECT_CACHE_LEN],
                         integer_string_concat_direct: [None; CONCAT_INTEGER_DIRECT_CACHE_LEN],
+                        table_hash_shapes: vec![Vec::new()],
+                        table_hash_shape_index: initial_table_hash_shape_index(),
                         tables: Vec::new(),
                         functions: Vec::new(),
                         upvalues: Vec::new(),
@@ -844,6 +860,7 @@ impl VmCell {
                 metatable: None,
                 version: 0,
                 shape_version: 0,
+                hash_shape_id: table_hash_shape_id_cell(EMPTY_TABLE_HASH_SHAPE_ID),
             });
             handle as u32
         })
@@ -864,6 +881,7 @@ impl VmCell {
                 metatable: None,
                 version: 0,
                 shape_version: 0,
+                hash_shape_id: table_hash_shape_id_cell(EMPTY_TABLE_HASH_SHAPE_ID),
             };
             for pair in fields.chunks_exact(2) {
                 let atom = pair[0].as_string_atom()?;
@@ -903,6 +921,7 @@ impl VmCell {
                 metatable: None,
                 version: 0,
                 shape_version: 0,
+                hash_shape_id: table_hash_shape_id_cell(EMPTY_TABLE_HASH_SHAPE_ID),
             };
             for (atom, value) in keys.iter().copied().zip(values.iter().copied()) {
                 root.strings.get(atom as usize)?;
@@ -940,6 +959,7 @@ impl VmCell {
                 metatable: None,
                 version: 0,
                 shape_version: 0,
+                hash_shape_id: table_hash_shape_id_cell(EMPTY_TABLE_HASH_SHAPE_ID),
             };
             for (atom, value) in keys.iter().copied().zip(values.iter().copied()) {
                 root.strings.get(atom as usize)?;
@@ -955,6 +975,7 @@ impl VmCell {
                 }
             }
             table.shape_version = table.hash.len() as u64;
+            table.hash_shape_id = None;
             if table.hash.len() >= TABLE_HASH_INDEX_MIN_LEN {
                 rebuild_hash_index(&mut table);
             }
@@ -976,6 +997,7 @@ impl VmCell {
                 metatable: None,
                 version: 0,
                 shape_version: 0,
+                hash_shape_id: table_hash_shape_id_cell(EMPTY_TABLE_HASH_SHAPE_ID),
             });
             handle as u32
         })
@@ -1974,6 +1996,29 @@ impl VmCell {
         })
     }
 
+    pub(crate) fn read_string_shared_shape_hash_slot_at_index(
+        &mut self,
+        table: u32,
+        hash_shape_id: u32,
+        index: usize,
+    ) -> Option<Option<TableStringHashSlotRead>> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let table_index = table as usize;
+            if table_hash_shape_id(&mut root, table_index)? != hash_shape_id {
+                return Some(None);
+            }
+            let table = root.tables.get(table_index)?;
+            let Some(entry) = table.hash.get(index) else {
+                return Some(None);
+            };
+            Some(Some(TableStringHashSlotRead {
+                value: entry.value,
+                has_metatable: table.metatable.is_some(),
+            }))
+        })
+    }
+
     pub(crate) fn write_string_hash_slot_at_index(
         &mut self,
         table: u32,
@@ -2039,6 +2084,40 @@ impl VmCell {
         })
     }
 
+    pub(crate) fn write_string_shared_shape_hash_slot_at_index(
+        &mut self,
+        table: u32,
+        atom: u32,
+        hash_shape_id: u32,
+        index: usize,
+        value: Value,
+    ) -> Option<HashWriteStatus> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            if string_atom_is(&root, atom, b"__mode") {
+                root.weak_tables_possible = true;
+            }
+            let table_index = table as usize;
+            if table_hash_shape_id(&mut root, table_index)? != hash_shape_id {
+                return Some(HashWriteStatus::Deferred);
+            }
+            let table = root.tables.get_mut(table_index)?;
+            let has_metatable = table.metatable.is_some();
+            let Some(entry) = table.hash.get_mut(index) else {
+                return Some(HashWriteStatus::Deferred);
+            };
+            if entry.value.kind() == ValueKind::Nil && has_metatable {
+                return Some(HashWriteStatus::Deferred);
+            }
+            if table.readonly {
+                return Some(HashWriteStatus::Readonly);
+            }
+            entry.value = value;
+            bump_table_version(table);
+            Some(HashWriteStatus::Stored)
+        })
+    }
+
     pub(crate) fn write_string_hash_slot_at_index_raw(
         &mut self,
         table: u32,
@@ -2058,6 +2137,36 @@ impl VmCell {
             if entry.key != TableKey::String(atom) {
                 return Some(HashWriteStatus::Deferred);
             }
+            if table.readonly {
+                return Some(HashWriteStatus::Readonly);
+            }
+            entry.value = value;
+            bump_table_version(table);
+            Some(HashWriteStatus::Stored)
+        })
+    }
+
+    pub(crate) fn write_string_shared_shape_hash_slot_at_index_raw(
+        &mut self,
+        table: u32,
+        atom: u32,
+        hash_shape_id: u32,
+        index: usize,
+        value: Value,
+    ) -> Option<HashWriteStatus> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            if string_atom_is(&root, atom, b"__mode") {
+                root.weak_tables_possible = true;
+            }
+            let table_index = table as usize;
+            if table_hash_shape_id(&mut root, table_index)? != hash_shape_id {
+                return Some(HashWriteStatus::Deferred);
+            }
+            let table = root.tables.get_mut(table_index)?;
+            let Some(entry) = table.hash.get_mut(index) else {
+                return Some(HashWriteStatus::Deferred);
+            };
             if table.readonly {
                 return Some(HashWriteStatus::Readonly);
             }
@@ -2582,6 +2691,13 @@ impl VmCell {
         })
     }
 
+    pub(crate) fn table_hash_shape_id(&mut self, table: u32) -> Option<u32> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            table_hash_shape_id(&mut root, table as usize)
+        })
+    }
+
     pub fn table_freeze(&mut self, table: u32) -> Option<bool> {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
@@ -2693,6 +2809,46 @@ fn bump_table_version(table: &mut TableData) {
 
 fn bump_table_shape_version(table: &mut TableData) {
     table.shape_version = table.shape_version.wrapping_add(1);
+    table.hash_shape_id = None;
+}
+
+fn table_hash_shape_id(root: &mut RootData<'_>, table_index: usize) -> Option<u32> {
+    if let Some(id) = root.tables.get(table_index)?.hash_shape_id {
+        return Some(table_hash_shape_id_value(id));
+    }
+
+    let keys = root
+        .tables
+        .get(table_index)?
+        .hash
+        .iter()
+        .map(|entry| entry.key)
+        .collect::<Vec<_>>();
+    let id = intern_table_hash_shape(root, keys)?;
+    root.tables.get_mut(table_index)?.hash_shape_id = table_hash_shape_id_cell(id);
+    Some(id)
+}
+
+fn intern_table_hash_shape(root: &mut RootData<'_>, keys: Vec<TableKey>) -> Option<u32> {
+    if let Some(id) = root.table_hash_shape_index.get(&keys) {
+        return Some(*id);
+    }
+
+    let id = u32::try_from(root.table_hash_shapes.len()).ok()?;
+    if id == u32::MAX {
+        return None;
+    }
+    root.table_hash_shapes.push(keys.clone());
+    root.table_hash_shape_index.insert(keys, id);
+    Some(id)
+}
+
+fn table_hash_shape_id_cell(id: u32) -> Option<NonZeroU32> {
+    id.checked_add(1).and_then(NonZeroU32::new)
+}
+
+fn table_hash_shape_id_value(id: NonZeroU32) -> u32 {
+    id.get() - 1
 }
 
 fn table_numeric_set(table: &mut TableData, index: i32, value: Value) {
@@ -3622,6 +3778,65 @@ mod tests {
         heap.table_set_metatable(table, Some(metatable)).unwrap();
 
         assert_ne!(heap.table_shape_version(table), Some(shape_version));
+    }
+
+    #[test]
+    fn matching_hash_layouts_share_table_hash_shape_id() {
+        let mut heap = VmCell::new();
+        let x = heap.intern_string("x");
+        let y = heap.intern_string("y");
+        let first = heap.alloc_array_table(&[]);
+        let second = heap.alloc_array_table(&[]);
+        let reversed = heap.alloc_array_table(&[]);
+
+        for table in [first, second] {
+            heap.table_set(table, Value::string_atom(x), Value::number(1.0))
+                .unwrap();
+            heap.table_set(table, Value::string_atom(y), Value::number(2.0))
+                .unwrap();
+        }
+        heap.table_set(reversed, Value::string_atom(y), Value::number(2.0))
+            .unwrap();
+        heap.table_set(reversed, Value::string_atom(x), Value::number(1.0))
+            .unwrap();
+
+        let first_shape = heap.table_hash_shape_id(first).unwrap();
+        assert_eq!(heap.table_hash_shape_id(second), Some(first_shape));
+        assert_ne!(heap.table_hash_shape_id(reversed), Some(first_shape));
+    }
+
+    #[test]
+    fn shared_hash_shape_slot_reads_matching_table_layouts() {
+        let mut heap = VmCell::new();
+        let x = heap.intern_string("x");
+        let y = heap.intern_string("y");
+        let z = heap.intern_string("z");
+        let first = heap.alloc_array_table(&[]);
+        let second = heap.alloc_array_table(&[]);
+
+        heap.table_set(first, Value::string_atom(x), Value::number(1.0))
+            .unwrap();
+        heap.table_set(first, Value::string_atom(y), Value::number(2.0))
+            .unwrap();
+        heap.table_set(second, Value::string_atom(x), Value::number(10.0))
+            .unwrap();
+        heap.table_set(second, Value::string_atom(y), Value::number(20.0))
+            .unwrap();
+
+        let slot = heap.table_string_hash_slot(first, x).unwrap().unwrap();
+        let shape_id = heap.table_hash_shape_id(first).unwrap();
+        let shared = heap
+            .read_string_shared_shape_hash_slot_at_index(second, shape_id, slot.index)
+            .unwrap()
+            .unwrap();
+        assert_eq!(shared.value.as_number(), Some(10.0));
+
+        heap.table_set(second, Value::string_atom(z), Value::number(30.0))
+            .unwrap();
+        assert!(heap
+            .read_string_shared_shape_hash_slot_at_index(second, shape_id, slot.index)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
