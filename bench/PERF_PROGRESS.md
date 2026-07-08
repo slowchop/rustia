@@ -100,12 +100,25 @@ The profiling code is behind the non-default `rustia-hot-site-summary` bench
 feature, which enables the VM's non-default `opcode-profiling` feature, so
 normal benchmark and release builds do not compile the opcode profiling field,
 API, or dispatch-path branch.
+The report now includes feature-gated inline-cache site probes for table string
+and integer reads. Each site reports hits, misses, fills, and hit rate, so the
+next table optimization can target cache stability instead of final IC
+occupancy alone.
+
+Current sample signal from
+`cargo run -p script-bench-harness --features rustia-hot-site-summary -- --rustia-hot-site-summary --workloads generic_iteration,dense_tables`:
+
+| workload | IC probe signal |
+| --- | --- |
+| `generic_iteration` | two `TableStringGet` sites had 64 probes, 0 hits, 64 misses, and 64 fills each; these sites refill every outer call and never become reusable |
+| `dense_tables` | one `TableStringGet` site had 64 probes, 63 hits, 1 miss, and 1 fill; this is the healthy warm-cache shape |
 
 ## Next Serious Bets
 
 1. Build real feedback-directed quickening for hot table sites instead of
-   adding more cold-path helpers. Track hit/miss counts per IC site, then
-   promote stable hot sites to a narrower quickened path.
+   adding more cold-path helpers. Use the new IC hit/miss/fill profile to
+   distinguish stable hot sites from refill-heavy sites, then promote the
+   stable sites or redesign the unstable cache keying.
 2. Reduce interpreter dispatch/register overhead around hot table loops with
    superinstructions that fuse the current benchmark patterns, especially
    numeric-for plus table set/get sequences. `488b5da` shows this can pay when

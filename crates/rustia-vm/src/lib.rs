@@ -29,4 +29,7 @@ pub use vm::{
     VmTableSetInlineCacheSnapshot, MAX_RECURSION_LIMIT,
 };
 #[cfg(feature = "opcode-profiling")]
-pub use vm::{VmOpcodeProfileEntry, VmOpcodeProfilePairEntry, VmOpcodeProfileSnapshot};
+pub use vm::{
+    VmInlineCacheProfileEntry, VmInlineCacheProfileKind, VmOpcodeProfileEntry,
+    VmOpcodeProfilePairEntry, VmOpcodeProfileSnapshot,
+};

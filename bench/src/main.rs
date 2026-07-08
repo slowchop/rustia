@@ -12,7 +12,7 @@ use rustia_compiler::compile_with_options;
 #[cfg(feature = "rustia-engine")]
 use rustia_parser::parse_source;
 #[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
-use rustia_vm::{Function, VmSettings};
+use rustia_vm::{Function, VmInlineCacheProfileEntry, VmSettings};
 #[cfg(feature = "rustia-engine")]
 use rustia_vm::{
     Instruction, Opcode, Profile, Program, Value, ValueKind, Vm, VmInlineCacheSnapshot,
@@ -1195,6 +1195,24 @@ struct RustiaHotSiteSummary {
     taken_quickened_pairs: BTreeMap<String, u64>,
     taken_quickened_sites: BTreeMap<String, u64>,
     loop_bodies: BTreeMap<String, u64>,
+    inline_cache_sites: Vec<RustiaInlineCacheSiteSummary>,
+}
+
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RustiaInlineCacheSiteSummary {
+    site: String,
+    kind: String,
+    hits: u64,
+    misses: u64,
+    fills: u64,
+}
+
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
+impl RustiaInlineCacheSiteSummary {
+    fn probes(&self) -> u64 {
+        self.hits.saturating_add(self.misses)
+    }
 }
 
 #[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
@@ -1204,8 +1222,8 @@ fn print_rustia_hot_site_summary(repo: &Path, workloads: &[&Workload]) -> Result
         "Dynamic opcode hits after running each workload with n={HOT_SITE_SUMMARY_N} and VM opcode profiling enabled."
     );
     println!("Use this as feedback for table, atom, inline-cache, and quickening work.\n");
-    println!("| workload | checksum | hits | quickened | table hits | iteration hits | hot opcode | hot pair | taken pair | hot loop |");
-    println!("| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- |");
+    println!("| workload | checksum | hits | quickened | table hits | iteration hits | hot opcode | hot pair | taken pair | hot IC | hot loop |");
+    println!("| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- |");
 
     let mut summaries = Vec::new();
     for workload in workloads {
@@ -1223,7 +1241,7 @@ fn print_rustia_hot_site_summary(repo: &Path, workloads: &[&Workload]) -> Result
         let snapshot = prepared.opcode_profile_snapshot();
         let summary = summarize_rustia_hot_sites(&prepared.program, &snapshot);
         println!(
-            "| {} | `{}` | {} | {} | {} | {} | {} | {} | {} | {} |",
+            "| {} | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             workload.id,
             checksum,
             summary.total_hits,
@@ -1233,6 +1251,7 @@ fn print_rustia_hot_site_summary(repo: &Path, workloads: &[&Workload]) -> Result
             format_top_u64_count(&summary.opcodes),
             format_top_u64_count(&summary.quickening_pairs),
             format_top_u64_count(&summary.taken_quickened_pairs),
+            format_top_inline_cache_site(&summary.inline_cache_sites),
             format_top_u64_count(&summary.loop_bodies)
         );
         summaries.push((workload.id, summary));
@@ -1241,6 +1260,11 @@ fn print_rustia_hot_site_summary(repo: &Path, workloads: &[&Workload]) -> Result
     for (workload, summary) in summaries {
         println!("\n## {workload}\n");
         print_rustia_u64_count_table("Hot Opcodes", "opcode", &summary.opcodes, Some(12));
+        print_rustia_inline_cache_site_table(
+            "Hot Inline Cache Sites",
+            &summary.inline_cache_sites,
+            Some(12),
+        );
         print_rustia_u64_count_table(
             "Hot Quickening Candidate Pairs",
             "pair",
@@ -1358,6 +1382,17 @@ fn summarize_rustia_hot_sites(
             }
         }
     }
+    summary.inline_cache_sites = snapshot
+        .inline_cache_sites
+        .iter()
+        .map(|entry| RustiaInlineCacheSiteSummary {
+            site: format_inline_cache_site(entry),
+            kind: format!("{:?}", entry.kind),
+            hits: entry.hits,
+            misses: entry.misses,
+            fills: entry.fills,
+        })
+        .collect();
     summary
 }
 
@@ -1388,6 +1423,75 @@ fn print_rustia_u64_count_table(
         println!("| none | 0 |");
     }
     println!();
+}
+
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
+fn print_rustia_inline_cache_site_table(
+    title: &str,
+    entries: &[RustiaInlineCacheSiteSummary],
+    limit: Option<usize>,
+) {
+    println!("### {title}\n");
+    println!("| site | kind | probes | hit % | hits | misses | fills |");
+    println!("| --- | --- | ---: | ---: | ---: | ---: | ---: |");
+    for entry in entries.iter().take(limit.unwrap_or(usize::MAX)) {
+        println!(
+            "| {} | {} | {} | {} | {} | {} | {} |",
+            entry.site,
+            entry.kind,
+            entry.probes(),
+            format_hit_rate(entry.hits, entry.misses),
+            entry.hits,
+            entry.misses,
+            entry.fills
+        );
+    }
+    if entries.is_empty() {
+        println!("| none | none | 0 | n/a | 0 | 0 | 0 |");
+    }
+    println!();
+}
+
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
+fn format_inline_cache_site(entry: &VmInlineCacheProfileEntry) -> String {
+    let function = entry
+        .prototype
+        .map(|prototype| format!("p{prototype}"))
+        .unwrap_or_else(|| "main".to_owned());
+    let location = entry
+        .line
+        .map(|line| format!("{function}:{} line {line}", entry.pc))
+        .unwrap_or_else(|| format!("{function}:{}", entry.pc));
+    if entry.program == 0 {
+        location
+    } else {
+        format!("program {} {location}", entry.program)
+    }
+}
+
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
+fn format_top_inline_cache_site(entries: &[RustiaInlineCacheSiteSummary]) -> String {
+    entries
+        .first()
+        .map(|entry| {
+            format!(
+                "{} {} ({} probes, {})",
+                entry.site,
+                entry.kind,
+                entry.probes(),
+                format_hit_rate(entry.hits, entry.misses)
+            )
+        })
+        .unwrap_or_else(|| "none".to_owned())
+}
+
+#[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]
+fn format_hit_rate(hits: u64, misses: u64) -> String {
+    let probes = hits.saturating_add(misses);
+    if probes == 0 {
+        return "n/a".to_owned();
+    }
+    format!("{:.1}%", hits as f64 * 100.0 / probes as f64)
 }
 
 #[cfg(all(feature = "rustia-engine", feature = "rustia-hot-site-summary"))]

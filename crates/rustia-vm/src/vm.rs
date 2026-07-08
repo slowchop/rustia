@@ -106,6 +106,7 @@ pub struct VmOpcodeProfileSnapshot {
     pub entries: Vec<VmOpcodeProfileEntry>,
     pub total_quickened_pairs: u64,
     pub quickened_pairs: Vec<VmOpcodeProfilePairEntry>,
+    pub inline_cache_sites: Vec<VmInlineCacheProfileEntry>,
 }
 
 #[cfg(feature = "opcode-profiling")]
@@ -129,6 +130,26 @@ pub struct VmOpcodeProfilePairEntry {
     pub left_opcode: Opcode,
     pub right_opcode: Opcode,
     pub hits: u64,
+}
+
+#[cfg(feature = "opcode-profiling")]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum VmInlineCacheProfileKind {
+    TableStringGet,
+    TableIntegerGet,
+}
+
+#[cfg(feature = "opcode-profiling")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VmInlineCacheProfileEntry {
+    pub program: u32,
+    pub prototype: Option<u32>,
+    pub pc: usize,
+    pub line: Option<u32>,
+    pub kind: VmInlineCacheProfileKind,
+    pub hits: u64,
+    pub misses: u64,
+    pub fills: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -210,6 +231,8 @@ pub struct Vm {
     opcode_profile_hits: BTreeMap<OpcodeProfileKey, u64>,
     #[cfg(feature = "opcode-profiling")]
     opcode_profile_quickened_pairs: BTreeMap<OpcodeProfileKey, u64>,
+    #[cfg(feature = "opcode-profiling")]
+    inline_cache_profile: BTreeMap<InlineCacheProfileKey, InlineCacheProfileCounters>,
     global_get_inline_cache: Vec<Option<GlobalGetInlineCacheSlot>>,
     table_get_inline_cache: Vec<Option<TableGetInlineCacheSlot>>,
     table_set_inline_cache: Vec<Option<TableSetInlineCacheSlot>>,
@@ -253,6 +276,31 @@ struct OpcodeProfileKey {
     program: Option<u32>,
     prototype: Option<u32>,
     pc: usize,
+}
+
+#[cfg(feature = "opcode-profiling")]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct InlineCacheProfileKey {
+    program: u32,
+    prototype: Option<u32>,
+    pc: usize,
+    kind: VmInlineCacheProfileKind,
+}
+
+#[cfg(feature = "opcode-profiling")]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct InlineCacheProfileCounters {
+    hits: u64,
+    misses: u64,
+    fills: u64,
+}
+
+#[cfg(feature = "opcode-profiling")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InlineCacheProfileOutcome {
+    Hit,
+    Miss,
+    Fill,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -975,6 +1023,8 @@ impl Vm {
             opcode_profile_hits: BTreeMap::new(),
             #[cfg(feature = "opcode-profiling")]
             opcode_profile_quickened_pairs: BTreeMap::new(),
+            #[cfg(feature = "opcode-profiling")]
+            inline_cache_profile: BTreeMap::new(),
             global_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             table_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             table_set_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
@@ -1199,11 +1249,42 @@ impl Vm {
                 .then_with(|| left.prototype.cmp(&right.prototype))
                 .then_with(|| left.pc.cmp(&right.pc))
         });
+        let mut inline_cache_sites = Vec::new();
+        for (key, counters) in &self.inline_cache_profile {
+            let profile_program = self
+                .dynamic_programs
+                .get(key.program as usize)
+                .map(Arc::as_ref)
+                .unwrap_or(program);
+            let Some(function) = opcode_profile_function(profile_program, key.prototype) else {
+                continue;
+            };
+            inline_cache_sites.push(VmInlineCacheProfileEntry {
+                program: key.program,
+                prototype: key.prototype,
+                pc: key.pc,
+                line: function.source_line_at_or_before(key.pc),
+                kind: key.kind,
+                hits: counters.hits,
+                misses: counters.misses,
+                fills: counters.fills,
+            });
+        }
+        inline_cache_sites.sort_by(|left, right| {
+            let left_probes = left.hits.saturating_add(left.misses);
+            let right_probes = right.hits.saturating_add(right.misses);
+            right_probes
+                .cmp(&left_probes)
+                .then_with(|| left.prototype.cmp(&right.prototype))
+                .then_with(|| left.pc.cmp(&right.pc))
+                .then_with(|| left.kind.cmp(&right.kind))
+        });
         VmOpcodeProfileSnapshot {
             total_hits,
             entries,
             total_quickened_pairs,
             quickened_pairs,
+            inline_cache_sites,
         }
     }
 
@@ -1211,6 +1292,7 @@ impl Vm {
     pub fn clear_opcode_profile(&mut self) {
         self.opcode_profile_hits.clear();
         self.opcode_profile_quickened_pairs.clear();
+        self.inline_cache_profile.clear();
     }
 
     pub fn register_extension_op(&mut self, op: ExtensionOp) -> Result<u16> {
@@ -8582,11 +8664,23 @@ impl Vm {
             if let Some(value) =
                 self.table_integer_get_inline_cache_hit(site, table, one_based_index)?
             {
+                #[cfg(feature = "opcode-profiling")]
+                self.record_inline_cache_probe(
+                    site,
+                    VmInlineCacheProfileKind::TableIntegerGet,
+                    InlineCacheProfileOutcome::Hit,
+                );
                 return Ok(Some(value));
             }
             if let Some(method) =
                 self.table_integer_index_function_inline_cache_hit(site, table, one_based_index)?
             {
+                #[cfg(feature = "opcode-profiling")]
+                self.record_inline_cache_probe(
+                    site,
+                    VmInlineCacheProfileKind::TableIntegerGet,
+                    InlineCacheProfileOutcome::Hit,
+                );
                 let results = self.call_value(
                     program,
                     method,
@@ -8596,6 +8690,12 @@ impl Vm {
                 )?;
                 return Ok(Some(first_result_or_nil(results)));
             }
+            #[cfg(feature = "opcode-profiling")]
+            self.record_inline_cache_probe(
+                site,
+                VmInlineCacheProfileKind::TableIntegerGet,
+                InlineCacheProfileOutcome::Miss,
+            );
             if let Some(value) = self.try_get_table_integer_hash_index_for_inline_cache(
                 site,
                 table,
@@ -8645,11 +8745,23 @@ impl Vm {
         if let Some(value) =
             self.table_integer_get_inline_cache_hit(site, table, one_based_index)?
         {
+            #[cfg(feature = "opcode-profiling")]
+            self.record_inline_cache_probe(
+                site,
+                VmInlineCacheProfileKind::TableIntegerGet,
+                InlineCacheProfileOutcome::Hit,
+            );
             return Ok(Some(value));
         }
         if let Some(method) =
             self.table_integer_index_function_inline_cache_hit(site, table, one_based_index)?
         {
+            #[cfg(feature = "opcode-profiling")]
+            self.record_inline_cache_probe(
+                site,
+                VmInlineCacheProfileKind::TableIntegerGet,
+                InlineCacheProfileOutcome::Hit,
+            );
             let results = self.call_value(
                 program,
                 method,
@@ -8659,6 +8771,12 @@ impl Vm {
             )?;
             return Ok(Some(first_result_or_nil(results)));
         }
+        #[cfg(feature = "opcode-profiling")]
+        self.record_inline_cache_probe(
+            site,
+            VmInlineCacheProfileKind::TableIntegerGet,
+            InlineCacheProfileOutcome::Miss,
+        );
         if let Some(value) =
             self.try_get_table_integer_index_table_for_inline_cache(site, table, one_based_index)?
         {
@@ -9205,6 +9323,12 @@ impl Vm {
         if let Some(slot) = self.table_integer_get_inline_cache.get_mut(site.slot()) {
             *slot = Some(TableIntegerGetInlineCacheSlot { site, entry });
         }
+        #[cfg(feature = "opcode-profiling")]
+        self.record_inline_cache_probe(
+            site,
+            VmInlineCacheProfileKind::TableIntegerGet,
+            InlineCacheProfileOutcome::Fill,
+        );
     }
 
     fn table_integer_get_slot_indices(
@@ -11150,6 +11274,12 @@ impl Vm {
             )?;
             return Ok(first_result_or_nil(results));
         }
+        #[cfg(feature = "opcode-profiling")]
+        self.record_inline_cache_probe(
+            site,
+            VmInlineCacheProfileKind::TableStringGet,
+            InlineCacheProfileOutcome::Miss,
+        );
         if let Some(value) =
             self.try_get_table_string_index_for_inline_cache(site, table, key_atom)?
         {
@@ -11222,7 +11352,16 @@ impl Vm {
         if entry.key_atom != key_atom {
             return Ok(None);
         }
-        self.table_get_inline_cache_entry_hit(entry, table)
+        let result = self.table_get_inline_cache_entry_hit(entry, table)?;
+        #[cfg(feature = "opcode-profiling")]
+        if result.is_some() {
+            self.record_inline_cache_probe(
+                site,
+                VmInlineCacheProfileKind::TableStringGet,
+                InlineCacheProfileOutcome::Hit,
+            );
+        }
+        Ok(result)
     }
 
     fn table_get_string_const_inline_cache_hit(
@@ -11241,7 +11380,16 @@ impl Vm {
         if slot.site != site {
             return Ok(None);
         }
-        self.table_get_inline_cache_entry_hit(slot.entry, table)
+        let result = self.table_get_inline_cache_entry_hit(slot.entry, table)?;
+        #[cfg(feature = "opcode-profiling")]
+        if result.is_some() {
+            self.record_inline_cache_probe(
+                site,
+                VmInlineCacheProfileKind::TableStringGet,
+                InlineCacheProfileOutcome::Hit,
+            );
+        }
+        Ok(result)
     }
 
     fn table_get_inline_cache_entry_hit(
@@ -11434,6 +11582,12 @@ impl Vm {
         if self.heap.table_version(metatable) != Some(metatable_version) {
             return Ok(None);
         }
+        #[cfg(feature = "opcode-profiling")]
+        self.record_inline_cache_probe(
+            site,
+            VmInlineCacheProfileKind::TableStringGet,
+            InlineCacheProfileOutcome::Hit,
+        );
         Ok(Some(method))
     }
 
@@ -11621,6 +11775,12 @@ impl Vm {
         if let Some(slot) = self.table_get_inline_cache.get_mut(site.slot()) {
             *slot = Some(TableGetInlineCacheSlot { site, entry });
         }
+        #[cfg(feature = "opcode-profiling")]
+        self.record_inline_cache_probe(
+            site,
+            VmInlineCacheProfileKind::TableStringGet,
+            InlineCacheProfileOutcome::Fill,
+        );
     }
 
     fn table_get_string_slot_indices(
@@ -21732,6 +21892,33 @@ impl Vm {
         }
     }
 
+    #[cfg(feature = "opcode-profiling")]
+    #[inline]
+    fn record_inline_cache_probe(
+        &mut self,
+        site: InlineCacheSite,
+        kind: VmInlineCacheProfileKind,
+        outcome: InlineCacheProfileOutcome,
+    ) {
+        if !self.settings.enable_opcode_profiling {
+            return;
+        }
+        let key = InlineCacheProfileKey {
+            program: site.program,
+            prototype: site.prototype,
+            pc: site.pc,
+            kind,
+        };
+        let counters = self.inline_cache_profile.entry(key).or_default();
+        match outcome {
+            InlineCacheProfileOutcome::Hit => counters.hits = counters.hits.saturating_add(1),
+            InlineCacheProfileOutcome::Miss => {
+                counters.misses = counters.misses.saturating_add(1);
+            }
+            InlineCacheProfileOutcome::Fill => counters.fills = counters.fills.saturating_add(1),
+        }
+    }
+
     #[cold]
     #[inline(never)]
     fn record_execution_hit_slow(
@@ -29157,6 +29344,8 @@ fn table_expected_error() -> Error {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "opcode-profiling")]
+    use super::VmInlineCacheProfileKind;
     use super::{
         mul_mod_const_table_index, native_function_value, quickened_method_check_follows,
         InlineCacheSite, RawTableIntegerGetInlineCacheSource, RawTableStringGetInlineCacheSource,
@@ -29708,6 +29897,110 @@ mod tests {
         assert_eq!(snapshot.table_get.direct_absent, 0);
         assert_eq!(snapshot.table_get.index_table, 0);
         assert_eq!(snapshot.table_get.index_function, 0);
+    }
+
+    #[cfg(feature = "opcode-profiling")]
+    #[test]
+    fn opcode_profile_snapshot_records_inline_cache_get_probes() {
+        let settings = VmSettings {
+            enable_opcode_profiling: true,
+            ..VmSettings::default()
+        };
+        let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        let program = dummy_program();
+        let key_atom = vm.heap.intern_string("x");
+        let string_table = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(
+                string_table,
+                Value::string_atom(key_atom),
+                Value::number(1.0),
+            )
+            .unwrap();
+        let string_site = InlineCacheSite {
+            program: 0,
+            prototype: None,
+            pc: 8,
+        };
+        let mut fuel = None;
+
+        let value = vm
+            .get_table_string_index_with_inline_cache(
+                &program,
+                string_site,
+                string_table,
+                Value::string_atom(key_atom),
+                key_atom,
+                0,
+                &mut fuel,
+            )
+            .unwrap();
+        assert_eq!(value.as_number(), Some(1.0));
+        let value = vm
+            .get_table_string_index_with_inline_cache(
+                &program,
+                string_site,
+                string_table,
+                Value::string_atom(key_atom),
+                key_atom,
+                0,
+                &mut fuel,
+            )
+            .unwrap();
+        assert_eq!(value.as_number(), Some(1.0));
+
+        let integer_table = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(integer_table, Value::number(100.0), Value::number(2.0))
+            .unwrap();
+        let integer_site = InlineCacheSite {
+            program: 0,
+            prototype: None,
+            pc: 9,
+        };
+        let value = vm
+            .get_table_integer_index_with_inline_cache(
+                &program,
+                Some(integer_site),
+                integer_table,
+                100,
+                0,
+                &mut fuel,
+            )
+            .unwrap()
+            .expect("integer hash read should resolve");
+        assert_eq!(value.as_number(), Some(2.0));
+        let value = vm
+            .get_table_integer_index_with_inline_cache(
+                &program,
+                Some(integer_site),
+                integer_table,
+                100,
+                0,
+                &mut fuel,
+            )
+            .unwrap()
+            .expect("cached integer hash read should resolve");
+        assert_eq!(value.as_number(), Some(2.0));
+
+        let snapshot = vm.opcode_profile_snapshot(&program);
+        let string_entry = snapshot
+            .inline_cache_sites
+            .iter()
+            .find(|entry| entry.kind == VmInlineCacheProfileKind::TableStringGet)
+            .expect("string get cache site should be profiled");
+        assert_eq!(string_entry.hits, 1);
+        assert_eq!(string_entry.misses, 1);
+        assert_eq!(string_entry.fills, 1);
+
+        let integer_entry = snapshot
+            .inline_cache_sites
+            .iter()
+            .find(|entry| entry.kind == VmInlineCacheProfileKind::TableIntegerGet)
+            .expect("integer get cache site should be profiled");
+        assert_eq!(integer_entry.hits, 1);
+        assert_eq!(integer_entry.misses, 1);
+        assert_eq!(integer_entry.fills, 1);
     }
 
     #[test]
