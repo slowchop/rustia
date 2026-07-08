@@ -419,6 +419,12 @@ struct TableHashIndexEntry {
     index: usize,
 }
 
+#[derive(Clone, Copy)]
+enum TableHashLookup {
+    Found(usize),
+    Vacant(Option<usize>),
+}
+
 #[derive(Clone, Copy, Collect)]
 #[collect(no_drop)]
 struct ConcatIntegerCacheEntry {
@@ -2796,14 +2802,37 @@ fn concat_integer_direct_cache_slot(key: u64) -> usize {
 }
 
 fn set_hash_key(table: &mut TableData, key: TableKey, key_value: Value, value: Value) {
-    if let Some(entry) = table_hash_entry_mut(table, key) {
-        entry.value = value;
-    } else if value.kind() != ValueKind::Nil {
-        insert_hash_key_absent(table, key, key_value, value);
+    match table_hash_lookup(table, key) {
+        TableHashLookup::Found(index) => {
+            if let Some(entry) = table.hash.get_mut(index) {
+                entry.value = value;
+            }
+        }
+        TableHashLookup::Vacant(vacant_hash_index) => {
+            if value.kind() != ValueKind::Nil {
+                insert_hash_key_absent_with_vacant_index(
+                    table,
+                    key,
+                    key_value,
+                    value,
+                    vacant_hash_index,
+                );
+            }
+        }
     }
 }
 
 fn insert_hash_key_absent(table: &mut TableData, key: TableKey, key_value: Value, value: Value) {
+    insert_hash_key_absent_with_vacant_index(table, key, key_value, value, None);
+}
+
+fn insert_hash_key_absent_with_vacant_index(
+    table: &mut TableData,
+    key: TableKey,
+    key_value: Value,
+    value: Value,
+    vacant_hash_index: Option<usize>,
+) {
     let index = table.hash.len();
     table.hash.push(TableEntry {
         key,
@@ -2811,7 +2840,7 @@ fn insert_hash_key_absent(table: &mut TableData, key: TableKey, key_value: Value
         value,
     });
     bump_table_shape_version(table);
-    record_hash_insert(table, key, index);
+    record_hash_insert(table, key, index, vacant_hash_index);
 }
 
 fn remove_hash_key(table: &mut TableData, key: TableKey) {
@@ -2836,28 +2865,52 @@ fn table_hash_entry_mut(table: &mut TableData, key: TableKey) -> Option<&mut Tab
 
 #[inline(always)]
 fn table_hash_entry_index(table: &TableData, key: TableKey) -> Option<usize> {
-    if table.hash.is_empty() {
-        return None;
-    }
-    if table.hash_index.is_empty() {
-        table.hash.iter().position(|entry| entry.key == key)
-    } else {
-        let mut position = table_hash_index_position(key, table.hash_index.len());
-        for _ in 0..table.hash_index.len() {
-            match table.hash_index[position] {
-                Some(entry) if entry.key == key => return Some(entry.index),
-                Some(_) => position = (position + 1) & (table.hash_index.len() - 1),
-                None => return None,
-            }
-        }
-        None
+    match table_hash_lookup(table, key) {
+        TableHashLookup::Found(index) => Some(index),
+        TableHashLookup::Vacant(_) => None,
     }
 }
 
-fn record_hash_insert(table: &mut TableData, key: TableKey, index: usize) {
+#[inline(always)]
+fn table_hash_lookup(table: &TableData, key: TableKey) -> TableHashLookup {
+    if table.hash.is_empty() {
+        return TableHashLookup::Vacant(None);
+    }
+    if table.hash_index.is_empty() {
+        return match table.hash.iter().position(|entry| entry.key == key) {
+            Some(index) => TableHashLookup::Found(index),
+            None => TableHashLookup::Vacant(None),
+        };
+    }
+
+    let mut position = table_hash_index_position(key, table.hash_index.len());
+    for _ in 0..table.hash_index.len() {
+        match table.hash_index[position] {
+            Some(entry) if entry.key == key => return TableHashLookup::Found(entry.index),
+            Some(_) => position = (position + 1) & (table.hash_index.len() - 1),
+            None => return TableHashLookup::Vacant(Some(position)),
+        }
+    }
+    TableHashLookup::Vacant(None)
+}
+
+fn record_hash_insert(
+    table: &mut TableData,
+    key: TableKey,
+    index: usize,
+    vacant_hash_index: Option<usize>,
+) {
     if table.hash_index.is_empty() {
         if table.hash.len() >= TABLE_HASH_INDEX_MIN_LEN {
             rebuild_hash_index(table);
+        }
+        return;
+    }
+    if let Some(position) = vacant_hash_index {
+        if table.hash.len().saturating_mul(2) > table.hash_index.len() {
+            rebuild_hash_index(table);
+        } else if let Some(entry) = table.hash_index.get_mut(position) {
+            *entry = Some(TableHashIndexEntry { key, index });
         }
         return;
     }
