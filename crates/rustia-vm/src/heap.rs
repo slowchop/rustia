@@ -2582,6 +2582,44 @@ impl VmCell {
         })
     }
 
+    pub(crate) fn table_iter_cache_snapshot(
+        &mut self,
+        table: u32,
+    ) -> Option<(u64, Option<u32>, u64)> {
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize)?;
+            let metatable_version = match table.metatable {
+                Some(metatable) => root.tables.get(metatable as usize)?.version,
+                None => 0,
+            };
+            Some((table.shape_version, table.metatable, metatable_version))
+        })
+    }
+
+    pub(crate) fn table_iter_cache_matches(
+        &mut self,
+        table: u32,
+        table_shape_version: u64,
+        metatable: Option<u32>,
+        metatable_version: u64,
+    ) -> Option<bool> {
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize)?;
+            if table.shape_version != table_shape_version || table.metatable != metatable {
+                return Some(false);
+            }
+            if let Some(metatable) = metatable {
+                let metatable = root.tables.get(metatable as usize)?;
+                if metatable.version != metatable_version {
+                    return Some(false);
+                }
+            }
+            Some(true)
+        })
+    }
+
     pub fn table_freeze(&mut self, table: u32) -> Option<bool> {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
