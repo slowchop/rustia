@@ -2235,6 +2235,28 @@ impl Vm {
                                         key.as_number().and_then(array_iterator_index)
                                     {
                                         if let Some(value) = self
+                                            .table_non_nil_array_slot(table, index)
+                                            .map_err(|e| {
+                                                attach_instruction_source(
+                                                    program,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
+                                                )
+                                            })?
+                                        {
+                                            set_register(&mut registers, instruction.a, value)
+                                                .map_err(|e| {
+                                                    attach_instruction_source(
+                                                        program,
+                                                        function,
+                                                        pc - 1,
+                                                        e,
+                                                    )
+                                                })?;
+                                            continue;
+                                        }
+                                        if let Some(value) = self
                                             .get_table_integer_index_with_inline_cache(
                                                 program,
                                                 program_id.map(|program| InlineCacheSite {
@@ -3116,6 +3138,28 @@ impl Vm {
                                     if let Some(table) = object.as_table() {
                                         if let Some(index) = array_iterator_index(number) {
                                             if let Some(value) = self
+                                                .table_non_nil_array_slot(table, index)
+                                                .map_err(|e| {
+                                                    attach_instruction_source(
+                                                        program,
+                                                        function,
+                                                        pc - 1,
+                                                        e,
+                                                    )
+                                                })?
+                                            {
+                                                set_register(&mut registers, instruction.a, value)
+                                                    .map_err(|e| {
+                                                        attach_instruction_source(
+                                                            program,
+                                                            function,
+                                                            pc - 1,
+                                                            e,
+                                                        )
+                                                    })?;
+                                                continue;
+                                            }
+                                            if let Some(value) = self
                                                 .get_table_integer_index_with_inline_cache(
                                                     program,
                                                     program_id.map(|program| InlineCacheSite {
@@ -3173,6 +3217,23 @@ impl Vm {
                                     .at_pc(pc - 1));
                                 };
                                 if let Some(table) = object.as_table() {
+                                    if let Some(value) = self
+                                        .table_non_nil_array_slot(table, index)
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })?
+                                    {
+                                        set_register(&mut registers, instruction.a, value)
+                                            .map_err(|e| {
+                                                attach_instruction_source(
+                                                    program,
+                                                    function,
+                                                    pc - 1,
+                                                    e,
+                                                )
+                                            })?;
+                                        continue;
+                                    }
                                     if let Some(value) = self
                                         .get_table_integer_index_with_inline_cache(
                                             program,
@@ -7749,6 +7810,26 @@ impl Vm {
             return self.get_object_index_metamethod(program, object, key, depth, fuel);
         }
         Err(self.index_error(object, key)?)
+    }
+
+    #[inline]
+    fn table_non_nil_array_slot(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+    ) -> Result<Option<Value>> {
+        let Some(value) = self
+            .heap
+            .array_slot(table, one_based_index)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+        else {
+            return Ok(None);
+        };
+        Ok((value.kind() != ValueKind::Nil).then_some(value))
     }
 
     fn get_index_mod_add_const(
@@ -28205,6 +28286,23 @@ mod tests {
             mul_mod_const_table_index(9_007_199_254_740_991.0, 2.0, 100003.0),
             None
         );
+    }
+
+    #[test]
+    fn non_nil_array_slot_fast_path_defers_nil_and_missing_slots() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let table = vm
+            .heap
+            .alloc_array_table(&[Value::number(7.0), Value::nil()]);
+
+        assert_eq!(
+            vm.table_non_nil_array_slot(table, 1)
+                .unwrap()
+                .and_then(Value::as_number),
+            Some(7.0)
+        );
+        assert!(vm.table_non_nil_array_slot(table, 2).unwrap().is_none());
+        assert!(vm.table_non_nil_array_slot(table, 3).unwrap().is_none());
     }
 
     #[test]
