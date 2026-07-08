@@ -46,6 +46,7 @@ CI bench runner. Do not retry them without a materially different approach.
 | `02c5867` combined sparse read-pair opcode | `9cacc6b` | runs `28967201259`/`28967318773`: average total median -0.64% and sparse median -3.52% vs `1c802df` average, but generic_iteration regressed +5.85%; too much cross-workload damage for a small total win |
 | `757968c` compiled `AddIndexNumber -> ForLoopStepOne` superinstruction | `e3376a7` | runs `28971363588`/`28971475517`: average total median +3.32% and total min +2.11% vs `dda4e76`; the target dense read loop lost one dispatch but dense median still +0.96% and generic_iteration +10.25%, so codegen/layout cost outweighed the dispatch saving |
 | `dda4e76` generalized upvalue-fed integer table reads | `4e9b27d` | runs `28970485244`/`28971792408`: average total median +1.89% and total min +1.48% vs the kept `474b9da` average; generic_iteration improved only 0.51% while dense/sparse/closures/stdlib regressed, so the upvalue-as-key quickening was backed out |
+| `2798365`/`b1a94b8`/`5f2fee6` IC site slot hash mixes | `6b50587` | hot-site profiling improved `generic_iteration` string-get IC sites from 0% hits to 98.4% hits, but CI did not support keeping it: the heavy mix regressed total median +3.55% vs `c4c190b`, the cheap mix regressed +1.42%, and the minimal mix averaged +0.66% median vs `c4c190b` across runs `28974027833`/`28974129768`; better hit rate did not translate to whole-suite speed |
 
 ## Current Shape Feedback
 
