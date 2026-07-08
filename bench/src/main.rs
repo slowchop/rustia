@@ -1271,7 +1271,6 @@ fn summarize_rustia_function_bytecode(code: &[Instruction], summary: &mut Rustia
             Opcode::GetIndexConcatConst
                 | Opcode::SetIndexConcatConst
                 | Opcode::AddIndexConcatConstOrZero
-                | Opcode::AddIndexConcatAndMulModConstOrZero
         ) {
             summary.concat_key += 1;
         }
@@ -1329,7 +1328,6 @@ fn opcode_is_table_related(opcode: Opcode) -> bool {
             | Opcode::AddIndexNumber
             | Opcode::AddIndexConcatConstOrZero
             | Opcode::AddIndexMulModConstOrZero
-            | Opcode::AddIndexConcatAndMulModConstOrZero
             | Opcode::SetIndex
             | Opcode::GetIndexConcatConst
             | Opcode::SetIndexConcatConst
@@ -1377,7 +1375,6 @@ fn opcode_is_string_key_related(opcode: Opcode) -> bool {
         opcode,
         Opcode::GetIndexStringConst
             | Opcode::AddIndexConcatConstOrZero
-            | Opcode::AddIndexConcatAndMulModConstOrZero
             | Opcode::SetIndexStringConst
             | Opcode::GetIndexConcatConst
             | Opcode::SetIndexConcatConst
@@ -1394,7 +1391,6 @@ fn opcode_is_numeric_key_related(opcode: Opcode) -> bool {
         Opcode::GetIndexNumber
             | Opcode::AddIndexNumber
             | Opcode::AddIndexMulModConstOrZero
-            | Opcode::AddIndexConcatAndMulModConstOrZero
             | Opcode::SetIndexNumber
             | Opcode::GetIndexNumberConst
             | Opcode::SetIndexNumberConst

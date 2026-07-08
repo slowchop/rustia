@@ -1,8 +1,8 @@
 #![allow(clippy::too_many_arguments)]
 
 use crate::bytecode::{
-    Constant, Function, Instruction, Opcode, Program, RuntimeType, SparseReadPlan,
-    UpvalueDescriptor, ARRAY_ITERATOR_SKIP_VISIBLE_KEY, ARRAY_ITERATOR_WRITE_VISIBLE_KEY,
+    Constant, Function, Instruction, Opcode, Program, RuntimeType, UpvalueDescriptor,
+    ARRAY_ITERATOR_SKIP_VISIBLE_KEY, ARRAY_ITERATOR_WRITE_VISIBLE_KEY,
     ASSERT_MESSAGE_MISSING_ARGUMENT, ASSERT_MESSAGE_NONE,
 };
 use crate::error::{Error, ErrorKind, ErrorLocation, Result};
@@ -2114,22 +2114,6 @@ impl Vm {
                             Opcode::AddIndexMulModConstOrZero => {
                                 self.add_index_mul_mod_const_or_zero(
                                     program,
-                                    &mut registers,
-                                    instruction,
-                                    program_id.map(|program| InlineCacheSite {
-                                        program,
-                                        prototype: context.prototype,
-                                        pc: pc - 1,
-                                    }),
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::AddIndexConcatAndMulModConstOrZero => {
-                                self.add_index_concat_and_mul_mod_const_or_zero(
-                                    program,
-                                    program_id,
                                     &mut registers,
                                     instruction,
                                     program_id.map(|program| InlineCacheSite {
@@ -6350,23 +6334,6 @@ impl Vm {
         ))
     }
 
-    fn sparse_read_plan(&self, program: &Program, index: i32) -> Result<SparseReadPlan> {
-        if index < 0 {
-            return Err(Error::new(ErrorKind::InvalidProgram {
-                reason: "negative sparse read plan index",
-            }));
-        }
-        program
-            .sparse_read_plans
-            .get(index as usize)
-            .copied()
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "sparse read plan index out of bounds",
-                })
-            })
-    }
-
     fn global_key(&mut self, program: &Program, index: i32) -> Result<Value> {
         Ok(Value::string_atom(
             self.global_key_atom(program, None, index)?,
@@ -7013,56 +6980,6 @@ impl Vm {
             instruction.a,
             lhs,
             rhs,
-            site,
-            depth,
-            fuel,
-        )
-    }
-
-    fn add_index_concat_and_mul_mod_const_or_zero(
-        &mut self,
-        program: &Program,
-        program_id: Option<u32>,
-        registers: &mut [Value],
-        instruction: Instruction,
-        site: Option<InlineCacheSite>,
-        depth: usize,
-        fuel: &mut Option<u64>,
-    ) -> Result<()> {
-        let plan = self.sparse_read_plan(program, instruction.aux)?;
-        let lhs = get_register(registers, instruction.a)?;
-        let object = get_register(registers, instruction.b)?;
-        let key = self.concat_const_key(
-            program,
-            program_id,
-            registers,
-            instruction.c,
-            plan.concat_constant,
-            depth,
-            fuel,
-        )?;
-        let rhs =
-            self.get_index_computed_key_without_inline_cache(program, object, key, depth, fuel)?;
-        self.add_rhs_or_zero(
-            program,
-            registers,
-            instruction.a,
-            lhs,
-            rhs,
-            None,
-            depth,
-            fuel,
-        )?;
-        self.add_index_mul_mod_const_or_zero(
-            program,
-            registers,
-            Instruction::with_aux(
-                Opcode::AddIndexMulModConstOrZero,
-                instruction.a,
-                instruction.b,
-                instruction.c,
-                plan.mul_mod_constants,
-            ),
             site,
             depth,
             fuel,
@@ -22906,7 +22823,6 @@ fn opcode_may_observe_current_roots(op: Opcode) -> bool {
         | Opcode::AddIndexNumber
         | Opcode::AddIndexConcatConstOrZero
         | Opcode::AddIndexMulModConstOrZero
-        | Opcode::AddIndexConcatAndMulModConstOrZero
         | Opcode::AddConst
         | Opcode::AddUpvalue
         | Opcode::AddUpvalueConst
