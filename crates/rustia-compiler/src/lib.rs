@@ -10264,6 +10264,76 @@ return sum
             assert_eq!(result.as_number(), Some(expected));
         }
 
+        let dynamic_string_key = parse_source(
+            "\
+            local key = 'x'
+            local mt = {
+                __index = { x = 99 },
+                __newindex = function()
+                    error('rawset should not call __newindex')
+                end,
+            }
+            local t = {}
+            setmetatable(t, mt)
+            local sum = 0
+            for i = 1, 5 do
+                if i == 2 then
+                    rawset(t, key, 7)
+                end
+                if i == 4 then
+                    rawset(t, key, nil)
+                end
+                local v = rawget(t, key)
+                sum += v or 1
+            end
+            return sum
+            ",
+        )
+        .unwrap();
+        let program = compile(&dynamic_string_key).unwrap();
+        assert!(opcode_count(&program, Opcode::RawGet) >= 1);
+        assert!(opcode_count(&program, Opcode::RawSet) >= 1);
+        assert_eq!(opcode_count(&program, Opcode::RawGetStringConst), 0);
+        assert_eq!(opcode_count(&program, Opcode::RawSetStringConst), 0);
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(17.0));
+
+        let dynamic_number_key = parse_source(
+            "\
+            local key = 20
+            local mt = {
+                __index = { [20] = 99 },
+                __newindex = function()
+                    error('rawset should not call __newindex')
+                end,
+            }
+            local t = {}
+            setmetatable(t, mt)
+            local sum = 0
+            for i = 1, 5 do
+                if i == 2 then
+                    rawset(t, key, 7)
+                end
+                if i == 4 then
+                    rawset(t, key, nil)
+                end
+                local v = rawget(t, key)
+                sum += v or 1
+            end
+            return sum
+            ",
+        )
+        .unwrap();
+        let program = compile(&dynamic_number_key).unwrap();
+        assert!(opcode_count(&program, Opcode::RawGet) >= 1);
+        assert!(opcode_count(&program, Opcode::RawSet) >= 1);
+        assert_eq!(opcode_count(&program, Opcode::RawGetNumberConst), 0);
+        assert_eq!(opcode_count(&program, Opcode::RawSetNumberConst), 0);
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(17.0));
+
         let nil_cases = [
             "local t = {} return rawget(t, nil)",
             "local t = {} return rawget(t, 0/0)",

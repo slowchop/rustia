@@ -3146,7 +3146,30 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let key = get_register(&registers, instruction.c)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                let value = self.raw_table_get_after_table_lookup(table, key);
+                                let value = if let Some(site) =
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }) {
+                                    if let Some(key_atom) = key.as_string_atom() {
+                                        self.raw_table_string_get_with_inline_cache(
+                                            site, table, key_atom,
+                                        )
+                                        .map_err(|e| e.at_pc(pc - 1))?
+                                    } else if let Some(index) =
+                                        key.as_number().and_then(array_iterator_index)
+                                    {
+                                        self.raw_table_integer_get_with_inline_cache(
+                                            site, table, index,
+                                        )
+                                        .map_err(|e| e.at_pc(pc - 1))?
+                                    } else {
+                                        self.raw_table_get_after_table_lookup(table, key)
+                                    }
+                                } else {
+                                    self.raw_table_get_after_table_lookup(table, key)
+                                };
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -3503,8 +3526,31 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let value = get_register(&registers, instruction.c)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                self.set_table_index_after_table_lookup(table, key, value)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                if let Some(site) = program_id.map(|program| InlineCacheSite {
+                                    program,
+                                    prototype: context.prototype,
+                                    pc: pc - 1,
+                                }) {
+                                    if let Some(key_atom) = key.as_string_atom() {
+                                        self.raw_table_string_set_with_inline_cache(
+                                            site, table, key_atom, value,
+                                        )
+                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                    } else if let Some(index) =
+                                        key.as_number().and_then(array_iterator_index)
+                                    {
+                                        self.raw_table_integer_set_with_inline_cache(
+                                            site, table, index, value,
+                                        )
+                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                    } else {
+                                        self.set_table_index_after_table_lookup(table, key, value)
+                                            .map_err(|e| e.at_pc(pc - 1))?;
+                                    }
+                                } else {
+                                    self.set_table_index_after_table_lookup(table, key, value)
+                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                }
                             }
                             Opcode::RawSetStringConst => {
                                 if instruction.aux < 0 {
