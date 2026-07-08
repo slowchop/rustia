@@ -4055,13 +4055,7 @@ impl Compiler {
                     }
                     "insert" => return self.compile_table_insert_call(args, target, span),
                     "remove" => return self.compile_table_remove_call(args, target, span),
-                    "sort" => {
-                        if args.len() == 1 {
-                            return self.compile_table_sort_call(args, target, span);
-                        }
-                        return self.compile_value_call_to(callee, args, target, span);
-                    }
-                    "move" | "foreach" | "foreachi" | "clone" => {
+                    "move" | "sort" | "foreach" | "foreachi" | "clone" => {
                         return self.compile_value_call_to(callee, args, target, span);
                     }
                     "pack" | "unpack" => {
@@ -6052,12 +6046,6 @@ impl Compiler {
                     return Ok(false);
                 }
             }
-            StdlibBuiltinAlias::TableSort => {
-                if args.len() != 1 {
-                    return Ok(false);
-                }
-                self.compile_table_sort_call(args, target, span)?;
-            }
         }
         Ok(true)
     }
@@ -6388,16 +6376,6 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_table_sort_call(&mut self, args: &[Expr], target: u8, span: Span) -> Result<()> {
-        if args.len() != 1 {
-            return Err(CompileError::at("unsupported table.sort arity", span));
-        }
-        self.compile_expr_to(&args[0], target)?;
-        self.code
-            .push(Instruction::new(Opcode::TableSort, target, target, 0));
-        Ok(())
-    }
-
     fn compile_string_sub_call(&mut self, args: &[Expr], target: u8, span: Span) -> Result<()> {
         if !(2..=3).contains(&args.len()) {
             return Err(CompileError::at("unsupported string.sub arity", span));
@@ -6725,16 +6703,6 @@ impl Compiler {
                     "sub" => Some(StdlibBuiltinAlias::StringSub),
                     "find" => Some(StdlibBuiltinAlias::StringFind),
                     "format" => Some(StdlibBuiltinAlias::StringFormat),
-                    _ => None,
-                }
-            }
-            Expr::Field { object, field, .. }
-                if matches!(object.as_ref(), Expr::Name(name, _) if name == "table")
-                    && self.builtin_global_is_unmodified("table")
-                    && self.builtin_table_field_is_unmodified("table", field) =>
-            {
-                match field.as_str() {
-                    "sort" => Some(StdlibBuiltinAlias::TableSort),
                     _ => None,
                 }
             }
@@ -9330,7 +9298,6 @@ enum StdlibBuiltinAlias {
     StringFind,
     ToNumber,
     StringFormat,
-    TableSort,
 }
 
 impl MathWindowCallSpec {
@@ -14133,98 +14100,6 @@ return f()
             0,
             "{:?}",
             program.functions
-        );
-
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let result = vm.run(&program).unwrap();
-        assert_eq!(vm.string_value(result).unwrap().as_deref(), Some("mutated"));
-    }
-
-    #[test]
-    fn fresh_local_table_writes_keep_table_sort_fast_path() {
-        let chunk =
-            parse_source("local a = {3, 1, 2} table.sort(a) return table.concat(a, ',')").unwrap();
-        let program = compile(&chunk).unwrap();
-        assert!(
-            opcode_count(&program, Opcode::TableSort) > 0,
-            "{:?}",
-            program.main.code
-        );
-
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let result = vm.run(&program).unwrap();
-        assert_eq!(vm.string_value(result).unwrap().as_deref(), Some("1,2,3"));
-    }
-
-    #[test]
-    fn local_table_sort_alias_uses_direct_opcode() {
-        let chunk = parse_source("local sort = table.sort local a = {3, 1, 2} sort(a) return a[1]")
-            .unwrap();
-        let program = compile(&chunk).unwrap();
-        assert!(
-            opcode_count(&program, Opcode::TableSort) > 0,
-            "{:?}",
-            program.main.code
-        );
-
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let result = vm.run(&program).unwrap();
-        assert_eq!(result.as_number(), Some(1.0));
-    }
-
-    #[test]
-    fn local_table_sort_alias_respects_reassigned_table_global() {
-        let chunk = parse_source(
-            "table = { sort = function() return 'replacement' end } local sort = table.sort return sort({3, 1, 2})",
-        )
-        .unwrap();
-        let program = compile(&chunk).unwrap();
-        assert_eq!(
-            opcode_count(&program, Opcode::TableSort),
-            0,
-            "{:?}",
-            program.main.code
-        );
-
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let result = vm.run(&program).unwrap();
-        assert_eq!(
-            vm.string_value(result).unwrap().as_deref(),
-            Some("replacement")
-        );
-    }
-
-    #[test]
-    fn table_sort_comparator_uses_generic_call_path() {
-        let chunk = parse_source(
-            "local a = {1, 2, 3} table.sort(a, function(a, b) return a > b end) return table.concat(a, ',')",
-        )
-        .unwrap();
-        let program = compile(&chunk).unwrap();
-        assert_eq!(
-            opcode_count(&program, Opcode::TableSort),
-            0,
-            "{:?}",
-            program.main.code
-        );
-
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let result = vm.run(&program).unwrap();
-        assert_eq!(vm.string_value(result).unwrap().as_deref(), Some("3,2,1"));
-    }
-
-    #[test]
-    fn stdlib_table_alias_writes_disable_table_sort_fast_path() {
-        let chunk = parse_source(
-            "local alias = table alias.sort = function() return 'mutated' end return table.sort({1})",
-        )
-        .unwrap();
-        let program = compile(&chunk).unwrap();
-        assert_eq!(
-            opcode_count(&program, Opcode::TableSort),
-            0,
-            "{:?}",
-            program.main.code
         );
 
         let mut vm = Vm::new(Profile::ReproducibleStandard);
