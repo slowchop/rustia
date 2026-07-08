@@ -113,8 +113,7 @@ pub struct Vm {
     arithmetic_metamethod_inline_cache: Vec<Option<ArithmeticMetamethodInlineCacheSlot>>,
     iter_metamethod_inline_cache: Vec<Option<IterMetamethodInlineCacheSlot>>,
     len_inline_cache: Vec<Option<LenInlineCacheSlot>>,
-    constant_string_atom_cache: BTreeMap<(u32, usize), u32>,
-    record_key_atom_cache: BTreeMap<(u32, usize), Arc<RecordKeyAtomPlan>>,
+    program_atom_caches: Vec<ProgramAtomCache>,
     string_format_plan_cache: BTreeMap<u32, Arc<[StringFormatPlanItem]>>,
 }
 
@@ -159,6 +158,11 @@ impl InlineCacheSite {
 struct RecordKeyAtomPlan {
     atoms: Arc<[u32]>,
     has_duplicate_keys: bool,
+}
+
+struct ProgramAtomCache {
+    string_atoms: Vec<Option<u32>>,
+    record_key_plans: Vec<Option<Arc<RecordKeyAtomPlan>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -629,8 +633,7 @@ impl Vm {
             arithmetic_metamethod_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             iter_metamethod_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             len_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
-            constant_string_atom_cache: BTreeMap::new(),
-            record_key_atom_cache: BTreeMap::new(),
+            program_atom_caches: Vec::new(),
             string_format_plan_cache: BTreeMap::new(),
         }
     }
@@ -5473,12 +5476,30 @@ impl Vm {
         let Some(program_id) = program_id else {
             return Ok(Some(self.heap.intern_string_bytes(value)));
         };
-        if let Some(atom) = self.constant_string_atom_cache.get(&(program_id, index)) {
-            return Ok(Some(*atom));
+        if let Some(atom) = self
+            .program_atom_caches
+            .get(program_id as usize)
+            .and_then(|cache| cache.string_atoms.get(index))
+            .copied()
+            .flatten()
+        {
+            return Ok(Some(atom));
         }
         let atom = self.heap.intern_string_bytes(value);
-        self.constant_string_atom_cache
-            .insert((program_id, index), atom);
+        let cache = self
+            .program_atom_caches
+            .get_mut(program_id as usize)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "program atom cache is missing",
+                })
+            })?;
+        let slot = cache.string_atoms.get_mut(index).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "program string atom cache slot is missing",
+            })
+        })?;
+        *slot = Some(atom);
         Ok(Some(atom))
     }
 
@@ -8894,8 +8915,14 @@ impl Vm {
             }));
         }
         if let Some(program_id) = program_id {
-            if let Some(plan) = self.record_key_atom_cache.get(&(program_id, key_set_index)) {
-                return Ok(plan.clone());
+            if let Some(plan) = self
+                .program_atom_caches
+                .get(program_id as usize)
+                .and_then(|cache| cache.record_key_plans.get(key_set_index))
+                .cloned()
+                .flatten()
+            {
+                return Ok(plan);
             }
         }
         let mut atoms = Vec::with_capacity(key_set.len());
@@ -8918,8 +8945,23 @@ impl Vm {
             has_duplicate_keys,
         });
         if let Some(program_id) = program_id {
-            self.record_key_atom_cache
-                .insert((program_id, key_set_index), plan.clone());
+            let cache = self
+                .program_atom_caches
+                .get_mut(program_id as usize)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "program atom cache is missing",
+                    })
+                })?;
+            let slot = cache
+                .record_key_plans
+                .get_mut(key_set_index)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "program record key cache slot is missing",
+                    })
+                })?;
+            *slot = Some(plan.clone());
         }
         Ok(plan)
     }
@@ -9669,6 +9711,10 @@ impl Vm {
                 reason: "dynamic program handle overflow",
             })
         })?;
+        self.program_atom_caches.push(ProgramAtomCache {
+            string_atoms: vec![None; program.constants.len()],
+            record_key_plans: vec![None; program.record_key_sets.len()],
+        });
         self.dynamic_programs.push(Arc::new(program));
         Ok(program_id)
     }
