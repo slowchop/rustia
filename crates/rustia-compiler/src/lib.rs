@@ -11160,6 +11160,54 @@ return t.missing
     }
 
     #[test]
+    fn quickened_index_table_cache_reads_updated_delegate_slots() {
+        let chunk = parse_source(
+            r#"
+local proto = { x = 1, y = 2 }
+local t = {}
+setmetatable(t, { __index = proto })
+local a = t.x
+proto.x = 3
+local b = t.x
+proto.y = 4
+local c = t.x
+return a * 100 + b * 10 + c
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::GetIndexStringConst) >= 3);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(133.0));
+    }
+
+    #[test]
+    fn quickened_index_table_cache_observes_index_table_reassignment() {
+        let chunk = parse_source(
+            r#"
+local first = { x = 1 }
+local second = { x = 2 }
+local mt = { __index = first }
+local t = {}
+setmetatable(t, mt)
+local a = t.x
+mt.__index = second
+local b = t.x
+return a * 10 + b
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::GetIndexStringConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(12.0));
+    }
+
+    #[test]
     fn index_read_lowering_preserves_side_effect_order() {
         let chunk = parse_source(
             r#"

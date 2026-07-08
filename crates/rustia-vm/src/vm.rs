@@ -196,10 +196,11 @@ enum TableGetInlineCacheSource {
     },
     IndexTable {
         metatable: u32,
-        metatable_version: u64,
+        metatable_shape_version: u64,
+        metatable_hash_index: usize,
         index_table: u32,
-        index_table_version: u64,
-        value: Value,
+        index_table_shape_version: u64,
+        index_table_hash_index: usize,
     },
 }
 
@@ -7051,7 +7052,7 @@ impl Vm {
             return Ok(value);
         }
         if let Some(value) =
-            self.try_get_table_string_index_for_inline_cache(site, table, key, key_atom)?
+            self.try_get_table_string_index_for_inline_cache(site, table, key_atom)?
         {
             return Ok(value);
         }
@@ -7139,10 +7140,11 @@ impl Vm {
             }
             TableGetInlineCacheSource::IndexTable {
                 metatable,
-                metatable_version,
+                metatable_shape_version,
+                metatable_hash_index,
                 index_table,
-                index_table_version,
-                value,
+                index_table_shape_version,
+                index_table_hash_index,
             } => {
                 if let Some(raw) = self.raw_table_slot(table, key)? {
                     if raw.kind() != ValueKind::Nil
@@ -7159,12 +7161,46 @@ impl Vm {
                 {
                     return Ok(None);
                 }
-                if self.heap.table_version(metatable) != Some(metatable_version)
-                    || self.heap.table_version(index_table) != Some(index_table_version)
-                {
+                let index_atom = self.heap.intern_string("__index");
+                let Some(index_slot) = self
+                    .heap
+                    .read_string_hash_slot_with_shape(
+                        metatable,
+                        index_atom,
+                        metatable_shape_version,
+                        metatable_hash_index,
+                    )
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "__index metatable handle is missing",
+                        })
+                    })?
+                else {
+                    return Ok(None);
+                };
+                if index_slot.value.as_table() != Some(index_table) {
                     return Ok(None);
                 }
-                Ok(Some(value))
+                let Some(value_slot) = self
+                    .heap
+                    .read_string_hash_slot_with_shape(
+                        index_table,
+                        key_atom,
+                        index_table_shape_version,
+                        index_table_hash_index,
+                    )
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "__index table handle is missing",
+                        })
+                    })?
+                else {
+                    return Ok(None);
+                };
+                if value_slot.value.kind() == ValueKind::Nil {
+                    return Ok(None);
+                }
+                Ok(Some(value_slot.value))
             }
         }
     }
@@ -7173,7 +7209,6 @@ impl Vm {
         &mut self,
         site: InlineCacheSite,
         table: u32,
-        key: Value,
         key_atom: u32,
     ) -> Result<Option<Value>> {
         let table_shape_version = self.heap.table_shape_version(table).ok_or_else(|| {
@@ -7230,7 +7265,7 @@ impl Vm {
             return Ok(Some(value));
         };
         if let Some(value) =
-            self.try_get_table_index_table_for_inline_cache(site, metatable, key, key_atom)?
+            self.try_get_table_index_table_for_inline_cache(site, metatable, key_atom)?
         {
             return Ok(Some(value));
         }
@@ -7241,27 +7276,35 @@ impl Vm {
         &mut self,
         site: InlineCacheSite,
         metatable: u32,
-        key: Value,
         key_atom: u32,
     ) -> Result<Option<Value>> {
-        let metatable_version = self.heap.table_version(metatable).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "metatable handle is missing",
-            })
-        })?;
-        let index_key = Value::string_atom(self.heap.intern_string("__index"));
-        let index = self.raw_table_get(metatable, index_key)?;
-        let Some(index_table) = index.as_table() else {
+        let index_atom = self.heap.intern_string("__index");
+        let Some(index_slot) = self
+            .heap
+            .table_string_hash_slot(metatable, index_atom)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "metatable handle is missing",
+                })
+            })?
+        else {
             return Ok(None);
         };
-        let index_table_version = self.heap.table_version(index_table).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "__index table handle is missing",
-            })
-        })?;
-        let Some(value) = self.raw_table_slot(index_table, key)? else {
+        let Some(index_table) = index_slot.value.as_table() else {
             return Ok(None);
         };
+        let Some(value_slot) = self
+            .heap
+            .table_string_hash_slot(index_table, key_atom)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "__index table handle is missing",
+                })
+            })?
+        else {
+            return Ok(None);
+        };
+        let value = value_slot.value;
         if value.kind() == ValueKind::Nil {
             return Ok(None);
         }
@@ -7271,10 +7314,11 @@ impl Vm {
                 key_atom,
                 source: TableGetInlineCacheSource::IndexTable {
                     metatable,
-                    metatable_version,
+                    metatable_shape_version: index_slot.shape_version,
+                    metatable_hash_index: index_slot.index,
                     index_table,
-                    index_table_version,
-                    value,
+                    index_table_shape_version: value_slot.shape_version,
+                    index_table_hash_index: value_slot.index,
                 },
             },
         );
