@@ -112,6 +112,8 @@ pub struct Vm {
     table_integer_set_inline_cache: Vec<Option<TableIntegerSetInlineCacheSlot>>,
     raw_table_string_get_inline_cache: Vec<Option<RawTableStringGetInlineCacheSlot>>,
     raw_table_string_set_inline_cache: Vec<Option<RawTableStringSetInlineCacheSlot>>,
+    raw_table_integer_get_inline_cache: Vec<Option<RawTableIntegerGetInlineCacheSlot>>,
+    raw_table_integer_set_inline_cache: Vec<Option<RawTableIntegerSetInlineCacheSlot>>,
     arithmetic_metamethod_inline_cache: Vec<Option<ArithmeticMetamethodInlineCacheSlot>>,
     iter_metamethod_inline_cache: Vec<Option<IterMetamethodInlineCacheSlot>>,
     len_inline_cache: Vec<Option<LenInlineCacheSlot>>,
@@ -284,6 +286,36 @@ struct RawTableStringSetInlineCacheSlot {
 #[derive(Clone, Copy)]
 struct RawTableStringSetInlineCacheEntry {
     key_atom: u32,
+    hash_indices: StringSlotIndexCache,
+}
+
+#[derive(Clone, Copy)]
+struct RawTableIntegerGetInlineCacheSlot {
+    site: InlineCacheSite,
+    entry: RawTableIntegerGetInlineCacheEntry,
+}
+
+#[derive(Clone, Copy)]
+struct RawTableIntegerGetInlineCacheEntry {
+    one_based_index: usize,
+    source: RawTableIntegerGetInlineCacheSource,
+}
+
+#[derive(Clone, Copy)]
+enum RawTableIntegerGetInlineCacheSource {
+    DirectSlot { hash_indices: StringSlotIndexCache },
+    DirectAbsent { table: u32, table_version: u64 },
+}
+
+#[derive(Clone, Copy)]
+struct RawTableIntegerSetInlineCacheSlot {
+    site: InlineCacheSite,
+    entry: RawTableIntegerSetInlineCacheEntry,
+}
+
+#[derive(Clone, Copy)]
+struct RawTableIntegerSetInlineCacheEntry {
+    one_based_index: usize,
     hash_indices: StringSlotIndexCache,
 }
 
@@ -669,6 +701,8 @@ impl Vm {
             table_integer_set_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             raw_table_string_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             raw_table_string_set_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
+            raw_table_integer_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
+            raw_table_integer_set_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             arithmetic_metamethod_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             iter_metamethod_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             len_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
@@ -3156,9 +3190,18 @@ impl Vm {
                                 };
                                 let table = get_table(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                let value = self
-                                    .raw_table_integer_get_after_table_lookup(table, index)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let value = if let Some(site) =
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }) {
+                                    self.raw_table_integer_get_with_inline_cache(site, table, index)
+                                        .map_err(|e| e.at_pc(pc - 1))?
+                                } else {
+                                    self.raw_table_integer_get_after_table_lookup(table, index)
+                                        .map_err(|e| e.at_pc(pc - 1))?
+                                };
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -3506,10 +3549,21 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let value = get_register(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                self.set_table_integer_index_after_table_lookup(
-                                    table, index, value,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
+                                if let Some(site) = program_id.map(|program| InlineCacheSite {
+                                    program,
+                                    prototype: context.prototype,
+                                    pc: pc - 1,
+                                }) {
+                                    self.raw_table_integer_set_with_inline_cache(
+                                        site, table, index, value,
+                                    )
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                } else {
+                                    self.set_table_integer_index_after_table_lookup(
+                                        table, index, value,
+                                    )
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                }
                             }
                             Opcode::TableConcat => {
                                 let table = get_table(&registers, instruction.b)
@@ -8318,6 +8372,293 @@ impl Vm {
 
     fn clear_raw_table_string_set_inline_cache_site(&mut self, site: InlineCacheSite) {
         if let Some(slot) = self.raw_table_string_set_inline_cache.get_mut(site.slot()) {
+            let should_clear = slot.as_ref().is_some_and(|slot| slot.site == site);
+            if should_clear {
+                *slot = None;
+            }
+        }
+    }
+
+    fn raw_table_integer_get_with_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+    ) -> Result<Value> {
+        if let Some(value) = self
+            .heap
+            .array_slot(table, one_based_index)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+        {
+            return Ok(value);
+        }
+        if let Some(value) =
+            self.raw_table_integer_get_inline_cache_hit(site, table, one_based_index)?
+        {
+            return Ok(value);
+        }
+        self.try_raw_table_integer_get_for_inline_cache(site, table, one_based_index)
+    }
+
+    fn raw_table_integer_get_inline_cache_hit(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+    ) -> Result<Option<Value>> {
+        let slot = self
+            .raw_table_integer_get_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
+        let Some(slot) = slot else {
+            return Ok(None);
+        };
+        if slot.site != site || slot.entry.one_based_index != one_based_index {
+            return Ok(None);
+        }
+        match slot.entry.source {
+            RawTableIntegerGetInlineCacheSource::DirectSlot { hash_indices } => {
+                for hash_index in hash_indices.iter() {
+                    let Some(slot) = self
+                        .heap
+                        .read_integer_hash_slot_at_index(table, one_based_index, hash_index)
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "table handle is missing",
+                            })
+                        })?
+                    else {
+                        continue;
+                    };
+                    return Ok(Some(slot.value));
+                }
+                Ok(None)
+            }
+            RawTableIntegerGetInlineCacheSource::DirectAbsent {
+                table: cached_table,
+                table_version,
+            } => {
+                if cached_table == table && self.heap.table_version(table) == Some(table_version) {
+                    return Ok(Some(Value::nil()));
+                }
+                Ok(None)
+            }
+        }
+    }
+
+    fn try_raw_table_integer_get_for_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+    ) -> Result<Value> {
+        let table_version = self.heap.table_version(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?;
+        let hash_slot = self
+            .heap
+            .table_integer_hash_slot(table, one_based_index)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?;
+        let (value, source) = hash_slot.map_or(
+            (
+                Value::nil(),
+                RawTableIntegerGetInlineCacheSource::DirectAbsent {
+                    table,
+                    table_version,
+                },
+            ),
+            |slot| {
+                (
+                    slot.value,
+                    RawTableIntegerGetInlineCacheSource::DirectSlot {
+                        hash_indices: self.raw_table_integer_get_slot_indices(
+                            site,
+                            one_based_index,
+                            slot.index,
+                        ),
+                    },
+                )
+            },
+        );
+        self.store_raw_table_integer_get_inline_cache(
+            site,
+            RawTableIntegerGetInlineCacheEntry {
+                one_based_index,
+                source,
+            },
+        );
+        Ok(value)
+    }
+
+    fn store_raw_table_integer_get_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        entry: RawTableIntegerGetInlineCacheEntry,
+    ) {
+        if let Some(slot) = self.raw_table_integer_get_inline_cache.get_mut(site.slot()) {
+            *slot = Some(RawTableIntegerGetInlineCacheSlot { site, entry });
+        }
+    }
+
+    fn raw_table_integer_get_slot_indices(
+        &self,
+        site: InlineCacheSite,
+        one_based_index: usize,
+        hash_index: usize,
+    ) -> StringSlotIndexCache {
+        self.raw_table_integer_get_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten()
+            .filter(|slot| slot.site == site && slot.entry.one_based_index == one_based_index)
+            .and_then(|slot| match slot.entry.source {
+                RawTableIntegerGetInlineCacheSource::DirectSlot { hash_indices } => {
+                    Some(hash_indices)
+                }
+                RawTableIntegerGetInlineCacheSource::DirectAbsent { .. } => None,
+            })
+            .map(|indices| indices.with_index(hash_index))
+            .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
+    }
+
+    fn raw_table_integer_set_with_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+    ) -> Result<()> {
+        if self.set_table_integer_index_fast(table, one_based_index, value)? {
+            return Ok(());
+        }
+        if self.raw_table_integer_set_inline_cache_hit(site, table, one_based_index, value)? {
+            return Ok(());
+        }
+        if self.try_raw_table_integer_set_for_inline_cache(site, table, one_based_index, value)? {
+            return Ok(());
+        }
+        self.clear_raw_table_integer_set_inline_cache_site(site);
+        self.set_table_integer_index_after_table_lookup(table, one_based_index, value)
+    }
+
+    fn raw_table_integer_set_inline_cache_hit(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+    ) -> Result<bool> {
+        let slot = self
+            .raw_table_integer_set_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
+        let Some(slot) = slot else {
+            return Ok(false);
+        };
+        if slot.site != site || slot.entry.one_based_index != one_based_index {
+            return Ok(false);
+        }
+        for hash_index in slot.entry.hash_indices.iter() {
+            match self
+                .heap
+                .write_integer_hash_slot_at_index_raw(table, one_based_index, hash_index, value)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    })
+                })? {
+                HashWriteStatus::Stored => return Ok(true),
+                HashWriteStatus::Deferred => {}
+                HashWriteStatus::Readonly => return Err(readonly_table_error()),
+            }
+        }
+        Ok(false)
+    }
+
+    fn try_raw_table_integer_set_for_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+    ) -> Result<bool> {
+        let Some(slot) = self
+            .heap
+            .table_integer_hash_slot(table, one_based_index)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+        else {
+            return Ok(false);
+        };
+        match self
+            .heap
+            .write_integer_hash_slot_at_index_raw(table, one_based_index, slot.index, value)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })? {
+            HashWriteStatus::Stored => {
+                self.store_raw_table_integer_set_inline_cache(
+                    site,
+                    RawTableIntegerSetInlineCacheEntry {
+                        one_based_index,
+                        hash_indices: self.raw_table_integer_set_slot_indices(
+                            site,
+                            one_based_index,
+                            slot.index,
+                        ),
+                    },
+                );
+                Ok(true)
+            }
+            HashWriteStatus::Deferred => Ok(false),
+            HashWriteStatus::Readonly => Err(readonly_table_error()),
+        }
+    }
+
+    fn store_raw_table_integer_set_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        entry: RawTableIntegerSetInlineCacheEntry,
+    ) {
+        if let Some(slot) = self.raw_table_integer_set_inline_cache.get_mut(site.slot()) {
+            *slot = Some(RawTableIntegerSetInlineCacheSlot { site, entry });
+        }
+    }
+
+    fn raw_table_integer_set_slot_indices(
+        &self,
+        site: InlineCacheSite,
+        one_based_index: usize,
+        hash_index: usize,
+    ) -> StringSlotIndexCache {
+        self.raw_table_integer_set_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten()
+            .filter(|slot| slot.site == site && slot.entry.one_based_index == one_based_index)
+            .map(|slot| slot.entry.hash_indices.with_index(hash_index))
+            .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
+    }
+
+    fn clear_raw_table_integer_set_inline_cache_site(&mut self, site: InlineCacheSite) {
+        if let Some(slot) = self.raw_table_integer_set_inline_cache.get_mut(site.slot()) {
             let should_clear = slot.as_ref().is_some_and(|slot| slot.site == site);
             if should_clear {
                 *slot = None;
