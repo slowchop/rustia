@@ -478,6 +478,18 @@ pub(crate) struct TableStringHashSlotRead {
     pub has_metatable: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TableIntegerHashSlot {
+    pub index: usize,
+    pub value: Value,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TableIntegerHashSlotRead {
+    pub value: Value,
+    pub has_metatable: bool,
+}
+
 pub(crate) enum UpvalueAddStatus {
     Stored(Value),
     Deferred(Value, Value),
@@ -1474,6 +1486,99 @@ impl VmCell {
             let key = number_table_key(one_based_index as f64)?;
             let value = table_hash_entry(table, key).map_or_else(Value::nil, |entry| entry.value);
             Some(HashReadStatus::Hit(value))
+        })
+    }
+
+    pub(crate) fn table_integer_hash_slot(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+    ) -> Option<Option<TableIntegerHashSlot>> {
+        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
+            return Some(None);
+        }
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize)?;
+            if one_based_index <= table.array.len() {
+                return Some(None);
+            }
+            let key = number_table_key(one_based_index as f64)?;
+            let Some(index) = table_hash_entry_index(table, key) else {
+                return Some(None);
+            };
+            let Some(entry) = table.hash.get(index) else {
+                return Some(None);
+            };
+            Some(Some(TableIntegerHashSlot {
+                index,
+                value: entry.value,
+            }))
+        })
+    }
+
+    pub(crate) fn read_integer_hash_slot_at_index(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+        index: usize,
+    ) -> Option<Option<TableIntegerHashSlotRead>> {
+        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
+            return Some(None);
+        }
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize)?;
+            if one_based_index <= table.array.len() {
+                return Some(None);
+            }
+            let Some(entry) = table.hash.get(index) else {
+                return Some(None);
+            };
+            let key = number_table_key(one_based_index as f64)?;
+            if entry.key != key {
+                return Some(None);
+            }
+            Some(Some(TableIntegerHashSlotRead {
+                value: entry.value,
+                has_metatable: table.metatable.is_some(),
+            }))
+        })
+    }
+
+    pub(crate) fn write_integer_hash_slot_at_index(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+        index: usize,
+        value: Value,
+    ) -> Option<HashWriteStatus> {
+        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
+            return Some(HashWriteStatus::Deferred);
+        }
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let table = root.tables.get_mut(table as usize)?;
+            if one_based_index <= table.array.len().saturating_add(1) {
+                return Some(HashWriteStatus::Deferred);
+            }
+            let has_metatable = table.metatable.is_some();
+            let Some(entry) = table.hash.get_mut(index) else {
+                return Some(HashWriteStatus::Deferred);
+            };
+            let key = number_table_key(one_based_index as f64)?;
+            if entry.key != key {
+                return Some(HashWriteStatus::Deferred);
+            }
+            if entry.value.kind() == ValueKind::Nil && has_metatable {
+                return Some(HashWriteStatus::Deferred);
+            }
+            if table.readonly {
+                return Some(HashWriteStatus::Readonly);
+            }
+            entry.value = value;
+            bump_table_version(table);
+            Some(HashWriteStatus::Stored)
         })
     }
 
@@ -2918,5 +3023,78 @@ mod tests {
             .read_string_hash_slot_at_index(different, x, x_slot.index)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn integer_hash_slot_indices_can_be_reused_across_matching_tables() {
+        let mut heap = VmCell::new();
+        let first = heap.alloc_array_table(&[]);
+        let second = heap.alloc_array_table(&[]);
+        let different = heap.alloc_array_table(&[]);
+
+        for table in [first, second] {
+            assert_eq!(
+                heap.write_integer_index_without_metamethod(table, 8, Value::number(1.0)),
+                Some(ArrayWriteStatus::Stored)
+            );
+        }
+        assert_eq!(
+            heap.write_integer_index_without_metamethod(different, 7, Value::number(2.0)),
+            Some(ArrayWriteStatus::Stored)
+        );
+        assert_eq!(
+            heap.write_integer_index_without_metamethod(different, 8, Value::number(3.0)),
+            Some(ArrayWriteStatus::Stored)
+        );
+
+        let slot = heap.table_integer_hash_slot(first, 8).unwrap().unwrap();
+        let second_read = heap
+            .read_integer_hash_slot_at_index(second, 8, slot.index)
+            .unwrap()
+            .unwrap();
+        assert_eq!(second_read.value.as_number(), Some(1.0));
+        assert!(heap
+            .read_integer_hash_slot_at_index(different, 8, slot.index)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn integer_hash_slot_indices_defer_when_array_slot_can_take_precedence() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+
+        assert_eq!(
+            heap.write_integer_index_without_metamethod(table, 4, Value::number(9.0)),
+            Some(ArrayWriteStatus::Stored)
+        );
+        let slot = heap.table_integer_hash_slot(table, 4).unwrap().unwrap();
+        for index in 1..=3 {
+            assert_eq!(
+                heap.write_integer_index_without_metamethod(
+                    table,
+                    index,
+                    Value::number(index as f64)
+                ),
+                Some(ArrayWriteStatus::Stored)
+            );
+        }
+
+        assert_eq!(
+            heap.write_integer_hash_slot_at_index(table, 4, slot.index, Value::number(10.0)),
+            Some(HashWriteStatus::Deferred)
+        );
+        assert_eq!(
+            heap.write_integer_index_without_metamethod(table, 4, Value::number(4.0)),
+            Some(ArrayWriteStatus::Stored)
+        );
+        assert!(heap
+            .read_integer_hash_slot_at_index(table, 4, slot.index)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            heap.array_slot(table, 4).unwrap().unwrap().as_number(),
+            Some(4.0)
+        );
     }
 }

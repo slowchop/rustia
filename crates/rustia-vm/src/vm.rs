@@ -108,6 +108,8 @@ pub struct Vm {
     global_get_inline_cache: Vec<Option<GlobalGetInlineCacheSlot>>,
     table_get_inline_cache: Vec<Option<TableGetInlineCacheSlot>>,
     table_set_inline_cache: Vec<Option<TableSetInlineCacheSlot>>,
+    table_integer_get_inline_cache: Vec<Option<TableIntegerGetInlineCacheSlot>>,
+    table_integer_set_inline_cache: Vec<Option<TableIntegerSetInlineCacheSlot>>,
     arithmetic_metamethod_inline_cache: Vec<Option<ArithmeticMetamethodInlineCacheSlot>>,
     iter_metamethod_inline_cache: Vec<Option<IterMetamethodInlineCacheSlot>>,
     len_inline_cache: Vec<Option<LenInlineCacheSlot>>,
@@ -211,6 +213,30 @@ struct TableSetInlineCacheSlot {
 #[derive(Clone, Copy)]
 struct TableSetInlineCacheEntry {
     key_atom: u32,
+    hash_indices: StringSlotIndexCache,
+}
+
+#[derive(Clone, Copy)]
+struct TableIntegerGetInlineCacheSlot {
+    site: InlineCacheSite,
+    entry: TableIntegerGetInlineCacheEntry,
+}
+
+#[derive(Clone, Copy)]
+struct TableIntegerGetInlineCacheEntry {
+    one_based_index: usize,
+    hash_indices: StringSlotIndexCache,
+}
+
+#[derive(Clone, Copy)]
+struct TableIntegerSetInlineCacheSlot {
+    site: InlineCacheSite,
+    entry: TableIntegerSetInlineCacheEntry,
+}
+
+#[derive(Clone, Copy)]
+struct TableIntegerSetInlineCacheEntry {
+    one_based_index: usize,
     hash_indices: StringSlotIndexCache,
 }
 
@@ -592,6 +618,8 @@ impl Vm {
             global_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             table_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             table_set_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
+            table_integer_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
+            table_integer_set_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             arithmetic_metamethod_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             iter_metamethod_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             len_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
@@ -1962,7 +1990,15 @@ impl Vm {
                                         key.as_number().and_then(array_iterator_index)
                                     {
                                         if let Some(value) = self
-                                            .get_table_integer_index_fast(table, index)
+                                            .get_table_integer_index_with_inline_cache(
+                                                program_id.map(|program| InlineCacheSite {
+                                                    program,
+                                                    prototype: context.prototype,
+                                                    pc: pc - 1,
+                                                }),
+                                                table,
+                                                index,
+                                            )
                                             .map_err(|e| {
                                                 attach_instruction_source(
                                                     program,
@@ -2645,7 +2681,15 @@ impl Vm {
                                         key.as_number().and_then(array_iterator_index)
                                     {
                                         if let Some(value) = self
-                                            .get_table_integer_index_fast(table, index)
+                                            .get_table_integer_index_with_inline_cache(
+                                                program_id.map(|program| InlineCacheSite {
+                                                    program,
+                                                    prototype: context.prototype,
+                                                    pc: pc - 1,
+                                                }),
+                                                table,
+                                                index,
+                                            )
                                             .map_err(|e| {
                                                 attach_instruction_source(
                                                     program,
@@ -2796,7 +2840,15 @@ impl Vm {
                                     if let Some(table) = object.as_table() {
                                         if let Some(index) = array_iterator_index(number) {
                                             if let Some(value) = self
-                                                .get_table_integer_index_fast(table, index)
+                                                .get_table_integer_index_with_inline_cache(
+                                                    program_id.map(|program| InlineCacheSite {
+                                                        program,
+                                                        prototype: context.prototype,
+                                                        pc: pc - 1,
+                                                    }),
+                                                    table,
+                                                    index,
+                                                )
                                                 .map_err(|e| {
                                                     attach_instruction_source(
                                                         program,
@@ -2843,7 +2895,15 @@ impl Vm {
                                 };
                                 if let Some(table) = object.as_table() {
                                     if let Some(value) = self
-                                        .get_table_integer_index_fast(table, index)
+                                        .get_table_integer_index_with_inline_cache(
+                                            program_id.map(|program| InlineCacheSite {
+                                                program,
+                                                prototype: context.prototype,
+                                                pc: pc - 1,
+                                            }),
+                                            table,
+                                            index,
+                                        )
                                         .map_err(|e| {
                                             attach_instruction_source(program, function, pc - 1, e)
                                         })?
@@ -2992,7 +3052,16 @@ impl Vm {
                                         key.as_number().and_then(array_iterator_index)
                                     {
                                         if self
-                                            .set_table_integer_index_fast(table, index, value)
+                                            .set_table_integer_index_with_inline_cache(
+                                                program_id.map(|program| InlineCacheSite {
+                                                    program,
+                                                    prototype: context.prototype,
+                                                    pc: pc - 1,
+                                                }),
+                                                table,
+                                                index,
+                                                value,
+                                            )
                                             .map_err(|e| {
                                                 attach_instruction_source(
                                                     program,
@@ -3034,7 +3103,16 @@ impl Vm {
                                     if let Some(table) = object.as_table() {
                                         if let Some(index) = array_iterator_index(number) {
                                             if self
-                                                .set_table_integer_index_fast(table, index, value)
+                                                .set_table_integer_index_with_inline_cache(
+                                                    program_id.map(|program| InlineCacheSite {
+                                                        program,
+                                                        prototype: context.prototype,
+                                                        pc: pc - 1,
+                                                    }),
+                                                    table,
+                                                    index,
+                                                    value,
+                                                )
                                                 .map_err(|e| {
                                                     attach_instruction_source(
                                                         program,
@@ -3079,7 +3157,16 @@ impl Vm {
                                 };
                                 if let Some(table) = object.as_table() {
                                     if self
-                                        .set_table_integer_index_fast(table, index, value)
+                                        .set_table_integer_index_with_inline_cache(
+                                            program_id.map(|program| InlineCacheSite {
+                                                program,
+                                                prototype: context.prototype,
+                                                pc: pc - 1,
+                                            }),
+                                            table,
+                                            index,
+                                            value,
+                                        )
                                         .map_err(|e| {
                                             attach_instruction_source(program, function, pc - 1, e)
                                         })?
@@ -3193,7 +3280,16 @@ impl Vm {
                                         key.as_number().and_then(array_iterator_index)
                                     {
                                         if self
-                                            .set_table_integer_index_fast(table, index, value)
+                                            .set_table_integer_index_with_inline_cache(
+                                                program_id.map(|program| InlineCacheSite {
+                                                    program,
+                                                    prototype: context.prototype,
+                                                    pc: pc - 1,
+                                                }),
+                                                table,
+                                                index,
+                                                value,
+                                            )
                                             .map_err(|e| {
                                                 attach_instruction_source(
                                                     program,
@@ -6058,7 +6154,7 @@ impl Vm {
 
         if let Some(table) = object.as_table() {
             if let Some(index) = key.as_number().and_then(array_iterator_index) {
-                if self.set_table_integer_index_fast(table, index, value)? {
+                if self.set_table_integer_index_with_inline_cache(site, table, index, value)? {
                     return Ok(());
                 }
             }
@@ -6112,7 +6208,7 @@ impl Vm {
 
         if let Some(table) = object.as_table() {
             if let Some(index) = key.as_number().and_then(array_iterator_index) {
-                if self.set_table_integer_index_fast(table, index, value)? {
+                if self.set_table_integer_index_with_inline_cache(site, table, index, value)? {
                     return Ok(());
                 }
             }
@@ -7056,7 +7152,9 @@ impl Vm {
 
         if let Some(table) = object.as_table() {
             if let Some(index) = key.as_number().and_then(array_iterator_index) {
-                if let Some(value) = self.get_table_integer_index_fast(table, index)? {
+                if let Some(value) =
+                    self.get_table_integer_index_with_inline_cache(site, table, index)?
+                {
                     return Ok(value);
                 }
             }
@@ -7109,7 +7207,9 @@ impl Vm {
 
         if let Some(table) = object.as_table() {
             if let Some(index) = key.as_number().and_then(array_iterator_index) {
-                if let Some(value) = self.get_table_integer_index_fast(table, index)? {
+                if let Some(value) =
+                    self.get_table_integer_index_with_inline_cache(site, table, index)?
+                {
                     return Ok(value);
                 }
             }
@@ -7149,6 +7249,175 @@ impl Vm {
             return Ok(Some(Value::nil()));
         }
         Ok(None)
+    }
+
+    fn get_table_integer_index_with_inline_cache(
+        &mut self,
+        site: Option<InlineCacheSite>,
+        table: u32,
+        one_based_index: usize,
+    ) -> Result<Option<Value>> {
+        let Some(site) = site else {
+            return self.get_table_integer_index_fast(table, one_based_index);
+        };
+        let Some(value) = self
+            .heap
+            .array_slot(table, one_based_index)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+        else {
+            if let Some(value) =
+                self.table_integer_get_inline_cache_hit(site, table, one_based_index)?
+            {
+                return Ok(Some(value));
+            }
+            if let Some(value) = self.try_get_table_integer_hash_index_for_inline_cache(
+                site,
+                table,
+                one_based_index,
+            )? {
+                return Ok(Some(value));
+            }
+            self.clear_table_integer_get_inline_cache_site(site);
+            return self.get_table_integer_hash_key_fast(table, one_based_index);
+        };
+        if value.kind() != ValueKind::Nil || self.table_uses_standard_global_type_surface(table)? {
+            return Ok(Some(value));
+        }
+        if self
+            .heap
+            .table_metatable(table)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+            .is_none()
+        {
+            return Ok(Some(Value::nil()));
+        }
+        Ok(None)
+    }
+
+    fn table_integer_get_inline_cache_hit(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+    ) -> Result<Option<Value>> {
+        let slot = self
+            .table_integer_get_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
+        let Some(slot) = slot else {
+            return Ok(None);
+        };
+        if slot.site != site || slot.entry.one_based_index != one_based_index {
+            return Ok(None);
+        }
+        for hash_index in slot.entry.hash_indices.iter() {
+            let Some(slot) = self
+                .heap
+                .read_integer_hash_slot_at_index(table, one_based_index, hash_index)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    })
+                })?
+            else {
+                continue;
+            };
+            if slot.value.kind() != ValueKind::Nil
+                || !slot.has_metatable
+                || self.table_uses_standard_global_type_surface(table)?
+            {
+                return Ok(Some(slot.value));
+            }
+            return Ok(None);
+        }
+        Ok(None)
+    }
+
+    fn try_get_table_integer_hash_index_for_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+    ) -> Result<Option<Value>> {
+        let Some(slot) = self
+            .heap
+            .table_integer_hash_slot(table, one_based_index)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+        else {
+            return Ok(None);
+        };
+        if slot.value.kind() == ValueKind::Nil
+            && self
+                .heap
+                .table_metatable(table)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    })
+                })?
+                .is_some()
+        {
+            return Ok(None);
+        }
+        self.store_table_integer_get_inline_cache(
+            site,
+            TableIntegerGetInlineCacheEntry {
+                one_based_index,
+                hash_indices: self.table_integer_get_slot_indices(
+                    site,
+                    one_based_index,
+                    slot.index,
+                ),
+            },
+        );
+        Ok(Some(slot.value))
+    }
+
+    fn store_table_integer_get_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        entry: TableIntegerGetInlineCacheEntry,
+    ) {
+        if let Some(slot) = self.table_integer_get_inline_cache.get_mut(site.slot()) {
+            *slot = Some(TableIntegerGetInlineCacheSlot { site, entry });
+        }
+    }
+
+    fn table_integer_get_slot_indices(
+        &self,
+        site: InlineCacheSite,
+        one_based_index: usize,
+        hash_index: usize,
+    ) -> StringSlotIndexCache {
+        self.table_integer_get_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten()
+            .filter(|slot| slot.site == site && slot.entry.one_based_index == one_based_index)
+            .map(|slot| slot.entry.hash_indices.with_index(hash_index))
+            .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
+    }
+
+    fn clear_table_integer_get_inline_cache_site(&mut self, site: InlineCacheSite) {
+        if let Some(slot) = self.table_integer_get_inline_cache.get_mut(site.slot()) {
+            let should_clear = slot.as_ref().is_some_and(|slot| slot.site == site);
+            if should_clear {
+                *slot = None;
+            }
+        }
     }
 
     fn get_table_integer_hash_key_fast(
@@ -7224,6 +7493,145 @@ impl Vm {
             ArrayWriteStatus::Stored => Ok(true),
             ArrayWriteStatus::Deferred => Ok(false),
             ArrayWriteStatus::Readonly => Err(readonly_table_error()),
+        }
+    }
+
+    fn set_table_integer_index_with_inline_cache(
+        &mut self,
+        site: Option<InlineCacheSite>,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+    ) -> Result<bool> {
+        let Some(site) = site else {
+            return self.set_table_integer_index_fast(table, one_based_index, value);
+        };
+        if self.table_integer_set_inline_cache_hit(site, table, one_based_index, value)? {
+            return Ok(true);
+        }
+        if self.try_set_table_integer_hash_index_for_inline_cache(
+            site,
+            table,
+            one_based_index,
+            value,
+        )? {
+            return Ok(true);
+        }
+        self.clear_table_integer_set_inline_cache_site(site);
+        self.set_table_integer_index_fast(table, one_based_index, value)
+    }
+
+    fn table_integer_set_inline_cache_hit(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+    ) -> Result<bool> {
+        let slot = self
+            .table_integer_set_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
+        let Some(slot) = slot else {
+            return Ok(false);
+        };
+        if slot.site != site || slot.entry.one_based_index != one_based_index {
+            return Ok(false);
+        }
+        for hash_index in slot.entry.hash_indices.iter() {
+            match self
+                .heap
+                .write_integer_hash_slot_at_index(table, one_based_index, hash_index, value)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    })
+                })? {
+                HashWriteStatus::Stored => return Ok(true),
+                HashWriteStatus::Deferred => {}
+                HashWriteStatus::Readonly => return Err(readonly_table_error()),
+            }
+        }
+        Ok(false)
+    }
+
+    fn try_set_table_integer_hash_index_for_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+    ) -> Result<bool> {
+        let Some(slot) = self
+            .heap
+            .table_integer_hash_slot(table, one_based_index)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+        else {
+            return Ok(false);
+        };
+        match self
+            .heap
+            .write_integer_hash_slot_at_index(table, one_based_index, slot.index, value)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })? {
+            HashWriteStatus::Stored => {
+                self.store_table_integer_set_inline_cache(
+                    site,
+                    TableIntegerSetInlineCacheEntry {
+                        one_based_index,
+                        hash_indices: self.table_integer_set_slot_indices(
+                            site,
+                            one_based_index,
+                            slot.index,
+                        ),
+                    },
+                );
+                Ok(true)
+            }
+            HashWriteStatus::Deferred => Ok(false),
+            HashWriteStatus::Readonly => Err(readonly_table_error()),
+        }
+    }
+
+    fn store_table_integer_set_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        entry: TableIntegerSetInlineCacheEntry,
+    ) {
+        if let Some(slot) = self.table_integer_set_inline_cache.get_mut(site.slot()) {
+            *slot = Some(TableIntegerSetInlineCacheSlot { site, entry });
+        }
+    }
+
+    fn table_integer_set_slot_indices(
+        &self,
+        site: InlineCacheSite,
+        one_based_index: usize,
+        hash_index: usize,
+    ) -> StringSlotIndexCache {
+        self.table_integer_set_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten()
+            .filter(|slot| slot.site == site && slot.entry.one_based_index == one_based_index)
+            .map(|slot| slot.entry.hash_indices.with_index(hash_index))
+            .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
+    }
+
+    fn clear_table_integer_set_inline_cache_site(&mut self, site: InlineCacheSite) {
+        if let Some(slot) = self.table_integer_set_inline_cache.get_mut(site.slot()) {
+            let should_clear = slot.as_ref().is_some_and(|slot| slot.site == site);
+            if should_clear {
+                *slot = None;
+            }
         }
     }
 

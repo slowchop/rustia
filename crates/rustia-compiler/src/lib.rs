@@ -11388,6 +11388,30 @@ return seen
     }
 
     #[test]
+    fn sparse_numeric_cache_defers_when_array_grows_to_slot() {
+        let chunk = parse_source(
+            r#"
+local t = {}
+t[4] = 9
+local before = t[4]
+t[1] = 1
+t[2] = 2
+t[3] = 3
+t[4] = 4
+return #t * 100 + before * 10 + t[4]
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexNumberConst) >= 5);
+        assert!(opcode_count(&program, Opcode::GetIndexNumberConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(494.0));
+    }
+
+    #[test]
     fn numeric_table_index_opcodes_preserve_metamethod_fallbacks() {
         let chunk = parse_source(
             r#"
