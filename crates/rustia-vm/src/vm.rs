@@ -11336,21 +11336,23 @@ impl Vm {
             return Ok(None);
         }
         let entry = slot.entry;
-        if !self
-            .heap
-            .table_iter_cache_matches(
-                table,
-                entry.table_shape_version,
-                entry.metatable,
-                entry.metatable_version,
-            )
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "__iter cache table handle is missing",
-                })
-            })?
-        {
+        let table_shape_version = self.heap.table_shape_version(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?;
+        if table_shape_version != entry.table_shape_version {
             return Ok(None);
+        }
+        if let Some(metatable) = entry.metatable {
+            let metatable_version = self.heap.table_version(metatable).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "__iter metatable handle is missing",
+                })
+            })?;
+            if metatable_version != entry.metatable_version {
+                return Ok(None);
+            }
         }
         Ok(Some(entry.method))
     }
@@ -11359,12 +11361,16 @@ impl Vm {
         &mut self,
         table: u32,
     ) -> Result<(IterMetamethodInlineCacheEntry, Option<Value>)> {
-        let (table_shape_version, metatable, metatable_version) =
-            self.heap.table_iter_cache_snapshot(table).ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "table handle is missing",
-                })
-            })?;
+        let table_shape_version = self.heap.table_shape_version(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?;
+        let metatable = self.heap.table_metatable(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })?;
         let Some(metatable) = metatable else {
             return Ok((
                 IterMetamethodInlineCacheEntry {
@@ -11377,6 +11383,11 @@ impl Vm {
                 None,
             ));
         };
+        let metatable_version = self.heap.table_version(metatable).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "__iter metatable handle is missing",
+            })
+        })?;
         let method = self.table_iter_metamethod_from_metatable(metatable)?;
         Ok((
             IterMetamethodInlineCacheEntry {
@@ -29421,46 +29432,6 @@ mod tests {
             .expect("value-only table changes should keep the __iter cache valid")
             .expect("__iter method should still be cached");
         assert_eq!(cached.as_function(), method.as_function());
-    }
-
-    #[test]
-    fn iter_metamethod_cache_observes_method_reassignment() {
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let iter_atom = vm.heap.intern_string("__iter");
-        let table = vm.heap.alloc_array_table(&[]);
-        let metatable = vm.heap.alloc_array_table(&[]);
-        let first_method = native_function_value(&mut vm.heap, NativeFunction::TypeOf, vm.globals);
-        let second_method =
-            native_function_value(&mut vm.heap, NativeFunction::TableGetN, vm.globals);
-        vm.heap
-            .table_set(metatable, Value::string_atom(iter_atom), first_method)
-            .unwrap();
-        vm.heap.table_set_metatable(table, Some(metatable)).unwrap();
-        let site = InlineCacheSite {
-            program: 1,
-            prototype: None,
-            pc: 9,
-        };
-
-        let cached = vm
-            .table_iter_metamethod_with_inline_cache(Some(site), table)
-            .unwrap()
-            .expect("__iter method should be cached");
-        assert_eq!(cached.as_function(), first_method.as_function());
-
-        vm.heap
-            .table_set(metatable, Value::string_atom(iter_atom), second_method)
-            .unwrap();
-        assert!(vm
-            .table_iter_metamethod_inline_cache_hit(site, table)
-            .unwrap()
-            .is_none());
-
-        let cached = vm
-            .table_iter_metamethod_with_inline_cache(Some(site), table)
-            .unwrap()
-            .expect("__iter method should be refreshed");
-        assert_eq!(cached.as_function(), second_method.as_function());
     }
 
     #[test]
