@@ -218,6 +218,8 @@ pub enum Opcode {
     SetIndexNumberConst = 159,
     CheckMethodStringConst = 160,
     NewRecordConstKeys = 161,
+    RawGetStringConst = 162,
+    RawSetStringConst = 163,
 }
 
 pub const ARRAY_ITERATOR_WRITE_VISIBLE_KEY: u8 = 0;

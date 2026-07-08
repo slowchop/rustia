@@ -6055,6 +6055,24 @@ impl Compiler {
             return Err(CompileError::at("unsupported rawget arity", span));
         }
         self.compile_expr_to(&args[0], target)?;
+        if let Some(Constant::String(key)) = const_eval(&args[1]) {
+            let key = self.string_constant_operand(&key)?;
+            let mut ignored_registers = Vec::new();
+            for arg in args.iter().skip(2) {
+                ignored_registers.push(self.compile_expr(arg)?);
+            }
+            self.code.push(Instruction::with_aux(
+                Opcode::RawGetStringConst,
+                target,
+                target,
+                0,
+                key,
+            ));
+            for register in ignored_registers.into_iter().rev() {
+                self.free_register(register);
+            }
+            return Ok(());
+        }
         let key_register = self.compile_expr(&args[1])?;
         let mut ignored_registers = Vec::new();
         for arg in args.iter().skip(2) {
@@ -6078,6 +6096,28 @@ impl Compiler {
             return Err(CompileError::at("unsupported rawset arity", span));
         }
         self.compile_expr_to(&args[0], target)?;
+        if let Some(Constant::String(key)) = const_eval(&args[1]) {
+            let key = self.string_constant_operand(&key)?;
+            let value_register = self.compile_expr(&args[2])?;
+            let mut ignored_registers = Vec::new();
+            for arg in args.iter().skip(3) {
+                ignored_registers.push(self.compile_expr(arg)?);
+            }
+            self.code.push(Instruction::with_aux(
+                Opcode::RawSetStringConst,
+                target,
+                value_register,
+                0,
+                key,
+            ));
+            for register in ignored_registers.into_iter().rev() {
+                self.free_register(register);
+            }
+            self.free_register(value_register);
+            self.mark_rawset_mutation(args);
+            self.stdlib_tables_may_be_mutated = true;
+            return Ok(());
+        }
         let key_register = self.compile_expr(&args[1])?;
         let value_register = self.compile_expr(&args[2])?;
         let mut ignored_registers = Vec::new();
@@ -9999,6 +10039,22 @@ mod tests {
             let result = vm.run(&program).unwrap();
             assert_eq!(result.as_number(), Some(expected));
         }
+
+        let chunk = parse_source("local t = { x = 7 } local r = rawget(t, 'x') return r").unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::RawGetStringConst), 1);
+        assert_eq!(opcode_count(&program, Opcode::RawGet), 0);
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(7.0));
+
+        let chunk = parse_source("local t = {} rawset(t, 'x', 7) return t.x").unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::RawSetStringConst), 1);
+        assert_eq!(opcode_count(&program, Opcode::RawSet), 0);
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(7.0));
 
         let nil_cases = [
             "local t = {} return rawget(t, nil)",

@@ -3066,6 +3066,35 @@ impl Vm {
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
+                            Opcode::RawGetStringConst => {
+                                if instruction.aux < 0 {
+                                    return Err(Error::new(ErrorKind::InvalidProgram {
+                                        reason: "negative rawget string constant",
+                                    })
+                                    .at_pc(pc - 1));
+                                }
+                                let table = get_table(&registers, instruction.b)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let key_atom = self
+                                    .constant_string_atom(
+                                        program,
+                                        program_id,
+                                        instruction.aux as usize,
+                                    )
+                                    .map_err(|e| e.at_pc(pc - 1))?
+                                    .ok_or_else(|| {
+                                        Error::new(ErrorKind::InvalidProgram {
+                                            reason: "rawget string opcode must reference a string",
+                                        })
+                                        .at_pc(pc - 1)
+                                    })?;
+                                let value = self.raw_table_get_after_table_lookup(
+                                    table,
+                                    Value::string_atom(key_atom),
+                                );
+                                set_register(&mut registers, instruction.a, value)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                            }
                             Opcode::SetIndex => {
                                 let object =
                                     get_register(&registers, instruction.a).map_err(|e| {
@@ -3355,6 +3384,37 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 self.set_table_index_after_table_lookup(table, key, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::RawSetStringConst => {
+                                if instruction.aux < 0 {
+                                    return Err(Error::new(ErrorKind::InvalidProgram {
+                                        reason: "negative rawset string constant",
+                                    })
+                                    .at_pc(pc - 1));
+                                }
+                                let table = get_table(&registers, instruction.a)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let value = get_register(&registers, instruction.b)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let key_atom = self
+                                    .constant_string_atom(
+                                        program,
+                                        program_id,
+                                        instruction.aux as usize,
+                                    )
+                                    .map_err(|e| e.at_pc(pc - 1))?
+                                    .ok_or_else(|| {
+                                        Error::new(ErrorKind::InvalidProgram {
+                                            reason: "rawset string opcode must reference a string",
+                                        })
+                                        .at_pc(pc - 1)
+                                    })?;
+                                self.set_table_index_after_table_lookup(
+                                    table,
+                                    Value::string_atom(key_atom),
+                                    value,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::TableConcat => {
                                 let table = get_table(&registers, instruction.b)
@@ -19473,7 +19533,9 @@ fn opcode_may_observe_current_roots(op: Opcode) -> bool {
         | Opcode::MathLog10
         | Opcode::MathLdexp
         | Opcode::RawGet
+        | Opcode::RawGetStringConst
         | Opcode::RawSet
+        | Opcode::RawSetStringConst
         | Opcode::RawLen
         | Opcode::TableCreate
         | Opcode::TableInsert
