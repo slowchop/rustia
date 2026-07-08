@@ -3479,19 +3479,6 @@ impl Vm {
                                         key.as_number().and_then(array_iterator_index)
                                     {
                                         if self
-                                            .set_table_integer_array_index_fast(table, index, value)
-                                            .map_err(|e| {
-                                                attach_instruction_source(
-                                                    program,
-                                                    function,
-                                                    pc - 1,
-                                                    e,
-                                                )
-                                            })?
-                                        {
-                                            continue;
-                                        }
-                                        if self
                                             .set_table_integer_index_with_inline_cache(
                                                 program,
                                                 program_id.map(|program| InlineCacheSite {
@@ -3577,21 +3564,6 @@ impl Vm {
                                     if let Some(table) = object.as_table() {
                                         if let Some(index) = array_iterator_index(number) {
                                             if self
-                                                .set_table_integer_array_index_fast(
-                                                    table, index, value,
-                                                )
-                                                .map_err(|e| {
-                                                    attach_instruction_source(
-                                                        program,
-                                                        function,
-                                                        pc - 1,
-                                                        e,
-                                                    )
-                                                })?
-                                            {
-                                                continue;
-                                            }
-                                            if self
                                                 .set_table_integer_index_with_inline_cache(
                                                     program,
                                                     program_id.map(|program| InlineCacheSite {
@@ -3648,14 +3620,6 @@ impl Vm {
                                     .at_pc(pc - 1));
                                 };
                                 if let Some(table) = object.as_table() {
-                                    if self
-                                        .set_table_integer_array_index_fast(table, index, value)
-                                        .map_err(|e| {
-                                            attach_instruction_source(program, function, pc - 1, e)
-                                        })?
-                                    {
-                                        continue;
-                                    }
                                     if self
                                         .set_table_integer_index_with_inline_cache(
                                             program,
