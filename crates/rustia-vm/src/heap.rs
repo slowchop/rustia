@@ -459,6 +459,13 @@ pub(crate) enum HashReadStatus {
     Deferred,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum HashWriteStatus {
+    Stored,
+    Deferred,
+    Readonly,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TableStringHashSlot {
     pub index: usize,
@@ -1535,6 +1542,42 @@ impl VmCell {
                 value: entry.value,
                 has_metatable: table.metatable.is_some(),
             }))
+        })
+    }
+
+    pub(crate) fn write_string_hash_slot_with_shape(
+        &mut self,
+        table: u32,
+        atom: u32,
+        shape_version: u64,
+        index: usize,
+        value: Value,
+    ) -> Option<HashWriteStatus> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            if string_atom_is(&root, atom, b"__mode") {
+                root.weak_tables_possible = true;
+            }
+            let table = root.tables.get_mut(table as usize)?;
+            if table.shape_version != shape_version {
+                return Some(HashWriteStatus::Deferred);
+            }
+            let has_metatable = table.metatable.is_some();
+            let Some(entry) = table.hash.get_mut(index) else {
+                return Some(HashWriteStatus::Deferred);
+            };
+            if entry.key != TableKey::String(atom) {
+                return Some(HashWriteStatus::Deferred);
+            }
+            if entry.value.kind() == ValueKind::Nil && has_metatable {
+                return Some(HashWriteStatus::Deferred);
+            }
+            if table.readonly {
+                return Some(HashWriteStatus::Readonly);
+            }
+            entry.value = value;
+            bump_table_version(table);
+            Some(HashWriteStatus::Stored)
         })
     }
 
@@ -2830,5 +2873,33 @@ mod tests {
         heap.table_set_metatable(table, Some(metatable)).unwrap();
 
         assert_ne!(heap.table_shape_version(table), Some(shape_version));
+    }
+
+    #[test]
+    fn string_hash_slot_writes_preserve_shape_and_update_value() {
+        let mut heap = VmCell::new();
+        let key = heap.intern_string("x");
+        let table = heap.alloc_array_table(&[]);
+        heap.table_set(table, Value::string_atom(key), Value::number(1.0))
+            .unwrap();
+        let slot = heap.table_string_hash_slot(table, key).unwrap().unwrap();
+
+        assert_eq!(
+            heap.write_string_hash_slot_with_shape(
+                table,
+                key,
+                slot.shape_version,
+                slot.index,
+                Value::number(2.0),
+            ),
+            Some(HashWriteStatus::Stored)
+        );
+        assert_eq!(heap.table_shape_version(table), Some(slot.shape_version));
+        assert_eq!(
+            heap.table_get(table, Value::string_atom(key))
+                .unwrap()
+                .as_number(),
+            Some(2.0)
+        );
     }
 }

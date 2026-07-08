@@ -8,9 +8,9 @@ use crate::bytecode::{
 use crate::error::{Error, ErrorKind, ErrorLocation, Result};
 use crate::extension::{validate_registered_op, ExtensionOp, ExtensionRegistry, HostFunctionOp};
 use crate::heap::{
-    ArrayWriteStatus, FunctionBytecodeContext, FunctionKind, HashReadStatus, NativeFunction,
-    TableConcatOutcome, TableIterationOrder, TableNext, UpvalueAddConstStatus, UpvalueAddStatus,
-    UserdataPayload, VectorData, VmCell,
+    ArrayWriteStatus, FunctionBytecodeContext, FunctionKind, HashReadStatus, HashWriteStatus,
+    NativeFunction, TableConcatOutcome, TableIterationOrder, TableNext, UpvalueAddConstStatus,
+    UpvalueAddStatus, UserdataPayload, VectorData, VmCell,
 };
 use crate::number::{binary, canonicalize_number, NumericOp};
 use crate::profile::Profile;
@@ -106,6 +106,7 @@ pub struct Vm {
     coverage_hits: BTreeMap<CoverageKey, u64>,
     global_get_inline_cache: Vec<Option<GlobalGetInlineCacheSlot>>,
     table_get_inline_cache: Vec<Option<TableGetInlineCacheSlot>>,
+    table_set_inline_cache: Vec<Option<TableSetInlineCacheSlot>>,
     arithmetic_metamethod_inline_cache: Vec<Option<ArithmeticMetamethodInlineCacheSlot>>,
     iter_metamethod_inline_cache: Vec<Option<IterMetamethodInlineCacheSlot>>,
     len_inline_cache: Vec<Option<LenInlineCacheSlot>>,
@@ -202,6 +203,20 @@ enum TableGetInlineCacheSource {
         index_table_shape_version: u64,
         index_table_hash_index: usize,
     },
+}
+
+#[derive(Clone, Copy)]
+struct TableSetInlineCacheSlot {
+    site: InlineCacheSite,
+    entry: TableSetInlineCacheEntry,
+}
+
+#[derive(Clone, Copy)]
+struct TableSetInlineCacheEntry {
+    table: u32,
+    key_atom: u32,
+    table_shape_version: u64,
+    hash_index: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -546,6 +561,7 @@ impl Vm {
             coverage_hits: BTreeMap::new(),
             global_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             table_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
+            table_set_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             arithmetic_metamethod_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             iter_metamethod_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             len_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
@@ -2963,6 +2979,72 @@ impl Vm {
                                                 continue;
                                             }
                                         }
+                                    }
+                                }
+                                self.set_index_value(
+                                    program,
+                                    object,
+                                    key,
+                                    value,
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })?;
+                            }
+                            Opcode::SetIndexStringConst => {
+                                if instruction.aux < 0 {
+                                    return Err(Error::new(ErrorKind::InvalidProgram {
+                                        reason: "negative string table set constant",
+                                    })
+                                    .at_pc(pc - 1));
+                                }
+                                let object =
+                                    get_register(&registers, instruction.a).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let value =
+                                    get_register(&registers, instruction.b).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let key_atom = self
+                                    .constant_string_atom(
+                                        program,
+                                        program_id,
+                                        instruction.aux as usize,
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?
+                                    .ok_or_else(|| {
+                                        Error::new(ErrorKind::InvalidProgram {
+                                            reason:
+                                                "string table set opcode must reference a string",
+                                        })
+                                        .at_pc(pc - 1)
+                                    })?;
+                                let key = Value::string_atom(key_atom);
+                                if let Some(table) = object.as_table() {
+                                    if let Some(site) = program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }) {
+                                        self.set_table_string_index_with_inline_cache(
+                                            program,
+                                            site,
+                                            table,
+                                            key,
+                                            key_atom,
+                                            value,
+                                            context.depth,
+                                            fuel,
+                                        )
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })?;
+                                        continue;
                                     }
                                 }
                                 self.set_index_value(
@@ -7035,6 +7117,150 @@ impl Vm {
             ArrayWriteStatus::Stored => Ok(true),
             ArrayWriteStatus::Deferred => Ok(false),
             ArrayWriteStatus::Readonly => Err(readonly_table_error()),
+        }
+    }
+
+    fn set_table_string_index_with_inline_cache(
+        &mut self,
+        program: &Program,
+        site: InlineCacheSite,
+        table: u32,
+        key: Value,
+        key_atom: u32,
+        value: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        if self.table_set_inline_cache_hit(site, table, key_atom, value)? {
+            return Ok(());
+        }
+        if self.try_set_table_string_index_for_inline_cache(site, table, key_atom, value)? {
+            return Ok(());
+        }
+        self.clear_table_set_inline_cache_site(site);
+        self.set_table_index_with_metamethod(program, table, key, value, depth, fuel)
+    }
+
+    fn table_set_inline_cache_hit(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        key_atom: u32,
+        value: Value,
+    ) -> Result<bool> {
+        let slot = self
+            .table_set_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
+        let Some(slot) = slot else {
+            return Ok(false);
+        };
+        if slot.site != site {
+            return Ok(false);
+        }
+        let entry = slot.entry;
+        if entry.table != table || entry.key_atom != key_atom {
+            return Ok(false);
+        }
+        match self
+            .heap
+            .write_string_hash_slot_with_shape(
+                table,
+                key_atom,
+                entry.table_shape_version,
+                entry.hash_index,
+                value,
+            )
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })? {
+            HashWriteStatus::Stored => Ok(true),
+            HashWriteStatus::Deferred => Ok(false),
+            HashWriteStatus::Readonly => Err(readonly_table_error()),
+        }
+    }
+
+    fn try_set_table_string_index_for_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        table: u32,
+        key_atom: u32,
+        value: Value,
+    ) -> Result<bool> {
+        let Some(slot) = self
+            .heap
+            .table_string_hash_slot(table, key_atom)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?
+        else {
+            return Ok(false);
+        };
+        if slot.value.kind() == ValueKind::Nil
+            && self
+                .heap
+                .table_metatable(table)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table handle is missing",
+                    })
+                })?
+                .is_some()
+        {
+            return Ok(false);
+        }
+        match self
+            .heap
+            .write_string_hash_slot_with_shape(
+                table,
+                key_atom,
+                slot.shape_version,
+                slot.index,
+                value,
+            )
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })? {
+            HashWriteStatus::Stored => {
+                self.store_table_set_inline_cache(
+                    site,
+                    TableSetInlineCacheEntry {
+                        table,
+                        key_atom,
+                        table_shape_version: slot.shape_version,
+                        hash_index: slot.index,
+                    },
+                );
+                Ok(true)
+            }
+            HashWriteStatus::Deferred => Ok(false),
+            HashWriteStatus::Readonly => Err(readonly_table_error()),
+        }
+    }
+
+    fn store_table_set_inline_cache(
+        &mut self,
+        site: InlineCacheSite,
+        entry: TableSetInlineCacheEntry,
+    ) {
+        if let Some(slot) = self.table_set_inline_cache.get_mut(site.slot()) {
+            *slot = Some(TableSetInlineCacheSlot { site, entry });
+        }
+    }
+
+    fn clear_table_set_inline_cache_site(&mut self, site: InlineCacheSite) {
+        if let Some(slot) = self.table_set_inline_cache.get_mut(site.slot()) {
+            let should_clear = slot.as_ref().is_some_and(|slot| slot.site == site);
+            if should_clear {
+                *slot = None;
+            }
         }
     }
 
@@ -18388,6 +18614,7 @@ fn opcode_may_observe_current_roots(op: Opcode) -> bool {
         | Opcode::GetIndexNumberConst
         | Opcode::GetIndexStringConst
         | Opcode::SetIndexNumber
+        | Opcode::SetIndexStringConst
         | Opcode::ConcatArgs
         | Opcode::ReturnCall
         | Opcode::Len

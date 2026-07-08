@@ -1335,6 +1335,33 @@ impl Compiler {
             }
         }
 
+        if let SimpleAssignmentKey::Constant(Constant::String(bytes)) = &key {
+            self.mark_table_assignment_mutation(
+                global_field,
+                stdlib_field,
+                may_mutate_stdlib_table,
+            );
+            let value_is_scalar_temporary = self.expr_is_known_scalar_temp(value);
+            let value_register = self.compile_expr(value)?;
+            let key = self.string_constant_operand(bytes)?;
+            self.emit_source_mapped_instruction(
+                Instruction::with_aux(
+                    Opcode::SetIndexStringConst,
+                    table_register,
+                    value_register,
+                    0,
+                    key,
+                ),
+                value.span(),
+            );
+            if value_is_scalar_temporary {
+                self.free_register_without_clear(value_register);
+            } else {
+                self.free_register(value_register);
+            }
+            return Ok(true);
+        }
+
         let key_register;
         let key_is_temporary;
         let key_is_scalar_temporary;
@@ -11157,6 +11184,69 @@ return t.missing
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(9.0));
+    }
+
+    #[test]
+    fn static_string_index_writes_use_quickened_opcode() {
+        let chunk = parse_source("local t = { x = 0 } t.x = 7 return t.x").unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::SetIndexStringConst), 1);
+        assert_eq!(opcode_count(&program, Opcode::SetIndex), 0);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(7.0));
+    }
+
+    #[test]
+    fn quickened_string_index_write_preserves_newindex_fallback() {
+        let chunk = parse_source(
+            r#"
+local seen = 0
+local t = setmetatable({}, {
+    __newindex = function(_, key, value)
+        if key == "missing" then
+            seen = value
+        end
+    end,
+})
+t.missing = 9
+return seen
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexStringConst) >= 1);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(9.0));
+    }
+
+    #[test]
+    fn quickened_string_index_write_defers_nil_slots_with_newindex() {
+        let chunk = parse_source(
+            r#"
+local seen = 0
+local t = { x = 1 }
+setmetatable(t, {
+    __newindex = function(_, _, value)
+        seen = value
+    end,
+})
+t.x = 2
+t.x = nil
+t.x = 5
+return seen + (t.x == nil and 100 or 0)
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexStringConst) >= 3);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(105.0));
     }
 
     #[test]
