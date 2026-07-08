@@ -49,15 +49,6 @@ CI bench runner. Do not retry them without a materially different approach.
 | `dda4e76` generalized upvalue-fed integer table reads | `4e9b27d` | runs `28970485244`/`28971792408`: average total median +1.89% and total min +1.48% vs the kept `474b9da` average; generic_iteration improved only 0.51% while dense/sparse/closures/stdlib regressed, so the upvalue-as-key quickening was backed out |
 | `2798365`/`b1a94b8`/`5f2fee6` IC site slot hash mixes | `6b50587` | hot-site profiling improved `generic_iteration` string-get IC sites from 0% hits to 98.4% hits, but CI did not support keeping it: the heavy mix regressed total median +3.55% vs `c4c190b`, the cheap mix regressed +1.42%, and the minimal mix averaged +0.66% median vs `c4c190b` across runs `28974027833`/`28974129768`; better hit rate did not translate to whole-suite speed |
 
-## Active Candidates
-
-These are implemented locally but still need self-hosted CI benchmark evidence
-before they should be promoted to kept wins.
-
-| candidate | local signal | CI status |
-| --- | --- | --- |
-| two-way table string-get inline-cache slots | fixes the measured `generic_iteration` collision where `p0:3` (`self.items`) and `p3:24` (`c.items`) both mapped to slot 0; hot-site profiling moved both sites from 64 misses/0 hits to 63 hits/1 miss each while leaving `dense_tables` at 63 hits/1 miss | pending |
-
 ## Current Shape Feedback
 
 `cargo run -p script-bench-harness -- --rustia-bytecode-summary` shows the
@@ -106,7 +97,7 @@ Current feedback:
 | --- | --- |
 | `dense_tables` | one direct table-get slot; array writes and dynamic numeric writes do not leave exact-key IC entries |
 | `sparse_tables` | no table IC occupancy; dynamic concat string keys and scattered numeric keys intentionally avoid exact-key IC churn |
-| `generic_iteration` | with the active two-way table-get candidate, two direct table-get slots, one direct table-set slot, plus one iter metamethod slot and one len slot |
+| `generic_iteration` | one direct table-get slot, one direct table-set slot, plus one iter metamethod slot and one len slot |
 | `stdlib_math_table` | one global-get slot and one direct table-get slot from setup; the hot loop is mostly math/table write/sort work |
 
 `cargo run -p script-bench-harness --features rustia-hot-site-summary -- --rustia-hot-site-summary`
@@ -125,7 +116,7 @@ Current sample signal from
 
 | workload | IC probe signal |
 | --- | --- |
-| `generic_iteration` | with the active two-way table-get candidate, the two `TableStringGet` sites each have 64 probes, 63 hits, 1 miss, and 1 fill; before the candidate they had 64 probes, 0 hits, 64 misses, and 64 fills each because both mapped to the same direct cache slot |
+| `generic_iteration` | two `TableStringGet` sites had 64 probes, 0 hits, 64 misses, and 64 fills each; these sites refill every outer call and never become reusable |
 | `dense_tables` | one `TableStringGet` site had 64 probes, 63 hits, 1 miss, and 1 fill; this is the healthy warm-cache shape |
 
 ## Next Serious Bets

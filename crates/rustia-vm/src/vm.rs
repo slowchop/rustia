@@ -235,7 +235,6 @@ pub struct Vm {
     inline_cache_profile: BTreeMap<InlineCacheProfileKey, InlineCacheProfileCounters>,
     global_get_inline_cache: Vec<Option<GlobalGetInlineCacheSlot>>,
     table_get_inline_cache: Vec<Option<TableGetInlineCacheSlot>>,
-    table_get_inline_cache_secondary: Vec<Option<TableGetInlineCacheSlot>>,
     table_set_inline_cache: Vec<Option<TableSetInlineCacheSlot>>,
     table_integer_get_inline_cache: Vec<Option<TableIntegerGetInlineCacheSlot>>,
     table_integer_set_inline_cache: Vec<Option<TableIntegerSetInlineCacheSlot>>,
@@ -1028,7 +1027,6 @@ impl Vm {
             inline_cache_profile: BTreeMap::new(),
             global_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             table_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
-            table_get_inline_cache_secondary: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             table_set_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             table_integer_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
             table_integer_set_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
@@ -1076,24 +1074,19 @@ impl Vm {
                 }
             }
         }
-        for cache in [
-            &self.table_get_inline_cache,
-            &self.table_get_inline_cache_secondary,
-        ] {
-            for slot in cache.iter().flatten() {
-                match slot.entry.source {
-                    TableGetInlineCacheSource::DirectSlot { .. } => {
-                        snapshot.table_get.direct_slot += 1;
-                    }
-                    TableGetInlineCacheSource::DirectAbsent { .. } => {
-                        snapshot.table_get.direct_absent += 1;
-                    }
-                    TableGetInlineCacheSource::IndexTable { .. } => {
-                        snapshot.table_get.index_table += 1;
-                    }
-                    TableGetInlineCacheSource::IndexFunction { .. } => {
-                        snapshot.table_get.index_function += 1;
-                    }
+        for slot in self.table_get_inline_cache.iter().flatten() {
+            match slot.entry.source {
+                TableGetInlineCacheSource::DirectSlot { .. } => {
+                    snapshot.table_get.direct_slot += 1;
+                }
+                TableGetInlineCacheSource::DirectAbsent { .. } => {
+                    snapshot.table_get.direct_absent += 1;
+                }
+                TableGetInlineCacheSource::IndexTable { .. } => {
+                    snapshot.table_get.index_table += 1;
+                }
+                TableGetInlineCacheSource::IndexFunction { .. } => {
+                    snapshot.table_get.index_function += 1;
                 }
             }
         }
@@ -11393,11 +11386,21 @@ impl Vm {
         table: u32,
         key_atom: u32,
     ) -> Result<Option<Value>> {
-        let slot = self.table_get_inline_cache_slot(site, Some(key_atom));
+        let slot = self
+            .table_get_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
         let Some(slot) = slot else {
             return Ok(None);
         };
+        if slot.site != site {
+            return Ok(None);
+        }
         let entry = slot.entry;
+        if entry.key_atom != key_atom {
+            return Ok(None);
+        }
         let result = self.table_get_inline_cache_entry_hit(entry, table)?;
         #[cfg(feature = "opcode-profiling")]
         if result.is_some() {
@@ -11415,10 +11418,17 @@ impl Vm {
         site: InlineCacheSite,
         table: u32,
     ) -> Result<Option<Value>> {
-        let slot = self.table_get_inline_cache_slot(site, None);
+        let slot = self
+            .table_get_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
         let Some(slot) = slot else {
             return Ok(None);
         };
+        if slot.site != site {
+            return Ok(None);
+        }
         let result = self.table_get_inline_cache_entry_hit(slot.entry, table)?;
         #[cfg(feature = "opcode-profiling")]
         if result.is_some() {
@@ -11584,10 +11594,17 @@ impl Vm {
         table: u32,
         key_atom: u32,
     ) -> Result<Option<Value>> {
-        let slot = self.table_get_inline_cache_slot(site, Some(key_atom));
+        let slot = self
+            .table_get_inline_cache
+            .get(site.slot())
+            .copied()
+            .flatten();
         let Some(slot) = slot else {
             return Ok(None);
         };
+        if slot.site != site || slot.entry.key_atom != key_atom {
+            return Ok(None);
+        }
         let TableGetInlineCacheSource::IndexFunction {
             metatable,
             metatable_version,
@@ -11804,34 +11821,8 @@ impl Vm {
         site: InlineCacheSite,
         entry: TableGetInlineCacheEntry,
     ) {
-        let new_slot = Some(TableGetInlineCacheSlot { site, entry });
-        let index = site.slot();
-        if let Some(slot) = self.table_get_inline_cache.get_mut(index) {
-            if slot.as_ref().is_none_or(|slot| slot.site == site) {
-                *slot = new_slot;
-                #[cfg(feature = "opcode-profiling")]
-                self.record_inline_cache_probe(
-                    site,
-                    VmInlineCacheProfileKind::TableStringGet,
-                    InlineCacheProfileOutcome::Fill,
-                );
-                return;
-            }
-        }
-        if let Some(slot) = self.table_get_inline_cache_secondary.get_mut(index) {
-            if slot.as_ref().is_none_or(|slot| slot.site == site) {
-                *slot = new_slot;
-                #[cfg(feature = "opcode-profiling")]
-                self.record_inline_cache_probe(
-                    site,
-                    VmInlineCacheProfileKind::TableStringGet,
-                    InlineCacheProfileOutcome::Fill,
-                );
-                return;
-            }
-        }
-        if let Some(slot) = self.table_get_inline_cache.get_mut(index) {
-            *slot = new_slot;
+        if let Some(slot) = self.table_get_inline_cache.get_mut(site.slot()) {
+            *slot = Some(TableGetInlineCacheSlot { site, entry });
         }
         #[cfg(feature = "opcode-profiling")]
         self.record_inline_cache_probe(
@@ -11847,19 +11838,11 @@ impl Vm {
         key_atom: u32,
         hash_index: usize,
     ) -> StringSlotIndexCache {
-        let index = site.slot();
         self.table_get_inline_cache
-            .get(index)
+            .get(site.slot())
             .copied()
             .flatten()
             .filter(|slot| slot.site == site && slot.entry.key_atom == key_atom)
-            .or_else(|| {
-                self.table_get_inline_cache_secondary
-                    .get(index)
-                    .copied()
-                    .flatten()
-                    .filter(|slot| slot.site == site && slot.entry.key_atom == key_atom)
-            })
             .and_then(|slot| match slot.entry.source {
                 TableGetInlineCacheSource::DirectSlot { hash_indices, .. } => Some(hash_indices),
                 TableGetInlineCacheSource::DirectAbsent { .. }
@@ -11870,40 +11853,8 @@ impl Vm {
             .unwrap_or_else(|| StringSlotIndexCache::single(hash_index))
     }
 
-    #[inline]
-    fn table_get_inline_cache_slot(
-        &self,
-        site: InlineCacheSite,
-        key_atom: Option<u32>,
-    ) -> Option<TableGetInlineCacheSlot> {
-        let index = site.slot();
-        self.table_get_inline_cache
-            .get(index)
-            .copied()
-            .flatten()
-            .filter(|slot| {
-                slot.site == site && key_atom.is_none_or(|key_atom| slot.entry.key_atom == key_atom)
-            })
-            .or_else(|| {
-                self.table_get_inline_cache_secondary
-                    .get(index)
-                    .copied()
-                    .flatten()
-                    .filter(|slot| {
-                        slot.site == site
-                            && key_atom.is_none_or(|key_atom| slot.entry.key_atom == key_atom)
-                    })
-            })
-    }
-
     fn clear_table_get_inline_cache_site(&mut self, site: InlineCacheSite) {
         if let Some(slot) = self.table_get_inline_cache.get_mut(site.slot()) {
-            let should_clear = slot.as_ref().is_some_and(|slot| slot.site == site);
-            if should_clear {
-                *slot = None;
-            }
-        }
-        if let Some(slot) = self.table_get_inline_cache_secondary.get_mut(site.slot()) {
             let should_clear = slot.as_ref().is_some_and(|slot| slot.site == site);
             if should_clear {
                 *slot = None;
@@ -30051,84 +30002,6 @@ mod tests {
         assert_eq!(snapshot.table_get.direct_absent, 0);
         assert_eq!(snapshot.table_get.index_table, 0);
         assert_eq!(snapshot.table_get.index_function, 0);
-    }
-
-    #[test]
-    fn table_get_inline_cache_keeps_two_colliding_sites() {
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let program = dummy_program();
-        let key_atom = vm.heap.intern_string("items");
-        let first_table = vm.heap.alloc_array_table(&[]);
-        let second_table = vm.heap.alloc_array_table(&[]);
-        vm.heap
-            .table_set(
-                first_table,
-                Value::string_atom(key_atom),
-                Value::number(1.0),
-            )
-            .unwrap();
-        vm.heap
-            .table_set(
-                second_table,
-                Value::string_atom(key_atom),
-                Value::number(2.0),
-            )
-            .unwrap();
-        let first_site = InlineCacheSite {
-            program: 0,
-            prototype: Some(0),
-            pc: 3,
-        };
-        let second_site = InlineCacheSite {
-            program: 0,
-            prototype: Some(3),
-            pc: 24,
-        };
-        let mut fuel = None;
-
-        assert_eq!(first_site.slot(), second_site.slot());
-        assert_eq!(
-            vm.get_table_string_index_with_inline_cache(
-                &program,
-                first_site,
-                first_table,
-                Value::string_atom(key_atom),
-                key_atom,
-                0,
-                &mut fuel,
-            )
-            .unwrap()
-            .as_number(),
-            Some(1.0)
-        );
-        assert_eq!(
-            vm.get_table_string_index_with_inline_cache(
-                &program,
-                second_site,
-                second_table,
-                Value::string_atom(key_atom),
-                key_atom,
-                0,
-                &mut fuel,
-            )
-            .unwrap()
-            .as_number(),
-            Some(2.0)
-        );
-
-        assert_eq!(
-            vm.table_get_inline_cache_hit(first_site, first_table, key_atom)
-                .unwrap()
-                .and_then(Value::as_number),
-            Some(1.0)
-        );
-        assert_eq!(
-            vm.table_get_inline_cache_hit(second_site, second_table, key_atom)
-                .unwrap()
-                .and_then(Value::as_number),
-            Some(2.0)
-        );
-        assert_eq!(vm.inline_cache_snapshot().table_get.direct_slot, 2);
     }
 
     #[cfg(feature = "opcode-profiling")]
