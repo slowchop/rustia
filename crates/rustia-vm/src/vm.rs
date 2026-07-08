@@ -1253,7 +1253,11 @@ impl Vm {
                                 )))
                             }
                             Opcode::LoadConst => {
-                                let value = self.load_constant(program, instruction.c as usize)?;
+                                let value = self.load_constant(
+                                    program,
+                                    program_id,
+                                    instruction.c as usize,
+                                )?;
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -1264,8 +1268,11 @@ impl Vm {
                                     })
                                     .at_pc(pc - 1));
                                 }
-                                let value =
-                                    self.load_constant(program, instruction.aux as usize)?;
+                                let value = self.load_constant(
+                                    program,
+                                    program_id,
+                                    instruction.aux as usize,
+                                )?;
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -5421,7 +5428,12 @@ impl Vm {
         Ok(())
     }
 
-    fn load_constant(&mut self, program: &Program, index: usize) -> Result<Value> {
+    fn load_constant(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        index: usize,
+    ) -> Result<Value> {
         let constant = program.constants.get(index).ok_or_else(|| {
             Error::new(ErrorKind::ConstantOutOfBounds {
                 index,
@@ -5432,7 +5444,14 @@ impl Vm {
             Constant::Nil => Value::nil(),
             Constant::Boolean(value) => Value::boolean(*value),
             Constant::Number(value) => Value::number(*value),
-            Constant::String(value) => Value::string_atom(self.heap.intern_string_bytes(value)),
+            Constant::String(_) => Value::string_atom(
+                self.constant_string_atom(program, program_id, index)?
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "string constant must resolve to an atom",
+                        })
+                    })?,
+            ),
         })
     }
 
@@ -6872,7 +6891,7 @@ impl Vm {
                 }
             }
         }
-        let rhs = self.load_constant(program, instruction.aux as usize)?;
+        let rhs = self.load_constant(program, program_id, instruction.aux as usize)?;
         self.concat_operands(program, lhs, rhs, depth, fuel)
     }
 
@@ -6908,7 +6927,7 @@ impl Vm {
                 }
             }
         }
-        let lhs = self.load_constant(program, constant_index as usize)?;
+        let lhs = self.load_constant(program, program_id, constant_index as usize)?;
         let rhs = get_register(registers, rhs_register)?;
         self.concat_operands(program, lhs, rhs, depth, fuel)
     }
