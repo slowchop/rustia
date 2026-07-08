@@ -19022,7 +19022,7 @@ impl Vm {
         let len = self.table_foreachi_len(table)?;
         for index in 1..=len {
             let key = Value::number(index as f64);
-            let value = self.raw_table_get(table, key)?;
+            let value = self.raw_table_integer_get_after_table_lookup(table, index)?;
             let result = first_result_or_nil(self.call_value(
                 program,
                 callback,

@@ -13320,6 +13320,26 @@ return type(v) == "vector"
     }
 
     #[test]
+    fn compiles_table_foreachi_builtin_reads_current_array_values() {
+        let source = r#"
+local t = {1, 2, 3}
+local sum = 0
+table.foreachi(t, function(i, v)
+    sum = sum + v
+    if i == 1 then
+        t[2] = 20
+    end
+end)
+return sum
+"#;
+        let chunk = parse_source(source).unwrap();
+        let program = compile(&chunk).unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(24.0));
+    }
+
+    #[test]
     fn compiles_table_freeze_and_isfrozen_builtins() {
         let cases = [
             (
