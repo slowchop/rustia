@@ -105,6 +105,7 @@ pub struct Vm {
     gc_step_counter: u64,
     gc_stopped: bool,
     executed_instructions: u64,
+    next_instruction_collection: u64,
     deterministic_collection_count: u64,
     coverage_hits: BTreeMap<CoverageKey, u64>,
     global_get_inline_cache: Vec<Option<GlobalGetInlineCacheSlot>>,
@@ -821,6 +822,7 @@ impl Vm {
         );
         let metamethod_atoms = MetamethodAtoms::intern(&mut heap);
         let rng_state = pcg32_seed(0);
+        let next_instruction_collection = settings.deterministic_gc_interval.get();
         Self {
             profile,
             settings,
@@ -850,6 +852,7 @@ impl Vm {
             gc_step_counter: 0,
             gc_stopped: false,
             executed_instructions: 0,
+            next_instruction_collection,
             deterministic_collection_count: 0,
             coverage_hits: BTreeMap::new(),
             global_get_inline_cache: vec![None; GLOBAL_GET_INLINE_CACHE_SLOTS],
@@ -20947,11 +20950,9 @@ impl Vm {
         varargs: &[Value],
         pending_return_prefixes: &[Value],
     ) {
+        let collection_due = self.take_instruction_collection_due();
         if self.profile.is_deterministic_sim() {
-            if self
-                .executed_instructions
-                .is_multiple_of(self.settings.deterministic_gc_interval.get())
-            {
+            if collection_due {
                 self.refresh_current_gc_roots_if_dirty(
                     roots_dirty,
                     registers,
@@ -20966,11 +20967,7 @@ impl Vm {
             }
         } else {
             self.heap.collect_debt();
-            if !self.gc_stopped
-                && self
-                    .executed_instructions
-                    .is_multiple_of(self.settings.deterministic_gc_interval.get())
-            {
+            if collection_due && !self.gc_stopped {
                 self.refresh_current_gc_roots_if_dirty(
                     roots_dirty,
                     registers,
@@ -20982,6 +20979,23 @@ impl Vm {
                 self.heap.collect_weak_tables_with_roots(&roots);
             }
         }
+    }
+
+    #[inline]
+    fn take_instruction_collection_due(&mut self) -> bool {
+        if self.executed_instructions < self.next_instruction_collection {
+            return false;
+        }
+        let interval = self.settings.deterministic_gc_interval.get();
+        let overdue = self
+            .executed_instructions
+            .saturating_sub(self.next_instruction_collection);
+        let intervals = overdue / interval + 1;
+        self.next_instruction_collection = self
+            .next_instruction_collection
+            .saturating_add(interval.saturating_mul(intervals))
+            .max(self.executed_instructions.saturating_add(1));
+        true
     }
 
     fn record_coverage_hit(
@@ -28397,7 +28411,8 @@ mod tests {
         TableIntegerSetInlineCacheTarget, TableSetInlineCacheTarget, Value, Vm,
     };
     use crate::heap::NativeFunction;
-    use crate::{Constant, Function, Instruction, Opcode, Profile, Program};
+    use crate::{Constant, Function, Instruction, Opcode, Profile, Program, VmSettings};
+    use std::num::NonZeroU64;
 
     fn dummy_program() -> Program {
         Program::new(
@@ -28419,6 +28434,28 @@ mod tests {
             mul_mod_const_table_index(9_007_199_254_740_991.0, 2.0, 100003.0),
             None
         );
+    }
+
+    #[test]
+    fn instruction_collection_scheduler_catches_crossed_thresholds() {
+        let settings = VmSettings {
+            deterministic_gc_interval: NonZeroU64::new(10).unwrap(),
+            ..VmSettings::default()
+        };
+        let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+
+        vm.executed_instructions = 9;
+        assert!(!vm.take_instruction_collection_due());
+        assert_eq!(vm.next_instruction_collection, 10);
+
+        vm.executed_instructions = 12;
+        assert!(vm.take_instruction_collection_due());
+        assert_eq!(vm.next_instruction_collection, 20);
+        assert!(!vm.take_instruction_collection_due());
+
+        vm.executed_instructions = 35;
+        assert!(vm.take_instruction_collection_due());
+        assert_eq!(vm.next_instruction_collection, 40);
     }
 
     #[test]
