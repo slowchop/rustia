@@ -1899,6 +1899,21 @@ impl Vm {
                                 )
                                 .map_err(|e| e.at_pc(pc - 1))?;
                             }
+                            Opcode::AddIndexNumber => {
+                                self.add_index_number(
+                                    program,
+                                    &mut registers,
+                                    instruction,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
                             Opcode::AddConst => {
                                 self.numeric_binop_const(
                                     program,
@@ -6661,6 +6676,43 @@ impl Vm {
             );
         }
         let result = self.numeric_binop_value(program, lhs, rhs, op, site, depth, fuel)?;
+        set_register(registers, instruction.a, result)
+    }
+
+    fn add_index_number(
+        &mut self,
+        program: &Program,
+        registers: &mut [Value],
+        instruction: Instruction,
+        site: Option<InlineCacheSite>,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        let lhs = get_register(registers, instruction.a)?;
+        let object = get_register(registers, instruction.b)?;
+        let key = get_register(registers, instruction.c)?;
+        let rhs = if let (Some(table), Some(index)) = (
+            object.as_table(),
+            key.as_number().and_then(array_iterator_index),
+        ) {
+            match self.get_table_integer_index_with_inline_cache(
+                program, site, table, index, depth, fuel,
+            )? {
+                Some(value) => value,
+                None => self.get_index_value(program, object, key, depth, fuel)?,
+            }
+        } else {
+            self.get_index_value(program, object, key, depth, fuel)?
+        };
+        if let (Some(lhs), Some(rhs)) = (lhs.as_number(), rhs.as_number()) {
+            return set_register(
+                registers,
+                instruction.a,
+                Value::number(binary(NumericOp::Add, lhs, rhs)),
+            );
+        }
+        let result =
+            self.numeric_binop_value(program, lhs, rhs, NumericOp::Add, site, depth, fuel)?;
         set_register(registers, instruction.a, result)
     }
 
@@ -22447,6 +22499,7 @@ fn opcode_may_observe_current_roots(op: Opcode) -> bool {
     // opcodes must be classified deliberately.
     match op {
         Opcode::Add
+        | Opcode::AddIndexNumber
         | Opcode::AddConst
         | Opcode::AddUpvalue
         | Opcode::AddUpvalueConst

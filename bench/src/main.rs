@@ -1108,6 +1108,7 @@ fn opcode_is_table_related(opcode: Opcode) -> bool {
     matches!(
         opcode,
         Opcode::GetIndex
+            | Opcode::AddIndexNumber
             | Opcode::SetIndex
             | Opcode::GetIndexConcatConst
             | Opcode::SetIndexConcatConst
@@ -1168,6 +1169,7 @@ fn opcode_is_numeric_key_related(opcode: Opcode) -> bool {
     matches!(
         opcode,
         Opcode::GetIndexNumber
+            | Opcode::AddIndexNumber
             | Opcode::SetIndexNumber
             | Opcode::GetIndexNumberConst
             | Opcode::SetIndexNumberConst

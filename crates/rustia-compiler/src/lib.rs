@@ -1172,6 +1172,9 @@ impl Compiler {
         self.numeric_registers.remove(&register);
         self.fresh_table_registers.remove(&register);
         for rhs in rhs_operands {
+            if self.compile_local_self_add_numeric_index(register, rhs, value.span())? {
+                continue;
+            }
             let rhs_register = self.compile_expr(rhs)?;
             self.emit_source_mapped_instruction(
                 Instruction::new(Opcode::Add, register, register, rhs_register),
@@ -1187,6 +1190,36 @@ impl Compiler {
             }
             self.free_register_without_clear(rhs_register);
         }
+        Ok(true)
+    }
+
+    fn compile_local_self_add_numeric_index(
+        &mut self,
+        target: u8,
+        rhs: &Expr,
+        span: Span,
+    ) -> Result<bool> {
+        let Expr::Index { object, index, .. } = expr_without_parens(rhs) else {
+            return Ok(false);
+        };
+        let Some(table_register) = self.simple_register_expr(object) else {
+            return Ok(false);
+        };
+        let Some(index_register) = self.simple_register_expr(index) else {
+            return Ok(false);
+        };
+        if !self.numeric_registers.contains(&index_register) {
+            return Ok(false);
+        }
+        self.emit_source_mapped_instruction(
+            Instruction::new(
+                Opcode::AddIndexNumber,
+                target,
+                table_register,
+                index_register,
+            ),
+            span,
+        );
         Ok(true)
     }
 
@@ -11393,6 +11426,53 @@ return acc
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(12.0));
+    }
+
+    #[test]
+    fn self_add_numeric_table_read_uses_fused_opcode() {
+        let chunk = parse_source(
+            r#"
+local t = {10, 20}
+local acc = 0
+for i = 1, 2 do
+    acc = acc + t[i]
+end
+return acc
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::AddIndexNumber), 1);
+        assert_eq!(opcode_count(&program, Opcode::GetIndexNumber), 0);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(30.0));
+    }
+
+    #[test]
+    fn self_add_numeric_table_read_preserves_index_fallback() {
+        let chunk = parse_source(
+            r#"
+local t = setmetatable({}, {
+    __index = function(_, key)
+        return key + 10
+    end,
+})
+local acc = 0
+for i = 1, 1 do
+    acc = acc + t[i]
+end
+return acc
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::AddIndexNumber), 1);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(11.0));
     }
 
     #[test]
