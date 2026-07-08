@@ -11752,6 +11752,79 @@ return seen + (delegate.x == nil and 100 or 0)
     }
 
     #[test]
+    fn numeric_newindex_table_write_cache_observes_delegate_reassignment() {
+        let chunk = parse_source(
+            r#"
+local first = { [20] = 0 }
+local second = { [20] = 0 }
+local mt = { __newindex = first }
+local t = {}
+setmetatable(t, mt)
+t[20] = 1
+mt.__newindex = second
+t[20] = 2
+return first[20] * 10 + second[20]
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexNumberConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(12.0));
+    }
+
+    #[test]
+    fn numeric_newindex_table_write_cache_observes_original_slot_creation() {
+        let chunk = parse_source(
+            r#"
+local delegate = { [20] = 0 }
+local t = {}
+setmetatable(t, { __newindex = delegate })
+t[20] = 1
+rawset(t, 20, 5)
+t[20] = 7
+return delegate[20] * 10 + t[20]
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexNumberConst) >= 2);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(17.0));
+    }
+
+    #[test]
+    fn numeric_newindex_table_write_cache_defers_nil_delegate_slots_with_metamethod() {
+        let chunk = parse_source(
+            r#"
+local seen = 0
+local delegate = { [20] = 1 }
+delegate[20] = nil
+setmetatable(delegate, {
+    __newindex = function(_, _, value)
+        seen = value
+    end,
+})
+local t = {}
+setmetatable(t, { __newindex = delegate })
+t[20] = 9
+return seen + (delegate[20] == nil and 100 or 0)
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(opcode_count(&program, Opcode::SetIndexNumberConst) >= 1);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(109.0));
+    }
+
+    #[test]
     fn index_read_lowering_preserves_side_effect_order() {
         let chunk = parse_source(
             r#"
