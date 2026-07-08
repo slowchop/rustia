@@ -11901,6 +11901,35 @@ return existing + hits
     }
 
     #[test]
+    fn custom_environment_global_reads_use_table_cache_semantics() {
+        let chunk = parse_source(
+            r#"
+local fallback = { missing = 4 }
+local env = setmetatable({ existing = 1 }, {
+    __index = fallback,
+})
+setfenv(1, env)
+local total = 0
+for _ = 1, 3 do
+    total = total + existing + missing
+end
+return total
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(program
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::GetGlobal));
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(15.0));
+    }
+
+    #[test]
     fn compiles_luau_vector_core_and_library_surface() {
         let chunk = parse_source(
             r#"

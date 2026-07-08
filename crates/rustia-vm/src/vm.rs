@@ -5527,14 +5527,35 @@ impl Vm {
         fuel: &mut Option<u64>,
     ) -> Result<Value> {
         let environment = self.current_environment()?;
-        if let Some(value) = self.global_get_inline_cache_hit(site, environment) {
+        if environment == self.globals {
+            if let Some(value) = self.global_get_inline_cache_hit(site, environment) {
+                return Ok(value);
+            }
+
+            let program_id = site.map(|site| site.program);
+            let key_atom = self.global_key_atom(program, program_id, name_index)?;
+            let key = Value::string_atom(key_atom);
+            let value =
+                self.get_table_index_with_metamethod(program, environment, key, depth, fuel)?;
+            self.update_global_get_inline_cache(site, environment, key)?;
             return Ok(value);
         }
 
-        let key = self.global_key(program, name_index)?;
-        let value = self.get_table_index_with_metamethod(program, environment, key, depth, fuel)?;
-        self.update_global_get_inline_cache(site, environment, key)?;
-        Ok(value)
+        let program_id = site.map(|site| site.program);
+        let key_atom = self.global_key_atom(program, program_id, name_index)?;
+        let key = Value::string_atom(key_atom);
+        let Some(site) = site else {
+            return self.get_table_index_with_metamethod(program, environment, key, depth, fuel);
+        };
+        self.get_table_string_index_with_inline_cache(
+            program,
+            site,
+            environment,
+            key,
+            key_atom,
+            depth,
+            fuel,
+        )
     }
 
     fn set_global_with_inline_cache(
