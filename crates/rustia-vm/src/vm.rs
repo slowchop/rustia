@@ -1914,6 +1914,32 @@ impl Vm {
                                 )
                                 .map_err(|e| e.at_pc(pc - 1))?;
                             }
+                            Opcode::AddIndexConcatConstOrZero => {
+                                self.add_index_concat_const_or_zero(
+                                    program,
+                                    program_id,
+                                    &mut registers,
+                                    instruction,
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::AddIndexMulModConstOrZero => {
+                                self.add_index_mul_mod_const_or_zero(
+                                    program,
+                                    &mut registers,
+                                    instruction,
+                                    program_id.map(|program| InlineCacheSite {
+                                        program,
+                                        prototype: context.prototype,
+                                        pc: pc - 1,
+                                    }),
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
+                            }
                             Opcode::AddConst => {
                                 self.numeric_binop_const(
                                     program,
@@ -6716,6 +6742,92 @@ impl Vm {
         set_register(registers, instruction.a, result)
     }
 
+    fn add_index_concat_const_or_zero(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        registers: &mut [Value],
+        instruction: Instruction,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        let lhs = get_register(registers, instruction.a)?;
+        let object = get_register(registers, instruction.b)?;
+        let key = self.concat_const_key(
+            program,
+            program_id,
+            registers,
+            instruction.c,
+            instruction.aux,
+            depth,
+            fuel,
+        )?;
+        let rhs =
+            self.get_index_computed_key_without_inline_cache(program, object, key, depth, fuel)?;
+        self.add_rhs_or_zero(
+            program,
+            registers,
+            instruction.a,
+            lhs,
+            rhs,
+            None,
+            depth,
+            fuel,
+        )
+    }
+
+    fn add_index_mul_mod_const_or_zero(
+        &mut self,
+        program: &Program,
+        registers: &mut [Value],
+        instruction: Instruction,
+        site: Option<InlineCacheSite>,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        let lhs = get_register(registers, instruction.a)?;
+        let rhs =
+            self.get_index_mul_mod_const(program, registers, instruction, site, depth, fuel)?;
+        self.add_rhs_or_zero(
+            program,
+            registers,
+            instruction.a,
+            lhs,
+            rhs,
+            site,
+            depth,
+            fuel,
+        )
+    }
+
+    fn add_rhs_or_zero(
+        &mut self,
+        program: &Program,
+        registers: &mut [Value],
+        target: u8,
+        lhs: Value,
+        rhs: Value,
+        site: Option<InlineCacheSite>,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        let rhs = if rhs.truthy() {
+            rhs
+        } else {
+            Value::number(0.0)
+        };
+        if let (Some(lhs), Some(rhs)) = (lhs.as_number(), rhs.as_number()) {
+            return set_register(
+                registers,
+                target,
+                Value::number(binary(NumericOp::Add, lhs, rhs)),
+            );
+        }
+        let result =
+            self.numeric_binop_value(program, lhs, rhs, NumericOp::Add, site, depth, fuel)?;
+        set_register(registers, target, result)
+    }
+
     fn numeric_binop_const(
         &mut self,
         program: &Program,
@@ -7862,6 +7974,29 @@ impl Vm {
             return self.get_object_index_metamethod(program, object, key, depth, fuel);
         }
         Err(self.index_error(object, key)?)
+    }
+
+    fn get_index_computed_key_without_inline_cache(
+        &mut self,
+        program: &Program,
+        object: Value,
+        key: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        if let Some(table) = object.as_table() {
+            if let Some(index) = key.as_number().and_then(array_iterator_index) {
+                return self.get_table_integer_index_without_inline_cache(
+                    program, table, index, depth, fuel,
+                );
+            }
+            if let Some(key_atom) = key.as_string_atom() {
+                return self.get_table_string_index_without_inline_cache(
+                    program, table, key, key_atom, depth, fuel,
+                );
+            }
+        }
+        self.get_index_value(program, object, key, depth, fuel)
     }
 
     fn get_index_mod_add_const(
@@ -22500,6 +22635,8 @@ fn opcode_may_observe_current_roots(op: Opcode) -> bool {
     match op {
         Opcode::Add
         | Opcode::AddIndexNumber
+        | Opcode::AddIndexConcatConstOrZero
+        | Opcode::AddIndexMulModConstOrZero
         | Opcode::AddConst
         | Opcode::AddUpvalue
         | Opcode::AddUpvalueConst

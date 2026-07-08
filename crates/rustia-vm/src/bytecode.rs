@@ -223,6 +223,8 @@ pub enum Opcode {
     RawGetNumberConst = 164,
     RawSetNumberConst = 165,
     AddIndexNumber = 166,
+    AddIndexConcatConstOrZero = 167,
+    AddIndexMulModConstOrZero = 168,
 }
 
 pub const ARRAY_ITERATOR_WRITE_VISIBLE_KEY: u8 = 0;

@@ -1172,6 +1172,9 @@ impl Compiler {
         self.numeric_registers.remove(&register);
         self.fresh_table_registers.remove(&register);
         for rhs in rhs_operands {
+            if self.compile_local_self_add_or_zero_table_index(register, rhs, value.span())? {
+                continue;
+            }
             if self.compile_local_self_add_numeric_index(register, rhs, value.span())? {
                 continue;
             }
@@ -1191,6 +1194,73 @@ impl Compiler {
             self.free_register_without_clear(rhs_register);
         }
         Ok(true)
+    }
+
+    fn compile_local_self_add_or_zero_table_index(
+        &mut self,
+        target: u8,
+        rhs: &Expr,
+        span: Span,
+    ) -> Result<bool> {
+        let Expr::Binary {
+            op: BinaryOp::Or,
+            lhs,
+            rhs: fallback,
+            ..
+        } = expr_without_parens(rhs)
+        else {
+            return Ok(false);
+        };
+        if !expr_is_zero(fallback) {
+            return Ok(false);
+        }
+        let Expr::Index { object, index, .. } = expr_without_parens(lhs) else {
+            return Ok(false);
+        };
+        let Some(table_register) = self.simple_register_expr(object) else {
+            return Ok(false);
+        };
+
+        if let Some((constant, suffix)) = lhs_const_concat_key(index) {
+            let Some(suffix_register) = self.simple_register_expr(suffix) else {
+                return Ok(false);
+            };
+            let constant = i32::try_from(self.constant_index(constant)?)
+                .map_err(|_| CompileError::new("constant pool overflow"))?;
+            self.emit_source_mapped_instruction(
+                Instruction::with_aux(
+                    Opcode::AddIndexConcatConstOrZero,
+                    target,
+                    table_register,
+                    suffix_register,
+                    constant,
+                ),
+                span,
+            );
+            return Ok(true);
+        }
+
+        if let Some((factor_expr, multiplier, modulus)) = self.mul_mod_number_const_expr(index) {
+            let Some(factor_register) = self.simple_register_expr(factor_expr) else {
+                return Ok(false);
+            };
+            let Some(aux) = self.number_constant_pair_operand(multiplier, modulus)? else {
+                return Ok(false);
+            };
+            self.emit_source_mapped_instruction(
+                Instruction::with_aux(
+                    Opcode::AddIndexMulModConstOrZero,
+                    target,
+                    table_register,
+                    factor_register,
+                    aux,
+                ),
+                span,
+            );
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
     fn compile_local_self_add_numeric_index(
@@ -11473,6 +11543,59 @@ return acc
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(11.0));
+    }
+
+    #[test]
+    fn self_add_or_zero_sparse_reads_use_fused_opcodes() {
+        let chunk = parse_source(
+            r#"
+local t = { k1 = 10, [7] = 20 }
+local acc = 1
+for i = 1, 1 do
+    acc = acc + (t["k" .. i] or 0) + (t[(i * 7) % 11] or 0)
+end
+return acc
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::AddIndexConcatConstOrZero), 1);
+        assert_eq!(opcode_count(&program, Opcode::AddIndexMulModConstOrZero), 1);
+        assert_eq!(opcode_count(&program, Opcode::GetIndexConcatConst), 0);
+        assert_eq!(opcode_count(&program, Opcode::GetIndexMulModConst), 0);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(31.0));
+    }
+
+    #[test]
+    fn self_add_or_zero_sparse_reads_preserve_fallbacks() {
+        let chunk = parse_source(
+            r#"
+local t = setmetatable({}, {
+    __index = function(_, key)
+        if key == "k1" then
+            return false
+        end
+        return key
+    end,
+})
+local acc = 1
+for i = 1, 1 do
+    acc = acc + (t["k" .. i] or 0) + (t[(i * 7) % 11] or 0)
+end
+return acc
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert_eq!(opcode_count(&program, Opcode::AddIndexConcatConstOrZero), 1);
+        assert_eq!(opcode_count(&program, Opcode::AddIndexMulModConstOrZero), 1);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_number(), Some(8.0));
     }
 
     #[test]

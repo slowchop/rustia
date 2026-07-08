@@ -1090,7 +1090,9 @@ fn summarize_rustia_function_bytecode(code: &[Instruction], summary: &mut Rustia
         }
         if matches!(
             opcode,
-            Opcode::GetIndexConcatConst | Opcode::SetIndexConcatConst
+            Opcode::GetIndexConcatConst
+                | Opcode::SetIndexConcatConst
+                | Opcode::AddIndexConcatConstOrZero
         ) {
             summary.concat_key += 1;
         }
@@ -1109,6 +1111,8 @@ fn opcode_is_table_related(opcode: Opcode) -> bool {
         opcode,
         Opcode::GetIndex
             | Opcode::AddIndexNumber
+            | Opcode::AddIndexConcatConstOrZero
+            | Opcode::AddIndexMulModConstOrZero
             | Opcode::SetIndex
             | Opcode::GetIndexConcatConst
             | Opcode::SetIndexConcatConst
@@ -1155,6 +1159,7 @@ fn opcode_is_string_key_related(opcode: Opcode) -> bool {
     matches!(
         opcode,
         Opcode::GetIndexStringConst
+            | Opcode::AddIndexConcatConstOrZero
             | Opcode::SetIndexStringConst
             | Opcode::GetIndexConcatConst
             | Opcode::SetIndexConcatConst
@@ -1170,6 +1175,7 @@ fn opcode_is_numeric_key_related(opcode: Opcode) -> bool {
         opcode,
         Opcode::GetIndexNumber
             | Opcode::AddIndexNumber
+            | Opcode::AddIndexMulModConstOrZero
             | Opcode::SetIndexNumber
             | Opcode::GetIndexNumberConst
             | Opcode::SetIndexNumberConst
