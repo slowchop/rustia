@@ -45,6 +45,7 @@ CI bench runner. Do not retry them without a materially different approach.
 | `ebb5329` table-op `ForLoopStepOne` tail quickening | `7e4e6e8` | run `28966423248`: total median +11.56% and total min +11.39% vs `1c802df` average; every workload regressed, so opportunistic dispatch fusion was worse than the regular loop dispatch |
 | `02c5867` combined sparse read-pair opcode | `9cacc6b` | runs `28967201259`/`28967318773`: average total median -0.64% and sparse median -3.52% vs `1c802df` average, but generic_iteration regressed +5.85%; too much cross-workload damage for a small total win |
 | `757968c` compiled `AddIndexNumber -> ForLoopStepOne` superinstruction | `e3376a7` | runs `28971363588`/`28971475517`: average total median +3.32% and total min +2.11% vs `dda4e76`; the target dense read loop lost one dispatch but dense median still +0.96% and generic_iteration +10.25%, so codegen/layout cost outweighed the dispatch saving |
+| `dda4e76` generalized upvalue-fed integer table reads | `4e9b27d` | runs `28970485244`/`28971792408`: average total median +1.89% and total min +1.48% vs the kept `474b9da` average; generic_iteration improved only 0.51% while dense/sparse/closures/stdlib regressed, so the upvalue-as-key quickening was backed out |
 
 ## Current Shape Feedback
 
@@ -77,8 +78,10 @@ The kept `474b9da` upvalue-index quickening is intentionally narrow: it only
 skips a following `GetIndex` when the upvalue is a table, the key is a clean
 integer, and the existing direct table integer fast path returns without
 metamethod behavior. It was kept on total-score evidence, but the workload mix
-shows code-layout sensitivity; do not stack more `GetUpvalue` quickening cases
-without repeat CI runs.
+shows code-layout sensitivity. The broader `dda4e76` upvalue-as-key version was
+reverted after repeat CI, even though hot-site reporting showed the generic
+workload can take that quickening; do not stack more `GetUpvalue` quickening
+cases without repeat CI runs.
 
 `cargo run -p script-bench-harness -- --rustia-inline-cache-summary` runs the
 default workloads with `n=64` and reports final atom/IC side-table occupancy.
