@@ -10,14 +10,6 @@ const wasmSourcePath = resolveArg("--wasm-source", path.join(__dirname, "wasm", 
 const outputPath = resolveArg("--output", path.join(__dirname, "SCOREBOARD.md"));
 const checkOnly = process.argv.includes("--check");
 
-const workloadLabels = new Map([
-  ["dense_tables", "dense"],
-  ["sparse_tables", "sparse"],
-  ["closures_upvalues", "closures"],
-  ["generic_iteration", "generic"],
-  ["stdlib_math_table", "stdlib math"],
-]);
-
 const engineOrder = [
   "rustia",
   "mlua-luau",
@@ -143,18 +135,6 @@ function formatIso(timestamp) {
   return new Date(timestamp * 1000).toISOString().replace("T", " ").replace(".000Z", " UTC");
 }
 
-function workloadHeader(workloads) {
-  return workloads.map((workload) => workloadLabels.get(workload) || workload).join(" | ");
-}
-
-function workloadSeparator(workloads) {
-  return workloads.map(() => "---:").join("|");
-}
-
-function workloadValues(row, workloads) {
-  return workloads.map((workload) => formatUs(row.byWorkload.get(workload))).join(" | ");
-}
-
 function engineSortKey(engine) {
   const index = engineOrder.indexOf(engine);
   return index === -1 ? engineOrder.length : index;
@@ -247,7 +227,6 @@ function summarizeEngine(engine, rows, workloads, rustiaTotalNs) {
     commit: commit || "not measured",
     timestamp,
     measured: values.length,
-    byWorkload,
     totalNs,
     ratio: totalNs != null && rustiaTotalNs != null ? rustiaTotalNs / totalNs : null,
     status: complete ? "measured" : values.length === 0 ? "not supported" : `${values.length}/${workloads.length} measured`,
@@ -259,14 +238,14 @@ function targetSection(target) {
   text += target.kind === "wasm"
     ? "Wasm adapter results for this runtime target. Missing adapters are shown as `not supported`.\n\n"
     : "Native/host benchmark results. Total score is the sum of per-workload medians; lower is better.\n\n";
-  text += `| rank | lang/engine | dialect | ratio to rustia | total score (lower better) | measured | ${workloadHeader(target.workloads)} | commit | status |\n`;
-  text += `|---:|---|---|---:|---:|---:|${workloadSeparator(target.workloads)}|---|---|\n`;
+  text += "| rank | lang/engine | dialect | ratio to rustia | total score (lower better) | measured | commit | status |\n";
+  text += "|---:|---|---|---:|---:|---:|---|---|\n";
   let rank = 0;
   for (const row of target.rows) {
     if (row.totalNs != null) {
       rank += 1;
     }
-    text += `| ${row.totalNs == null ? "-" : rank} | ${row.engine} | ${row.dialect} | ${formatRatio(row.ratio)} | ${formatUs(row.totalNs)} | ${row.measured}/${target.workloads.length} | ${workloadValues(row, target.workloads)} | ${row.commit} | ${row.status} |\n`;
+    text += `| ${row.totalNs == null ? "-" : rank} | ${row.engine} | ${row.dialect} | ${formatRatio(row.ratio)} | ${formatUs(row.totalNs)} | ${row.measured}/${target.workloads.length} | ${row.commit} | ${row.status} |\n`;
   }
   return `${text}\n`;
 }
