@@ -2045,6 +2045,7 @@ impl Vm {
                                                 if let Some(len) =
                                                     self.len_inline_cache_hit(site, table)
                                                 {
+                                                    let len_value = Value::number(len as f64);
                                                     if next.a != instruction.a {
                                                         set_register(
                                                             &mut registers,
@@ -2053,12 +2054,60 @@ impl Vm {
                                                         )
                                                         .map_err(|e| e.at_pc(pc - 1))?;
                                                     }
-                                                    set_register(
-                                                        &mut registers,
-                                                        next.a,
-                                                        Value::number(len as f64),
-                                                    )
-                                                    .map_err(|e| e.at_pc(pc))?;
+                                                    set_register(&mut registers, next.a, len_value)
+                                                        .map_err(|e| e.at_pc(pc))?;
+                                                    if let Some(compare) = function
+                                                        .code
+                                                        .get(pc + 1)
+                                                        .filter(|compare| {
+                                                            compare.op == Opcode::LessEqual
+                                                                && (compare.b == next.a
+                                                                    || compare.c == next.a)
+                                                        })
+                                                    {
+                                                        let lhs = if compare.b == next.a {
+                                                            len_value
+                                                        } else {
+                                                            get_register(&registers, compare.b)
+                                                                .map_err(|e| e.at_pc(pc + 1))?
+                                                        };
+                                                        let rhs = if compare.c == next.a {
+                                                            len_value
+                                                        } else {
+                                                            get_register(&registers, compare.c)
+                                                                .map_err(|e| e.at_pc(pc + 1))?
+                                                        };
+                                                        if let (Some(lhs), Some(rhs)) =
+                                                            (lhs.as_number(), rhs.as_number())
+                                                        {
+                                                            set_register(
+                                                                &mut registers,
+                                                                compare.a,
+                                                                Value::boolean(compare_ordering(
+                                                                    OrderComparison::LessEqual,
+                                                                    lhs.partial_cmp(&rhs),
+                                                                )),
+                                                            )
+                                                            .map_err(|e| e.at_pc(pc + 1))?;
+                                                            self.executed_instructions = self
+                                                                .executed_instructions
+                                                                .wrapping_add(2);
+                                                            self.record_quickened_execution_pair(
+                                                                program_id,
+                                                                context.prototype,
+                                                                function,
+                                                                pc - 1,
+                                                            );
+                                                            self.record_quickened_execution_pair(
+                                                                program_id,
+                                                                context.prototype,
+                                                                function,
+                                                                pc,
+                                                            );
+                                                            pc += 2;
+                                                            continue;
+                                                        }
+                                                    }
                                                     self.executed_instructions =
                                                         self.executed_instructions.wrapping_add(1);
                                                     self.record_quickened_execution_pair(
@@ -29436,6 +29485,62 @@ mod tests {
             entry.pc == 0
                 && entry.left_opcode == Opcode::GetUpvalue
                 && entry.right_opcode == Opcode::GetIndex
+                && entry.hits == 1
+        }));
+    }
+
+    #[cfg(feature = "opcode-profiling")]
+    #[test]
+    fn opcode_profile_snapshot_records_len_less_equal_quickening() {
+        let function = Function::with_params(
+            vec![
+                Instruction::with_aux(Opcode::GetUpvalue, 1, 0, 0, 0),
+                Instruction::new(Opcode::Len, 1, 1, 0),
+                Instruction::new(Opcode::LessEqual, 0, 0, 1),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+            ],
+            2,
+            1,
+        );
+        let program = Program::with_functions(dummy_program().main, vec![], vec![function]);
+        let settings = VmSettings {
+            enable_opcode_profiling: true,
+            ..VmSettings::default()
+        };
+        let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        let program_id = vm.retain_dynamic_program(program.clone()).unwrap();
+        let table = vm.heap.alloc_array_table(&[
+            Value::number(10.0),
+            Value::number(20.0),
+            Value::number(30.0),
+        ]);
+        let table_upvalue = vm.heap.alloc_upvalue(Value::table(table)).unwrap();
+        let function = Value::function(
+            vm.heap
+                .alloc_function(Some(program_id), 0, vec![table_upvalue], vm.globals)
+                .unwrap(),
+        );
+
+        let result = vm
+            .call_function(&program, function, &[Value::number(2.0)])
+            .unwrap();
+        assert!(result.truthy());
+        let result = vm
+            .call_function(&program, function, &[Value::number(4.0)])
+            .unwrap();
+        assert!(!result.truthy());
+
+        let snapshot = vm.opcode_profile_snapshot(&program);
+        assert!(snapshot.quickened_pairs.iter().any(|entry| {
+            entry.pc == 0
+                && entry.left_opcode == Opcode::GetUpvalue
+                && entry.right_opcode == Opcode::Len
+                && entry.hits == 1
+        }));
+        assert!(snapshot.quickened_pairs.iter().any(|entry| {
+            entry.pc == 1
+                && entry.left_opcode == Opcode::Len
+                && entry.right_opcode == Opcode::LessEqual
                 && entry.hits == 1
         }));
     }
