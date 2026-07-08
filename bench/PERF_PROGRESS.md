@@ -20,6 +20,7 @@ Baseline for this branch is the old pre-perf CI artifact at `a728ee7`.
 | `c669e48` | add quickening sequence feedback to the bytecode summary | tooling only; reports adjacent table/iteration pairs and loop-body opcode sequences so superinstruction candidates are evidence-backed |
 | `9105988` | feature-gate dynamic opcode profiling and hot-site summary | tooling only; runs `28968775343`/`28968901905` averaged total median +0.20% and total min -0.05% vs `1c802df` average, with the second run back at normal `generic_iteration` levels |
 | `474b9da` | quicken `GetUpvalue -> GetIndex` for integer table reads | runs `28969471980`/`28969579753`: average total median 1.17% faster vs `9105988` average and 0.97% faster vs `1c802df` average; `generic_iteration` improved 4.91% vs the noisy `9105988` average but remains 1.41% slower than `1c802df`, while dense regressed 0.77-2.24% |
+| `e62cae7` | quicken hot `GetUpvalue -> Len -> LessEqual` number comparisons | runs `28974682831`/`28974790223`: average total median 2.54% faster and total min 2.31% faster vs `c4c190b`; `generic_iteration` median improved 6.11%, dense 3.72%, stdlib 10.83%, with sparse median +0.94% |
 
 ## Reverted Candidates
 
@@ -83,6 +84,10 @@ shows code-layout sensitivity. The broader `dda4e76` upvalue-as-key version was
 reverted after repeat CI, even though hot-site reporting showed the generic
 workload can take that quickening; do not stack more `GetUpvalue` quickening
 cases without repeat CI runs.
+The kept `e62cae7` quickening extends the already-hot `GetUpvalue -> Len`
+path by folding an immediately following numeric `LessEqual`. Hot-site
+profiling for `generic_iteration` now shows `Len -> LessEqual` as a taken
+quickened pair 2111 times at `n=64`.
 
 `cargo run -p script-bench-harness -- --rustia-inline-cache-summary` runs the
 default workloads with `n=64` and reports final atom/IC side-table occupancy.
