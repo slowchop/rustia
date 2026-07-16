@@ -8,6 +8,7 @@ const root = path.resolve(__dirname, "..");
 const workflowDir = path.join(root, ".github", "workflows");
 const ciPath = path.join(workflowDir, "ci.yml");
 const benchmarksPath = path.join(workflowDir, "benchmarks.yml");
+const rustToolchainPath = path.join(root, "rust-toolchain.toml");
 
 function fail(message) {
   console.error(`check-workflows: ${message}`);
@@ -20,6 +21,15 @@ function readWorkflow(filePath) {
   } catch (error) {
     fail(`could not read ${path.relative(root, filePath)}: ${error.message}`);
   }
+}
+
+function pinnedRustChannel() {
+  const text = readWorkflow(rustToolchainPath);
+  const match = text.match(/^channel = "([^"]+)"$/m);
+  if (!match) {
+    fail("rust-toolchain.toml must declare a quoted channel");
+  }
+  return match[1];
 }
 
 function requireIncludes(text, needle, label) {
@@ -122,10 +132,21 @@ function checkRunnerLabels(files) {
 
 function checkCi(text) {
   const label = ".github/workflows/ci.yml";
+  const rustChannel = pinnedRustChannel();
   requireIncludes(text, "name: CI\n", label);
   requireIncludes(text, "\"on\":\n  pull_request:\n  push:\n", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
   requireIncludes(text, "runs-on: ubuntu-latest", label);
+  requireIncludes(
+    text,
+    `rustup toolchain install ${rustChannel} --profile minimal --component clippy --component rustfmt`,
+    label,
+  );
+  requireIncludes(text, `rustup default ${rustChannel}`, label);
+  requireIncludes(text, "cargo fmt --all -- --check", label);
+  requireIncludes(text, "cargo clippy --workspace --all-targets -- -D warnings", label);
+  forbidIncludes(text, "rustup toolchain install stable", label);
+  forbidIncludes(text, "rustup default stable", label);
   requireIncludes(text, "node tools/check-release-notes.js", label);
   requireIncludes(text, "node tools/check-crate-metadata.js --check", label);
   requireIncludes(text, "node tools/check-package-files.js --check", label);

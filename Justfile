@@ -1,3 +1,7 @@
+check-style:
+    cargo fmt --all -- --check
+    cargo clippy --workspace --all-targets -- -D warnings
+
 gen-progress:
     node design/render-progress.js
 
@@ -44,6 +48,7 @@ check-examples:
     cargo test -p rustia --examples --no-run
 
 release-preflight:
+    just check-style
     just check-release-notes
     just check-crate-metadata
     just check-workflows

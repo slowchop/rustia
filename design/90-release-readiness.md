@@ -120,9 +120,12 @@ from `publish = false` to publishable.
 ## Release Process Gate
 
 - `just release-preflight` passes before any publishability flip. It checks
-  release notes, package file lists, generated progress HTML, benchmark result
-  freshness, crate metadata, workflow policy, example compilation, and the
-  workspace test suite.
+  formatting, strict workspace Clippy, release notes, package file lists,
+  generated progress HTML, benchmark result freshness, crate metadata, workflow
+  policy, example compilation, and the workspace test suite.
+- Hosted CI installs the exact channel from `rust-toolchain.toml` and runs
+  `cargo fmt --all -- --check` plus
+  `cargo clippy --workspace --all-targets -- -D warnings`.
 - `just check-crate-metadata` passes and `design/crate-metadata.json` is
   current.
 - `just check-workflows` passes and keeps the hosted CI workflow, manual

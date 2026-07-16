@@ -36,8 +36,9 @@ marker. Experimental spikes and standalone wasm FFI demos remain outside that pu
 `rustia-cli` supports file, stdin, `--eval`, and `--repl` execution with profile, fuel, source-name options,
 state-preserving line evaluation, expression shorthand, and source-aware diagnostics for compile and runtime
 failures.
-CI wiring now includes hosted release-preflight checks, explicit public-example compilation, plus a manual
-benchmark measurement workflow that targets only the generic `[self-hosted, bench]` runner label.
+CI wiring now includes pinned-toolchain formatting and strict Clippy gates, hosted release-preflight checks,
+explicit public-example compilation, plus a manual benchmark measurement workflow that targets only the generic
+`[self-hosted, bench]` runner label.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
 ## Project pillars

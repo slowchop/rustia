@@ -65,10 +65,10 @@ public rustia project; actual grabby integration work is explicitly out of scope
   [`design/crate-metadata.json`](design/crate-metadata.json), and package file-list review in
   [`design/package-files.json`](design/package-files.json). Current publish blockers are generated at
   [`design/publishability.json`](design/publishability.json).
-- `just release-preflight` validates the current release-note, package-file, generated leaf package dry-run,
-  progress-dashboard, project-status, benchmark-result, crate-metadata, workflow-policy, example-compile, and
-  workspace-test gates without running fresh benchmark measurements; `.github/workflows/ci.yml` mirrors that gate
-  on hosted Linux CI.
+- `just release-preflight` validates formatting, strict Clippy, release notes, package files, generated leaf
+  package dry-runs, progress/project status, benchmark results, crate metadata, workflow policy, examples, and
+  workspace tests without running fresh benchmark measurements; `.github/workflows/ci.yml` mirrors that gate on
+  hosted Linux CI using the pinned Rust toolchain.
 
 ## Layout
 - `design/` — the design record: constraints → research → spikes → architecture (ADR) → conformance → improvements.

@@ -25,6 +25,8 @@ Current unpublished workspace version: `0.0.1`.
 - Release preflight now composes release notes, package files, generated leaf
   package dry runs, progress HTML, project-status drift checks, benchmark
   result freshness, and workspace tests.
+- Release preflight and hosted CI now enforce formatting plus strict Clippy on
+  the pinned Rust toolchain.
 - Crate publishability blockers are generated from cargo metadata and package
   file audits into `design/publishability.json`.
 - GitHub Actions now has a hosted release-preflight workflow and a manual
