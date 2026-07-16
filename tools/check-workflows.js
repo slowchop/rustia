@@ -44,6 +44,13 @@ function forbidIncludes(text, needle, label) {
   }
 }
 
+function requireCount(text, needle, count, label) {
+  const actual = text.split(needle).length - 1;
+  if (actual !== count) {
+    fail(`${label} must include ${JSON.stringify(needle)} exactly ${count} time(s), got ${actual}`);
+  }
+}
+
 function requireRegex(text, regex, label, description) {
   if (!regex.test(text)) {
     fail(`${label} must ${description}`);
@@ -168,11 +175,21 @@ function checkCi(text) {
 
 function checkBenchmarks(text) {
   const label = ".github/workflows/benchmarks.yml";
+  const rustChannel = pinnedRustChannel();
   requireIncludes(text, "name: Benchmark Measurement\n", label);
   requireIncludes(text, "\"on\":\n  push:\n    branches:\n      - main\n  schedule:\n    - cron: \"17 16 * * *\"\n  workflow_dispatch:\n", label);
   requireIncludes(text, "default: rustia", label);
   requireIncludes(text, "          - rustia\n          - full", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
+  requireCount(
+    text,
+    `rustup toolchain install ${rustChannel} --profile minimal`,
+    2,
+    label,
+  );
+  requireCount(text, `rustup default ${rustChannel}`, 2, label);
+  forbidIncludes(text, "rustup toolchain install stable", label);
+  forbidIncludes(text, "rustup default stable", label);
   forbidIncludes(text, "pull_request:", label);
   forbidIncludes(text, "actions/upload-artifact", label);
   requireIncludes(text, "BENCH_DATA_REPO: git@github.com:slowchop/rustia-bench-data.git", label);

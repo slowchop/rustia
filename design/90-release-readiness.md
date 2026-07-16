@@ -129,8 +129,8 @@ from `publish = false` to publishable.
 - `just check-crate-metadata` passes and `design/crate-metadata.json` is
   current.
 - `just check-workflows` passes and keeps the hosted CI workflow, manual
-  benchmark workflow, action pins, permissions, and generic runner labels in
-  their expected public-safe shape.
+  benchmark workflow, pinned Rust toolchain, action pins, permissions, and
+  generic runner labels in their expected public-safe shape.
 - `.github/workflows/ci.yml` mirrors the release-preflight gate on hosted Linux
   CI, including example compilation, without running fresh benchmark
   measurements.
@@ -148,7 +148,8 @@ from `publish = false` to publishable.
   workspace version plus public-facing unreleased changes.
 - `just check-progress`, `just check-project-status`, and
   `just check-benchmark-results` pass without rewriting committed generated
-  artifacts or letting README/current-progress facts drift.
+  artifacts, skipping the wasm gate verifier, or letting
+  README/current-progress facts drift.
 - `rustia-cli` supports file, stdin, `--eval`, and `--repl` execution, plus
   profile, fuel, source-name options, line-oriented REPL evaluation, and
   source-aware compile/runtime diagnostics.

@@ -40,6 +40,7 @@ check-workflows:
 
 check-benchmark-results:
     node tools/check-benchmark-results.js
+    node tools/check-wasm-gate-results.js
     node bench/render-current-results.js --check
     node bench/render-claims.js --check
     node tools/check-benchmark-site.js
