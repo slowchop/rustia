@@ -37,11 +37,11 @@ function relative(filePath) {
 function parseArgs(argv) {
   const options = {
     build: true,
-    runtimes: ["node", "deno", "bun"],
+    runtimes: ["node", "deno", "bun", "spidermonkey"],
     output: outputPath,
     targetMs: 80,
     reps: 5,
-    adapters: ["rustia", "koto"],
+    adapters: ["rustia", "koto", "rhai"],
   };
 
   for (let index = 0; index < argv.length; index += 1) {

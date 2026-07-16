@@ -136,6 +136,7 @@ function checkCi(text) {
   requireIncludes(text, "node design/show-progress.js --no-color --width 88 >/dev/null", label);
   requireIncludes(text, "node tools/check-project-status.js", label);
   requireIncludes(text, "node tools/check-benchmark-results.js", label);
+  requireIncludes(text, "node tools/check-wasm-gate-results.js", label);
   requireIncludes(text, "node bench/render-current-results.js --check", label);
   requireIncludes(text, "node bench/render-claims.js --check", label);
   requireIncludes(text, "node tools/check-benchmark-site.js", label);
@@ -153,9 +154,14 @@ function checkBenchmarks(text) {
   requireIncludes(text, "          - rustia\n          - full", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
   forbidIncludes(text, "pull_request:", label);
-  forbidIncludes(text, "contents: write", label);
-  forbidIncludes(text, "git push", label);
-  forbidIncludes(text, "secrets.", label);
+  forbidIncludes(text, "actions/upload-artifact", label);
+  requireIncludes(text, "BENCH_DATA_REPO: git@github.com:slowchop/rustia-bench-data.git", label);
+  requireIncludes(text, "BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
+  requireIncludes(text, "command -v unzip >/dev/null", label);
+  requireIncludes(text, "jsshell-linux-x86_64.zip", label);
+  requireIncludes(text, "LD_LIBRARY_PATH", label);
+  requireIncludes(text, "curl -fsSL https://deno.land/install.sh | sh", label);
+  requireIncludes(text, "curl -fsSL https://bun.sh/install | bash", label);
   const labels = benchmarkRunLabels(text);
   if (labels.join(",") !== "self-hosted,bench") {
     fail(`${label} runner labels must be exactly self-hosted + bench, got ${labels.join(", ")}`);
@@ -165,18 +171,29 @@ function checkBenchmarks(text) {
   requireIncludes(text, "measure-rustia-current:", label);
   requireIncludes(text, "if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'rustia')", label);
   requireIncludes(text, "--engines rustia", label);
-  requireIncludes(text, "benchmark-rustia-current-results", label);
+  requireIncludes(text, "Record Rustia benchmark results for ${short_sha}", label);
   requireIncludes(text, "measure-full-current:", label);
   requireIncludes(text, "if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'full')", label);
   requireIncludes(text, "--features all-engines", label);
   requireIncludes(text, "--features mlua-lua54", label);
-  requireIncludes(text, "benchmark-full-current-results", label);
+  requireIncludes(text, "Record full benchmark results for ${short_sha}", label);
   requireIncludes(text, "--commit \"$(git rev-parse --short HEAD)\"", label);
+  requireIncludes(text, "node tools/run-wasm-gate.js", label);
+  requireIncludes(text, "node tools/run-wasm-dispatch-gate.js", label);
+  requireIncludes(text, "node tools/check-wasm-gate-results.js", label);
+  requireIncludes(text, "node tools/check-benchmark-site.js", label);
   requireIncludes(text, "cargo run -p script-bench-harness -- --refresh-results", label);
   requireIncludes(text, "node bench/render-current-results.js", label);
   requireIncludes(text, "node bench/render-claims.js", label);
-  requireIncludes(text, "uses: actions/upload-artifact@v4", label);
-  requireRegex(text, /bench\/history\/runs\.jsonl[\s\S]*bench\/CLAIMS\.md/, label, "upload benchmark history and claim artifacts");
+  requireIncludes(text, "git config user.name \"github-actions[bot]\"", label);
+  requireIncludes(text, "git ls-remote --exit-code --heads \"$BENCH_DATA_REPO\" main", label);
+  requireIncludes(text, "git clone --depth 1 \"$BENCH_DATA_REPO\"", label);
+  requireIncludes(text, "node tools/render-benchmark-data-readme.js", label);
+  requireIncludes(text, "--wasm-source \"$publish_dir/bench/wasm/current-results.json\"", label);
+  requireIncludes(text, "--output \"$publish_dir/README.md\"", label);
+  requireIncludes(text, "git add README.md $BENCH_RESULT_FILES", label);
+  requireIncludes(text, "git -C \"$publish_dir\" push origin \"HEAD:main\"", label);
+  requireRegex(text, /BENCH_RESULT_FILES:[\s\S]*bench\/history\/runs\.jsonl[\s\S]*bench\/CLAIMS\.md[\s\S]*bench\/wasm-gate\.json[\s\S]*bench\/wasm\/current-results\.json[\s\S]*bench\/wasm\/dispatch-current-results\.json/, label, "persist benchmark history, claim, and wasm result artifacts");
   checkActionPins(text, label);
 }
 

@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 koto = { version = "0.16", default-features = false, features = ["arc"] }
+rhai = { version = "1.25", default-features = false, features = ["std"] }
 rustia = { path = "../../../crates/rustia" }
 wasmi = "2.0.0-beta.4"
 

@@ -2,8 +2,8 @@
   "schema_version": 1,
   "schema": "rustia.bench.wasm-dispatch-current-results.v1",
   "source": "script-bench-harness",
-  "updated": "2026-07-03",
-  "commit": "b5573b6",
+  "updated": "2026-07-04",
+  "commit": "a167350",
   "requirements": {
     "call-ref-vs-br-table": true
   },
@@ -17,8 +17,8 @@
       "schema_version": 1,
       "schema": "rustia.bench.wasm-dispatch-results.v1",
       "source": "script-bench-harness",
-      "timestamp_unix": 1783073649,
-      "commit": "b5573b6",
+      "timestamp_unix": 1783141490,
+      "commit": "a167350",
       "target": "wasm32-dispatch-v8-node-darwin-arm64",
       "runtime": {
         "name": "node",
@@ -48,24 +48,24 @@
         {
           "style": "br_table",
           "feature": "core br_table dispatch",
-          "n": 177704833,
+          "n": 225969001,
           "reps": 5,
           "wasm_bytes": 131,
-          "ns_per_dispatch_min": 0.4239717779650931,
-          "ns_per_dispatch_median": 0.4502224652494396,
-          "dispatches_per_sec": 2358647560.9287677,
-          "checksum": "i32:-197176384"
+          "ns_per_dispatch_min": 0.3330556389015501,
+          "ns_per_dispatch_median": 0.3413049252715867,
+          "dispatches_per_sec": 3002501333.705375,
+          "checksum": "i32:1064265492"
         },
         {
           "style": "call_ref",
           "feature": "typed function reference dispatch",
-          "n": 75695270,
+          "n": 89139422,
           "reps": 5,
           "wasm_bytes": 143,
-          "ns_per_dispatch_min": 1.114050785471801,
-          "ns_per_dispatch_median": 1.267263238508825,
-          "dispatches_per_sec": 897625146.9330454,
-          "checksum": "i32:2025311039"
+          "ns_per_dispatch_min": 0.9087398165987648,
+          "ns_per_dispatch_median": 0.9301898210648027,
+          "dispatches_per_sec": 1100424986.0458455,
+          "checksum": "i32:909528739"
         }
       ],
       "skipped": [],
@@ -77,16 +77,16 @@
         "status": "measured",
         "baseline": "br_table",
         "candidate": "call_ref",
-        "candidate_vs_baseline_min": 2.627653167903841,
-        "candidate_vs_baseline_median": 2.814749010373605
+        "candidate_vs_baseline_min": 2.728492511328969,
+        "candidate_vs_baseline_median": 2.72539231692781
       }
     },
     {
       "schema_version": 1,
       "schema": "rustia.bench.wasm-dispatch-results.v1",
       "source": "script-bench-harness",
-      "timestamp_unix": 1783073650,
-      "commit": "b5573b6",
+      "timestamp_unix": 1783141491,
+      "commit": "a167350",
       "target": "wasm32-dispatch-v8-deno-darwin-aarch64",
       "runtime": {
         "name": "deno",
@@ -116,24 +116,24 @@
         {
           "style": "br_table",
           "feature": "core br_table dispatch",
-          "n": 49002156,
+          "n": 238706898,
           "reps": 5,
           "wasm_bytes": 131,
-          "ns_per_dispatch_min": 0.3858937349613761,
-          "ns_per_dispatch_median": 0.38595836477072554,
-          "dispatches_per_sec": 2591386978.8533607,
-          "checksum": "i32:645478005"
+          "ns_per_dispatch_min": 0.3341517721871614,
+          "ns_per_dispatch_median": 0.350284527596685,
+          "dispatches_per_sec": 2992652091.7563505,
+          "checksum": "i32:-953020790"
         },
         {
           "style": "call_ref",
           "feature": "typed function reference dispatch",
-          "n": 72672229,
+          "n": 89476931,
           "reps": 5,
           "wasm_bytes": 143,
-          "ns_per_dispatch_min": 1.0392037101270128,
-          "ns_per_dispatch_median": 1.1006525615169998,
-          "dispatches_per_sec": 962275240.412468,
-          "checksum": "i32:751042965"
+          "ns_per_dispatch_min": 0.9212211469345087,
+          "ns_per_dispatch_median": 0.9671138027744822,
+          "dispatches_per_sec": 1085515680.276814,
+          "checksum": "i32:1774148896"
         }
       ],
       "skipped": [],
@@ -145,16 +145,16 @@
         "status": "measured",
         "baseline": "br_table",
         "candidate": "call_ref",
-        "candidate_vs_baseline_min": 2.692978962799244,
-        "candidate_vs_baseline_median": 2.8517391044778386
+        "candidate_vs_baseline_min": 2.7568943923437415,
+        "candidate_vs_baseline_median": 2.7609378279134553
       }
     },
     {
       "schema_version": 1,
       "schema": "rustia.bench.wasm-dispatch-results.v1",
       "source": "script-bench-harness",
-      "timestamp_unix": 1783073651,
-      "commit": "b5573b6",
+      "timestamp_unix": 1783141492,
+      "commit": "a167350",
       "target": "wasm32-dispatch-javascriptcore-bun-darwin-arm64",
       "runtime": {
         "name": "bun",
@@ -184,24 +184,24 @@
         {
           "style": "br_table",
           "feature": "core br_table dispatch",
-          "n": 73095032,
+          "n": 109608728,
           "reps": 5,
           "wasm_bytes": 131,
-          "ns_per_dispatch_min": 0.8650490911612161,
-          "ns_per_dispatch_median": 1.010937378069688,
-          "dispatches_per_sec": 1156003757.7262,
-          "checksum": "i32:471986036"
+          "ns_per_dispatch_min": 0.6666827663578032,
+          "ns_per_dispatch_median": 0.6789118746091097,
+          "dispatches_per_sec": 1499963776.5697217,
+          "checksum": "i32:-1708989148"
         },
         {
           "style": "call_ref",
           "feature": "typed function reference dispatch",
-          "n": 24065684,
+          "n": 27007118,
           "reps": 5,
           "wasm_bytes": 143,
-          "ns_per_dispatch_min": 3.166552423774865,
-          "ns_per_dispatch_median": 3.491091298298439,
-          "dispatches_per_sec": 315800866.73818415,
-          "checksum": "i32:-630989815"
+          "ns_per_dispatch_min": 2.625730631457977,
+          "ns_per_dispatch_median": 2.7851376811105855,
+          "dispatches_per_sec": 380846377.773616,
+          "checksum": "i32:1372856907"
         }
       ],
       "skipped": [],
@@ -213,16 +213,16 @@
         "status": "measured",
         "baseline": "br_table",
         "candidate": "call_ref",
-        "candidate_vs_baseline_min": 3.6605465009207503,
-        "candidate_vs_baseline_median": 3.4533210206990526
+        "candidate_vs_baseline_min": 3.9385008342165073,
+        "candidate_vs_baseline_median": 4.102355232354944
       }
     },
     {
       "schema_version": 1,
       "schema": "rustia.bench.wasm-dispatch-results.v1",
       "source": "script-bench-harness",
-      "timestamp_unix": 1783073652,
-      "commit": "b5573b6",
+      "timestamp_unix": 1783141493,
+      "commit": "a167350",
       "target": "wasm32-dispatch-spidermonkey-spidermonkey-unknown-host",
       "runtime": {
         "name": "spidermonkey",
@@ -252,24 +252,24 @@
         {
           "style": "br_table",
           "feature": "core br_table dispatch",
-          "n": 155450197,
+          "n": 160858921,
           "reps": 5,
           "wasm_bytes": 131,
-          "ns_per_dispatch_min": 0.5676101357521921,
-          "ns_per_dispatch_median": 0.6262964733087473,
-          "dispatches_per_sec": 1761772627.0423424,
-          "checksum": "i32:71121341"
+          "ns_per_dispatch_min": 0.4496309436111411,
+          "ns_per_dispatch_median": 0.4540323644841556,
+          "dispatches_per_sec": 2224046218.8137126,
+          "checksum": "i32:1502445492"
         },
         {
           "style": "call_ref",
           "feature": "typed function reference dispatch",
-          "n": 4194304,
+          "n": 8946393,
           "reps": 5,
           "wasm_bytes": 143,
-          "ns_per_dispatch_min": 9.630224667489529,
-          "ns_per_dispatch_median": 9.674287866801023,
-          "dispatches_per_sec": 103839737.34028022,
-          "checksum": "i32:-438304768"
+          "ns_per_dispatch_min": 8.82791839613462,
+          "ns_per_dispatch_median": 8.985295674818332,
+          "dispatches_per_sec": 113276987.294973,
+          "checksum": "i32:-1483563428"
         }
       ],
       "skipped": [],
@@ -281,8 +281,8 @@
         "status": "measured",
         "baseline": "br_table",
         "candidate": "call_ref",
-        "candidate_vs_baseline_min": 16.966266211450993,
-        "candidate_vs_baseline_median": 15.446818366533993
+        "candidate_vs_baseline_min": 19.63369852891922,
+        "candidate_vs_baseline_median": 19.78998938771003
       }
     }
   ],

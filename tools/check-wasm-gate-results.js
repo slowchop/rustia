@@ -20,6 +20,7 @@ const expectedWorkloads = new Map([
 const expectedAdapters = new Map([
   ["rustia", "luau"],
   ["koto", "koto"],
+  ["rhai", "rhai"],
 ]);
 
 function fail(message) {
