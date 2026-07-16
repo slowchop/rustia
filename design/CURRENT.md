@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-16.)
 
 ## One-paragraph state
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
@@ -33,6 +33,10 @@ first koto-to-rustia migration guide.
 The public workspace now treats **no unsafe code** as a product feature: every workspace package inherits
 `unsafe_code = "forbid"`, and the live VM is thread-affine instead of relying on an unsafe cross-thread `Send`
 marker. Experimental spikes and standalone wasm FFI demos remain outside that public workspace gate.
+The first table/atom/inline-cache performance foundation is now in-tree: larger insertion-ordered hash parts
+use a thresholded deterministic side index; VM-local byte atoms are indexed; loaded programs cache constant
+atoms; and positive global/index string slots are cached per program/function/PC with shape, exact-key, live
+value, metamethod, readonly, and fuel behavior preserved.
 `rustia-cli` supports file, stdin, `--eval`, and `--repl` execution with profile, fuel, source-name options,
 state-preserving line evaluation, expression shorthand, and source-aware diagnostics for compile and runtime
 failures.
@@ -70,8 +74,9 @@ API parity release-critical work.
    keep the 16-byte tagged `Value` firewall, portable `br_table`-friendly dispatch, instruction-count fuel,
    deterministic f64/libm behavior, table-key `-0` normalization, and profile-specific GC behavior covered by
    tests while performance work proceeds. Keep the public workspace's `unsafe_code = "forbid"` gate intact.
-   For performance sequencing, use [`56-performance-research.md`](56-performance-research.md): table/atom/IC and
-   FASTCALL catch-up first, then adaptive specialization and type-directed wasm/AOT.
+   For performance sequencing, use [`56-performance-research.md`](56-performance-research.md): measure and
+   harden the landed table/atom/slot-cache slice, then FASTCALL/GETIMPORT, broader field/namecall
+   specialization, adaptive specialization, and type-directed wasm/AOT.
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 12 workload entries including
    source-covered `string_building`, append-only JSONL history, package metadata, split notes, static dashboard
@@ -115,10 +120,12 @@ section below for the full list (GC tuning, benchmark publication, `LuauIntegerT
   needs **type guards + deopt**, so gate on a hotness counter and use **type-directed compilation** to emit
   guard-free specialized wasm. (Corrects the earlier sloppy "JIT moot in-browser.")
 - **SotA performance plan is no-unsafe:** [`56-performance-research.md`](56-performance-research.md) ranks the
-  current speed work. The product sequence is table/atoms/slot-ICs, FASTCALL/GETIMPORT, hot-loop hygiene,
-  adaptive quickening, superinstructions/O2, then type-directed wasm/AOT for kernels that can beat the C++ Luau
-  interpreter. Native copy-and-patch/JIT work remains a research reference unless it can satisfy the public
-  `unsafe_code = "forbid"` gate.
+  current speed work. The first deterministic table side index, indexed VM-local atoms, loaded-program
+  constant-atom cache, and positive predicted string-slot cache are landed. The remaining sequence is
+  measurement/hardening, shared string representation and broader field/namecall specialization,
+  FASTCALL/GETIMPORT, hot-loop hygiene, adaptive quickening, superinstructions/O2, then type-directed wasm/AOT
+  for kernels that can beat the C++ Luau interpreter. Native copy-and-patch/JIT work remains a research
+  reference unless it can satisfy the public `unsafe_code = "forbid"` gate.
 - **Luau target PINNED** (review C1): **Luau 0.709** (= our mlua oracle), standalone (not-Roblox) surface,
   vector width 3, flags-off — see [`05-luau-target.md`](05-luau-target.md). **f64-only is VERIFIED correct**
   (`math.type==nil`; integers are default-OFF even at HEAD 0.727 behind `FFlag::LuauIntegerType2`).
@@ -173,7 +180,7 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 | H3 | wasm gate + Wasm 3.0 | **RESOLVED** — Wasm-3.0 assessed (br_table stays; wasm-GC rejected; relaxed-SIMD banned); V8 + Bun/JSC-family + SpiderMonkey production wasm and `call_ref` dispatch measured. |
 | M1 | three named modes | **RESOLVED** — LuauCompat(knobs)/ReproducibleStandard(default)/DeterministicSim(real build). |
 | M2 | Standard incremental GC | **RESOLVED** — paced/incremental for Standard, full-collect-on-instruction-count for DeterministicSim. |
-| M3 | promote inline caches + hot/cold | **RESOLVED** — hot/cold→P1, GETTABLEKS IC→P2. |
+| M3 | promote inline caches + hot/cold | **RESOLVED** — the first safe side-table string-slot cache landed early; hot/cold remains P1 and dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` specialization remains P2. |
 
 ## What's next (the genuine remaining gates before P1 lock)
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items:

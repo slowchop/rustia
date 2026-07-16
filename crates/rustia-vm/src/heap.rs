@@ -1,18 +1,20 @@
 use gc_arena::lock::RefLock;
 use gc_arena::{Arena, Collect, DynamicRootSet, Gc, Rootable, Static};
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::number::table_key_number_bits;
 use crate::value::{Value, ValueKind};
 
 const MAX_LUAU_ARRAY_INDEX: usize = 2_147_483_647;
 const MAX_LUAU_ARRAY_INDEX_F64: f64 = 2_147_483_647.0;
+const TABLE_HASH_INDEX_MIN_LEN: usize = 16;
 
 #[derive(Collect)]
 #[collect(no_drop)]
 struct RootData<'gc> {
     _roots: DynamicRootSet<'gc>,
     strings: Vec<Gc<'gc, Static<Vec<u8>>>>,
+    string_index: BTreeMap<Vec<u8>, u32>,
     tables: Vec<TableData>,
     functions: Vec<FunctionData>,
     upvalues: Vec<UpvalueData>,
@@ -26,8 +28,10 @@ struct RootData<'gc> {
 struct TableData {
     array: Vec<Value>,
     hash: Vec<TableEntry>,
+    hash_index: Vec<Option<TableHashIndexEntry>>,
     readonly: bool,
     metatable: Option<u32>,
+    shape_version: u64,
 }
 
 #[derive(Collect)]
@@ -345,6 +349,13 @@ struct TableEntry {
     value: Value,
 }
 
+#[derive(Clone, Copy, Collect)]
+#[collect(no_drop)]
+struct TableHashIndexEntry {
+    key: TableKey,
+    index: usize,
+}
+
 #[derive(Clone, Copy, Eq, PartialEq, Collect)]
 #[collect(no_drop)]
 enum TableKey {
@@ -363,6 +374,19 @@ pub enum TableNext {
     Entry(Value, Value),
     End,
     InvalidKey,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct TableStringHashSlot {
+    index: usize,
+    shape_version: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TableStringHashWrite {
+    Stored,
+    Deferred,
+    Readonly,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -392,6 +416,7 @@ impl VmCell {
                     RefLock::new(RootData {
                         _roots: DynamicRootSet::new(mc),
                         strings: Vec::new(),
+                        string_index: BTreeMap::new(),
                         tables: Vec::new(),
                         functions: Vec::new(),
                         upvalues: Vec::new(),
@@ -436,16 +461,12 @@ impl VmCell {
     pub fn intern_string_bytes(&mut self, value: &[u8]) -> u32 {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
-            if let Some((index, _)) = root
-                .strings
-                .iter()
-                .enumerate()
-                .find(|(_, existing)| existing.0.as_slice() == value)
-            {
-                return index as u32;
+            if let Some(atom) = root.string_index.get(value) {
+                return *atom;
             }
             let atom = root.strings.len();
             root.strings.push(Gc::new(mc, Static(value.to_vec())));
+            root.string_index.insert(value.to_vec(), atom as u32);
             atom as u32
         })
     }
@@ -477,8 +498,10 @@ impl VmCell {
             root.tables.push(TableData {
                 array: values.to_vec(),
                 hash: Vec::new(),
+                hash_index: Vec::new(),
                 readonly: false,
                 metatable: None,
+                shape_version: 0,
             });
             handle as u32
         })
@@ -491,8 +514,10 @@ impl VmCell {
             root.tables.push(TableData {
                 array: vec![value; size],
                 hash: Vec::new(),
+                hash_index: Vec::new(),
                 readonly: false,
                 metatable: None,
+                shape_version: 0,
             });
             handle as u32
         })
@@ -822,11 +847,80 @@ impl VmCell {
                     return Some(*value);
                 }
             }
-            table
-                .hash
-                .iter()
-                .find(|entry| entry.key == table_key)
-                .map(|entry| entry.value)
+            table_hash_entry(table, table_key).map(|entry| entry.value)
+        })
+    }
+
+    pub(crate) fn table_string_hash_probe(
+        &mut self,
+        table: u32,
+        atom: u32,
+    ) -> Option<Option<(Value, TableStringHashSlot)>> {
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize)?;
+            let Some(index) = table_hash_entry_index(table, TableKey::String(atom)) else {
+                return Some(None);
+            };
+            let Some(entry) = table.hash.get(index) else {
+                return Some(None);
+            };
+            Some(Some((
+                entry.value,
+                TableStringHashSlot {
+                    index,
+                    shape_version: table.shape_version,
+                },
+            )))
+        })
+    }
+
+    pub(crate) fn read_string_hash_slot(
+        &mut self,
+        table: u32,
+        atom: u32,
+        slot: TableStringHashSlot,
+    ) -> Option<Option<Value>> {
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize)?;
+            if table.shape_version != slot.shape_version {
+                return Some(None);
+            }
+            let Some(entry) = table.hash.get(slot.index) else {
+                return Some(None);
+            };
+            if entry.key != TableKey::String(atom) {
+                return Some(None);
+            }
+            Some(Some(entry.value))
+        })
+    }
+
+    pub(crate) fn write_string_hash_slot(
+        &mut self,
+        table: u32,
+        atom: u32,
+        slot: TableStringHashSlot,
+        value: Value,
+    ) -> Option<TableStringHashWrite> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let table = root.tables.get_mut(table as usize)?;
+            if table.shape_version != slot.shape_version {
+                return Some(TableStringHashWrite::Deferred);
+            }
+            let Some(entry) = table.hash.get_mut(slot.index) else {
+                return Some(TableStringHashWrite::Deferred);
+            };
+            if entry.key != TableKey::String(atom) || entry.value.kind() == ValueKind::Nil {
+                return Some(TableStringHashWrite::Deferred);
+            }
+            if table.readonly {
+                return Some(TableStringHashWrite::Readonly);
+            }
+            entry.value = value;
+            Some(TableStringHashWrite::Stored)
         })
     }
 
@@ -845,7 +939,7 @@ impl VmCell {
                         *slot = Value::nil();
                     }
                 }
-                if let Some(entry) = table.hash.iter_mut().find(|entry| entry.key == table_key) {
+                if let Some(entry) = table_hash_entry_mut(table, table_key) {
                     entry.value = Value::nil();
                 }
                 return Some(());
@@ -856,24 +950,14 @@ impl VmCell {
                         table.array.resize(index, Value::nil());
                     }
                     table.array[index - 1] = value;
-                    if let Some(hash_index) =
-                        table.hash.iter().position(|entry| entry.key == table_key)
-                    {
-                        table.hash.remove(hash_index);
+                    if !table.hash.is_empty() {
+                        remove_hash_key(table, table_key);
                     }
                     return Some(());
                 }
             }
 
-            if let Some(entry) = table.hash.iter_mut().find(|entry| entry.key == table_key) {
-                entry.value = value;
-            } else {
-                table.hash.push(TableEntry {
-                    key: table_key,
-                    key_value,
-                    value,
-                });
-            }
+            set_hash_key(table, table_key, key_value, value);
             Some(())
         })
     }
@@ -898,7 +982,9 @@ impl VmCell {
                 table.array.resize(one_based_index, Value::nil());
             }
             table.array[one_based_index - 1] = value;
-            remove_hash_key(table, key);
+            if !table.hash.is_empty() {
+                remove_hash_key(table, key);
+            }
             Some(())
         })
     }
@@ -965,8 +1051,10 @@ impl VmCell {
             if table.readonly {
                 return None;
             }
+            bump_table_shape_version(table);
             table.array.fill(Value::nil());
             table.hash.clear();
+            table.hash_index.clear();
             Some(())
         })
     }
@@ -1202,11 +1290,11 @@ fn table_numeric_get(table: &TableData, one_based_index: usize) -> Value {
     let Some(key) = number_table_key(one_based_index as f64) else {
         return Value::nil();
     };
-    table
-        .hash
-        .iter()
-        .find(|entry| entry.key == key)
-        .map_or_else(Value::nil, |entry| entry.value)
+    table_hash_entry(table, key).map_or_else(Value::nil, |entry| entry.value)
+}
+
+fn bump_table_shape_version(table: &mut TableData) {
+    table.shape_version = table.shape_version.saturating_add(1);
 }
 
 fn table_numeric_set(table: &mut TableData, index: i32, value: Value) {
@@ -1229,13 +1317,17 @@ fn table_numeric_set_array_index(table: &mut TableData, index: usize, value: Val
         if let Some(slot) = table.array.get_mut(index - 1) {
             *slot = Value::nil();
         }
-        remove_hash_key(table, key);
+        if !table.hash.is_empty() {
+            remove_hash_key(table, key);
+        }
     } else if index <= table.array.len() + 1 {
         if index > table.array.len() {
             table.array.resize(index, Value::nil());
         }
         table.array[index - 1] = value;
-        remove_hash_key(table, key);
+        if !table.hash.is_empty() {
+            remove_hash_key(table, key);
+        }
     } else {
         set_hash_key(table, key, key_value, value);
     }
@@ -1253,21 +1345,203 @@ fn set_hash_number_key(table: &mut TableData, number: f64, value: Value) {
 }
 
 fn set_hash_key(table: &mut TableData, key: TableKey, key_value: Value, value: Value) {
-    if let Some(entry) = table.hash.iter_mut().find(|entry| entry.key == key) {
-        entry.value = value;
-    } else if value.kind() != ValueKind::Nil {
-        table.hash.push(TableEntry {
-            key,
-            key_value,
-            value,
-        });
+    match table_hash_lookup(table, key) {
+        TableHashLookup::Found(index) => {
+            if let Some(entry) = table.hash.get_mut(index) {
+                entry.value = value;
+            }
+        }
+        TableHashLookup::Vacant(vacant_hash_index) => {
+            if value.kind() != ValueKind::Nil {
+                let index = table.hash.len();
+                table.hash.push(TableEntry {
+                    key,
+                    key_value,
+                    value,
+                });
+                bump_table_shape_version(table);
+                record_hash_insert(table, key, index, vacant_hash_index);
+            }
+        }
     }
 }
 
+#[inline]
 fn remove_hash_key(table: &mut TableData, key: TableKey) {
-    if let Some(hash_index) = table.hash.iter().position(|entry| entry.key == key) {
+    if let Some(hash_index) = table_hash_entry_index(table, key) {
         table.hash.remove(hash_index);
+        bump_table_shape_version(table);
+        record_hash_remove(table);
     }
+}
+
+#[derive(Clone, Copy)]
+enum TableHashLookup {
+    Found(usize),
+    Vacant(Option<usize>),
+}
+
+#[inline]
+fn table_hash_entry(table: &TableData, key: TableKey) -> Option<&TableEntry> {
+    let index = table_hash_entry_index(table, key)?;
+    table.hash.get(index)
+}
+
+#[inline]
+fn table_hash_entry_mut(table: &mut TableData, key: TableKey) -> Option<&mut TableEntry> {
+    let index = table_hash_entry_index(table, key)?;
+    table.hash.get_mut(index)
+}
+
+#[inline]
+fn table_hash_entry_index(table: &TableData, key: TableKey) -> Option<usize> {
+    match table_hash_lookup(table, key) {
+        TableHashLookup::Found(index) => Some(index),
+        TableHashLookup::Vacant(_) => None,
+    }
+}
+
+#[inline]
+fn table_hash_lookup(table: &TableData, key: TableKey) -> TableHashLookup {
+    if table.hash.is_empty() {
+        return TableHashLookup::Vacant(None);
+    }
+    if table.hash_index.is_empty() {
+        return match table.hash.iter().position(|entry| entry.key == key) {
+            Some(index) => TableHashLookup::Found(index),
+            None => TableHashLookup::Vacant(None),
+        };
+    }
+
+    let mut position = table_hash_index_position(key, table.hash_index.len());
+    for _ in 0..table.hash_index.len() {
+        match table.hash_index[position] {
+            Some(entry) if entry.key == key => {
+                let indexed_entry_matches = table
+                    .hash
+                    .get(entry.index)
+                    .is_some_and(|candidate| candidate.key == key);
+                debug_assert!(
+                    indexed_entry_matches,
+                    "table hash side index points at a different key"
+                );
+                if indexed_entry_matches {
+                    return TableHashLookup::Found(entry.index);
+                }
+                return match table.hash.iter().position(|candidate| candidate.key == key) {
+                    Some(index) => TableHashLookup::Found(index),
+                    None => TableHashLookup::Vacant(None),
+                };
+            }
+            Some(_) => position = (position + 1) & (table.hash_index.len() - 1),
+            None => return TableHashLookup::Vacant(Some(position)),
+        }
+    }
+    TableHashLookup::Vacant(None)
+}
+
+fn record_hash_insert(
+    table: &mut TableData,
+    key: TableKey,
+    index: usize,
+    vacant_hash_index: Option<usize>,
+) {
+    if table.hash_index.is_empty() {
+        if table.hash.len() >= TABLE_HASH_INDEX_MIN_LEN {
+            rebuild_hash_index(table);
+        }
+        return;
+    }
+    if let Some(position) = vacant_hash_index {
+        if table.hash.len().saturating_mul(2) > table.hash_index.len() {
+            rebuild_hash_index(table);
+        } else if let Some(entry) = table.hash_index.get_mut(position) {
+            *entry = Some(TableHashIndexEntry { key, index });
+        }
+        return;
+    }
+    insert_hash_index(table, key, index);
+}
+
+fn insert_hash_index(table: &mut TableData, key: TableKey, index: usize) {
+    if table.hash.len().saturating_mul(2) > table.hash_index.len() {
+        rebuild_hash_index(table);
+        return;
+    }
+    let mut position = table_hash_index_position(key, table.hash_index.len());
+    for _ in 0..table.hash_index.len() {
+        match table.hash_index[position] {
+            Some(entry) if entry.key == key => {
+                table.hash_index[position] = Some(TableHashIndexEntry { key, index });
+                return;
+            }
+            Some(_) => position = (position + 1) & (table.hash_index.len() - 1),
+            None => {
+                table.hash_index[position] = Some(TableHashIndexEntry { key, index });
+                return;
+            }
+        }
+    }
+    rebuild_hash_index(table);
+}
+
+fn record_hash_remove(table: &mut TableData) {
+    if table.hash.len() < TABLE_HASH_INDEX_MIN_LEN {
+        table.hash_index.clear();
+    } else {
+        rebuild_hash_index(table);
+    }
+}
+
+fn rebuild_hash_index(table: &mut TableData) {
+    table.hash_index.clear();
+    if table.hash.len() < TABLE_HASH_INDEX_MIN_LEN {
+        return;
+    }
+    let capacity = table
+        .hash
+        .len()
+        .saturating_mul(4)
+        .next_power_of_two()
+        .max(TABLE_HASH_INDEX_MIN_LEN * 4);
+    table.hash_index.resize(capacity, None);
+    for index in 0..table.hash.len() {
+        let key = table.hash[index].key;
+        insert_hash_index(table, key, index);
+    }
+}
+
+#[inline]
+fn table_hash_index_position(key: TableKey, len: usize) -> usize {
+    debug_assert!(len.is_power_of_two());
+    (table_hash_index_key(key) as usize) & (len - 1)
+}
+
+#[inline]
+fn table_hash_index_key(key: TableKey) -> u64 {
+    let value = match key {
+        TableKey::Number(bits) => return table_numeric_hash_index_key(bits),
+        TableKey::Boolean(value) => u64::from(value),
+        TableKey::String(handle)
+        | TableKey::Table(handle)
+        | TableKey::Function(handle)
+        | TableKey::Userdata(handle)
+        | TableKey::Buffer(handle) => u64::from(handle),
+        TableKey::Vector(bits) => bits.into_iter().fold(0x9e37_79b9_u64, |hash, bits| {
+            hash ^ u64::from(bits)
+                .wrapping_add(0x9e37_79b9)
+                .wrapping_add(hash << 6)
+                .wrapping_add(hash >> 2)
+        }),
+    };
+    value.wrapping_mul(0x9e37_79b9_7f4a_7c15).rotate_left(23) ^ value.rotate_right(17)
+}
+
+#[inline]
+fn table_numeric_hash_index_key(mut bits: u64) -> u64 {
+    bits ^= bits >> 32;
+    bits = bits.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    bits ^ (bits >> 29)
 }
 
 #[derive(Clone, Copy)]
@@ -1417,6 +1691,7 @@ fn sweep_weak_table(table: &mut TableData, mode: WeakMode, live: &WeakLiveSet) {
             }
         }
     }
+    let hash_len = table.hash.len();
     table.hash.retain(|entry| {
         let same_identity = table_key_value_same_identity(entry.key, entry.value);
         let remove_key = mode.keys
@@ -1429,6 +1704,10 @@ fn sweep_weak_table(table: &mut TableData, mode: WeakMode, live: &WeakLiveSet) {
             && (mode.keys || !same_identity);
         !(remove_key || remove_value)
     });
+    if table.hash.len() != hash_len {
+        bump_table_shape_version(table);
+        rebuild_hash_index(table);
+    }
 }
 
 fn table_key_is_collectable(key: TableKey) -> bool {
@@ -1569,6 +1848,11 @@ fn first_hash_entry(
     table: &TableData,
     order: TableIterationOrder,
 ) -> Option<(Value, Value)> {
+    if order == TableIterationOrder::Insertion {
+        return table.hash.iter().find_map(|entry| {
+            (entry.value.kind() != ValueKind::Nil).then_some((entry.key_value, entry.value))
+        });
+    }
     ordered_hash_entries(root, table, order)
         .into_iter()
         .find_map(|entry| {
@@ -1582,6 +1866,12 @@ fn next_after_hash_key(
     key: TableKey,
     order: TableIterationOrder,
 ) -> Option<Option<(Value, Value)>> {
+    if order == TableIterationOrder::Insertion {
+        let index = table_hash_entry_index(table, key)?;
+        return Some(table.hash.iter().skip(index + 1).find_map(|entry| {
+            (entry.value.kind() != ValueKind::Nil).then_some((entry.key_value, entry.value))
+        }));
+    }
     let entries = ordered_hash_entries(root, table, order);
     let index = entries.iter().position(|entry| entry.key == key)?;
     Some(entries.into_iter().skip(index + 1).find_map(|entry| {

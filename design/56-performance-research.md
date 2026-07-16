@@ -1,6 +1,6 @@
 # rustia — SotA performance research update
 
-> **Status: [PERFORMANCE RESEARCH v1] (2026-07-04).** This note updates
+> **Status: [PERFORMANCE RESEARCH v1.1] (updated 2026-07-16).** This note updates
 > [`55-improvements.md`](55-improvements.md) with the current performance research stack. It is not a new
 > conformance contract; it is the ordered implementation bet list for making rustia fast while keeping the public
 > workspace under `unsafe_code = "forbid"`.
@@ -11,9 +11,15 @@ The committed benchmark posture is still conservative: rustia is currently far b
 through `mlua-luau` on the tracked workloads, with the generated benchmark claim saying rustia trails by roughly
 8x-20x and about 13x geomean in the committed snapshot. That makes this a catch-up project first.
 
-The encouraging part is that the slow path is visible. Today rustia still pays avoidable costs that Luau-class VMs
-do not pay: linear table lookup, incomplete atom/string interning, no mature field inline caches, limited
-FASTCALL/GETIMPORT coverage, heavy per-instruction book-keeping, and no type-directed hot tier.
+The first safe table/atom/cache foundation is now in-tree. Dense-array plus insertion-ordered hash tables use a
+deterministic open-addressed side index at 16+ hash entries; VM-local byte interning is indexed by `BTreeMap`;
+each loaded program caches its VM-local string-constant atoms; and existing global/`GetIndex`/`SetIndex` paths
+have positive per-program/function/PC string-slot caches. Those caches store atom+slot only, revalidate
+shape/key/live value, preserve metamethod and readonly behavior, and do not change opcode fuel.
+
+The remaining avoidable costs include small-table scans, no shared cross-VM `Program` string pool or
+short-string inline form, no dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` tier, limited FASTCALL/GETIMPORT
+coverage, heavy per-instruction book-keeping, and no type-directed hot tier.
 
 The no-unsafe policy is a feature, not a speed dead-end. The product path below assumes safe Rust in the public
 workspace. Techniques that require writable executable memory, raw code patching, or unsafe FFI remain research
@@ -30,12 +36,13 @@ performance tier after the table/IC base lands.
 Expected gain: 10x-100x on monomorphic kernels; on those kernels rustia can plausibly beat the C++ Luau
 interpreter by multiples. General Luau code still depends on guard quality and fallback cost.
 
-**2. Real table engine: array/hash storage, atoms, and slot inline caches.**
-Replace linear hash scans with a Luau-class table: dense array part, hashed string/key part, cached length boundary,
-interned-string identity checks, and per-VM GETTABLEKS/SETTABLEKS/NAMECALL slot caches. This attacks the largest
-obvious current bottleneck.
-Current plan delta: [`55-improvements.md`](55-improvements.md) already adopts dual-part tables and atoms, but the
-IC work should move as early as the table rewrite allows.
+**2. Harden and extend the landed table/atom/slot-cache foundation.**
+The first slice now provides dense array storage, insertion-ordered hash entries, thresholded deterministic
+indexed lookup, indexed VM-local atoms, per-loaded-program constant-atom caches, and positive predicted string
+slots on existing global/index opcodes. Next add cached length boundaries, shared program string storage where
+safe, and dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` specialization.
+Current plan delta: measure and harden the landed slice before broadening it; retain the safe side-metadata and
+fuel-invariant rules.
 Expected gain: 2x-20x on table-heavy workloads; likely the fastest route to closing the current benchmark gap.
 
 **3. Adaptive quickening and specializing bytecode.**
@@ -88,8 +95,9 @@ Expected gain: 1.2x-4x on closure/upvalue/coroutine-shaped workloads.
 **9. Allocation, GC, and string model overhaul.**
 Use per-program intern pools, short-string storage, shared frozen stdlib state, and deterministic allocation-driven
 GC pacing. Keep non-moving handles friendly to inline caches, but keep the VM thread-affine and safe.
-Current plan delta: pieces are already adopted; performance work should land them as one representation project
-because tables, atoms, imports, and ICs compound.
+Current plan delta: VM-local indexed atoms and per-loaded-program constant caches have landed. Shared cross-VM
+program strings, short-string storage, and frozen stdlib state remain representation work because tables, atoms,
+imports, and ICs compound.
 Expected gain: 1.2x-3x speed plus large RSS/startup wins for many-VM usage.
 
 **10. Typed lanes for vectors, buffers, and deterministic extension kernels.**
@@ -106,7 +114,7 @@ catch-up work.
 | state | likely position vs C++ Luau interpreter |
 |---|---|
 | Current committed snapshot | About 8x-20x slower on tracked workloads; roughly 13x slower geomean. |
-| Tables + atoms + ICs + FASTCALL/GETIMPORT | Could close most table/global/stdlib gaps; target 0.5x-1.0x Luau on many interpreter workloads. |
+| Full tables + shared atoms + broader ICs + FASTCALL/GETIMPORT | Could close most table/global/stdlib gaps; target 0.5x-1.0x Luau on many interpreter workloads. |
 | Add quickening + hot-loop hygiene + superinstructions + O2 optimizer | Plausible 0.8x-1.5x Luau interpreter on favorable workloads, but only measurement can bless this. |
 | Add type-directed wasm/AOT tier | Hot type-stable kernels can plausibly beat the C++ Luau interpreter by multiples; this is the main better-than-Luau-interpreter route. |
 | Native copy-and-patch/JIT family | Research reference only for the no-unsafe product. Useful to study, not a public-workspace implementation plan unless the unsafe boundary policy changes. |

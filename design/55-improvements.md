@@ -15,8 +15,10 @@
 **1. Dual-part table (dense array part + insertion-ordered hash part).** *(speed #1 · memory #2 · compat #4)*
 Replace the flat IndexMap with **Luau's own two-part shape**: a contiguous `Vec<Value>` array part for the
 dense `1..n` prefix (no key, no hash) + the insertion-ordered hash part. `pairs()`/`next()`/generalized-for =
-array-ascending then hash-insertion-order. Deletions use `shift_remove` (**not** `swap_remove` — a determinism
-*fix*). **Why better:** ~16 B/elem vs ~40 B+ on the common shape (memory), `t[i]`/`ipairs`/`#t` become array
+array-ascending then hash-insertion-order. Logical `t[k] = nil` deletion preserves the entry as a stable
+tombstone so `next(t, k)` can resume; physical removals preserve relative order and rebuild the deterministic
+side index. Never use `swap_remove`. **Why better:** ~16 B/elem vs ~40 B+ on the common shape (memory),
+`t[i]`/`ipairs`/`#t` become array
 ops (kills the ~8% range/iterator cost + integer-key hashing), and it makes `pairs()` order *match real Luau on
 every proper sequence* — closing the single biggest cross-category compat risk. **Conformant:** hash-part order
 is UNSPECIFIED in Luau, so pinning it is a within-spec strengthening; byte-match claimed only on proper
@@ -33,7 +35,11 @@ N-VM model (literals stored 1× per process, not N×). **Conformant:** eq/hash u
 only when both sides are interned; else byte compare) → Luau semantics byte-identical; only **compile-time
 constants** go in the immutable `Arc` (Sync-blessed), runtime strings stay per-VM `Gc` → the live VM remains
 thread-affine; stays in the 16-B layout. **Cost:** medium-high; sequence behind the sealed `Value` newtype pre-P1.
-(Resolves the open const-pool/`Gc`-string seam.)
+(Starts resolving the open const-pool/`Gc`-string seam.)
+
+**Implementation update (2026-07-16):** the first safe slice is in-tree: VM-local byte interning is indexed by
+`BTreeMap<Vec<u8>, u32>`, and each loaded program caches its VM-local atom for string constants. A shared
+cross-VM `Program` pool, precomputed hashes, and short-string inlining remain pending.
 
 **3. safeenv-gated generic FASTCALL + GETIMPORT.** *(speed #1 — strongest on the sim hot path)* Re-introduce
 Luau's builtin-call fast path as a **generic** superinstruction: while the base environment is unmutated
@@ -119,10 +125,12 @@ already required by conf-8).
 
 ## Strong runners-up (several worth doing later)
 > **PROMOTED per review M3:** the two below are no longer "P4 runner-ups" — **hot/cold opcode split → P1**
-> (de-risks the JSC/SpiderMonkey baseline tiers; design-in, not retrofit), and the **GETTABLEKS shape inline
-> cache → P2** (depends on the dual-part table #1 + atoms #2; at P1 reserve the aux/cache word + a per-VM
-> IC side-table keyed by IP — never mutate the shared `Arc<Program>`; same fuel on hit/miss).
-- **Monomorphic inline cache (GETTABLEKS)** — **promoted to P2** (M3). Per-VM IC side-table; depends on #1/#2.
+> (de-risks the JSC/SpiderMonkey baseline tiers; design-in, not retrofit). A first predicted string-slot cache
+> landed early on the existing global/`GetIndex`/`SetIndex` paths: per-loaded-program, per-function/PC side
+> metadata caches atom+slot only, revalidates shape/key/live value, never mutates shared `Program`, and charges
+> the same opcode fuel on hits and misses. Dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` specialization remains P2.
+- **Broader field/namecall inline caches** — **P2** (M3). Extend the landed safe side-table foundation with
+  dedicated opcode families and measured specialization.
 - **Front-end crate split → bytecode-only deterministic-sim wasm** — real size/hygiene win; overlaps #9; strong runner-up.
 - **Hot/cold opcode split for JSC/SpiderMonkey baseline tiers** — **promoted to P1** (M3); validated by disassembly + the P1 cross-engine measurement.
 - **wasm SIMD `f32x4` for vector ops** — clean wasm speedup but `vector` is P4 and workload-specific.
@@ -133,5 +141,8 @@ already required by conf-8).
 - **A** dispatch ← adds generic FASTCALL/GETIMPORT (#3) + the capability-typed hook contract (#7).
 - **B** value ← short-string inlining stays in 16 B (#2); the array part (#1) cuts value memory.
 - **C** determinism ← libm enforcement teeth (#5), float→int rule (#6), the canon-point invariant (#8).
-- **D** GC/tables ← the IndexMap becomes Luau's dual-part table (#1); const strings resolve the `Gc`-string seam (#2); frozen shared env (#9).
-- **E/F/G/H** ← `shift_remove` order fix (#1), fuel-ABI on the hook (#7), borrowing ABI + typed sugar + structured errors (#4, #10).
+- **D** GC/tables ← the flat map becomes a dual-part table with stable tombstones and a deterministic side index
+  (#1); indexed VM-local atoms and loaded-program constant caches start resolving the `Gc`-string seam (#2);
+  frozen shared env remains future work (#9).
+- **E/F/G/H** ← stable logical-deletion/physical-compaction rules (#1), fuel-ABI on the hook (#7), borrowing ABI
+  + typed sugar + structured errors (#4, #10).

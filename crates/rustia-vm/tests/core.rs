@@ -70,6 +70,42 @@ fn value_debug_keeps_reference_payloads_opaque() {
 }
 
 #[test]
+fn indexed_hash_lookup_preserves_tombstone_insertion_order() {
+    let mut vm = Vm::new(Profile::ReproducibleStandard);
+    let table = vm.empty_table();
+    let mut keys = Vec::new();
+
+    for index in 0..128 {
+        let key = vm.string(format!("field_{index:03}"));
+        vm.raw_table_set_value(table, key, Value::number(index as f64))
+            .unwrap();
+        keys.push(key);
+    }
+    for (index, key) in keys.iter().copied().enumerate() {
+        assert_eq!(
+            vm.raw_table_get_value(table, key).unwrap().as_number(),
+            Some(index as f64)
+        );
+    }
+
+    let tombstone = keys[37];
+    vm.raw_table_set_value(table, tombstone, Value::nil())
+        .unwrap();
+    vm.raw_table_set_value(table, tombstone, Value::number(999.0))
+        .unwrap();
+
+    let entries = vm.raw_table_entries_value(table).unwrap();
+    let position = entries
+        .iter()
+        .position(|(key, _)| {
+            vm.string_value_bytes(*key).unwrap().as_deref() == Some(b"field_037".as_slice())
+        })
+        .expect("reinserted tombstone should be iterable");
+    assert_eq!(position, 37);
+    assert_eq!(entries[position].1.as_number(), Some(999.0));
+}
+
+#[test]
 fn number_canon_preserves_negative_zero_outside_table_keys() {
     let value = Value::number(-0.0);
     assert_eq!(value.as_number().unwrap().to_bits(), (-0.0f64).to_bits());

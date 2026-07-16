@@ -9,7 +9,12 @@ Current unpublished workspace version: `0.0.1`.
 ### Added
 
 - Luau 0.709 conformance tracking is pending-free, with the current manifest at
-  684 fixtures and 481 behavior refs.
+  692 fixtures and 491 behavior refs.
+- Larger insertion-ordered table hash parts now use a deterministic
+  open-addressed side index; VM strings use indexed byte interning; loaded
+  programs cache VM-local constant atoms; and global/index reads and writes use
+  shape-revalidated positive string-slot caches without changing insertion
+  order, metamethod/readonly behavior, or opcode fuel.
 - The public `rustia` facade has compile-checked examples for globals, typed
   host functions, deterministic extensions, retained script functions, serde,
   and hot reload.

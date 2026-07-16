@@ -7,8 +7,8 @@ use crate::bytecode::{
 use crate::error::{Error, ErrorKind, ErrorLocation, Result};
 use crate::extension::{validate_registered_op, ExtensionOp, ExtensionRegistry, HostFunctionOp};
 use crate::heap::{
-    FunctionKind, NativeFunction, TableIterationOrder, TableNext, UserdataPayload, VectorData,
-    VmCell,
+    FunctionKind, NativeFunction, TableIterationOrder, TableNext, TableStringHashSlot,
+    TableStringHashWrite, UserdataPayload, VectorData, VmCell,
 };
 use crate::number::{binary, canonicalize_number, NumericOp};
 use crate::profile::Profile;
@@ -74,7 +74,7 @@ pub struct Vm {
     conformance_vertex_metatable: Option<u32>,
     extensions: ExtensionRegistry,
     host_functions: Vec<HostFunctionOp>,
-    dynamic_programs: Vec<Arc<Program>>,
+    dynamic_programs: Vec<LoadedProgram>,
     call_stack: Vec<CallStackFrame>,
     coroutines: Vec<CoroutineState>,
     running_coroutines: Vec<usize>,
@@ -90,6 +90,78 @@ pub struct Vm {
     executed_instructions: u64,
     deterministic_collection_count: u64,
     coverage_hits: BTreeMap<CoverageKey, u64>,
+}
+
+struct LoadedProgram {
+    program: Arc<Program>,
+    constant_atoms: Vec<Option<u32>>,
+    main_table_inline_caches: Vec<Option<TableStringInlineCache>>,
+    function_table_inline_caches: Vec<Vec<Option<TableStringInlineCache>>>,
+    #[cfg(test)]
+    table_inline_cache_hits: u64,
+    #[cfg(test)]
+    table_inline_cache_fills: u64,
+}
+
+impl LoadedProgram {
+    fn new(program: Program) -> Self {
+        let constant_atoms = vec![None; program.constants.len()];
+        let main_table_inline_caches = vec![None; program.main.code.len()];
+        let function_table_inline_caches = program
+            .functions
+            .iter()
+            .map(|function| vec![None; function.code.len()])
+            .collect();
+        Self {
+            program: Arc::new(program),
+            constant_atoms,
+            main_table_inline_caches,
+            function_table_inline_caches,
+            #[cfg(test)]
+            table_inline_cache_hits: 0,
+            #[cfg(test)]
+            table_inline_cache_fills: 0,
+        }
+    }
+
+    fn table_inline_cache(
+        &self,
+        prototype: Option<u32>,
+        pc: usize,
+    ) -> Option<TableStringInlineCache> {
+        match prototype {
+            Some(prototype) => self
+                .function_table_inline_caches
+                .get(prototype as usize)?
+                .get(pc)
+                .copied()
+                .flatten(),
+            None => self.main_table_inline_caches.get(pc).copied().flatten(),
+        }
+    }
+
+    fn set_table_inline_cache(
+        &mut self,
+        prototype: Option<u32>,
+        pc: usize,
+        entry: TableStringInlineCache,
+    ) -> Option<()> {
+        let slot = match prototype {
+            Some(prototype) => self
+                .function_table_inline_caches
+                .get_mut(prototype as usize)?
+                .get_mut(pc)?,
+            None => self.main_table_inline_caches.get_mut(pc)?,
+        };
+        *slot = Some(entry);
+        Some(())
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TableStringInlineCache {
+    atom: u32,
+    slot: TableStringHashSlot,
 }
 
 struct FunctionCallContext<'a> {
@@ -869,7 +941,11 @@ impl Vm {
                                 )))
                             }
                             Opcode::LoadConst => {
-                                let value = self.load_constant(program, instruction.c as usize)?;
+                                let value = self.load_constant(
+                                    program,
+                                    program_id,
+                                    instruction.c as usize,
+                                )?;
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -880,18 +956,25 @@ impl Vm {
                                     })
                                     .at_pc(pc - 1));
                                 }
-                                let value =
-                                    self.load_constant(program, instruction.aux as usize)?;
+                                let value = self.load_constant(
+                                    program,
+                                    program_id,
+                                    instruction.aux as usize,
+                                )?;
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::GetGlobal => {
-                                let key = self.global_key(program, instruction.aux)?;
+                                let key =
+                                    self.global_key_cached(program, program_id, instruction.aux)?;
                                 let environment =
                                     self.current_environment().map_err(|e| e.at_pc(pc - 1))?;
                                 let value = self
-                                    .get_table_index_with_metamethod(
+                                    .get_table_index_with_inline_cache(
                                         program,
+                                        program_id,
+                                        context.prototype,
+                                        pc - 1,
                                         environment,
                                         key,
                                         context.depth,
@@ -902,13 +985,17 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::SetGlobal => {
-                                let key = self.global_key(program, instruction.aux)?;
+                                let key =
+                                    self.global_key_cached(program, program_id, instruction.aux)?;
                                 let environment =
                                     self.current_environment().map_err(|e| e.at_pc(pc - 1))?;
                                 let value = get_register(&registers, instruction.a)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                self.set_table_index_with_metamethod(
+                                self.set_table_index_with_inline_cache(
                                     program,
+                                    program_id,
+                                    context.prototype,
+                                    pc - 1,
                                     environment,
                                     key,
                                     value,
@@ -1628,7 +1715,16 @@ impl Vm {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })?;
                                 let value = self
-                                    .get_index_value(program, object, key, context.depth, fuel)
+                                    .get_index_value_with_inline_cache(
+                                        program,
+                                        program_id,
+                                        context.prototype,
+                                        pc - 1,
+                                        object,
+                                        key,
+                                        context.depth,
+                                        fuel,
+                                    )
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
@@ -1675,8 +1771,11 @@ impl Vm {
                                     get_register(&registers, instruction.c).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
-                                self.set_index_value(
+                                self.set_index_value_with_inline_cache(
                                     program,
+                                    program_id,
+                                    context.prototype,
+                                    pc - 1,
                                     object,
                                     key,
                                     value,
@@ -3712,7 +3811,12 @@ impl Vm {
         Ok(())
     }
 
-    fn load_constant(&mut self, program: &Program, index: usize) -> Result<Value> {
+    fn load_constant(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        index: usize,
+    ) -> Result<Value> {
         let constant = program.constants.get(index).ok_or_else(|| {
             Error::new(ErrorKind::ConstantOutOfBounds {
                 index,
@@ -3723,8 +3827,74 @@ impl Vm {
             Constant::Nil => Value::nil(),
             Constant::Boolean(value) => Value::boolean(*value),
             Constant::Number(value) => Value::number(*value),
-            Constant::String(value) => Value::string_atom(self.heap.intern_string_bytes(value)),
+            Constant::String(_) => Value::string_atom(
+                self.constant_string_atom(program, program_id, index)?
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "string constant atom is missing",
+                        })
+                    })?,
+            ),
         })
+    }
+
+    fn constant_string_atom(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        index: usize,
+    ) -> Result<Option<u32>> {
+        let constant = program.constants.get(index).ok_or_else(|| {
+            Error::new(ErrorKind::ConstantOutOfBounds {
+                index,
+                len: program.constants.len(),
+            })
+        })?;
+        let Constant::String(value) = constant else {
+            return Ok(None);
+        };
+        if let Some(program_id) = program_id {
+            if let Some(Some(atom)) = self
+                .dynamic_programs
+                .get(program_id as usize)
+                .and_then(|program| program.constant_atoms.get(index))
+                .copied()
+            {
+                return Ok(Some(atom));
+            }
+        }
+        let atom = self.heap.intern_string_bytes(value);
+        if let Some(program_id) = program_id {
+            if let Some(slot) = self
+                .dynamic_programs
+                .get_mut(program_id as usize)
+                .and_then(|program| program.constant_atoms.get_mut(index))
+            {
+                *slot = Some(atom);
+            }
+        }
+        Ok(Some(atom))
+    }
+
+    fn global_key_cached(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        index: i32,
+    ) -> Result<Value> {
+        if index < 0 {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "negative global constant index",
+            }));
+        }
+        let atom = self
+            .constant_string_atom(program, program_id, index as usize)?
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "global key constant must be a string",
+                })
+            })?;
+        Ok(Value::string_atom(atom))
     }
 
     fn global_key(&mut self, program: &Program, index: i32) -> Result<Value> {
@@ -4422,6 +4592,25 @@ impl Vm {
         Err(self.index_error(object, key)?)
     }
 
+    fn get_index_value_with_inline_cache(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        prototype: Option<u32>,
+        pc: usize,
+        object: Value,
+        key: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        if let Some(table) = object.as_table() {
+            return self.get_table_index_with_inline_cache(
+                program, program_id, prototype, pc, table, key, depth, fuel,
+            );
+        }
+        self.get_index_value(program, object, key, depth, fuel)
+    }
+
     fn check_method_value(&mut self, callee: Value, object: Value, key: Value) -> Result<()> {
         if callee.kind() != ValueKind::Nil {
             return Ok(());
@@ -4468,6 +4657,53 @@ impl Vm {
             }
         }
         self.get_object_index_metamethod(program, Value::table(table), key, depth, fuel)
+    }
+
+    fn get_table_index_with_inline_cache(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        prototype: Option<u32>,
+        pc: usize,
+        table: u32,
+        key: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        self.check_recursion_depth(depth)?;
+        let Some(program_id) = program_id else {
+            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
+        };
+        let Some(atom) = key.as_string_atom() else {
+            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
+        };
+
+        if let Some(entry) = self.table_inline_cache(program_id, prototype, pc) {
+            if entry.atom == atom {
+                if let Some(Some(value)) = self.heap.read_string_hash_slot(table, atom, entry.slot)
+                {
+                    if value.kind() != ValueKind::Nil {
+                        #[cfg(test)]
+                        self.record_table_inline_cache_hit(program_id);
+                        return Ok(value);
+                    }
+                }
+            }
+        }
+
+        if let Some(Some((value, slot))) = self.heap.table_string_hash_probe(table, atom) {
+            if value.kind() != ValueKind::Nil {
+                self.set_table_inline_cache(
+                    program_id,
+                    prototype,
+                    pc,
+                    TableStringInlineCache { atom, slot },
+                );
+                return Ok(value);
+            }
+        }
+
+        self.get_table_index_with_metamethod(program, table, key, depth, fuel)
     }
 
     fn get_object_index_metamethod(
@@ -4539,6 +4775,26 @@ impl Vm {
         Err(Error::new(ErrorKind::TypeError { expected: "table" }))
     }
 
+    fn set_index_value_with_inline_cache(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        prototype: Option<u32>,
+        pc: usize,
+        object: Value,
+        key: Value,
+        value: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        if let Some(table) = object.as_table() {
+            return self.set_table_index_with_inline_cache(
+                program, program_id, prototype, pc, table, key, value, depth, fuel,
+            );
+        }
+        self.set_index_value(program, object, key, value, depth, fuel)
+    }
+
     fn set_table_index_with_metamethod(
         &mut self,
         program: &Program,
@@ -4564,6 +4820,68 @@ impl Vm {
             );
         }
         self.set_table_index(table, key, value)
+    }
+
+    fn set_table_index_with_inline_cache(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        prototype: Option<u32>,
+        pc: usize,
+        table: u32,
+        key: Value,
+        value: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<()> {
+        self.check_recursion_depth(depth)?;
+        let Some(program_id) = program_id else {
+            return self.set_table_index_with_metamethod(program, table, key, value, depth, fuel);
+        };
+        let Some(atom) = key.as_string_atom() else {
+            return self.set_table_index_with_metamethod(program, table, key, value, depth, fuel);
+        };
+
+        if let Some(entry) = self.table_inline_cache(program_id, prototype, pc) {
+            if entry.atom == atom {
+                match self
+                    .heap
+                    .write_string_hash_slot(table, atom, entry.slot, value)
+                {
+                    Some(TableStringHashWrite::Stored) => {
+                        #[cfg(test)]
+                        self.record_table_inline_cache_hit(program_id);
+                        return Ok(());
+                    }
+                    Some(TableStringHashWrite::Readonly) => {
+                        return Err(readonly_table_error());
+                    }
+                    Some(TableStringHashWrite::Deferred) | None => {}
+                }
+            }
+        }
+
+        if let Some(Some((existing, slot))) = self.heap.table_string_hash_probe(table, atom) {
+            if existing.kind() != ValueKind::Nil {
+                match self.heap.write_string_hash_slot(table, atom, slot, value) {
+                    Some(TableStringHashWrite::Stored) => {
+                        self.set_table_inline_cache(
+                            program_id,
+                            prototype,
+                            pc,
+                            TableStringInlineCache { atom, slot },
+                        );
+                        return Ok(());
+                    }
+                    Some(TableStringHashWrite::Readonly) => {
+                        return Err(readonly_table_error());
+                    }
+                    Some(TableStringHashWrite::Deferred) | None => {}
+                }
+            }
+        }
+
+        self.set_table_index_with_metamethod(program, table, key, value, depth, fuel)
     }
 
     fn set_object_newindex_metamethod(
@@ -5296,12 +5614,51 @@ impl Vm {
     fn dynamic_program(&self, program_id: u32) -> Result<Arc<Program>> {
         self.dynamic_programs
             .get(program_id as usize)
-            .cloned()
+            .map(|program| Arc::clone(&program.program))
             .ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "dynamic program handle is missing",
                 })
             })
+    }
+
+    fn table_inline_cache(
+        &self,
+        program_id: u32,
+        prototype: Option<u32>,
+        pc: usize,
+    ) -> Option<TableStringInlineCache> {
+        self.dynamic_programs
+            .get(program_id as usize)?
+            .table_inline_cache(prototype, pc)
+    }
+
+    fn set_table_inline_cache(
+        &mut self,
+        program_id: u32,
+        prototype: Option<u32>,
+        pc: usize,
+        entry: TableStringInlineCache,
+    ) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+            if program
+                .set_table_inline_cache(prototype, pc, entry)
+                .is_some()
+            {
+                #[cfg(test)]
+                {
+                    program.table_inline_cache_fills =
+                        program.table_inline_cache_fills.saturating_add(1);
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn record_table_inline_cache_hit(&mut self, program_id: u32) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+            program.table_inline_cache_hits = program.table_inline_cache_hits.saturating_add(1);
+        }
     }
 
     fn host_function(&self, host: u32) -> Result<&HostFunctionOp> {
@@ -5318,7 +5675,7 @@ impl Vm {
                 reason: "dynamic program handle overflow",
             })
         })?;
-        self.dynamic_programs.push(Arc::new(program));
+        self.dynamic_programs.push(LoadedProgram::new(program));
         Ok(program_id)
     }
 
@@ -19488,4 +19845,570 @@ fn table_expected_error() -> Error {
     Error::new(ErrorKind::RuntimeError {
         message: "table expected".to_owned(),
     })
+}
+
+#[cfg(test)]
+mod inline_cache_tests {
+    use super::*;
+
+    fn cache_program() -> Program {
+        Program::new(
+            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            Vec::new(),
+        )
+    }
+
+    fn table_with_field(vm: &mut Vm, name: &str, value: Value) -> (u32, Value) {
+        let table = vm.heap.alloc_array_table(&[]);
+        let key = Value::string_atom(vm.heap.intern_string(name));
+        vm.heap
+            .table_set(table, key, value)
+            .expect("table field should be writable");
+        (table, key)
+    }
+
+    #[test]
+    fn string_atoms_reuse_arbitrary_bytes() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let first = vm.heap.intern_string_bytes(b"field\0name");
+        let second = vm.heap.intern_string_bytes(b"field\0name");
+        let different = vm.heap.intern_string_bytes(b"field\0other");
+
+        assert_eq!(first, second);
+        assert_ne!(first, different);
+    }
+
+    #[test]
+    fn constant_atom_caches_are_isolated_per_loaded_program() {
+        let program = Program::new(
+            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            vec![Constant::String(b"field".to_vec())],
+        );
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let first_program = vm
+            .retain_dynamic_program(program.clone())
+            .expect("first program should be retained");
+        let second_program = vm
+            .retain_dynamic_program(program.clone())
+            .expect("second program should be retained");
+
+        let first_atom = vm
+            .constant_string_atom(&program, Some(first_program), 0)
+            .expect("string constant")
+            .expect("string atom");
+        assert_eq!(
+            vm.dynamic_programs[first_program as usize].constant_atoms[0],
+            Some(first_atom)
+        );
+        assert_eq!(
+            vm.dynamic_programs[second_program as usize].constant_atoms[0],
+            None
+        );
+
+        let second_atom = vm
+            .constant_string_atom(&program, Some(second_program), 0)
+            .expect("string constant")
+            .expect("string atom");
+        assert_eq!(first_atom, second_atom);
+    }
+
+    #[test]
+    fn string_slot_cache_reads_live_values() {
+        let program = cache_program();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program_id = vm
+            .retain_dynamic_program(program.clone())
+            .expect("program should be retained");
+        let (table, key) = table_with_field(&mut vm, "x", Value::number(1.0));
+        let mut fuel = Some(50);
+
+        let first = vm
+            .get_table_index_with_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                table,
+                key,
+                0,
+                &mut fuel,
+            )
+            .expect("initial cached read");
+        assert_eq!(first.as_number(), Some(1.0));
+        assert!(vm.table_inline_cache(program_id, None, 0).is_some());
+        assert_eq!(
+            vm.dynamic_programs[program_id as usize].table_inline_cache_fills,
+            1
+        );
+        assert_eq!(
+            vm.dynamic_programs[program_id as usize].table_inline_cache_hits,
+            0
+        );
+        assert_eq!(fuel, Some(50));
+
+        vm.heap
+            .table_set(table, key, Value::number(2.0))
+            .expect("table field update");
+        let updated = vm
+            .get_table_index_with_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                table,
+                key,
+                0,
+                &mut fuel,
+            )
+            .expect("cached read after value update");
+        assert_eq!(updated.as_number(), Some(2.0));
+        assert_eq!(
+            vm.dynamic_programs[program_id as usize].table_inline_cache_hits,
+            1
+        );
+        assert_eq!(fuel, Some(50));
+    }
+
+    #[test]
+    fn string_slot_cache_revalidates_different_table_layouts() {
+        let program = cache_program();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program_id = vm
+            .retain_dynamic_program(program.clone())
+            .expect("program should be retained");
+        let (first, key) = table_with_field(&mut vm, "x", Value::number(1.0));
+        let first_y = Value::string_atom(vm.heap.intern_string("y"));
+        vm.heap
+            .table_set(first, first_y, Value::number(10.0))
+            .expect("first y field");
+
+        let second = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set(second, first_y, Value::number(20.0))
+            .expect("second y field");
+        vm.heap
+            .table_set(second, key, Value::number(2.0))
+            .expect("second x field");
+        let mut fuel = None;
+
+        let first_value = vm
+            .get_table_index_with_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                first,
+                key,
+                0,
+                &mut fuel,
+            )
+            .expect("first layout read");
+        let second_value = vm
+            .get_table_index_with_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                second,
+                key,
+                0,
+                &mut fuel,
+            )
+            .expect("second layout read");
+
+        assert_eq!(first_value.as_number(), Some(1.0));
+        assert_eq!(second_value.as_number(), Some(2.0));
+    }
+
+    #[test]
+    fn string_slot_cache_refreshes_after_clear_and_reinsert() {
+        let program = cache_program();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program_id = vm
+            .retain_dynamic_program(program.clone())
+            .expect("program should be retained");
+        let (table, key) = table_with_field(&mut vm, "x", Value::number(1.0));
+        let mut fuel = None;
+
+        vm.get_table_index_with_inline_cache(
+            &program,
+            Some(program_id),
+            None,
+            0,
+            table,
+            key,
+            0,
+            &mut fuel,
+        )
+        .expect("cache fill read");
+        vm.heap.table_clear(table).expect("table should clear");
+        let other = Value::string_atom(vm.heap.intern_string("other"));
+        vm.heap
+            .table_set(table, other, Value::number(8.0))
+            .expect("other field insert");
+        vm.heap
+            .table_set(table, key, Value::number(3.0))
+            .expect("x field reinsert");
+
+        let refreshed = vm
+            .get_table_index_with_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                table,
+                key,
+                0,
+                &mut fuel,
+            )
+            .expect("refreshed read");
+        assert_eq!(refreshed.as_number(), Some(3.0));
+    }
+
+    #[test]
+    fn string_slot_cache_refreshes_after_weak_sweep_rebuild() {
+        let program = cache_program();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program_id = vm
+            .retain_dynamic_program(program.clone())
+            .expect("program should be retained");
+        let table = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let mode_key = Value::string_atom(vm.heap.intern_string("__mode"));
+        let weak_values = Value::string_atom(vm.heap.intern_string("v"));
+        vm.heap
+            .table_set(metatable, mode_key, weak_values)
+            .expect("weak mode field");
+        vm.heap
+            .table_set_metatable(table, Some(metatable))
+            .expect("weak metatable");
+
+        let mut dead_keys = Vec::new();
+        let mut live_keys = Vec::new();
+        for index in 0..24 {
+            let dead_key = Value::string_atom(vm.heap.intern_string(&format!("dead_{index:02}")));
+            let live_key = Value::string_atom(vm.heap.intern_string(&format!("live_{index:02}")));
+            let dead_value = Value::table(vm.heap.alloc_array_table(&[]));
+            vm.heap
+                .table_set(table, dead_key, dead_value)
+                .expect("weak table dead field");
+            vm.heap
+                .table_set(table, live_key, Value::number(index as f64))
+                .expect("weak table live field");
+            dead_keys.push(dead_key);
+            live_keys.push(live_key);
+        }
+        let cached_key = Value::string_atom(vm.heap.intern_string("x"));
+        vm.heap
+            .table_set(table, cached_key, Value::number(99.0))
+            .expect("cached field");
+        let mut fuel = None;
+
+        let before_sweep = vm
+            .get_table_index_with_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                table,
+                cached_key,
+                0,
+                &mut fuel,
+            )
+            .expect("cache fill before weak sweep");
+        assert_eq!(before_sweep.as_number(), Some(99.0));
+        assert_eq!(
+            vm.dynamic_programs[program_id as usize].table_inline_cache_fills,
+            1
+        );
+
+        vm.heap
+            .collect_weak_tables_with_roots(&[Value::table(table)]);
+
+        for key in dead_keys {
+            assert_eq!(
+                vm.heap
+                    .table_get(table, key)
+                    .unwrap_or_else(Value::nil)
+                    .kind(),
+                ValueKind::Nil
+            );
+        }
+        for (index, key) in live_keys.iter().copied().enumerate() {
+            assert_eq!(
+                vm.heap.table_get(table, key).and_then(Value::as_number),
+                Some(index as f64)
+            );
+        }
+
+        let after_sweep = vm
+            .get_table_index_with_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                table,
+                cached_key,
+                0,
+                &mut fuel,
+            )
+            .expect("cache refill after weak sweep");
+        assert_eq!(after_sweep.as_number(), Some(99.0));
+        assert_eq!(
+            vm.dynamic_programs[program_id as usize].table_inline_cache_fills,
+            2
+        );
+        let cached_again = vm
+            .get_table_index_with_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                table,
+                cached_key,
+                0,
+                &mut fuel,
+            )
+            .expect("cache hit after weak sweep");
+        assert_eq!(cached_again.as_number(), Some(99.0));
+        assert_eq!(
+            vm.dynamic_programs[program_id as usize].table_inline_cache_hits,
+            1
+        );
+
+        let entries = vm
+            .raw_table_entries_value(Value::table(table))
+            .expect("weak table entries");
+        let names = entries
+            .into_iter()
+            .map(|(key, _)| {
+                String::from_utf8(
+                    vm.string_value_bytes(key)
+                        .expect("string lookup")
+                        .expect("string key"),
+                )
+                .expect("utf-8 test key")
+            })
+            .collect::<Vec<_>>();
+        let mut expected_names = (0..24)
+            .map(|index| format!("live_{index:02}"))
+            .collect::<Vec<_>>();
+        expected_names.push("x".to_owned());
+        assert_eq!(names, expected_names);
+    }
+
+    #[test]
+    fn bytecode_string_slot_caches_preserve_opcode_fuel() {
+        let program = Program::new(
+            Function::with_params(
+                vec![
+                    Instruction::new(Opcode::SetIndex, 0, 1, 2),
+                    Instruction::new(Opcode::GetIndex, 3, 0, 1),
+                    Instruction::new(Opcode::Return, 3, 1, 0),
+                ],
+                4,
+                3,
+            ),
+            Vec::new(),
+        );
+        let settings = VmSettings {
+            initial_fuel: Some(3),
+            ..VmSettings::default()
+        };
+        let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        let program_id = vm
+            .retain_dynamic_program(program)
+            .expect("program should be retained");
+        let function_handle = vm
+            .heap
+            .alloc_dynamic_main_function(program_id, vm.globals)
+            .expect("dynamic main function");
+        let function = Value::function(function_handle);
+        let (table, key) = table_with_field(&mut vm, "x", Value::number(1.0));
+        let table = Value::table(table);
+
+        let cold = vm
+            .call_retained_function(function, &[table, key, Value::number(7.0)])
+            .expect("cold cache call");
+        assert_eq!(cold[0].as_number(), Some(7.0));
+        assert_eq!(
+            vm.dynamic_programs[program_id as usize].table_inline_cache_fills,
+            2
+        );
+        assert_eq!(
+            vm.dynamic_programs[program_id as usize].table_inline_cache_hits,
+            0
+        );
+
+        let hot = vm
+            .call_retained_function(function, &[table, key, Value::number(8.0)])
+            .expect("hot cache call");
+        assert_eq!(hot[0].as_number(), Some(8.0));
+        assert_eq!(
+            vm.dynamic_programs[program_id as usize].table_inline_cache_hits,
+            2
+        );
+
+        vm.settings.initial_fuel = Some(2);
+        let error = vm
+            .call_retained_function(function, &[table, key, Value::number(9.0)])
+            .expect_err("one fewer unit of fuel must still exhaust on Return");
+        assert!(matches!(error.kind, ErrorKind::FuelExhausted { limit: 2 }));
+    }
+
+    #[test]
+    fn cached_nil_field_falls_through_to_index_table() {
+        let program = cache_program();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program_id = vm
+            .retain_dynamic_program(program.clone())
+            .expect("program should be retained");
+        let (table, key) = table_with_field(&mut vm, "x", Value::number(1.0));
+        let (fallback, _) = table_with_field(&mut vm, "x", Value::number(9.0));
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let index_key = Value::string_atom(vm.heap.intern_string("__index"));
+        vm.heap
+            .table_set(metatable, index_key, Value::table(fallback))
+            .expect("metatable index field");
+        vm.heap
+            .table_set_metatable(table, Some(metatable))
+            .expect("table metatable");
+        let mut fuel = None;
+
+        let cached = vm
+            .get_table_index_with_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                table,
+                key,
+                0,
+                &mut fuel,
+            )
+            .expect("initial cached read");
+        assert_eq!(cached.as_number(), Some(1.0));
+
+        vm.heap
+            .table_set(table, key, Value::nil())
+            .expect("logical field deletion");
+        let fallback_value = vm
+            .get_table_index_with_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                table,
+                key,
+                0,
+                &mut fuel,
+            )
+            .expect("nil cache entry should fall through");
+        assert_eq!(fallback_value.as_number(), Some(9.0));
+    }
+
+    #[test]
+    fn cached_write_observes_newindex_after_logical_delete() {
+        let program = cache_program();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program_id = vm
+            .retain_dynamic_program(program.clone())
+            .expect("program should be retained");
+        let (table, key) = table_with_field(&mut vm, "x", Value::number(1.0));
+        let delegate = vm.heap.alloc_array_table(&[]);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let newindex_key = Value::string_atom(vm.heap.intern_string("__newindex"));
+        vm.heap
+            .table_set(metatable, newindex_key, Value::table(delegate))
+            .expect("metatable newindex field");
+        vm.heap
+            .table_set_metatable(table, Some(metatable))
+            .expect("table metatable");
+        let mut fuel = None;
+
+        vm.set_table_index_with_inline_cache(
+            &program,
+            Some(program_id),
+            None,
+            0,
+            table,
+            key,
+            Value::number(2.0),
+            0,
+            &mut fuel,
+        )
+        .expect("cache fill write");
+        vm.set_table_index_with_inline_cache(
+            &program,
+            Some(program_id),
+            None,
+            0,
+            table,
+            key,
+            Value::nil(),
+            0,
+            &mut fuel,
+        )
+        .expect("cached logical delete");
+        vm.set_table_index_with_inline_cache(
+            &program,
+            Some(program_id),
+            None,
+            0,
+            table,
+            key,
+            Value::number(3.0),
+            0,
+            &mut fuel,
+        )
+        .expect("newindex delegate write");
+
+        assert_eq!(
+            vm.heap.table_get(table, key).and_then(Value::as_number),
+            None
+        );
+        assert_eq!(
+            vm.heap.table_get(delegate, key).and_then(Value::as_number),
+            Some(3.0)
+        );
+    }
+
+    #[test]
+    fn cached_write_rechecks_readonly_state() {
+        let program = cache_program();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program_id = vm
+            .retain_dynamic_program(program.clone())
+            .expect("program should be retained");
+        let (table, key) = table_with_field(&mut vm, "x", Value::number(1.0));
+        let mut fuel = None;
+
+        vm.set_table_index_with_inline_cache(
+            &program,
+            Some(program_id),
+            None,
+            0,
+            table,
+            key,
+            Value::number(2.0),
+            0,
+            &mut fuel,
+        )
+        .expect("cache fill write");
+        vm.heap.table_freeze(table).expect("table should freeze");
+        let error = vm
+            .set_table_index_with_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                table,
+                key,
+                Value::number(3.0),
+                0,
+                &mut fuel,
+            )
+            .expect_err("cached write must recheck readonly");
+        assert!(error.to_string().contains("readonly table"));
+    }
 }

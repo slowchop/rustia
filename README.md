@@ -15,8 +15,12 @@ benchmark, API, and release gates are satisfied.
   general Luau speed claims remain gated on type guards, fallback behavior, and benchmark history.
 - `DeterministicSim` is bit-reproducible by construction on the tested matrix; `ReproducibleStandard` remains
   Luau-conformant while making reproducible choices for unspecified behavior.
-- One portable engine: big-`match`→`br_table` interpreter + a wasm-emit JIT/AOT tier; **gc-arena** GC,
+- One portable engine: big-`match`→`br_table` interpreter plus a validated future wasm-emit JIT/AOT tier;
+  **gc-arena** GC,
   **16-byte tagged** values, own hand-written Luau parser, and thread-affine safe-Rust VM execution.
+- First interpreter performance foundation: deterministic indexed lookup for larger insertion-ordered hash
+  parts, indexed VM-local atoms, per-loaded-program constant-atom caching, and revalidated positive string-slot
+  caches while preserving insertion order, metamethod/readonly behavior, and opcode fuel.
 - **No unsafe code in the public workspace:** all workspace crates, including the benchmark harness, inherit
   `unsafe_code = "forbid"`; research spikes and standalone wasm FFI demos are kept outside that product gate.
 - Pinned to **Luau 0.709** (standalone luau.org surface, not Roblox).
@@ -42,7 +46,7 @@ The canonical decision filter is [`design/02-pillars.md`](design/02-pillars.md).
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](design/progress.json) into
-[`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-04 for the
+[`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-16 for the
 public rustia project; actual grabby integration work is explicitly out of scope.
 
 | goal | complete | confidence |
