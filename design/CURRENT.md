@@ -17,7 +17,8 @@ A from-scratch Rust Luau
 interpreter is validated as **GO** by the earlier spikes and is now backed by the production conformance suite;
 performance still needs the continuous benchmark gate before public claims. All 8 architecture axes are decided
 ([`30-architecture.md`](30-architecture.md) v3), 10 conformance-verified improvements are adopted
-([`55-improvements.md`](55-improvements.md)), and the standalone benchmark harness has the engine/workload/history
+([`55-improvements.md`](55-improvements.md)), the no-unsafe SotA performance research stack is now captured in
+[`56-performance-research.md`](56-performance-research.md), and the standalone benchmark harness has the engine/workload/history
 shell, static chart dashboard, 12 workload entries including cross-adapter `string_building` source coverage, and
 the `rustia`/`boa`/`koto`/`mlua-lua54`/`mlua-luau`/`rhai`/`roto`/`rquickjs`/`wasmi`/`wasmtime` native adapters in
 place.
@@ -29,6 +30,9 @@ Its generated [`../bench/CLAIMS.md`](../bench/CLAIMS.md) gate keeps public bench
 currently approves no blanket speed headline from the committed snapshot.
 The public API now has release-preflight-enforced compile-checked examples for embedding and hot reload, plus a
 first koto-to-rustia migration guide.
+The public workspace now treats **no unsafe code** as a product feature: every workspace package inherits
+`unsafe_code = "forbid"`, and the live VM is thread-affine instead of relying on an unsafe cross-thread `Send`
+marker. Experimental spikes and standalone wasm FFI demos remain outside that public workspace gate.
 `rustia-cli` supports file, stdin, `--eval`, and `--repl` execution with profile, fuel, source-name options,
 state-preserving line evaluation, expression shorthand, and source-aware diagnostics for compile and runtime
 failures.
@@ -36,15 +40,37 @@ CI wiring now includes hosted release-preflight checks, explicit public-example 
 benchmark measurement workflow that targets only the generic `[self-hosted, bench]` runner label.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
+## Project pillars
+The canonical decision filter is [`02-pillars.md`](02-pillars.md). These pillars define what counts as current
+rustia work and what should be deferred or marked out of scope:
+
+| # | pillar | current meaning |
+|---:|---|---|
+| 1 | Pinned Standalone Luau Compatibility | Luau 0.709 standalone runtime behavior: parser/compiler/VM/source-visible stdlib, vector-3, flags-off. |
+| 2 | Conformance and Provenance | Compatibility claims need fixtures, upstream links, generated audits, benchmark records, or explicit defer reasons. |
+| 3 | Deterministic Profiles and Replay ABI | `ReproducibleStandard` is reproducible-conformant; `DeterministicSim` is the stricter lockstep/replay subset. |
+| 4 | Rollback-Safe Host Boundary | The host owns cross-tick authoritative state, typed slots, rollback capture, ordered effect queues, and commits. |
+| 5 | Layered Rust Embedding API | Small typed facade first; extensions, capabilities, fuel, retained handles, serde, and future interop are layered. |
+| 6 | One Safe Native + Wasm Engine | One semantic engine across native and `wasm32-unknown-unknown`, with no public unsafe-code or target-specific semantic fork. |
+| 7 | Benchmark-Gated Performance Claims | Public speed claims are per workload/target and generated from committed benchmark history. |
+| 8 | Public-Clean OSS Consumer Contract | Public crates stay generic, documented, packageable, semver-scoped, and free of grabby-specific API. |
+
+Important boundary: "Luau compatibility" means pinned standalone Luau runtime compatibility. It does not make
+Roblox APIs, latest-Luau churn, Lua 5.4 behavior, analyzer/typechecker parity, bytecode loading, or raw Luau C
+API parity release-critical work.
+
 ## 🚀 Next actions (cold-start handoff — do in this order)
-**Read order for a fresh agent:** `CLAUDE.md` (auto-loaded) → **this file** → [`30-architecture.md`](30-architecture.md) (the ADR)
+**Read order for a fresh agent:** `CLAUDE.md` (auto-loaded) → **this file** → [`02-pillars.md`](02-pillars.md)
+→ [`30-architecture.md`](30-architecture.md) (the ADR)
 → the doc for your task. (A fresh Claude session in this repo also auto-loads the project memory.)
 
 **Action queue:**
 1. **Harden the production engine** against the LOCKED decisions ([`30-architecture.md`](30-architecture.md) §1–§4):
    keep the 16-byte tagged `Value` firewall, portable `br_table`-friendly dispatch, instruction-count fuel,
    deterministic f64/libm behavior, table-key `-0` normalization, and profile-specific GC behavior covered by
-   tests while performance work proceeds.
+   tests while performance work proceeds. Keep the public workspace's `unsafe_code = "forbid"` gate intact.
+   For performance sequencing, use [`56-performance-research.md`](56-performance-research.md): table/atom/IC and
+   FASTCALL catch-up first, then adaptive specialization and type-directed wasm/AOT.
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 12 workload entries including
    source-covered `string_building`, append-only JSONL history, package metadata, split notes, static dashboard
@@ -87,6 +113,11 @@ section below for the full list (GC tuning, benchmark publication, `LuauIntegerT
   research option — the in-browser route to near-native speed. Caveat: monomorphic-f64 kernel; general Luau
   needs **type guards + deopt**, so gate on a hotness counter and use **type-directed compilation** to emit
   guard-free specialized wasm. (Corrects the earlier sloppy "JIT moot in-browser.")
+- **SotA performance plan is no-unsafe:** [`56-performance-research.md`](56-performance-research.md) ranks the
+  current speed work. The product sequence is table/atoms/slot-ICs, FASTCALL/GETIMPORT, hot-loop hygiene,
+  adaptive quickening, superinstructions/O2, then type-directed wasm/AOT for kernels that can beat the C++ Luau
+  interpreter. Native copy-and-patch/JIT work remains a research reference unless it can satisfy the public
+  `unsafe_code = "forbid"` gate.
 - **Luau target PINNED** (review C1): **Luau 0.709** (= our mlua oracle), standalone (not-Roblox) surface,
   vector width 3, flags-off — see [`05-luau-target.md`](05-luau-target.md). **f64-only is VERIFIED correct**
   (`math.type==nil`; integers are default-OFF even at HEAD 0.727 behind `FFlag::LuauIntegerType2`).
@@ -111,10 +142,12 @@ section below for the full list (GC tuning, benchmark publication, `LuauIntegerT
 | doc | role | status |
 |---|---|---|
 | **CURRENT.md** (this) | the live canonical state | authoritative |
+| [`02-pillars.md`](02-pillars.md) | project pillars, non-goals, and the rabbit-hole decision filter | **canonical** |
 | [`30-architecture.md`](30-architecture.md) | the ADR (8 axes, decided) v3 + v3.1 refinements | authoritative for design |
 | [`05-luau-target.md`](05-luau-target.md) | the pinned-target spec (Luau 0.709) | **authoritative** ✅ |
 | [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 692 fixtures / 491 refs / 0 pending |
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
+| [`56-performance-research.md`](56-performance-research.md) | no-unsafe SotA performance stack, top-10 ordered bets, C++ Luau estimates | current research note |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + deterministic extension/linker plan | **implemented first slice** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |

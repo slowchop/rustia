@@ -6,6 +6,7 @@ const path = require("path");
 
 const root = path.resolve(__dirname, "..");
 const sourcePath = path.join(__dirname, "current-results.json");
+const historyPath = path.join(__dirname, "history", "runs.jsonl");
 const wasmResultsPath = path.join(__dirname, "wasm", "current-results.json");
 const wasmDispatchPath = path.join(__dirname, "wasm", "dispatch-current-results.json");
 const outputPath = path.join(__dirname, "current-results.html");
@@ -67,6 +68,63 @@ function readData() {
   data.rows.forEach(validateRow);
   validateMetadataMatchesRows(data);
   return data;
+}
+
+function readHistory() {
+  let text;
+  try {
+    text = fs.readFileSync(historyPath, "utf8");
+  } catch (error) {
+    fail(`could not read ${relative(historyPath)}: ${error.message}`);
+  }
+
+  const records = [];
+  for (const [index, rawLine] of text.split(/\r?\n/).entries()) {
+    const line = rawLine.trim();
+    if (line === "") {
+      continue;
+    }
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch (error) {
+      fail(`${relative(historyPath)} line ${index + 1} is not JSON: ${error.message}`);
+    }
+    records.push(normalizeHistoryRecord(record, index + 1));
+  }
+  if (records.length === 0) {
+    fail(`${relative(historyPath)} must contain at least one benchmark record`);
+  }
+  return records.sort(compareRunTime);
+}
+
+function normalizeHistoryRecord(record, lineNumber) {
+  const label = `${relative(historyPath)} line ${lineNumber}`;
+  for (const key of ["commit", "target", "engine", "dialect", "workload", "unit", "checksum"]) {
+    if (typeof record[key] !== "string" || record[key].trim() === "") {
+      fail(`${label}.${key} must be a non-empty string`);
+    }
+  }
+  for (const key of ["timestamp_unix", "n", "reps", "ns_per_unit_min", "ns_per_unit_median", "units_per_sec"]) {
+    if (!Number.isFinite(Number(record[key])) || Number(record[key]) <= 0) {
+      fail(`${label}.${key} must be a positive finite number`);
+    }
+  }
+  return {
+    timestamp_unix: Number(record.timestamp_unix),
+    commit: record.commit,
+    target: record.target,
+    engine: record.engine,
+    dialect: record.dialect,
+    workload: record.workload,
+    unit: record.unit,
+    n: Number(record.n),
+    reps: Number(record.reps),
+    ns_per_unit_min: Number(record.ns_per_unit_min),
+    ns_per_unit_median: Number(record.ns_per_unit_median),
+    units_per_sec: Number(record.units_per_sec),
+    checksum: record.checksum,
+  };
 }
 
 function readJson(filePath) {
@@ -322,6 +380,27 @@ function compareRows(left, right) {
   );
 }
 
+function compareRunTime(left, right) {
+  return (
+    left.timestamp_unix - right.timestamp_unix ||
+    left.commit.localeCompare(right.commit) ||
+    left.engine.localeCompare(right.engine) ||
+    left.workload.localeCompare(right.workload)
+  );
+}
+
+function latestBy(values, keyFn) {
+  const latest = new Map();
+  for (const value of values) {
+    const key = keyFn(value);
+    const existing = latest.get(key);
+    if (!existing || compareRunTime(existing, value) < 0) {
+      latest.set(key, value);
+    }
+  }
+  return [...latest.values()];
+}
+
 function summarize(data, wasmRows) {
   const rows = data.rows.slice().sort(compareRows);
   const summaryRows = [
@@ -390,6 +469,23 @@ function summarize(data, wasmRows) {
   };
 }
 
+function summarizeHistory(records) {
+  const rows = records.slice().sort(compareRunTime);
+  const timestamps = rows.map((row) => row.timestamp_unix);
+  const targetRows = [...groupBy(rows, (row) => row.target)]
+    .map(([target, values]) => ({ target, values }))
+    .sort((left, right) => left.target.localeCompare(right.target));
+  return {
+    rows,
+    targetRows,
+    engineCount: unique(rows.map((row) => row.engine)).length,
+    workloadCount: unique(rows.map((row) => row.workload)).length,
+    commitCount: unique(rows.map((row) => row.commit)).length,
+    minTimestamp: Math.min(...timestamps),
+    maxTimestamp: Math.max(...timestamps),
+  };
+}
+
 function median(values) {
   const sorted = values
     .filter((value) => Number.isFinite(value))
@@ -410,6 +506,319 @@ function metric(value, label) {
       <span>${escapeHtml(label)}</span>
     </div>
   `;
+}
+
+function claimPosture(rustiaRow, luauRow) {
+  if (!rustiaRow) {
+    return { ready: false, label: "Blocked", text: "missing rustia baseline" };
+  }
+  if (!luauRow || !Number.isFinite(luauRow.speed_vs_rustia)) {
+    return { ready: false, label: "Blocked", text: "missing mlua-luau baseline" };
+  }
+  if (luauRow.speed_vs_rustia > 1.05) {
+    return {
+      ready: false,
+      label: "Not ready",
+      text: `rustia trails mlua-luau by ${formatSpeed(luauRow.speed_vs_rustia)}`,
+    };
+  }
+  if (luauRow.speed_vs_rustia >= 0.95) {
+    return {
+      ready: true,
+      label: "Eligible",
+      text: "rustia is near mlua-luau for this workload",
+    };
+  }
+  return {
+    ready: true,
+    label: "Eligible",
+    text: `rustia leads mlua-luau by ${formatSpeed(1 / luauRow.speed_vs_rustia)}`,
+  };
+}
+
+function summarizeClaimRows(rows) {
+  return [...groupBy(rows, (row) => `${row.target}\0${row.workload}`).entries()]
+    .map(([key, values]) => {
+      const [target, workload] = key.split("\0");
+      const sorted = values
+        .slice()
+        .sort((left, right) => left.ns_per_unit_min - right.ns_per_unit_min || left.engine.localeCompare(right.engine));
+      const rustiaRow = values.find((row) => row.engine === "rustia") ?? null;
+      const luauRow = values.find((row) => row.engine === "mlua-luau") ?? null;
+      return {
+        target,
+        workload,
+        unit: rustiaRow?.unit ?? sorted[0]?.unit ?? "",
+        rustiaRow,
+        luauRow,
+        fastest: sorted[0] ?? null,
+        rustiaRank: rustiaRow ? sorted.findIndex((row) => row.engine === "rustia") + 1 : null,
+        engineCount: sorted.length,
+        posture: claimPosture(rustiaRow, luauRow),
+      };
+    })
+    .sort((left, right) =>
+      left.target.localeCompare(right.target) ||
+      left.workload.localeCompare(right.workload)
+    );
+}
+
+function claimGateSection(claimRows) {
+  const readyCount = claimRows.filter((row) => row.posture.ready).length;
+  const headline = readyCount === claimRows.length
+    ? "All current workload claims are eligible, but keep wording per-workload."
+    : `${formatInteger(claimRows.length - readyCount)} current workload claims are not public-ready against mlua-luau.`;
+  return `
+    <section class="panel" id="claim-gate">
+      <div class="section-head">
+        <div>
+          <h2>Claim Gate</h2>
+          <p>${formatInteger(readyCount)} / ${formatInteger(claimRows.length)} eligible · ${escapeHtml(headline)}</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Target / workload</th>
+              <th>rustia min</th>
+              <th>mlua-luau vs rustia</th>
+              <th>rustia rank</th>
+              <th>Fastest</th>
+              <th>Posture</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${claimRows.map(claimGateTableRow).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function claimGateTableRow(row) {
+  const rustiaMin = row.rustiaRow ? `${formatNumber(row.rustiaRow.ns_per_unit_min)} ns` : "n/a";
+  const luauSpeed = row.luauRow ? formatSpeed(row.luauRow.speed_vs_rustia) : "n/a";
+  const rank = row.rustiaRank == null
+    ? "n/a"
+    : `${formatInteger(row.rustiaRank)} / ${formatInteger(row.engineCount)}`;
+  const fastest = row.fastest
+    ? `${row.fastest.engine} · ${formatNumber(row.fastest.ns_per_unit_min)} ns`
+    : "n/a";
+  const postureClass = row.posture.ready ? "claim-ready" : "claim-blocked";
+  return `
+    <tr>
+      <td>${claimWorkloadLabel(row)}</td>
+      <td>${escapeHtml(rustiaMin)}</td>
+      <td>${escapeHtml(luauSpeed)}</td>
+      <td>${escapeHtml(rank)}</td>
+      <td>${escapeHtml(fastest)}</td>
+      <td>
+        <span class="claim-posture">
+          <span class="claim-pill ${postureClass}">${escapeHtml(row.posture.label)}</span>
+          <small>${escapeHtml(row.posture.text)}</small>
+        </span>
+      </td>
+    </tr>
+  `;
+}
+
+function claimWorkloadLabel(row) {
+  return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.workload)} · ${escapeHtml(row.unit)}</span></span>`;
+}
+
+function historySection(history) {
+  return `
+    <section class="panel" id="history">
+      <div class="section-head">
+        <div>
+          <h2>Benchmark History</h2>
+          <p>${formatInteger(history.rows.length)} records · ${formatInteger(history.commitCount)} commits · source <code>${escapeHtml(relative(historyPath))}</code> · ${formatTime(history.minTimestamp)} to ${formatTime(history.maxTimestamp)}</p>
+        </div>
+      </div>
+      <div class="history-body">
+        ${history.targetRows.map(historyTargetSection).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function historyTargetSection(group) {
+  const workloads = [...groupBy(group.values, (row) => row.workload)]
+    .map(([workload, rows]) => ({ workload, rows }))
+    .sort((left, right) => left.workload.localeCompare(right.workload));
+  return `
+    <section class="history-target">
+      <div class="history-target-head">
+        <h3>${escapeHtml(group.target)}</h3>
+        <p>${formatInteger(group.values.length)} records across ${formatInteger(workloads.length)} workloads</p>
+      </div>
+      ${workloads.map((entry) => historyWorkloadSection(group.target, entry.workload, entry.rows)).join("")}
+    </section>
+  `;
+}
+
+function historyWorkloadSection(target, workload, rows) {
+  const latestRows = latestBy(rows, (row) => row.engine)
+    .sort((left, right) => left.ns_per_unit_min - right.ns_per_unit_min || left.engine.localeCompare(right.engine));
+  const unit = latestRows[0]?.unit ?? rows[0]?.unit ?? "";
+  return `
+    <section class="history-workload" id="${escapeHtml(slug(`history-${target}-${workload}`))}">
+      <div class="history-workload-head">
+        <div>
+          <h4>${escapeHtml(workload)}</h4>
+          <p>${escapeHtml(unit)} · ${formatInteger(rows.length)} records · ${formatInteger(latestRows.length)} engines</p>
+        </div>
+      </div>
+      ${historyChart(rows)}
+      <div class="table-wrap history-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Engine</th>
+              <th>Latest min ns/unit</th>
+              <th>Median</th>
+              <th>Trend vs previous</th>
+              <th>Commit</th>
+              <th>Measured</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${latestRows.map((row) => historyLatestRow(row, rows)).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function historyLatestRow(row, rows) {
+  const previous = previousHistoryRecord(row, rows);
+  const trend = previous ? (row.ns_per_unit_min / previous.ns_per_unit_min - 1) * 100 : null;
+  return `
+    <tr>
+      <td>${historyEngineLabel(row.engine)}</td>
+      <td>${formatNumber(row.ns_per_unit_min)}</td>
+      <td>${formatNumber(row.ns_per_unit_median)}</td>
+      <td>${historyTrend(trend)}</td>
+      <td>${escapeHtml(row.commit)}</td>
+      <td>${formatTime(row.timestamp_unix)}</td>
+    </tr>
+  `;
+}
+
+function previousHistoryRecord(row, rows) {
+  return rows
+    .filter((record) =>
+      record.engine === row.engine &&
+      record.target === row.target &&
+      record.workload === row.workload &&
+      record.timestamp_unix < row.timestamp_unix
+    )
+    .sort(compareRunTime)
+    .at(-1) ?? null;
+}
+
+function historyTrend(value) {
+  if (!Number.isFinite(value)) {
+    return '<span class="trend trend-flat">n/a</span>';
+  }
+  const className = value <= 0 ? "trend trend-good" : "trend trend-bad";
+  return `<span class="${className}">${value > 0 ? "+" : ""}${value.toFixed(1)}%</span>`;
+}
+
+function historyChart(rows) {
+  const width = 920;
+  const height = 260;
+  const pad = { left: 62, right: 20, top: 20, bottom: 42 };
+  const values = rows.map((row) => row.ns_per_unit_min).filter((value) => Number.isFinite(value) && value > 0);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const minY = Math.log10(minValue * 0.85);
+  const maxY = Math.log10(maxValue * 1.15);
+  const minX = Math.min(...rows.map((row) => row.timestamp_unix));
+  const maxX = Math.max(...rows.map((row) => row.timestamp_unix));
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const xScale = (timestamp) => maxX === minX
+    ? pad.left + plotWidth / 2
+    : pad.left + ((timestamp - minX) / (maxX - minX)) * plotWidth;
+  const yScale = (value) => {
+    const span = maxY - minY || 1;
+    return pad.top + (1 - (Math.log10(value) - minY) / span) * plotHeight;
+  };
+  const series = [...groupBy(rows, (row) => row.engine)]
+    .map(([engine, engineRows], index) => ({
+      engine,
+      color: engineColor(engine, index),
+      rows: engineRows.slice().sort(compareRunTime),
+    }))
+    .sort((left, right) => left.engine.localeCompare(right.engine));
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((tick) => {
+    const y = pad.top + tick * plotHeight;
+    const value = 10 ** (maxY - tick * (maxY - minY));
+    return `
+      <line x1="${pad.left}" y1="${y.toFixed(2)}" x2="${width - pad.right}" y2="${y.toFixed(2)}" class="history-grid-line" />
+      <text x="8" y="${(y + 4).toFixed(2)}" class="history-axis-label">${escapeHtml(formatNumber(value))}</text>
+    `;
+  }).join("");
+  return `
+    <div class="history-chart">
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(rows[0].workload)} timing history">
+        <rect x="0" y="0" width="${width}" height="${height}" class="history-chart-bg" />
+        ${yTicks}
+        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" class="history-axis" />
+        <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" class="history-axis" />
+        <text x="${pad.left}" y="${height - 10}" class="history-axis-label">${escapeHtml(formatTime(minX))}</text>
+        <text x="${width - pad.right}" y="${height - 10}" text-anchor="end" class="history-axis-label">${escapeHtml(formatTime(maxX))}</text>
+        ${series.map((item) => historySeriesSvg(item, xScale, yScale)).join("")}
+      </svg>
+      <div class="history-legend">
+        ${series.map((item) => `<span>${colorDotMarkup(item.color)}${escapeHtml(item.engine)}</span>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function historySeriesSvg(series, xScale, yScale) {
+  const points = series.rows
+    .map((row) => `${xScale(row.timestamp_unix).toFixed(2)},${yScale(row.ns_per_unit_min).toFixed(2)}`)
+    .join(" ");
+  const circles = series.rows.map((row) => `
+    <circle cx="${xScale(row.timestamp_unix).toFixed(2)}" cy="${yScale(row.ns_per_unit_min).toFixed(2)}" r="3.2" fill="${series.color}">
+      <title>${escapeHtml(`${series.engine} ${row.commit}: ${formatNumber(row.ns_per_unit_min)} ns/unit`)}</title>
+    </circle>
+  `).join("");
+  const line = series.rows.length > 1
+    ? `<polyline points="${points}" fill="none" stroke="${series.color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />`
+    : "";
+  return `<g>${line}${circles}</g>`;
+}
+
+function historyEngineLabel(engine) {
+  return `<span class="history-engine">${colorDotMarkup(engineColor(engine))}<strong>${escapeHtml(engine)}</strong></span>`;
+}
+
+function colorDotMarkup(color) {
+  return `<span class="swatch" style="color: ${escapeHtml(color)}"></span>`;
+}
+
+function engineColor(engine, fallbackIndex = 0) {
+  const known = {
+    rustia: "#2563eb",
+    koto: "#0f766e",
+    "mlua-luau": "#b45309",
+    "mlua-lua54": "#7c3aed",
+    rhai: "#b91c1c",
+    boa: "#047857",
+    rquickjs: "#be185d",
+    roto: "#475569",
+    wasmi: "#be185d",
+    wasmtime: "#111827",
+  };
+  const fallback = ["#2563eb", "#0f766e", "#b45309", "#b91c1c", "#7c3aed", "#047857", "#be185d", "#475569"];
+  return known[engine] ?? fallback[fallbackIndex % fallback.length];
 }
 
 function engineSummaryTable(engineRows) {
@@ -686,9 +1095,12 @@ function targetRuntimeLabel(row) {
   return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.runtime)}</span></span>`;
 }
 
-function render(data, wasmResults, wasmDispatchResults) {
+function render(data, wasmResults, wasmDispatchResults, historyRecords) {
   const wasmRows = wasmTargetRows(wasmResults);
   const summary = summarize(data, wasmRows);
+  const history = summarizeHistory(historyRecords);
+  const claimRows = summarizeClaimRows(summary.rows);
+  const claimReadyCount = claimRows.filter((row) => row.posture.ready).length;
   const dispatchRows = wasmDispatchRows(wasmDispatchResults);
   const latestCommit = summary.rows
     .slice()
@@ -699,7 +1111,7 @@ function render(data, wasmResults, wasmDispatchResults) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>rustia Current Benchmark Results</title>
+  <title>rustia Benchmark Results and History</title>
   <style>
     :root {
       color-scheme: light;
@@ -811,6 +1223,8 @@ function render(data, wasmResults, wasmDispatchResults) {
     .metric span,
     .section-head p,
     .target-head p,
+    .history-target-head p,
+    .history-workload-head p,
     .workload-head p,
     .result-label span {
       color: var(--muted);
@@ -872,6 +1286,50 @@ function render(data, wasmResults, wasmDispatchResults) {
       font-weight: 600;
     }
 
+    .claim-posture {
+      display: grid;
+      gap: 4px;
+      min-width: 220px;
+      white-space: normal;
+    }
+
+    .claim-posture small {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
+    .claim-pill {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .claim-ready {
+      background: #dff7ed;
+      color: #047857;
+    }
+
+    .claim-blocked {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .swatch {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      margin-right: 8px;
+      border-radius: 999px;
+      background: currentColor;
+      vertical-align: -1px;
+    }
+
     .nav {
       display: flex;
       flex-wrap: wrap;
@@ -903,6 +1361,8 @@ function render(data, wasmResults, wasmDispatchResults) {
 
     .section-head,
     .target-head,
+    .history-target-head,
+    .history-workload-head,
     .workload-head {
       display: flex;
       justify-content: space-between;
@@ -915,9 +1375,107 @@ function render(data, wasmResults, wasmDispatchResults) {
 
     .section-head h2,
     .target-head h2,
+    .history-target-head h3,
+    .history-workload-head h4,
     .workload-head h3 {
       margin-bottom: 2px;
       font-size: 22px;
+    }
+
+    .history-body {
+      display: grid;
+      min-width: 0;
+    }
+
+    .history-target {
+      min-width: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .history-target:last-child {
+      border-bottom: 0;
+    }
+
+    .history-workload {
+      min-width: 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .history-workload-head {
+      background: #fff;
+    }
+
+    .history-workload-head h4 {
+      font-size: 18px;
+    }
+
+    .history-chart {
+      padding: 16px 20px 8px;
+    }
+
+    .history-chart svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .history-chart-bg {
+      fill: #fff;
+    }
+
+    .history-axis,
+    .history-grid-line {
+      stroke: var(--line);
+      stroke-width: 1;
+    }
+
+    .history-grid-line {
+      stroke: #edf1f5;
+    }
+
+    .history-axis-label {
+      fill: var(--muted);
+      font-size: 11px;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .history-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      padding-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .history-table table {
+      min-width: 860px;
+    }
+
+    .history-engine {
+      display: inline-flex;
+      align-items: center;
+      gap: 0;
+    }
+
+    .trend {
+      font-weight: 800;
+    }
+
+    .trend-good {
+      color: #047857;
+    }
+
+    .trend-bad {
+      color: #b91c1c;
+    }
+
+    .trend-flat {
+      color: var(--muted);
     }
 
     .table-wrap {
@@ -1067,18 +1625,20 @@ function render(data, wasmResults, wasmDispatchResults) {
     <section class="hero">
       <div class="hero-panel">
         <p class="eyebrow">script-bench current snapshot</p>
-        <h1>rustia Current Benchmark Results</h1>
-        <p class="lead">Static HTML generated from the committed current benchmark JSON. Bars are rough relative comparisons: lower time bars compare each row to the fastest engine in that workload, while speed bars use the harness speed-vs-rustia ratio.</p>
+        <h1>rustia Benchmark Results and History</h1>
+        <p class="lead">Static HTML generated from the committed current benchmark JSON and append-only history. Bars compare current rows, the claim gate keeps public wording honest, and the history section renders per-workload timing trends directly from JSONL.</p>
         <p class="source-line">
           <span>Source <code>${escapeHtml(relative(sourcePath))}</code></span>
-          <span>History <code>${escapeHtml(data.metadata.history)}</code></span>
+          <span>History <code>${escapeHtml(relative(historyPath))}</code></span>
           <span>Generated by <code>${escapeHtml(relative(__filename))}</code></span>
         </p>
       </div>
       <div class="metrics">
         ${metric(formatInteger(data.metadata.row_count), "current result rows")}
+        ${metric(formatInteger(history.rows.length), "history records")}
         ${metric(formatInteger(data.metadata.engines.length), "engines")}
         ${metric(formatInteger(data.metadata.workloads.length), "workloads")}
+        ${metric(`${formatInteger(claimReadyCount)} / ${formatInteger(claimRows.length)}`, "claims ready")}
         ${metric(formatInteger(wasmRows.length), "wasm target rows")}
         ${metric(formatInteger(dispatchRows.length), "wasm dispatch rows")}
         ${metric(escapeHtml(latestCommit), "latest commit in snapshot")}
@@ -1087,17 +1647,21 @@ function render(data, wasmResults, wasmDispatchResults) {
     </section>
 
     <nav class="nav" aria-label="Targets">
+      <a href="#claim-gate">Claim Gate</a>
+      <a href="#history">History</a>
       <a href="#wasm-target">Wasm Target</a>
       <a href="#wasm-dispatch">Wasm Dispatch</a>
       ${summary.targetRows.map((group) => `<a href="#${escapeHtml(slug(group.target))}">${escapeHtml(group.target)}</a>`).join("")}
     </nav>
 
     ${engineSummaryTable(summary.engineRows)}
+    ${claimGateSection(claimRows)}
+    ${historySection(history)}
     ${wasmTargetSection(wasmResults)}
     ${wasmDispatchSection(wasmDispatchResults)}
     ${summary.targetRows.map(targetSection).join("")}
 
-    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(data.metadata.history)}</code> (${escapeHtml(data.metadata.history_schema)}). The dashboard is deterministic and contains no external assets or runtime JavaScript. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic and contains no external assets or runtime JavaScript. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
 </body>
 </html>
@@ -1106,9 +1670,10 @@ function render(data, wasmResults, wasmDispatchResults) {
 
 function main() {
   const data = readData();
+  const historyRecords = readHistory();
   const wasmResults = readWasmResults();
   const wasmDispatchResults = readWasmDispatchResults();
-  const html = render(data, wasmResults, wasmDispatchResults).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
+  const html = render(data, wasmResults, wasmDispatchResults, historyRecords).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
   const output = `${html}\n`;
   if (checkOnly) {
     let current;
@@ -1123,7 +1688,7 @@ function main() {
     console.log(`${relative(outputPath)} is current`);
   } else {
     fs.writeFileSync(outputPath, output);
-    console.log(`wrote ${relative(outputPath)} from ${relative(sourcePath)}`);
+    console.log(`wrote ${relative(outputPath)} from ${relative(sourcePath)} and ${relative(historyPath)}`);
   }
 }
 

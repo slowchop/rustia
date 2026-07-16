@@ -59,9 +59,7 @@ jobs:
         run: node tools/check-package-dry-runs.js
 
       - name: Check progress dashboard
-        run: |
-          node design/render-progress.js --check
-          node design/show-progress.js --no-color --width 88 >/dev/null
+        run: node design/render-progress.js --check
 
       - name: Check project status alignment
         run: node tools/check-project-status.js

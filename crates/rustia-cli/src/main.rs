@@ -65,7 +65,7 @@ fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), CliError> {
 
     let (source_name, source) = read_source(&config)?;
     let value = run_source(&config, &source_name, &source).map_err(|error| CliError::Rustia {
-        error,
+        error: Box::new(error),
         source_name: source_name.clone(),
         source: source.clone(),
     })?;
@@ -498,7 +498,7 @@ enum CliError {
         error: io::Error,
     },
     Rustia {
-        error: rustia::Error,
+        error: Box<rustia::Error>,
         source_name: String,
         source: String,
     },
@@ -513,7 +513,7 @@ impl CliError {
 impl From<rustia::Error> for CliError {
     fn from(error: rustia::Error) -> Self {
         Self::Rustia {
-            error,
+            error: Box::new(error),
             source_name: "<unknown>".to_owned(),
             source: String::new(),
         }

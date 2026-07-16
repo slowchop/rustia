@@ -1,8 +1,8 @@
 # rustia
 
-A fast, low-memory, **deterministic** Luau interpreter written in Rust — built to replace **koto** as the
-scripting layer in [grabby-aliens](https://github.com/slowchop/grabby-next), and intended for public release
-at full Luau parity.
+A fast, low-memory, **deterministic** Luau interpreter written in Rust — built for a deterministic game runtime,
+and intended for public release as a standalone Luau 0.709-compatible Rust engine once its conformance,
+benchmark, API, and release gates are satisfied.
 
 > **Status: P1 engine implementation in progress.** The locked design is implemented through a substantial
 > production VM/compiler/API/conformance slice; `spikes/` are throwaway prototypes that validated the design.
@@ -10,14 +10,15 @@ at full Luau parity.
 > [`design/README.md`](design/README.md) for the full doc map.
 
 ## Highlights (spikes validated the direction; production gates are now in-tree)
-- Designed to run at/near reference-Luau parity on measured workloads, with koto comparisons tracked
-  per-workload; **near-native on hot numeric paths** via a runtime wasm-emit JIT (~176× the interpreter in V8,
-  crossover ≈ 6 calls).
-- **Bit-for-bit deterministic** across x86-64-linux / arm64-mac / wasm32 (f64 + pure-Rust libm + per-op
-  NaN canonicalization, table-key `-0` normalization, and no-FMA), with two profiles: `ReproducibleStandard` (public) and
-  `DeterministicSim` (lockstep multiplayer).
+- Performance claims are benchmark-gated per workload and target; no global speed headline is published until
+  the committed claim gate approves it. A wasm-emission spike validates a hot monomorphic f64-kernel tier, but
+  general Luau speed claims remain gated on type guards, fallback behavior, and benchmark history.
+- `DeterministicSim` is bit-reproducible by construction on the tested matrix; `ReproducibleStandard` remains
+  Luau-conformant while making reproducible choices for unspecified behavior.
 - One portable engine: big-`match`→`br_table` interpreter + a wasm-emit JIT/AOT tier; **gc-arena** GC,
-  **16-byte tagged** values, own hand-written Luau parser, **Send-not-Sync** N-VM threading.
+  **16-byte tagged** values, own hand-written Luau parser, and thread-affine safe-Rust VM execution.
+- **No unsafe code in the public workspace:** all workspace crates, including the benchmark harness, inherit
+  `unsafe_code = "forbid"`; research spikes and standalone wasm FFI demos are kept outside that product gate.
 - Pinned to **Luau 0.709** (standalone luau.org surface, not Roblox).
 - Current conformance runner: **692 fixtures**, **491 refs**, **0 pending-oracle**, **0 pending-impl**.
 - Public embedding API first slice: typed `run<T>()`, owned values with
@@ -27,17 +28,28 @@ at full Luau parity.
   retained-handle freshness checks and current-generation accessors, public source-span/runtime-location error
   accessors, owned-value/table serde, deterministic extensions, hot reload, and macro sugar.
 
+## Project Pillars
+The canonical decision filter is [`design/02-pillars.md`](design/02-pillars.md). The short version:
+
+- **Pinned Standalone Luau Compatibility** — Luau 0.709 standalone runtime behavior, not Roblox/latest-Luau drift.
+- **Conformance and Provenance** — claims need fixtures, upstream links, audits, benchmarks, or explicit defers.
+- **Deterministic Profiles and Replay ABI** — reproducible public behavior plus a stricter lockstep profile.
+- **Rollback-Safe Host Boundary** — hosts own authoritative state, rollback capture, and ordered effect commits.
+- **Layered Rust Embedding API** — small typed facade first; advanced interop stays layered.
+- **One Safe Native + Wasm Engine** — one semantic engine across native and `wasm32-unknown-unknown`.
+- **Benchmark-Gated Performance Claims** — no blanket speed headline without generated claim approval.
+- **Public-Clean OSS Consumer Contract** — generic crates, docs, semver, CI, packaging, and no grabby-specific API.
+
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](design/progress.json) into
 [`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-04 for the
-public rustia project; actual grabby integration work is explicitly out of scope. Use `just show-progress` for
-a terminal summary of the same source data.
+public rustia project; actual grabby integration work is explicitly out of scope.
 
 | goal | complete | confidence |
 |---|---:|---:|
 | Whole public rustia project | 80% | 65% |
 | Usable embedded scripting crate | 83% | 70% |
-| Full public Luau engine release | 48% | 58% |
+| Full public standalone Luau engine release | 48% | 58% |
 | Standalone benchmark OSS project | 80% | 80% |
 | Public release readiness | 73% | 75% |
 

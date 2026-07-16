@@ -87,22 +87,33 @@ impl HostFunctionOp {
         name: impl Into<String>,
         fuel_cost: u32,
         capability: OpCapability,
-        parameter_count: u8,
-        parameter_types: Vec<&'static str>,
-        return_types: Vec<&'static str>,
-        fallible: bool,
         handler: HostFunctionHandler,
     ) -> Self {
         Self {
             name: name.into(),
             fuel_cost,
             capability,
-            parameter_count,
-            parameter_types,
-            return_types,
-            fallible,
+            parameter_count: 0,
+            parameter_types: Vec::new(),
+            return_types: Vec::new(),
+            fallible: false,
             handler,
         }
+    }
+
+    pub fn with_signature(
+        mut self,
+        parameter_count: u8,
+        parameter_types: Vec<&'static str>,
+        return_types: Vec<&'static str>,
+        fallible: bool,
+    ) -> Self {
+        debug_assert_eq!(usize::from(parameter_count), parameter_types.len());
+        self.parameter_count = parameter_count;
+        self.parameter_types = parameter_types;
+        self.return_types = return_types;
+        self.fallible = fallible;
+        self
     }
 }
 

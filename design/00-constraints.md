@@ -60,8 +60,10 @@ libm + canonicalization discipline is arch-portable by construction.
   subtype" is now a **tripwire**, not a tension: revisit only if upstream `FFlag::LuauIntegerType2` flips
   default-true in a version we adopt.
 
-### C2 — `Send + Sync`
-- Values and the VM must be `Send + Sync` (koto's non-default `arc` feature; grabby builds with it).
+### C2 — thread model
+- The production VM stays safe Rust and thread-affine while it owns a `gc-arena` heap. Parallel hosts should
+  create one VM per worker, or move shared immutable compiled artifacts/configuration between workers, instead
+  of moving a live VM across threads.
 - Execution model is **N independent VMs across a thread pool**, NOT one shared VM. Per-borrow tax of the
   Arc path was ~5–10% in koto — budget for, and try to beat, that.
 

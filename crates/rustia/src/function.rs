@@ -231,11 +231,13 @@ where
             name,
             fuel_cost,
             capability,
+            Arc::new(move |vm, _args| host_return_to_raw(vm, &diagnostic_name, self())),
+        )
+        .with_signature(
             0,
             Vec::new(),
             Return::rustia_type_names(),
             Return::is_fallible(),
-            Arc::new(move |vm, _args| host_return_to_raw(vm, &diagnostic_name, self())),
         )
     }
 }
@@ -260,10 +262,6 @@ macro_rules! impl_host_function {
                     name,
                     fuel_cost,
                     capability,
-                    $parameter_count,
-                    vec![$(type_name::<$name>()),+],
-                    Return::rustia_type_names(),
-                    Return::is_fallible(),
                     Arc::new(move |vm, args| {
                         let mut index = 0usize;
                         $(
@@ -273,6 +271,12 @@ macro_rules! impl_host_function {
                         let _ = index;
                         host_return_to_raw(vm, &diagnostic_name, self($($name),+))
                     }),
+                )
+                .with_signature(
+                    $parameter_count,
+                    vec![$(type_name::<$name>()),+],
+                    Return::rustia_type_names(),
+                    Return::is_fallible(),
                 )
             }
         }

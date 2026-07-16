@@ -461,19 +461,19 @@
 
     <article class="goal-card">
       <div class="card-head">
-        <h3>Full public Luau engine release</h3>
+        <h3>Full public standalone Luau engine release</h3>
         <span class="percent">48%</span>
       </div>
 
-    <div class="meter" aria-label="Full public Luau engine release: 48% complete">
+    <div class="meter" aria-label="Full public standalone Luau engine release: 48% complete">
       <div class="meter-fill" style="width: 48%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip low">58% confidence</span>
       </div>
-      <p>Luau 0.709 target and conformance corpus are strong; production engine still needs perf and parity hardening.</p>
-      <p class="plan"><strong>Next:</strong> Complete P1/P2 runtime work, then P4 parity items such as module/loading, typechecker/LSP track, and release packaging.</p>
+      <p>Luau 0.709 standalone target and conformance corpus are strong; production engine still needs runtime, stdlib, performance, and release hardening. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode-compatibility work are not runtime-release requirements.</p>
+      <p class="plan"><strong>Next:</strong> Complete P1/P2 runtime and standalone stdlib work, keep out-of-scope tracks audited, then package the public release against the pinned target.</p>
     </article>
 
     <article class="goal-card">
@@ -1537,6 +1537,7 @@
         <li>mlua-lua54 runs separately from mlua-luau because both mlua-sys builds use links = &quot;lua&quot;.</li>
         <li>Percentages are rough engineering estimates, not automated metrics.</li>
         <li>The scope tracks public rustia crates, conformance, benchmarks, docs, tooling, and release readiness.</li>
+        <li>Project pillars and non-goals are canonical in design/02-pillars.md.</li>
         <li>The public host-bridge remains generic; grabby-specific types and effect catalogs stay outside public rustia.</li>
       </ul>
     </section>

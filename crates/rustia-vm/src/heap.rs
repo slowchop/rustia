@@ -374,18 +374,14 @@ pub(crate) enum TableIterationOrder {
 type ArenaRoot = Rootable![Gc<'_, RefLock<RootData<'_>>>];
 type VmArena = Arena<ArenaRoot>;
 
-/// The Send unit for one VM lane.
+/// The GC cell for one VM lane.
 ///
-/// `gc-arena` values and retained roots are not independently thread-safe. The design model is
-/// one VM per lane: the whole arena, root set, and future retained handles move together.
+/// `gc-arena` values and retained roots are not independently thread-safe, so the VM stays
+/// thread-affine while it owns an arena. Parallel hosts should create one VM per worker or move
+/// compiled programs/configuration between workers instead of moving a live VM.
 pub struct VmCell {
     arena: VmArena,
 }
-
-// SAFETY: `VmCell` owns the arena and root set exclusively. Moving the cell transfers the whole
-// GC graph as one unit; callers cannot extract `Gc` values or `DynamicRoot` handles, so no arena
-// allocation or non-atomic root bookkeeping can be touched concurrently from two threads.
-unsafe impl Send for VmCell {}
 
 impl VmCell {
     pub fn new() -> Self {

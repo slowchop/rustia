@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>rustia Current Benchmark Results</title>
+  <title>rustia Benchmark Results and History</title>
   <style>
     :root {
       color-scheme: light;
@@ -115,6 +115,8 @@
     .metric span,
     .section-head p,
     .target-head p,
+    .history-target-head p,
+    .history-workload-head p,
     .workload-head p,
     .result-label span {
       color: var(--muted);
@@ -176,6 +178,50 @@
       font-weight: 600;
     }
 
+    .claim-posture {
+      display: grid;
+      gap: 4px;
+      min-width: 220px;
+      white-space: normal;
+    }
+
+    .claim-posture small {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
+    .claim-pill {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .claim-ready {
+      background: #dff7ed;
+      color: #047857;
+    }
+
+    .claim-blocked {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .swatch {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      margin-right: 8px;
+      border-radius: 999px;
+      background: currentColor;
+      vertical-align: -1px;
+    }
+
     .nav {
       display: flex;
       flex-wrap: wrap;
@@ -207,6 +253,8 @@
 
     .section-head,
     .target-head,
+    .history-target-head,
+    .history-workload-head,
     .workload-head {
       display: flex;
       justify-content: space-between;
@@ -219,9 +267,107 @@
 
     .section-head h2,
     .target-head h2,
+    .history-target-head h3,
+    .history-workload-head h4,
     .workload-head h3 {
       margin-bottom: 2px;
       font-size: 22px;
+    }
+
+    .history-body {
+      display: grid;
+      min-width: 0;
+    }
+
+    .history-target {
+      min-width: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .history-target:last-child {
+      border-bottom: 0;
+    }
+
+    .history-workload {
+      min-width: 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .history-workload-head {
+      background: #fff;
+    }
+
+    .history-workload-head h4 {
+      font-size: 18px;
+    }
+
+    .history-chart {
+      padding: 16px 20px 8px;
+    }
+
+    .history-chart svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .history-chart-bg {
+      fill: #fff;
+    }
+
+    .history-axis,
+    .history-grid-line {
+      stroke: var(--line);
+      stroke-width: 1;
+    }
+
+    .history-grid-line {
+      stroke: #edf1f5;
+    }
+
+    .history-axis-label {
+      fill: var(--muted);
+      font-size: 11px;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .history-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      padding-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .history-table table {
+      min-width: 860px;
+    }
+
+    .history-engine {
+      display: inline-flex;
+      align-items: center;
+      gap: 0;
+    }
+
+    .trend {
+      font-weight: 800;
+    }
+
+    .trend-good {
+      color: #047857;
+    }
+
+    .trend-bad {
+      color: #b91c1c;
+    }
+
+    .trend-flat {
+      color: var(--muted);
     }
 
     .table-wrap {
@@ -371,8 +517,8 @@
     <section class="hero">
       <div class="hero-panel">
         <p class="eyebrow">script-bench current snapshot</p>
-        <h1>rustia Current Benchmark Results</h1>
-        <p class="lead">Static HTML generated from the committed current benchmark JSON. Bars are rough relative comparisons: lower time bars compare each row to the fastest engine in that workload, while speed bars use the harness speed-vs-rustia ratio.</p>
+        <h1>rustia Benchmark Results and History</h1>
+        <p class="lead">Static HTML generated from the committed current benchmark JSON and append-only history. Bars compare current rows, the claim gate keeps public wording honest, and the history section renders per-workload timing trends directly from JSONL.</p>
         <p class="source-line">
           <span>Source <code>bench/current-results.json</code></span>
           <span>History <code>bench/history/runs.jsonl</code></span>
@@ -388,6 +534,12 @@
 
 
     <div class="metric">
+      <strong>200</strong>
+      <span>history records</span>
+    </div>
+
+
+    <div class="metric">
       <strong>10</strong>
       <span>engines</span>
     </div>
@@ -396,6 +548,12 @@
     <div class="metric">
       <strong>5</strong>
       <span>workloads</span>
+    </div>
+
+
+    <div class="metric">
+      <strong>0 / 5</strong>
+      <span>claims ready</span>
     </div>
 
 
@@ -426,6 +584,8 @@
     </section>
 
     <nav class="nav" aria-label="Targets">
+      <a href="#claim-gate">Claim Gate</a>
+      <a href="#history">History</a>
       <a href="#wasm-target">Wasm Target</a>
       <a href="#wasm-dispatch">Wasm Dispatch</a>
       <a href="#macos-aarch64">macos-aarch64</a>
@@ -740,6 +900,1659 @@
 
           </tbody>
         </table>
+      </div>
+    </section>
+
+
+    <section class="panel" id="claim-gate">
+      <div class="section-head">
+        <div>
+          <h2>Claim Gate</h2>
+          <p>0 / 5 eligible · 5 current workload claims are not public-ready against mlua-luau.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Target / workload</th>
+              <th>rustia min</th>
+              <th>mlua-luau vs rustia</th>
+              <th>rustia rank</th>
+              <th>Fastest</th>
+              <th>Posture</th>
+            </tr>
+          </thead>
+          <tbody>
+
+    <tr>
+      <td><span class="target-runtime"><strong>macos-aarch64</strong><span>closures_upvalues · one upvalue-mutating closure call</span></span></td>
+      <td>421 ns</td>
+      <td>19.9x</td>
+      <td>8 / 10</td>
+      <td>roto · 3.805 ns</td>
+      <td>
+        <span class="claim-posture">
+          <span class="claim-pill claim-blocked">Not ready</span>
+          <small>rustia trails mlua-luau by 19.9x</small>
+        </span>
+      </td>
+    </tr>
+
+    <tr>
+      <td><span class="target-runtime"><strong>macos-aarch64</strong><span>dense_tables · build+sum+sort of 256-elem array</span></span></td>
+      <td>132,121 ns</td>
+      <td>13.5x</td>
+      <td>8 / 10</td>
+      <td>wasmtime · 193 ns</td>
+      <td>
+        <span class="claim-posture">
+          <span class="claim-pill claim-blocked">Not ready</span>
+          <small>rustia trails mlua-luau by 13.5x</small>
+        </span>
+      </td>
+    </tr>
+
+    <tr>
+      <td><span class="target-runtime"><strong>macos-aarch64</strong><span>generic_iteration · __iter(32)+pairs(5)+ipairs(32) pass</span></span></td>
+      <td>17,533 ns</td>
+      <td>8.247x</td>
+      <td>10 / 10</td>
+      <td>wasmtime · 78.8 ns</td>
+      <td>
+        <span class="claim-posture">
+          <span class="claim-pill claim-blocked">Not ready</span>
+          <small>rustia trails mlua-luau by 8.247x</small>
+        </span>
+      </td>
+    </tr>
+
+    <tr>
+      <td><span class="target-runtime"><strong>macos-aarch64</strong><span>sparse_tables · fill+read 128 hash entries</span></span></td>
+      <td>113,418 ns</td>
+      <td>12.2x</td>
+      <td>8 / 10</td>
+      <td>wasmtime · 304 ns</td>
+      <td>
+        <span class="claim-posture">
+          <span class="claim-pill claim-blocked">Not ready</span>
+          <small>rustia trails mlua-luau by 12.2x</small>
+        </span>
+      </td>
+    </tr>
+
+    <tr>
+      <td><span class="target-runtime"><strong>macos-aarch64</strong><span>stdlib_math_table · math fastcalls + buffered push</span></span></td>
+      <td>1,203 ns</td>
+      <td>13.4x</td>
+      <td>9 / 10</td>
+      <td>wasmtime · 2.519 ns</td>
+      <td>
+        <span class="claim-posture">
+          <span class="claim-pill claim-blocked">Not ready</span>
+          <small>rustia trails mlua-luau by 13.4x</small>
+        </span>
+      </td>
+    </tr>
+
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+
+    <section class="panel" id="history">
+      <div class="section-head">
+        <div>
+          <h2>Benchmark History</h2>
+          <p>200 records · 9 commits · source <code>bench/history/runs.jsonl</code> · 2026-07-03 00:24:19 UTC to 2026-07-03 02:27:20 UTC</p>
+        </div>
+      </div>
+      <div class="history-body">
+
+    <section class="history-target">
+      <div class="history-target-head">
+        <h3>macos-aarch64</h3>
+        <p>200 records across 5 workloads</p>
+      </div>
+
+    <section class="history-workload" id="history-macos-aarch64-closures-upvalues">
+      <div class="history-workload-head">
+        <div>
+          <h4>closures_upvalues</h4>
+          <p>one upvalue-mutating closure call · 40 records · 10 engines</p>
+        </div>
+      </div>
+
+    <div class="history-chart">
+      <svg viewBox="0 0 920 260" role="img" aria-label="closures_upvalues timing history">
+        <rect x="0" y="0" width="920" height="260" class="history-chart-bg" />
+
+      <line x1="62" y1="20.00" x2="900" y2="20.00" class="history-grid-line" />
+      <text x="8" y="24.00" class="history-axis-label">1,175</text>
+
+      <line x1="62" y1="69.50" x2="900" y2="69.50" class="history-grid-line" />
+      <text x="8" y="73.50" class="history-axis-label">269</text>
+
+      <line x1="62" y1="119.00" x2="900" y2="119.00" class="history-grid-line" />
+      <text x="8" y="123.00" class="history-axis-label">61.6</text>
+
+      <line x1="62" y1="168.50" x2="900" y2="168.50" class="history-grid-line" />
+      <text x="8" y="172.50" class="history-axis-label">14.1</text>
+
+      <line x1="62" y1="218.00" x2="900" y2="218.00" class="history-grid-line" />
+      <text x="8" y="222.00" class="history-axis-label">3.234</text>
+
+        <line x1="62" y1="20" x2="62" y2="218" class="history-axis" />
+        <line x1="62" y1="218" x2="900" y2="218" class="history-axis" />
+        <text x="62" y="250" class="history-axis-label">2026-07-03 00:24:25 UTC</text>
+        <text x="900" y="250" text-anchor="end" class="history-axis-label">2026-07-03 02:27:14 UTC</text>
+        <g><polyline points="423.86,24.69 491.29,26.65 576.13,27.25 674.04,25.27" fill="none" stroke="#047857" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="423.86" cy="24.69" r="3.2" fill="#047857">
+      <title>boa 8996ed3: 1,022 ns/unit</title>
+    </circle>
+
+    <circle cx="491.29" cy="26.65" r="3.2" fill="#047857">
+      <title>boa 735401d: 964 ns/unit</title>
+    </circle>
+
+    <circle cx="576.13" cy="27.25" r="3.2" fill="#047857">
+      <title>boa 5814726: 947 ns/unit</title>
+    </circle>
+
+    <circle cx="674.04" cy="25.27" r="3.2" fill="#047857">
+      <title>boa e48285b: 1,004 ns/unit</title>
+    </circle>
+  </g><g><polyline points="72.69,96.30 79.51,96.99 171.85,97.02 297.17,94.10 425.56,95.51 493.22,97.21 578.06,97.44 675.86,96.37" fill="none" stroke="#0f766e" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="72.69" cy="96.30" r="3.2" fill="#0f766e">
+      <title>koto 7e044f2: 121 ns/unit</title>
+    </circle>
+
+    <circle cx="79.51" cy="96.99" r="3.2" fill="#0f766e">
+      <title>koto 7e044f2: 119 ns/unit</title>
+    </circle>
+
+    <circle cx="171.85" cy="97.02" r="3.2" fill="#0f766e">
+      <title>koto 40bc14c: 119 ns/unit</title>
+    </circle>
+
+    <circle cx="297.17" cy="94.10" r="3.2" fill="#0f766e">
+      <title>koto 635aa83: 129 ns/unit</title>
+    </circle>
+
+    <circle cx="425.56" cy="95.51" r="3.2" fill="#0f766e">
+      <title>koto 8996ed3: 124 ns/unit</title>
+    </circle>
+
+    <circle cx="493.22" cy="97.21" r="3.2" fill="#0f766e">
+      <title>koto 735401d: 118 ns/unit</title>
+    </circle>
+
+    <circle cx="578.06" cy="97.44" r="3.2" fill="#0f766e">
+      <title>koto 5814726: 117 ns/unit</title>
+    </circle>
+
+    <circle cx="675.86" cy="96.37" r="3.2" fill="#0f766e">
+      <title>koto e48285b: 121 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="801.75" cy="162.44" r="3.2" fill="#7c3aed">
+      <title>mlua-lua54 d4bb1ed: 16.9 ns/unit</title>
+    </circle>
+  </g><g><polyline points="173.67,155.66 298.88,154.98 427.38,152.97 495.04,155.69 579.88,155.85 677.68,154.95" fill="none" stroke="#b45309" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="173.67" cy="155.66" r="3.2" fill="#b45309">
+      <title>mlua-luau 40bc14c: 20.7 ns/unit</title>
+    </circle>
+
+    <circle cx="298.88" cy="154.98" r="3.2" fill="#b45309">
+      <title>mlua-luau 635aa83: 21.1 ns/unit</title>
+    </circle>
+
+    <circle cx="427.38" cy="152.97" r="3.2" fill="#b45309">
+      <title>mlua-luau 8996ed3: 22.4 ns/unit</title>
+    </circle>
+
+    <circle cx="495.04" cy="155.69" r="3.2" fill="#b45309">
+      <title>mlua-luau 735401d: 20.7 ns/unit</title>
+    </circle>
+
+    <circle cx="579.88" cy="155.85" r="3.2" fill="#b45309">
+      <title>mlua-luau 5814726: 20.6 ns/unit</title>
+    </circle>
+
+    <circle cx="677.68" cy="154.95" r="3.2" fill="#b45309">
+      <title>mlua-luau e48285b: 21.1 ns/unit</title>
+    </circle>
+  </g><g><polyline points="300.81,33.25 429.20,45.75 496.86,48.21 581.70,48.71 679.61,47.29" fill="none" stroke="#b91c1c" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="300.81" cy="33.25" r="3.2" fill="#b91c1c">
+      <title>rhai 635aa83: 792 ns/unit</title>
+    </circle>
+
+    <circle cx="429.20" cy="45.75" r="3.2" fill="#b91c1c">
+      <title>rhai 8996ed3: 546 ns/unit</title>
+    </circle>
+
+    <circle cx="496.86" cy="48.21" r="3.2" fill="#b91c1c">
+      <title>rhai 735401d: 507 ns/unit</title>
+    </circle>
+
+    <circle cx="581.70" cy="48.71" r="3.2" fill="#b91c1c">
+      <title>rhai 5814726: 500 ns/unit</title>
+    </circle>
+
+    <circle cx="679.61" cy="47.29" r="3.2" fill="#b91c1c">
+      <title>rhai e48285b: 521 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="900.00" cy="212.54" r="3.2" fill="#475569">
+      <title>roto 9f3b0d1: 3.805 ns/unit</title>
+    </circle>
+  </g><g><polyline points="498.68,73.78 583.52,72.74 681.43,72.08" fill="none" stroke="#be185d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="498.68" cy="73.78" r="3.2" fill="#be185d">
+      <title>rquickjs 735401d: 237 ns/unit</title>
+    </circle>
+
+    <circle cx="583.52" cy="72.74" r="3.2" fill="#be185d">
+      <title>rquickjs 5814726: 244 ns/unit</title>
+    </circle>
+
+    <circle cx="681.43" cy="72.08" r="3.2" fill="#be185d">
+      <title>rquickjs e48285b: 249 ns/unit</title>
+    </circle>
+  </g><g><polyline points="62.00,58.14 70.87,56.58 77.69,57.61 169.92,57.78 295.35,38.46 422.04,50.69 489.47,57.21 574.42,54.25 672.22,54.49" fill="none" stroke="#2563eb" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="62.00" cy="58.14" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 377 ns/unit</title>
+    </circle>
+
+    <circle cx="70.87" cy="56.58" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 395 ns/unit</title>
+    </circle>
+
+    <circle cx="77.69" cy="57.61" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 383 ns/unit</title>
+    </circle>
+
+    <circle cx="169.92" cy="57.78" r="3.2" fill="#2563eb">
+      <title>rustia 40bc14c: 382 ns/unit</title>
+    </circle>
+
+    <circle cx="295.35" cy="38.46" r="3.2" fill="#2563eb">
+      <title>rustia 635aa83: 678 ns/unit</title>
+    </circle>
+
+    <circle cx="422.04" cy="50.69" r="3.2" fill="#2563eb">
+      <title>rustia 8996ed3: 471 ns/unit</title>
+    </circle>
+
+    <circle cx="489.47" cy="57.21" r="3.2" fill="#2563eb">
+      <title>rustia 735401d: 388 ns/unit</title>
+    </circle>
+
+    <circle cx="574.42" cy="54.25" r="3.2" fill="#2563eb">
+      <title>rustia 5814726: 424 ns/unit</title>
+    </circle>
+
+    <circle cx="672.22" cy="54.49" r="3.2" fill="#2563eb">
+      <title>rustia e48285b: 421 ns/unit</title>
+    </circle>
+  </g><g><polyline points="585.45,110.19 683.36,107.18" fill="none" stroke="#be185d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="585.45" cy="110.19" r="3.2" fill="#be185d">
+      <title>wasmi 5814726: 80.1 ns/unit</title>
+    </circle>
+
+    <circle cx="683.36" cy="107.18" r="3.2" fill="#be185d">
+      <title>wasmi e48285b: 87.7 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="685.18" cy="164.11" r="3.2" fill="#111827">
+      <title>wasmtime e48285b: 16.1 ns/unit</title>
+    </circle>
+  </g>
+      </svg>
+      <div class="history-legend">
+        <span><span class="swatch" style="color: #047857"></span>boa</span><span><span class="swatch" style="color: #0f766e"></span>koto</span><span><span class="swatch" style="color: #7c3aed"></span>mlua-lua54</span><span><span class="swatch" style="color: #b45309"></span>mlua-luau</span><span><span class="swatch" style="color: #b91c1c"></span>rhai</span><span><span class="swatch" style="color: #475569"></span>roto</span><span><span class="swatch" style="color: #be185d"></span>rquickjs</span><span><span class="swatch" style="color: #2563eb"></span>rustia</span><span><span class="swatch" style="color: #be185d"></span>wasmi</span><span><span class="swatch" style="color: #111827"></span>wasmtime</span>
+      </div>
+    </div>
+
+      <div class="table-wrap history-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Engine</th>
+              <th>Latest min ns/unit</th>
+              <th>Median</th>
+              <th>Trend vs previous</th>
+              <th>Commit</th>
+              <th>Measured</th>
+            </tr>
+          </thead>
+          <tbody>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #475569"></span><strong>roto</strong></span></td>
+      <td>3.805</td>
+      <td>3.889</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>9f3b0d1</td>
+      <td>2026-07-03 02:27:14 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #111827"></span><strong>wasmtime</strong></span></td>
+      <td>16.1</td>
+      <td>16.3</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:45 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #7c3aed"></span><strong>mlua-lua54</strong></span></td>
+      <td>16.9</td>
+      <td>17.8</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>d4bb1ed</td>
+      <td>2026-07-03 02:12:50 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #b45309"></span><strong>mlua-luau</strong></span></td>
+      <td>21.1</td>
+      <td>21.7</td>
+      <td><span class="trend trend-bad">+2.7%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:39 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>wasmi</strong></span></td>
+      <td>87.7</td>
+      <td>90.5</td>
+      <td><span class="trend trend-bad">+9.4%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:29 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #0f766e"></span><strong>koto</strong></span></td>
+      <td>121</td>
+      <td>123</td>
+      <td><span class="trend trend-bad">+3.2%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:23 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>rquickjs</strong></span></td>
+      <td>249</td>
+      <td>253</td>
+      <td><span class="trend trend-bad">+2.0%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:12 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #2563eb"></span><strong>rustia</strong></span></td>
+      <td>421</td>
+      <td>429</td>
+      <td><span class="trend trend-good">-0.7%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:53:51 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #b91c1c"></span><strong>rhai</strong></span></td>
+      <td>521</td>
+      <td>527</td>
+      <td><span class="trend trend-bad">+4.3%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:56 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #047857"></span><strong>boa</strong></span></td>
+      <td>1,004</td>
+      <td>1,018</td>
+      <td><span class="trend trend-bad">+6.1%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:07 UTC</td>
+    </tr>
+
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="history-workload" id="history-macos-aarch64-dense-tables">
+      <div class="history-workload-head">
+        <div>
+          <h4>dense_tables</h4>
+          <p>build+sum+sort of 256-elem array · 40 records · 10 engines</p>
+        </div>
+      </div>
+
+    <div class="history-chart">
+      <svg viewBox="0 0 920 260" role="img" aria-label="dense_tables timing history">
+        <rect x="0" y="0" width="920" height="260" class="history-chart-bg" />
+
+      <line x1="62" y1="20.00" x2="900" y2="20.00" class="history-grid-line" />
+      <text x="8" y="24.00" class="history-axis-label">1,394,375</text>
+
+      <line x1="62" y1="69.50" x2="900" y2="69.50" class="history-grid-line" />
+      <text x="8" y="73.50" class="history-axis-label">145,206</text>
+
+      <line x1="62" y1="119.00" x2="900" y2="119.00" class="history-grid-line" />
+      <text x="8" y="123.00" class="history-axis-label">15,121</text>
+
+      <line x1="62" y1="168.50" x2="900" y2="168.50" class="history-grid-line" />
+      <text x="8" y="172.50" class="history-axis-label">1,575</text>
+
+      <line x1="62" y1="218.00" x2="900" y2="218.00" class="history-grid-line" />
+      <text x="8" y="222.00" class="history-axis-label">164</text>
+
+        <line x1="62" y1="20" x2="62" y2="218" class="history-axis" />
+        <line x1="62" y1="218" x2="900" y2="218" class="history-axis" />
+        <text x="62" y="250" class="history-axis-label">2026-07-03 00:24:19 UTC</text>
+        <text x="900" y="250" text-anchor="end" class="history-axis-label">2026-07-03 02:27:07 UTC</text>
+        <g><polyline points="423.79,45.98 491.35,49.49 576.20,49.94 674.12,48.47" fill="none" stroke="#047857" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="423.79" cy="45.98" r="3.2" fill="#047857">
+      <title>boa 8996ed3: 425,385 ns/unit</title>
+    </circle>
+
+    <circle cx="491.35" cy="49.49" r="3.2" fill="#047857">
+      <title>boa 735401d: 362,340 ns/unit</title>
+    </circle>
+
+    <circle cx="576.20" cy="49.94" r="3.2" fill="#047857">
+      <title>boa 5814726: 355,008 ns/unit</title>
+    </circle>
+
+    <circle cx="674.12" cy="48.47" r="3.2" fill="#047857">
+      <title>boa e48285b: 379,688 ns/unit</title>
+    </circle>
+  </g><g><polyline points="72.58,78.09 79.52,78.40 171.75,78.67 296.98,69.22 425.61,77.13 493.17,78.05 578.02,78.85 675.94,77.90" fill="none" stroke="#0f766e" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="72.58" cy="78.09" r="3.2" fill="#0f766e">
+      <title>koto 7e044f2: 98,074 ns/unit</title>
+    </circle>
+
+    <circle cx="79.52" cy="78.40" r="3.2" fill="#0f766e">
+      <title>koto 7e044f2: 96,682 ns/unit</title>
+    </circle>
+
+    <circle cx="171.75" cy="78.67" r="3.2" fill="#0f766e">
+      <title>koto 40bc14c: 95,478 ns/unit</title>
+    </circle>
+
+    <circle cx="296.98" cy="69.22" r="3.2" fill="#0f766e">
+      <title>koto 635aa83: 147,096 ns/unit</title>
+    </circle>
+
+    <circle cx="425.61" cy="77.13" r="3.2" fill="#0f766e">
+      <title>koto 8996ed3: 102,474 ns/unit</title>
+    </circle>
+
+    <circle cx="493.17" cy="78.05" r="3.2" fill="#0f766e">
+      <title>koto 735401d: 98,261 ns/unit</title>
+    </circle>
+
+    <circle cx="578.02" cy="78.85" r="3.2" fill="#0f766e">
+      <title>koto 5814726: 94,714 ns/unit</title>
+    </circle>
+
+    <circle cx="675.94" cy="77.90" r="3.2" fill="#0f766e">
+      <title>koto e48285b: 98,906 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="802.07" cy="107.91" r="3.2" fill="#7c3aed">
+      <title>mlua-lua54 d4bb1ed: 25,106 ns/unit</title>
+    </circle>
+  </g><g><polyline points="173.57,129.55 298.91,115.22 427.43,127.47 494.99,129.60 579.95,130.25 677.76,128.59" fill="none" stroke="#b45309" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="173.57" cy="129.55" r="3.2" fill="#b45309">
+      <title>mlua-luau 40bc14c: 9,339 ns/unit</title>
+    </circle>
+
+    <circle cx="298.91" cy="115.22" r="3.2" fill="#b45309">
+      <title>mlua-luau 635aa83: 17,975 ns/unit</title>
+    </circle>
+
+    <circle cx="427.43" cy="127.47" r="3.2" fill="#b45309">
+      <title>mlua-luau 8996ed3: 10,268 ns/unit</title>
+    </circle>
+
+    <circle cx="494.99" cy="129.60" r="3.2" fill="#b45309">
+      <title>mlua-luau 735401d: 9,314 ns/unit</title>
+    </circle>
+
+    <circle cx="579.95" cy="130.25" r="3.2" fill="#b45309">
+      <title>mlua-luau 5814726: 9,045 ns/unit</title>
+    </circle>
+
+    <circle cx="677.76" cy="128.59" r="3.2" fill="#b45309">
+      <title>mlua-luau e48285b: 9,757 ns/unit</title>
+    </circle>
+  </g><g><polyline points="300.62,70.76 429.25,75.97 496.92,77.14 581.77,77.27 679.58,76.01" fill="none" stroke="#b91c1c" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="300.62" cy="70.76" r="3.2" fill="#b91c1c">
+      <title>rhai 635aa83: 137,093 ns/unit</title>
+    </circle>
+
+    <circle cx="429.25" cy="75.97" r="3.2" fill="#b91c1c">
+      <title>rhai 8996ed3: 108,053 ns/unit</title>
+    </circle>
+
+    <circle cx="496.92" cy="77.14" r="3.2" fill="#b91c1c">
+      <title>rhai 735401d: 102,430 ns/unit</title>
+    </circle>
+
+    <circle cx="581.77" cy="77.27" r="3.2" fill="#b91c1c">
+      <title>rhai 5814726: 101,816 ns/unit</title>
+    </circle>
+
+    <circle cx="679.58" cy="76.01" r="3.2" fill="#b91c1c">
+      <title>rhai e48285b: 107,846 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="900.00" cy="23.06" r="3.2" fill="#475569">
+      <title>roto 9f3b0d1: 1,212,500 ns/unit</title>
+    </circle>
+  </g><g><polyline points="498.74,90.17 583.59,90.70 681.51,89.80" fill="none" stroke="#be185d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="498.74" cy="90.17" r="3.2" fill="#be185d">
+      <title>rquickjs 735401d: 56,459 ns/unit</title>
+    </circle>
+
+    <circle cx="583.59" cy="90.70" r="3.2" fill="#be185d">
+      <title>rquickjs 5814726: 55,102 ns/unit</title>
+    </circle>
+
+    <circle cx="681.51" cy="89.80" r="3.2" fill="#be185d">
+      <title>rquickjs e48285b: 57,415 ns/unit</title>
+    </circle>
+  </g><g><polyline points="62.00,73.13 70.76,72.34 77.58,72.70 169.93,73.10 295.27,64.08 421.97,68.08 489.42,72.47 574.26,72.88 672.19,71.57" fill="none" stroke="#2563eb" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="62.00" cy="73.13" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 123,001 ns/unit</title>
+    </circle>
+
+    <circle cx="70.76" cy="72.34" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 127,513 ns/unit</title>
+    </circle>
+
+    <circle cx="77.58" cy="72.70" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 125,464 ns/unit</title>
+    </circle>
+
+    <circle cx="169.93" cy="73.10" r="3.2" fill="#2563eb">
+      <title>rustia 40bc14c: 123,199 ns/unit</title>
+    </circle>
+
+    <circle cx="295.27" cy="64.08" r="3.2" fill="#2563eb">
+      <title>rustia 635aa83: 186,023 ns/unit</title>
+    </circle>
+
+    <circle cx="421.97" cy="68.08" r="3.2" fill="#2563eb">
+      <title>rustia 8996ed3: 154,953 ns/unit</title>
+    </circle>
+
+    <circle cx="489.42" cy="72.47" r="3.2" fill="#2563eb">
+      <title>rustia 735401d: 126,763 ns/unit</title>
+    </circle>
+
+    <circle cx="574.26" cy="72.88" r="3.2" fill="#2563eb">
+      <title>rustia 5814726: 124,397 ns/unit</title>
+    </circle>
+
+    <circle cx="672.19" cy="71.57" r="3.2" fill="#2563eb">
+      <title>rustia e48285b: 132,121 ns/unit</title>
+    </circle>
+  </g><g><polyline points="585.41,173.92 683.33,173.23" fill="none" stroke="#be185d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="585.41" cy="173.92" r="3.2" fill="#be185d">
+      <title>wasmi 5814726: 1,229 ns/unit</title>
+    </circle>
+
+    <circle cx="683.33" cy="173.23" r="3.2" fill="#be185d">
+      <title>wasmi e48285b: 1,269 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="685.27" cy="214.44" r="3.2" fill="#111827">
+      <title>wasmtime e48285b: 193 ns/unit</title>
+    </circle>
+  </g>
+      </svg>
+      <div class="history-legend">
+        <span><span class="swatch" style="color: #047857"></span>boa</span><span><span class="swatch" style="color: #0f766e"></span>koto</span><span><span class="swatch" style="color: #7c3aed"></span>mlua-lua54</span><span><span class="swatch" style="color: #b45309"></span>mlua-luau</span><span><span class="swatch" style="color: #b91c1c"></span>rhai</span><span><span class="swatch" style="color: #475569"></span>roto</span><span><span class="swatch" style="color: #be185d"></span>rquickjs</span><span><span class="swatch" style="color: #2563eb"></span>rustia</span><span><span class="swatch" style="color: #be185d"></span>wasmi</span><span><span class="swatch" style="color: #111827"></span>wasmtime</span>
+      </div>
+    </div>
+
+      <div class="table-wrap history-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Engine</th>
+              <th>Latest min ns/unit</th>
+              <th>Median</th>
+              <th>Trend vs previous</th>
+              <th>Commit</th>
+              <th>Measured</th>
+            </tr>
+          </thead>
+          <tbody>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #111827"></span><strong>wasmtime</strong></span></td>
+      <td>193</td>
+      <td>194</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:39 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>wasmi</strong></span></td>
+      <td>1,269</td>
+      <td>1,280</td>
+      <td><span class="trend trend-bad">+3.2%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:22 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #b45309"></span><strong>mlua-luau</strong></span></td>
+      <td>9,757</td>
+      <td>9,898</td>
+      <td><span class="trend trend-bad">+7.9%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:33 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #7c3aed"></span><strong>mlua-lua54</strong></span></td>
+      <td>25,106</td>
+      <td>30,907</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>d4bb1ed</td>
+      <td>2026-07-03 02:12:46 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>rquickjs</strong></span></td>
+      <td>57,415</td>
+      <td>58,061</td>
+      <td><span class="trend trend-bad">+4.2%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:06 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #0f766e"></span><strong>koto</strong></span></td>
+      <td>98,906</td>
+      <td>100,379</td>
+      <td><span class="trend trend-bad">+4.4%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:17 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #b91c1c"></span><strong>rhai</strong></span></td>
+      <td>107,846</td>
+      <td>108,245</td>
+      <td><span class="trend trend-bad">+5.9%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:49 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #2563eb"></span><strong>rustia</strong></span></td>
+      <td>132,121</td>
+      <td>136,885</td>
+      <td><span class="trend trend-bad">+6.2%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:53:44 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #047857"></span><strong>boa</strong></span></td>
+      <td>379,688</td>
+      <td>381,672</td>
+      <td><span class="trend trend-bad">+7.0%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:01 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #475569"></span><strong>roto</strong></span></td>
+      <td>1,212,500</td>
+      <td>1,219,195</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>9f3b0d1</td>
+      <td>2026-07-03 02:27:07 UTC</td>
+    </tr>
+
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="history-workload" id="history-macos-aarch64-generic-iteration">
+      <div class="history-workload-head">
+        <div>
+          <h4>generic_iteration</h4>
+          <p>__iter(32)+pairs(5)+ipairs(32) pass · 40 records · 10 engines</p>
+        </div>
+      </div>
+
+    <div class="history-chart">
+      <svg viewBox="0 0 920 260" role="img" aria-label="generic_iteration timing history">
+        <rect x="0" y="0" width="920" height="260" class="history-chart-bg" />
+
+      <line x1="62" y1="20.00" x2="900" y2="20.00" class="history-grid-line" />
+      <text x="8" y="24.00" class="history-axis-label">20,378</text>
+
+      <line x1="62" y1="69.50" x2="900" y2="69.50" class="history-grid-line" />
+      <text x="8" y="73.50" class="history-axis-label">4,880</text>
+
+      <line x1="62" y1="119.00" x2="900" y2="119.00" class="history-grid-line" />
+      <text x="8" y="123.00" class="history-axis-label">1,168</text>
+
+      <line x1="62" y1="168.50" x2="900" y2="168.50" class="history-grid-line" />
+      <text x="8" y="172.50" class="history-axis-label">280</text>
+
+      <line x1="62" y1="218.00" x2="900" y2="218.00" class="history-grid-line" />
+      <text x="8" y="222.00" class="history-axis-label">67</text>
+
+        <line x1="62" y1="20" x2="62" y2="218" class="history-axis" />
+        <line x1="62" y1="218" x2="900" y2="218" class="history-axis" />
+        <text x="62" y="250" class="history-axis-label">2026-07-03 00:24:28 UTC</text>
+        <text x="900" y="250" text-anchor="end" class="history-axis-label">2026-07-03 02:27:17 UTC</text>
+        <g><polyline points="423.86,31.90 491.29,34.01 576.24,34.75 674.04,32.49" fill="none" stroke="#047857" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="423.86" cy="31.90" r="3.2" fill="#047857">
+      <title>boa 8996ed3: 14,450 ns/unit</title>
+    </circle>
+
+    <circle cx="491.29" cy="34.01" r="3.2" fill="#047857">
+      <title>boa 735401d: 13,598 ns/unit</title>
+    </circle>
+
+    <circle cx="576.24" cy="34.75" r="3.2" fill="#047857">
+      <title>boa 5814726: 13,309 ns/unit</title>
+    </circle>
+
+    <circle cx="674.04" cy="32.49" r="3.2" fill="#047857">
+      <title>boa e48285b: 14,206 ns/unit</title>
+    </circle>
+  </g><g><polyline points="72.69,95.89 79.51,95.57 171.85,96.15 297.17,76.53 425.56,94.54 493.22,96.27 578.06,97.02 675.97,95.26" fill="none" stroke="#0f766e" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="72.69" cy="95.89" r="3.2" fill="#0f766e">
+      <title>koto 7e044f2: 2,277 ns/unit</title>
+    </circle>
+
+    <circle cx="79.51" cy="95.57" r="3.2" fill="#0f766e">
+      <title>koto 7e044f2: 2,298 ns/unit</title>
+    </circle>
+
+    <circle cx="171.85" cy="96.15" r="3.2" fill="#0f766e">
+      <title>koto 40bc14c: 2,260 ns/unit</title>
+    </circle>
+
+    <circle cx="297.17" cy="76.53" r="3.2" fill="#0f766e">
+      <title>koto 635aa83: 3,983 ns/unit</title>
+    </circle>
+
+    <circle cx="425.56" cy="94.54" r="3.2" fill="#0f766e">
+      <title>koto 8996ed3: 2,368 ns/unit</title>
+    </circle>
+
+    <circle cx="493.22" cy="96.27" r="3.2" fill="#0f766e">
+      <title>koto 735401d: 2,253 ns/unit</title>
+    </circle>
+
+    <circle cx="578.06" cy="97.02" r="3.2" fill="#0f766e">
+      <title>koto 5814726: 2,204 ns/unit</title>
+    </circle>
+
+    <circle cx="675.97" cy="95.26" r="3.2" fill="#0f766e">
+      <title>koto e48285b: 2,319 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="801.86" cy="112.03" r="3.2" fill="#7c3aed">
+      <title>mlua-lua54 d4bb1ed: 1,429 ns/unit</title>
+    </circle>
+  </g><g><polyline points="173.67,101.08 298.88,96.59 427.38,97.76 495.04,99.11 579.88,100.87 677.68,98.27" fill="none" stroke="#b45309" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="173.67" cy="101.08" r="3.2" fill="#b45309">
+      <title>mlua-luau 40bc14c: 1,960 ns/unit</title>
+    </circle>
+
+    <circle cx="298.88" cy="96.59" r="3.2" fill="#b45309">
+      <title>mlua-luau 635aa83: 2,231 ns/unit</title>
+    </circle>
+
+    <circle cx="427.38" cy="97.76" r="3.2" fill="#b45309">
+      <title>mlua-luau 8996ed3: 2,157 ns/unit</title>
+    </circle>
+
+    <circle cx="495.04" cy="99.11" r="3.2" fill="#b45309">
+      <title>mlua-luau 735401d: 2,075 ns/unit</title>
+    </circle>
+
+    <circle cx="579.88" cy="100.87" r="3.2" fill="#b45309">
+      <title>mlua-luau 5814726: 1,972 ns/unit</title>
+    </circle>
+
+    <circle cx="677.68" cy="98.27" r="3.2" fill="#b45309">
+      <title>mlua-luau e48285b: 2,126 ns/unit</title>
+    </circle>
+  </g><g><polyline points="300.92,73.97 429.31,80.30 496.86,82.25 581.81,83.21 679.61,81.38" fill="none" stroke="#b91c1c" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="300.92" cy="73.97" r="3.2" fill="#b91c1c">
+      <title>rhai 635aa83: 4,288 ns/unit</title>
+    </circle>
+
+    <circle cx="429.31" cy="80.30" r="3.2" fill="#b91c1c">
+      <title>rhai 8996ed3: 3,572 ns/unit</title>
+    </circle>
+
+    <circle cx="496.86" cy="82.25" r="3.2" fill="#b91c1c">
+      <title>rhai 735401d: 3,376 ns/unit</title>
+    </circle>
+
+    <circle cx="581.81" cy="83.21" r="3.2" fill="#b91c1c">
+      <title>rhai 5814726: 3,284 ns/unit</title>
+    </circle>
+
+    <circle cx="679.61" cy="81.38" r="3.2" fill="#b91c1c">
+      <title>rhai e48285b: 3,463 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="900.00" cy="119.50" r="3.2" fill="#475569">
+      <title>roto 9f3b0d1: 1,152 ns/unit</title>
+    </circle>
+  </g><g><polyline points="498.80,89.62 583.63,89.39 681.43,87.35" fill="none" stroke="#be185d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="498.80" cy="89.62" r="3.2" fill="#be185d">
+      <title>rquickjs 735401d: 2,729 ns/unit</title>
+    </circle>
+
+    <circle cx="583.63" cy="89.39" r="3.2" fill="#be185d">
+      <title>rquickjs 5814726: 2,748 ns/unit</title>
+    </circle>
+
+    <circle cx="681.43" cy="87.35" r="3.2" fill="#be185d">
+      <title>rquickjs e48285b: 2,914 ns/unit</title>
+    </circle>
+  </g><g><polyline points="62.00,28.32 70.87,28.28 77.69,28.80 169.92,29.00 295.35,24.84 422.04,25.62 489.47,28.10 574.42,25.90 672.22,25.21" fill="none" stroke="#2563eb" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="62.00" cy="28.32" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 16,026 ns/unit</title>
+    </circle>
+
+    <circle cx="70.87" cy="28.28" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 16,044 ns/unit</title>
+    </circle>
+
+    <circle cx="77.69" cy="28.80" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 15,804 ns/unit</title>
+    </circle>
+
+    <circle cx="169.92" cy="29.00" r="3.2" fill="#2563eb">
+      <title>rustia 40bc14c: 15,712 ns/unit</title>
+    </circle>
+
+    <circle cx="295.35" cy="24.84" r="3.2" fill="#2563eb">
+      <title>rustia 635aa83: 17,720 ns/unit</title>
+    </circle>
+
+    <circle cx="422.04" cy="25.62" r="3.2" fill="#2563eb">
+      <title>rustia 8996ed3: 17,327 ns/unit</title>
+    </circle>
+
+    <circle cx="489.47" cy="28.10" r="3.2" fill="#2563eb">
+      <title>rustia 735401d: 16,130 ns/unit</title>
+    </circle>
+
+    <circle cx="574.42" cy="25.90" r="3.2" fill="#2563eb">
+      <title>rustia 5814726: 17,188 ns/unit</title>
+    </circle>
+
+    <circle cx="672.22" cy="25.21" r="3.2" fill="#2563eb">
+      <title>rustia e48285b: 17,533 ns/unit</title>
+    </circle>
+  </g><g><polyline points="585.45,188.51 683.36,187.48" fill="none" stroke="#be185d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="585.45" cy="188.51" r="3.2" fill="#be185d">
+      <title>wasmi 5814726: 157 ns/unit</title>
+    </circle>
+
+    <circle cx="683.36" cy="187.48" r="3.2" fill="#be185d">
+      <title>wasmi e48285b: 162 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="685.18" cy="212.37" r="3.2" fill="#111827">
+      <title>wasmtime e48285b: 78.8 ns/unit</title>
+    </circle>
+  </g>
+      </svg>
+      <div class="history-legend">
+        <span><span class="swatch" style="color: #047857"></span>boa</span><span><span class="swatch" style="color: #0f766e"></span>koto</span><span><span class="swatch" style="color: #7c3aed"></span>mlua-lua54</span><span><span class="swatch" style="color: #b45309"></span>mlua-luau</span><span><span class="swatch" style="color: #b91c1c"></span>rhai</span><span><span class="swatch" style="color: #475569"></span>roto</span><span><span class="swatch" style="color: #be185d"></span>rquickjs</span><span><span class="swatch" style="color: #2563eb"></span>rustia</span><span><span class="swatch" style="color: #be185d"></span>wasmi</span><span><span class="swatch" style="color: #111827"></span>wasmtime</span>
+      </div>
+    </div>
+
+      <div class="table-wrap history-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Engine</th>
+              <th>Latest min ns/unit</th>
+              <th>Median</th>
+              <th>Trend vs previous</th>
+              <th>Commit</th>
+              <th>Measured</th>
+            </tr>
+          </thead>
+          <tbody>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #111827"></span><strong>wasmtime</strong></span></td>
+      <td>78.8</td>
+      <td>79.5</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:48 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>wasmi</strong></span></td>
+      <td>162</td>
+      <td>163</td>
+      <td><span class="trend trend-bad">+3.0%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:32 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #475569"></span><strong>roto</strong></span></td>
+      <td>1,152</td>
+      <td>1,160</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>9f3b0d1</td>
+      <td>2026-07-03 02:27:17 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #7c3aed"></span><strong>mlua-lua54</strong></span></td>
+      <td>1,429</td>
+      <td>1,433</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>d4bb1ed</td>
+      <td>2026-07-03 02:12:54 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #b45309"></span><strong>mlua-luau</strong></span></td>
+      <td>2,126</td>
+      <td>2,133</td>
+      <td><span class="trend trend-bad">+7.8%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:42 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #0f766e"></span><strong>koto</strong></span></td>
+      <td>2,319</td>
+      <td>2,345</td>
+      <td><span class="trend trend-bad">+5.2%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:27 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>rquickjs</strong></span></td>
+      <td>2,914</td>
+      <td>2,947</td>
+      <td><span class="trend trend-bad">+6.0%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:15 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #b91c1c"></span><strong>rhai</strong></span></td>
+      <td>3,463</td>
+      <td>3,491</td>
+      <td><span class="trend trend-bad">+5.4%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:59 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #047857"></span><strong>boa</strong></span></td>
+      <td>14,206</td>
+      <td>14,415</td>
+      <td><span class="trend trend-bad">+6.7%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:10 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #2563eb"></span><strong>rustia</strong></span></td>
+      <td>17,533</td>
+      <td>17,764</td>
+      <td><span class="trend trend-bad">+2.0%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:53:54 UTC</td>
+    </tr>
+
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="history-workload" id="history-macos-aarch64-sparse-tables">
+      <div class="history-workload-head">
+        <div>
+          <h4>sparse_tables</h4>
+          <p>fill+read 128 hash entries · 40 records · 10 engines</p>
+        </div>
+      </div>
+
+    <div class="history-chart">
+      <svg viewBox="0 0 920 260" role="img" aria-label="sparse_tables timing history">
+        <rect x="0" y="0" width="920" height="260" class="history-chart-bg" />
+
+      <line x1="62" y1="20.00" x2="900" y2="20.00" class="history-grid-line" />
+      <text x="8" y="24.00" class="history-axis-label">198,382</text>
+
+      <line x1="62" y1="69.50" x2="900" y2="69.50" class="history-grid-line" />
+      <text x="8" y="73.50" class="history-axis-label">37,678</text>
+
+      <line x1="62" y1="119.00" x2="900" y2="119.00" class="history-grid-line" />
+      <text x="8" y="123.00" class="history-axis-label">7,156</text>
+
+      <line x1="62" y1="168.50" x2="900" y2="168.50" class="history-grid-line" />
+      <text x="8" y="172.50" class="history-axis-label">1,359</text>
+
+      <line x1="62" y1="218.00" x2="900" y2="218.00" class="history-grid-line" />
+      <text x="8" y="222.00" class="history-axis-label">258</text>
+
+        <line x1="62" y1="20" x2="62" y2="218" class="history-axis" />
+        <line x1="62" y1="218" x2="900" y2="218" class="history-axis" />
+        <text x="62" y="250" class="history-axis-label">2026-07-03 00:24:22 UTC</text>
+        <text x="900" y="250" text-anchor="end" class="history-axis-label">2026-07-03 02:27:10 UTC</text>
+        <g><polyline points="423.90,28.43 491.35,31.65 576.20,32.35 674.12,30.29" fill="none" stroke="#047857" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="423.90" cy="28.43" r="3.2" fill="#047857">
+      <title>boa 8996ed3: 149,515 ns/unit</title>
+    </circle>
+
+    <circle cx="491.35" cy="31.65" r="3.2" fill="#047857">
+      <title>boa 735401d: 134,172 ns/unit</title>
+    </circle>
+
+    <circle cx="576.20" cy="32.35" r="3.2" fill="#047857">
+      <title>boa 5814726: 131,086 ns/unit</title>
+    </circle>
+
+    <circle cx="674.12" cy="30.29" r="3.2" fill="#047857">
+      <title>boa e48285b: 140,451 ns/unit</title>
+    </circle>
+  </g><g><polyline points="72.69,58.43 79.52,58.78 171.87,59.17 297.20,39.34 425.61,57.20 493.28,59.32 578.13,59.83 675.94,58.54" fill="none" stroke="#0f766e" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="72.69" cy="58.43" r="3.2" fill="#0f766e">
+      <title>koto 7e044f2: 54,637 ns/unit</title>
+    </circle>
+
+    <circle cx="79.52" cy="58.78" r="3.2" fill="#0f766e">
+      <title>koto 7e044f2: 53,983 ns/unit</title>
+    </circle>
+
+    <circle cx="171.87" cy="59.17" r="3.2" fill="#0f766e">
+      <title>koto 40bc14c: 53,285 ns/unit</title>
+    </circle>
+
+    <circle cx="297.20" cy="39.34" r="3.2" fill="#0f766e">
+      <title>koto 635aa83: 103,673 ns/unit</title>
+    </circle>
+
+    <circle cx="425.61" cy="57.20" r="3.2" fill="#0f766e">
+      <title>koto 8996ed3: 56,927 ns/unit</title>
+    </circle>
+
+    <circle cx="493.28" cy="59.32" r="3.2" fill="#0f766e">
+      <title>koto 735401d: 53,013 ns/unit</title>
+    </circle>
+
+    <circle cx="578.13" cy="59.83" r="3.2" fill="#0f766e">
+      <title>koto 5814726: 52,130 ns/unit</title>
+    </circle>
+
+    <circle cx="675.94" cy="58.54" r="3.2" fill="#0f766e">
+      <title>koto e48285b: 54,427 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="801.96" cy="103.05" r="3.2" fill="#7c3aed">
+      <title>mlua-lua54 d4bb1ed: 12,221 ns/unit</title>
+    </circle>
+  </g><g><polyline points="173.69,112.94 299.02,97.97 427.43,111.59 495.10,113.01 579.95,113.07 677.76,111.29" fill="none" stroke="#b45309" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="173.69" cy="112.94" r="3.2" fill="#b45309">
+      <title>mlua-luau 40bc14c: 8,771 ns/unit</title>
+    </circle>
+
+    <circle cx="299.02" cy="97.97" r="3.2" fill="#b45309">
+      <title>mlua-luau 635aa83: 14,494 ns/unit</title>
+    </circle>
+
+    <circle cx="427.43" cy="111.59" r="3.2" fill="#b45309">
+      <title>mlua-luau 8996ed3: 9,176 ns/unit</title>
+    </circle>
+
+    <circle cx="495.10" cy="113.01" r="3.2" fill="#b45309">
+      <title>mlua-luau 735401d: 8,748 ns/unit</title>
+    </circle>
+
+    <circle cx="579.95" cy="113.07" r="3.2" fill="#b45309">
+      <title>mlua-luau 5814726: 8,731 ns/unit</title>
+    </circle>
+
+    <circle cx="677.76" cy="111.29" r="3.2" fill="#b45309">
+      <title>mlua-luau e48285b: 9,268 ns/unit</title>
+    </circle>
+  </g><g><polyline points="300.73,24.16 429.25,34.77 496.92,37.55 581.77,37.61 679.70,36.43" fill="none" stroke="#b91c1c" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="300.73" cy="24.16" r="3.2" fill="#b91c1c">
+      <title>rhai 635aa83: 172,506 ns/unit</title>
+    </circle>
+
+    <circle cx="429.25" cy="34.77" r="3.2" fill="#b91c1c">
+      <title>rhai 8996ed3: 120,857 ns/unit</title>
+    </circle>
+
+    <circle cx="496.92" cy="37.55" r="3.2" fill="#b91c1c">
+      <title>rhai 735401d: 110,086 ns/unit</title>
+    </circle>
+
+    <circle cx="581.77" cy="37.61" r="3.2" fill="#b91c1c">
+      <title>rhai 5814726: 109,848 ns/unit</title>
+    </circle>
+
+    <circle cx="679.70" cy="36.43" r="3.2" fill="#b91c1c">
+      <title>rhai e48285b: 114,296 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="900.00" cy="60.31" r="3.2" fill="#475569">
+      <title>roto 9f3b0d1: 51,291 ns/unit</title>
+    </circle>
+  </g><g><polyline points="498.74,62.39 583.59,63.00 681.51,61.92" fill="none" stroke="#be185d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="498.74" cy="62.39" r="3.2" fill="#be185d">
+      <title>rquickjs 735401d: 47,837 ns/unit</title>
+    </circle>
+
+    <circle cx="583.59" cy="63.00" r="3.2" fill="#be185d">
+      <title>rquickjs 5814726: 46,867 ns/unit</title>
+    </circle>
+
+    <circle cx="681.51" cy="61.92" r="3.2" fill="#be185d">
+      <title>rquickjs e48285b: 48,597 ns/unit</title>
+    </circle>
+  </g><g><polyline points="62.00,40.06 70.76,40.06 77.70,39.48 169.93,40.26 295.27,36.17 422.09,34.48 489.53,39.70 574.38,39.87 672.19,36.66" fill="none" stroke="#2563eb" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="62.00" cy="40.06" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 101,191 ns/unit</title>
+    </circle>
+
+    <circle cx="70.76" cy="40.06" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 101,189 ns/unit</title>
+    </circle>
+
+    <circle cx="77.70" cy="39.48" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 103,165 ns/unit</title>
+    </circle>
+
+    <circle cx="169.93" cy="40.26" r="3.2" fill="#2563eb">
+      <title>rustia 40bc14c: 100,517 ns/unit</title>
+    </circle>
+
+    <circle cx="295.27" cy="36.17" r="3.2" fill="#2563eb">
+      <title>rustia 635aa83: 115,284 ns/unit</title>
+    </circle>
+
+    <circle cx="422.09" cy="34.48" r="3.2" fill="#2563eb">
+      <title>rustia 8996ed3: 122,035 ns/unit</title>
+    </circle>
+
+    <circle cx="489.53" cy="39.70" r="3.2" fill="#2563eb">
+      <title>rustia 735401d: 102,429 ns/unit</title>
+    </circle>
+
+    <circle cx="574.38" cy="39.87" r="3.2" fill="#2563eb">
+      <title>rustia 5814726: 101,831 ns/unit</title>
+    </circle>
+
+    <circle cx="672.19" cy="36.66" r="3.2" fill="#2563eb">
+      <title>rustia e48285b: 113,418 ns/unit</title>
+    </circle>
+  </g><g><polyline points="585.52,170.73 683.33,169.45" fill="none" stroke="#be185d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="585.52" cy="170.73" r="3.2" fill="#be185d">
+      <title>wasmi 5814726: 1,261 ns/unit</title>
+    </circle>
+
+    <circle cx="683.33" cy="169.45" r="3.2" fill="#be185d">
+      <title>wasmi e48285b: 1,316 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="685.27" cy="213.16" r="3.2" fill="#111827">
+      <title>wasmtime e48285b: 304 ns/unit</title>
+    </circle>
+  </g>
+      </svg>
+      <div class="history-legend">
+        <span><span class="swatch" style="color: #047857"></span>boa</span><span><span class="swatch" style="color: #0f766e"></span>koto</span><span><span class="swatch" style="color: #7c3aed"></span>mlua-lua54</span><span><span class="swatch" style="color: #b45309"></span>mlua-luau</span><span><span class="swatch" style="color: #b91c1c"></span>rhai</span><span><span class="swatch" style="color: #475569"></span>roto</span><span><span class="swatch" style="color: #be185d"></span>rquickjs</span><span><span class="swatch" style="color: #2563eb"></span>rustia</span><span><span class="swatch" style="color: #be185d"></span>wasmi</span><span><span class="swatch" style="color: #111827"></span>wasmtime</span>
+      </div>
+    </div>
+
+      <div class="table-wrap history-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Engine</th>
+              <th>Latest min ns/unit</th>
+              <th>Median</th>
+              <th>Trend vs previous</th>
+              <th>Commit</th>
+              <th>Measured</th>
+            </tr>
+          </thead>
+          <tbody>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #111827"></span><strong>wasmtime</strong></span></td>
+      <td>304</td>
+      <td>307</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:42 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>wasmi</strong></span></td>
+      <td>1,316</td>
+      <td>1,388</td>
+      <td><span class="trend trend-bad">+4.4%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:25 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #b45309"></span><strong>mlua-luau</strong></span></td>
+      <td>9,268</td>
+      <td>9,387</td>
+      <td><span class="trend trend-bad">+6.2%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:36 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #7c3aed"></span><strong>mlua-lua54</strong></span></td>
+      <td>12,221</td>
+      <td>14,006</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>d4bb1ed</td>
+      <td>2026-07-03 02:12:48 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>rquickjs</strong></span></td>
+      <td>48,597</td>
+      <td>49,477</td>
+      <td><span class="trend trend-bad">+3.7%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:09 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #475569"></span><strong>roto</strong></span></td>
+      <td>51,291</td>
+      <td>51,949</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>9f3b0d1</td>
+      <td>2026-07-03 02:27:10 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #0f766e"></span><strong>koto</strong></span></td>
+      <td>54,427</td>
+      <td>55,042</td>
+      <td><span class="trend trend-bad">+4.4%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:20 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #2563eb"></span><strong>rustia</strong></span></td>
+      <td>113,418</td>
+      <td>116,401</td>
+      <td><span class="trend trend-bad">+11.4%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:53:47 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #b91c1c"></span><strong>rhai</strong></span></td>
+      <td>114,296</td>
+      <td>117,811</td>
+      <td><span class="trend trend-bad">+4.0%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:53 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #047857"></span><strong>boa</strong></span></td>
+      <td>140,451</td>
+      <td>141,920</td>
+      <td><span class="trend trend-bad">+7.1%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:04 UTC</td>
+    </tr>
+
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="history-workload" id="history-macos-aarch64-stdlib-math-table">
+      <div class="history-workload-head">
+        <div>
+          <h4>stdlib_math_table</h4>
+          <p>math fastcalls + buffered push · 40 records · 10 engines</p>
+        </div>
+      </div>
+
+    <div class="history-chart">
+      <svg viewBox="0 0 920 260" role="img" aria-label="stdlib_math_table timing history">
+        <rect x="0" y="0" width="920" height="260" class="history-chart-bg" />
+
+      <line x1="62" y1="20.00" x2="900" y2="20.00" class="history-grid-line" />
+      <text x="8" y="24.00" class="history-axis-label">2,054</text>
+
+      <line x1="62" y1="69.50" x2="900" y2="69.50" class="history-grid-line" />
+      <text x="8" y="73.50" class="history-axis-label">369</text>
+
+      <line x1="62" y1="119.00" x2="900" y2="119.00" class="history-grid-line" />
+      <text x="8" y="123.00" class="history-axis-label">66.3</text>
+
+      <line x1="62" y1="168.50" x2="900" y2="168.50" class="history-grid-line" />
+      <text x="8" y="172.50" class="history-axis-label">11.9</text>
+
+      <line x1="62" y1="218.00" x2="900" y2="218.00" class="history-grid-line" />
+      <text x="8" y="222.00" class="history-axis-label">2.141</text>
+
+        <line x1="62" y1="20" x2="62" y2="218" class="history-axis" />
+        <line x1="62" y1="218" x2="900" y2="218" class="history-axis" />
+        <text x="62" y="250" class="history-axis-label">2026-07-03 00:24:32 UTC</text>
+        <text x="900" y="250" text-anchor="end" class="history-axis-label">2026-07-03 02:27:20 UTC</text>
+        <g><polyline points="423.90,24.43 491.35,25.16 576.20,26.33 674.12,24.26" fill="none" stroke="#047857" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="423.90" cy="24.43" r="3.2" fill="#047857">
+      <title>boa 8996ed3: 1,761 ns/unit</title>
+    </circle>
+
+    <circle cx="491.35" cy="25.16" r="3.2" fill="#047857">
+      <title>boa 735401d: 1,717 ns/unit</title>
+    </circle>
+
+    <circle cx="576.20" cy="26.33" r="3.2" fill="#047857">
+      <title>boa 5814726: 1,649 ns/unit</title>
+    </circle>
+
+    <circle cx="674.12" cy="24.26" r="3.2" fill="#047857">
+      <title>boa e48285b: 1,772 ns/unit</title>
+    </circle>
+  </g><g><polyline points="72.58,55.57 79.40,55.92 171.75,56.08 297.20,54.36 425.61,54.49 493.17,55.56 578.13,56.31 675.94,54.58" fill="none" stroke="#0f766e" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="72.58" cy="55.57" r="3.2" fill="#0f766e">
+      <title>koto 7e044f2: 598 ns/unit</title>
+    </circle>
+
+    <circle cx="79.40" cy="55.92" r="3.2" fill="#0f766e">
+      <title>koto 7e044f2: 591 ns/unit</title>
+    </circle>
+
+    <circle cx="171.75" cy="56.08" r="3.2" fill="#0f766e">
+      <title>koto 40bc14c: 588 ns/unit</title>
+    </circle>
+
+    <circle cx="297.20" cy="54.36" r="3.2" fill="#0f766e">
+      <title>koto 635aa83: 624 ns/unit</title>
+    </circle>
+
+    <circle cx="425.61" cy="54.49" r="3.2" fill="#0f766e">
+      <title>koto 8996ed3: 621 ns/unit</title>
+    </circle>
+
+    <circle cx="493.17" cy="55.56" r="3.2" fill="#0f766e">
+      <title>koto 735401d: 599 ns/unit</title>
+    </circle>
+
+    <circle cx="578.13" cy="56.31" r="3.2" fill="#0f766e">
+      <title>koto 5814726: 583 ns/unit</title>
+    </circle>
+
+    <circle cx="675.94" cy="54.58" r="3.2" fill="#0f766e">
+      <title>koto e48285b: 619 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="801.85" cy="98.17" r="3.2" fill="#7c3aed">
+      <title>mlua-lua54 d4bb1ed: 137 ns/unit</title>
+    </circle>
+  </g><g><polyline points="173.57,111.96 298.80,105.30 427.43,109.00 494.99,111.18 579.84,111.19 677.76,110.34" fill="none" stroke="#b45309" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="173.57" cy="111.96" r="3.2" fill="#b45309">
+      <title>mlua-luau 40bc14c: 84.7 ns/unit</title>
+    </circle>
+
+    <circle cx="298.80" cy="105.30" r="3.2" fill="#b45309">
+      <title>mlua-luau 635aa83: 107 ns/unit</title>
+    </circle>
+
+    <circle cx="427.43" cy="109.00" r="3.2" fill="#b45309">
+      <title>mlua-luau 8996ed3: 93.8 ns/unit</title>
+    </circle>
+
+    <circle cx="494.99" cy="111.18" r="3.2" fill="#b45309">
+      <title>mlua-luau 735401d: 87 ns/unit</title>
+    </circle>
+
+    <circle cx="579.84" cy="111.19" r="3.2" fill="#b45309">
+      <title>mlua-luau 5814726: 86.9 ns/unit</title>
+    </circle>
+
+    <circle cx="677.76" cy="110.34" r="3.2" fill="#b45309">
+      <title>mlua-luau e48285b: 89.6 ns/unit</title>
+    </circle>
+  </g><g><polyline points="300.96,33.80 429.25,39.21 496.92,40.62 581.77,40.93 679.58,39.54" fill="none" stroke="#b91c1c" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="300.96" cy="33.80" r="3.2" fill="#b91c1c">
+      <title>rhai 635aa83: 1,273 ns/unit</title>
+    </circle>
+
+    <circle cx="429.25" cy="39.21" r="3.2" fill="#b91c1c">
+      <title>rhai 8996ed3: 1,055 ns/unit</title>
+    </circle>
+
+    <circle cx="496.92" cy="40.62" r="3.2" fill="#b91c1c">
+      <title>rhai 735401d: 1,005 ns/unit</title>
+    </circle>
+
+    <circle cx="581.77" cy="40.93" r="3.2" fill="#b91c1c">
+      <title>rhai 5814726: 994 ns/unit</title>
+    </circle>
+
+    <circle cx="679.58" cy="39.54" r="3.2" fill="#b91c1c">
+      <title>rhai e48285b: 1,043 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="900.00" cy="97.47" r="3.2" fill="#475569">
+      <title>roto 9f3b0d1: 140 ns/unit</title>
+    </circle>
+  </g><g><polyline points="498.74,83.77 583.59,84.26 681.51,83.11" fill="none" stroke="#be185d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="498.74" cy="83.77" r="3.2" fill="#be185d">
+      <title>rquickjs 735401d: 225 ns/unit</title>
+    </circle>
+
+    <circle cx="583.59" cy="84.26" r="3.2" fill="#be185d">
+      <title>rquickjs 5814726: 221 ns/unit</title>
+    </circle>
+
+    <circle cx="681.51" cy="83.11" r="3.2" fill="#be185d">
+      <title>rquickjs e48285b: 230 ns/unit</title>
+    </circle>
+  </g><g><polyline points="62.00,36.62 70.76,37.38 77.58,37.35 169.93,37.78 295.16,24.03 421.97,34.30 489.53,36.49 574.38,38.08 672.19,35.42" fill="none" stroke="#2563eb" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="62.00" cy="36.62" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 1,154 ns/unit</title>
+    </circle>
+
+    <circle cx="70.76" cy="37.38" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 1,124 ns/unit</title>
+    </circle>
+
+    <circle cx="77.58" cy="37.35" r="3.2" fill="#2563eb">
+      <title>rustia 7e044f2: 1,125 ns/unit</title>
+    </circle>
+
+    <circle cx="169.93" cy="37.78" r="3.2" fill="#2563eb">
+      <title>rustia 40bc14c: 1,109 ns/unit</title>
+    </circle>
+
+    <circle cx="295.16" cy="24.03" r="3.2" fill="#2563eb">
+      <title>rustia 635aa83: 1,786 ns/unit</title>
+    </circle>
+
+    <circle cx="421.97" cy="34.30" r="3.2" fill="#2563eb">
+      <title>rustia 8996ed3: 1,251 ns/unit</title>
+    </circle>
+
+    <circle cx="489.53" cy="36.49" r="3.2" fill="#2563eb">
+      <title>rustia 735401d: 1,159 ns/unit</title>
+    </circle>
+
+    <circle cx="574.38" cy="38.08" r="3.2" fill="#2563eb">
+      <title>rustia 5814726: 1,097 ns/unit</title>
+    </circle>
+
+    <circle cx="672.19" cy="35.42" r="3.2" fill="#2563eb">
+      <title>rustia e48285b: 1,203 ns/unit</title>
+    </circle>
+  </g><g><polyline points="585.41,187.31 683.33,186.75" fill="none" stroke="#be185d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="585.41" cy="187.31" r="3.2" fill="#be185d">
+      <title>wasmi 5814726: 6.207 ns/unit</title>
+    </circle>
+
+    <circle cx="683.33" cy="186.75" r="3.2" fill="#be185d">
+      <title>wasmi e48285b: 6.328 ns/unit</title>
+    </circle>
+  </g><g>
+    <circle cx="685.15" cy="213.31" r="3.2" fill="#111827">
+      <title>wasmtime e48285b: 2.519 ns/unit</title>
+    </circle>
+  </g>
+      </svg>
+      <div class="history-legend">
+        <span><span class="swatch" style="color: #047857"></span>boa</span><span><span class="swatch" style="color: #0f766e"></span>koto</span><span><span class="swatch" style="color: #7c3aed"></span>mlua-lua54</span><span><span class="swatch" style="color: #b45309"></span>mlua-luau</span><span><span class="swatch" style="color: #b91c1c"></span>rhai</span><span><span class="swatch" style="color: #475569"></span>roto</span><span><span class="swatch" style="color: #be185d"></span>rquickjs</span><span><span class="swatch" style="color: #2563eb"></span>rustia</span><span><span class="swatch" style="color: #be185d"></span>wasmi</span><span><span class="swatch" style="color: #111827"></span>wasmtime</span>
+      </div>
+    </div>
+
+      <div class="table-wrap history-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Engine</th>
+              <th>Latest min ns/unit</th>
+              <th>Median</th>
+              <th>Trend vs previous</th>
+              <th>Commit</th>
+              <th>Measured</th>
+            </tr>
+          </thead>
+          <tbody>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #111827"></span><strong>wasmtime</strong></span></td>
+      <td>2.519</td>
+      <td>2.538</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:51 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>wasmi</strong></span></td>
+      <td>6.328</td>
+      <td>6.665</td>
+      <td><span class="trend trend-bad">+2.0%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:35 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #b45309"></span><strong>mlua-luau</strong></span></td>
+      <td>89.6</td>
+      <td>91.4</td>
+      <td><span class="trend trend-bad">+3.0%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:46 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #7c3aed"></span><strong>mlua-lua54</strong></span></td>
+      <td>137</td>
+      <td>137</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>d4bb1ed</td>
+      <td>2026-07-03 02:12:57 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #475569"></span><strong>roto</strong></span></td>
+      <td>140</td>
+      <td>141</td>
+      <td><span class="trend trend-flat">n/a</span></td>
+      <td>9f3b0d1</td>
+      <td>2026-07-03 02:27:20 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>rquickjs</strong></span></td>
+      <td>230</td>
+      <td>233</td>
+      <td><span class="trend trend-bad">+4.1%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:19 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #0f766e"></span><strong>koto</strong></span></td>
+      <td>619</td>
+      <td>641</td>
+      <td><span class="trend trend-bad">+6.2%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:30 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #b91c1c"></span><strong>rhai</strong></span></td>
+      <td>1,043</td>
+      <td>1,052</td>
+      <td><span class="trend trend-bad">+4.9%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:55:02 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #2563eb"></span><strong>rustia</strong></span></td>
+      <td>1,203</td>
+      <td>1,276</td>
+      <td><span class="trend trend-bad">+9.7%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:53:57 UTC</td>
+    </tr>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #047857"></span><strong>boa</strong></span></td>
+      <td>1,772</td>
+      <td>1,780</td>
+      <td><span class="trend trend-bad">+7.5%</span></td>
+      <td>e48285b</td>
+      <td>2026-07-03 01:54:14 UTC</td>
+    </tr>
+
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    </section>
+
       </div>
     </section>
 
@@ -2292,7 +4105,7 @@
     </section>
 
 
-    <p class="footnote">Schema <code>rustia.bench.current-results.v1</code>. Wasm sources <code>bench/wasm/current-results.json</code> and <code>bench/wasm/dispatch-current-results.json</code>. History <code>bench/history/runs.jsonl</code> (jsonl-v1). The dashboard is deterministic and contains no external assets or runtime JavaScript. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>rustia.bench.current-results.v1</code>. Wasm sources <code>bench/wasm/current-results.json</code> and <code>bench/wasm/dispatch-current-results.json</code>. History <code>bench/history/runs.jsonl</code> (jsonl-v1). The report is deterministic and contains no external assets or runtime JavaScript. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
 </body>
 </html>

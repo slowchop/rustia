@@ -8,6 +8,7 @@
     "notes": [
       "Percentages are rough engineering estimates, not automated metrics.",
       "The scope tracks public rustia crates, conformance, benchmarks, docs, tooling, and release readiness.",
+      "Project pillars and non-goals are canonical in design/02-pillars.md.",
       "The public host-bridge remains generic; grabby-specific types and effect catalogs stay outside public rustia."
     ],
     "canonical_facts": {
@@ -86,11 +87,11 @@
       "future_plan": "Stabilize API semantics, diagnostics, capability policy, and migration docs."
     },
     {
-      "name": "Full public Luau engine release",
+      "name": "Full public standalone Luau engine release",
       "complete": 48,
       "confidence": 58,
-      "state": "Luau 0.709 target and conformance corpus are strong; production engine still needs perf and parity hardening.",
-      "future_plan": "Complete P1/P2 runtime work, then P4 parity items such as module/loading, typechecker/LSP track, and release packaging."
+      "state": "Luau 0.709 standalone target and conformance corpus are strong; production engine still needs runtime, stdlib, performance, and release hardening. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode-compatibility work are not runtime-release requirements.",
+      "future_plan": "Complete P1/P2 runtime and standalone stdlib work, keep out-of-scope tracks audited, then package the public release against the pinned target."
     },
     {
       "name": "Standalone benchmark OSS project",

@@ -16,6 +16,10 @@ from `publish = false` to publishable.
   effect catalogs, or integration code from this repository.
 - Treat Luau 0.709 conformance as the compatibility contract until the target is
   deliberately re-pinned.
+- Treat no unsafe code as a public-workspace feature: every workspace package
+  must inherit the workspace `unsafe_code = "forbid"` lint. Experimental
+  spikes and standalone wasm FFI demos are not part of the publishable product
+  gate.
 
 ## Crate Metadata Gate
 

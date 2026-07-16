@@ -164,7 +164,8 @@ engine, and workload.
 Use `--latest-json <path>` to choose a different destination or
 `--no-latest-json` to skip it.
 
-Generate the static current-results HTML from the latest snapshot:
+Generate the static benchmark HTML report from the latest snapshot and committed
+history:
 
 ```sh
 node bench/render-current-results.js
@@ -177,8 +178,9 @@ just gen-current-results
 ```
 
 `gen-current-results` does not run measurements; it only regenerates result
-artifacts from committed history, including [`CLAIMS.md`](CLAIMS.md), the
-per-workload public-claim gate. `gen-benchmark-results` is kept as a recipe
+artifacts from committed history, including [`current-results.html`](current-results.html)
+with the current leaderboard and history charts, plus [`CLAIMS.md`](CLAIMS.md),
+the per-workload public-claim gate. `gen-benchmark-results` is kept as a recipe
 alias.
 
 Check that committed benchmark markdown, current-results JSON, claim gate, and
@@ -198,11 +200,14 @@ tracked in [`PRIOR-ART.md`](PRIOR-ART.md).
 
 ## Static Site
 
-`site/` contains a dependency-free dashboard that reads `history/runs.jsonl`,
-shows current leaderboards, renders per-workload history charts, and loads
-`wasm-gate.json` so the closed V8/JSC/SpiderMonkey pre-lock requirements stay
-visible next to the rough performance comparisons.
-It also reads `wasm/current-results.json` for the browser-wasm target bench.
+`current-results.html` is the single generated report for current leaderboards,
+per-workload history charts, wasm results, and claim-gate context.
+
+`site/` contains the older dependency-free dashboard that reads `history/runs.jsonl`
+directly. It remains useful while editing the raw JSONL history by hand.
+It also loads `wasm-gate.json` so the closed V8/JSC/SpiderMonkey pre-lock
+requirements stay visible next to the rough performance comparisons.
+The dashboard also reads `wasm/current-results.json` for the browser-wasm target bench.
 The dispatch panel reads `wasm/dispatch-current-results.json` for the
 `call_ref` versus `br_table` microbench.
 That target currently measures the wasm-compatible scripting adapters `rustia`

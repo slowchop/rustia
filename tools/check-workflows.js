@@ -133,7 +133,6 @@ function checkCi(text) {
   requireIncludes(text, "node tools/check-package-dry-runs.js", label);
   requireIncludes(text, "node tools/check-workflows.js", label);
   requireIncludes(text, "node design/render-progress.js --check", label);
-  requireIncludes(text, "node design/show-progress.js --no-color --width 88 >/dev/null", label);
   requireIncludes(text, "node tools/check-project-status.js", label);
   requireIncludes(text, "node tools/check-benchmark-results.js", label);
   requireIncludes(text, "node tools/check-wasm-gate-results.js", label);

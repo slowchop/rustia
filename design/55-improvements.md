@@ -3,9 +3,12 @@
 > **Status: [IMPROVEMENTS v1 — adopted] (2026-06-30).** From a 6-lens proposer + adversarial-synthesis
 > workflow over the design + the [conformance table](50-conformance.md). Each was verified against the five
 > gates (full-Luau public · the Standard/Deterministic two-profile model · public-clean/no-bespoke-in-public ·
-> Send-not-Sync · the locked axes) — **all 10 hold; none survives by violating an ideal.** Most live in the
+> thread-affine safe-Rust VM · the locked axes) — **all 10 hold; none survives by violating an ideal.** Most live in the
 > UNSPECIFIED/IMPL-DEFINED bucket (free to choose) or *are what real Luau already does*; the rest are pure
 > host-side/tooling guardrails. They **refine** the locked axes, never abandon them. Raw: `50-conformance-raw.json`.
+> For the newer performance-specific ranking and C++ Luau comparison, see
+> [`56-performance-research.md`](56-performance-research.md). This file remains the conformance-vetted improvement
+> list; the performance note reorders and extends the speed work.
 
 ## The 10 (ranked by leverage)
 
@@ -28,8 +31,8 @@ interned operands is an integer compare. **Why better:** attacks the measured ~2
 method dispatch at once (this is what Luau does); the **cross-VM shared pool is the biggest RSS lever** in the
 N-VM model (literals stored 1× per process, not N×). **Conformant:** eq/hash unify *by bytes* (atom fast-path
 only when both sides are interned; else byte compare) → Luau semantics byte-identical; only **compile-time
-constants** go in the immutable `Arc` (Sync-blessed), runtime strings stay per-VM `Gc` → **Send-not-Sync
-holds**; stays in the 16-B layout. **Cost:** medium-high; sequence behind the sealed `Value` newtype pre-P1.
+constants** go in the immutable `Arc` (Sync-blessed), runtime strings stay per-VM `Gc` → the live VM remains
+thread-affine; stays in the 16-B layout. **Cost:** medium-high; sequence behind the sealed `Value` newtype pre-P1.
 (Resolves the open const-pool/`Gc`-string seam.)
 
 **3. safeenv-gated generic FASTCALL + GETIMPORT.** *(speed #1 — strongest on the sim hot path)* Re-introduce
@@ -51,7 +54,7 @@ per-call `Vec<OwnedValue>`. **Why better:** the measured value-boundary cost is 
 (1.47 vs 1.01 µs); the stdlib is called constantly, so paying `OwnedValue` round-trips on every builtin is pure
 waste — collapses the ~4.7% host-call cost and gives the ergonomic typed API. **Conformant:** the public
 `Box<dyn Fn(&[OwnedValue])->Result>` ABI is **retained as the `'gc` firewall** for embedder code; typed sugar
-yields owned Rust scalars (brand never leaks); runs on the owning thread inside `mutate` → Send-not-Sync intact.
+yields owned Rust scalars (brand never leaks); runs on the owning thread inside `mutate` → thread-affine VM intact.
 **Cost:** medium (one internal trait + ~8 arity impls; public ABI unchanged).
 
 **5. Enforce libm-only transcendentals in-tree (clippy `disallowed-methods` + deny FMA/relaxed-SIMD).** *(determinism #4 · wasm #3)* Hard-forbid `f64::{sin,cos,…,powf,…}` everywhere (route through the `libm` crate);
@@ -97,7 +100,7 @@ the child). **Why better:** in the N-VM model the dominant per-VM cost is materi
 every hot-reload + console/mod VM) → sharing makes spawn ~free, cuts steady-state RSS (priority #2), and shrinks
 wasm startup/high-water on mobile (priority #3). **Conformant:** a readonly shared sandbox *is* Luau's behavior;
 Standard layers mutable globals via COW (base never mutated); the frozen image holds only **non-`Gc`**
-fn-pointers/`Arc` (never shared `Gc`) → Send-not-Sync holds. **Cost:** medium (child-env indirection + COW
+fn-pointers/`Arc` (never shared `Gc`) → the live VM remains thread-affine. **Cost:** medium (child-env indirection + COW
 seam; couple with #2 at P1).
 
 **10. Structured error (kind + span + chunkname + traceback) with one byte-exact Luau-message renderer + typed

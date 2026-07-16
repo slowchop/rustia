@@ -18,7 +18,8 @@
 
 A from-scratch **Rust Luau interpreter** replaces koto: deterministic (native+wasm), wasm-ready at ~parity,
 and **~5× faster than koto on general scripts**. **rustia is intended to be released publicly** (open-source)
-once it reaches full Luau parity; the public product is a clean, general-purpose Luau engine.
+as a pinned standalone Luau-compatible Rust engine once its conformance, benchmark, API, and release gates are
+satisfied; the public product is a clean, general-purpose Luau engine.
 
 **Two perf regimes — keep them separate (the v1 blur the review corrected):**
 
@@ -106,15 +107,15 @@ quiet-NaN at **every** f64-producing op; `-0.0`→`+0.0` **only at table-key nor
 instruction counter (full collection); ALL rollback-relevant AI state stays host-columnar (off the GC heap) —
 a hard constraint.** Considered: gc-arena [✓]; slotmap [✓ for host-columnar state, not the main heap];
 hand-rolled mark&sweep [fallback]; Rc+cycle-collector [rejected]; region/no-GC for the kernel [✓ complement].
-*Evidence (spike-d-gc):* all three flagged integration risks **retired by measurement** — write barrier is
-**free** (3.18 ns/mut in Marked phase = no-barrier; `make_gray_again` is `#[cold]`), the **retain pattern**
+*Evidence (spike-d-gc):* the key GC integration risks **retired by measurement** — write barrier is
+**free** (3.18 ns/mut in Marked phase = no-barrier; `make_gray_again` is `#[cold]`), and the **retain pattern**
 works (a `DynamicRoot` survived **1000 forced collections**, `fetch` ~0.69 ns; deep-copy-out is a one-time
-export cost), and the **`unsafe impl Send` move path is UB-clean under miri Stacked + Tree Borrows** across two
-thread moves. Throughput == slotmap == plain Vec (3.18 vs 3.14 ns/op). **slotmap rejected as the main heap**
-(its only edge is snapshot, which is O(heap) not O(1), and it has no cycle reclamation). Two API rules: (i) a
-`VmCell` that keeps the arena + all retained `DynamicRoot`s moving together (so a `!Send` handle can't be
-separated from its arena); (ii) collection trigger is the **instruction counter, never byte-debt** (object
-sizes differ 32/64-bit; byte-accounting ignores `Vec` backing).
+export cost). The old cross-thread live-VM move path was measured UB-clean, but production now avoids that
+marker entirely: a live `VmCell` is thread-affine while it owns a `gc-arena` heap. Throughput == slotmap == plain Vec
+(3.18 vs 3.14 ns/op). **slotmap rejected as the main heap** (its only edge is snapshot, which is O(heap) not
+O(1), and it has no cycle reclamation). Two API rules: (i) hosts parallelize with worker-local VMs and shared
+immutable compiled artifacts/configuration, not by moving live VMs; (ii) collection trigger is the **instruction
+counter, never byte-debt** (object sizes differ 32/64-bit; byte-accounting ignores `Vec` backing).
 
 **E. Determinism enforcement — LOCKED.** Insertion-ordered maps (seedless FxHash IndexMap). Per-op NaN canon
 (soundness + cross-engine). Ban FMA/fast-math/relaxed-SIMD. All transcendentals via the `libm` crate —
@@ -226,7 +227,7 @@ minimal locked-down sandbox/wasm build.
   ~0.9–1.0 µs, canon-ON golden, real `call_indirect`, gc-arena heap, retain+serde) measured. Axes B/D/H closed.
 - **P1 — engine core.** Lexer + recursive-descent parser (full type-grammar parse, no typecheck) + compiler
   (constant-fold w/ pinned libm+canon, generic-superinstruction fusion, regalloc, O0 mode); `rustia-vm` with
-  the **16-byte tagged Value**, gc-arena heap + write barriers + the `VmCell` Send unit + the op-extension hook,
+  the **16-byte tagged Value**, thread-affine gc-arena heap + write barriers + the op-extension hook,
   big-match dispatch, fuel + recursion cap, stackless trampoline. Host-columnar rollback region. Prepare the
   cross-arch golden (incl. f64) for the FULL target matrix (§C0): native macOS-arm64/**x86_64-Intel**/Windows/
   Linux-x86_64/arm64, and wasm in **V8 (Chrome) + SpiderMonkey (Firefox) + JSC (Safari/iOS)**. CI workflow
@@ -257,7 +258,9 @@ minimal locked-down sandbox/wasm build.
   speed. An **op-extension hook** + a sealed embedding API. No grabby-specific code. License TBD (P4).
 - **gak's private fork** = registers bespoke fused ops (the AI-kernel `OP_UTIL`, ~25× koto) through the hook —
   a thin delta tracking upstream, never a hard fork.
-- **Parity bar for public release = full Luau** (the §2-F deferred items return at P4); grabby's *first* private
+- **Parity bar for public release = pinned standalone Luau runtime compatibility** (the §2-F deferred runtime
+  items return at P4; analyzer, raw C API, Roblox, Lua 5.4, and bytecode compatibility remain separate tracks);
+  grabby's *first* private
   use runs on the P2 minimum-viable subset.
 
 ## 6. Risk register (post-resolution)
@@ -266,12 +269,12 @@ minimal locked-down sandbox/wasm build.
 |---|---|---|
 | Value-layout + wasm numbers are **V8-only / arm-Mac+Linux-x86 only**; **Firefox (SpiderMonkey)**, **Safari/iOS (JSC)**, **Intel Mac**, Windows, ARM-Linux untested | **high** | the one open gate (§C0 matrix) — re-measure at P1 before the final stamp; `Value` sealed/swappable until then |
 | General-script perf (~5× koto) is now **measured** (agent-H slice) but on one workload | med | broaden workloads at P1/P3; keep the Criterion gate |
-| `unsafe impl Send` soundness is an argument + one miri pass | med | `VmCell` encapsulation; keep miri/loom in CI; the move path is already UB-clean under both borrow models |
+| Live VM is thread-affine instead of `Send` | med | Avoids unsafe in production; hosts should construct VMs on worker threads and share only immutable compiled artifacts/configuration |
 | GC full-collect cost scales O(live-objects) (~10 ns/obj; ~200 µs at 20k objects) | med | tune the instruction-count collection interval at P1 on realistic heap sizes; confirm bit-reproducible native vs wasm |
 | Byte-compat tail (Schubfach, patterns, sort-tie, PCG32) | med | discrete P2 tasks, each gated by a differential test |
 | Per-VM RSS unmeasured (priority #2); 16B Value doubles value memory; GcBox +16 B/obj; grows-only wasm memory | med | measure at P1; set a per-VM budget; wasm binary already 128 KB |
 | Const-pool / `Gc`-string seam (shared `Arc<Program>` can't hold per-arena `Gc` constants) | med | resolve the interning policy + equality/hashing when real string constants land (P1) |
-| Public-release scope (full Luau parity) is a long tail | low | P4; grabby ships privately on the P2 subset first |
+| Public-release scope for pinned standalone Luau runtime compatibility is a long tail | low | P4; grabby ships privately on the P2 subset first; analyzer, raw C API, Roblox, Lua 5.4, and bytecode compatibility stay separate unless reclassified |
 
 ## 7. Open sub-decisions (deferred, not blocking)
 - Final string-interning / const-pool representation (Arc<str> host leaves vs per-VM materialization).

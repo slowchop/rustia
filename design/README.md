@@ -16,6 +16,7 @@ docs are design intent.
 | doc | what it covers | status |
 |---|---|---|
 | [`CURRENT.md`](CURRENT.md) | **the single canonical state** — read first | **authoritative** ✅ |
+| [`02-pillars.md`](02-pillars.md) | project pillars, non-goals, and the rabbit-hole decision filter | **[CANONICAL]** ✅ |
 | [`00-constraints.md`](00-constraints.md) | the fixed contract every decision is scored against (from grabby + gak) | **[FOUNDATION]** ✅ |
 | [`05-luau-target.md`](05-luau-target.md) | the pinned Luau target (0.709) — the conformance anchor | **[PINNED]** ✅ |
 | [`10-landscape.md`](10-landscape.md) | research brief: koto internals, Rust scripting landscape, Luau spec, official Luau VM, SOTA VM/JIT/WASM techniques (+ raw JSON) | **[RESEARCH v1]** ✅ |

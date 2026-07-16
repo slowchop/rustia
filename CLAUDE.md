@@ -30,13 +30,14 @@ serves them.
    the simplest thing that passes the golden + the bench. Strangler: small, always-green steps.
 
 5. **Mechanical enforcement over good intentions (the LLM-first lever).** rustfmt, `clippy -D warnings`, the
-   determinism lints, the golden test, the bench gate, the parser fuzz-vs-`full_moon`, and `miri` on every
-   `unsafe` — all in CI. If a rule matters, make it a check, not a comment. Agents forget; CI doesn't.
+   determinism lints, `unsafe_code = "forbid"` for the public workspace, the golden test, the bench gate, and
+   the parser fuzz-vs-`full_moon` — all in CI. If a rule matters, make it a check, not a comment. Agents
+   forget; CI doesn't.
 
 6. **Local reasoning — explicit state, no spooky action at a distance.** No hidden globals / thread-locals /
    statics that affect behaviour; pass VM state explicitly. Host effects go through the typed effect-queue,
    never `&World` aliasing. A function must be understandable from its signature + body — that's how both
-   agents and humans reason, and it's what makes the Send-not-Sync, one-VM-per-lane model sound.
+   agents and humans reason, and it's what makes the thread-affine, one-VM-per-lane model sound.
 
 7. **Greppable structure, honest names.** One concept per file; small self-contained modules named for what
    they hold; the module tree mirrors the design's crate layout; no mega-files, deep nesting, or
@@ -45,11 +46,11 @@ serves them.
    variants named consistently. A name should tell the truth about cost and effects (`get` is cheap; `compile`
    is not).
 
-8. **Every `unsafe` and every invariant is documented and asserted.** A `// SAFETY:` comment on every `unsafe`
-   block stating the invariant it relies on (especially the gc-arena `Send` wrapper and the `'gc` lifetime
-   rules); `debug_assert!` invariants where cheap; soundness-critical ones get `miri`/`loom` in CI. The two
-   profiles only *restrict* — a test asserts anything that runs under `DeterministicSim` produces identical
-   results under `ReproducibleStandard`.
+8. **No unsafe code in the public workspace; invariants are documented and asserted.** Production crates and
+   the benchmark harness inherit `unsafe_code = "forbid"`. Experimental spikes or standalone FFI demos may use
+   `unsafe` only with an explicit local reason and `SAFETY:` comments. Use `debug_assert!` for cheap invariants.
+   The two profiles only *restrict* — a test asserts anything that runs under `DeterministicSim` produces
+   identical results under `ReproducibleStandard`.
 
 9. **Never panic on guest input — errors are structured Results.** Script/compile errors → a typed
    `Result`/`ErrorKind` with source span + the byte-exact Luau message. `panic!`/`unwrap` are reserved for
