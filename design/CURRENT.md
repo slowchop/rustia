@@ -38,21 +38,45 @@ insertion-ordered hash parts use compact deterministic open-addressed `u32` side
 compact `u32` constant atoms plus a 4-byte per-PC site map; and eligible sites lazily allocate 16-byte
 atom/slot/shape records that always read the live value. Mutation-safe `GETIMPORT` resolves one-to-three-component
 descriptors without caching final values, and generic fixed-result `FASTCALL` guards the exact native function
-handle before direct dispatch and otherwise follows the ordinary resumable call path. Insertion order,
-metamethod/readonly behavior, mutation visibility, and logical fuel remain preserved.
+handle before direct dispatch and otherwise follows the ordinary resumable call path. Non-import dot fields and
+compile-time string-key reads/writes now lower to `GETTABLEKS`/`SETTABLEKS` with the same live slot
+revalidation as generic index operations. `GETTABLEKS` costs fuel 2. Compiler writes keep a one-fuel key load
+before an intervening RHS and then use the preloaded-key, one-fuel `SETTABLEKS`; the no-preload fully fused
+bytecode mode costs fuel 2. Compound updates retain the key produced
+by `GETTABLEKS` for their later `SETINDEX`, preserving the unfused three-step load/read/write fuel schedule.
+`NAMECALL` fuses the constant-name load
+and method lookup, not the subsequent `CALL`: its two lanes cover the receiver and the receiver's current
+table-valued `__index`, revalidate both paths, and read the live callee without caching a final value, receiver, or
+class. Lookup-only `NAMECALL` costs fuel 2; the mode that also preserves the prior missing-method check costs 3.
+Fused costs are charged before their side effects, preloaded writes retain the original cross-RHS phase, and the
+equivalent instruction-count/GC cadence is retained.
+Insertion order, metamethod/readonly behavior, mutation visibility, and logical fuel remain preserved.
+Compiled constant pools are immutable and shared across program clones retained by different VMs. Long compiled
+string atoms reference that storage without copying the bytes per VM, and an equal runtime-owned atom upgrades to
+the shared bytes when the compiled literal arrives later. Ordinary loaded literals and runtime-created binary
+strings of up to 13 bytes can live directly in the sealed 16-byte `Value`. Constant-key
+and cache paths still atomize when identity is required, and table insertion canonicalizes a new non-nil short
+key, but lookup misses, nil writes, readonly writes, and invalid-table writes do not create atoms.
 `rustia-cli` supports file, stdin, `--eval`, and `--repl` execution with profile, fuel, source-name options,
 state-preserving line evaluation, expression shorthand, and source-aware diagnostics for compile and runtime
 failures.
 CI wiring now includes pinned-toolchain formatting and strict Clippy gates, hosted release-preflight checks,
-explicit public-example compilation, plus a manual benchmark measurement workflow that targets only the generic
-`[self-hosted, bench]` runner label.
+explicit public-example compilation, plus push, nightly, and manual benchmark measurement modes that target only
+the generic `[self-hosted, bench]` runner label and publish generated history to the private benchmark-data repo.
 The benchmark harness prepares fresh engine/workload state for calibration and every recorded repetition, warms
 that state once outside the timer, and can write execution-ordered raw samples to a separate
-`rustia.bench.raw-samples.v1` JSON sidecar. The stable public history remains min/median summary JSONL. No
-public-history result has been published for this slice. A local fresh-state ABBA against `dac4ec2` found no
-material regression above 5% after hardening; stdlib/string improved materially, closures were neutral-to-faster,
-and the cooled dense-table confirmation retained a borderline 1.29% slowdown. It remains development evidence,
-not a blanket release speed claim.
+`rustia.bench.raw-samples.v1` JSON sidecar. `--fixed-n` bypasses calibration and uses exactly the selected work for
+every warmup and timed repetition; sidecars record whether `n` was fixed or calibrated, while the stable public
+history remains min/median summary JSONL. The equal-work protocol alternates ABBA/BAAB order and requires at least
+three independent publication measurements of the clean final commit, with the sidecar written before each actual
+summary append. No accepted exact-final public-history result has been published for the new field/string slice.
+Six uncontaminated fixed-work
+diagnostic legs reduced the working-tree dense difference to about +0.90% with overlapping spreads; two later
+legs were excluded after unrelated release builds saturated the host. The preceding local fresh-state ABBA
+against `dac4ec2` found no material regression above 5% after hardening; stdlib/string improved materially,
+closures were neutral-to-faster, and the cooled dense-table confirmation retained a borderline 1.29% slowdown.
+That older result remains development evidence, not a claim that the dense-table follow-up is resolved or a
+blanket release speed claim.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
 ## Project pillars
@@ -85,21 +109,20 @@ API parity release-critical work.
    deterministic f64/libm behavior, table-key `-0` normalization, and profile-specific GC behavior covered by
    tests while performance work proceeds. Keep the public workspace's `unsafe_code = "forbid"` gate intact.
    For performance sequencing, use [`56-performance-research.md`](56-performance-research.md): publish the
-   locally completed alternating table/atom/cache plus `GETIMPORT`/`FASTCALL` measurement through the normal
-   benchmark-history gate, keep the borderline dense-table cost visible, then pursue broader field/namecall
-   specialization, adaptive specialization, and type-directed wasm/AOT.
+   implemented table/atom/cache, `GETIMPORT`/`FASTCALL`, constant field/namecall, and string-representation slice
+   through the fixed-work benchmark-history gate; keep the borderline dense-table cost visible until equal-work
+   evidence resolves it; then pursue adaptive specialization and type-directed wasm/AOT.
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 12 workload entries including
    source-covered `string_building`, append-only JSONL history, package metadata, split notes, static dashboard
    files, an explicit closed wasm pre-lock gate artifact, a wasm target bench for rustia+koto, a `call_ref`
-   versus `br_table` dispatch microbench, and a manual self-hosted measurement workflow. Next work is the actual
-   standalone-project split, longer-run public history, and automated tracking publication.
+   versus `br_table` dispatch microbench, and self-hosted push/nightly/manual publication into the private
+   benchmark-data repository. Next work is the actual standalone-project split and longer-run public history.
 3. **Keep the Luau 0.709 conformance corpus green**. The current repo has 692 executable fixtures covering 491
    behavior refs with no pending rows; new engine work should add focused fixtures rather than re-opening
    pending inventory.
-4. **Operationalize benchmark CI** — the public workflow uses only `[self-hosted, bench]`. The owner still needs
-   to register that runner before using the manual measurement workflow, and automated history publication is
-   not wired yet.
+4. **Maintain benchmark CI operations** — the workflow uses only `[self-hosted, bench]`, restores and publishes
+   the private benchmark-data repository, and requires the matching runner plus deploy key to remain registered.
 
 **Pre-P1-LOCK gates** (finalizing the value-layout/dispatch/wasm story waits on these): see the "What's next"
 section below for the full list (GC tuning, benchmark publication, `LuauIntegerType2` watch).
@@ -132,12 +155,15 @@ section below for the full list (GC tuning, benchmark publication, `LuauIntegerT
   guard-free specialized wasm. (Corrects the earlier sloppy "JIT moot in-browser.")
 - **SotA performance plan is no-unsafe:** [`56-performance-research.md`](56-performance-research.md) ranks the
   current speed work. Compact deterministic table/atom indices, compact site-scoped live-slot caches,
-  mutation-safe `GETIMPORT`, and guarded generic fixed-result `FASTCALL` are landed. A local fresh-state ABBA
-  found no credible material regression above 5%, while retaining a borderline +1.29% dense-table result; it is
-  not committed public history or blanket speed evidence. Next come shared string representation, broader
-  field/namecall specialization, hot-loop hygiene, adaptive quickening, superinstructions/O2, and type-directed
-  wasm/AOT. Native copy-and-patch/JIT work remains a research reference unless it can satisfy the public
-  `unsafe_code = "forbid"` gate.
+  mutation-safe `GETIMPORT`, guarded generic fixed-result `FASTCALL`, constant-key
+  `GETTABLEKS`/`SETTABLEKS`, two-lane live `NAMECALL` lookup, shared compiled constant storage, and 13-byte inline
+  literal/runtime strings are landed. A local fresh-state ABBA for the preceding hardening found no credible
+  material regression above 5%, while retaining a borderline +1.29% dense-table result. A fixed-work working-tree
+  diagnostic for the newer field/string slice measured about +0.90% across six uncontaminated legs, but exact-final
+  evidence and public history are still pending, so neither result is blanket speed evidence. Next come
+  equal-work validation and publication, hot-loop hygiene, adaptive quickening, superinstructions/O2, and
+  type-directed wasm/AOT. Native copy-and-patch/JIT work remains a research reference unless it can satisfy the
+  public `unsafe_code = "forbid"` gate.
 - **Luau target PINNED** (review C1): **Luau 0.709** (= our mlua oracle), standalone (not-Roblox) surface,
   vector width 3, flags-off — see [`05-luau-target.md`](05-luau-target.md). **f64-only is VERIFIED correct**
   (`math.type==nil`; integers are default-OFF even at HEAD 0.727 behind `FFlag::LuauIntegerType2`).
@@ -171,7 +197,7 @@ section below for the full list (GC tuning, benchmark publication, `LuauIntegerT
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + deterministic extension/linker plan | **implemented first slice** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |
-| [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design (some decisions pending) | **runner/adapters/history/site/package metadata/manual benchmark workflow implemented; split/published tracking pending** |
+| [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/site/package metadata and push/nightly/manual data-repo publication implemented; standalone split pending** |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **metadata/checklist/changelog/preflight/CI gates started; publish=false remains** |
 | [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **policy started; 0.0.x remains unstable** |
 | [`crate-metadata.json`](crate-metadata.json) | generated cargo metadata policy audit for all workspace packages | **current audit: 8 packages / metadata policy ok / publish=false** |
@@ -192,18 +218,20 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 | H3 | wasm gate + Wasm 3.0 | **RESOLVED** — Wasm-3.0 assessed (br_table stays; wasm-GC rejected; relaxed-SIMD banned); V8 + Bun/JSC-family + SpiderMonkey production wasm and `call_ref` dispatch measured. |
 | M1 | three named modes | **RESOLVED** — LuauCompat(knobs)/ReproducibleStandard(default)/DeterministicSim(real build). |
 | M2 | Standard incremental GC | **RESOLVED** — paced/incremental for Standard, full-collect-on-instruction-count for DeterministicSim. |
-| M3 | promote inline caches + hot/cold | **RESOLVED** — compact site-scoped live-slot caches plus `GETIMPORT`/`FASTCALL` landed; hot/cold remains P1 and dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` specialization remains P2. |
+| M3 | promote inline caches + hot/cold | **RESOLVED** — compact site-scoped live-slot caches plus `GETIMPORT`/`FASTCALL` and dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` landed; hot/cold remains P1. |
 
 ## What's next (the genuine remaining gates before P1 lock)
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items:
 1. **Tune the GC intervals** (Deterministic instruction-count interval = determinism ABI; Standard paced-debt
    multiplier) on realistic heap sizes at P1.
 2. **Record production benchmark baselines** for rustia and each completed external adapter. For the current
-   performance slice, retain separate baseline/candidate raw sidecars and alternate run order so drift is
-   visible; publish only the stable summary records that pass the claim gate. Then make `RESULTS.md` and the
-   future static website consume the same JSONL history.
+   performance slice, use one recorded fixed `n`, retain separate baseline/candidate raw sidecars, and alternate
+   ABBA/BAAB run order so drift is visible. Publish only actual harness-produced summary records from at least
+   three clean-final-commit legs and withhold an interpretation unless their retained evidence agrees; do not
+   treat either the existing +1.29% dense result or the working-tree +0.90% diagnostic as resolved before that
+   evidence. Keep `RESULTS.md`, claims, and the static benchmark view consuming the same JSONL history.
 3. **Watch `FFlag::LuauIntegerType2`** upstream (the f64-only tripwire).
 
 These are P1-gated; the design itself is otherwise complete. P1 (engine build) starts with the cross-engine +
-conformance + benchmark gates prepared from day one; workflow/config wiring waits until the owner has been told
-the required self-hosted runner setup.
+conformance + benchmark gates prepared from day one; the self-hosted runner and private data-repo deploy key are
+external operational prerequisites for fresh CI measurements.

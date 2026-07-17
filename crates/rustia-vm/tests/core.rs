@@ -330,6 +330,291 @@ fn getimport_rejects_invalid_encoding_fields() {
 }
 
 #[test]
+fn constant_key_and_namecall_opcodes_reserve_fused_fuel_atomically() {
+    let cases = [
+        (Instruction::with_aux(Opcode::GetTableKs, 0, 1, 0, 0), 1),
+        (Instruction::with_aux(Opcode::SetTableKs, 0, 1, 0, 0), 1),
+        (Instruction::with_aux(Opcode::NameCall, 0, 1, 0, 0), 1),
+        (Instruction::with_aux(Opcode::NameCall, 0, 1, 1, 0), 2),
+    ];
+
+    for (instruction, limit) in cases {
+        let settings = VmSettings {
+            initial_fuel: Some(limit),
+            deterministic_gc_interval: NonZeroU64::new(1).unwrap(),
+            ..VmSettings::default()
+        };
+        let program = Program::new(
+            Function::new(vec![instruction], 2),
+            vec![Constant::String(b"field".to_vec())],
+        );
+        let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
+        let error = vm
+            .run(&program)
+            .expect_err("a fused opcode must reserve its full fuel before starting");
+        assert!(matches!(
+            error.kind,
+            rustia_vm::ErrorKind::FuelExhausted { limit: actual } if actual == limit
+        ));
+        assert_eq!(error.pc, Some(0));
+        assert_eq!(vm.deterministic_collection_count(), 0);
+    }
+}
+
+#[test]
+fn constant_key_and_checked_namecall_opcodes_preserve_successful_gc_cadence() {
+    let cases = [
+        (
+            vec![
+                Instruction::new(Opcode::NewArray, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                Instruction::with_aux(Opcode::SetTableKs, 0, 1, 0, 0),
+                Instruction::with_aux(Opcode::GetTableKs, 2, 0, 0, 0),
+                Instruction::new(Opcode::Return, 2, 1, 0),
+            ],
+            7,
+        ),
+        (
+            vec![
+                Instruction::new(Opcode::NewArray, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                Instruction::with_aux(Opcode::SetTableKs, 0, 1, 0, 0),
+                Instruction::with_aux(Opcode::NameCall, 2, 0, 1, 0),
+                Instruction::new(Opcode::Return, 2, 1, 0),
+            ],
+            8,
+        ),
+    ];
+
+    for (code, expected_collections) in cases {
+        let settings = VmSettings {
+            deterministic_gc_interval: NonZeroU64::new(1).unwrap(),
+            ..VmSettings::default()
+        };
+        let program = Program::new(
+            Function::new(code, 3),
+            vec![Constant::String(b"field".to_vec()), Constant::Number(42.0)],
+        );
+        let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
+
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(42.0));
+        assert_eq!(vm.deterministic_collection_count(), expected_collections);
+    }
+}
+
+#[test]
+fn compound_gettableks_key_output_matches_unfused_fuel_and_gc_cadence() {
+    let setup = vec![
+        Instruction::new(Opcode::NewArray, 0, 0, 0),
+        Instruction::new(Opcode::LoadConst, 1, 0, 1),
+        Instruction::with_aux(Opcode::SetTableKs, 0, 1, 0, 0),
+    ];
+    let mut fused = setup.clone();
+    fused.extend([
+        Instruction::with_aux(Opcode::GetTableKs, 2, 0, 3, 0),
+        Instruction::new(Opcode::LoadConst, 4, 0, 1),
+        Instruction::new(Opcode::Add, 2, 2, 4),
+        Instruction::new(Opcode::SetIndex, 0, 3, 2),
+        Instruction::new(Opcode::Return, 2, 1, 0),
+    ]);
+    let mut unfused = setup;
+    unfused.extend([
+        Instruction::new(Opcode::LoadConst, 3, 0, 0),
+        Instruction::new(Opcode::GetIndex, 2, 0, 3),
+        Instruction::new(Opcode::LoadConst, 4, 0, 1),
+        Instruction::new(Opcode::Add, 2, 2, 4),
+        Instruction::new(Opcode::SetIndex, 0, 3, 2),
+        Instruction::new(Opcode::Return, 2, 1, 0),
+    ]);
+
+    for code in [fused, unfused] {
+        let settings = VmSettings {
+            initial_fuel: Some(10),
+            deterministic_gc_interval: NonZeroU64::new(1).unwrap(),
+            ..VmSettings::default()
+        };
+        let program = Program::new(
+            Function::new(code, 5),
+            vec![Constant::String(b"field".to_vec()), Constant::Number(1.0)],
+        );
+        let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
+
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(2.0));
+        assert_eq!(vm.deterministic_collection_count(), 10);
+    }
+}
+
+#[test]
+fn preloaded_settableks_matches_unfused_fuel_and_gc_cadence() {
+    let preloaded = vec![
+        Instruction::new(Opcode::NewArray, 0, 0, 0),
+        Instruction::new(Opcode::LoadConst, 1, 0, 0),
+        Instruction::new(Opcode::LoadConst, 2, 0, 1),
+        Instruction::with_aux(Opcode::SetTableKs, 0, 2, 1, 0),
+        Instruction::new(Opcode::Return, 2, 1, 0),
+    ];
+    let unfused = vec![
+        Instruction::new(Opcode::NewArray, 0, 0, 0),
+        Instruction::new(Opcode::LoadConst, 1, 0, 0),
+        Instruction::new(Opcode::LoadConst, 2, 0, 1),
+        Instruction::new(Opcode::SetIndex, 0, 1, 2),
+        Instruction::new(Opcode::Return, 2, 1, 0),
+    ];
+
+    let variants = [preloaded, unfused];
+    for limit in 0..=5 {
+        let outcomes = variants
+            .iter()
+            .map(|code| {
+                let settings = VmSettings {
+                    initial_fuel: Some(limit),
+                    deterministic_gc_interval: NonZeroU64::new(1).unwrap(),
+                    ..VmSettings::default()
+                };
+                let program = Program::new(
+                    Function::new(code.clone(), 3),
+                    vec![Constant::String(b"field".to_vec()), Constant::Number(42.0)],
+                );
+                let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
+                let outcome = match vm.run(&program) {
+                    Ok(value) => format!("ok:{:?}", value.as_number()),
+                    Err(error) => format!("err:{:?}:{error}", error.pc),
+                };
+                (outcome, vm.deterministic_collection_count())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(outcomes[0], outcomes[1], "fuel cutoff {limit} diverged");
+        if limit == 5 {
+            assert_eq!(outcomes[0], ("ok:Some(42.0)".to_owned(), 5));
+        }
+    }
+}
+
+#[test]
+fn constant_key_and_namecall_opcodes_reject_malformed_encodings() {
+    let cases = [
+        (
+            Instruction::with_aux(Opcode::SetTableKs, 0, 1, 1, 0),
+            vec![Constant::String(b"field".to_vec())],
+        ),
+        (
+            Instruction::with_aux(Opcode::NameCall, 0, 1, 2, 0),
+            vec![Constant::String(b"method".to_vec())],
+        ),
+        (
+            Instruction::with_aux(Opcode::GetTableKs, 0, 1, 0, -1),
+            vec![Constant::String(b"field".to_vec())],
+        ),
+        (
+            Instruction::with_aux(Opcode::SetTableKs, 0, 1, 0, -1),
+            vec![Constant::String(b"field".to_vec())],
+        ),
+        (
+            Instruction::with_aux(Opcode::NameCall, 0, 1, 0, -1),
+            vec![Constant::String(b"method".to_vec())],
+        ),
+        (
+            Instruction::with_aux(Opcode::GetTableKs, 0, 1, 0, 0),
+            vec![Constant::Number(1.0)],
+        ),
+        (
+            Instruction::with_aux(Opcode::SetTableKs, 0, 1, 0, 0),
+            vec![Constant::Number(1.0)],
+        ),
+        (
+            Instruction::with_aux(Opcode::NameCall, 0, 1, 0, 0),
+            vec![Constant::Number(1.0)],
+        ),
+    ];
+
+    for (instruction, constants) in cases {
+        let program = Program::new(Function::new(vec![instruction], 2), constants);
+        let error = Vm::new(Profile::ReproducibleStandard)
+            .run(&program)
+            .expect_err("malformed fused table bytecode must be rejected");
+        assert!(matches!(
+            error.kind,
+            rustia_vm::ErrorKind::InvalidProgram { .. }
+        ));
+    }
+
+    let invalid_key_output = Program::new(
+        Function::new(
+            vec![Instruction::with_aux(Opcode::GetTableKs, 0, 0, 1, 0)],
+            1,
+        ),
+        vec![Constant::String(b"field".to_vec())],
+    );
+    let error = Vm::new(Profile::ReproducibleStandard)
+        .run(&invalid_key_output)
+        .expect_err("GETTABLEKS key output must reference a live register");
+    assert!(matches!(
+        error.kind,
+        rustia_vm::ErrorKind::RegisterOutOfBounds {
+            register: 1,
+            max: 1
+        }
+    ));
+
+    let mismatched_preload = Program::new(
+        Function::new(
+            vec![
+                Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                Instruction::with_aux(Opcode::SetTableKs, 0, 1, 1, 0),
+            ],
+            2,
+        ),
+        vec![
+            Constant::String(b"field".to_vec()),
+            Constant::String(b"other".to_vec()),
+        ],
+    );
+    let error = Vm::new(Profile::ReproducibleStandard)
+        .run(&mismatched_preload)
+        .expect_err("preloaded SETTABLEKS key must match its constant");
+    assert!(matches!(
+        error.kind,
+        rustia_vm::ErrorKind::InvalidProgram { .. }
+    ));
+
+    let invalid_preload_register = Program::new(
+        Function::new(
+            vec![Instruction::with_aux(Opcode::SetTableKs, 0, 1, 2, 0)],
+            2,
+        ),
+        vec![Constant::String(b"field".to_vec())],
+    );
+    let error = Vm::new(Profile::ReproducibleStandard)
+        .run(&invalid_preload_register)
+        .expect_err("preloaded SETTABLEKS key register must be in bounds");
+    assert!(matches!(
+        error.kind,
+        rustia_vm::ErrorKind::RegisterOutOfBounds {
+            register: 2,
+            max: 2
+        }
+    ));
+
+    for instruction in [
+        Instruction::with_aux(Opcode::GetTableKs, 0, 1, 0, 9),
+        Instruction::with_aux(Opcode::SetTableKs, 0, 1, 0, 9),
+        Instruction::with_aux(Opcode::NameCall, 0, 1, 0, 9),
+    ] {
+        let out_of_bounds = Program::new(
+            Function::new(vec![instruction], 2),
+            vec![Constant::String(b"field".to_vec())],
+        );
+        let error = Vm::new(Profile::ReproducibleStandard)
+            .run(&out_of_bounds)
+            .expect_err("out-of-range table key constants must be rejected");
+        assert!(matches!(
+            error.kind,
+            rustia_vm::ErrorKind::ConstantOutOfBounds { index: 9, len: 1 }
+        ));
+    }
+}
+
+#[test]
 fn fastcall_reuses_call_argument_validation() {
     let invalid_arity = Program::new(
         Function::new(

@@ -72,6 +72,7 @@ jobs:
 
       - name: Check benchmark generated artifacts
         run: |
+          node bench/analyze-fixed-samples.js --self-test
           node tools/check-benchmark-results.js
           node tools/check-wasm-gate-results.js
           node bench/render-current-results.js --check

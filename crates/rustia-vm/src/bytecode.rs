@@ -1,9 +1,43 @@
+use std::sync::Arc;
+
 #[derive(Clone, Debug)]
 pub struct Program {
     pub main: Function,
-    pub constants: Vec<Constant>,
+    /// Immutable compiled constants shared by every clone of this program.
+    ///
+    /// VMs retain a program clone for closures and coroutines. Keeping the pool behind an
+    /// `Arc` makes that retention cheap and, in particular, stores compiled string bytes once
+    /// even when the same program is loaded into multiple VMs.
+    constants: Arc<ConstantStorage>,
     pub functions: Vec<Function>,
     pub source_name: Option<String>,
+}
+
+#[derive(Debug)]
+struct ConstantStorage {
+    values: Box<[Constant]>,
+    string_hashes: Box<[u64]>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SharedProgramString {
+    storage: Arc<ConstantStorage>,
+    index: usize,
+}
+
+impl SharedProgramString {
+    #[inline]
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        match &self.storage.values[self.index] {
+            Constant::String(bytes) => bytes,
+            _ => unreachable!("shared string descriptors are validated at construction"),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn stable_hash(&self) -> u64 {
+        self.storage.string_hashes[self.index]
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -183,6 +217,18 @@ pub enum Opcode {
     CoerceForNumber = 125,
     GetImport = 126,
     FastCall = 127,
+    /// Constant-string table lookup. A nonzero `C` also receives the loaded key value so a
+    /// compound update can reuse the original logical constant-load step without forcing a new
+    /// short-string atom on a miss.
+    GetTableKs = 128,
+    /// Constant-string table write. `C = 0` fuses the logical key load (fuel 2); nonzero `C`
+    /// names a key register loaded earlier and specializes only the final write (fuel 1), so
+    /// compiler lowering can preserve evaluation and GC order across an intervening RHS.
+    SetTableKs = 129,
+    /// Constant-name method lookup. `A` receives the callee, `B` names the receiver register,
+    /// and `aux` names the string constant. `C = 0` performs lookup only (fuel 2); `C = 1`
+    /// also checks for a missing method (fuel 3). Other `C` values are invalid.
+    NameCall = 130,
 }
 
 pub const ASSERT_MESSAGE_NONE: i32 = -1;
@@ -221,7 +267,7 @@ impl Program {
     pub fn new(main: Function, constants: Vec<Constant>) -> Self {
         Self {
             main,
-            constants,
+            constants: Arc::new(ConstantStorage::new(constants)),
             functions: Vec::new(),
             source_name: None,
         }
@@ -234,7 +280,7 @@ impl Program {
     ) -> Self {
         Self {
             main,
-            constants,
+            constants: Arc::new(ConstantStorage::new(constants)),
             functions,
             source_name: None,
         }
@@ -244,6 +290,57 @@ impl Program {
         self.source_name = source_name;
         self
     }
+
+    #[inline]
+    pub fn constants(&self) -> &[Constant] {
+        &self.constants.values
+    }
+
+    #[inline]
+    pub(crate) fn shared_string(&self, index: usize) -> Option<SharedProgramString> {
+        matches!(self.constants.values.get(index), Some(Constant::String(_))).then(|| {
+            SharedProgramString {
+                storage: Arc::clone(&self.constants),
+                index,
+            }
+        })
+    }
+}
+
+impl ConstantStorage {
+    fn new(values: Vec<Constant>) -> Self {
+        let string_hashes = values
+            .iter()
+            .map(|constant| match constant {
+                Constant::String(bytes) => stable_bytes_hash(bytes),
+                _ => 0,
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        Self {
+            values: values.into_boxed_slice(),
+            string_hashes,
+        }
+    }
+}
+
+#[inline]
+pub(crate) fn stable_bytes_hash(value: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in value {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    mix_stable_hash(hash ^ value.len() as u64)
+}
+
+#[inline]
+const fn mix_stable_hash(mut value: u64) -> u64 {
+    value ^= value >> 30;
+    value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value ^= value >> 27;
+    value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
 }
 
 impl Function {
@@ -396,4 +493,42 @@ impl Function {
 pub enum UpvalueDescriptor {
     ParentLocal(u8),
     ParentUpvalue(u8),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn program_clones_share_compiled_constants_and_string_storage() {
+        let bytes = b"shared compiled string storage".to_vec();
+        let bytes_pointer = bytes.as_ptr();
+        let program = Program::new(
+            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            vec![Constant::String(bytes)],
+        );
+        let cloned = program.clone();
+
+        assert!(Arc::ptr_eq(&program.constants, &cloned.constants));
+        let original = program.shared_string(0).expect("shared string");
+        let cloned = cloned.shared_string(0).expect("shared string");
+        assert!(Arc::ptr_eq(&original.storage, &cloned.storage));
+        assert_eq!(original.as_bytes().as_ptr(), bytes_pointer);
+        assert_eq!(original.as_bytes().as_ptr(), cloned.as_bytes().as_ptr());
+        assert_eq!(
+            original.stable_hash(),
+            stable_bytes_hash(original.as_bytes())
+        );
+    }
+
+    #[test]
+    fn shared_string_descriptors_reject_non_strings_and_out_of_bounds_indices() {
+        let program = Program::new(
+            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            vec![Constant::Number(1.0)],
+        );
+
+        assert!(program.shared_string(0).is_none());
+        assert!(program.shared_string(1).is_none());
+    }
 }

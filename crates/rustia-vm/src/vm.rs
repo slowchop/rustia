@@ -115,7 +115,7 @@ struct LoadedProgram {
 
 impl LoadedProgram {
     fn new(program: Program) -> Self {
-        let constant_atoms = vec![CONSTANT_ATOM_EMPTY; program.constants.len()];
+        let constant_atoms = vec![CONSTANT_ATOM_EMPTY; program.constants().len()];
         let main_inline_caches = FunctionInlineCaches::new(&program.main);
         let function_inline_caches = program
             .functions
@@ -245,7 +245,7 @@ impl FunctionInlineCaches {
             .code
             .iter()
             .map(|instruction| match instruction.op {
-                Opcode::GetImport => SITE_CACHE_IMPORT_EMPTY,
+                Opcode::GetImport | Opcode::NameCall => SITE_CACHE_IMPORT_EMPTY,
                 Opcode::FastCall => SITE_CACHE_FAST_CALL_EMPTY,
                 opcode if opcode_uses_table_inline_cache(opcode) => SITE_CACHE_TABLE_EMPTY,
                 _ => SITE_CACHE_INELIGIBLE,
@@ -364,7 +364,12 @@ fn compact_site_cache_index(index: usize) -> Option<u32> {
 const fn opcode_uses_table_inline_cache(opcode: Opcode) -> bool {
     matches!(
         opcode,
-        Opcode::GetGlobal | Opcode::SetGlobal | Opcode::GetIndex | Opcode::SetIndex
+        Opcode::GetGlobal
+            | Opcode::SetGlobal
+            | Opcode::GetIndex
+            | Opcode::SetIndex
+            | Opcode::GetTableKs
+            | Opcode::SetTableKs
     )
 }
 
@@ -772,7 +777,8 @@ impl Vm {
     }
 
     pub fn string(&mut self, value: impl AsRef<str>) -> Value {
-        Value::string_atom(self.heap.intern_string(value.as_ref()))
+        self.heap
+            .intern_string_value_bytes(value.as_ref().as_bytes())
     }
 
     pub fn array_table(&mut self, values: &[Value]) -> Value {
@@ -1193,7 +1199,7 @@ impl Vm {
                                 return Ok(VmFlow::Return(finish_function_results(
                                     &mut pending_return_prefixes,
                                     vec![Value::nil()],
-                                )))
+                                )));
                             }
                             Opcode::LoadConst => {
                                 let value = self.load_constant(
@@ -2004,6 +2010,97 @@ impl Vm {
                                     |e| attach_instruction_source(program, function, pc - 1, e),
                                 )?;
                             }
+                            Opcode::GetTableKs => {
+                                let object =
+                                    get_register(&registers, instruction.b).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let key = self
+                                    .instruction_string_key_value(
+                                        program,
+                                        program_id,
+                                        instruction.aux,
+                                        "negative table-key constant index",
+                                        "table-key constant must be a string",
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let key = self.canonicalize_existing_string_key(
+                                    program_id,
+                                    instruction.aux,
+                                    key,
+                                );
+                                self.advance_fused_instruction_steps_with_root(1, object);
+                                if instruction.c != 0 {
+                                    set_register(&mut registers, instruction.c, key).map_err(
+                                        |e| attach_instruction_source(program, function, pc - 1, e),
+                                    )?;
+                                }
+                                let value = self
+                                    .get_index_value_with_inline_cache(
+                                        program,
+                                        program_id,
+                                        context.prototype,
+                                        pc - 1,
+                                        object,
+                                        key,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                set_register(&mut registers, instruction.a, value).map_err(
+                                    |e| attach_instruction_source(program, function, pc - 1, e),
+                                )?;
+                            }
+                            Opcode::NameCall => {
+                                let object =
+                                    get_register(&registers, instruction.b).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let key = self
+                                    .instruction_string_key_value(
+                                        program,
+                                        program_id,
+                                        instruction.aux,
+                                        "negative method-name constant index",
+                                        "method-name constant must be a string",
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let key = self.canonicalize_existing_string_key(
+                                    program_id,
+                                    instruction.aux,
+                                    key,
+                                );
+                                self.advance_fused_instruction_steps_with_root(1, object);
+                                let callee = self
+                                    .get_index_value_with_namecall_inline_cache(
+                                        program,
+                                        program_id,
+                                        context.prototype,
+                                        pc - 1,
+                                        object,
+                                        key,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                set_register(&mut registers, instruction.a, callee).map_err(
+                                    |e| attach_instruction_source(program, function, pc - 1, e),
+                                )?;
+                                if instruction.c == 1 {
+                                    self.advance_fused_instruction_steps_with_root(1, callee);
+                                    self.check_method_value(callee, object, key).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                }
+                            }
                             Opcode::CheckMethod => {
                                 let callee =
                                     get_register(&registers, instruction.a).map_err(|e| {
@@ -2043,6 +2140,74 @@ impl Vm {
                                     get_register(&registers, instruction.c).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
+                                self.set_index_value_with_inline_cache(
+                                    program,
+                                    program_id,
+                                    context.prototype,
+                                    pc - 1,
+                                    object,
+                                    key,
+                                    value,
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })?;
+                            }
+                            Opcode::SetTableKs => {
+                                let object =
+                                    get_register(&registers, instruction.a).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let preloaded_key = if instruction.c == 0 {
+                                    None
+                                } else {
+                                    Some(get_register(&registers, instruction.c).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?)
+                                };
+                                let value =
+                                    get_register(&registers, instruction.b).map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let expected_key = self
+                                    .instruction_string_key_value(
+                                        program,
+                                        program_id,
+                                        instruction.aux,
+                                        "negative table-key constant index",
+                                        "table-key constant must be a string",
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                let key = if let Some(preloaded_key) = preloaded_key {
+                                    let matches = self
+                                        .raw_equal_values(preloaded_key, expected_key)
+                                        .map_err(|e| {
+                                            attach_instruction_source(program, function, pc - 1, e)
+                                        })?;
+                                    if !matches {
+                                        return Err(attach_instruction_source(
+                                            program,
+                                            function,
+                                            pc - 1,
+                                            Error::new(ErrorKind::InvalidProgram {
+                                                reason: "preloaded table-key register does not match the constant",
+                                            }),
+                                        ));
+                                    }
+                                    preloaded_key
+                                } else {
+                                    self.advance_fused_instruction_steps_with_root(1, object);
+                                    expected_key
+                                };
+                                let key = self.canonicalize_existing_string_key(
+                                    program_id,
+                                    instruction.aux,
+                                    key,
+                                );
                                 self.set_index_value_with_inline_cache(
                                     program,
                                     program_id,
@@ -2107,13 +2272,9 @@ impl Vm {
                                         fuel,
                                     )
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                let atom = self.heap.intern_string_bytes(&text);
-                                set_register(
-                                    &mut registers,
-                                    instruction.a,
-                                    Value::string_atom(atom),
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
+                                let string = self.heap.intern_string_value_bytes(&text);
+                                set_register(&mut registers, instruction.a, string)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::NextKey => {
                                 let table = get_table(&registers, instruction.b)
@@ -2143,13 +2304,11 @@ impl Vm {
                             Opcode::TypeOf => {
                                 let value = get_register(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                let atom = self.heap.intern_string(self.luau_type_name(value));
-                                set_register(
-                                    &mut registers,
-                                    instruction.a,
-                                    Value::string_atom(atom),
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
+                                let string = self.heap.intern_string_value_bytes(
+                                    self.luau_type_name(value).as_bytes(),
+                                );
+                                set_register(&mut registers, instruction.a, string)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::StringSub => {
                                 let value = self
@@ -2181,26 +2340,18 @@ impl Vm {
                                     .coerce_to_string(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 text.make_ascii_uppercase();
-                                let atom = self.heap.intern_string_bytes(&text);
-                                set_register(
-                                    &mut registers,
-                                    instruction.a,
-                                    Value::string_atom(atom),
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
+                                let string = self.heap.intern_string_value_bytes(&text);
+                                set_register(&mut registers, instruction.a, string)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::StringLower => {
                                 let mut text = self
                                     .coerce_to_string(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 text.make_ascii_lowercase();
-                                let atom = self.heap.intern_string_bytes(&text);
-                                set_register(
-                                    &mut registers,
-                                    instruction.a,
-                                    Value::string_atom(atom),
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
+                                let string = self.heap.intern_string_value_bytes(&text);
+                                set_register(&mut registers, instruction.a, string)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::StringReverse => {
                                 let text = self
@@ -2208,13 +2359,9 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let reversed =
                                     reverse_string_bytes(&text).map_err(|e| e.at_pc(pc - 1))?;
-                                let atom = self.heap.intern_string_bytes(&reversed);
-                                set_register(
-                                    &mut registers,
-                                    instruction.a,
-                                    Value::string_atom(atom),
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
+                                let string = self.heap.intern_string_value_bytes(&reversed);
+                                set_register(&mut registers, instruction.a, string)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::StringRep => {
                                 let value = self
@@ -4115,24 +4262,30 @@ impl Vm {
         program_id: Option<u32>,
         index: usize,
     ) -> Result<Value> {
-        let constant = program.constants.get(index).ok_or_else(|| {
+        let constant = program.constants().get(index).ok_or_else(|| {
             Error::new(ErrorKind::ConstantOutOfBounds {
                 index,
-                len: program.constants.len(),
+                len: program.constants().len(),
             })
         })?;
         Ok(match constant {
             Constant::Nil => Value::nil(),
             Constant::Boolean(value) => Value::boolean(*value),
             Constant::Number(value) => Value::number(*value),
-            Constant::String(_) => Value::string_atom(
-                self.constant_string_atom(program, program_id, index)?
-                    .ok_or_else(|| {
-                        Error::new(ErrorKind::InvalidProgram {
-                            reason: "string constant atom is missing",
-                        })
-                    })?,
-            ),
+            Constant::String(bytes) => {
+                if let Some(value) = Value::short_string(bytes) {
+                    value
+                } else {
+                    Value::string_atom(
+                        self.constant_string_atom(program, program_id, index)?
+                            .ok_or_else(|| {
+                                Error::new(ErrorKind::InvalidProgram {
+                                    reason: "string constant atom is missing",
+                                })
+                            })?,
+                    )
+                }
+            }
             Constant::Import(_) => {
                 return Err(Error::new(ErrorKind::InvalidProgram {
                     reason: "import descriptors cannot be loaded as values",
@@ -4168,10 +4321,10 @@ impl Vm {
             }));
         }
         let descriptor_index = instruction.aux as usize;
-        let descriptor = program.constants.get(descriptor_index).ok_or_else(|| {
+        let descriptor = program.constants().get(descriptor_index).ok_or_else(|| {
             Error::new(ErrorKind::ConstantOutOfBounds {
                 index: descriptor_index,
-                len: program.constants.len(),
+                len: program.constants().len(),
             })
         })?;
         let Constant::Import(path) = descriptor else {
@@ -4190,7 +4343,7 @@ impl Vm {
                     reason: "import component index overflow",
                 })
             })?;
-            if !matches!(program.constants.get(index), Some(Constant::String(_))) {
+            if !matches!(program.constants().get(index), Some(Constant::String(_))) {
                 return Err(Error::new(ErrorKind::InvalidProgram {
                     reason: "import components must reference string constants",
                 }));
@@ -4239,13 +4392,13 @@ impl Vm {
         program_id: Option<u32>,
         index: usize,
     ) -> Result<Option<u32>> {
-        let constant = program.constants.get(index).ok_or_else(|| {
+        let constant = program.constants().get(index).ok_or_else(|| {
             Error::new(ErrorKind::ConstantOutOfBounds {
                 index,
-                len: program.constants.len(),
+                len: program.constants().len(),
             })
         })?;
-        let Constant::String(value) = constant else {
+        let Constant::String(_) = constant else {
             return Ok(None);
         };
         if let Some(program_id) = program_id {
@@ -4257,7 +4410,12 @@ impl Vm {
                 return Ok(Some(atom));
             }
         }
-        let atom = self.heap.intern_string_bytes(value);
+        let shared = program.shared_string(index).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "shared program string is missing",
+            })
+        })?;
+        let atom = self.heap.intern_shared_string(shared);
         if let Some(program_id) = program_id {
             if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
                 program.set_constant_atom(index, atom);
@@ -4287,24 +4445,96 @@ impl Vm {
         Ok(Value::string_atom(atom))
     }
 
+    fn instruction_string_key_value(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        index: i32,
+        negative_reason: &'static str,
+        non_string_reason: &'static str,
+    ) -> Result<Value> {
+        if index < 0 {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: negative_reason,
+            }));
+        }
+        let index = index as usize;
+        if let Some(program_id) = program_id {
+            if let Some(atom) = self
+                .dynamic_programs
+                .get(program_id as usize)
+                .and_then(|program| program.constant_atom(index))
+            {
+                return Ok(Value::string_atom(atom));
+            }
+        }
+        let constant = program.constants().get(index).ok_or_else(|| {
+            Error::new(ErrorKind::ConstantOutOfBounds {
+                index,
+                len: program.constants().len(),
+            })
+        })?;
+        let Constant::String(bytes) = constant else {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: non_string_reason,
+            }));
+        };
+        if let Some(value) = Value::short_string(bytes) {
+            return Ok(value);
+        }
+        let atom = self
+            .constant_string_atom(program, program_id, index)?
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: non_string_reason,
+                })
+            })?;
+        Ok(Value::string_atom(atom))
+    }
+
+    fn canonicalize_existing_string_key(
+        &mut self,
+        program_id: Option<u32>,
+        constant_index: i32,
+        key: Value,
+    ) -> Value {
+        let Some(short) = key.as_short_string() else {
+            return key;
+        };
+        let Some(atom) = self.heap.find_string_atom_bytes(short.as_bytes()) else {
+            return key;
+        };
+        if let (Some(program_id), Ok(index)) = (program_id, usize::try_from(constant_index)) {
+            if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+                program.set_constant_atom(index, atom);
+            }
+        }
+        Value::string_atom(atom)
+    }
+
     fn global_key(&mut self, program: &Program, index: i32) -> Result<Value> {
         if index < 0 {
             return Err(Error::new(ErrorKind::InvalidProgram {
                 reason: "negative global constant index",
             }));
         }
-        let constant = program.constants.get(index as usize).ok_or_else(|| {
+        let constant = program.constants().get(index as usize).ok_or_else(|| {
             Error::new(ErrorKind::ConstantOutOfBounds {
                 index: index as usize,
-                len: program.constants.len(),
+                len: program.constants().len(),
             })
         })?;
-        let Constant::String(name) = constant else {
+        let Constant::String(_) = constant else {
             return Err(Error::new(ErrorKind::InvalidProgram {
                 reason: "global key constant must be a string",
             }));
         };
-        Ok(Value::string_atom(self.heap.intern_string_bytes(name)))
+        let shared = program.shared_string(index as usize).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "shared program string is missing",
+            })
+        })?;
+        Ok(Value::string_atom(self.heap.intern_shared_string(shared)))
     }
 
     fn assert_message(&mut self, registers: &[Value], instruction: Instruction) -> Result<String> {
@@ -4327,28 +4557,27 @@ impl Vm {
         }
 
         let message = get_register(registers, instruction.aux as u8)?;
-        let Some(atom) = message.as_string_atom() else {
+        let Some(message) = self.string_value_bytes(message)? else {
             return Ok("assertion failed!".to_owned());
         };
-        self.heap.string_lossy(atom).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "assert message string atom is missing",
-            })
-        })
+        Ok(String::from_utf8_lossy(&message).into_owned())
     }
 
     pub fn string_value(&mut self, value: Value) -> Result<Option<String>> {
-        let Some(atom) = value.as_string_atom() else {
+        let Some(bytes) = self.string_value_bytes(value)? else {
             return Ok(None);
         };
-        self.heap.string(atom).map(Some).ok_or_else(|| {
+        String::from_utf8(bytes).map(Some).map_err(|_| {
             Error::new(ErrorKind::InvalidProgram {
-                reason: "string atom is missing",
+                reason: "string value is not valid UTF-8",
             })
         })
     }
 
     pub fn string_value_bytes(&mut self, value: Value) -> Result<Option<Vec<u8>>> {
+        if let Some(short) = value.as_short_string() {
+            return Ok(Some(short.as_bytes().to_vec()));
+        }
         let Some(atom) = value.as_string_atom() else {
             return Ok(None);
         };
@@ -4559,13 +4788,13 @@ impl Vm {
         if let Some(number) = value.as_number() {
             return Ok(Some(number));
         }
-        let Some(atom) = value.as_string_atom() else {
+        let Some(bytes) = self.string_value_bytes(value)? else {
             return Ok(None);
         };
-        let Some(text) = self.heap.string(atom) else {
+        let Ok(text) = std::str::from_utf8(&bytes) else {
             return Ok(None);
         };
-        Ok(parse_tonumber_string(&text))
+        Ok(parse_tonumber_string(text))
     }
 
     fn coerce_to_i32(&mut self, value: Value, expected: &'static str) -> Result<i32> {
@@ -4697,7 +4926,7 @@ impl Vm {
         let Some(rhs_method) = self.metamethod_for_value(rhs, name)? else {
             return Ok(None);
         };
-        if lhs_method.luau_equals(rhs_method) {
+        if self.raw_equal_values(lhs_method, rhs_method)? {
             Ok(Some(lhs_method))
         } else {
             Ok(None)
@@ -4736,6 +4965,43 @@ impl Vm {
     }
 
     fn raw_equal_values(&mut self, lhs: Value, rhs: Value) -> Result<bool> {
+        if lhs.kind() == ValueKind::String || rhs.kind() == ValueKind::String {
+            if lhs.kind() != ValueKind::String || rhs.kind() != ValueKind::String {
+                return Ok(false);
+            }
+            return match (lhs.as_string_atom(), rhs.as_string_atom()) {
+                (Some(lhs), Some(rhs)) => Ok(lhs == rhs),
+                (Some(atom), None) => {
+                    let inline = rhs.as_short_string().ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "string value has an invalid representation",
+                        })
+                    })?;
+                    self.heap
+                        .string_atom_equals_bytes(atom, inline.as_bytes())
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "string atom is missing",
+                            })
+                        })
+                }
+                (None, Some(atom)) => {
+                    let inline = lhs.as_short_string().ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "string value has an invalid representation",
+                        })
+                    })?;
+                    self.heap
+                        .string_atom_equals_bytes(atom, inline.as_bytes())
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: "string atom is missing",
+                            })
+                        })
+                }
+                (None, None) => Ok(lhs.luau_equals(rhs)),
+            };
+        }
         if lhs.kind() == ValueKind::Vector || rhs.kind() == ValueKind::Vector {
             if lhs.kind() != ValueKind::Vector || rhs.kind() != ValueKind::Vector {
                 return Ok(false);
@@ -4886,8 +5152,7 @@ impl Vm {
             (self.value_to_string(lhs), self.value_to_string(rhs))
         {
             lhs_text.extend_from_slice(&rhs_text);
-            let atom = self.heap.intern_string_bytes(&lhs_text);
-            return Ok(Value::string_atom(atom));
+            return Ok(self.heap.intern_string_value_bytes(&lhs_text));
         }
         if let Some(method) = self.binary_metamethod(lhs, rhs, "__concat")? {
             let results =
@@ -4905,13 +5170,15 @@ impl Vm {
     }
 
     fn raw_len_value(&mut self, value: Value) -> Result<usize> {
-        if let Some(atom) = value.as_string_atom() {
-            let Some(text) = self.heap.string_bytes(atom) else {
-                return Err(Error::new(ErrorKind::InvalidProgram {
-                    reason: "string atom is missing",
-                }));
-            };
-            return Ok(text.len());
+        if value.kind() == ValueKind::String {
+            return self
+                .string_value_bytes(value)?
+                .map(|text| text.len())
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "string value is missing",
+                    })
+                });
         }
         let Some(table) = value.as_table() else {
             return Err(Error::new(ErrorKind::RuntimeError {
@@ -4999,6 +5266,103 @@ impl Vm {
             );
         }
         self.get_index_value(program, object, key, depth, fuel)
+    }
+
+    fn get_index_value_with_namecall_inline_cache(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        prototype: Option<u32>,
+        pc: usize,
+        object: Value,
+        key: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        let Some(table) = object.as_table() else {
+            return self.get_index_value(program, object, key, depth, fuel);
+        };
+        self.check_recursion_depth(depth)?;
+        let Some(program_id) = program_id else {
+            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
+        };
+        let Some(atom) = key.as_string_atom() else {
+            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
+        };
+
+        if let Some(entry) = self.import_inline_cache(program_id, prototype, pc, 0) {
+            if entry.atom() == Some(atom) {
+                if let Some(Some(value)) =
+                    self.heap.read_string_hash_slot(table, atom, entry.slot())
+                {
+                    if value.kind() != ValueKind::Nil {
+                        #[cfg(test)]
+                        self.record_table_inline_cache_hit(program_id);
+                        return Ok(value);
+                    }
+                }
+            }
+        }
+
+        if let Some(Some((value, slot))) = self.heap.table_string_hash_probe(table, atom) {
+            if value.kind() != ValueKind::Nil {
+                self.set_import_inline_cache(
+                    program_id,
+                    prototype,
+                    pc,
+                    0,
+                    TableStringInlineCache::new(atom, slot),
+                );
+                return Ok(value);
+            }
+            if self.table_uses_standard_global_type_surface(table)? {
+                return Ok(value);
+            }
+        }
+
+        let Some(index) = self.metamethod_for_value(object, "__index")? else {
+            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
+        };
+        let Some(index_table) = index.as_table() else {
+            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
+        };
+        self.check_recursion_depth(depth.saturating_add(1))?;
+
+        if let Some(entry) = self.import_inline_cache(program_id, prototype, pc, 1) {
+            if entry.atom() == Some(atom) {
+                if let Some(Some(value)) =
+                    self.heap
+                        .read_string_hash_slot(index_table, atom, entry.slot())
+                {
+                    if value.kind() != ValueKind::Nil {
+                        #[cfg(test)]
+                        self.record_table_inline_cache_hit(program_id);
+                        return Ok(value);
+                    }
+                }
+            }
+        }
+
+        if let Some(Some((value, slot))) = self.heap.table_string_hash_probe(index_table, atom) {
+            if value.kind() != ValueKind::Nil {
+                self.set_import_inline_cache(
+                    program_id,
+                    prototype,
+                    pc,
+                    1,
+                    TableStringInlineCache::new(atom, slot),
+                );
+                return Ok(value);
+            }
+        }
+
+        self.get_table_index_with_metamethod(
+            program,
+            index_table,
+            key,
+            depth.saturating_add(1),
+            fuel,
+        )
     }
 
     fn get_index_value_with_import_inline_cache(
@@ -5521,8 +5885,7 @@ impl Vm {
         let end = end.unwrap_or(len);
         let mut output = Vec::new();
         if start > end {
-            let atom = self.heap.intern_string_bytes(&output);
-            return Ok(Value::string_atom(atom));
+            return Ok(self.heap.intern_string_value_bytes(&output));
         }
         for index in start..=end {
             if index > start {
@@ -5531,8 +5894,7 @@ impl Vm {
             let value = self.heap.array_get(table, index).unwrap_or_else(Value::nil);
             output.extend_from_slice(&self.value_to_string(value)?);
         }
-        let atom = self.heap.intern_string_bytes(&output);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(&output))
     }
 
     fn table_find(
@@ -7428,10 +7790,11 @@ impl Vm {
                 "false".len()
             }),
             ValueKind::Number => Some(luau_number_to_string(value.as_number()?).len()),
-            ValueKind::String => {
-                let atom = value.as_string_atom()?;
-                self.heap.string_bytes(atom).map(|text| text.len())
-            }
+            ValueKind::String => self
+                .string_value_bytes(value)
+                .ok()
+                .flatten()
+                .map(|text| text.len()),
             ValueKind::Table
             | ValueKind::Function
             | ValueKind::Userdata
@@ -7827,8 +8190,7 @@ impl Vm {
                 }
                 traceback.push('\n');
             }
-            let atom = self.heap.intern_string(&traceback);
-            return Ok(Value::string_atom(atom));
+            return Ok(self.heap.intern_string_value_bytes(traceback.as_bytes()));
         }
 
         if let Some(snapshot) = self.protected_error_traceback.as_ref() {
@@ -7843,8 +8205,7 @@ impl Vm {
                 }
                 traceback.push('\n');
             }
-            let atom = self.heap.intern_string(&traceback);
-            return Ok(Value::string_atom(atom));
+            return Ok(self.heap.intern_string_value_bytes(traceback.as_bytes()));
         }
 
         let has_current_call_site = call_site.is_some();
@@ -7864,8 +8225,7 @@ impl Vm {
             }
             traceback.push('\n');
         }
-        let atom = self.heap.intern_string(&traceback);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(traceback.as_bytes()))
     }
 
     fn coroutine_debug_traceback_entries(
@@ -8204,12 +8564,13 @@ impl Vm {
         for field in &options.fields {
             match field {
                 DebugInfoField::Name => {
-                    let atom = self.heap.intern_string(&target.name);
-                    results.push(Value::string_atom(atom));
+                    results.push(self.heap.intern_string_value_bytes(target.name.as_bytes()));
                 }
                 DebugInfoField::Source => {
-                    let atom = self.heap.intern_string(&target.source);
-                    results.push(Value::string_atom(atom));
+                    results.push(
+                        self.heap
+                            .intern_string_value_bytes(target.source.as_bytes()),
+                    );
                 }
                 DebugInfoField::Line => results.push(Value::number(f64::from(target.line))),
                 DebugInfoField::Function => results.push(target.function),
@@ -8239,16 +8600,16 @@ impl Vm {
             None
         };
         let Some(compiler) = self.settings.loadstring_compiler else {
-            let atom = self
+            let message = self
                 .heap
-                .intern_string("loadstring compiler is not configured");
-            return Ok(vec![Value::nil(), Value::string_atom(atom)]);
+                .intern_string_value_bytes(b"loadstring compiler is not configured");
+            return Ok(vec![Value::nil(), message]);
         };
         let program = match compiler(&source, source_name.as_deref()) {
             Ok(program) => program,
             Err(message) => {
-                let atom = self.heap.intern_string(&message);
-                return Ok(vec![Value::nil(), Value::string_atom(atom)]);
+                let message = self.heap.intern_string_value_bytes(message.as_bytes());
+                return Ok(vec![Value::nil(), message]);
             }
         };
         let program_id = self.retain_dynamic_program(program)?;
@@ -8298,8 +8659,7 @@ impl Vm {
         } else {
             "suspended"
         };
-        let atom = self.heap.intern_string(status);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(status.as_bytes()))
     }
 
     fn native_coroutine_running(&mut self, args: &[Value]) -> Result<Value> {
@@ -8676,12 +9036,16 @@ impl Vm {
         validate_native_arity(args, 1, u8::MAX as usize, "coroutine.resume arguments")?;
         let coroutine = self.coroutine_index(args[0])?;
         if self.running_coroutines.contains(&coroutine) {
-            let atom = self.heap.intern_string("cannot resume running coroutine");
-            return Ok(vec![Value::boolean(false), Value::string_atom(atom)]);
+            let message = self
+                .heap
+                .intern_string_value_bytes(b"cannot resume running coroutine");
+            return Ok(vec![Value::boolean(false), message]);
         }
         if self.coroutines[coroutine].dead {
-            let atom = self.heap.intern_string("cannot resume dead coroutine");
-            return Ok(vec![Value::boolean(false), Value::string_atom(atom)]);
+            let message = self
+                .heap
+                .intern_string_value_bytes(b"cannot resume dead coroutine");
+            return Ok(vec![Value::boolean(false), message]);
         }
         let flow = if !self.coroutines[coroutine].initialized {
             let callee = self.coroutines[coroutine].callee;
@@ -9075,11 +9439,13 @@ impl Vm {
         handler_error: Error,
     ) -> Vec<Value> {
         if original_is_out_of_memory && error_is_out_of_memory(&handler_error) {
-            let atom = self.heap.intern_string("not enough memory");
-            return vec![Value::boolean(false), Value::string_atom(atom)];
+            let message = self.heap.intern_string_value_bytes(b"not enough memory");
+            return vec![Value::boolean(false), message];
         }
-        let atom = self.heap.intern_string("error in error handling");
-        vec![Value::boolean(false), Value::string_atom(atom)]
+        let message = self
+            .heap
+            .intern_string_value_bytes(b"error in error handling");
+        vec![Value::boolean(false), message]
     }
 
     fn xpcall_handler(&mut self, args: &[Value]) -> Result<Value> {
@@ -9105,7 +9471,7 @@ impl Vm {
             return *value;
         }
         let message = error.to_string();
-        Value::string_atom(self.heap.intern_string(&message))
+        self.heap.intern_string_value_bytes(message.as_bytes())
     }
 
     fn guest_error_from_value(&mut self, value: Value) -> Result<Error> {
@@ -9195,14 +9561,14 @@ impl Vm {
     ) -> Result<Value> {
         validate_native_arity(args, 1, usize::MAX, "tostring argument")?;
         let text = self.value_to_tostring_with_metamethod(program, args[0], depth, fuel)?;
-        let atom = self.heap.intern_string_bytes(&text);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(&text))
     }
 
     fn native_typeof(&mut self, args: &[Value]) -> Result<Value> {
         validate_native_arity(args, 1, usize::MAX, "type argument")?;
-        let atom = self.heap.intern_string(self.luau_type_name(args[0]));
-        Ok(Value::string_atom(atom))
+        Ok(self
+            .heap
+            .intern_string_value_bytes(self.luau_type_name(args[0]).as_bytes()))
     }
 
     fn native_getfenv(&mut self, args: &[Value]) -> Result<Value> {
@@ -9678,8 +10044,7 @@ impl Vm {
             return Ok(Value::table(self.os_date_table(parts)));
         }
         let text = format_os_date(&format, parts)?;
-        let atom = self.heap.intern_string_bytes(&text);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(&text))
     }
 
     fn native_os_time(&mut self, args: &[Value]) -> Result<Value> {
@@ -9865,8 +10230,7 @@ impl Vm {
             })
         })?;
         let bytes = self.buffer_read_checked(buffer, 0, len)?;
-        let atom = self.heap.intern_string_bytes(&bytes);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(&bytes))
     }
 
     fn native_buffer_read_int(&mut self, args: &[Value], kind: BufferReadKind) -> Result<Value> {
@@ -9912,8 +10276,7 @@ impl Vm {
             self.buffer_nonnegative_arg(args[2], "invalid argument #3 to 'readstring' (size)")?;
         let offset = self.buffer_offset_arg(args[1])?;
         let bytes = self.buffer_read_checked(buffer, offset, count)?;
-        let atom = self.heap.intern_string_bytes(&bytes);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(&bytes))
     }
 
     fn native_buffer_readbits(&mut self, args: &[Value]) -> Result<Value> {
@@ -10309,8 +10672,9 @@ impl Vm {
     fn native_conformance_int64_tostring(&mut self, args: &[Value]) -> Result<Value> {
         validate_native_arity(args, 1, 1, "int64 __tostring argument")?;
         let value = self.conformance_int64_value(args[0])?;
-        let atom = self.heap.intern_string(&value.to_string());
-        Ok(Value::string_atom(atom))
+        Ok(self
+            .heap
+            .intern_string_value_bytes(value.to_string().as_bytes()))
     }
 
     fn native_conformance_int64_index(&mut self, args: &[Value]) -> Result<Value> {
@@ -10628,7 +10992,7 @@ impl Vm {
         let table = self.heap.alloc_array_table(&[]);
         if let Some(name) = &function.debug_name {
             let key = Value::string_atom(self.heap.intern_string("name"));
-            let value = Value::string_atom(self.heap.intern_string(name));
+            let value = self.heap.intern_string_value_bytes(name.as_bytes());
             self.heap
                 .table_set(table, key, value)
                 .expect("coverage entry table and string key are valid");
@@ -11288,8 +11652,7 @@ impl Vm {
         for arg in args {
             output.push(self.string_char_byte(*arg)?);
         }
-        let atom = self.heap.intern_string_bytes(&output);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(&output))
     }
 
     fn string_char_byte(&mut self, value: Value) -> Result<u8> {
@@ -11308,8 +11671,7 @@ impl Vm {
             let codepoint = self.utf8_codepoint_arg(*arg)?;
             encode_luau_utf8_char(codepoint, &mut output);
         }
-        let atom = self.heap.intern_string_bytes(&output);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(&output))
     }
 
     fn native_utf8_codepoint(&mut self, args: &[Value]) -> Result<Vec<Value>> {
@@ -11373,17 +11735,13 @@ impl Vm {
     fn native_utf8_codes(&mut self, args: &[Value]) -> Result<Vec<Value>> {
         validate_native_arity(args, 1, usize::MAX, "utf8.codes arguments")?;
         let text = self.value_to_string(args[0])?;
-        let text_atom = self.heap.intern_string_bytes(&text);
+        let text = self.heap.intern_string_value_bytes(&text);
         let iterator = native_function_value(
             &mut self.heap,
             NativeFunction::Utf8CodesIterator,
             self.globals,
         );
-        Ok(vec![
-            iterator,
-            Value::string_atom(text_atom),
-            Value::number(0.0),
-        ])
+        Ok(vec![iterator, text, Value::number(0.0)])
     }
 
     fn native_utf8_codes_iterator(&mut self, args: &[Value]) -> Result<Vec<Value>> {
@@ -11608,16 +11966,14 @@ impl Vm {
             StringCase::Upper => text.make_ascii_uppercase(),
             StringCase::Lower => text.make_ascii_lowercase(),
         }
-        let atom = self.heap.intern_string_bytes(&text);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(&text))
     }
 
     fn native_string_reverse(&mut self, args: &[Value]) -> Result<Value> {
         validate_native_arity(args, 1, 1, "string.reverse argument")?;
         let text = self.value_to_string(args[0])?;
         let reversed = reverse_string_bytes(&text)?;
-        let atom = self.heap.intern_string_bytes(&reversed);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(&reversed))
     }
 
     fn native_string_rep(&mut self, args: &[Value]) -> Result<Value> {
@@ -11682,8 +12038,10 @@ impl Vm {
             depth,
             fuel,
         )?;
-        let atom = self.heap.intern_string_bytes(&output);
-        Ok(vec![Value::string_atom(atom), Value::number(count as f64)])
+        Ok(vec![
+            self.heap.intern_string_value_bytes(&output),
+            Value::number(count as f64),
+        ])
     }
 
     fn luau_string_gsub(
@@ -11885,8 +12243,7 @@ impl Vm {
     fn gsub_capture_value(&mut self, text: &[u8], capture: GSubCapture) -> Result<Value> {
         match capture {
             GSubCapture::Slice { start, end } => {
-                let atom = self.heap.intern_string_bytes(&text[start..end]);
-                Ok(Value::string_atom(atom))
+                Ok(self.heap.intern_string_value_bytes(&text[start..end]))
             }
             GSubCapture::Position(position) => Ok(Value::number(position as f64)),
         }
@@ -11905,24 +12262,18 @@ impl Vm {
         let pattern = self.value_to_string(args[1])?;
         let _ = luau_gmatch_pattern_kind(&pattern)?;
 
-        let text_atom = self.heap.intern_string_bytes(&text);
-        let pattern_atom = self.heap.intern_string_bytes(&pattern);
-        let text_upvalue = self
-            .heap
-            .alloc_upvalue(Value::string_atom(text_atom))
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "string.gmatch text upvalue handle overflow",
-                })
-            })?;
-        let pattern_upvalue = self
-            .heap
-            .alloc_upvalue(Value::string_atom(pattern_atom))
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "string.gmatch pattern upvalue handle overflow",
-                })
-            })?;
+        let text = self.heap.intern_string_value_bytes(&text);
+        let pattern = self.heap.intern_string_value_bytes(&pattern);
+        let text_upvalue = self.heap.alloc_upvalue(text).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "string.gmatch text upvalue handle overflow",
+            })
+        })?;
+        let pattern_upvalue = self.heap.alloc_upvalue(pattern).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "string.gmatch pattern upvalue handle overflow",
+            })
+        })?;
         let cursor_upvalue = self.heap.alloc_upvalue(Value::number(0.0)).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "string.gmatch cursor upvalue handle overflow",
@@ -11983,8 +12334,7 @@ impl Vm {
         for capture in result.captures {
             match capture {
                 GMatchCapture::Slice { start, end } => {
-                    let atom = self.heap.intern_string_bytes(&text[start..end]);
-                    values.push(Value::string_atom(atom));
+                    values.push(self.heap.intern_string_value_bytes(&text[start..end]));
                 }
                 GMatchCapture::Position(position) => values.push(Value::number(position as f64)),
             }
@@ -12041,8 +12391,7 @@ impl Vm {
         for capture in captures {
             match capture {
                 StringCapture::Slice { start, end } => {
-                    let atom = self.heap.intern_string_bytes(&text[start..end]);
-                    values.push(Value::string_atom(atom));
+                    values.push(self.heap.intern_string_value_bytes(&text[start..end]));
                 }
                 StringCapture::Position(position) => values.push(Value::number(position as f64)),
             }
@@ -12069,8 +12418,7 @@ impl Vm {
         validate_native_arity(args, 1, u8::MAX as usize, "string.format arguments")?;
         let format = self.value_to_string(args[0])?;
         let output = self.luau_string_format(program, &format, &args[1..], depth, fuel)?;
-        let atom = self.heap.intern_string_bytes(&output);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(&output))
     }
 
     fn native_string_pack(&mut self, args: &[Value]) -> Result<Value> {
@@ -12169,8 +12517,7 @@ impl Vm {
             }
         }
 
-        let atom = self.heap.intern_string_bytes(&output);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(&output))
     }
 
     fn native_string_unpack(&mut self, args: &[Value]) -> Result<Vec<Value>> {
@@ -12222,8 +12569,7 @@ impl Vm {
                         PackDataKind::FixedString { size } => {
                             let bytes = unpack_bytes(&data, cursor, size)?;
                             cursor += size;
-                            let atom = self.heap.intern_string_bytes(bytes);
-                            results.push(Value::string_atom(atom));
+                            results.push(self.heap.intern_string_value_bytes(bytes));
                         }
                         PackDataKind::ZeroTerminatedString => {
                             let Some(offset) = data[cursor..].iter().position(|byte| *byte == 0)
@@ -12231,8 +12577,7 @@ impl Vm {
                                 return Err(pack_runtime_error("unfinished string for format 'z'"));
                             };
                             let end = cursor + offset;
-                            let atom = self.heap.intern_string_bytes(&data[cursor..end]);
-                            results.push(Value::string_atom(atom));
+                            results.push(self.heap.intern_string_value_bytes(&data[cursor..end]));
                             cursor = end + 1;
                         }
                         PackDataKind::SizedString { size } => {
@@ -12244,8 +12589,7 @@ impl Vm {
                             })?;
                             let bytes = unpack_bytes(&data, cursor, len)?;
                             cursor += len;
-                            let atom = self.heap.intern_string_bytes(bytes);
-                            results.push(Value::string_atom(atom));
+                            results.push(self.heap.intern_string_value_bytes(bytes));
                         }
                     }
                 }
@@ -13197,8 +13541,7 @@ impl Vm {
             -1
         };
         let output = luau_string_sub(&text, start, end)?;
-        let atom = self.heap.intern_string_bytes(&output);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(&output))
     }
 
     fn string_byte(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
@@ -13258,8 +13601,7 @@ impl Vm {
         let text = self.coerce_to_string(registers, instruction.b)?;
         let count = string_repeat_count(get_number(registers, instruction.c)?)?;
         let output = repeat_string(&text, count)?;
-        let atom = self.heap.intern_string_bytes(&output);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(&output))
     }
 
     fn string_find(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
@@ -13309,7 +13651,7 @@ impl Vm {
         let parts = split_luau_string(&text, &separator)?;
         let values = parts
             .iter()
-            .map(|part| Value::string_atom(self.heap.intern_string_bytes(part)))
+            .map(|part| self.heap.intern_string_value_bytes(part))
             .collect::<Vec<_>>();
         Ok(Value::table(self.heap.alloc_array_table(&values)))
     }
@@ -13530,8 +13872,7 @@ impl Vm {
                 &self.value_to_tostring_with_metamethod(program, value, depth, fuel)?,
             );
         }
-        let atom = self.heap.intern_string_bytes(&output);
-        Ok(Value::string_atom(atom))
+        Ok(self.heap.intern_string_value_bytes(&output))
     }
 
     fn ipairs_prepare(
@@ -13914,6 +14255,18 @@ impl Vm {
                 }));
             }
             Ok(u64::from(instruction.b) * 2 - 1)
+        } else if instruction.op == Opcode::GetTableKs {
+            Ok(2)
+        } else if instruction.op == Opcode::SetTableKs {
+            Ok(if instruction.c == 0 { 2 } else { 1 })
+        } else if instruction.op == Opcode::NameCall {
+            match instruction.c {
+                0 => Ok(2),
+                1 => Ok(3),
+                _ => Err(Error::new(ErrorKind::InvalidProgram {
+                    reason: "namecall mode must be zero or one",
+                })),
+            }
         } else {
             Ok(1)
         }
@@ -14359,7 +14712,7 @@ fn initialize_standard_globals(
     for (name, native) in UTF8_NATIVE_FUNCTIONS {
         set_native_table_field(heap, utf8, name, *native);
     }
-    let charpattern = Value::string_atom(heap.intern_string_bytes(LUAU_UTF8_CHARPATTERN));
+    let charpattern = heap.intern_string_value_bytes(LUAU_UTF8_CHARPATTERN);
     set_table_field(heap, utf8, "charpattern", charpattern);
     set_standard_index_field(heap, standard_globals, "utf8", Value::table(utf8));
 
@@ -14582,7 +14935,7 @@ fn set_rtti_string_type(heap: &mut VmCell, table: u32, name: &str) {
 }
 
 fn set_rtti_field(heap: &mut VmCell, table: u32, name: &str, type_name: &str) {
-    let value = Value::string_atom(heap.intern_string(type_name));
+    let value = heap.intern_string_value_bytes(type_name.as_bytes());
     set_table_field(heap, table, name, value);
 }
 
@@ -16573,7 +16926,7 @@ fn recursive_reverse_replacement_global(
     }
     if global_name < 0
         || !matches!(
-            program.constants.get(global_name as usize),
+            program.constants().get(global_name as usize),
             Some(Constant::String(_))
         )
     {
@@ -16663,7 +17016,7 @@ fn constant_string_equals(program: &Program, index: i32, expected: &[u8]) -> boo
         return false;
     }
     matches!(
-        program.constants.get(index as usize),
+        program.constants().get(index as usize),
         Some(Constant::String(bytes)) if bytes == expected
     )
 }
@@ -16672,7 +17025,7 @@ fn import_component_indices(program: &Program, index: i32) -> Option<&[u32]> {
     if index < 0 {
         return None;
     }
-    let Constant::Import(path) = program.constants.get(index as usize)? else {
+    let Constant::Import(path) = program.constants().get(index as usize)? else {
         return None;
     };
     (1..=IMPORT_CACHE_LANES)
@@ -20651,6 +21004,41 @@ mod inline_cache_tests {
     }
 
     #[test]
+    fn compiled_short_literals_stay_inline_until_atom_identity_is_required() {
+        for (bytes, should_inline) in [
+            (b"1234567890123".as_slice(), true),
+            (b"12345678901234".as_slice(), false),
+        ] {
+            let program = Program::new(
+                Function::new(
+                    vec![
+                        Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                        Instruction::new(Opcode::Return, 0, 1, 0),
+                    ],
+                    1,
+                ),
+                vec![Constant::String(bytes.to_vec())],
+            );
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            let value = vm.run(&program).expect("compiled string literal");
+            let cached_atom = vm
+                .dynamic_programs
+                .last()
+                .expect("run should retain the program")
+                .constant_atom(0);
+
+            assert_eq!(value.as_short_string().is_some(), should_inline);
+            assert_eq!(cached_atom.is_none(), should_inline);
+            assert_eq!(
+                vm.string_value_bytes(value)
+                    .expect("valid string representation")
+                    .as_deref(),
+                Some(bytes)
+            );
+        }
+    }
+
+    #[test]
     fn loaded_program_metadata_is_compact_and_cache_site_scoped() {
         let mut code = vec![Instruction::new(Opcode::Halt, 0, 0, 0); 256];
         code[17] = Instruction::new(Opcode::GetGlobal, 0, 0, 0);
@@ -21237,6 +21625,94 @@ mod inline_cache_tests {
     }
 
     #[test]
+    fn constant_key_misses_and_nil_writes_do_not_intern_short_keys() {
+        let key = b"miss\0key\xff".to_vec();
+        let cases = [
+            Program::new(
+                Function::new(
+                    vec![
+                        Instruction::new(Opcode::NewArray, 0, 0, 0),
+                        Instruction::with_aux(Opcode::GetTableKs, 1, 0, 0, 0),
+                        Instruction::new(Opcode::Return, 1, 1, 0),
+                    ],
+                    2,
+                ),
+                vec![Constant::String(key.clone())],
+            ),
+            Program::new(
+                Function::new(
+                    vec![
+                        Instruction::new(Opcode::NewArray, 0, 0, 0),
+                        Instruction::with_aux(Opcode::NameCall, 1, 0, 0, 0),
+                        Instruction::new(Opcode::Return, 1, 1, 0),
+                    ],
+                    2,
+                ),
+                vec![Constant::String(key.clone())],
+            ),
+            Program::new(
+                Function::new(
+                    vec![
+                        Instruction::new(Opcode::NewArray, 0, 0, 0),
+                        Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                        Instruction::with_aux(Opcode::SetTableKs, 0, 1, 0, 0),
+                        Instruction::new(Opcode::Return, 1, 1, 0),
+                    ],
+                    2,
+                ),
+                vec![Constant::String(key.clone()), Constant::Nil],
+            ),
+            Program::new(
+                Function::new(
+                    vec![
+                        Instruction::new(Opcode::NewArray, 0, 0, 0),
+                        Instruction::new(Opcode::LoadConst, 1, 0, 0),
+                        Instruction::new(Opcode::LoadConst, 2, 0, 1),
+                        Instruction::with_aux(Opcode::SetTableKs, 0, 2, 1, 0),
+                        Instruction::new(Opcode::Return, 2, 1, 0),
+                    ],
+                    3,
+                ),
+                vec![Constant::String(key.clone()), Constant::Nil],
+            ),
+        ];
+
+        for program in cases {
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            let before = vm.heap.string_atom_count();
+            assert_eq!(vm.run(&program).unwrap().kind(), ValueKind::Nil);
+            assert_eq!(
+                vm.heap.string_atom_count(),
+                before,
+                "lookup misses and nil writes must not grow the atom table"
+            );
+        }
+
+        let successful = Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::NewArray, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                    Instruction::with_aux(Opcode::SetTableKs, 0, 1, 0, 0),
+                    Instruction::with_aux(Opcode::GetTableKs, 2, 0, 0, 0),
+                    Instruction::new(Opcode::Return, 2, 1, 0),
+                ],
+                3,
+            ),
+            vec![Constant::String(key), Constant::Number(1.0)],
+        );
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let before = vm.heap.string_atom_count();
+        assert_eq!(vm.run(&successful).unwrap().as_number(), Some(1.0));
+        assert_eq!(vm.heap.string_atom_count(), before + 1);
+        assert!(vm
+            .dynamic_programs
+            .last()
+            .and_then(|program| program.constant_atom(0))
+            .is_some());
+    }
+
+    #[test]
     fn import_cache_allocates_lanes_lazily_and_reads_them_hot() {
         let program = Program::new(
             Function::new(
@@ -21272,6 +21748,294 @@ mod inline_cache_tests {
         assert_eq!(loaded.main_inline_caches.import_entries.len(), 1);
         assert_eq!(loaded.table_inline_cache_fills, 2);
         assert_eq!(loaded.table_inline_cache_hits, 2);
+    }
+
+    #[test]
+    fn namecall_cache_hits_direct_and_live_index_table_lanes_across_mutation() {
+        let program = Program::new(
+            Function::new(vec![Instruction::with_aux(Opcode::NameCall, 0, 1, 0, 0)], 2),
+            vec![Constant::String(b"method".to_vec())],
+        );
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program_id = vm
+            .retain_dynamic_program(program.clone())
+            .expect("program should be retained");
+        let key = Value::string_atom(vm.heap.intern_string("method"));
+        let (object, _) = table_with_field(&mut vm, "method", Value::number(1.0));
+        let (delegate, _) = table_with_field(&mut vm, "method", Value::number(10.0));
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let index_key = Value::string_atom(vm.heap.intern_string("__index"));
+        vm.heap
+            .table_set(metatable, index_key, Value::table(delegate))
+            .expect("index table");
+        vm.heap
+            .table_set_metatable(object, Some(metatable))
+            .expect("object metatable");
+        let mut fuel = None;
+
+        let lookup = |vm: &mut Vm, fuel: &mut Option<u64>| {
+            vm.get_index_value_with_namecall_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                Value::table(object),
+                key,
+                0,
+                fuel,
+            )
+        };
+
+        assert_eq!(
+            lookup(&mut vm, &mut fuel)
+                .expect("direct cache fill")
+                .as_number(),
+            Some(1.0)
+        );
+        assert_eq!(
+            lookup(&mut vm, &mut fuel)
+                .expect("direct cache hit")
+                .as_number(),
+            Some(1.0)
+        );
+        vm.heap
+            .table_set(object, key, Value::number(2.0))
+            .expect("live direct method replacement");
+        assert_eq!(
+            lookup(&mut vm, &mut fuel)
+                .expect("direct cache must read the live value")
+                .as_number(),
+            Some(2.0)
+        );
+
+        vm.heap
+            .table_set(object, key, Value::nil())
+            .expect("remove direct shadow");
+        assert_eq!(
+            lookup(&mut vm, &mut fuel)
+                .expect("index-table cache fill")
+                .as_number(),
+            Some(10.0)
+        );
+        assert_eq!(
+            lookup(&mut vm, &mut fuel)
+                .expect("index-table cache hit")
+                .as_number(),
+            Some(10.0)
+        );
+
+        let replacement = vm.heap.alloc_array_table(&[]);
+        let other = Value::string_atom(vm.heap.intern_string("other"));
+        vm.heap
+            .table_set(replacement, other, Value::number(0.0))
+            .expect("different replacement layout");
+        vm.heap
+            .table_set(replacement, key, Value::number(20.0))
+            .expect("replacement method");
+        vm.heap
+            .table_set(metatable, index_key, Value::table(replacement))
+            .expect("swap live index table");
+        assert_eq!(
+            lookup(&mut vm, &mut fuel)
+                .expect("index-table cache must revalidate the live delegate")
+                .as_number(),
+            Some(20.0)
+        );
+        assert_eq!(
+            lookup(&mut vm, &mut fuel)
+                .expect("replacement index-table cache hit")
+                .as_number(),
+            Some(20.0)
+        );
+
+        let loaded = &vm.dynamic_programs[program_id as usize];
+        assert_eq!(loaded.main_inline_caches.import_entries.len(), 1);
+        assert!(loaded.import_inline_cache(None, 0, 0).is_some());
+        assert!(loaded.import_inline_cache(None, 0, 1).is_some());
+        assert_eq!(loaded.table_inline_cache_fills, 3);
+        assert_eq!(loaded.table_inline_cache_hits, 4);
+    }
+
+    #[test]
+    fn namecall_index_table_cache_preserves_incremented_recursion_depth() {
+        let program = Program::new(
+            Function::new(vec![Instruction::with_aux(Opcode::NameCall, 0, 1, 0, 0)], 2),
+            vec![Constant::String(b"method".to_vec())],
+        );
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program_id = vm
+            .retain_dynamic_program(program.clone())
+            .expect("program should be retained");
+        let key = Value::string_atom(vm.heap.intern_string("method"));
+        let object = vm.heap.alloc_array_table(&[]);
+        let (delegate, _) = table_with_field(&mut vm, "method", Value::number(1.0));
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let index_key = Value::string_atom(vm.heap.intern_string("__index"));
+        vm.heap
+            .table_set(metatable, index_key, Value::table(delegate))
+            .expect("index table");
+        vm.heap
+            .table_set_metatable(object, Some(metatable))
+            .expect("object metatable");
+        let object = Value::table(object);
+        let mut fuel = None;
+
+        assert_eq!(
+            vm.get_index_value_with_namecall_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                object,
+                key,
+                0,
+                &mut fuel,
+            )
+            .expect("initial index-table lookup should fill the cache")
+            .as_number(),
+            Some(1.0)
+        );
+        assert!(vm.dynamic_programs[program_id as usize]
+            .import_inline_cache(None, 0, 1)
+            .is_some());
+
+        vm.settings.recursion_limit = 0;
+        let generic = vm
+            .get_index_value(&program, object, key, 0, &mut fuel)
+            .expect_err("generic index-table lookup should exceed the limit");
+        let cached = vm
+            .get_index_value_with_namecall_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                object,
+                key,
+                0,
+                &mut fuel,
+            )
+            .expect_err("cached index-table lookup must enforce the same limit");
+        assert!(matches!(
+            generic.kind,
+            ErrorKind::RecursionLimit { limit: 0 }
+        ));
+        assert!(matches!(
+            cached.kind,
+            ErrorKind::RecursionLimit { limit: 0 }
+        ));
+    }
+
+    #[test]
+    fn retained_function_namecall_cache_revalidates_receiver_and_index_table_mutation() {
+        let program = Program::with_functions(
+            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            vec![Constant::String(b"method".to_vec())],
+            vec![Function::with_params(
+                vec![
+                    Instruction::with_aux(Opcode::NameCall, 1, 0, 0, 0),
+                    Instruction::new(Opcode::Return, 1, 1, 0),
+                ],
+                2,
+                1,
+            )],
+        );
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program_id = vm
+            .retain_dynamic_program(program)
+            .expect("program should be retained");
+        let function = vm
+            .heap
+            .alloc_function(Some(program_id), 0, Vec::new(), vm.globals)
+            .map(Value::function)
+            .expect("retained function");
+        let key = Value::string_atom(vm.heap.intern_string("method"));
+        let object = vm.heap.alloc_array_table(&[]);
+        let (first_delegate, _) = table_with_field(&mut vm, "method", Value::number(1.0));
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let index_key = Value::string_atom(vm.heap.intern_string("__index"));
+        vm.heap
+            .table_set(metatable, index_key, Value::table(first_delegate))
+            .expect("first index table");
+        vm.heap
+            .table_set_metatable(object, Some(metatable))
+            .expect("receiver metatable");
+        let receiver = Value::table(object);
+        let call = |vm: &mut Vm| {
+            vm.call_retained_function(function, &[receiver])
+                .map(|results| results[0])
+        };
+
+        assert_eq!(
+            call(&mut vm).expect("cold index-table call").as_number(),
+            Some(1.0)
+        );
+        assert_eq!(
+            call(&mut vm).expect("hot index-table call").as_number(),
+            Some(1.0)
+        );
+        vm.heap
+            .table_set(first_delegate, key, Value::number(2.0))
+            .expect("live method replacement");
+        assert_eq!(
+            call(&mut vm)
+                .expect("cached live method replacement")
+                .as_number(),
+            Some(2.0)
+        );
+
+        let second_delegate = vm.heap.alloc_array_table(&[]);
+        let dummy = Value::string_atom(vm.heap.intern_string("dummy"));
+        vm.heap
+            .table_set(second_delegate, dummy, Value::number(0.0))
+            .expect("dummy field for a different layout");
+        vm.heap
+            .table_set(second_delegate, key, Value::number(3.0))
+            .expect("second method");
+        vm.heap
+            .table_set(metatable, index_key, Value::table(second_delegate))
+            .expect("swap index table");
+        assert_eq!(
+            call(&mut vm)
+                .expect("revalidated replacement delegate")
+                .as_number(),
+            Some(3.0)
+        );
+        assert_eq!(
+            call(&mut vm).expect("hot replacement delegate").as_number(),
+            Some(3.0)
+        );
+
+        vm.heap
+            .table_set(object, key, Value::number(4.0))
+            .expect("receiver shadow");
+        assert_eq!(
+            call(&mut vm)
+                .expect("direct receiver cache fill")
+                .as_number(),
+            Some(4.0)
+        );
+        assert_eq!(
+            call(&mut vm)
+                .expect("direct receiver cache hit")
+                .as_number(),
+            Some(4.0)
+        );
+        vm.heap
+            .table_set(object, key, Value::nil())
+            .expect("remove receiver shadow");
+        assert_eq!(
+            call(&mut vm)
+                .expect("nil direct slot must fall through")
+                .as_number(),
+            Some(3.0)
+        );
+
+        let loaded = &vm.dynamic_programs[program_id as usize];
+        assert_eq!(loaded.function_inline_caches[0].import_entries.len(), 1);
+        assert!(loaded.import_inline_cache(Some(0), 0, 0).is_some());
+        assert!(loaded.import_inline_cache(Some(0), 0, 1).is_some());
+        assert_eq!(loaded.table_inline_cache_fills, 3);
+        assert_eq!(loaded.table_inline_cache_hits, 5);
     }
 
     #[test]
@@ -21327,5 +22091,120 @@ mod inline_cache_tests {
             caches.table_inline_cache(0).and_then(|entry| entry.atom()),
             Some(1)
         );
+    }
+
+    fn assert_inline_string(vm: &mut Vm, value: Value, expected: &[u8]) {
+        assert!(
+            value.as_short_string().is_some(),
+            "expected a short inline string"
+        );
+        assert_eq!(
+            vm.string_value_bytes(value)
+                .expect("string representation should be valid")
+                .as_deref(),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn guest_string_results_inline_short_outputs_without_changing_bytes() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+
+        let kind = vm
+            .native_typeof(&[Value::boolean(true)])
+            .expect("typeof should return a string");
+        assert_inline_string(&mut vm, kind, b"boolean");
+
+        let binary = vm
+            .native_string_char(&[
+                Value::number(0.0),
+                Value::number(0x80 as f64),
+                Value::number(0xff as f64),
+            ])
+            .expect("string.char should accept arbitrary bytes");
+        assert_inline_string(&mut vm, binary, &[0, 0x80, 0xff]);
+
+        let buffer = vm
+            .native_buffer_fromstring(&[binary])
+            .expect("short binary string should construct a buffer");
+        let round_trip = vm
+            .native_buffer_tostring(&[buffer])
+            .expect("buffer.tostring should preserve arbitrary bytes");
+        assert_inline_string(&mut vm, round_trip, &[0, 0x80, 0xff]);
+
+        let first = vm.string("left");
+        let second = vm.string("right");
+        let table = vm.array_table(&[first, second]);
+        let separator = vm.string(":");
+        let joined = vm
+            .native_table_concat(&[table, separator])
+            .expect("table.concat should produce a string");
+        assert_inline_string(&mut vm, joined, b"left:right");
+
+        let unit = vm.string("x");
+        let repeated = vm
+            .native_string_rep(&[unit, Value::number(14.0)])
+            .expect("string.rep should produce a string");
+        assert!(repeated.as_short_string().is_none());
+        assert!(repeated.as_string_atom().is_some());
+        assert_eq!(
+            vm.string_value_bytes(repeated)
+                .expect("long string atom should be valid")
+                .as_deref(),
+            Some(b"xxxxxxxxxxxxxx".as_slice())
+        );
+    }
+
+    #[test]
+    fn assert_message_renders_invalid_utf8_lossily() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let message = vm.heap.intern_string_value_bytes(&[b'a', 0xff, b'b']);
+        let instruction = Instruction::with_aux(Opcode::Halt, 0, 0, 0, 0);
+
+        assert_eq!(
+            vm.assert_message(&[message], instruction)
+                .expect("binary assertion messages should be accepted"),
+            "a\u{fffd}b"
+        );
+
+        let mut long_bytes = [b'x'; 14];
+        long_bytes[13] = 0xff;
+        let long_message = vm.heap.intern_string_value_bytes(&long_bytes);
+        assert!(long_message.as_string_atom().is_some());
+        assert_eq!(
+            vm.assert_message(&[long_message], instruction)
+                .expect("binary atom assertion messages should be accepted"),
+            String::from_utf8_lossy(&long_bytes)
+        );
+    }
+
+    #[test]
+    fn raw_string_equality_handles_atom_inline_and_packed_inline_paths() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let inline = vm.heap.intern_string_value_bytes(b"same\0bytes");
+        let equal_inline = vm.heap.intern_string_value_bytes(b"same\0bytes");
+        let unequal_inline = vm.heap.intern_string_value_bytes(b"other");
+        let atom = Value::string_atom(vm.heap.intern_string_bytes(b"same\0bytes"));
+        let equal_atom = Value::string_atom(vm.heap.intern_string_bytes(b"same\0bytes"));
+        let unequal_atom = Value::string_atom(vm.heap.intern_string_bytes(b"other"));
+
+        assert!(vm
+            .raw_equal_values(inline, equal_inline)
+            .expect("inline equality should succeed"));
+        assert!(!vm
+            .raw_equal_values(inline, unequal_inline)
+            .expect("inline inequality should succeed"));
+        assert!(vm
+            .raw_equal_values(atom, equal_atom)
+            .expect("atom equality should succeed"));
+        assert!(!vm
+            .raw_equal_values(atom, unequal_atom)
+            .expect("atom inequality should succeed"));
+        assert!(vm
+            .raw_equal_values(atom, inline)
+            .expect("mixed equality should succeed"));
+        assert!(vm
+            .raw_equal_values(inline, atom)
+            .expect("mixed equality should be symmetric"));
     }
 }

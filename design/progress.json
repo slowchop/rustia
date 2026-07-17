@@ -97,8 +97,8 @@
       "name": "Standalone benchmark OSS project",
       "complete": 80,
       "confidence": 80,
-      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, a wasm target runner for rustia+koto on V8, JavaScriptCore-family, and SpiderMonkey runtimes, a call_ref versus br_table dispatch microbench on those same families, and a manual self-hosted measurement workflow are present.",
-      "future_plan": "Split from workspace, expand workloads, publish long-run history, and automate tracking charts."
+      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, a wasm target runner for rustia+koto on V8, JavaScriptCore-family, and SpiderMonkey runtimes, a call_ref versus br_table dispatch microbench on those same families, and push/nightly/manual self-hosted publication to the private benchmark-data repository are present.",
+      "future_plan": "Split from workspace, expand workloads, and accumulate longer-run public history and richer tracking charts."
     },
     {
       "name": "Public release readiness",
@@ -248,8 +248,8 @@
           "name": "Tables/metatables",
           "complete": 78,
           "confidence": 70,
-          "state": "Broad table, metatable, iteration, and stdlib behavior is conformance-covered. Logical deletion preserves tombstone insertion semantics, larger hash parts use a deterministic side index, and shape-revalidated positive string-slot cache hooks cover global/index reads and writes.",
-          "future_plan": "Keep the full suite green while measuring and hardening the first slice, then add cached-length refinements and dedicated field/namecall specialization."
+          "state": "Broad table, metatable, iteration, and stdlib behavior is conformance-covered. Logical deletion preserves tombstone insertion semantics, larger hash parts use a deterministic side index, and shape-revalidated positive string-slot caches now cover global/index reads and writes plus dedicated GETTABLEKS, SETTABLEKS, and NAMECALL field/method paths.",
+          "future_plan": "Keep the full suite green while publishing exact fixed-work evidence for the landed field/method slice, then add cached-length refinements."
         },
         {
           "name": "Functions/coroutines/pcall",
@@ -408,10 +408,10 @@
         },
         {
           "name": "Benchmark CI",
-          "complete": 42,
+          "complete": 75,
           "confidence": 90,
-          "state": "A manual workflow_dispatch benchmark measurement job exists on the generic [self-hosted, bench] runner label, uploads generated artifacts, and is guarded by a workflow policy check.",
-          "future_plan": "After runner setup, add automated history publication and regression alerts without exposing infra details."
+          "state": "Main pushes run the Rustia matrix, nightly and full manual dispatches run the comparison matrix, and rustia manual dispatch remains available on the generic [self-hosted, bench] runner. Each mode restores and publishes generated history through the private benchmark-data repository and is guarded by workflow policy checks.",
+          "future_plan": "Keep the runner and deploy key operational, accumulate longer history, and add regression alerts without exposing infrastructure details."
         }
       ]
     },

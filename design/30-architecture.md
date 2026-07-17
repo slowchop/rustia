@@ -20,8 +20,10 @@
 > VM-local byte atoms and larger hash parts use compact deterministic open-addressed `u32` side indices. Loaded
 > programs store compact `u32` constant atoms and a 4-byte per-PC site map, with lazily allocated 16-byte
 > shape/key/live-slot records at eligible sites. Mutation-safe `GETIMPORT` and guarded generic fixed-result
-> `FASTCALL` are implemented with ordinary semantic fallbacks and logical fuel preserved. Shared cross-VM string
-> storage, short-string inlining, and dedicated field/namecall opcodes remain future work.
+> `FASTCALL` are implemented with ordinary semantic fallbacks and logical fuel preserved. Immutable compiled
+> constant storage is shared across VMs, long compiled atoms borrow those bytes, and binary strings up to 13
+> bytes can live inside `Value`. Dedicated `GETTABLEKS`, `SETTABLEKS`, and two-lane live `NAMECALL` lookup are
+> implemented; full Luau `__namecall` context remains a separate conformance item.
 
 ## 0. The bet — proven, with honest framing
 
@@ -95,7 +97,8 @@ cache metadata uses a 4-byte site-map entry per PC and allocates 16-byte shape/k
 eligible table/import sites fill. `GETIMPORT` reads live values through up to three guarded slots; generic
 fixed-result `FASTCALL` guards an exact native function handle and falls back to ordinary resumable calls.
 Neither mutates shared `Program` data or changes logical fuel. Dedicated
-`GETTABLEKS`/`SETTABLEKS`/`NAMECALL` specialization remains P2.
+`GETTABLEKS`/`SETTABLEKS`/`NAMECALL` specialization is now implemented through the same per-VM live-slot
+cache model; full Luau `__namecall` context remains separate conformance work.
 
 **B. Value representation — LOCKED: 16-byte tagged union (Copy scalars + payload word + tag); NOT NaN-box.**
 *(Overturns the v1/v2 leaning.)* Considered: NaN-box 8B; **16-byte tagged [✓]**; koto 24B [rejected];
@@ -266,7 +269,8 @@ minimal locked-down sandbox/wasm build.
 - **P4 — full public parity + release.** The deferred public-parity libs come IN: **`buffer`, `vector` (+lib),
   `utf8`, `string.pack`**, the rest of `math`/`string`/`table`, `require`/module system, and the **gradual type
   *checker*** (the big LSP-only subsystem). Differential conformance vs full_moon / reference Luau. Per-VM RSS
-  budget + measurement (priority #2). Broader opcode-specific field/namecall caches and specialization.
+  budget + measurement (priority #2). Quantify and harden the landed opcode-specific field/namecall caches before
+  pursuing broader adaptive specialization.
   License + clean public codebase (no
   grabby-specific code). *Optional:* native-only JIT (cranelift first). **VALIDATED tier — wasm-emit
   JIT/AOT-to-wasm (the in-browser speed answer, spike `65-wasmjit`):** emitting a hot kernel to wasm at runtime
@@ -300,12 +304,10 @@ minimal locked-down sandbox/wasm build.
 | GC full-collect cost scales O(live-objects) (~10 ns/obj; ~200 µs at 20k objects) | med | tune the instruction-count collection interval at P1 on realistic heap sizes; confirm bit-reproducible native vs wasm |
 | Byte-compat tail (Schubfach, patterns, sort-tie, PCG32) | med | discrete P2 tasks, each gated by a differential test |
 | Per-VM RSS unmeasured (priority #2); 16B Value doubles value memory; GcBox +16 B/obj; grows-only wasm memory | med | measure at P1; set a per-VM budget; wasm binary already 128 KB |
-| Const-pool / `Gc`-string seam is only partly resolved | med | indexed VM-local atoms + loaded-program constant caches have landed; design shared cross-VM strings, precomputed hashes, and short-string storage |
 | Public-release scope for pinned standalone Luau runtime compatibility is a long tail | low | P4; grabby ships privately on the P2 subset first; analyzer, raw C API, Roblox, Lua 5.4, and bytecode compatibility stay separate unless reclassified |
 
 ## 7. Open sub-decisions (deferred, not blocking)
-- Final shared string-interning / const-pool representation beyond the landed VM-local indexed atoms and
-  per-loaded-program constant cache.
+- Quantitative per-VM RSS/startup measurement for the landed shared compiled-string and 13-byte inline forms.
 - Exact generic-superinstruction set beyond numeric-for — driven by P4 profiling of real scripts.
 - Whether production AI runs inside the rollback sim (host-columnar) or as a separate non-rolled-back layer.
 - Whether any transcendental runs in the 50 Hz per-tick path (vs one-shot scenario gen).

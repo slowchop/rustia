@@ -523,7 +523,7 @@ impl Compiler {
         let prototype = i32::try_from(prototype)
             .map_err(|_| CompileError::at("too many function prototypes", span))?;
 
-        let target = self.compile_assignment_target(target)?;
+        let target = self.compile_assignment_target(target, true)?;
         match target {
             CompiledAssignmentTarget::Local(register) => {
                 self.code.push(Instruction::with_aux(
@@ -582,7 +582,7 @@ impl Compiler {
                     prototype,
                 ));
                 self.emit_source_mapped_instruction(
-                    Instruction::new(Opcode::SetIndex, table, key, function_register),
+                    table_set_instruction(table, key, function_register),
                     span,
                 );
                 if let Some(name) = global_field {
@@ -592,7 +592,9 @@ impl Compiler {
                     self.assigned_stdlib_fields.insert((table_name, field_name));
                 }
                 self.free_register(function_register);
-                self.free_register(key);
+                if let Some(key) = key.register() {
+                    self.free_register(key);
+                }
                 self.free_register(table);
             }
             CompiledAssignmentTarget::Global { key, name } => {
@@ -636,7 +638,18 @@ impl Compiler {
                     span,
                 ));
             }
-            let target = self.compile_assignment_target(&targets[0])?;
+            let target = self.compile_assignment_target(&targets[0], false)?;
+            let reusable_string_key = match &target {
+                CompiledAssignmentTarget::Table {
+                    key: CompiledTableKey::StringConstant { .. },
+                    ..
+                } => {
+                    let register = self.alloc_register_at(span)?;
+                    debug_assert_ne!(register, 0, "register zero is the no-key-output sentinel");
+                    Some(register)
+                }
+                _ => None,
+            };
             let result = self.alloc_register_at(span)?;
             match &target {
                 CompiledAssignmentTarget::Local(register) => {
@@ -657,8 +670,24 @@ impl Compiler {
                     ));
                 }
                 CompiledAssignmentTarget::Table { table, key, .. } => {
-                    self.code
-                        .push(Instruction::new(Opcode::GetIndex, result, *table, *key));
+                    let instruction = match (*key, reusable_string_key) {
+                        (
+                            CompiledTableKey::StringConstant { index: key, .. },
+                            Some(key_register),
+                        ) => {
+                            // Compound assignment reuses the loaded key for the later SETINDEX,
+                            // matching the unfused LoadConst + GetIndex + SetIndex fuel schedule.
+                            Instruction::with_aux(
+                                Opcode::GetTableKs,
+                                result,
+                                *table,
+                                key_register,
+                                key,
+                            )
+                        }
+                        _ => table_get_instruction(result, *table, *key),
+                    };
+                    self.code.push(instruction);
                 }
                 CompiledAssignmentTarget::Global { key, .. } => {
                     self.code
@@ -706,8 +735,16 @@ impl Compiler {
                     ));
                 }
                 CompiledAssignmentTarget::Table { table, key, .. } => {
-                    self.code
-                        .push(Instruction::new(Opcode::SetIndex, *table, *key, result));
+                    if let Some(key_register) = reusable_string_key {
+                        self.code.push(Instruction::new(
+                            Opcode::SetIndex,
+                            *table,
+                            key_register,
+                            result,
+                        ));
+                    } else {
+                        self.code.push(table_set_instruction(*table, *key, result));
+                    }
                 }
                 CompiledAssignmentTarget::Global { key, .. } => {
                     self.code
@@ -717,12 +754,17 @@ impl Compiler {
             self.mark_assignment_target_mutations(&target);
             self.free_register(rhs_register);
             self.free_register(result);
+            if let Some(key_register) = reusable_string_key {
+                self.free_register(key_register);
+            }
             match target {
                 CompiledAssignmentTarget::Local(_) => {}
                 CompiledAssignmentTarget::CapturedLocal(_) => {}
                 CompiledAssignmentTarget::Upvalue(_) => {}
                 CompiledAssignmentTarget::Table { table, key, .. } => {
-                    self.free_register(key);
+                    if let Some(key) = key.register() {
+                        self.free_register(key);
+                    }
                     self.free_register(table);
                 }
                 CompiledAssignmentTarget::Global { .. } => {}
@@ -732,7 +774,7 @@ impl Compiler {
 
         let mut compiled_targets = Vec::with_capacity(targets.len());
         for target in targets {
-            compiled_targets.push(self.compile_assignment_target(target)?);
+            compiled_targets.push(self.compile_assignment_target(target, true)?);
         }
         for target in &compiled_targets {
             self.mark_assignment_target_mutations(target);
@@ -809,6 +851,7 @@ impl Compiler {
     fn compile_assignment_target(
         &mut self,
         target: &AssignmentTarget,
+        preload_constant_key: bool,
     ) -> Result<CompiledAssignmentTarget> {
         match target {
             AssignmentTarget::Local { name, span } => {
@@ -842,12 +885,16 @@ impl Compiler {
             AssignmentTarget::Field {
                 object,
                 field,
-                field_span: _,
+                field_span,
                 ..
             } => {
                 let global_field = self.global_table_field_assignment(object, field);
                 let table = self.compile_expr(object)?;
-                let key = self.load_constant(Constant::String(field.as_bytes().to_vec()))?;
+                let key = self.compiled_string_table_key(
+                    field.as_bytes(),
+                    *field_span,
+                    preload_constant_key,
+                )?;
                 Ok(CompiledAssignmentTarget::Table {
                     table,
                     key,
@@ -859,7 +906,11 @@ impl Compiler {
                 let global_field = self.global_table_index_assignment(object, index);
                 let stdlib_field = self.stdlib_table_index_assignment(object, index);
                 let table = self.compile_expr(object)?;
-                let key = self.compile_expr(index)?;
+                let key = if let Some(Constant::String(bytes)) = const_eval(index) {
+                    self.compiled_string_table_key(&bytes, index.span(), preload_constant_key)?
+                } else {
+                    CompiledTableKey::Register(self.compile_expr(index)?)
+                };
                 Ok(CompiledAssignmentTarget::Table {
                     table,
                     key,
@@ -1277,14 +1328,22 @@ impl Compiler {
             } => self.compile_field_to(object, field, *field_span, target),
             Expr::Index { object, index, .. } => {
                 self.compile_expr_to(object, target)?;
-                let index_register = self.compile_expr(index)?;
-                self.code.push(Instruction::new(
-                    Opcode::GetIndex,
-                    target,
-                    target,
-                    index_register,
-                ));
-                self.free_register(index_register);
+                if let Some(Constant::String(bytes)) = const_eval(index) {
+                    let key = self.string_constant_index(&bytes, index.span())?;
+                    self.emit_source_mapped_instruction(
+                        Instruction::with_aux(Opcode::GetTableKs, target, target, 0, key),
+                        index.span(),
+                    );
+                } else {
+                    let index_register = self.compile_expr(index)?;
+                    self.code.push(Instruction::new(
+                        Opcode::GetIndex,
+                        target,
+                        target,
+                        index_register,
+                    ));
+                    self.free_register(index_register);
+                }
                 Ok(())
             }
             Expr::Table { fields, .. } => self.compile_table_to(fields, target),
@@ -1556,12 +1615,11 @@ impl Compiler {
             }
         }
         self.compile_expr_to(object, target)?;
-        let key_register = self.load_constant(Constant::String(field.as_bytes().to_vec()))?;
+        let key = self.string_constant_index(field.as_bytes(), field_span)?;
         self.emit_source_mapped_instruction(
-            Instruction::new(Opcode::GetIndex, target, target, key_register),
+            Instruction::with_aux(Opcode::GetTableKs, target, target, 0, key),
             field_span,
         );
-        self.free_register(key_register);
         Ok(())
     }
 
@@ -1657,30 +1715,39 @@ impl Compiler {
                     array_index += 1.0;
                 }
                 TableField::Named { name, value, .. } => {
-                    let key_register =
-                        self.load_constant(Constant::String(name.as_bytes().to_vec()))?;
+                    let key =
+                        self.compiled_string_table_key(name.as_bytes(), value.span(), true)?;
                     let value_register =
                         self.compile_expr_with_debug_name(value, Some(name.clone()))?;
-                    self.code.push(Instruction::new(
-                        Opcode::SetIndex,
-                        target,
-                        key_register,
-                        value_register,
-                    ));
+                    self.code
+                        .push(table_set_instruction(target, key, value_register));
                     self.free_register(value_register);
-                    self.free_register(key_register);
+                    if let Some(key) = key.register() {
+                        self.free_register(key);
+                    }
                 }
                 TableField::Keyed { key, value, .. } => {
-                    let key_register = self.compile_expr(key)?;
-                    let value_register = self.compile_expr(value)?;
-                    self.code.push(Instruction::new(
-                        Opcode::SetIndex,
-                        target,
-                        key_register,
-                        value_register,
-                    ));
-                    self.free_register(value_register);
-                    self.free_register(key_register);
+                    if let Some(Constant::String(bytes)) = const_eval(key) {
+                        let key = self.compiled_string_table_key(&bytes, key.span(), true)?;
+                        let value_register = self.compile_expr(value)?;
+                        self.code
+                            .push(table_set_instruction(target, key, value_register));
+                        self.free_register(value_register);
+                        if let Some(key) = key.register() {
+                            self.free_register(key);
+                        }
+                    } else {
+                        let key_register = self.compile_expr(key)?;
+                        let value_register = self.compile_expr(value)?;
+                        self.code.push(Instruction::new(
+                            Opcode::SetIndex,
+                            target,
+                            key_register,
+                            value_register,
+                        ));
+                        self.free_register(value_register);
+                        self.free_register(key_register);
+                    }
                 }
             }
         }
@@ -1852,15 +1919,13 @@ impl Compiler {
                 )?;
                 let self_register = checked_register_offset(callee_register, 1, expr.span())?;
                 self.compile_expr_to(object, self_register)?;
-                let key_register =
-                    self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-                self.code.push(Instruction::new(
-                    Opcode::GetIndex,
+                self.emit_namecall_lookup(
                     callee_register,
                     self_register,
-                    key_register,
-                ));
-                self.free_register(key_register);
+                    method,
+                    false,
+                    expr.span(),
+                )?;
                 if self.method_call_has_expandable_trailing_arg(args) {
                     let trailing_index = args.len().checked_sub(1).ok_or_else(|| {
                         CompileError::at(
@@ -2039,14 +2104,7 @@ impl Compiler {
         let callee_register = self.alloc_register_window_at(window_len, span)?;
         let self_register = checked_register_offset(callee_register, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            callee_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_namecall_lookup(callee_register, self_register, method, false, span)?;
         for (index, arg) in args[..trailing_index].iter().enumerate() {
             let register = checked_register_offset(callee_register, index + 2, span)?;
             self.compile_expr_to(arg, register)?;
@@ -3493,14 +3551,7 @@ impl Compiler {
         let callee_register = self.alloc_register_at(span)?;
         let self_register = self.alloc_register_at(span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            callee_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_namecall_lookup(callee_register, self_register, method, false, span)?;
 
         for arg in args {
             self.compile_expr(arg)?;
@@ -3551,14 +3602,7 @@ impl Compiler {
         let call_base = self.alloc_register_window_at(window_len, span)?;
         let self_register = checked_register_offset(call_base, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            call_base,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_namecall_lookup(call_base, self_register, method, false, span)?;
         for (index, arg) in args[..trailing_index].iter().enumerate() {
             let register = checked_register_offset(call_base, index + 2, span)?;
             self.compile_expr_to(arg, register)?;
@@ -3611,14 +3655,7 @@ impl Compiler {
         let callee_register = self.alloc_register_at(span)?;
         let self_register = self.alloc_register_at(span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            callee_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_namecall_lookup(callee_register, self_register, method, false, span)?;
 
         for arg in &args[..trailing_index] {
             self.compile_expr(arg)?;
@@ -4037,15 +4074,7 @@ impl Compiler {
             } => {
                 let self_register = checked_register_offset(callee_register, 1, span)?;
                 self.compile_expr_to(object, self_register)?;
-                let key_register =
-                    self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-                self.code.push(Instruction::new(
-                    Opcode::GetIndex,
-                    callee_register,
-                    self_register,
-                    key_register,
-                ));
-                self.free_register(key_register);
+                self.emit_namecall_lookup(callee_register, self_register, method, false, span)?;
                 for (index, arg) in args.iter().enumerate() {
                     let register = checked_register_offset(callee_register, index + 2, span)?;
                     self.compile_expr_to(arg, register)?;
@@ -4080,15 +4109,7 @@ impl Compiler {
             } => {
                 let self_register = checked_register_offset(callee_register, 1, span)?;
                 self.compile_expr_to(object, self_register)?;
-                let key_register =
-                    self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-                self.code.push(Instruction::new(
-                    Opcode::GetIndex,
-                    callee_register,
-                    self_register,
-                    key_register,
-                ));
-                self.free_register(key_register);
+                self.emit_namecall_lookup(callee_register, self_register, method, false, span)?;
                 for (index, arg) in args[..shape.scalar_arg_count].iter().enumerate() {
                     let register = checked_register_offset(callee_register, index + 2, span)?;
                     self.compile_expr_to(arg, register)?;
@@ -4139,14 +4160,7 @@ impl Compiler {
 
         let self_register = checked_register_offset(first_register, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            first_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_namecall_lookup(first_register, self_register, method, false, span)?;
 
         for (index, arg) in args.iter().enumerate() {
             let register = checked_register_offset(first_register, index + 2, span)?;
@@ -4195,18 +4209,7 @@ impl Compiler {
 
         let self_register = self.alloc_register_at(span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            target,
-            self_register,
-            key_register,
-        ));
-        self.emit_source_mapped_instruction(
-            Instruction::new(Opcode::CheckMethod, target, self_register, key_register),
-            span,
-        );
-        self.free_register(key_register);
+        self.emit_namecall_lookup(target, self_register, method, true, span)?;
 
         let mut arg_registers = Vec::with_capacity(args.len());
         for arg in args {
@@ -4262,14 +4265,7 @@ impl Compiler {
 
         let self_register = checked_register_offset(first_register, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            first_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_namecall_lookup(first_register, self_register, method, false, span)?;
         for (index, arg) in args[..trailing_index].iter().enumerate() {
             let register = checked_register_offset(first_register, index + 2, span)?;
             self.compile_expr_to(arg, register)?;
@@ -4322,14 +4318,7 @@ impl Compiler {
 
         let self_register = checked_register_offset(first_register, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            first_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_namecall_lookup(first_register, self_register, method, false, span)?;
 
         for (index, arg) in args[..trailing_index].iter().enumerate() {
             let register = checked_register_offset(first_register, index + 2, span)?;
@@ -4857,6 +4846,10 @@ impl Compiler {
 
     fn load_constant_to(&mut self, register: u8, constant: Constant) -> Result<()> {
         let constant = self.constant_index(constant)?;
+        self.emit_constant_index_to(register, constant)
+    }
+
+    fn emit_constant_index_to(&mut self, register: u8, constant: usize) -> Result<()> {
         if let Ok(constant) = u8::try_from(constant) {
             self.code
                 .push(Instruction::new(Opcode::LoadConst, register, 0, constant));
@@ -4871,6 +4864,53 @@ impl Compiler {
                 constant,
             ));
         }
+        Ok(())
+    }
+
+    fn string_constant_index(&mut self, bytes: &[u8], span: Span) -> Result<i32> {
+        let index = self.constant_index(Constant::String(bytes.to_vec()))?;
+        i32::try_from(index).map_err(|_| CompileError::at("string constant index overflow", span))
+    }
+
+    fn compiled_string_table_key(
+        &mut self,
+        bytes: &[u8],
+        span: Span,
+        preload: bool,
+    ) -> Result<CompiledTableKey> {
+        let index = self.string_constant_index(bytes, span)?;
+        let preloaded = if preload {
+            let register = self.alloc_register_at(span)?;
+            debug_assert_ne!(register, 0, "register zero is the fused-key sentinel");
+            let constant = usize::try_from(index)
+                .map_err(|_| CompileError::at("negative string constant index", span))?;
+            self.emit_constant_index_to(register, constant)?;
+            Some(register)
+        } else {
+            None
+        };
+        Ok(CompiledTableKey::StringConstant { index, preloaded })
+    }
+
+    fn emit_namecall_lookup(
+        &mut self,
+        callee: u8,
+        receiver: u8,
+        method: &str,
+        checked: bool,
+        span: Span,
+    ) -> Result<()> {
+        let method = self.string_constant_index(method.as_bytes(), span)?;
+        self.emit_source_mapped_instruction(
+            Instruction::with_aux(
+                Opcode::NameCall,
+                callee,
+                receiver,
+                u8::from(checked),
+                method,
+            ),
+            span,
+        );
         Ok(())
     }
 
@@ -5201,8 +5241,7 @@ impl Compiler {
                 ));
             }
             CompiledAssignmentTarget::Table { table, key, .. } => {
-                self.code
-                    .push(Instruction::new(Opcode::SetIndex, *table, *key, source));
+                self.code.push(table_set_instruction(*table, *key, source));
             }
             CompiledAssignmentTarget::Global { key, .. } => {
                 self.code
@@ -5217,7 +5256,9 @@ impl Compiler {
             CompiledAssignmentTarget::CapturedLocal(_) => {}
             CompiledAssignmentTarget::Upvalue(_) => {}
             CompiledAssignmentTarget::Table { table, key, .. } => {
-                self.free_register(key);
+                if let Some(key) = key.register() {
+                    self.free_register(key);
+                }
                 self.free_register(table);
             }
             CompiledAssignmentTarget::Global { .. } => {}
@@ -5773,7 +5814,7 @@ enum CompiledAssignmentTarget {
     Upvalue(u8),
     Table {
         table: u8,
-        key: u8,
+        key: CompiledTableKey,
         global_field: Option<String>,
         stdlib_field: Option<(String, String)>,
     },
@@ -5781,6 +5822,53 @@ enum CompiledAssignmentTarget {
         key: i32,
         name: String,
     },
+}
+
+#[derive(Clone, Copy)]
+enum CompiledTableKey {
+    Register(u8),
+    StringConstant {
+        index: i32,
+        /// Register holding the original logical constant load when evaluation must remain
+        /// before an intervening right-hand side. `None` means the load is fused here.
+        preloaded: Option<u8>,
+    },
+}
+
+impl CompiledTableKey {
+    fn register(self) -> Option<u8> {
+        match self {
+            Self::Register(register) => Some(register),
+            Self::StringConstant { preloaded, .. } => preloaded,
+        }
+    }
+}
+
+fn table_get_instruction(result: u8, table: u8, key: CompiledTableKey) -> Instruction {
+    match key {
+        CompiledTableKey::Register(key) => Instruction::new(Opcode::GetIndex, result, table, key),
+        CompiledTableKey::StringConstant {
+            index,
+            preloaded: None,
+        } => Instruction::with_aux(Opcode::GetTableKs, result, table, 0, index),
+        CompiledTableKey::StringConstant {
+            preloaded: Some(key),
+            ..
+        } => Instruction::new(Opcode::GetIndex, result, table, key),
+    }
+}
+
+fn table_set_instruction(table: u8, key: CompiledTableKey, value: u8) -> Instruction {
+    match key {
+        CompiledTableKey::Register(key) => Instruction::new(Opcode::SetIndex, table, key, value),
+        CompiledTableKey::StringConstant { index, preloaded } => Instruction::with_aux(
+            Opcode::SetTableKs,
+            table,
+            value,
+            preloaded.unwrap_or(0),
+            index,
+        ),
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -6122,7 +6210,7 @@ mod tests {
         let chunk = parse_source("return tostring(-0) .. '|' .. tostring(0)").unwrap();
         let program = compile(&chunk).unwrap();
         let zero_bits = program
-            .constants
+            .constants()
             .iter()
             .filter_map(|constant| match constant {
                 Constant::Number(value) if *value == 0.0 => Some(value.to_bits()),
@@ -8651,6 +8739,29 @@ return `x {s}`"#,
     }
 
     #[test]
+    fn mixed_string_representations_preserve_compatible_eq_metamethods() {
+        let chunk = parse_source(
+            r#"
+                local atom = next({same = true})
+                local inline = "same"
+                local left = setmetatable({}, {__eq = atom})
+                local right = setmetatable({}, {__eq = inline})
+                return left == right
+            "#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        let error = Vm::new(Profile::ReproducibleStandard)
+            .run(&program)
+            .expect_err("equal mixed-representation metamethod values must be invoked");
+        assert!(matches!(
+            error.kind,
+            ErrorKind::RuntimeError { ref message }
+                if message == "attempt to call a string value"
+        ));
+    }
+
+    #[test]
     fn compiles_relational_operators() {
         let chunk = parse_source("local x = 1; return assert(x <= 2)").unwrap();
         let program = compile(&chunk).unwrap();
@@ -9209,13 +9320,13 @@ return #s * 1000 + string.byte(s, 256)
             .main
             .code
             .iter()
-            .any(|instruction| instruction.op == Opcode::GetIndex));
-        let Constant::Import(path) = &program.constants[import.aux as usize] else {
+            .any(|instruction| instruction.op == Opcode::GetTableKs));
+        let Constant::Import(path) = &program.constants()[import.aux as usize] else {
             panic!("GETIMPORT must reference an import descriptor");
         };
         let names = path
             .iter()
-            .map(|index| match &program.constants[*index as usize] {
+            .map(|index| match &program.constants()[*index as usize] {
                 Constant::String(name) => String::from_utf8(name.clone()).unwrap(),
                 _ => panic!("import component must reference a string"),
             })
@@ -9224,6 +9335,191 @@ return #s * 1000 + string.byte(s, 256)
 
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         assert_eq!(vm.run(&program).unwrap().as_number(), Some(42.0));
+    }
+
+    #[test]
+    fn lowers_constant_string_table_and_namecall_fastpaths() {
+        let program = compile(
+            &parse_source(
+                r#"
+                    local t = {
+                        value = 1,
+                        ["other"] = 2,
+                        add = function(self, x) return self.value + x end,
+                    }
+                    t.value += 1
+                    t["other"] = t.value
+                    local key = "other"
+                    t[key] = 3
+                    local dynamic = t[key]
+                    return t:add(dynamic) + 0
+                "#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let code = program
+            .main
+            .code
+            .iter()
+            .chain(program.functions.iter().flat_map(|function| &function.code))
+            .collect::<Vec<_>>();
+        assert!(code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::GetTableKs));
+        assert!(code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::SetTableKs));
+        assert!(code
+            .iter()
+            .filter(|instruction| instruction.op == Opcode::SetTableKs)
+            .all(|instruction| instruction.c != 0));
+        let compound_get = code
+            .iter()
+            .find(|instruction| instruction.op == Opcode::GetTableKs && instruction.c != 0)
+            .expect("compound constant-field read should retain its loaded key");
+        assert!(code.iter().any(|instruction| {
+            instruction.op == Opcode::SetIndex && instruction.b == compound_get.c
+        }));
+        assert!(code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::NameCall && instruction.c == 1));
+        assert!(code
+            .iter()
+            .all(|instruction| instruction.op != Opcode::CheckMethod));
+        assert!(code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::GetIndex));
+        assert!(code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::SetIndex));
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(5.0));
+
+        let tail = compile(
+            &parse_source("local t = {m = function(self) return 42 end}; return t:m()").unwrap(),
+        )
+        .unwrap();
+        assert!(tail
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::NameCall && instruction.c == 0));
+
+        let indexed_class = compile(
+            &parse_source(
+                r#"
+                    local Class = {}
+                    Class.__index = Class
+                    function Class:add(x) return self.value + x end
+                    local object = setmetatable({value = 40}, Class)
+                    local result = 0
+                    for i = 1, 2 do result = object:add(i) end
+                    return result
+                "#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&indexed_class).unwrap().as_number(), Some(42.0));
+
+        let missing =
+            compile(&parse_source("local t = {}; return t:missing() + 0").unwrap()).unwrap();
+        let error = Vm::new(Profile::ReproducibleStandard)
+            .run(&missing)
+            .expect_err("checked NAMECALL must retain the missing-method diagnostic");
+        assert!(matches!(
+            error.kind,
+            ErrorKind::RuntimeError { ref message }
+                if message == "attempt to call missing method 'missing' of table"
+        ));
+    }
+
+    #[test]
+    fn settableks_preloads_its_logical_key_before_an_intervening_rhs_call() {
+        let program = compile(
+            &parse_source(
+                r#"
+                    local t = {}
+                    local function rhs() return 42 end
+                    t.field = rhs()
+                    return t.field
+                "#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let code = &program.main.code;
+        let (set_index, set) = code
+            .iter()
+            .enumerate()
+            .find(|(_, instruction)| instruction.op == Opcode::SetTableKs)
+            .expect("constant field write should use SETTABLEKS");
+        assert_ne!(set.c, 0, "compiler writes must use preloaded-key mode");
+        let key_load = code[..set_index]
+            .iter()
+            .rposition(|instruction| {
+                instruction.a == set.c
+                    && matches!(instruction.op, Opcode::LoadConst | Opcode::LoadConstWide)
+            })
+            .expect("SETTABLEKS key register should have a logical constant load");
+        let rhs_call = code[..set_index]
+            .iter()
+            .rposition(|instruction| matches!(instruction.op, Opcode::Call | Opcode::CallMulti))
+            .expect("the RHS should contain the ordinary function call");
+        assert!(
+            key_load < rhs_call && rhs_call < set_index,
+            "the key step must remain before RHS side effects and the write after them"
+        );
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(42.0));
+    }
+
+    #[test]
+    fn every_source_write_preloads_the_matching_settableks_key() {
+        let program = compile(
+            &parse_source(
+                r#"
+                    local a, b = {}, {}
+                    local function rhs(value) return value end
+                    a.one, b.two = rhs(1), rhs(2)
+                    local c = { three = rhs(3), ["four"] = rhs(4) }
+                    function a.five() return 5 end
+                    return a.one + b.two + c.three + c.four + a.five()
+                "#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let code = &program.main.code;
+        let sets = code
+            .iter()
+            .enumerate()
+            .filter(|(_, instruction)| instruction.op == Opcode::SetTableKs)
+            .collect::<Vec<_>>();
+        assert_eq!(sets.len(), 5);
+        for (set_index, set) in sets {
+            assert_ne!(set.c, 0, "source writes must use preloaded-key mode");
+            let load = code[..set_index]
+                .iter()
+                .rfind(|instruction| {
+                    instruction.a == set.c
+                        && matches!(instruction.op, Opcode::LoadConst | Opcode::LoadConstWide)
+                })
+                .expect("preloaded key must have a preceding constant load");
+            let loaded_constant = match load.op {
+                Opcode::LoadConst => i32::from(load.c),
+                Opcode::LoadConstWide => load.aux,
+                _ => unreachable!(),
+            };
+            assert_eq!(loaded_constant, set.aux);
+        }
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(15.0));
     }
 
     #[test]

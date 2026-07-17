@@ -17,6 +17,12 @@ but it is structured to become a standalone OSS benchmark project.
 - Keep dirty benchmark records out of committed history. `just benchmarks`
   captures a clean HEAD commit before the first history append and passes it to
   both runner binaries.
+- Keep accepted fixed-work raw sidecars and provenance manifests under
+  `history/evidence/<full-commit>/`; they complement rather than extend the
+  stable JSONL summary schema.
+- Keep `analyze-fixed-samples.js` dependency-free and retain its exact seeded
+  pooled/hierarchical analysis output beside accepted sidecars so the
+  conservative regression verdict is reproducible after the split.
 
 ## Workspace Seams
 
@@ -27,8 +33,9 @@ workspace coupling is intentional:
   `../crates/`.
 - The root `Justfile` owns convenience recipes while the project remains in this
   workspace.
-- `.github/workflows/benchmarks.yml` owns the current in-repo manual
-  self-hosted measurement job while the project remains in this workspace.
+- `.github/workflows/benchmarks.yml` owns the current in-repo push, nightly, and
+  manual self-hosted measurement jobs plus private data-repo publication while
+  the project remains in this workspace.
 - Root license files cover the current in-repo copy.
 
 When the project splits, either publish `rustia-*` crates first, move the rustia

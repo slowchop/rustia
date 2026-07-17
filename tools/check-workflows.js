@@ -162,6 +162,7 @@ function checkCi(text) {
   requireIncludes(text, "node tools/check-workflows.js", label);
   requireIncludes(text, "node design/render-progress.js --check", label);
   requireIncludes(text, "node tools/check-project-status.js", label);
+  requireIncludes(text, "node bench/analyze-fixed-samples.js --self-test", label);
   requireIncludes(text, "node tools/check-benchmark-results.js", label);
   requireIncludes(text, "node tools/check-wasm-gate-results.js", label);
   requireIncludes(text, "node bench/render-current-results.js --check", label);
@@ -217,6 +218,7 @@ function checkBenchmarks(text) {
   requireIncludes(text, "--commit \"$(git rev-parse --short HEAD)\"", label);
   requireIncludes(text, "node tools/run-wasm-gate.js", label);
   requireIncludes(text, "node tools/run-wasm-dispatch-gate.js", label);
+  requireCount(text, "node bench/analyze-fixed-samples.js --self-test", 2, label);
   requireIncludes(text, "node tools/check-wasm-gate-results.js", label);
   requireIncludes(text, "node tools/check-benchmark-site.js", label);
   requireIncludes(text, "cargo run -p script-bench-harness -- --refresh-results", label);

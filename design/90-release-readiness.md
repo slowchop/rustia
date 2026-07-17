@@ -128,15 +128,16 @@ from `publish = false` to publishable.
   `cargo clippy --workspace --all-targets -- -D warnings`.
 - `just check-crate-metadata` passes and `design/crate-metadata.json` is
   current.
-- `just check-workflows` passes and keeps the hosted CI workflow, manual
-  benchmark workflow, pinned Rust toolchain, action pins, permissions, and
+- `just check-workflows` passes and keeps the hosted CI workflow, push/nightly/
+  manual benchmark modes, pinned Rust toolchain, action pins, permissions, and
   generic runner labels in their expected public-safe shape.
 - `.github/workflows/ci.yml` mirrors the release-preflight gate on hosted Linux
   CI, including example compilation, without running fresh benchmark
   measurements.
-- `.github/workflows/benchmarks.yml` provides manual current-matrix measurement
-  on the generic `[self-hosted, bench]` runner label and uploads generated
-  benchmark artifacts.
+- `.github/workflows/benchmarks.yml` provides main-push Rustia, nightly full-
+  matrix, and manual measurements on the generic `[self-hosted, bench]` runner;
+  it restores and publishes generated artifacts through the private
+  benchmark-data repository.
 - `cargo test --workspace` passes on the release toolchain.
 - `just check-examples` passes and compiles the public `rustia` examples.
 - `just check-package-files` passes and `design/package-files.json` is current.
@@ -148,8 +149,8 @@ from `publish = false` to publishable.
   workspace version plus public-facing unreleased changes.
 - `just check-progress`, `just check-project-status`, and
   `just check-benchmark-results` pass without rewriting committed generated
-  artifacts, skipping the wasm gate verifier, or letting
-  README/current-progress facts drift.
+  artifacts, skipping the fixed-sample analyzer self-test or wasm gate verifier,
+  or letting README/current-progress facts drift.
 - `rustia-cli` supports file, stdin, `--eval`, and `--repl` execution, plus
   profile, fuel, source-name options, line-oriented REPL evaluation, and
   source-aware compile/runtime diagnostics.

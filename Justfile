@@ -39,6 +39,7 @@ check-workflows:
     node tools/check-workflows.js
 
 check-benchmark-results:
+    node bench/analyze-fixed-samples.js --self-test
     node tools/check-benchmark-results.js
     node tools/check-wasm-gate-results.js
     node bench/render-current-results.js --check

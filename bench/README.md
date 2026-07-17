@@ -34,6 +34,12 @@ instance before the timer starts, then exactly one invocation is timed. This
 keeps growing VM state and caches from leaking across repetitions while leaving
 engine setup, source compilation, and warmup outside the sample.
 
+Pass `--fixed-n <positive integer>` to bypass calibration and use exactly that
+`n` for every warmup and recorded repetition. Fixed mode also bypasses
+`--max-n`; `--target-ms` is irrelevant because no calibration probe runs. The
+default remains calibrated measurement, so existing commands and public history
+behavior are unchanged.
+
 The append-only history continues to store only the stable min/median summary.
 For local analysis, write the raw per-repetition `ns/unit` values to a separate
 JSON sidecar:
@@ -46,16 +52,148 @@ cargo run -p script-bench-harness --release -- \
 ```
 
 The sidecar uses the `rustia.bench.raw-samples.v1` schema and preserves samples
-in execution order. It also records the commit, target, workload, calibrated
-`n`, checksum, and summary statistics for every measurement. Keep separate
-baseline and candidate sidecars and alternate their run order (for example,
-ABBA then BAAB) when evaluating small changes, so machine drift is visible
-rather than folded into one best result.
+in execution order. It also records the commit, target, workload, selected `n`,
+whether `n` was `calibrated` or `fixed`, the checksum, and summary statistics
+for every measurement. Keep separate baseline and candidate sidecars and
+alternate their run order (for example, ABBA then BAAB) when evaluating small
+changes, so machine drift is visible rather than folded into one best result.
+Fixed-N runs that append history must provide `--samples-json`; the harness
+writes that sidecar before appending its summary row.
 
 The 2026-07-17 local table/cache/`GETIMPORT`/`FASTCALL` hardening comparison is
 recorded in [`../design/56-performance-research.md`](../design/56-performance-research.md),
 including the baseline and harness hashes, broad ABBA medians, cooled focused
 checks, and the deliberately conservative claim posture.
+
+## Equal-work validation and publication
+
+Use fixed mode when a small A/B difference must not be confounded by separate
+calibration choices. Build the baseline and candidate from byte-identical
+`bench/src/main.rs` source, then run the following from a quiet benchmark host.
+The example fixes the dense-table workload at 1,500 units and 15 repetitions;
+choose and record a workload-appropriate fixed value for any other workload.
+Freeze a clean candidate commit before creating any accepted evidence. Build
+both release binaries only after freezing their inputs. Do not rebuild or
+replace the candidate after accepting the A/B comparison: its exact SHA-256
+binary is also the one used for final publication. Also predeclare a numeric
+host-idle/thermal policy and an external-contamination rule before the first
+leg. If either rule is violated, discard and repeat the whole eight-leg block;
+never include or exclude a leg based on its timing result.
+
+```bash
+git diff --quiet --ignore-submodules --
+git diff --cached --quiet --ignore-submodules --
+test -z "$(git ls-files --others --exclude-standard -- bench crates Cargo.toml Cargo.lock rust-toolchain.toml)"
+
+baseline_bin=/absolute/path/to/baseline/target/release/script-bench
+candidate_bin=/absolute/path/to/candidate/target/release/script-bench
+baseline_commit=BASELINE_COMMIT
+candidate_commit="$(git rev-parse HEAD)"
+evidence_dir="bench/history/evidence/$candidate_commit"
+bootstrap_reps=20000
+bootstrap_seed=1381323604
+material_threshold=5
+common=(--engines rustia --workloads dense_tables --fixed-n 1500 --reps 15 --no-history --no-results --no-latest-json)
+
+"$baseline_bin" "${common[@]}" --commit "$baseline_commit" --samples-json "$evidence_dir/dense-abba-A1.json"
+"$candidate_bin" "${common[@]}" --commit "$candidate_commit" --samples-json "$evidence_dir/dense-abba-B1.json"
+"$candidate_bin" "${common[@]}" --commit "$candidate_commit" --samples-json "$evidence_dir/dense-abba-B2.json"
+"$baseline_bin" "${common[@]}" --commit "$baseline_commit" --samples-json "$evidence_dir/dense-abba-A2.json"
+```
+
+Let the host return to the same idle and thermal state between legs. Repeat in
+the reverse order rather than treating the first sequence as conclusive:
+
+```bash
+"$candidate_bin" "${common[@]}" --commit "$candidate_commit" --samples-json "$evidence_dir/dense-baab-B3.json"
+"$baseline_bin" "${common[@]}" --commit "$baseline_commit" --samples-json "$evidence_dir/dense-baab-A3.json"
+"$baseline_bin" "${common[@]}" --commit "$baseline_commit" --samples-json "$evidence_dir/dense-baab-A4.json"
+"$candidate_bin" "${common[@]}" --commit "$candidate_commit" --samples-json "$evidence_dir/dense-baab-B4.json"
+```
+
+Analyze all eight legs with the checked, dependency-free analyzer. Its seeded
+bootstrap, seed, and material-regression threshold are explicit so another
+machine can reproduce the interpretation exactly:
+
+```bash
+node bench/analyze-fixed-samples.js \
+  --baseline "$evidence_dir/dense-abba-A1.json" \
+  --baseline "$evidence_dir/dense-abba-A2.json" \
+  --baseline "$evidence_dir/dense-baab-A3.json" \
+  --baseline "$evidence_dir/dense-baab-A4.json" \
+  --candidate "$evidence_dir/dense-abba-B1.json" \
+  --candidate "$evidence_dir/dense-abba-B2.json" \
+  --candidate "$evidence_dir/dense-baab-B3.json" \
+  --candidate "$evidence_dir/dense-baab-B4.json" \
+  --bootstrap-reps "$bootstrap_reps" \
+  --seed "$bootstrap_seed" \
+  --material-threshold "$material_threshold" \
+  --expected-legs 4 \
+  --require-full-commits \
+  > "$evidence_dir/analysis.json"
+```
+
+The analyzer validates the exact sidecar protocol metadata and summaries, four
+unique legs per group, distinct lowercase full commit IDs, fixed-work identity,
+repetitions, and checksum. It reports per-leg medians, pooled five-number
+summaries, and nominal 95% pooled and leg-clustered hierarchical bootstrap
+intervals. The verdict uses their conservative envelope; neither interval can
+cover unobserved host states, which is why the predeclared host gate remains
+mandatory. Proceed only when the verdict is `material_regression_excluded`; a
+confirmed regression or an inconclusive interval requires investigation or
+more predeclared evidence.
+
+These sidecars are diagnostic evidence, not public-history records. Do not
+manufacture JSONL rows from pooled samples or copy a computed median into
+`history/runs.jsonl`. Once a final commit is accepted, produce repeatable public
+history from the actual clean final-commit binary. For this protocol,
+"repeatable" means at least three independent final-commit measurements on the
+same controlled target. Recheck that the frozen commit and tracked inputs are
+unchanged before the first append; the already-created evidence directory is
+the only allowed untracked benchmark input. Run each command only after the
+host has cooled:
+
+```bash
+test "$(git rev-parse HEAD)" = "$candidate_commit"
+git diff --quiet --ignore-submodules --
+git diff --cached --quiet --ignore-submodules --
+test -z "$(git ls-files --others --exclude-standard -- bench crates Cargo.toml Cargo.lock rust-toolchain.toml ':(exclude)bench/history/evidence/**')"
+final_commit="$candidate_commit"
+evidence_dir="bench/history/evidence/$final_commit"
+test -x "$candidate_bin"
+publish=(--engines rustia --workloads dense_tables --fixed-n 1500 --reps 15 --history bench/history/runs.jsonl --no-results --no-latest-json --commit "$final_commit")
+
+"$candidate_bin" "${publish[@]}" --samples-json "$evidence_dir/final-dense-1.json"
+"$candidate_bin" "${publish[@]}" --samples-json "$evidence_dir/final-dense-2.json"
+"$candidate_bin" "${publish[@]}" --samples-json "$evidence_dir/final-dense-3.json"
+
+env -u RUSTC_WRAPPER cargo +1.95.0 run -p script-bench-harness -- --check-history
+env -u RUSTC_WRAPPER cargo +1.95.0 run -p script-bench-harness -- --refresh-results
+node bench/render-current-results.js
+node bench/render-claims.js
+just check-benchmark-results
+```
+
+The explicit `--commit` is valid here only because the tree was checked before
+the first append; the history file itself makes the worktree dirty afterward.
+Review the three raw sidecars before committing generated history and reports.
+If their leg medians, spread, or checksums disagree unexpectedly, keep the claim
+unpublished and investigate instead of selecting the most favorable run.
+
+Record the following provenance beside any published interpretation:
+
+- full engine commits for baseline and candidate, plus SHA-256 values for the
+  byte-identical harness source, selected workload source, and release binaries;
+- pinned Rust version, target, OS/CPU, runner identity, and power/thermal policy;
+- complete command, workload, fixed `n`, repetitions, run order, timestamps,
+  and cooldown policy;
+- raw-sidecar paths and SHA-256 values, sample counts, and workload checksums;
+- every leg median and spread, the comparison method and confidence interval,
+  and the material-regression threshold chosen before inspecting the result.
+
+The append-only JSONL remains the summary source of truth. Raw sidecars and a
+provenance manifest live under [`history/evidence/`](history/evidence/) and must
+not change that public schema.
 
 List all configured engine slots:
 
@@ -164,9 +302,10 @@ The future website should treat JSONL as the append-only source of truth and
 generate charts from `engine × target × workload` series.
 
 Raw repetitions are intentionally excluded from this public history schema.
-`--samples-json <path>` exports them as an optional, replaceable analysis
-sidecar without changing JSONL history records or generated current-results
-artifacts.
+`--samples-json <path>` exports them without changing JSONL history records or
+generated current-results artifacts. A sidecar is optional for ordinary local
+or calibrated runs, but required when a fixed-N run appends history; accepted
+milestone evidence is retained under `history/evidence/<full-commit>/`.
 
 `--list-json` emits a separate schema-identified metadata document for the
 available engine slots, feature gates, workload IDs, default workload set, and
@@ -217,8 +356,9 @@ with the current leaderboard and history charts, plus [`CLAIMS.md`](CLAIMS.md),
 the per-workload public-claim gate. `gen-benchmark-results` is kept as a recipe
 alias.
 
-Check that committed benchmark markdown, current-results JSON, claim gate, and
-current HTML are fresh without running measurements:
+Run the fixed-sample analyzer self-test and check that committed benchmark
+markdown, current-results JSON, claim gate, and current HTML are fresh without
+running measurements:
 
 ```sh
 just check-benchmark-results

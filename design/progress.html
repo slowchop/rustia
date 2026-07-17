@@ -489,8 +489,8 @@
       <div class="meta-line">
         <span class="chip high">80% confidence</span>
       </div>
-      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, a wasm target runner for rustia+koto on V8, JavaScriptCore-family, and SpiderMonkey runtimes, a call_ref versus br_table dispatch microbench on those same families, and a manual self-hosted measurement workflow are present.</p>
-      <p class="plan"><strong>Next:</strong> Split from workspace, expand workloads, publish long-run history, and automate tracking charts.</p>
+      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, a wasm target runner for rustia+koto on V8, JavaScriptCore-family, and SpiderMonkey runtimes, a call_ref versus br_table dispatch microbench on those same families, and push/nightly/manual self-hosted publication to the private benchmark-data repository are present.</p>
+      <p class="plan"><strong>Next:</strong> Split from workspace, expand workloads, and accumulate longer-run public history and richer tracking charts.</p>
     </article>
 
     <article class="goal-card">
@@ -513,7 +513,7 @@
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 93%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 75%</a><a href="#determinism">Determinism 80%</a><a href="#embedded-api">Embedded API 70%</a><a href="#benchmarks">Benchmarks 75%</a><a href="#wasm-perf">Wasm/perf 62%</a><a href="#tooling">Tooling 65%</a><a href="#packaging">Packaging 62%</a>
+      <a href="#design">Design 93%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 75%</a><a href="#determinism">Determinism 80%</a><a href="#embedded-api">Embedded API 70%</a><a href="#benchmarks">Benchmarks 82%</a><a href="#wasm-perf">Wasm/perf 62%</a><a href="#tooling">Tooling 65%</a><a href="#packaging">Packaging 62%</a>
     </nav>
 
 
@@ -902,7 +902,7 @@
       <div class="entry-top">
         <div>
           <h4>Tables/metatables</h4>
-          <p>Broad table, metatable, iteration, and stdlib behavior is conformance-covered. Logical deletion preserves tombstone insertion semantics, larger hash parts use a deterministic side index, and shape-revalidated positive string-slot cache hooks cover global/index reads and writes.</p>
+          <p>Broad table, metatable, iteration, and stdlib behavior is conformance-covered. Logical deletion preserves tombstone insertion semantics, larger hash parts use a deterministic side index, and shape-revalidated positive string-slot caches now cover global/index reads and writes plus dedicated GETTABLEKS, SETTABLEKS, and NAMECALL field/method paths.</p>
         </div>
         <div class="entry-score">
           <strong>78%</strong>
@@ -914,7 +914,7 @@
       <div class="meter-fill" style="width: 78%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Keep the full suite green while measuring and hardening the first slice, then add cached-length refinements and dedicated field/namecall specialization.</p>
+      <p class="plan"><strong>Future plan:</strong> Keep the full suite green while publishing exact fixed-work evidence for the landed field/method slice, then add cached-length refinements.</p>
     </article>
 
     <article class="entry">
@@ -1263,7 +1263,7 @@
           <p>5 tracked items</p>
         </div>
         <div class="area-score">
-          <span>75% avg complete</span>
+          <span>82% avg complete</span>
           <span>85% avg confidence</span>
         </div>
       </div>
@@ -1349,19 +1349,19 @@
       <div class="entry-top">
         <div>
           <h4>Benchmark CI</h4>
-          <p>A manual workflow_dispatch benchmark measurement job exists on the generic [self-hosted, bench] runner label, uploads generated artifacts, and is guarded by a workflow policy check.</p>
+          <p>Main pushes run the Rustia matrix, nightly and full manual dispatches run the comparison matrix, and rustia manual dispatch remains available on the generic [self-hosted, bench] runner. Each mode restores and publishes generated history through the private benchmark-data repository and is guarded by workflow policy checks.</p>
         </div>
         <div class="entry-score">
-          <strong>42%</strong>
+          <strong>75%</strong>
           <span class="chip high">90% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Benchmark CI: 42% complete">
-      <div class="meter-fill" style="width: 42%"></div>
+    <div class="meter" aria-label="Benchmark CI: 75% complete">
+      <div class="meter-fill" style="width: 75%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> After runner setup, add automated history publication and regression alerts without exposing infra details.</p>
+      <p class="plan"><strong>Future plan:</strong> Keep the runner and deploy key operational, accumulate longer history, and add regression alerts without exposing infrastructure details.</p>
     </article>
 
       </div>

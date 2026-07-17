@@ -20,8 +20,14 @@ benchmark, API, and release gates are satisfied.
   **16-byte tagged** values, own hand-written Luau parser, and thread-affine safe-Rust VM execution.
 - Interpreter performance foundation: compact deterministic open-addressed `u32` side indices for VM-local
   atoms and larger insertion-ordered hash parts; compact loaded-program constant atoms; a 4-byte per-PC cache
-  site map with lazily allocated 16-byte shape/key/live-slot records; and mutation-safe `GETIMPORT` plus guarded
-  fixed-result `FASTCALL`, both with ordinary semantic fallbacks and logical fuel preserved.
+  site map with lazily allocated 16-byte shape/key/live-slot records; constant-key
+  `GETTABLEKS`/`SETTABLEKS`; two-lane live receiver/`__index`-table `NAMECALL` lookup; and mutation-safe
+  `GETIMPORT` plus guarded fixed-result `FASTCALL`, all with ordinary semantic fallbacks and logical fuel
+  preserved. `NAMECALL` does not fuse the subsequent `CALL` or cache a final callee.
+- Compiled constant pools are immutable and shared across program clones and VMs. Long compiled string atoms
+  reuse those shared bytes, while ordinary compiled literals and runtime-produced binary strings up to 13 bytes
+  can be stored directly in the sealed 16-byte `Value`; constant-key/cache paths atomize only when needed, and
+  short-key lookup misses and failed or nil writes do not grow the VM atom table.
 - **No unsafe code in the public workspace:** all workspace crates, including the benchmark harness, inherit
   `unsafe_code = "forbid"`; research spikes and standalone wasm FFI demos are kept outside that product gate.
 - Pinned to **Luau 0.709** (standalone luau.org surface, not Roblox).
@@ -64,10 +70,18 @@ public rustia project; actual grabby integration work is explicitly out of scope
 - Current benchmark claim posture is generated at [`bench/CLAIMS.md`](bench/CLAIMS.md); it approves no blanket
   speed headline from the current snapshot.
 - Timed benchmark repetitions now prepare fresh engine/workload state, perform one untimed warmup, and can emit
-  execution-ordered raw samples to a separate JSON sidecar. A local fresh-state ABBA against `dac4ec2` found no
+  execution-ordered raw samples to a separate JSON sidecar. `--fixed-n` bypasses calibration for equal-work
+  ABBA/BAAB comparisons; fixed-work history appends require the raw sidecar to be written first, and the
+  publication protocol records three independent measurements of the clean final commit, with each invocation
+  writing its sidecar before appending its actual summary. A dependency-free analyzer validates fixed-work
+  sidecars and records a deterministic conservative pooled/hierarchical bootstrap verdict with the predeclared
+  regression threshold. The earlier local fresh-state ABBA against `dac4ec2` found no
   material regression above 5% after hot-path hardening: stdlib/string improved 7.25%/19.71%, closures were
-  neutral-to-faster, and a cooled dense-table check retained a borderline 1.29% slowdown. This is development
-  evidence, not a blanket release speed claim; details are in [`design/56-performance-research.md`](design/56-performance-research.md).
+  neutral-to-faster, and a cooled dense-table check retained a borderline 1.29% slowdown. Six uncontaminated
+  fixed-work diagnostic legs for the new field/string slice measured about +0.90% with overlapping spreads, but
+  the exact final commit has not been accepted or added to public history. Both results remain development
+  evidence, not a blanket release speed claim; details are in
+  [`design/56-performance-research.md`](design/56-performance-research.md).
 - Major remaining gates are engine hardening, long-run benchmark history, public benchmark publication, and release
   packaging. Semver policy is tracked in [`design/91-semver-policy.md`](design/91-semver-policy.md), release
   notes in [`CHANGELOG.md`](CHANGELOG.md), koto migration guidance in

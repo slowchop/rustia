@@ -2,8 +2,9 @@ use gc_arena::lock::RefLock;
 use gc_arena::{Arena, Collect, DynamicRootSet, Gc, Rootable, Static};
 use std::collections::{BTreeSet, VecDeque};
 
+use crate::bytecode::{stable_bytes_hash, SharedProgramString};
 use crate::number::table_key_number_bits;
-use crate::value::{Value, ValueKind};
+use crate::value::{ShortString, Value, ValueKind};
 
 const MAX_LUAU_ARRAY_INDEX: usize = 2_147_483_647;
 const MAX_LUAU_ARRAY_INDEX_F64: f64 = 2_147_483_647.0;
@@ -14,7 +15,7 @@ const STRING_INDEX_MIN_CAPACITY: usize = 16;
 #[collect(no_drop)]
 struct RootData<'gc> {
     _roots: DynamicRootSet<'gc>,
-    strings: Vec<Gc<'gc, Static<Vec<u8>>>>,
+    strings: Vec<InternedString<'gc>>,
     string_index: Vec<u32>,
     tables: Vec<TableData>,
     functions: Vec<FunctionData>,
@@ -22,6 +23,37 @@ struct RootData<'gc> {
     userdatas: Vec<UserdataData>,
     buffers: Vec<BufferData>,
     vectors: Vec<VectorData>,
+}
+
+#[derive(Collect)]
+#[collect(no_drop)]
+enum InternedString<'gc> {
+    /// Compact atom storage used for short strings that must acquire table-key identity.
+    Inline(ShortString),
+    /// Immutable compile-time bytes shared by every VM that loads the same program.
+    Shared(Static<SharedProgramString>),
+    /// Per-VM runtime strings too large for the inline form.
+    Owned(Gc<'gc, Static<Vec<u8>>>),
+}
+
+impl InternedString<'_> {
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::Inline(value) => value.as_bytes(),
+            Self::Shared(value) => value.0.as_bytes(),
+            Self::Owned(value) => value.0.as_slice(),
+        }
+    }
+
+    #[inline]
+    fn stable_hash(&self) -> u64 {
+        match self {
+            Self::Shared(value) => value.0.stable_hash(),
+            Self::Inline(value) => stable_bytes_hash(value.as_bytes()),
+            Self::Owned(value) => stable_bytes_hash(value.0.as_slice()),
+        }
+    }
 }
 
 #[derive(Clone, Collect)]
@@ -470,9 +502,10 @@ impl VmCell {
     }
 
     pub fn intern_string_bytes(&mut self, value: &[u8]) -> u32 {
+        let hash = stable_bytes_hash(value);
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
-            if let Some(atom) = string_index_lookup(&root, value) {
+            if let Some(atom) = string_index_lookup(&root, value, hash) {
                 return atom;
             }
             let required = root.strings.len().saturating_add(1);
@@ -488,20 +521,83 @@ impl VmCell {
                 .ok()
                 .and_then(|atom| atom.checked_add(1).map(|_| atom))
                 .expect("string atom table exceeds compact u32 index address space");
-            root.strings.push(Gc::new(mc, Static(value.to_vec())));
+            let stored = ShortString::new(value)
+                .map(InternedString::Inline)
+                .unwrap_or_else(|| InternedString::Owned(Gc::new(mc, Static(value.to_vec()))));
+            root.strings.push(stored);
             insert_string_index(&mut root, atom);
             atom
         })
     }
 
-    pub fn string(&mut self, atom: u32) -> Option<String> {
-        self.string_bytes(atom)
-            .and_then(|bytes| String::from_utf8(bytes).ok())
+    pub(crate) fn intern_shared_string(&mut self, value: SharedProgramString) -> u32 {
+        let stable_hash = value.stable_hash();
+        if let Some(short) = ShortString::new(value.as_bytes()) {
+            return self.intern_inline_string(short, stable_hash);
+        }
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            if let Some(atom) = string_index_lookup(&root, value.as_bytes(), stable_hash) {
+                if matches!(
+                    root.strings.get(atom as usize),
+                    Some(InternedString::Owned(_))
+                ) {
+                    root.strings[atom as usize] = InternedString::Shared(Static(value));
+                }
+                return atom;
+            }
+            ensure_string_index_capacity(&mut root);
+            let atom = next_string_atom(&root);
+            root.strings.push(InternedString::Shared(Static(value)));
+            insert_string_index(&mut root, atom);
+            atom
+        })
     }
 
-    pub fn string_lossy(&mut self, atom: u32) -> Option<String> {
-        self.string_bytes(atom)
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+    fn intern_inline_string(&mut self, value: ShortString, stable_hash: u64) -> u32 {
+        self.arena.mutate(|_mc, root| {
+            let mut root = root.unlock(_mc).borrow_mut();
+            if let Some(atom) = string_index_lookup(&root, value.as_bytes(), stable_hash) {
+                return atom;
+            }
+            ensure_string_index_capacity(&mut root);
+            let atom = next_string_atom(&root);
+            root.strings.push(InternedString::Inline(value));
+            insert_string_index(&mut root, atom);
+            atom
+        })
+    }
+
+    #[inline]
+    pub(crate) fn intern_string_value_bytes(&mut self, value: &[u8]) -> Value {
+        Value::short_string(value)
+            .unwrap_or_else(|| Value::string_atom(self.intern_string_bytes(value)))
+    }
+
+    #[inline]
+    pub(crate) fn find_string_atom_bytes(&mut self, value: &[u8]) -> Option<u32> {
+        let stable_hash = stable_bytes_hash(value);
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            string_index_lookup(&root, value, stable_hash)
+        })
+    }
+
+    #[inline]
+    pub(crate) fn string_atom_equals_bytes(&mut self, atom: u32, value: &[u8]) -> Option<bool> {
+        self.arena.mutate(|mc, root| {
+            root.unlock(mc)
+                .borrow()
+                .strings
+                .get(atom as usize)
+                .map(|candidate| candidate.as_bytes() == value)
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn string_atom_count(&mut self) -> usize {
+        self.arena
+            .mutate(|mc, root| root.unlock(mc).borrow().strings.len())
     }
 
     pub fn string_bytes(&mut self, atom: u32) -> Option<Vec<u8>> {
@@ -510,7 +606,7 @@ impl VmCell {
                 .borrow()
                 .strings
                 .get(atom as usize)
-                .map(|value| value.0.clone())
+                .map(|value| value.as_bytes().to_vec())
         })
     }
 
@@ -861,6 +957,11 @@ impl VmCell {
     }
 
     pub fn table_get(&mut self, table: u32, key: Value) -> Option<Value> {
+        let key = if let Some(short) = key.as_short_string() {
+            Value::string_atom(self.find_string_atom_bytes(short.as_bytes())?)
+        } else {
+            key
+        };
         self.arena.mutate(|mc, root| {
             let root = root.unlock(mc).borrow();
             let table = root.tables.get(table as usize)?;
@@ -948,10 +1049,34 @@ impl VmCell {
     }
 
     pub fn table_set(&mut self, table: u32, key: Value, value: Value) -> Option<()> {
+        let key_value = key;
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
+            let key = if let Some(short) = key.as_short_string() {
+                let stable_hash = stable_bytes_hash(short.as_bytes());
+                let atom =
+                    if let Some(atom) = string_index_lookup(&root, short.as_bytes(), stable_hash) {
+                        atom
+                    } else {
+                        let table = root.tables.get(table as usize)?;
+                        if table.readonly {
+                            return None;
+                        }
+                        if value.kind() == ValueKind::Nil {
+                            return Some(());
+                        }
+                        ensure_string_index_capacity(&mut root);
+                        let atom = next_string_atom(&root);
+                        root.strings.push(InternedString::Inline(short));
+                        insert_string_index(&mut root, atom);
+                        atom
+                    };
+                Value::string_atom(atom)
+            } else {
+                key
+            };
             let table_key = table_key_from_value(&root, key)?;
-            let key_value = table_key_visible_value(&mut root, table_key, key)?;
+            let key_value = table_key_visible_value(&mut root, table_key, key_value)?;
             let table = root.tables.get_mut(table as usize)?;
             if table.readonly {
                 return None;
@@ -1162,6 +1287,14 @@ impl VmCell {
         after: Value,
         order: TableIterationOrder,
     ) -> Option<TableNext> {
+        let after = if let Some(short) = after.as_short_string() {
+            let Some(atom) = self.find_string_atom_bytes(short.as_bytes()) else {
+                return self.has_table(table).then_some(TableNext::InvalidKey);
+            };
+            Value::string_atom(atom)
+        } else {
+            after
+        };
         self.arena.mutate(|mc, root| {
             let root = root.unlock(mc).borrow();
             let table = root.tables.get(table as usize)?;
@@ -1240,13 +1373,13 @@ impl VmCell {
 }
 
 #[inline]
-fn string_index_lookup(root: &RootData<'_>, value: &[u8]) -> Option<u32> {
+fn string_index_lookup(root: &RootData<'_>, value: &[u8], stable_hash: u64) -> Option<u32> {
     if root.string_index.is_empty() {
         return None;
     }
 
     debug_assert!(root.string_index.len().is_power_of_two());
-    let mut position = string_index_position(value, root.string_index.len());
+    let mut position = string_index_position(stable_hash, root.string_index.len());
     for _ in 0..root.string_index.len() {
         let slot = root.string_index[position];
         if slot == 0 {
@@ -1258,12 +1391,30 @@ fn string_index_lookup(root: &RootData<'_>, value: &[u8]) -> Option<u32> {
             indexed_value.is_some(),
             "string index contains an invalid atom"
         );
-        if indexed_value.is_some_and(|candidate| candidate.0.as_slice() == value) {
+        if indexed_value.is_some_and(|candidate| candidate.as_bytes() == value) {
             return Some(atom);
         }
         position = (position + 1) & (root.string_index.len() - 1);
     }
     None
+}
+
+fn ensure_string_index_capacity(root: &mut RootData<'_>) {
+    let required = root.strings.len().saturating_add(1);
+    if root.string_index.is_empty() || required.saturating_mul(2) > root.string_index.len() {
+        let capacity = required
+            .saturating_mul(2)
+            .next_power_of_two()
+            .max(STRING_INDEX_MIN_CAPACITY);
+        rebuild_string_index(root, capacity);
+    }
+}
+
+fn next_string_atom(root: &RootData<'_>) -> u32 {
+    u32::try_from(root.strings.len())
+        .ok()
+        .and_then(|atom| atom.checked_add(1).map(|_| atom))
+        .expect("string atom table exceeds compact u32 index address space")
 }
 
 fn rebuild_string_index(root: &mut RootData<'_>, requested_capacity: usize) {
@@ -1296,7 +1447,7 @@ fn insert_string_index(root: &mut RootData<'_>, atom: u32) {
         .strings
         .get(atom as usize)
         .expect("string index insertion references an invalid atom");
-    let mut position = string_index_position(value.0.as_slice(), root.string_index.len());
+    let mut position = string_index_position(value.stable_hash(), root.string_index.len());
     for _ in 0..root.string_index.len() {
         if root.string_index[position] == 0 {
             root.string_index[position] = slot;
@@ -1308,19 +1459,9 @@ fn insert_string_index(root: &mut RootData<'_>, atom: u32) {
 }
 
 #[inline]
-fn string_index_position(value: &[u8], len: usize) -> usize {
+fn string_index_position(stable_hash: u64, len: usize) -> usize {
     debug_assert!(len.is_power_of_two());
-    (stable_bytes_hash(value) as usize) & (len - 1)
-}
-
-#[inline]
-fn stable_bytes_hash(value: &[u8]) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in value {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    mix_index_hash(hash ^ value.len() as u64)
+    (stable_hash as usize) & (len - 1)
 }
 
 fn table_key_from_value(root: &RootData<'_>, value: Value) -> Option<TableKey> {
@@ -1698,20 +1839,25 @@ fn table_weak_mode(root: &RootData<'_>, table: usize) -> Option<WeakMode> {
     let table = root.tables.get(table)?;
     let metatable = table.metatable?;
     let metatable = root.tables.get(metatable as usize)?;
-    let mode = metatable.hash.iter().find_map(|entry| {
-        if !table_key_is_string(root, entry.key, b"__mode") {
-            return None;
-        }
-        let atom = entry.value.as_string_atom()?;
-        root.strings
-            .get(atom as usize)
-            .map(|value| value.0.as_slice())
-    })?;
+    let mode = metatable
+        .hash
+        .iter()
+        .find_map(|entry| table_key_is_string(root, entry.key, b"__mode").then_some(entry.value))?;
     let weak = WeakMode {
-        keys: mode.contains(&b'k'),
-        values: mode.contains(&b'v'),
+        keys: string_value_contains(root, mode, b'k')?,
+        values: string_value_contains(root, mode, b'v')?,
     };
     (weak.keys || weak.values).then_some(weak)
+}
+
+fn string_value_contains(root: &RootData<'_>, value: Value, needle: u8) -> Option<bool> {
+    if let Some(short) = value.as_short_string() {
+        return Some(short.as_bytes().contains(&needle));
+    }
+    let atom = value.as_string_atom()?;
+    root.strings
+        .get(atom as usize)
+        .map(|value| value.as_bytes().contains(&needle))
 }
 
 fn table_key_is_string(root: &RootData<'_>, key: TableKey, expected: &[u8]) -> bool {
@@ -1720,7 +1866,7 @@ fn table_key_is_string(root: &RootData<'_>, key: TableKey, expected: &[u8]) -> b
     };
     root.strings
         .get(atom as usize)
-        .is_some_and(|value| value.0.as_slice() == expected)
+        .is_some_and(|value| value.as_bytes() == expected)
 }
 
 fn mark_weak_reachable(
@@ -2102,7 +2248,7 @@ fn luau_hash_key(root: &RootData<'_>, key: TableKey) -> u32 {
         TableKey::String(atom) => root
             .strings
             .get(atom as usize)
-            .map_or(atom, |value| luau_string_hash(value.0.as_slice())),
+            .map_or(atom, |value| luau_string_hash(value.as_bytes())),
         TableKey::Table(handle)
         | TableKey::Function(handle)
         | TableKey::Userdata(handle)
@@ -2165,6 +2311,7 @@ fn vector_table_key_bits(value: f32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bytecode::{Constant, Function, Instruction, Opcode, Program};
     use std::mem::size_of;
 
     fn empty_table() -> TableData {
@@ -2183,6 +2330,8 @@ mod tests {
         assert_eq!(size_of::<u32>(), 4);
         if cfg!(target_pointer_width = "64") {
             assert_eq!(size_of::<TableEntry>(), 48);
+            assert_eq!(size_of::<SharedProgramString>(), 16);
+            assert_eq!(size_of::<InternedString<'static>>(), 24);
         }
     }
 
@@ -2214,6 +2363,188 @@ mod tests {
                 root.string_index.iter().filter(|slot| **slot != 0).count(),
                 root.strings.len()
             );
+        });
+    }
+
+    #[test]
+    fn short_atoms_are_inline_and_shared_long_atoms_reuse_program_bytes() {
+        let program = Program::new(
+            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            vec![
+                Constant::String(b"thirteen-byte".to_vec()),
+                Constant::String(b"a compiled string longer than thirteen bytes".to_vec()),
+            ],
+        );
+        let Constant::String(long_bytes) = &program.constants()[1] else {
+            panic!("long constant should be a string");
+        };
+        let long_pointer = long_bytes.as_ptr();
+        let mut first = VmCell::new();
+        let mut second = VmCell::new();
+        let short = first.intern_shared_string(program.shared_string(0).expect("short descriptor"));
+        let first_long =
+            first.intern_shared_string(program.shared_string(1).expect("long descriptor"));
+        let second_long =
+            second.intern_shared_string(program.shared_string(1).expect("long descriptor"));
+
+        first.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            assert!(matches!(
+                root.strings.get(short as usize),
+                Some(InternedString::Inline(_))
+            ));
+            let Some(InternedString::Shared(stored)) = root.strings.get(first_long as usize) else {
+                panic!("compiled long string should use shared storage");
+            };
+            assert_eq!(stored.0.as_bytes().as_ptr(), long_pointer);
+        });
+        second.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let Some(InternedString::Shared(stored)) = root.strings.get(second_long as usize)
+            else {
+                panic!("second VM should retain shared storage");
+            };
+            assert_eq!(stored.0.as_bytes().as_ptr(), long_pointer);
+        });
+    }
+
+    #[test]
+    fn compiled_and_runtime_long_strings_share_atom_identity_without_copying_bytes() {
+        let bytes = b"same long binary string\0\xff".to_vec();
+        let program = Program::new(
+            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            vec![Constant::String(bytes.clone())],
+        );
+
+        let mut runtime_first = VmCell::new();
+        let runtime_atom = runtime_first.intern_string_bytes(&bytes);
+        let compiled_atom = runtime_first
+            .intern_shared_string(program.shared_string(0).expect("compiled descriptor"));
+        assert_eq!(runtime_atom, compiled_atom);
+        let Constant::String(compiled_bytes) = &program.constants()[0] else {
+            panic!("compiled constant should remain a string");
+        };
+        runtime_first.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let Some(InternedString::Shared(stored)) = root.strings.get(runtime_atom as usize)
+            else {
+                panic!("compiled arrival should upgrade runtime-owned storage");
+            };
+            assert_eq!(stored.0.as_bytes().as_ptr(), compiled_bytes.as_ptr());
+        });
+        assert_eq!(
+            runtime_first.string_bytes(runtime_atom),
+            Some(bytes.clone())
+        );
+
+        let mut compiled_first = VmCell::new();
+        let compiled_atom = compiled_first
+            .intern_shared_string(program.shared_string(0).expect("compiled descriptor"));
+        let runtime_atom = compiled_first.intern_string_bytes(&bytes);
+        assert_eq!(compiled_atom, runtime_atom);
+        assert_eq!(compiled_first.string_bytes(compiled_atom), Some(bytes));
+    }
+
+    #[test]
+    fn equal_compiled_strings_from_distinct_programs_canonicalize_to_one_atom() {
+        let bytes = b"equal long strings from separate compiled programs";
+        let make_program = || {
+            Program::new(
+                Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+                vec![Constant::String(bytes.to_vec())],
+            )
+        };
+        let first = make_program();
+        let second = make_program();
+        let mut heap = VmCell::new();
+
+        let first_atom =
+            heap.intern_shared_string(first.shared_string(0).expect("first descriptor"));
+        let second_atom =
+            heap.intern_shared_string(second.shared_string(0).expect("second descriptor"));
+
+        assert_eq!(first_atom, second_atom);
+        assert_eq!(
+            heap.string_bytes(first_atom).as_deref(),
+            Some(bytes.as_slice())
+        );
+    }
+
+    #[test]
+    fn inline_string_table_keys_canonicalize_to_existing_atoms() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+        let inline = Value::short_string(b"binary\0key").expect("short string");
+        let atom = Value::string_atom(heap.intern_string_bytes(b"binary\0key"));
+
+        assert_eq!(heap.table_set(table, inline, Value::number(42.0)), Some(()));
+        assert_eq!(
+            heap.table_get(table, atom).and_then(Value::as_number),
+            Some(42.0)
+        );
+        assert_eq!(
+            heap.table_get(table, inline).and_then(Value::as_number),
+            Some(42.0)
+        );
+        assert!(matches!(
+            heap.table_next_after(table, Value::nil(), TableIterationOrder::Insertion),
+            Some(TableNext::Entry(key, value))
+                if key.as_short_string().is_some_and(|key| key.as_bytes() == b"binary\0key")
+                    && value.as_number() == Some(42.0)
+        ));
+    }
+
+    #[test]
+    fn inline_string_lookup_misses_and_failed_writes_do_not_create_atoms() {
+        let mut heap = VmCell::new();
+        let writable = heap.alloc_array_table(&[]);
+        let readonly = heap.alloc_array_table(&[]);
+        heap.table_freeze(readonly).expect("table should freeze");
+        let missing = Value::short_string(b"unseen-key").expect("short string");
+
+        let string_count = |heap: &mut VmCell| {
+            heap.arena
+                .mutate(|mc, root| root.unlock(mc).borrow().strings.len())
+        };
+        assert_eq!(string_count(&mut heap), 0);
+
+        assert!(heap.table_get(writable, missing).is_none());
+        assert!(matches!(
+            heap.table_next_after(writable, missing, TableIterationOrder::Insertion),
+            Some(TableNext::InvalidKey)
+        ));
+        assert_eq!(heap.table_set(writable, missing, Value::nil()), Some(()));
+        assert_eq!(heap.table_set(readonly, missing, Value::number(1.0)), None);
+        assert_eq!(heap.table_set(u32::MAX, missing, Value::number(1.0)), None);
+        assert_eq!(string_count(&mut heap), 0);
+
+        assert_eq!(
+            heap.table_set(writable, missing, Value::number(42.0)),
+            Some(())
+        );
+        assert_eq!(string_count(&mut heap), 1);
+        assert_eq!(
+            heap.table_get(writable, missing).and_then(Value::as_number),
+            Some(42.0)
+        );
+    }
+
+    #[test]
+    fn ordinary_short_string_values_do_not_allocate_vm_atoms() {
+        let mut heap = VmCell::new();
+        let values = (0_u32..4_096)
+            .map(|index| {
+                let mut bytes = [0_u8; crate::value::SHORT_STRING_CAPACITY];
+                bytes[..4].copy_from_slice(&index.to_le_bytes());
+                heap.intern_string_value_bytes(&bytes)
+            })
+            .collect::<Vec<_>>();
+
+        assert!(values.iter().all(|value| value.as_short_string().is_some()));
+        heap.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            assert!(root.strings.is_empty());
+            assert!(root.string_index.is_empty());
         });
     }
 

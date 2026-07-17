@@ -1,6 +1,6 @@
 # rustia — SotA performance research update
 
-> **Status: [PERFORMANCE RESEARCH v1.2] (updated 2026-07-17).** This note updates
+> **Status: [PERFORMANCE RESEARCH v1.3] (updated 2026-07-17).** This note updates
 > [`55-improvements.md`](55-improvements.md) with the current performance research stack. It is not a new
 > conformance contract; it is the ordered implementation bet list for making rustia fast while keeping the public
 > workspace under `unsafe_code = "forbid"`.
@@ -18,6 +18,15 @@ clear or contraction below the threshold. Loaded programs cache constant atoms i
 4-byte site-map entry per PC. Eligible sites allocate 16-byte atom/slot/shape records only when filled, revalidate
 the exact key and shape, and always read the live table value.
 
+The compiled constant pool is now immutable shared storage, so cloned programs retained by separate VMs share
+the same compiled string bytes. Long compiled string atoms reference that pool instead of allocating a second
+per-VM byte vector; an equal runtime-owned atom is upgraded to the shared compiled storage if it arrived first.
+Separately, ordinary compiled literals and runtime-produced binary strings up to 13 bytes can live directly
+inside the sealed 16-byte `Value`; constant-key/cache paths still atomize them when identity is required. A short
+key is canonicalized into an atom only when a successful non-nil table insertion needs it;
+lookup misses, nil writes, readonly writes, and invalid-table writes use lookup-only canonicalization and do not
+grow the atom table.
+
 Mutation-safe `GETIMPORT` and generic fixed-result `FASTCALL` are also in-tree. The import descriptor supports
 one to three components (the compiler currently lowers unshadowed two- and three-component dotted paths), reads
 each component live, and falls back through ordinary index/metamethod behavior. `FASTCALL` guards the exact
@@ -26,9 +35,24 @@ callee takes the ordinary resumable call path. Compiler prediction is limited to
 fields and binding-scoped aliases, so a shadowing local or parameter does not admit an unrelated call site.
 Neither cache stores a final value or result.
 
-The remaining avoidable costs include small-table scans, no shared cross-VM `Program` string pool or
-short-string inline form, no dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` tier, no fused
-`GETIMPORT`+`FASTCALL` form, heavy per-instruction book-keeping, and no type-directed hot tier.
+Constant-key table and method specialization is now in-tree too. Non-import dot fields, constant-string bracket
+operations, assignment targets, and named/constant-key constructors lower through `GETTABLEKS`/`SETTABLEKS`;
+`GETTABLEKS` fuses the constant load and read at logical fuel 2. Compiler-emitted writes retain their one-fuel
+key load before an intervening RHS, then use a one-fuel preloaded-key `SETTABLEKS`; the no-preload fully fused
+bytecode mode costs 2. Both use the live slot cache on hits and misses. A compound update uses `GETTABLEKS`'s optional key-value output and a later `SETINDEX`, so its single
+logical constant load is reused and the unfused three-step load/read/write fuel schedule is retained.
+`NAMECALL` fuses method-name loading and lookup but intentionally leaves the subsequent `CALL` separate. Its
+direct-receiver lane and live table-valued-`__index` lane re-resolve the current receiver metatable and `__index`
+target, validate the key/shape/slot, and read the current callee; they do not cache a final callee, receiver, or
+class. Lookup-only mode costs fuel 2, while the mode that folds the prior missing-method check costs 3 and retains
+the same diagnostic. Full fused costs are charged before side effects; preloaded writes retain the original
+cross-RHS fuel/GC phase, and synthetic instruction/GC steps preserve the unfused cadence. Function-valued
+`__index` and all other fallback cases still use ordinary metamethod
+semantics; this opcode is a lowering fast path, not a claim of full Luau `__namecall` context support.
+
+The remaining avoidable costs include small-table scans, cached length-boundary work, no fused
+`GETIMPORT`+`FASTCALL` form, heavy per-instruction book-keeping, no shared frozen standard-library state, and no
+type-directed hot tier.
 
 The no-unsafe policy is a feature, not a speed dead-end. The product path below assumes safe Rust in the public
 workspace. Techniques that require writable executable memory, raw code patching, or unsafe FFI remain research
@@ -50,12 +74,14 @@ The first slice now provides dense array storage, insertion-ordered hash entries
 indexed lookup, indexed VM-local atoms, compact per-loaded-program constant atoms, and live predicted string
 slots on existing global/index/import opcodes. The first memory hardening pass replaced duplicate-key indices
 with compact `u32` slots, reduced the table index to at most 50% load, added a 4-byte per-PC site map with
-16-byte filled live-slot records, and stopped a monomorphic site from thrashing across atom changes. Next add
-cached length boundaries, shared program string storage where safe, and dedicated
-`GETTABLEKS`/`SETTABLEKS`/`NAMECALL` specialization.
-Current plan delta: the representation hardening and local alternating measurement are complete, with no
-credible material regression above 5% and a borderline +1.29% dense-table result kept visible. Committed
-long-run history is still required before attributing a public speedup.
+16-byte filled live-slot records, and stopped a monomorphic site from thrashing across atom changes. Shared
+compiled constant storage, 13-byte inline literal/runtime strings, constant-key `GETTABLEKS`/`SETTABLEKS`, and two-lane
+live `NAMECALL` lookup have now landed. Next add cached length boundaries and profile the remaining small-table
+scan and dispatch costs.
+Current plan delta: implementation is complete for this slice, but performance validation is not. The earlier
+representation-hardening measurement found no credible material regression above 5% and kept a borderline
++1.29% dense-table result visible; the newer field/string changes still need fixed-work validation and committed
+repeatable history before attributing a public speedup or claiming the dense follow-up is resolved.
 Expected gain: 2x-20x on table-heavy workloads; likely the fastest route to closing the current benchmark gap.
 
 **3. Adaptive quickening and specializing bytecode.**
@@ -73,10 +99,11 @@ observable because imports cache only guarded locations and FASTCALL dispatches 
 function handle matches; every other case uses the ordinary index/call machinery. Import fuel is `2n - 1`
 (1/3/5) on hit or miss, matching the unfused lowering's total cost and reserved atomically before the fused
 lookup starts. FASTCALL costs the same one base fuel as CALL and charges native variable-work fuel exactly once.
-Current plan delta: benchmark this slice, then complete dedicated string-method/namecall coverage and consider
-safe fusion where it preserves those guards and fuel. The guarded mutation guarantee applies to sites lowered
-through `GETIMPORT`/`FASTCALL`; the older dedicated math/string opcodes retain their existing source-level
-safeenv gates, and host-time replacement for those opcodes remains separate hardening work.
+Current plan delta: benchmark this combined slice, then consider safe `GETIMPORT`+`FASTCALL` fusion where it
+preserves those guards and fuel. Constant method lookup now has the separate `NAMECALL` fast path described
+above; it does not fuse `CALL` or broaden the older dedicated math/string opcodes. The guarded mutation guarantee
+applies to sites lowered through `GETIMPORT`/`FASTCALL`; those older opcodes retain their existing source-level
+safeenv gates, and host-time replacement for them remains separate hardening work.
 Expected gain: 2x-10x on stdlib-heavy code; essential for matching Luau on `stdlib_math_table`.
 
 **5. Hot-loop hygiene: reduce dispatch count and per-instruction tolls.**
@@ -114,8 +141,9 @@ Expected gain: 1.2x-4x on closure/upvalue/coroutine-shaped workloads.
 Use per-program intern pools, short-string storage, shared frozen stdlib state, and deterministic allocation-driven
 GC pacing. Keep non-moving handles friendly to inline caches, but keep the VM thread-affine and safe.
 Current plan delta: VM-local indexed atoms and per-loaded-program constant caches have landed. Shared cross-VM
-program strings, short-string storage, and frozen stdlib state remain representation work because tables, atoms,
-imports, and ICs compound.
+compiled constant storage and the 13-byte inline literal/runtime-string form have now landed too. Lookup-only short-key
+misses avoid permanent atom growth. Shared frozen stdlib state and broader allocation/GC tuning remain because
+tables, atoms, imports, and ICs compound.
 Expected gain: 1.2x-3x speed plus large RSS/startup wins for many-VM usage.
 
 **10. Typed lanes for vectors, buffers, and deterministic extension kernels.**
@@ -134,10 +162,40 @@ repetition. Each recorded instance runs one untimed warmup followed by exactly o
 growing VM state and caches from leaking across samples while keeping setup/compilation outside the timer.
 
 `--samples-json <path>` writes the execution-ordered `ns/unit` repetitions to a separate
-`rustia.bench.raw-samples.v1` sidecar with commit, target, workload, calibrated `n`, checksum, and summary
-metadata. It deliberately does not change the stable append-only history schema, which retains min/median
-summaries. For small engine changes, keep baseline and candidate sidecars separate and alternate run order
-(ABBA/BAAB) so drift is visible.
+`rustia.bench.raw-samples.v1` sidecar with commit, target, workload, selected `n`, fixed-versus-calibrated
+selection, checksum, and summary metadata. It deliberately does not change the stable append-only history
+schema, which retains min/median summaries.
+
+For small engine changes, `--fixed-n <positive integer>` bypasses calibration and uses exactly the selected work
+for every warmup and recorded repetition. Build baseline and candidate from byte-identical harness source, retain
+separate raw sidecars, and alternate ABBA then BAAB order so drift is visible. For public history, measure the
+accepted clean final-commit binary at least three independent times on the same controlled target, append only
+the actual harness-produced summary rows, retain sidecars as separate evidence, and regenerate the history-derived
+results and claims. `bench/analyze-fixed-samples.js` validates all fixed-work
+sidecars and emits deterministic pooled and leg-clustered hierarchical bootstrap
+intervals, with a conservative-envelope verdict against the predeclared
+material-regression threshold; accepted evidence retains that exact JSON
+output. The exact commands and required provenance are in
+[`../bench/README.md`](../bench/README.md).
+
+### Current field/string slice — exact-final measurement pending
+
+A fixed-work diagnostic has been run for the `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` and string-representation
+working tree, but no accepted exact-final result or public-history row exists yet. Baseline
+`dac4ec2295f77587c79f04e4ff0a09cb99912f96` and the working candidate used byte-identical harness source
+(SHA-256 `9cb397349bf2e630e2ca120bd2b84b70aa83bf1dbeb496aa3f05622b2696325c`) and dense workload source
+(`b0c048b9fb17582fa409ae46b977cc73da635c145df39ea6f8fd756e9e17118d`), fixed `n=1500`, 15 repetitions, and
+the identical checksum `number:193302491.00000000000000000`.
+
+The first six ABBA/BAAB legs were usable. Pooling their 45 samples per variant gave baseline median
+139,964.195 ns/unit (IQR 133,262.333–156,530.778) and candidate median 141,223.833 ns/unit (IQR
+132,568.028–160,640.917), a +0.90% difference whose leg signs flipped and whose distributions overlap heavily.
+Two subsequent legs measured 978,686.639 and 825,969.167 ns/unit while unrelated release builds drove host load
+into triple digits; both were excluded as externally contaminated rather than selected by outcome. These
+temporary sidecars and the `ae3beae-working-tree` candidate label are diagnostic only. The complete sequence must
+be repeated from hashed exact-commit binaries on an idle host, retained durably, and followed by three actual
+final-commit history appends. Until then, neither the older +1.29% observation nor this +0.90% diagnostic supports
+a speedup, neutrality claim, or dense-regression resolution.
 
 ### 2026-07-17 local hardening measurement
 
@@ -173,7 +231,7 @@ below remain planning estimates rather than measured claims against C++ Luau.
 
 | state | likely position vs C++ Luau interpreter |
 |---|---|
-| Current committed snapshot | About 8x-20x slower on tracked workloads; roughly 13x slower geomean. |
+| Current committed benchmark snapshot | About 8x-20x slower on tracked workloads; roughly 13x slower geomean. The newer field/string code is not represented yet. |
 | Full tables + shared atoms + broader ICs + FASTCALL/GETIMPORT | Could close most table/global/stdlib gaps; target 0.5x-1.0x Luau on many interpreter workloads. |
 | Add quickening + hot-loop hygiene + superinstructions + O2 optimizer | Plausible 0.8x-1.5x Luau interpreter on favorable workloads, but only measurement can bless this. |
 | Add type-directed wasm/AOT tier | Hot type-stable kernels can plausibly beat the C++ Luau interpreter by multiples; this is the main better-than-Luau-interpreter route. |

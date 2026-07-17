@@ -37,10 +37,12 @@ constants** go in the immutable `Arc` (Sync-blessed), runtime strings stay per-V
 thread-affine; stays in the 16-B layout. **Cost:** medium-high; sequence behind the sealed `Value` newtype pre-P1.
 (Starts resolving the open const-pool/`Gc`-string seam.)
 
-**Implementation update (2026-07-17):** the first safe slice is in-tree: VM-local byte interning uses a compact
-deterministic open-addressed `Vec<u32>` index that compares bytes in authoritative GC storage, and each loaded
-program caches string-constant atoms in compact `u32` slots. A shared cross-VM `Program` pool, precomputed
-hashes, and short-string inlining remain pending.
+**Implementation update (2026-07-17):** the immutable `Arc<ConstantStorage>` is now the sole owner of compiled
+constant bytes and precomputed string hashes. Program clones and separate VMs retain typed descriptors into that
+same storage, so long compiled atoms do not allocate a second byte vector. Binary compiled literals and ordinary
+runtime results up to 13 bytes live directly in the sealed 16-byte `Value`; an equal runtime-first long atom
+upgrades to compiled shared storage. Short table keys atomize only when a successful non-nil insertion needs
+identity, while misses and failed/nil writes do not grow the atom table.
 
 **3. mutation-safe generic FASTCALL + GETIMPORT.** *(speed #1 — strongest on the sim hot path)* Re-introduce
 Luau's import and builtin-call families without assuming the Standard environment is frozen. `GETIMPORT`
@@ -137,9 +139,10 @@ already required by conf-8).
 > a 4-byte per-PC site map and lazily allocated 16-byte atom/slot/shape records for existing global/index paths
 > and `GETIMPORT` lanes. Records revalidate shape/key and read the live value, never mutate shared `Program`, and
 > charge the same logical fuel on hits and misses. Dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` specialization
-> remains P2.
-- **Broader field/namecall inline caches** — **P2** (M3). Extend the landed safe side-table foundation with
-  dedicated opcode families and measured specialization.
+> is now implemented as the first broader field/method cache slice.
+- **Broader field/namecall inline caches** — **implemented** (M3). `GETTABLEKS`/`SETTABLEKS` cover compile-time
+  string-key reads and writes, while live receiver and table-valued-`__index` lanes accelerate `NAMECALL` lookup
+  without caching a final callee. Full Luau `__namecall` context remains separate conformance work.
 - **Front-end crate split → bytecode-only deterministic-sim wasm** — real size/hygiene win; overlaps #9; strong runner-up.
 - **Hot/cold opcode split for JSC/SpiderMonkey baseline tiers** — **promoted to P1** (M3); validated by disassembly + the P1 cross-engine measurement.
 - **wasm SIMD `f32x4` for vector ops** — clean wasm speedup but `vector` is P4 and workload-specific.
@@ -148,10 +151,12 @@ already required by conf-8).
 
 ## Net effect on the locked axes (all refined, none abandoned)
 - **A** dispatch ← adds generic FASTCALL/GETIMPORT (#3) + the capability-typed hook contract (#7).
-- **B** value ← short-string inlining stays in 16 B (#2); the array part (#1) cuts value memory.
+- **B** value ← shared compiled strings and 13-byte inline strings stay within the 16-B `Value` contract (#2);
+  the array part (#1) cuts value memory.
 - **C** determinism ← libm enforcement teeth (#5), float→int rule (#6), the canon-point invariant (#8).
 - **D** GC/tables ← the flat map becomes a dual-part table with stable tombstones and a deterministic side index
-  (#1); indexed VM-local atoms and loaded-program constant caches start resolving the `Gc`-string seam (#2);
+  (#1); shared compiled storage, inline short values, and indexed VM-local atoms resolve the planned
+  const-pool/`Gc`-string seam (#2);
   frozen shared env remains future work (#9).
 - **E/F/G/H** ← stable logical-deletion/physical-compaction rules (#1), fuel-ABI on the hook (#7), borrowing ABI
   + typed sugar + structured errors (#4, #10).

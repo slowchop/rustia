@@ -249,6 +249,7 @@ struct Config {
     target: Duration,
     reps: usize,
     max_n: u64,
+    fixed_n: Option<u64>,
     history: Option<PathBuf>,
     results: Option<PathBuf>,
     latest_json: Option<PathBuf>,
@@ -277,6 +278,7 @@ impl Default for Config {
             target: Duration::from_millis(DEFAULT_TARGET_MS),
             reps: DEFAULT_REPS,
             max_n: DEFAULT_MAX_N,
+            fixed_n: None,
             history: Some(PathBuf::from(HISTORY_PATH)),
             results: Some(PathBuf::from(RESULTS_PATH)),
             latest_json: Some(PathBuf::from(CURRENT_RESULTS_JSON_PATH)),
@@ -298,6 +300,7 @@ struct Measurement {
     workload: String,
     unit: &'static str,
     n: u64,
+    n_selection: NSelection,
     reps: usize,
     ns_per_unit_min: f64,
     ns_per_unit_median: f64,
@@ -307,6 +310,21 @@ struct Measurement {
     commit: String,
     timestamp_unix: u64,
     target: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NSelection {
+    Calibrated,
+    Fixed,
+}
+
+impl NSelection {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Calibrated => "calibrated",
+            Self::Fixed => "fixed",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -442,6 +460,8 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
+    validate_measurement_outputs(&config)?;
+
     let repo = repo_root()?;
     let selected_engines = select_engines(&config.engines)?;
     let selected_workloads = select_workloads(&config.workloads)?;
@@ -483,6 +503,11 @@ fn run() -> Result<()> {
         return Err(Error::new("no benchmark measurements were produced"));
     }
 
+    // Persist raw evidence before its summary row. A sidecar without history can be retried; a
+    // history row whose raw fixed-work evidence failed to write cannot be reconstructed.
+    if let Some(samples_json) = &config.samples_json {
+        write_samples_json(samples_json, &records)?;
+    }
     if let Some(history) = &config.history {
         append_history(history, &records)?;
     }
@@ -492,10 +517,16 @@ fn run() -> Result<()> {
     if let Some(latest_json) = &config.latest_json {
         write_latest_json(latest_json, config.history.as_deref(), &records)?;
     }
-    if let Some(samples_json) = &config.samples_json {
-        write_samples_json(samples_json, &records)?;
-    }
 
+    Ok(())
+}
+
+fn validate_measurement_outputs(config: &Config) -> Result<()> {
+    if config.fixed_n.is_some() && config.history.is_some() && config.samples_json.is_none() {
+        return Err(Error::new(
+            "fixed-N history publication requires --samples-json raw evidence",
+        ));
+    }
     Ok(())
 }
 
@@ -554,6 +585,18 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
                 if config.max_n == 0 {
                     return Err(Error::new("--max-n must be greater than zero"));
                 }
+            }
+            "--fixed-n" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| Error::new("--fixed-n requires a value"))?;
+                let fixed_n = value
+                    .parse::<u64>()
+                    .map_err(|_| Error::new(format!("invalid --fixed-n value {value:?}")))?;
+                if fixed_n == 0 {
+                    return Err(Error::new("--fixed-n must be greater than zero"));
+                }
+                config.fixed_n = Some(fixed_n);
             }
             "--history" => {
                 let value = args
@@ -623,6 +666,7 @@ fn print_usage() {
     println!("  --workloads dense_tables,sparse_tables,closures_upvalues,generic_iteration,stdlib_math_table");
     println!("  --target-ms 250");
     println!("  --reps 9");
+    println!("  --fixed-n <n>");
     println!("  --history bench/history/runs.jsonl");
     println!("  --results bench/RESULTS.md");
     println!("  --latest-json bench/current-results.json");
@@ -924,20 +968,25 @@ fn measure_with_factory(
     workload: &Workload,
     mut factory: impl FnMut() -> Result<Box<dyn PreparedWorkload>>,
 ) -> Result<Measurement> {
-    let mut n = 16_u64.min(config.max_n);
-    loop {
-        let mut calibration = factory()?;
-        let _ = calibration.run(n)?;
-        let (_, elapsed) = run_once(&mut *calibration, n)?;
-        if elapsed >= config.target || n >= config.max_n {
-            if elapsed.as_nanos() > 0 {
-                let scale = config.target.as_secs_f64() / elapsed.as_secs_f64();
-                n = ((n as f64 * scale).max(1.0).min(config.max_n as f64)) as u64;
+    let (n, n_selection) = if let Some(n) = config.fixed_n {
+        (n, NSelection::Fixed)
+    } else {
+        let mut n = 16_u64.min(config.max_n);
+        loop {
+            let mut calibration = factory()?;
+            let _ = calibration.run(n)?;
+            let (_, elapsed) = run_once(&mut *calibration, n)?;
+            if elapsed >= config.target || n >= config.max_n {
+                if elapsed.as_nanos() > 0 {
+                    let scale = config.target.as_secs_f64() / elapsed.as_secs_f64();
+                    n = ((n as f64 * scale).max(1.0).min(config.max_n as f64)) as u64;
+                }
+                break;
             }
-            break;
+            n = n.saturating_mul(2).min(config.max_n);
         }
-        n = n.saturating_mul(2).min(config.max_n);
-    }
+        (n, NSelection::Calibrated)
+    };
 
     let n_f64 = n as f64;
     let mut samples_ns_per_unit = Vec::with_capacity(config.reps);
@@ -960,6 +1009,7 @@ fn measure_with_factory(
         workload: workload.id.to_owned(),
         unit: workload.unit,
         n,
+        n_selection,
         reps: config.reps,
         ns_per_unit_min,
         ns_per_unit_median,
@@ -1661,6 +1711,7 @@ fn write_samples_json(path: &Path, records: &[Measurement]) -> Result<()> {
                 "workload": record.workload,
                 "unit": record.unit,
                 "n": record.n,
+                "n_selection": record.n_selection.as_str(),
                 "reps": record.reps,
                 "ns_per_unit_min": record.ns_per_unit_min,
                 "ns_per_unit_median": record.ns_per_unit_median,
@@ -2090,6 +2141,20 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
+    struct RecordingPrepared {
+        id: usize,
+        run_count: usize,
+        runs: Rc<RefCell<Vec<(usize, usize, u64)>>>,
+    }
+
+    impl PreparedWorkload for RecordingPrepared {
+        fn run(&mut self, n: u64) -> Result<String> {
+            self.run_count += 1;
+            self.runs.borrow_mut().push((self.id, self.run_count, n));
+            Ok(format!("instance:{}:run:{}", self.id, self.run_count))
+        }
+    }
+
     #[test]
     fn inventory_json_reports_source_implemented_slots_independent_of_features() {
         let value = inventory_json_value();
@@ -2309,21 +2374,42 @@ mod tests {
     }
 
     #[test]
+    fn parse_args_accepts_positive_fixed_n_and_rejects_zero() {
+        let config =
+            parse_args(["--fixed-n".to_owned(), "1500".to_owned()].into_iter()).expect("fixed n");
+        assert_eq!(config.fixed_n, Some(1500));
+
+        let error = parse_args(["--fixed-n".to_owned(), "0".to_owned()].into_iter())
+            .expect_err("zero fixed n should fail");
+        assert!(error.to_string().contains("greater than zero"));
+    }
+
+    #[test]
+    fn fixed_n_history_requires_raw_evidence_but_diagnostics_do_not() {
+        let publication = Config {
+            fixed_n: Some(1500),
+            ..Config::default()
+        };
+        let error = validate_measurement_outputs(&publication)
+            .expect_err("fixed history without samples must be rejected");
+        assert!(error.to_string().contains("requires --samples-json"));
+
+        let with_evidence = Config {
+            samples_json: Some(PathBuf::from("raw.json")),
+            ..publication
+        };
+        validate_measurement_outputs(&with_evidence).expect("raw evidence enables publication");
+
+        let diagnostic = Config {
+            fixed_n: Some(1500),
+            history: None,
+            ..Config::default()
+        };
+        validate_measurement_outputs(&diagnostic).expect("no-history diagnostics need no sidecar");
+    }
+
+    #[test]
     fn each_recorded_sample_uses_fresh_preparation_after_an_untimed_warmup() {
-        struct RecordingPrepared {
-            id: usize,
-            run_count: usize,
-            runs: Rc<RefCell<Vec<(usize, usize, u64)>>>,
-        }
-
-        impl PreparedWorkload for RecordingPrepared {
-            fn run(&mut self, n: u64) -> Result<String> {
-                self.run_count += 1;
-                self.runs.borrow_mut().push((self.id, self.run_count, n));
-                Ok(format!("instance:{}:run:{}", self.id, self.run_count))
-            }
-        }
-
         let config = Config {
             target: Duration::ZERO,
             max_n: 1,
@@ -2363,7 +2449,55 @@ mod tests {
             ]
         );
         assert_eq!(measurement.samples_ns_per_unit.len(), 3);
+        assert_eq!(measurement.n_selection, NSelection::Calibrated);
         assert_eq!(measurement.checksum, "instance:3:run:2");
+    }
+
+    #[test]
+    fn fixed_n_bypasses_calibration_and_uses_equal_work_for_every_sample() {
+        let config = Config {
+            fixed_n: Some(1500),
+            max_n: 1,
+            reps: 3,
+            commit: Some("test".to_owned()),
+            ..Config::default()
+        };
+        let next_id = Rc::new(Cell::new(0_usize));
+        let runs = Rc::new(RefCell::new(Vec::new()));
+        let measurement = measure_with_factory(&config, &ENGINE_SLOTS[0], &WORKLOADS[0], {
+            let next_id = Rc::clone(&next_id);
+            let runs = Rc::clone(&runs);
+            move || {
+                let id = next_id.get();
+                next_id.set(id + 1);
+                Ok(Box::new(RecordingPrepared {
+                    id,
+                    run_count: 0,
+                    runs: Rc::clone(&runs),
+                }) as Box<dyn PreparedWorkload>)
+            }
+        })
+        .expect("fixed measurement");
+
+        assert_eq!(
+            next_id.get(),
+            3,
+            "fixed mode must not prepare calibration state"
+        );
+        assert_eq!(
+            runs.borrow().as_slice(),
+            &[
+                (0, 1, 1500),
+                (0, 2, 1500),
+                (1, 1, 1500),
+                (1, 2, 1500),
+                (2, 1, 1500),
+                (2, 2, 1500),
+            ]
+        );
+        assert_eq!(measurement.n, 1500);
+        assert_eq!(measurement.n_selection, NSelection::Fixed);
+        assert_eq!(measurement.samples_ns_per_unit.len(), 3);
     }
 
     #[test]
@@ -2422,7 +2556,9 @@ mod tests {
     #[test]
     fn write_samples_json_preserves_execution_order_without_changing_history_records() {
         let samples = temp_path("raw-samples", "json");
-        let measurement = sample_measurement(100, "rustia", "luau", "dense_tables", "test");
+        let mut measurement = sample_measurement(100, "rustia", "luau", "dense_tables", "test");
+        measurement.n = 1500;
+        measurement.n_selection = NSelection::Fixed;
 
         write_samples_json(&samples, std::slice::from_ref(&measurement))
             .expect("write samples JSON");
@@ -2434,6 +2570,8 @@ mod tests {
         assert_eq!(value["schema"], "rustia.bench.raw-samples.v1");
         assert_eq!(value["metadata"]["measurement_count"], 1);
         assert_eq!(value["metadata"]["sample_count"], 3);
+        assert_eq!(value["measurements"][0]["n"], 1500);
+        assert_eq!(value["measurements"][0]["n_selection"], "fixed");
         assert_eq!(
             value["measurements"][0]["samples_ns_per_unit"],
             serde_json::json!([3.0, 1.0, 2.0])
@@ -2441,6 +2579,10 @@ mod tests {
         assert!(
             !record_json(&measurement).contains("samples_ns_per_unit"),
             "the append-only public history schema must remain unchanged"
+        );
+        assert!(
+            !record_json(&measurement).contains("n_selection"),
+            "fixed-N provenance must stay out of the public history schema"
         );
     }
 
@@ -2487,6 +2629,7 @@ mod tests {
             workload: workload.to_owned(),
             unit,
             n: 10,
+            n_selection: NSelection::Calibrated,
             reps: 3,
             ns_per_unit_min: 1.0,
             ns_per_unit_median: 1.5,
