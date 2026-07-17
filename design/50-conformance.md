@@ -10,9 +10,11 @@
 >    only; no runtime effect). Oracle: all are `function`; `table.maxn({1,2,nil,4})=4`. **rustia MUST provide all
 >    four** (carry deprecation metadata for the LSP). The body rows calling them "removed" are WRONG; absence is
 >    the divergence.
-> 2. **`getfenv` / `setfenv` — PRESENT** in the 0.709 base lib (`getfenv(0)==_G`). Provide in Standard/LuauCompat
->    (their use disables the `GETIMPORT`/global-slot fast path); Deterministic may capability-remove them
->    (raising `ErrorKind::CapabilityRemoved`, never silent `nil`). Delete the "absent" body rows.
+> 2. **`getfenv` / `setfenv` — PRESENT** in the 0.709 base lib (`getfenv(0)==_G`). Provide in Standard/LuauCompat.
+>    They disable environment-assuming compile-time builtin folds, but rustia's live-slot `GETIMPORT` remains
+>    valid because every access starts from the current environment and revalidates shape/key before reading the
+>    live value. Deterministic may capability-remove them (raising `ErrorKind::CapabilityRemoved`, never silent
+>    `nil`). Delete the "absent" body rows.
 > 3. **`math.map` — PRESENT** (linear remap *with extrapolation*, no clamp): `math.map(15,0,10,0,100)=150`.
 >    **rustia MUST implement it.** (Resolves open-decision c7 = INCLUDE. Siblings `lerp`/`noise`/`round`/`clamp`/
 >    `sign` also confirmed present.)
@@ -718,7 +720,7 @@
 | **`table.freeze` / `table.isfrozen`** | specified | Present; `freeze` makes a table readonly (shallow), `isfrozen` queries it. | Both profiles: present, same shallow-freeze semantics + readonly write error. | both | Luau-specific; required for parity. |
 | **`_G`** | specified | Present, references the (sandboxed/per-thread) global table. | Both: present, references the per-VM global env. | both | New keys writable, builtins readonly via the env chain. |
 | **`_ENV` (Lua 5.2 lexical environment)** | specified | **Not supported** — Luau has no `_ENV` upvalue mechanism; globals use a dedicated environment, not `_ENV`. | Both: no `_ENV`; `_ENV` is just an ordinary (nil) global identifier. | both | Do NOT implement Lua 5.2 `_ENV` (would be a fork). WATCH: code referencing `_ENV` resolves to a normal global lookup, as in Luau. |
-| **`getfenv` / `setfenv`** | impl-defined | **Present** (Lua 5.1 compat) but flagged as an isolation hazard; their use **disables the `safeenv` global-access fast path** (deoptimizes global/import lookups). | Provide for Luau parity; calling them triggers deopt off the GETIMPORT/global-slot fast path. Deterministic sandbox restrictions, if any, must be explicit profile policy. | both | They defeat the precomputed-global-slot optimization and allow stack-frame env injection. grabby never uses them. WATCH: presence forces a slow-global mode for affected chunks. |
+| **`getfenv` / `setfenv`** | impl-defined | **Present** (Lua 5.1 compat) but flagged as an isolation hazard; their use disables Luau's environment-assuming `safeenv` folds. | Provide for Luau parity. Calling them disables environment-assuming compile-time builtin folds; live-slot `GETIMPORT` remains correct because it starts from the current environment and revalidates shape/key/live value. Deterministic sandbox restrictions, if any, must be explicit profile policy. | both | They defeat cached-final-value/precomputed-environment assumptions and allow stack-frame env injection. rustia's location-only import cache does not make either assumption. grabby never uses them. |
 | **`loadstring(src)`** | host/conformance surface | Standalone CLI may host-add it (compiles **source**, never bytecode). Roblox: disabled by default. Not in VM base lib. | Public base globals omit it; the Luau conformance compiler environment has a literal-string helper to execute pinned upstream fixtures. Future host/REPL opt-in remains an explicit c10 decision. | conformance/public differs | Conformance-only support is deliberate and must not imply runtime bytecode loading or deterministic-profile dynamic source compilation. |
 | **`load(chunk[, ...])`** | sandbox-removed | **Not registered** in Luau VM base nor standalone CLI (only host-provided loaders may exist). | Omit from base globals in both profiles; possible future host/REPL opt-in remains an explicit c10 decision. | both | Adding `load` would be a documented divergence-by-addition from reference Luau's base global surface. |
 | **Bytecode loading from script** | sandbox-removed | No script-level bytecode loader; `string.dump` removed; `loadstring` rejects bytecode; bytecode load is **host C-API only** and assumed compiler-generated/trusted. | No script-visible bytecode load in either profile; bytecode ingestion is embedding-API-only and validated. | both | Matches Luau's "untrusted bytecode is unsafe" stance; never expose to scripts. |

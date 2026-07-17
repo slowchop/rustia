@@ -16,11 +16,12 @@
 > short-string inlining** resolving the const-pool seam; generic **FASTCALL/GETIMPORT**; a **capability+fuel
 > contract on the op-extension hook**; **clippy-enforced libm-only** transcendentals; **saturating float→int**).
 >
-> **v3.2 implementation update (2026-07-16):** production tables retain tombstones for ordinary nil deletion
-> and use a stable custom-mixed open-addressed side index for larger hash parts. VM-local bytes are indexed to
-> atoms with `BTreeMap`, loaded programs cache constant atoms, and positive string-slot caches now cover existing
-> global/`GetIndex`/`SetIndex` paths with shape/key/live-value revalidation and unchanged fuel. Shared cross-VM
-> string storage, short-string inlining, and dedicated field/namecall opcodes remain future work.
+> **v3.2 implementation update (2026-07-17):** production tables retain tombstones for ordinary nil deletion;
+> VM-local byte atoms and larger hash parts use compact deterministic open-addressed `u32` side indices. Loaded
+> programs store compact `u32` constant atoms and a 4-byte per-PC site map, with lazily allocated 16-byte
+> shape/key/live-slot records at eligible sites. Mutation-safe `GETIMPORT` and guarded generic fixed-result
+> `FASTCALL` are implemented with ordinary semantic fallbacks and logical fuel preserved. Shared cross-VM string
+> storage, short-string inlining, and dedicated field/namecall opcodes remain future work.
 
 ## 0. The bet — proven, with honest framing
 
@@ -89,10 +90,12 @@ confirms `br_table` across the measured engine families. **wasm-GC is REJECTED**
 engine-defined layout → forfeits deterministic full-collect + host-columnar rollback AND isn't bit-identical
 across engines); rustia keeps gc-arena on linear memory. **relaxed-SIMD stays banned** (FMA/rounding
 nondeterminism); only fixed `f32x4` where proven bit-identical. **M3:** the **hot/cold opcode split moves to P1**
-(tight hot-core br_table + `#[cold]` rare ops — de-risks the JSC/SpiderMonkey baseline tiers). A first
-per-loaded-program/per-function/PC string-slot cache landed early on the existing global/index opcodes without
-mutating shared `Program` data or changing fuel; dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` specialization
-remains P2.
+(tight hot-core br_table + `#[cold]` rare ops — de-risks the JSC/SpiderMonkey baseline tiers). Per-loaded-program
+cache metadata uses a 4-byte site-map entry per PC and allocates 16-byte shape/key/live-slot records only when
+eligible table/import sites fill. `GETIMPORT` reads live values through up to three guarded slots; generic
+fixed-result `FASTCALL` guards an exact native function handle and falls back to ordinary resumable calls.
+Neither mutates shared `Program` data or changes logical fuel. Dedicated
+`GETTABLEKS`/`SETTABLEKS`/`NAMECALL` specialization remains P2.
 
 **B. Value representation — LOCKED: 16-byte tagged union (Copy scalars + payload word + tag); NOT NaN-box.**
 *(Overturns the v1/v2 leaning.)* Considered: NaN-box 8B; **16-byte tagged [✓]**; koto 24B [rejected];
@@ -128,8 +131,11 @@ immutable compiled artifacts/configuration, not by moving live VMs; (ii) collect
 counter, never byte-debt** (object sizes differ 32/64-bit; byte-accounting ignores `Vec` backing).
 
 **E. Determinism enforcement — LOCKED.** Dense `Vec` array parts plus insertion-ordered `Vec` hash entries;
-larger hash parts use a stable custom-mixed open-addressed side index, and logical nil deletion retains
-tombstones. Per-op NaN canon
+larger hash parts use a stable custom-mixed open-addressed `Vec<u32>` side index at no more than 50% load, and
+logical nil deletion retains tombstones. The index stores authoritative-entry indices rather than duplicate
+keys, is released below the 16-entry threshold or on clear, and never defines iteration order. VM-local string
+interning uses the same compact deterministic open-addressing principle and compares bytes in authoritative
+storage. Per-op NaN canon
 (soundness + cross-engine). Ban FMA/fast-math/relaxed-SIMD. All transcendentals via the `libm` crate —
 **including the compiler's constant folder** (hot-reload recompiles per platform → folder is on the bit-parity
 path).
@@ -141,7 +147,13 @@ floored; Rust truncates), comparison-based `math.min`/`max`. Not consuming Luau 
 **G. Steppability / fuel — LOCKED: stackless trampoline + per-instruction deterministic fuel + recursion cap;
 coroutines as resumable contexts.** Fuel charged at the **logical/source-op level** (fusion-invariant) or via a
 **versioned cost table** — changing the superinstruction set is a fuel-ABI break. Fuel exhaustion is a
-**distinct error**, not silent `nil`.
+**distinct error**, not silent `nil`. `GETIMPORT` therefore costs `2n - 1` fuel for an `n`-component path
+(1/3/5 for one/two/three components), matching the unfused global-plus-index lowering's total cost on cache hit
+or miss. The fused instruction reserves that total atomically before its first lookup, so insufficient fuel
+cannot expose a partially resolved import path.
+`FASTCALL` costs the same one base fuel as `CALL`; native variable-work fuel is charged exactly once, while cache
+misses and non-native/reassigned callees use the ordinary call path with the same yield, error, and continuation
+behavior.
 
 **H. Embedding API — LOCKED: koto-SHAPED facade over a typed `FromValue`/`IntoValue` core + a ZERO-COPY serde
 bridge; defer mlua `UserData`/`Scope`.** Considered: koto-shim [✓ outer]; mlua-style [partial — take the typed

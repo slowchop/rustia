@@ -1,6 +1,6 @@
 # rustia — continuous perf-benchmark suite + CI (design)
 
-> **Status: [DESIGN — implementation started] (2026-07-03).** Scoped by the `bench-scoping` agent (clone+read of
+> **Status: [DESIGN — implementation started] (updated 2026-07-17).** Scoped by the `bench-scoping` agent (clone+read of
 > `khvzak/script-bench-rs`, the 11-workload seed in `spikes/bench-suite/`, and the 2025–26 tracker/wasm-shell
 > tooling) + self-hosted benchmark-label constraints + privacy lean. Operationalises principle #3 ("measure,
 > don't assert — the bench suite is a CI gate"). See [`CURRENT.md`](CURRENT.md).
@@ -44,6 +44,13 @@ Split by what's measurable; never use one for the other's job:
 `{engine, engine_version, target, arch, os, mode, workload, unit, ns_per_unit_min, ns_per_unit_median,
 units_per_sec, n, golden_hash, commit, date, runner}`.
 
+The stable JSONL record deliberately remains a min/median summary. An optional
+`rustia.bench.raw-samples.v1` JSON sidecar stores execution-ordered per-repetition `ns/unit` values plus the
+commit, target, workload, calibrated `n`, checksum, and summaries for local analysis. Calibration probes and
+recorded repetitions each create fresh prepared engine/workload state; a single untimed warmup immediately
+precedes the one timed invocation. Baseline/candidate comparisons should retain separate sidecars and alternate
+run order (ABBA/BAAB). Sidecars are evidence for analysis, not a new public-history schema.
+
 ## CI structure (GitHub Actions, self-hosted benchmark runner via a GENERIC label `[self-hosted, bench]` — no infra
 detail in the repo)
 1. **`bench-native`** — build the `bench` crate per engine feature; `iai-callgrind` instruction-count = the
@@ -68,6 +75,11 @@ exposed by `script-bench --wasm-gate-json` and rendered by the static dashboard.
 runtimes in `bench/wasm/current-results.json`; adapter exclusions are documented in `bench/wasm/ADAPTERS.md`.
 The dispatch gate now records `call_ref` versus `br_table` on V8, JavaScriptCore-family, and SpiderMonkey
 runtimes in `bench/wasm/dispatch-current-results.json`, closing the pre-lock wasm gate.
+The native harness now offers `--samples-json` for raw sidecars and isolates every calibration probe and timed
+repetition in freshly prepared state. A local ABBA for the current engine slice is summarized in
+[`56-performance-research.md`](56-performance-research.md); it found no material regression above 5%, while a
+cooled dense-table confirmation retained a borderline 1.29% cost. The sidecars were not appended to public
+history, so the result remains hardening evidence rather than a published speed claim.
 It does not yet publish the JSONL history back to a tracking branch or static host. `tools/check-workflows.js`
 guards the public workflow policy: hosted CI stays hosted, the benchmark job stays manual, and self-hosted labels
 stay exactly `[self-hosted, bench]`.

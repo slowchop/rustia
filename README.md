@@ -18,9 +18,10 @@ benchmark, API, and release gates are satisfied.
 - One portable engine: big-`match`→`br_table` interpreter plus a validated future wasm-emit JIT/AOT tier;
   **gc-arena** GC,
   **16-byte tagged** values, own hand-written Luau parser, and thread-affine safe-Rust VM execution.
-- First interpreter performance foundation: deterministic indexed lookup for larger insertion-ordered hash
-  parts, indexed VM-local atoms, per-loaded-program constant-atom caching, and revalidated positive string-slot
-  caches while preserving insertion order, metamethod/readonly behavior, and opcode fuel.
+- Interpreter performance foundation: compact deterministic open-addressed `u32` side indices for VM-local
+  atoms and larger insertion-ordered hash parts; compact loaded-program constant atoms; a 4-byte per-PC cache
+  site map with lazily allocated 16-byte shape/key/live-slot records; and mutation-safe `GETIMPORT` plus guarded
+  fixed-result `FASTCALL`, both with ordinary semantic fallbacks and logical fuel preserved.
 - **No unsafe code in the public workspace:** all workspace crates, including the benchmark harness, inherit
   `unsafe_code = "forbid"`; research spikes and standalone wasm FFI demos are kept outside that product gate.
 - Pinned to **Luau 0.709** (standalone luau.org surface, not Roblox).
@@ -62,6 +63,11 @@ public rustia project; actual grabby integration work is explicitly out of scope
   across them; Lua 5.4 runs separately from Luau because `mlua-sys` cannot link both in one binary.
 - Current benchmark claim posture is generated at [`bench/CLAIMS.md`](bench/CLAIMS.md); it approves no blanket
   speed headline from the current snapshot.
+- Timed benchmark repetitions now prepare fresh engine/workload state, perform one untimed warmup, and can emit
+  execution-ordered raw samples to a separate JSON sidecar. A local fresh-state ABBA against `dac4ec2` found no
+  material regression above 5% after hot-path hardening: stdlib/string improved 7.25%/19.71%, closures were
+  neutral-to-faster, and a cooled dense-table check retained a borderline 1.29% slowdown. This is development
+  evidence, not a blanket release speed claim; details are in [`design/56-performance-research.md`](design/56-performance-research.md).
 - Major remaining gates are engine hardening, long-run benchmark history, public benchmark publication, and release
   packaging. Semver policy is tracked in [`design/91-semver-policy.md`](design/91-semver-policy.md), release
   notes in [`CHANGELOG.md`](CHANGELOG.md), koto migration guidance in

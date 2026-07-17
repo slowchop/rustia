@@ -10,11 +10,24 @@ Current unpublished workspace version: `0.0.1`.
 
 - Luau 0.709 conformance tracking is pending-free, with the current manifest at
   692 fixtures and 491 behavior refs.
-- Larger insertion-ordered table hash parts now use a deterministic
-  open-addressed side index; VM strings use indexed byte interning; loaded
-  programs cache VM-local constant atoms; and global/index reads and writes use
-  shape-revalidated positive string-slot caches without changing insertion
-  order, metamethod/readonly behavior, or opcode fuel.
+- VM strings and larger insertion-ordered table hash parts now use compact
+  deterministic open-addressed `u32` side indices. The table index is built at
+  16 hash entries, kept at or below 50% load, and releases its allocation after
+  clear or contraction below the threshold.
+- Loaded programs now store compact `u32` constant atoms and a 4-byte per-PC
+  cache-site map. Eligible sites lazily allocate 16-byte atom/slot/shape records
+  that always read the live table value and retain the first admitted atom to
+  avoid polymorphic cache churn.
+- `GETIMPORT` resolves validated one-to-three-component descriptors through
+  live, shape/key-revalidated table slots. Compiler lowering respects lexical
+  shadowing, host or script mutation remains observable, and path lengths one,
+  two, and three cost logical fuel 1, 3, and 5 on both cache hits and misses.
+- Compiler-predicted fixed-result `FASTCALL` sites cover unshadowed standard-library
+  fields and binding-scoped aliases, guard the exact current function handle and
+  native function kind, dispatch a matching native directly, and otherwise use
+  the ordinary resumable call path. Reassignment, host replacement,
+  metamethod calls, runtime arity errors, yields, and native variable-work fuel
+  retain ordinary-call behavior; the base opcode costs one fuel on hit or miss.
 - The public `rustia` facade has compile-checked examples for globals, typed
   host functions, deterministic extensions, retained script functions, serde,
   and hot reload.
@@ -25,6 +38,15 @@ Current unpublished workspace version: `0.0.1`.
 - The benchmark harness has current-results JSON/HTML, generated per-workload
   claim gating, package-file history, the requested adapter matrix, and
   cross-adapter source coverage for the non-default `string_building` workload.
+- Benchmark calibration probes and timed repetitions now use freshly prepared
+  engine/workload state with an untimed warmup, and `--samples-json` writes
+  execution-ordered raw repetitions to a schema-identified sidecar without
+  changing the append-only public history format.
+- A local fresh-state ABBA against `dac4ec2` found no remaining material
+  regression above 5% after restoring the inline GC-debt hot path and separating
+  ordinary calls from FASTCALL cache admission. Stdlib/string improved
+  7.25%/19.71%; a cooled dense-table check retained a borderline 1.29% cost, so
+  the result is recorded as hardening evidence rather than a blanket speed claim.
 - The benchmark static site now has a release-preflight contract check for local
   assets, DOM bindings, JSONL history parsing, and current-results agreement.
 - Release preflight now composes release notes, package files, generated leaf

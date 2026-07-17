@@ -1,6 +1,6 @@
 use gc_arena::lock::RefLock;
 use gc_arena::{Arena, Collect, DynamicRootSet, Gc, Rootable, Static};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeSet, VecDeque};
 
 use crate::number::table_key_number_bits;
 use crate::value::{Value, ValueKind};
@@ -8,13 +8,14 @@ use crate::value::{Value, ValueKind};
 const MAX_LUAU_ARRAY_INDEX: usize = 2_147_483_647;
 const MAX_LUAU_ARRAY_INDEX_F64: f64 = 2_147_483_647.0;
 const TABLE_HASH_INDEX_MIN_LEN: usize = 16;
+const STRING_INDEX_MIN_CAPACITY: usize = 16;
 
 #[derive(Collect)]
 #[collect(no_drop)]
 struct RootData<'gc> {
     _roots: DynamicRootSet<'gc>,
     strings: Vec<Gc<'gc, Static<Vec<u8>>>>,
-    string_index: BTreeMap<Vec<u8>, u32>,
+    string_index: Vec<u32>,
     tables: Vec<TableData>,
     functions: Vec<FunctionData>,
     upvalues: Vec<UpvalueData>,
@@ -28,7 +29,7 @@ struct RootData<'gc> {
 struct TableData {
     array: Vec<Value>,
     hash: Vec<TableEntry>,
-    hash_index: Vec<Option<TableHashIndexEntry>>,
+    hash_index: Vec<u32>,
     readonly: bool,
     metatable: Option<u32>,
     shape_version: u64,
@@ -349,13 +350,6 @@ struct TableEntry {
     value: Value,
 }
 
-#[derive(Clone, Copy, Collect)]
-#[collect(no_drop)]
-struct TableHashIndexEntry {
-    key: TableKey,
-    index: usize,
-}
-
 #[derive(Clone, Copy, Eq, PartialEq, Collect)]
 #[collect(no_drop)]
 enum TableKey {
@@ -378,8 +372,25 @@ pub enum TableNext {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct TableStringHashSlot {
-    index: usize,
     shape_version: u64,
+    index: u32,
+}
+
+impl TableStringHashSlot {
+    pub(crate) const fn from_parts(shape_version: u64, index: u32) -> Self {
+        Self {
+            shape_version,
+            index,
+        }
+    }
+
+    pub(crate) const fn shape_version(self) -> u64 {
+        self.shape_version
+    }
+
+    pub(crate) const fn index(self) -> u32 {
+        self.index
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -416,7 +427,7 @@ impl VmCell {
                     RefLock::new(RootData {
                         _roots: DynamicRootSet::new(mc),
                         strings: Vec::new(),
-                        string_index: BTreeMap::new(),
+                        string_index: Vec::new(),
                         tables: Vec::new(),
                         functions: Vec::new(),
                         upvalues: Vec::new(),
@@ -461,13 +472,25 @@ impl VmCell {
     pub fn intern_string_bytes(&mut self, value: &[u8]) -> u32 {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
-            if let Some(atom) = root.string_index.get(value) {
-                return *atom;
+            if let Some(atom) = string_index_lookup(&root, value) {
+                return atom;
             }
-            let atom = root.strings.len();
+            let required = root.strings.len().saturating_add(1);
+            if root.string_index.is_empty() || required.saturating_mul(2) > root.string_index.len()
+            {
+                let capacity = required
+                    .saturating_mul(2)
+                    .next_power_of_two()
+                    .max(STRING_INDEX_MIN_CAPACITY);
+                rebuild_string_index(&mut root, capacity);
+            }
+            let atom = u32::try_from(root.strings.len())
+                .ok()
+                .and_then(|atom| atom.checked_add(1).map(|_| atom))
+                .expect("string atom table exceeds compact u32 index address space");
             root.strings.push(Gc::new(mc, Static(value.to_vec())));
-            root.string_index.insert(value.to_vec(), atom as u32);
-            atom as u32
+            insert_string_index(&mut root, atom);
+            atom
         })
     }
 
@@ -868,8 +891,8 @@ impl VmCell {
             Some(Some((
                 entry.value,
                 TableStringHashSlot {
-                    index,
                     shape_version: table.shape_version,
+                    index: u32::try_from(index).ok()?,
                 },
             )))
         })
@@ -887,7 +910,7 @@ impl VmCell {
             if table.shape_version != slot.shape_version {
                 return Some(None);
             }
-            let Some(entry) = table.hash.get(slot.index) else {
+            let Some(entry) = table.hash.get(slot.index as usize) else {
                 return Some(None);
             };
             if entry.key != TableKey::String(atom) {
@@ -910,7 +933,7 @@ impl VmCell {
             if table.shape_version != slot.shape_version {
                 return Some(TableStringHashWrite::Deferred);
             }
-            let Some(entry) = table.hash.get_mut(slot.index) else {
+            let Some(entry) = table.hash.get_mut(slot.index as usize) else {
                 return Some(TableStringHashWrite::Deferred);
             };
             if entry.key != TableKey::String(atom) || entry.value.kind() == ValueKind::Nil {
@@ -1054,7 +1077,7 @@ impl VmCell {
             bump_table_shape_version(table);
             table.array.fill(Value::nil());
             table.hash.clear();
-            table.hash_index.clear();
+            table.hash_index = Vec::new();
             Some(())
         })
     }
@@ -1216,6 +1239,90 @@ impl VmCell {
     }
 }
 
+#[inline]
+fn string_index_lookup(root: &RootData<'_>, value: &[u8]) -> Option<u32> {
+    if root.string_index.is_empty() {
+        return None;
+    }
+
+    debug_assert!(root.string_index.len().is_power_of_two());
+    let mut position = string_index_position(value, root.string_index.len());
+    for _ in 0..root.string_index.len() {
+        let slot = root.string_index[position];
+        if slot == 0 {
+            return None;
+        }
+        let atom = slot - 1;
+        let indexed_value = root.strings.get(atom as usize);
+        debug_assert!(
+            indexed_value.is_some(),
+            "string index contains an invalid atom"
+        );
+        if indexed_value.is_some_and(|candidate| candidate.0.as_slice() == value) {
+            return Some(atom);
+        }
+        position = (position + 1) & (root.string_index.len() - 1);
+    }
+    None
+}
+
+fn rebuild_string_index(root: &mut RootData<'_>, requested_capacity: usize) {
+    let required_capacity = root
+        .strings
+        .len()
+        .saturating_mul(2)
+        .next_power_of_two()
+        .max(STRING_INDEX_MIN_CAPACITY);
+    let capacity = requested_capacity
+        .max(required_capacity)
+        .next_power_of_two();
+    root.string_index = vec![0; capacity];
+    for atom in 0..root.strings.len() {
+        let atom = u32::try_from(atom)
+            .ok()
+            .and_then(|atom| atom.checked_add(1).map(|_| atom))
+            .expect("string atom table exceeds compact u32 index address space");
+        insert_string_index(root, atom);
+    }
+}
+
+fn insert_string_index(root: &mut RootData<'_>, atom: u32) {
+    debug_assert!(!root.string_index.is_empty());
+    debug_assert!(root.string_index.len().is_power_of_two());
+    let slot = atom
+        .checked_add(1)
+        .expect("string atom table exceeds compact u32 index address space");
+    let value = root
+        .strings
+        .get(atom as usize)
+        .expect("string index insertion references an invalid atom");
+    let mut position = string_index_position(value.0.as_slice(), root.string_index.len());
+    for _ in 0..root.string_index.len() {
+        if root.string_index[position] == 0 {
+            root.string_index[position] = slot;
+            return;
+        }
+        position = (position + 1) & (root.string_index.len() - 1);
+    }
+    panic!("string index has no vacant slot");
+}
+
+#[inline]
+fn string_index_position(value: &[u8], len: usize) -> usize {
+    debug_assert!(len.is_power_of_two());
+    (stable_bytes_hash(value) as usize) & (len - 1)
+}
+
+#[inline]
+fn stable_bytes_hash(value: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in value {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    mix_index_hash(hash ^ value.len() as u64)
+}
+
 fn table_key_from_value(root: &RootData<'_>, value: Value) -> Option<TableKey> {
     match value.kind() {
         ValueKind::Nil => None,
@@ -1360,7 +1467,7 @@ fn set_hash_key(table: &mut TableData, key: TableKey, key_value: Value, value: V
                     value,
                 });
                 bump_table_shape_version(table);
-                record_hash_insert(table, key, index, vacant_hash_index);
+                record_hash_insert(table, index, vacant_hash_index);
             }
         }
     }
@@ -1415,37 +1522,25 @@ fn table_hash_lookup(table: &TableData, key: TableKey) -> TableHashLookup {
 
     let mut position = table_hash_index_position(key, table.hash_index.len());
     for _ in 0..table.hash_index.len() {
-        match table.hash_index[position] {
-            Some(entry) if entry.key == key => {
-                let indexed_entry_matches = table
-                    .hash
-                    .get(entry.index)
-                    .is_some_and(|candidate| candidate.key == key);
-                debug_assert!(
-                    indexed_entry_matches,
-                    "table hash side index points at a different key"
-                );
-                if indexed_entry_matches {
-                    return TableHashLookup::Found(entry.index);
-                }
-                return match table.hash.iter().position(|candidate| candidate.key == key) {
-                    Some(index) => TableHashLookup::Found(index),
-                    None => TableHashLookup::Vacant(None),
-                };
-            }
-            Some(_) => position = (position + 1) & (table.hash_index.len() - 1),
-            None => return TableHashLookup::Vacant(Some(position)),
+        let slot = table.hash_index[position];
+        if slot == 0 {
+            return TableHashLookup::Vacant(Some(position));
         }
+        let index = (slot - 1) as usize;
+        let indexed_entry = table.hash.get(index);
+        debug_assert!(
+            indexed_entry.is_some(),
+            "table hash side index contains an invalid entry index"
+        );
+        if indexed_entry.is_some_and(|candidate| candidate.key == key) {
+            return TableHashLookup::Found(index);
+        }
+        position = (position + 1) & (table.hash_index.len() - 1);
     }
     TableHashLookup::Vacant(None)
 }
 
-fn record_hash_insert(
-    table: &mut TableData,
-    key: TableKey,
-    index: usize,
-    vacant_hash_index: Option<usize>,
-) {
+fn record_hash_insert(table: &mut TableData, index: usize, vacant_hash_index: Option<usize>) {
     if table.hash_index.is_empty() {
         if table.hash.len() >= TABLE_HASH_INDEX_MIN_LEN {
             rebuild_hash_index(table);
@@ -1456,30 +1551,39 @@ fn record_hash_insert(
         if table.hash.len().saturating_mul(2) > table.hash_index.len() {
             rebuild_hash_index(table);
         } else if let Some(entry) = table.hash_index.get_mut(position) {
-            *entry = Some(TableHashIndexEntry { key, index });
+            *entry = compact_hash_index_slot(index);
         }
         return;
     }
-    insert_hash_index(table, key, index);
+    insert_hash_index(table, index);
 }
 
-fn insert_hash_index(table: &mut TableData, key: TableKey, index: usize) {
+fn insert_hash_index(table: &mut TableData, index: usize) {
     if table.hash.len().saturating_mul(2) > table.hash_index.len() {
         rebuild_hash_index(table);
         return;
     }
+    let Some(key) = table.hash.get(index).map(|entry| entry.key) else {
+        debug_assert!(
+            false,
+            "table hash side index insertion references an invalid entry"
+        );
+        return;
+    };
     let mut position = table_hash_index_position(key, table.hash_index.len());
     for _ in 0..table.hash_index.len() {
-        match table.hash_index[position] {
+        let slot = table.hash_index[position];
+        if slot == 0 {
+            table.hash_index[position] = compact_hash_index_slot(index);
+            return;
+        }
+        let existing_index = (slot - 1) as usize;
+        match table.hash.get(existing_index) {
             Some(entry) if entry.key == key => {
-                table.hash_index[position] = Some(TableHashIndexEntry { key, index });
+                table.hash_index[position] = compact_hash_index_slot(index);
                 return;
             }
-            Some(_) => position = (position + 1) & (table.hash_index.len() - 1),
-            None => {
-                table.hash_index[position] = Some(TableHashIndexEntry { key, index });
-                return;
-            }
+            _ => position = (position + 1) & (table.hash_index.len() - 1),
         }
     }
     rebuild_hash_index(table);
@@ -1487,28 +1591,35 @@ fn insert_hash_index(table: &mut TableData, key: TableKey, index: usize) {
 
 fn record_hash_remove(table: &mut TableData) {
     if table.hash.len() < TABLE_HASH_INDEX_MIN_LEN {
-        table.hash_index.clear();
+        table.hash_index = Vec::new();
     } else {
         rebuild_hash_index(table);
     }
 }
 
 fn rebuild_hash_index(table: &mut TableData) {
-    table.hash_index.clear();
     if table.hash.len() < TABLE_HASH_INDEX_MIN_LEN {
+        table.hash_index = Vec::new();
         return;
     }
     let capacity = table
         .hash
         .len()
-        .saturating_mul(4)
+        .saturating_mul(2)
         .next_power_of_two()
-        .max(TABLE_HASH_INDEX_MIN_LEN * 4);
-    table.hash_index.resize(capacity, None);
+        .max(TABLE_HASH_INDEX_MIN_LEN * 2);
+    table.hash_index = vec![0; capacity];
     for index in 0..table.hash.len() {
-        let key = table.hash[index].key;
-        insert_hash_index(table, key, index);
+        insert_hash_index(table, index);
     }
+}
+
+#[inline]
+fn compact_hash_index_slot(index: usize) -> u32 {
+    u32::try_from(index)
+        .ok()
+        .and_then(|index| index.checked_add(1))
+        .expect("table hash exceeds compact u32 side-index address space")
 }
 
 #[inline]
@@ -1519,22 +1630,24 @@ fn table_hash_index_position(key: TableKey, len: usize) -> usize {
 
 #[inline]
 fn table_hash_index_key(key: TableKey) -> u64 {
-    let value = match key {
-        TableKey::Number(bits) => return table_numeric_hash_index_key(bits),
-        TableKey::Boolean(value) => u64::from(value),
-        TableKey::String(handle)
-        | TableKey::Table(handle)
-        | TableKey::Function(handle)
-        | TableKey::Userdata(handle)
-        | TableKey::Buffer(handle) => u64::from(handle),
-        TableKey::Vector(bits) => bits.into_iter().fold(0x9e37_79b9_u64, |hash, bits| {
-            hash ^ u64::from(bits)
-                .wrapping_add(0x9e37_79b9)
-                .wrapping_add(hash << 6)
-                .wrapping_add(hash >> 2)
-        }),
+    let tagged = match key {
+        TableKey::Boolean(value) => u64::from(value) ^ 0x243f_6a88_85a3_08d3,
+        TableKey::Number(bits) => table_numeric_hash_index_key(bits) ^ 0x1319_8a2e_0370_7344,
+        TableKey::String(handle) => u64::from(handle) ^ 0xa409_3822_299f_31d0,
+        TableKey::Table(handle) => u64::from(handle) ^ 0x082e_fa98_ec4e_6c89,
+        TableKey::Function(handle) => u64::from(handle) ^ 0x4528_21e6_38d0_1377,
+        TableKey::Userdata(handle) => u64::from(handle) ^ 0xbe54_66cf_34e9_0c6c,
+        TableKey::Buffer(handle) => u64::from(handle) ^ 0xc0ac_29b7_c97c_50dd,
+        TableKey::Vector(bits) => bits
+            .into_iter()
+            .fold(0x3f84_d5b5_b547_0917_u64, |hash, bits| {
+                hash ^ u64::from(bits)
+                    .wrapping_add(0x9e37_79b9)
+                    .wrapping_add(hash << 6)
+                    .wrapping_add(hash >> 2)
+            }),
     };
-    value.wrapping_mul(0x9e37_79b9_7f4a_7c15).rotate_left(23) ^ value.rotate_right(17)
+    mix_index_hash(tagged)
 }
 
 #[inline]
@@ -1542,6 +1655,15 @@ fn table_numeric_hash_index_key(mut bits: u64) -> u64 {
     bits ^= bits >> 32;
     bits = bits.wrapping_mul(0x9e37_79b9_7f4a_7c15);
     bits ^ (bits >> 29)
+}
+
+#[inline]
+fn mix_index_hash(mut value: u64) -> u64 {
+    value ^= value >> 30;
+    value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value ^= value >> 27;
+    value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
 }
 
 #[derive(Clone, Copy)]
@@ -2038,4 +2160,139 @@ fn canonicalize_vector_component(value: f32) -> f32 {
 fn vector_table_key_bits(value: f32) -> u32 {
     let normalized = if value == 0.0 { 0.0 } else { value };
     canonicalize_vector_component(normalized).to_bits()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::mem::size_of;
+
+    fn empty_table() -> TableData {
+        TableData {
+            array: Vec::new(),
+            hash: Vec::new(),
+            hash_index: Vec::new(),
+            readonly: false,
+            metatable: None,
+            shape_version: 0,
+        }
+    }
+
+    #[test]
+    fn compact_index_slots_have_locked_layout() {
+        assert_eq!(size_of::<u32>(), 4);
+        if cfg!(target_pointer_width = "64") {
+            assert_eq!(size_of::<TableEntry>(), 48);
+        }
+    }
+
+    #[test]
+    fn string_index_preserves_binary_atoms_across_growth() {
+        let mut heap = VmCell::new();
+        let values = (0_u32..1_024)
+            .map(|index| {
+                let mut value = index.to_le_bytes().to_vec();
+                value.extend_from_slice(b"\0atom");
+                value
+            })
+            .collect::<Vec<_>>();
+        let atoms = values
+            .iter()
+            .map(|value| heap.intern_string_bytes(value))
+            .collect::<Vec<_>>();
+
+        for (value, atom) in values.iter().zip(&atoms) {
+            assert_eq!(heap.intern_string_bytes(value), *atom);
+            assert_eq!(heap.string_bytes(*atom).as_deref(), Some(value.as_slice()));
+        }
+
+        heap.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            assert_eq!(root.strings.len(), values.len());
+            assert!(root.string_index.len() >= root.strings.len() * 2);
+            assert_eq!(
+                root.string_index.iter().filter(|slot| **slot != 0).count(),
+                root.strings.len()
+            );
+        });
+    }
+
+    #[test]
+    fn compact_hash_index_handles_collisions_removal_and_clone() {
+        let mut table = empty_table();
+        let mut atoms = Vec::new();
+        for atom in 0..100_000_u32 {
+            if table_hash_index_position(TableKey::String(atom), 64) == 0 {
+                atoms.push(atom);
+                if atoms.len() == 20 {
+                    break;
+                }
+            }
+        }
+        assert_eq!(atoms.len(), 20);
+
+        for atom in &atoms {
+            set_hash_key(
+                &mut table,
+                TableKey::String(*atom),
+                Value::string_atom(*atom),
+                Value::number(f64::from(*atom)),
+            );
+        }
+        assert_eq!(table.hash_index.len(), 64);
+        for atom in &atoms {
+            assert_eq!(
+                table_hash_entry(&table, TableKey::String(*atom))
+                    .and_then(|entry| entry.value.as_number()),
+                Some(f64::from(*atom))
+            );
+        }
+
+        let removed = atoms.remove(7);
+        remove_hash_key(&mut table, TableKey::String(removed));
+        assert_eq!(table.hash.len(), atoms.len());
+        assert!(!table.hash_index.is_empty());
+        assert!(table_hash_entry(&table, TableKey::String(removed)).is_none());
+        for atom in &atoms {
+            assert!(table_hash_entry(&table, TableKey::String(*atom)).is_some());
+        }
+
+        let clone = table.clone();
+        for atom in &atoms {
+            assert!(table_hash_entry(&clone, TableKey::String(*atom)).is_some());
+        }
+
+        while table.hash.len() >= TABLE_HASH_INDEX_MIN_LEN {
+            let key = table.hash[0].key;
+            remove_hash_key(&mut table, key);
+        }
+        assert!(table.hash_index.is_empty());
+        assert_eq!(table.hash_index.capacity(), 0);
+    }
+
+    #[test]
+    fn table_clear_releases_compact_hash_index() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+        for index in 0..20 {
+            let atom = heap.intern_string(&format!("key_{index}"));
+            assert_eq!(
+                heap.table_set(table, Value::string_atom(atom), Value::number(index as f64)),
+                Some(())
+            );
+        }
+        heap.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            assert!(!root.tables[table as usize].hash_index.is_empty());
+        });
+
+        assert_eq!(heap.table_clear(table), Some(()));
+        heap.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = &root.tables[table as usize];
+            assert!(table.hash.is_empty());
+            assert!(table.hash_index.is_empty());
+            assert_eq!(table.hash_index.capacity(), 0);
+        });
+    }
 }

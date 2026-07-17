@@ -155,6 +155,7 @@ struct Compiler {
     locals: BTreeMap<String, Binding>,
     assigned_globals: BTreeSet<String>,
     assigned_stdlib_fields: BTreeSet<(String, String)>,
+    fastcall_candidate_names: BTreeSet<String>,
     stdlib_tables_may_be_mutated: bool,
     global_environment_escaped: bool,
     disable_builtin_fastpaths: bool,
@@ -181,6 +182,7 @@ impl Compiler {
             locals: BTreeMap::new(),
             assigned_globals: BTreeSet::new(),
             assigned_stdlib_fields: BTreeSet::new(),
+            fastcall_candidate_names: BTreeSet::new(),
             stdlib_tables_may_be_mutated: false,
             global_environment_escaped: false,
             disable_builtin_fastpaths: false,
@@ -221,6 +223,7 @@ impl Compiler {
 
     fn compile_scoped_block(&mut self, statements: &[Stmt]) -> Result<()> {
         let locals = self.locals.clone();
+        let fastcall_candidate_names = self.fastcall_candidate_names.clone();
         let next_register = self.next_register;
         self.scope_register_starts.push(next_register);
         self.compile_block(statements)?;
@@ -229,6 +232,7 @@ impl Compiler {
             .pop()
             .expect("scope register stack should be balanced");
         self.locals = locals;
+        self.fastcall_candidate_names = fastcall_candidate_names;
         self.next_register = next_register;
         Ok(())
     }
@@ -414,6 +418,16 @@ impl Compiler {
                 self.free_register(register);
             }
         }
+        for (index, binding) in bindings.iter().enumerate() {
+            if init
+                .get(index)
+                .is_some_and(|expr| self.expr_is_fastcall_candidate(expr))
+            {
+                self.fastcall_candidate_names.insert(binding.name.clone());
+            } else {
+                self.fastcall_candidate_names.remove(&binding.name);
+            }
+        }
         for (binding, register) in bindings.iter().zip(registers) {
             self.locals
                 .insert(binding.name.clone(), Binding::Register(register));
@@ -431,6 +445,7 @@ impl Compiler {
     ) -> Result<()> {
         let register = self.alloc_register_at(span)?;
         self.clear_local_cell(register);
+        self.fastcall_candidate_names.remove(name);
         self.locals
             .insert(name.to_owned(), Binding::Register(register));
         let prototype = self.compile_function_prototype(
@@ -935,6 +950,7 @@ impl Compiler {
         span: Span,
     ) -> Result<()> {
         let locals = self.locals.clone();
+        let fastcall_candidate_names = self.fastcall_candidate_names.clone();
         let next_register = self.next_register;
 
         let index_register = self.alloc_register_at(span)?;
@@ -962,6 +978,7 @@ impl Compiler {
             step.map_or(span, Expr::span),
         );
 
+        self.fastcall_candidate_names.remove(variable);
         self.locals
             .insert(variable.to_owned(), Binding::Register(visible_register));
 
@@ -989,12 +1006,14 @@ impl Compiler {
         self.patch_jump_to(prep_jump, clear_start, span)?;
         self.patch_loop_breaks_to(clear_start, span)?;
         self.locals = locals;
+        self.fastcall_candidate_names = fastcall_candidate_names;
         self.next_register = next_register;
         Ok(())
     }
 
     fn compile_repeat(&mut self, body: &[Stmt], condition: &Expr, span: Span) -> Result<()> {
         let locals = self.locals.clone();
+        let fastcall_candidate_names = self.fastcall_candidate_names.clone();
         let next_register = self.next_register;
         let loop_start = self.code.len();
 
@@ -1020,6 +1039,7 @@ impl Compiler {
         self.clear_local_cells_from(next_register)?;
         self.patch_loop_breaks_to(clear_start, span)?;
         self.locals = locals;
+        self.fastcall_candidate_names = fastcall_candidate_names;
         self.next_register = next_register;
         Ok(())
     }
@@ -1376,6 +1396,7 @@ impl Compiler {
         let parent_source_map = std::mem::take(&mut self.source_map);
         let parent_scope = CaptureScope {
             locals: std::mem::take(&mut self.locals),
+            fastcall_candidate_names: std::mem::take(&mut self.fastcall_candidate_names),
             upvalues: std::mem::take(&mut self.upvalues),
             captured_registers: std::mem::take(&mut self.captured_registers),
         };
@@ -1443,6 +1464,7 @@ impl Compiler {
         self.code = parent_code;
         self.source_map = parent_source_map;
         self.locals = parent_scope.locals;
+        self.fastcall_candidate_names = parent_scope.fastcall_candidate_names;
         self.upvalues = parent_scope.upvalues;
         self.captured_registers = parent_scope.captured_registers;
         self.assigned_globals = parent_assigned_globals;
@@ -1528,16 +1550,9 @@ impl Compiler {
         field_span: Span,
         target: u8,
     ) -> Result<()> {
-        if matches!(object, Expr::Name(name, _) if name == "math")
-            && self.builtin_table_field_is_unmodified("math", field)
-        {
-            match field {
-                "huge" => return self.load_constant_to(target, Constant::Number(f64::INFINITY)),
-                "pi" => self.load_constant_to(
-                    target,
-                    Constant::Number(f64::from_bits(0x4009_21fb_5444_2d18)),
-                )?,
-                _ => {}
+        if let Some(path) = dotted_import_path(object, field) {
+            if (2..=3).contains(&path.len()) && !self.name_is_lexically_bound(&path[0]) {
+                return self.compile_import_path_to(&path, target, field_span);
             }
         }
         self.compile_expr_to(object, target)?;
@@ -1547,6 +1562,38 @@ impl Compiler {
             field_span,
         );
         self.free_register(key_register);
+        Ok(())
+    }
+
+    fn compile_import_path_to(&mut self, path: &[String], target: u8, span: Span) -> Result<()> {
+        if !(1..=3).contains(&path.len()) {
+            return Err(CompileError::at(
+                "import path must contain between one and three components",
+                span,
+            ));
+        }
+        let mut components = Vec::with_capacity(path.len());
+        for component in path {
+            let index = self.constant_index(Constant::String(component.as_bytes().to_vec()))?;
+            components.push(
+                u32::try_from(index)
+                    .map_err(|_| CompileError::at("import component index overflow", span))?,
+            );
+        }
+        let descriptor = self.constant_index(Constant::Import(components))?;
+        let descriptor = i32::try_from(descriptor)
+            .map_err(|_| CompileError::at("import descriptor index overflow", span))?;
+        self.emit_source_mapped_instruction(
+            Instruction::with_aux(
+                Opcode::GetImport,
+                target,
+                u8::try_from(path.len())
+                    .map_err(|_| CompileError::at("import path length overflow", span))?,
+                0,
+                descriptor,
+            ),
+            span,
+        );
         Ok(())
     }
 
@@ -2044,6 +2091,7 @@ impl Compiler {
         };
 
         let locals = self.locals.clone();
+        let fastcall_candidate_names = self.fastcall_candidate_names.clone();
         let next_register = self.next_register;
 
         let table_register = self.alloc_register_at(span)?;
@@ -2056,6 +2104,9 @@ impl Compiler {
         }
 
         self.compile_expr_to(table_expr, table_register)?;
+        for variable in variables {
+            self.fastcall_candidate_names.remove(&variable.name);
+        }
         self.locals
             .insert(variables[0].name.clone(), Binding::Register(key_register));
         if let Some(value_binding) = variables.get(1) {
@@ -2107,6 +2158,7 @@ impl Compiler {
         self.patch_jump_to(prep_jump, clear_start, span)?;
         self.patch_loop_breaks_to(clear_start, span)?;
         self.locals = locals;
+        self.fastcall_candidate_names = fastcall_candidate_names;
         self.next_register = next_register;
         Ok(())
     }
@@ -2129,6 +2181,7 @@ impl Compiler {
         }
 
         let locals = self.locals.clone();
+        let fastcall_candidate_names = self.fastcall_candidate_names.clone();
         let next_register = self.next_register;
         let window_len = 3usize
             .checked_add(variables.len())
@@ -2137,6 +2190,9 @@ impl Compiler {
         let first_visible = checked_register_offset(iterator_register, 3, span)?;
 
         self.compile_generic_iterator_values(iter, iterator_register, span)?;
+        for variable in variables {
+            self.fastcall_candidate_names.remove(&variable.name);
+        }
         for (index, binding) in variables.iter().enumerate() {
             let register = checked_register_offset(first_visible, index, span)?;
             self.locals
@@ -2175,6 +2231,7 @@ impl Compiler {
         self.patch_jump_to(prep_jump, clear_start, span)?;
         self.patch_loop_breaks_to(clear_start, span)?;
         self.locals = locals;
+        self.fastcall_candidate_names = fastcall_candidate_names;
         self.next_register = next_register;
         Ok(())
     }
@@ -2194,6 +2251,7 @@ impl Compiler {
         }
 
         let locals = self.locals.clone();
+        let fastcall_candidate_names = self.fastcall_candidate_names.clone();
         let next_register = self.next_register;
         let window_len = 4usize
             .checked_add(variables.len())
@@ -2202,6 +2260,9 @@ impl Compiler {
         let first_visible = checked_register_offset(iterator_register, 4, span)?;
 
         self.compile_expr_to(expr, iterator_register)?;
+        for variable in variables {
+            self.fastcall_candidate_names.remove(&variable.name);
+        }
         for (index, binding) in variables.iter().enumerate() {
             let register = checked_register_offset(first_visible, index, span)?;
             self.locals
@@ -2240,6 +2301,7 @@ impl Compiler {
         self.patch_jump_to(prep_jump, clear_start, span)?;
         self.patch_loop_breaks_to(clear_start, span)?;
         self.locals = locals;
+        self.fastcall_candidate_names = fastcall_candidate_names;
         self.next_register = next_register;
         Ok(())
     }
@@ -2438,6 +2500,9 @@ impl Compiler {
                 && self.builtin_global_is_unmodified("math")
             {
                 if !self.builtin_table_field_is_unmodified("math", field) {
+                    return self.compile_value_call_to(callee, args, target, span);
+                }
+                if math_specialized_min_arity(field).is_some_and(|minimum| args.len() < minimum) {
                     return self.compile_value_call_to(callee, args, target, span);
                 }
                 match field.as_str() {
@@ -2909,7 +2974,11 @@ impl Compiler {
         }
         self.emit_source_mapped_instruction(
             Instruction::with_aux(
-                Opcode::Call,
+                if self.expr_is_fastcall_candidate(callee) {
+                    Opcode::FastCall
+                } else {
+                    Opcode::Call
+                },
                 target,
                 target,
                 arg_registers.first().copied().unwrap_or(0),
@@ -2957,6 +3026,7 @@ impl Compiler {
         let parent_source_map = std::mem::take(&mut self.source_map);
         let parent_source_line_starts = std::mem::take(&mut self.options.source_line_starts);
         let parent_locals = std::mem::take(&mut self.locals);
+        let parent_fastcall_candidate_names = std::mem::take(&mut self.fastcall_candidate_names);
         let parent_upvalues = std::mem::take(&mut self.upvalues);
         let parent_captured_registers = std::mem::take(&mut self.captured_registers);
         let parent_capture_stack = std::mem::take(&mut self.capture_stack);
@@ -2997,6 +3067,7 @@ impl Compiler {
         self.source_map = parent_source_map;
         self.options.source_line_starts = parent_source_line_starts;
         self.locals = parent_locals;
+        self.fastcall_candidate_names = parent_fastcall_candidate_names;
         self.upvalues = parent_upvalues;
         self.captured_registers = parent_captured_registers;
         self.capture_stack = parent_capture_stack;
@@ -4829,6 +4900,56 @@ impl Compiler {
             && !self.assigned_globals.contains(name)
     }
 
+    fn name_is_lexically_bound(&self, name: &str) -> bool {
+        self.locals.contains_key(name)
+            || self
+                .capture_stack
+                .iter()
+                .rev()
+                .any(|scope| scope.locals.contains_key(name))
+    }
+
+    fn expr_is_fastcall_candidate(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Name(name, _) => self.name_is_fastcall_candidate(name),
+            Expr::Field { object, .. } => dotted_import_root(object).is_some_and(|root| {
+                matches!(
+                    root,
+                    "bit32"
+                        | "buffer"
+                        | "coroutine"
+                        | "debug"
+                        | "math"
+                        | "os"
+                        | "string"
+                        | "table"
+                        | "utf8"
+                        | "vector"
+                ) && !self.name_is_lexically_bound(root)
+            }),
+            Expr::Paren { expr, .. } => self.expr_is_fastcall_candidate(expr),
+            _ => false,
+        }
+    }
+
+    fn name_is_fastcall_candidate(&self, name: &str) -> bool {
+        match self.locals.get(name) {
+            Some(Binding::Register(_) | Binding::CapturedLocal(_) | Binding::CurrentFunction) => {
+                return self.fastcall_candidate_names.contains(name);
+            }
+            Some(Binding::Upvalue(_)) | None => {}
+        }
+        for scope in self.capture_stack.iter().rev() {
+            match scope.locals.get(name) {
+                Some(
+                    Binding::Register(_) | Binding::CapturedLocal(_) | Binding::CurrentFunction,
+                ) => return scope.fastcall_candidate_names.contains(name),
+                Some(Binding::Upvalue(_)) | None => {}
+            }
+        }
+        false
+    }
+
     fn mark_global_environment_escape_for_call(&mut self, callee: &Expr) {
         if matches!(callee, Expr::Name(name, _) if name == "getfenv" || name == "setfenv") {
             self.global_environment_escaped = true;
@@ -5640,6 +5761,7 @@ enum Binding {
 #[derive(Clone)]
 struct CaptureScope {
     locals: BTreeMap<String, Binding>,
+    fastcall_candidate_names: BTreeSet<String>,
     upvalues: Vec<UpvalueDescriptor>,
     captured_registers: BTreeSet<u8>,
 }
@@ -5702,6 +5824,41 @@ impl GenericArrayIterator {
     }
 }
 
+fn dotted_import_path(object: &Expr, field: &str) -> Option<Vec<String>> {
+    fn collect(expr: &Expr, path: &mut Vec<String>) -> bool {
+        match expr {
+            Expr::Name(name, _) => {
+                path.push(name.clone());
+                true
+            }
+            Expr::Field { object, field, .. } => {
+                if !collect(object, path) {
+                    return false;
+                }
+                path.push(field.clone());
+                true
+            }
+            Expr::Paren { expr, .. } => collect(expr, path),
+            _ => false,
+        }
+    }
+
+    let mut path = Vec::with_capacity(3);
+    if !collect(object, &mut path) {
+        return None;
+    }
+    path.push(field.to_owned());
+    Some(path)
+}
+
+fn dotted_import_root(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Name(name, _) => Some(name),
+        Expr::Field { object, .. } | Expr::Paren { expr: object, .. } => dotted_import_root(object),
+        _ => None,
+    }
+}
+
 fn const_eval(expr: &Expr) -> Option<Constant> {
     match expr {
         Expr::Nil(_) => Some(Constant::Nil),
@@ -5752,6 +5909,18 @@ fn math_abs_needs_native_error_path(args: &[Expr]) -> bool {
         const_eval(first),
         Some(Constant::Nil | Constant::Boolean(_))
     )
+}
+
+fn math_specialized_min_arity(field: &str) -> Option<usize> {
+    match field {
+        "abs" | "floor" | "ceil" | "round" | "sign" | "sqrt" | "deg" | "rad" | "isnan"
+        | "isinf" | "isfinite" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh"
+        | "cosh" | "tanh" | "exp" | "log" | "log10" | "min" | "max" => Some(1),
+        "fmod" | "pow" | "atan2" | "ldexp" => Some(2),
+        "clamp" | "lerp" => Some(3),
+        "map" => Some(5),
+        _ => None,
+    }
 }
 
 fn const_eval_binary(op: BinaryOp, lhs: &Expr, rhs: &Expr) -> Option<Constant> {
@@ -5873,6 +6042,7 @@ fn constants_equal(lhs: &Constant, rhs: &Constant) -> bool {
         (Constant::Boolean(lhs), Constant::Boolean(rhs)) => lhs == rhs,
         (Constant::Number(lhs), Constant::Number(rhs)) => lhs.to_bits() == rhs.to_bits(),
         (Constant::String(lhs), Constant::String(rhs)) => lhs == rhs,
+        (Constant::Import(lhs), Constant::Import(rhs)) => lhs == rhs,
         _ => false,
     }
 }
@@ -5911,7 +6081,8 @@ mod tests {
     use super::{compile, compile_with_options, BuiltinEnvironment, CompileOptions};
     use rustia_parser::{parse_source, parse_source_bytes};
     use rustia_vm::bytecode::{Constant, Opcode, Program};
-    use rustia_vm::{ErrorKind, Profile, Vm, VmSettings};
+    use rustia_vm::{ErrorKind, HostFunctionOp, OpCapability, Profile, Vm, VmSettings};
+    use std::sync::Arc;
 
     #[test]
     fn compiles_and_runs_typed_numeric_subset() {
@@ -9019,6 +9190,344 @@ return #s * 1000 + string.byte(s, 256)
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let error = vm.run(&program).unwrap_err();
         assert_assertion_message(error.kind, "assertion failed!");
+    }
+
+    #[test]
+    fn lowers_live_dotted_imports_and_keeps_fourth_component_generic() {
+        let chunk =
+            parse_source("foo = {bar = {baz = {qux = 42}}}; return foo.bar.baz.qux").unwrap();
+        let program = compile(&chunk).unwrap();
+        let import = program
+            .main
+            .code
+            .iter()
+            .find(|instruction| instruction.op == Opcode::GetImport)
+            .copied()
+            .expect("three-component prefix should use GETIMPORT");
+        assert_eq!(import.b, 3);
+        assert!(program
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::GetIndex));
+        let Constant::Import(path) = &program.constants[import.aux as usize] else {
+            panic!("GETIMPORT must reference an import descriptor");
+        };
+        let names = path
+            .iter()
+            .map(|index| match &program.constants[*index as usize] {
+                Constant::String(name) => String::from_utf8(name.clone()).unwrap(),
+                _ => panic!("import component must reference a string"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["foo", "bar", "baz"]);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(42.0));
+    }
+
+    #[test]
+    fn import_lowering_respects_current_and_outer_lexical_bindings() {
+        let cases = [
+            "local math = {pi = 9}; return math.pi",
+            "local function read(math) return math.pi end; return read({pi = 8})",
+            "local math = {pi = 7}; local function read() return math.pi end; return read()",
+        ];
+        for (source, expected) in cases.into_iter().zip([9.0, 8.0, 7.0]) {
+            let program = compile(&parse_source(source).unwrap()).unwrap();
+            assert!(program
+                .main
+                .code
+                .iter()
+                .chain(program.functions.iter().flat_map(|function| &function.code))
+                .all(|instruction| instruction.op != Opcode::GetImport));
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            assert_eq!(vm.run(&program).unwrap().as_number(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn import_cache_observes_live_field_mutation() {
+        let chunk = parse_source(
+            "local result = 0; for i = 1, 2 do result = math.pi; math.pi = 7 end; return result",
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(program
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::GetImport));
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(7.0));
+    }
+
+    #[test]
+    fn getimport_roots_intermediate_values_across_fused_gc_steps() {
+        let source = r#"
+            local weak = setmetatable({}, {__mode = "k"})
+            local object_meta = {
+                __index = function(self, key)
+                    return weak[self]
+                end,
+            }
+            foo = setmetatable({}, {
+                __index = function(_, key)
+                    local object = setmetatable({}, object_meta)
+                    weak[object] = 123
+                    return object
+                end,
+            })
+            return foo.missing.bar
+        "#;
+        let program = compile(&parse_source(source).unwrap()).unwrap();
+        assert!(program
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::GetImport && instruction.b == 3));
+        let settings = VmSettings {
+            deterministic_gc_interval: std::num::NonZeroU64::new(1).unwrap(),
+            ..VmSettings::default()
+        };
+        let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(123.0));
+    }
+
+    #[test]
+    fn generic_fastcall_covers_local_aliases_and_deopts_on_reassignment() {
+        let chunk = parse_source(
+            "local f = math.floor; local result = 0; for i = 1, 2 do result = f(1.5) + 0; f = function() return 77 end end; return result",
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(program
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::FastCall));
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(77.0));
+
+        let nested = compile(
+            &parse_source(
+                "local f = math.floor; local function call(x) return f(x) + 0 end; return call(1.5)",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(nested.functions.iter().any(|function| function
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::FastCall)));
+
+        let ordinary =
+            compile(&parse_source("local function c() return 1 end; return c() + 0").unwrap())
+                .unwrap();
+        assert!(ordinary
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::Call));
+        assert!(ordinary
+            .main
+            .code
+            .iter()
+            .all(|instruction| instruction.op != Opcode::FastCall));
+
+        let shadowed_parameter = compile(
+            &parse_source(
+                "local f = math.floor; local function use(f) return f() + 0 end; return use(function() return 1 end)",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(shadowed_parameter
+            .functions
+            .iter()
+            .flat_map(|function| &function.code)
+            .all(|instruction| instruction.op != Opcode::FastCall));
+
+        let child_only = compile(
+            &parse_source(
+                "local function seed() local g = math.floor end; local function g() return 1 end; return g() + 0",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(child_only
+            .main
+            .code
+            .iter()
+            .chain(
+                child_only
+                    .functions
+                    .iter()
+                    .flat_map(|function| &function.code)
+            )
+            .all(|instruction| instruction.op != Opcode::FastCall));
+    }
+
+    #[test]
+    fn fastcall_falls_back_to_callable_table_metamethods() {
+        let program = compile(
+            &parse_source(
+                "local f = math.floor; f = setmetatable({}, {__call = function(_, x) return x + 40 end}); return f(2) + 0",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(program
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::FastCall));
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(42.0));
+    }
+
+    #[test]
+    fn fastcall_cold_and_hot_hits_preserve_native_variable_work_fuel() {
+        let fast = compile(
+            &parse_source(
+                r#"
+                    local concat = table.concat
+                    local values = {"abcdefgh", "ijklmnop"}
+                    local result = ""
+                    for i = 1, 2 do
+                        result = (concat(values))
+                    end
+                    return result
+                "#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            fast.main
+                .code
+                .iter()
+                .filter(|instruction| instruction.op == Opcode::FastCall)
+                .count(),
+            1
+        );
+
+        let mut ordinary = fast.clone();
+        for instruction in &mut ordinary.main.code {
+            if instruction.op == Opcode::FastCall {
+                instruction.op = Opcode::Call;
+            }
+        }
+
+        let minimum_fuel = |program: &Program| {
+            let succeeds = |limit| {
+                let settings = VmSettings {
+                    initial_fuel: Some(limit),
+                    ..VmSettings::default()
+                };
+                match Vm::with_settings(Profile::ReproducibleStandard, settings).run(program) {
+                    Ok(_) => true,
+                    Err(error) if matches!(error.kind, ErrorKind::FuelExhausted { .. }) => false,
+                    Err(error) => panic!("unexpected runtime error: {error}"),
+                }
+            };
+            let mut low = 0_u64;
+            let mut high = 1_000_u64;
+            assert!(succeeds(high), "fuel search upper bound is too small");
+            while low < high {
+                let middle = low + (high - low) / 2;
+                if succeeds(middle) {
+                    high = middle;
+                } else {
+                    low = middle + 1;
+                }
+            }
+            low
+        };
+        let fast_fuel = minimum_fuel(&fast);
+        let ordinary_fuel = minimum_fuel(&ordinary);
+        assert_eq!(fast_fuel, ordinary_fuel);
+        assert!(fast_fuel > 0);
+
+        let settings = VmSettings {
+            initial_fuel: Some(fast_fuel - 1),
+            ..VmSettings::default()
+        };
+        let error = Vm::with_settings(Profile::ReproducibleStandard, settings)
+            .run(&fast)
+            .expect_err("one unit below the exact CALL fuel must also starve FASTCALL");
+        assert!(matches!(error.kind, ErrorKind::FuelExhausted { .. }));
+    }
+
+    #[test]
+    fn fastcall_preserves_yield_and_write_first_continuation() {
+        let chunk = parse_source(
+            r#"
+                local yield_alias = coroutine.yield
+                local function worker()
+                    local resumed = yield_alias(5) + 0
+                    return resumed
+                end
+                local thread = coroutine.create(worker)
+                local ok, first = coroutine.resume(thread)
+                local ok2, second = coroutine.resume(thread, 9)
+                assert(ok and first == 5 and ok2)
+                return second
+            "#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(program.functions.iter().any(|function| function
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::FastCall)));
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(9.0));
+    }
+
+    #[test]
+    fn getimport_and_fastcall_observe_host_time_builtin_replacement() {
+        let program =
+            compile(&parse_source("local f = math.floor; return f(1.5)").unwrap()).unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let replacement = vm
+            .register_host_function(HostFunctionOp::new(
+                "replacement_floor",
+                1,
+                OpCapability::Pure,
+                Arc::new(|_, _| Ok(vec![rustia_vm::Value::number(77.0)])),
+            ))
+            .unwrap();
+        let math = vm.get_global_value("math").unwrap();
+        let floor = vm.string("floor");
+        vm.raw_table_set_value(math, floor, replacement).unwrap();
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(77.0));
+    }
+
+    #[test]
+    fn invalid_specialized_arities_compile_and_fail_through_native_fallback() {
+        for source in [
+            "return math.floor()",
+            "return math.fmod(1)",
+            "return math.log()",
+            "return math.min()",
+            "return math.clamp(1, 2)",
+        ] {
+            let program = compile(&parse_source(source).unwrap())
+                .unwrap_or_else(|error| panic!("{source} should compile: {error}"));
+            assert!(program
+                .main
+                .code
+                .iter()
+                .any(|instruction| instruction.op == Opcode::FastCall));
+            let error = Vm::new(Profile::ReproducibleStandard)
+                .run(&program)
+                .expect_err("invalid native arity should fail at runtime");
+            assert!(matches!(
+                error.kind,
+                ErrorKind::TypeError { .. } | ErrorKind::RuntimeError { .. }
+            ));
+        }
     }
 
     fn conformance_options() -> CompileOptions {

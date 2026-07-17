@@ -28,6 +28,7 @@ docs are design intent.
 | [`30-architecture.md`](30-architecture.md) | the architecture decision record + build plan — **v3, all 8 axes resolved on measured evidence** | **[ARCHITECTURE v3]** ✅ |
 | [`50-conformance.md`](50-conformance.md) | **per-behavior Luau conformance table** — 709 rows, specified/unspecified→rustia's choice, + the 96-row differential-test watch-list + 80 open decisions (+ raw) | **[CONFORMANCE v1]** ✅ |
 | [`55-improvements.md`](55-improvements.md) | **10 adopted design improvements**, each verified still-conformant (dual-part table, string interning, FASTCALL, libm-enforcement, …) | **[IMPROVEMENTS v1]** ✅ |
+| [`56-performance-research.md`](56-performance-research.md) | safe-Rust performance sequence, landed table/atom/cache/`GETIMPORT`/`FASTCALL` invariants, and measurement protocol | **[PERFORMANCE RESEARCH v1.2]** |
 | [`65-wasmjit.md`](65-wasmjit.md) | **wasm-emit JIT / AOT-to-wasm spike** (verified) — ~176× the interpreter in V8, crossover ≈ 6 calls; the in-browser near-native path | **[SPIKE]** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | **Grabby-Compatible Embedded API** — public koto-shaped facade, typed conversion, serde, hot reload, deterministic extension/linker plan | **[PLAN]** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public koto-to-rustia migration guide for the implemented embedding facade | **[GUIDE]** |

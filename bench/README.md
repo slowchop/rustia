@@ -28,6 +28,35 @@ as the #15 string/concat workload source set.
 cargo run -p script-bench-harness --release -- --history bench/history/runs.jsonl
 ```
 
+Each calibration probe and each recorded repetition uses a freshly prepared
+engine/workload instance. A single invocation at the selected `n` warms that
+instance before the timer starts, then exactly one invocation is timed. This
+keeps growing VM state and caches from leaking across repetitions while leaving
+engine setup, source compilation, and warmup outside the sample.
+
+The append-only history continues to store only the stable min/median summary.
+For local analysis, write the raw per-repetition `ns/unit` values to a separate
+JSON sidecar:
+
+```sh
+cargo run -p script-bench-harness --release -- \
+  --engines rustia \
+  --samples-json /tmp/rustia-samples.json \
+  --no-history --no-results --no-latest-json
+```
+
+The sidecar uses the `rustia.bench.raw-samples.v1` schema and preserves samples
+in execution order. It also records the commit, target, workload, calibrated
+`n`, checksum, and summary statistics for every measurement. Keep separate
+baseline and candidate sidecars and alternate their run order (for example,
+ABBA then BAAB) when evaluating small changes, so machine drift is visible
+rather than folded into one best result.
+
+The 2026-07-17 local table/cache/`GETIMPORT`/`FASTCALL` hardening comparison is
+recorded in [`../design/56-performance-research.md`](../design/56-performance-research.md),
+including the baseline and harness hashes, broad ABBA medians, cooled focused
+checks, and the deliberately conservative claim posture.
+
 List all configured engine slots:
 
 ```sh
@@ -133,6 +162,11 @@ Each line in `history/runs.jsonl` is a JSON object:
 
 The future website should treat JSONL as the append-only source of truth and
 generate charts from `engine × target × workload` series.
+
+Raw repetitions are intentionally excluded from this public history schema.
+`--samples-json <path>` exports them as an optional, replaceable analysis
+sidecar without changing JSONL history records or generated current-results
+artifacts.
 
 `--list-json` emits a separate schema-identified metadata document for the
 available engine slots, feature gates, workload IDs, default workload set, and

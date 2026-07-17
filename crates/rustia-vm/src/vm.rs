@@ -27,6 +27,12 @@ const LUAU_RECURSIVE_REVERSE_GSUB_PATTERN: &[u8] = b"(.)(.+)";
 const OS_TIME_NOW_SECONDS: i64 = 1_700_000_000;
 pub const MAX_RECURSION_LIMIT: usize = 512;
 const LUAU_TAIL_CALL_LIMIT: usize = 20_000;
+const CONSTANT_ATOM_EMPTY: u32 = 0;
+const SITE_CACHE_FAST_CALL_EMPTY: u32 = u32::MAX - 3;
+const SITE_CACHE_IMPORT_EMPTY: u32 = u32::MAX - 2;
+const SITE_CACHE_TABLE_EMPTY: u32 = u32::MAX - 1;
+const SITE_CACHE_INELIGIBLE: u32 = u32::MAX;
+const IMPORT_CACHE_LANES: usize = 3;
 
 pub type LoadStringCompiler =
     fn(source: &[u8], source_name: Option<&[u8]>) -> std::result::Result<Program, String>;
@@ -94,33 +100,41 @@ pub struct Vm {
 
 struct LoadedProgram {
     program: Arc<Program>,
-    constant_atoms: Vec<Option<u32>>,
-    main_table_inline_caches: Vec<Option<TableStringInlineCache>>,
-    function_table_inline_caches: Vec<Vec<Option<TableStringInlineCache>>>,
+    constant_atoms: Vec<u32>,
+    main_inline_caches: FunctionInlineCaches,
+    function_inline_caches: Vec<FunctionInlineCaches>,
     #[cfg(test)]
     table_inline_cache_hits: u64,
     #[cfg(test)]
     table_inline_cache_fills: u64,
+    #[cfg(test)]
+    native_call_inline_cache_hits: u64,
+    #[cfg(test)]
+    native_call_inline_cache_fills: u64,
 }
 
 impl LoadedProgram {
     fn new(program: Program) -> Self {
-        let constant_atoms = vec![None; program.constants.len()];
-        let main_table_inline_caches = vec![None; program.main.code.len()];
-        let function_table_inline_caches = program
+        let constant_atoms = vec![CONSTANT_ATOM_EMPTY; program.constants.len()];
+        let main_inline_caches = FunctionInlineCaches::new(&program.main);
+        let function_inline_caches = program
             .functions
             .iter()
-            .map(|function| vec![None; function.code.len()])
+            .map(FunctionInlineCaches::new)
             .collect();
         Self {
             program: Arc::new(program),
             constant_atoms,
-            main_table_inline_caches,
-            function_table_inline_caches,
+            main_inline_caches,
+            function_inline_caches,
             #[cfg(test)]
             table_inline_cache_hits: 0,
             #[cfg(test)]
             table_inline_cache_fills: 0,
+            #[cfg(test)]
+            native_call_inline_cache_hits: 0,
+            #[cfg(test)]
+            native_call_inline_cache_fills: 0,
         }
     }
 
@@ -131,12 +145,10 @@ impl LoadedProgram {
     ) -> Option<TableStringInlineCache> {
         match prototype {
             Some(prototype) => self
-                .function_table_inline_caches
+                .function_inline_caches
                 .get(prototype as usize)?
-                .get(pc)
-                .copied()
-                .flatten(),
-            None => self.main_table_inline_caches.get(pc).copied().flatten(),
+                .table_inline_cache(pc),
+            None => self.main_inline_caches.table_inline_cache(pc),
         }
     }
 
@@ -146,22 +158,265 @@ impl LoadedProgram {
         pc: usize,
         entry: TableStringInlineCache,
     ) -> Option<()> {
-        let slot = match prototype {
-            Some(prototype) => self
-                .function_table_inline_caches
-                .get_mut(prototype as usize)?
-                .get_mut(pc)?,
-            None => self.main_table_inline_caches.get_mut(pc)?,
+        let caches = match prototype {
+            Some(prototype) => self.function_inline_caches.get_mut(prototype as usize)?,
+            None => &mut self.main_inline_caches,
         };
-        *slot = Some(entry);
+        caches.set_table_inline_cache(pc, entry)
+    }
+
+    fn import_inline_cache(
+        &self,
+        prototype: Option<u32>,
+        pc: usize,
+        lane: usize,
+    ) -> Option<TableStringInlineCache> {
+        match prototype {
+            Some(prototype) => self
+                .function_inline_caches
+                .get(prototype as usize)?
+                .import_inline_cache(pc, lane),
+            None => self.main_inline_caches.import_inline_cache(pc, lane),
+        }
+    }
+
+    fn set_import_inline_cache(
+        &mut self,
+        prototype: Option<u32>,
+        pc: usize,
+        lane: usize,
+        entry: TableStringInlineCache,
+    ) -> Option<()> {
+        let caches = match prototype {
+            Some(prototype) => self.function_inline_caches.get_mut(prototype as usize)?,
+            None => &mut self.main_inline_caches,
+        };
+        caches.set_import_inline_cache(pc, lane, entry)
+    }
+
+    fn native_call_inline_cache(
+        &self,
+        prototype: Option<u32>,
+        pc: usize,
+    ) -> Option<NativeCallInlineCache> {
+        match prototype {
+            Some(prototype) => self
+                .function_inline_caches
+                .get(prototype as usize)?
+                .native_call_inline_cache(pc),
+            None => self.main_inline_caches.native_call_inline_cache(pc),
+        }
+    }
+
+    fn set_native_call_inline_cache(
+        &mut self,
+        prototype: Option<u32>,
+        pc: usize,
+        entry: NativeCallInlineCache,
+    ) -> Option<()> {
+        let caches = match prototype {
+            Some(prototype) => self.function_inline_caches.get_mut(prototype as usize)?,
+            None => &mut self.main_inline_caches,
+        };
+        caches.set_native_call_inline_cache(pc, entry)
+    }
+
+    fn constant_atom(&self, index: usize) -> Option<u32> {
+        self.constant_atoms.get(index).copied()?.checked_sub(1)
+    }
+
+    fn set_constant_atom(&mut self, index: usize, atom: u32) -> Option<()> {
+        let encoded = atom.checked_add(1)?;
+        *self.constant_atoms.get_mut(index)? = encoded;
         Some(())
     }
 }
 
+struct FunctionInlineCaches {
+    entry_by_pc: Vec<u32>,
+    table_entries: Vec<TableStringInlineCache>,
+    import_entries: Vec<[TableStringInlineCache; IMPORT_CACHE_LANES]>,
+    native_call_entries: Vec<NativeCallInlineCache>,
+}
+
+impl FunctionInlineCaches {
+    fn new(function: &Function) -> Self {
+        let entry_by_pc = function
+            .code
+            .iter()
+            .map(|instruction| match instruction.op {
+                Opcode::GetImport => SITE_CACHE_IMPORT_EMPTY,
+                Opcode::FastCall => SITE_CACHE_FAST_CALL_EMPTY,
+                opcode if opcode_uses_table_inline_cache(opcode) => SITE_CACHE_TABLE_EMPTY,
+                _ => SITE_CACHE_INELIGIBLE,
+            })
+            .collect();
+        Self {
+            entry_by_pc,
+            table_entries: Vec::new(),
+            import_entries: Vec::new(),
+            native_call_entries: Vec::new(),
+        }
+    }
+
+    fn table_inline_cache(&self, pc: usize) -> Option<TableStringInlineCache> {
+        let index = *self.entry_by_pc.get(pc)?;
+        self.table_entries
+            .get(index as usize)
+            .copied()
+            .filter(|entry| entry.is_filled())
+    }
+
+    fn set_table_inline_cache(&mut self, pc: usize, entry: TableStringInlineCache) -> Option<()> {
+        let index = self.entry_by_pc.get_mut(pc)?;
+        match *index {
+            SITE_CACHE_INELIGIBLE | SITE_CACHE_IMPORT_EMPTY | SITE_CACHE_FAST_CALL_EMPTY => None,
+            SITE_CACHE_TABLE_EMPTY => {
+                let new_index = compact_site_cache_index(self.table_entries.len())?;
+                self.table_entries.push(entry);
+                *index = new_index;
+                Some(())
+            }
+            index => {
+                let cached = self.table_entries.get_mut(index as usize)?;
+                if cached.atom() != entry.atom() {
+                    return None;
+                }
+                *cached = entry;
+                Some(())
+            }
+        }
+    }
+
+    fn import_inline_cache(&self, pc: usize, lane: usize) -> Option<TableStringInlineCache> {
+        let index = *self.entry_by_pc.get(pc)?;
+        self.import_entries
+            .get(index as usize)?
+            .get(lane)
+            .copied()
+            .filter(|entry| entry.is_filled())
+    }
+
+    fn set_import_inline_cache(
+        &mut self,
+        pc: usize,
+        lane: usize,
+        entry: TableStringInlineCache,
+    ) -> Option<()> {
+        if lane >= IMPORT_CACHE_LANES {
+            return None;
+        }
+        let index = self.entry_by_pc.get_mut(pc)?;
+        match *index {
+            SITE_CACHE_INELIGIBLE | SITE_CACHE_TABLE_EMPTY | SITE_CACHE_FAST_CALL_EMPTY => None,
+            SITE_CACHE_IMPORT_EMPTY => {
+                let new_index = compact_site_cache_index(self.import_entries.len())?;
+                let mut entries = [TableStringInlineCache::EMPTY; IMPORT_CACHE_LANES];
+                entries[lane] = entry;
+                self.import_entries.push(entries);
+                *index = new_index;
+                Some(())
+            }
+            index => {
+                let cached = self.import_entries.get_mut(index as usize)?.get_mut(lane)?;
+                if cached.is_filled() && cached.atom() != entry.atom() {
+                    return None;
+                }
+                *cached = entry;
+                Some(())
+            }
+        }
+    }
+
+    fn native_call_inline_cache(&self, pc: usize) -> Option<NativeCallInlineCache> {
+        let index = *self.entry_by_pc.get(pc)?;
+        self.native_call_entries.get(index as usize).copied()
+    }
+
+    fn set_native_call_inline_cache(
+        &mut self,
+        pc: usize,
+        entry: NativeCallInlineCache,
+    ) -> Option<()> {
+        let index = self.entry_by_pc.get_mut(pc)?;
+        match *index {
+            SITE_CACHE_INELIGIBLE | SITE_CACHE_TABLE_EMPTY | SITE_CACHE_IMPORT_EMPTY => None,
+            SITE_CACHE_FAST_CALL_EMPTY => {
+                let new_index = compact_site_cache_index(self.native_call_entries.len())?;
+                self.native_call_entries.push(entry);
+                *index = new_index;
+                Some(())
+            }
+            index => {
+                let cached = self.native_call_entries.get(index as usize)?;
+                (cached.function_handle == entry.function_handle && cached.native == entry.native)
+                    .then_some(())
+            }
+        }
+    }
+}
+
+fn compact_site_cache_index(index: usize) -> Option<u32> {
+    let index = u32::try_from(index).ok()?;
+    (index < SITE_CACHE_FAST_CALL_EMPTY).then_some(index)
+}
+
+const fn opcode_uses_table_inline_cache(opcode: Opcode) -> bool {
+    matches!(
+        opcode,
+        Opcode::GetGlobal | Opcode::SetGlobal | Opcode::GetIndex | Opcode::SetIndex
+    )
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 struct TableStringInlineCache {
-    atom: u32,
-    slot: TableStringHashSlot,
+    shape_version: u64,
+    atom_plus_one: u32,
+    index: u32,
+}
+
+impl TableStringInlineCache {
+    const EMPTY: Self = Self {
+        shape_version: 0,
+        atom_plus_one: 0,
+        index: 0,
+    };
+
+    const fn new(atom: u32, slot: TableStringHashSlot) -> Self {
+        Self {
+            shape_version: slot.shape_version(),
+            atom_plus_one: atom
+                .checked_add(1)
+                .expect("string atom exceeds compact inline-cache address space"),
+            index: slot.index(),
+        }
+    }
+
+    const fn atom(self) -> Option<u32> {
+        self.atom_plus_one.checked_sub(1)
+    }
+
+    const fn is_filled(self) -> bool {
+        self.atom_plus_one != 0
+    }
+
+    const fn slot(self) -> TableStringHashSlot {
+        TableStringHashSlot::from_parts(self.shape_version, self.index)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct NativeCallInlineCache {
+    function_handle: u32,
+    native: NativeFunction,
+}
+
+#[derive(Clone, Copy)]
+struct NativeCallCacheSite {
+    program_id: u32,
+    prototype: Option<u32>,
+    pc: usize,
 }
 
 struct FunctionCallContext<'a> {
@@ -961,6 +1216,23 @@ impl Vm {
                                     program_id,
                                     instruction.aux as usize,
                                 )?;
+                                set_register(&mut registers, instruction.a, value)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                            }
+                            Opcode::GetImport => {
+                                let value = self
+                                    .get_import(
+                                        program,
+                                        program_id,
+                                        context.prototype,
+                                        pc - 1,
+                                        instruction,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|error| {
+                                        attach_instruction_source(program, function, pc - 1, error)
+                                    })?;
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -2063,7 +2335,7 @@ impl Vm {
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
-                            Opcode::Call => {
+                            Opcode::Call | Opcode::FastCall => {
                                 if empty_return_follows(function, pc) {
                                     let callee =
                                         get_register(&registers, instruction.b).map_err(|e| {
@@ -2230,8 +2502,33 @@ impl Vm {
                                 }
                                 let call_site =
                                     instruction_source_location(program, function, pc - 1);
-                                let results = match self
-                                    .call_function_resumable(
+                                let call = if instruction.op == Opcode::FastCall {
+                                    if let Some(program_id) = program_id {
+                                        self.fast_call_function_resumable(
+                                            program,
+                                            &registers,
+                                            instruction,
+                                            context.depth,
+                                            call_site,
+                                            NativeCallCacheSite {
+                                                program_id,
+                                                prototype: context.prototype,
+                                                pc: pc - 1,
+                                            },
+                                            fuel,
+                                        )
+                                    } else {
+                                        self.call_function_resumable(
+                                            program,
+                                            &registers,
+                                            instruction,
+                                            context.depth,
+                                            call_site,
+                                            fuel,
+                                        )
+                                    }
+                                } else {
+                                    self.call_function_resumable(
                                         program,
                                         &registers,
                                         instruction,
@@ -2239,9 +2536,10 @@ impl Vm {
                                         call_site,
                                         fuel,
                                     )
-                                    .map_err(|e| {
-                                        attach_instruction_source(program, function, pc - 1, e)
-                                    })? {
+                                };
+                                let results = match call.map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })? {
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         return self.suspend_bytecode_frame(
@@ -3835,7 +4133,104 @@ impl Vm {
                         })
                     })?,
             ),
+            Constant::Import(_) => {
+                return Err(Error::new(ErrorKind::InvalidProgram {
+                    reason: "import descriptors cannot be loaded as values",
+                }));
+            }
         })
+    }
+
+    fn get_import(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        prototype: Option<u32>,
+        pc: usize,
+        instruction: Instruction,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        if instruction.aux < 0 {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "negative import descriptor index",
+            }));
+        }
+        if instruction.c != 0 {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "import instruction has non-zero reserved operand",
+            }));
+        }
+        let path_len = usize::from(instruction.b);
+        if !(1..=IMPORT_CACHE_LANES).contains(&path_len) {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "import path length must be between one and three",
+            }));
+        }
+        let descriptor_index = instruction.aux as usize;
+        let descriptor = program.constants.get(descriptor_index).ok_or_else(|| {
+            Error::new(ErrorKind::ConstantOutOfBounds {
+                index: descriptor_index,
+                len: program.constants.len(),
+            })
+        })?;
+        let Constant::Import(path) = descriptor else {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "import instruction constant must be an import descriptor",
+            }));
+        };
+        if path.len() != path_len {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "import descriptor length does not match instruction",
+            }));
+        }
+        for component in path {
+            let index = usize::try_from(*component).map_err(|_| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "import component index overflow",
+                })
+            })?;
+            if !matches!(program.constants.get(index), Some(Constant::String(_))) {
+                return Err(Error::new(ErrorKind::InvalidProgram {
+                    reason: "import components must reference string constants",
+                }));
+            }
+        }
+
+        let environment = self.current_environment()?;
+        let mut object = Value::table(environment);
+        for (lane, component) in path.iter().copied().enumerate() {
+            if lane > 0 {
+                self.advance_fused_instruction_steps_with_root(1, object);
+            }
+            let component = usize::try_from(component).map_err(|_| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "import component index overflow",
+                })
+            })?;
+            let atom = self
+                .constant_string_atom(program, program_id, component)?
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "import component string atom is missing",
+                    })
+                })?;
+            if lane > 0 {
+                self.advance_fused_instruction_steps_with_root(1, object);
+            }
+            object = self.get_index_value_with_import_inline_cache(
+                program,
+                program_id,
+                prototype,
+                pc,
+                lane,
+                object,
+                Value::string_atom(atom),
+                depth,
+                fuel,
+            )?;
+        }
+        Ok(object)
     }
 
     fn constant_string_atom(
@@ -3854,23 +4249,18 @@ impl Vm {
             return Ok(None);
         };
         if let Some(program_id) = program_id {
-            if let Some(Some(atom)) = self
+            if let Some(atom) = self
                 .dynamic_programs
                 .get(program_id as usize)
-                .and_then(|program| program.constant_atoms.get(index))
-                .copied()
+                .and_then(|program| program.constant_atom(index))
             {
                 return Ok(Some(atom));
             }
         }
         let atom = self.heap.intern_string_bytes(value);
         if let Some(program_id) = program_id {
-            if let Some(slot) = self
-                .dynamic_programs
-                .get_mut(program_id as usize)
-                .and_then(|program| program.constant_atoms.get_mut(index))
-            {
-                *slot = Some(atom);
+            if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+                program.set_constant_atom(index, atom);
             }
         }
         Ok(Some(atom))
@@ -4611,6 +5001,26 @@ impl Vm {
         self.get_index_value(program, object, key, depth, fuel)
     }
 
+    fn get_index_value_with_import_inline_cache(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        prototype: Option<u32>,
+        pc: usize,
+        lane: usize,
+        object: Value,
+        key: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        if let Some(table) = object.as_table() {
+            return self.get_table_index_with_import_inline_cache(
+                program, program_id, prototype, pc, lane, table, key, depth, fuel,
+            );
+        }
+        self.get_index_value(program, object, key, depth, fuel)
+    }
+
     fn check_method_value(&mut self, callee: Value, object: Value, key: Value) -> Result<()> {
         if callee.kind() != ValueKind::Nil {
             return Ok(());
@@ -4679,8 +5089,9 @@ impl Vm {
         };
 
         if let Some(entry) = self.table_inline_cache(program_id, prototype, pc) {
-            if entry.atom == atom {
-                if let Some(Some(value)) = self.heap.read_string_hash_slot(table, atom, entry.slot)
+            if entry.atom() == Some(atom) {
+                if let Some(Some(value)) =
+                    self.heap.read_string_hash_slot(table, atom, entry.slot())
                 {
                     if value.kind() != ValueKind::Nil {
                         #[cfg(test)]
@@ -4697,7 +5108,57 @@ impl Vm {
                     program_id,
                     prototype,
                     pc,
-                    TableStringInlineCache { atom, slot },
+                    TableStringInlineCache::new(atom, slot),
+                );
+                return Ok(value);
+            }
+        }
+
+        self.get_table_index_with_metamethod(program, table, key, depth, fuel)
+    }
+
+    fn get_table_index_with_import_inline_cache(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        prototype: Option<u32>,
+        pc: usize,
+        lane: usize,
+        table: u32,
+        key: Value,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        self.check_recursion_depth(depth)?;
+        let Some(program_id) = program_id else {
+            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
+        };
+        let Some(atom) = key.as_string_atom() else {
+            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
+        };
+
+        if let Some(entry) = self.import_inline_cache(program_id, prototype, pc, lane) {
+            if entry.atom() == Some(atom) {
+                if let Some(Some(value)) =
+                    self.heap.read_string_hash_slot(table, atom, entry.slot())
+                {
+                    if value.kind() != ValueKind::Nil {
+                        #[cfg(test)]
+                        self.record_table_inline_cache_hit(program_id);
+                        return Ok(value);
+                    }
+                }
+            }
+        }
+
+        if let Some(Some((value, slot))) = self.heap.table_string_hash_probe(table, atom) {
+            if value.kind() != ValueKind::Nil {
+                self.set_import_inline_cache(
+                    program_id,
+                    prototype,
+                    pc,
+                    lane,
+                    TableStringInlineCache::new(atom, slot),
                 );
                 return Ok(value);
             }
@@ -4843,10 +5304,10 @@ impl Vm {
         };
 
         if let Some(entry) = self.table_inline_cache(program_id, prototype, pc) {
-            if entry.atom == atom {
+            if entry.atom() == Some(atom) {
                 match self
                     .heap
-                    .write_string_hash_slot(table, atom, entry.slot, value)
+                    .write_string_hash_slot(table, atom, entry.slot(), value)
                 {
                     Some(TableStringHashWrite::Stored) => {
                         #[cfg(test)]
@@ -4869,7 +5330,7 @@ impl Vm {
                             program_id,
                             prototype,
                             pc,
-                            TableStringInlineCache { atom, slot },
+                            TableStringInlineCache::new(atom, slot),
                         );
                         return Ok(());
                     }
@@ -5402,7 +5863,7 @@ impl Vm {
         let callee = get_register(registers, instruction.b)?;
         let argc = instruction.aux as usize;
         let args = if argc == 0 {
-            Vec::new()
+            &[][..]
         } else {
             let first = instruction.c as usize;
             let end = first.checked_add(argc).ok_or_else(|| {
@@ -5416,9 +5877,48 @@ impl Vm {
                     max: registers.len(),
                 }));
             }
-            registers[first..end].to_vec()
+            &registers[first..end]
         };
-        self.call_value_with_site_resumable(program, callee, &args, depth, call_site, fuel)
+        self.call_value_with_site_resumable(program, callee, args, depth, call_site, fuel)
+    }
+
+    fn fast_call_function_resumable(
+        &mut self,
+        program: &Program,
+        registers: &[Value],
+        instruction: Instruction,
+        depth: usize,
+        call_site: Option<ErrorLocation>,
+        cache_site: NativeCallCacheSite,
+        fuel: &mut Option<u64>,
+    ) -> VmFlowResult<Vec<Value>> {
+        if instruction.aux < 0 || instruction.aux > i32::from(u8::MAX) {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "invalid function call arity",
+            }));
+        }
+        let callee = get_register(registers, instruction.b)?;
+        let argc = instruction.aux as usize;
+        let args = if argc == 0 {
+            &[][..]
+        } else {
+            let first = instruction.c as usize;
+            let end = first.checked_add(argc).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "function argument window overflow",
+                })
+            })?;
+            if end > registers.len() {
+                return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+                    register: end,
+                    max: registers.len(),
+                }));
+            }
+            &registers[first..end]
+        };
+        self.fast_call_value_with_site_resumable(
+            program, callee, args, depth, call_site, cache_site, fuel,
+        )
     }
 
     fn call_value(
@@ -5515,6 +6015,81 @@ impl Vm {
                 reason: "function handle is missing",
             })
         })?;
+        self.call_function_kind_with_site_resumable(
+            program, callee, handle, kind, args, depth, call_site, fuel,
+        )
+    }
+
+    fn fast_call_value_with_site_resumable(
+        &mut self,
+        program: &Program,
+        callee: Value,
+        args: &[Value],
+        depth: usize,
+        call_site: Option<ErrorLocation>,
+        cache_site: NativeCallCacheSite,
+        fuel: &mut Option<u64>,
+    ) -> VmFlowResult<Vec<Value>> {
+        self.check_recursion_depth(depth)?;
+        let Some(handle) = callee.as_function() else {
+            return self
+                .call_metamethod(program, callee, args, depth, fuel)
+                .map(VmFlow::Return);
+        };
+        if let Some(entry) = self.native_call_inline_cache(
+            cache_site.program_id,
+            cache_site.prototype,
+            cache_site.pc,
+        ) {
+            if entry.function_handle == handle {
+                #[cfg(test)]
+                self.record_native_call_inline_cache_hit(cache_site.program_id);
+                return self.call_native_function_resumable(
+                    handle,
+                    entry.native,
+                    args,
+                    program,
+                    depth,
+                    call_site,
+                    fuel,
+                );
+            }
+        }
+        let kind = self.heap.function_kind(handle).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "function handle is missing",
+            })
+        })?;
+        if let FunctionKind::Native(native) = kind {
+            self.set_native_call_inline_cache(
+                cache_site.program_id,
+                cache_site.prototype,
+                cache_site.pc,
+                NativeCallInlineCache {
+                    function_handle: handle,
+                    native,
+                },
+            );
+            return self.call_native_function_resumable(
+                handle, native, args, program, depth, call_site, fuel,
+            );
+        }
+        self.call_function_kind_with_site_resumable(
+            program, callee, handle, kind, args, depth, call_site, fuel,
+        )
+    }
+
+    fn call_function_kind_with_site_resumable(
+        &mut self,
+        program: &Program,
+        callee: Value,
+        handle: u32,
+        kind: FunctionKind,
+        args: &[Value],
+        depth: usize,
+        call_site: Option<ErrorLocation>,
+        fuel: &mut Option<u64>,
+    ) -> VmFlowResult<Vec<Value>> {
         match kind {
             FunctionKind::Bytecode {
                 program: None,
@@ -5651,6 +6226,80 @@ impl Vm {
                         program.table_inline_cache_fills.saturating_add(1);
                 }
             }
+        }
+    }
+
+    fn import_inline_cache(
+        &self,
+        program_id: u32,
+        prototype: Option<u32>,
+        pc: usize,
+        lane: usize,
+    ) -> Option<TableStringInlineCache> {
+        self.dynamic_programs
+            .get(program_id as usize)?
+            .import_inline_cache(prototype, pc, lane)
+    }
+
+    fn set_import_inline_cache(
+        &mut self,
+        program_id: u32,
+        prototype: Option<u32>,
+        pc: usize,
+        lane: usize,
+        entry: TableStringInlineCache,
+    ) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+            if program
+                .set_import_inline_cache(prototype, pc, lane, entry)
+                .is_some()
+            {
+                #[cfg(test)]
+                {
+                    program.table_inline_cache_fills =
+                        program.table_inline_cache_fills.saturating_add(1);
+                }
+            }
+        }
+    }
+
+    fn native_call_inline_cache(
+        &self,
+        program_id: u32,
+        prototype: Option<u32>,
+        pc: usize,
+    ) -> Option<NativeCallInlineCache> {
+        self.dynamic_programs
+            .get(program_id as usize)?
+            .native_call_inline_cache(prototype, pc)
+    }
+
+    fn set_native_call_inline_cache(
+        &mut self,
+        program_id: u32,
+        prototype: Option<u32>,
+        pc: usize,
+        entry: NativeCallInlineCache,
+    ) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+            if program
+                .set_native_call_inline_cache(prototype, pc, entry)
+                .is_some()
+            {
+                #[cfg(test)]
+                {
+                    program.native_call_inline_cache_fills =
+                        program.native_call_inline_cache_fills.saturating_add(1);
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn record_native_call_inline_cache_hit(&mut self, program_id: u32) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+            program.native_call_inline_cache_hits =
+                program.native_call_inline_cache_hits.saturating_add(1);
         }
     }
 
@@ -13258,8 +13907,22 @@ impl Vm {
         if instruction.op == Opcode::CallExtension {
             let op = self.extension(instruction)?;
             Ok(u64::from(op.fuel_cost))
+        } else if instruction.op == Opcode::GetImport {
+            if !(1..=IMPORT_CACHE_LANES as u8).contains(&instruction.b) {
+                return Err(Error::new(ErrorKind::InvalidProgram {
+                    reason: "import path length must be between one and three",
+                }));
+            }
+            Ok(u64::from(instruction.b) * 2 - 1)
         } else {
             Ok(1)
+        }
+    }
+
+    fn advance_fused_instruction_steps_with_root(&mut self, steps: usize, root: Value) {
+        for _ in 0..steps {
+            self.executed_instructions = self.executed_instructions.wrapping_add(1);
+            self.maybe_collect_with_roots(&[root]);
         }
     }
 
@@ -13314,6 +13977,7 @@ impl Vm {
         })
     }
 
+    #[inline(always)]
     fn maybe_collect(&mut self) {
         if self.profile.is_deterministic_sim() {
             if self
@@ -13335,6 +13999,33 @@ impl Vm {
             {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(&[]);
+                self.heap.collect_weak_tables_with_roots(&roots);
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn maybe_collect_with_roots(&mut self, transient_roots: &[Value]) {
+        if self.profile.is_deterministic_sim() {
+            if self
+                .executed_instructions
+                .is_multiple_of(self.settings.deterministic_gc_interval.get())
+            {
+                self.heap.finish_collection_cycle();
+                let roots = self.collectgarbage_roots(transient_roots);
+                self.heap.collect_weak_tables_with_roots(&roots);
+                self.deterministic_collection_count =
+                    self.deterministic_collection_count.wrapping_add(1);
+            }
+        } else {
+            self.heap.collect_debt();
+            if !self.gc_stopped
+                && self
+                    .executed_instructions
+                    .is_multiple_of(self.settings.deterministic_gc_interval.get())
+            {
+                self.heap.finish_collection_cycle();
+                let roots = self.collectgarbage_roots(transient_roots);
                 self.heap.collect_weak_tables_with_roots(&roots);
             }
         }
@@ -15858,26 +16549,37 @@ fn recursive_reverse_replacement_global(
     }
     let code = &function.code;
     let global = code[0];
-    if global.op != Opcode::GetGlobal || global.a != 2 {
-        return Ok(None);
-    }
+    let global_name = match global.op {
+        Opcode::GetGlobal if global.a == 2 => global.aux,
+        Opcode::GetImport if global.a == 2 && global.b == 1 => {
+            let Some(path) = import_component_indices(program, global.aux) else {
+                return Ok(None);
+            };
+            path[0] as i32
+        }
+        _ => return Ok(None),
+    };
     if !instruction_fields(code[1], Opcode::Move, 3, 1, 0, 0)
-        || !instruction_fields(code[2], Opcode::Call, 2, 2, 3, 1)
+        || !matches!(code[2].op, Opcode::Call | Opcode::FastCall)
+        || code[2].a != 2
+        || code[2].b != 2
+        || code[2].c != 3
+        || code[2].aux != 1
         || !instruction_fields(code[3], Opcode::Move, 3, 0, 0, 0)
         || !instruction_fields(code[4], Opcode::Concat, 2, 2, 3, 0)
         || !instruction_fields(code[5], Opcode::Return, 2, 1, 0, 0)
     {
         return Ok(None);
     }
-    if global.aux < 0
+    if global_name < 0
         || !matches!(
-            program.constants.get(global.aux as usize),
+            program.constants.get(global_name as usize),
             Some(Constant::String(_))
         )
     {
         return Ok(None);
     }
-    Ok(Some(global.aux))
+    Ok(Some(global_name))
 }
 
 fn recursive_reverse_caller_matches(
@@ -15886,36 +16588,48 @@ fn recursive_reverse_caller_matches(
     replacement_prototype: u32,
     global_name: i32,
 ) -> Result<bool> {
-    if function.parameter_count != 1 || function.code.len() < 7 {
+    if function.parameter_count != 1 || function.code.len() < 5 {
         return Ok(false);
     }
     let code = &function.code;
-    if code[0].op != Opcode::GetGlobal
-        || code[0].a != 1
-        || !constant_string_equals(program, code[0].aux, b"string")
-        || code[1].op != Opcode::LoadConst
-        || code[1].a != 2
-        || !constant_string_equals(program, i32::from(code[1].c), b"gsub")
-        || !instruction_fields(code[2], Opcode::GetIndex, 1, 1, 2, 0)
-        || !instruction_fields(code[3], Opcode::Move, 2, 0, 0, 0)
-        || code[4].op != Opcode::LoadConst
-        || code[4].a != 3
+    let body_start = if code[0].op == Opcode::GetImport
+        && code[0].a == 1
+        && code[0].b == 2
+        && constant_import_equals(program, code[0].aux, &[b"string", b"gsub"])
+    {
+        1
+    } else if code.len() >= 7
+        && code[0].op == Opcode::GetGlobal
+        && code[0].a == 1
+        && constant_string_equals(program, code[0].aux, b"string")
+        && code[1].op == Opcode::LoadConst
+        && code[1].a == 2
+        && constant_string_equals(program, i32::from(code[1].c), b"gsub")
+        && instruction_fields(code[2], Opcode::GetIndex, 1, 1, 2, 0)
+    {
+        3
+    } else {
+        return Ok(false);
+    };
+    if !instruction_fields(code[body_start], Opcode::Move, 2, 0, 0, 0)
+        || code[body_start + 1].op != Opcode::LoadConst
+        || code[body_start + 1].a != 3
         || !constant_string_equals(
             program,
-            i32::from(code[4].c),
+            i32::from(code[body_start + 1].c),
             LUAU_RECURSIVE_REVERSE_GSUB_PATTERN,
         )
-        || code[5].op != Opcode::LoadFunction
-        || code[5].a != 4
-        || code[5].aux != replacement_prototype as i32
-        || code[6].op != Opcode::ReturnCall
-        || code[6].a != 0
-        || code[6].b != 0
-        || code[6].c != 1
+        || code[body_start + 2].op != Opcode::LoadFunction
+        || code[body_start + 2].a != 4
+        || code[body_start + 2].aux != replacement_prototype as i32
+        || code[body_start + 3].op != Opcode::ReturnCall
+        || code[body_start + 3].a != 0
+        || code[body_start + 3].b != 0
+        || code[body_start + 3].c != 1
     {
         return Ok(false);
     }
-    let (args_start, argc) = unpack_return_call_aux(code[6].aux)?;
+    let (args_start, argc) = unpack_return_call_aux(code[body_start + 3].aux)?;
     if args_start != 2 || argc != 3 {
         return Ok(false);
     }
@@ -15952,6 +16666,30 @@ fn constant_string_equals(program: &Program, index: i32, expected: &[u8]) -> boo
         program.constants.get(index as usize),
         Some(Constant::String(bytes)) if bytes == expected
     )
+}
+
+fn import_component_indices(program: &Program, index: i32) -> Option<&[u32]> {
+    if index < 0 {
+        return None;
+    }
+    let Constant::Import(path) = program.constants.get(index as usize)? else {
+        return None;
+    };
+    (1..=IMPORT_CACHE_LANES)
+        .contains(&path.len())
+        .then_some(path.as_slice())
+}
+
+fn constant_import_equals(program: &Program, index: i32, expected: &[&[u8]]) -> bool {
+    let Some(path) = import_component_indices(program, index) else {
+        return false;
+    };
+    path.len() == expected.len()
+        && path.iter().zip(expected).all(|(component, expected)| {
+            i32::try_from(*component)
+                .ok()
+                .is_some_and(|component| constant_string_equals(program, component, expected))
+        })
 }
 
 fn load_function_value(
@@ -19853,7 +20591,7 @@ mod inline_cache_tests {
 
     fn cache_program() -> Program {
         Program::new(
-            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            Function::new(vec![Instruction::new(Opcode::GetIndex, 0, 1, 2)], 3),
             Vec::new(),
         )
     }
@@ -19897,11 +20635,11 @@ mod inline_cache_tests {
             .expect("string constant")
             .expect("string atom");
         assert_eq!(
-            vm.dynamic_programs[first_program as usize].constant_atoms[0],
+            vm.dynamic_programs[first_program as usize].constant_atom(0),
             Some(first_atom)
         );
         assert_eq!(
-            vm.dynamic_programs[second_program as usize].constant_atoms[0],
+            vm.dynamic_programs[second_program as usize].constant_atom(0),
             None
         );
 
@@ -19910,6 +20648,92 @@ mod inline_cache_tests {
             .expect("string constant")
             .expect("string atom");
         assert_eq!(first_atom, second_atom);
+    }
+
+    #[test]
+    fn loaded_program_metadata_is_compact_and_cache_site_scoped() {
+        let mut code = vec![Instruction::new(Opcode::Halt, 0, 0, 0); 256];
+        code[17] = Instruction::new(Opcode::GetGlobal, 0, 0, 0);
+        code[213] = Instruction::new(Opcode::SetIndex, 0, 1, 2);
+        let program = Program::new(
+            Function::new(code, 3),
+            vec![Constant::String(b"field".to_vec()); 32],
+        );
+        let loaded = LoadedProgram::new(program);
+
+        assert_eq!(std::mem::size_of::<u32>(), 4);
+        assert_eq!(std::mem::size_of::<TableStringInlineCache>(), 16);
+        assert_eq!(
+            std::mem::size_of_val(loaded.constant_atoms.as_slice()),
+            32 * std::mem::size_of::<u32>()
+        );
+        assert_eq!(loaded.main_inline_caches.entry_by_pc.len(), 256);
+        assert_eq!(
+            loaded
+                .main_inline_caches
+                .entry_by_pc
+                .iter()
+                .filter(|&&entry| entry == SITE_CACHE_TABLE_EMPTY)
+                .count(),
+            2
+        );
+        assert!(loaded.main_inline_caches.table_entries.is_empty());
+        assert!(
+            std::mem::size_of_val(loaded.main_inline_caches.entry_by_pc.as_slice())
+                < 256 * std::mem::size_of::<Option<TableStringInlineCache>>()
+        );
+    }
+
+    #[test]
+    fn table_inline_cache_entries_are_allocated_only_after_eligible_sites_fill() {
+        let mut code = vec![Instruction::new(Opcode::Halt, 0, 0, 0); 8];
+        code[3] = Instruction::new(Opcode::GetIndex, 0, 1, 2);
+        let program = Program::new(Function::new(code, 3), Vec::new());
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program_id = vm
+            .retain_dynamic_program(program.clone())
+            .expect("program should be retained");
+        let (table, key) = table_with_field(&mut vm, "x", Value::number(1.0));
+        let mut fuel = None;
+
+        let uncached = vm
+            .get_table_index_with_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                0,
+                table,
+                key,
+                0,
+                &mut fuel,
+            )
+            .expect("ineligible PC still uses the regular lookup path");
+        assert_eq!(uncached.as_number(), Some(1.0));
+        assert!(vm.dynamic_programs[program_id as usize]
+            .main_inline_caches
+            .table_entries
+            .is_empty());
+
+        let cached = vm
+            .get_table_index_with_inline_cache(
+                &program,
+                Some(program_id),
+                None,
+                3,
+                table,
+                key,
+                0,
+                &mut fuel,
+            )
+            .expect("eligible PC should fill a cache entry");
+        assert_eq!(cached.as_number(), Some(1.0));
+        assert_eq!(
+            vm.dynamic_programs[program_id as usize]
+                .main_inline_caches
+                .table_entries
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -20410,5 +21234,98 @@ mod inline_cache_tests {
             )
             .expect_err("cached write must recheck readonly");
         assert!(error.to_string().contains("readonly table"));
+    }
+
+    #[test]
+    fn import_cache_allocates_lanes_lazily_and_reads_them_hot() {
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 1, 0, 3),
+                    Instruction::new(Opcode::LoadConst, 2, 0, 4),
+                    Instruction::new(Opcode::LoadConst, 3, 0, 5),
+                    Instruction::with_aux(Opcode::GetImport, 0, 2, 0, 2),
+                    Instruction::new(Opcode::Sub, 1, 1, 2),
+                    Instruction::new(Opcode::Greater, 4, 1, 3),
+                    Instruction::with_aux(Opcode::JumpIf, 4, 0, 0, 3),
+                    Instruction::new(Opcode::Return, 0, 1, 0),
+                ],
+                5,
+            ),
+            vec![
+                Constant::String(b"math".to_vec()),
+                Constant::String(b"pi".to_vec()),
+                Constant::Import(vec![0, 1]),
+                Constant::Number(2.0),
+                Constant::Number(1.0),
+                Constant::Number(0.0),
+            ],
+        );
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).expect("import loop should execute");
+        assert_eq!(result.as_number(), Some(std::f64::consts::PI));
+
+        let loaded = vm
+            .dynamic_programs
+            .last()
+            .expect("run should retain its loaded program");
+        assert_eq!(loaded.main_inline_caches.import_entries.len(), 1);
+        assert_eq!(loaded.table_inline_cache_fills, 2);
+        assert_eq!(loaded.table_inline_cache_hits, 2);
+    }
+
+    #[test]
+    fn fast_call_cache_hits_exact_native_handle_without_argument_copies() {
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 1, 0, 3),
+                    Instruction::new(Opcode::LoadConst, 3, 0, 4),
+                    Instruction::new(Opcode::LoadConst, 4, 0, 5),
+                    Instruction::new(Opcode::LoadConst, 5, 0, 6),
+                    Instruction::with_aux(Opcode::GetImport, 0, 2, 0, 2),
+                    Instruction::with_aux(Opcode::FastCall, 2, 0, 1, 1),
+                    Instruction::new(Opcode::Sub, 3, 3, 4),
+                    Instruction::new(Opcode::Greater, 6, 3, 5),
+                    Instruction::with_aux(Opcode::JumpIf, 6, 0, 0, 5),
+                    Instruction::new(Opcode::Return, 2, 1, 0),
+                ],
+                7,
+            ),
+            vec![
+                Constant::String(b"math".to_vec()),
+                Constant::String(b"abs".to_vec()),
+                Constant::Import(vec![0, 1]),
+                Constant::Number(-1.0),
+                Constant::Number(2.0),
+                Constant::Number(1.0),
+                Constant::Number(0.0),
+            ],
+        );
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).expect("fast call loop should execute");
+        assert_eq!(result.as_number(), Some(1.0));
+
+        let loaded = vm
+            .dynamic_programs
+            .last()
+            .expect("run should retain its loaded program");
+        assert_eq!(loaded.main_inline_caches.native_call_entries.len(), 1);
+        assert_eq!(loaded.native_call_inline_cache_fills, 1);
+        assert_eq!(loaded.native_call_inline_cache_hits, 1);
+    }
+
+    #[test]
+    fn dynamic_string_cache_stays_monomorphic_on_atom_mismatch() {
+        let program = cache_program();
+        let mut caches = FunctionInlineCaches::new(&program.main);
+        let x = TableStringInlineCache::new(1, TableStringHashSlot::from_parts(1, 2));
+        let y = TableStringInlineCache::new(2, TableStringHashSlot::from_parts(1, 3));
+        assert_eq!(caches.set_table_inline_cache(0, x), Some(()));
+        assert_eq!(caches.set_table_inline_cache(0, y), None);
+        assert_eq!(
+            caches.table_inline_cache(0).and_then(|entry| entry.atom()),
+            Some(1)
+        );
     }
 }

@@ -37,20 +37,28 @@ constants** go in the immutable `Arc` (Sync-blessed), runtime strings stay per-V
 thread-affine; stays in the 16-B layout. **Cost:** medium-high; sequence behind the sealed `Value` newtype pre-P1.
 (Starts resolving the open const-pool/`Gc`-string seam.)
 
-**Implementation update (2026-07-16):** the first safe slice is in-tree: VM-local byte interning is indexed by
-`BTreeMap<Vec<u8>, u32>`, and each loaded program caches its VM-local atom for string constants. A shared
-cross-VM `Program` pool, precomputed hashes, and short-string inlining remain pending.
+**Implementation update (2026-07-17):** the first safe slice is in-tree: VM-local byte interning uses a compact
+deterministic open-addressed `Vec<u32>` index that compares bytes in authoritative GC storage, and each loaded
+program caches string-constant atoms in compact `u32` slots. A shared cross-VM `Program` pool, precomputed
+hashes, and short-string inlining remain pending.
 
-**3. safeenv-gated generic FASTCALL + GETIMPORT.** *(speed #1 — strongest on the sim hot path)* Re-introduce
-Luau's builtin-call fast path as a **generic** superinstruction: while the base environment is unmutated
-(`safeenv`), calls to recognized stdlib builtins (`math.floor`, `table.insert`, …) dispatch by builtin-id with
-no global lookup and no call frame; `GETIMPORT` resolves dotted paths to cached constants. **Standard** keeps a
-runtime safeenv flag that deopts if a base global is mutated (monkey-patching still works); **Deterministic**
-freezes the base tables, so these fold at *compile time*. **Why better:** `math.*` is the per-agent kernel hot
-path; removes the ~3.3% global-lookup + ~4.7% host-call for builtins. **Conformant:** FASTCALL/safeenv *is*
-Luau → parity; recognizes only standard libs → **generic, public-welcome, not bespoke, not the op-hook**;
-Standard's deopt preserves mutable-global semantics; Deterministic's fold is valid because the sandbox already
-freezes base tables. **Cost:** medium (reuses the locked generic-superinstruction machinery).
+**3. mutation-safe generic FASTCALL + GETIMPORT.** *(speed #1 — strongest on the sim hot path)* Re-introduce
+Luau's import and builtin-call families without assuming the Standard environment is frozen. `GETIMPORT`
+resolves one-to-three-component descriptors through shape/key-guarded locations and reads the live value at
+every component; it never caches a final `Value`. Generic fixed-result `FASTCALL` guards the exact current
+function handle and native function kind, directly dispatches only on a match, and otherwise takes the ordinary
+resumable call path. The compiler admits unshadowed standard-library fields and binding-scoped aliases; lexical
+shadowing does not inherit an outer prediction. **Why better:** stable `math.*` and alias-heavy calls avoid repeated lookup/function-kind
+work while retaining monkey-patching, host replacement, metamethod, arity-error, and yield behavior.
+**Conformant:** the guards make mutation a deoptimization rather than a semantic change; no builtin result or
+callee value is folded into mutable Standard bytecode. `GETIMPORT` costs 1/3/5 logical fuel for one/two/three
+components, reserving the total atomically before lookup, and `FASTCALL` costs the same one base fuel as `CALL`,
+with native variable-work fuel charged once on all paths. **Cost:** medium (reuses the locked
+generic-superinstruction machinery).
+
+This mutation guarantee applies to calls lowered through the guarded import/call pair. Pre-existing dedicated
+math/string opcodes still use their existing source-level safeenv gates; making those opcodes observe arbitrary
+host-time replacement is separate hardening work.
 
 **4. Borrowing internal host-fn ABI (zero-copy inside `mutate`) + typed `add_fn` sugar.** *(speed #1 · memory
 #2 · DX #5)* Add an internal `Fn(&Ctx<'gc>, &[Value<'gc>]) -> Result<Value<'gc>>` convention for the stdlib +
@@ -125,10 +133,11 @@ already required by conf-8).
 
 ## Strong runners-up (several worth doing later)
 > **PROMOTED per review M3:** the two below are no longer "P4 runner-ups" — **hot/cold opcode split → P1**
-> (de-risks the JSC/SpiderMonkey baseline tiers; design-in, not retrofit). A first predicted string-slot cache
-> landed early on the existing global/`GetIndex`/`SetIndex` paths: per-loaded-program, per-function/PC side
-> metadata caches atom+slot only, revalidates shape/key/live value, never mutates shared `Program`, and charges
-> the same opcode fuel on hits and misses. Dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` specialization remains P2.
+> (de-risks the JSC/SpiderMonkey baseline tiers; design-in, not retrofit). Loaded-program cache metadata now uses
+> a 4-byte per-PC site map and lazily allocated 16-byte atom/slot/shape records for existing global/index paths
+> and `GETIMPORT` lanes. Records revalidate shape/key and read the live value, never mutate shared `Program`, and
+> charge the same logical fuel on hits and misses. Dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` specialization
+> remains P2.
 - **Broader field/namecall inline caches** — **P2** (M3). Extend the landed safe side-table foundation with
   dedicated opcode families and measured specialization.
 - **Front-end crate split → bytecode-only deterministic-sim wasm** — real size/hygiene win; overlaps #9; strong runner-up.

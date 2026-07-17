@@ -46,6 +46,27 @@ fn global_kind(profile: Profile, name: &[u8]) -> ValueKind {
     Vm::new(profile).run(&program).unwrap().kind()
 }
 
+fn import_program(path: &[&[u8]]) -> Program {
+    let mut constants = path
+        .iter()
+        .map(|component| Constant::String(component.to_vec()))
+        .collect::<Vec<_>>();
+    let descriptor = constants.len();
+    constants.push(Constant::Import(
+        (0..path.len()).map(|index| index as u32).collect(),
+    ));
+    Program::new(
+        Function::new(
+            vec![
+                Instruction::with_aux(Opcode::GetImport, 0, path.len() as u8, 0, descriptor as i32),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+            ],
+            1,
+        ),
+        constants,
+    )
+}
+
 #[test]
 fn value_is_sixteen_byte_tagged_newtype() {
     assert_eq!(std::mem::size_of::<Value>(), 16);
@@ -128,6 +149,217 @@ fn deterministic_sim_omits_environment_dependent_gc_and_os_globals() {
     for name in [b"collectgarbage".as_slice(), b"gcinfo", b"os"] {
         assert_eq!(global_kind(Profile::DeterministicSim, name), ValueKind::Nil);
     }
+}
+
+#[test]
+fn getimport_supports_one_to_three_live_components_with_one_three_five_fuel() {
+    let cases = [
+        (import_program(&[b"math"]), 1_u64, None),
+        (
+            import_program(&[b"math", b"pi"]),
+            3_u64,
+            Some(std::f64::consts::PI),
+        ),
+        (
+            import_program(&[b"root", b"child", b"value"]),
+            5_u64,
+            Some(42.0),
+        ),
+    ];
+
+    for (program, import_fuel, expected_number) in cases {
+        let settings = VmSettings {
+            initial_fuel: Some(import_fuel),
+            ..VmSettings::default()
+        };
+        let mut starved = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        if expected_number == Some(42.0) {
+            let child = starved.empty_table();
+            let value = starved.string("value");
+            starved
+                .raw_table_set_value(child, value, Value::number(42.0))
+                .unwrap();
+            let root = starved.empty_table();
+            let child_key = starved.string("child");
+            starved.raw_table_set_value(root, child_key, child).unwrap();
+            starved.set_global_value("root", root).unwrap();
+        }
+        let error = starved
+            .run(&program)
+            .expect_err("Return still needs one fuel");
+        assert!(matches!(
+            error.kind,
+            rustia_vm::ErrorKind::FuelExhausted { limit } if limit == import_fuel
+        ));
+        assert_eq!(error.pc, Some(1));
+
+        let settings = VmSettings {
+            initial_fuel: Some(import_fuel + 1),
+            ..VmSettings::default()
+        };
+        let mut enough = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        if expected_number == Some(42.0) {
+            let child = enough.empty_table();
+            let value = enough.string("value");
+            enough
+                .raw_table_set_value(child, value, Value::number(42.0))
+                .unwrap();
+            let root = enough.empty_table();
+            let child_key = enough.string("child");
+            enough.raw_table_set_value(root, child_key, child).unwrap();
+            enough.set_global_value("root", root).unwrap();
+        }
+        let result = enough.run(&program).expect("exact import fuel should pass");
+        if let Some(expected) = expected_number {
+            assert_eq!(result.as_number(), Some(expected));
+        } else {
+            assert_eq!(result.kind(), ValueKind::Table);
+        }
+    }
+}
+
+#[test]
+fn getimport_reserves_its_fused_fuel_before_lookup_steps() {
+    let settings = VmSettings {
+        initial_fuel: Some(4),
+        deterministic_gc_interval: NonZeroU64::new(1).unwrap(),
+        ..VmSettings::default()
+    };
+    let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
+    let child = vm.empty_table();
+    let value = vm.string("value");
+    vm.raw_table_set_value(child, value, Value::number(42.0))
+        .unwrap();
+    let root = vm.empty_table();
+    let child_key = vm.string("child");
+    vm.raw_table_set_value(root, child_key, child).unwrap();
+    vm.set_global_value("root", root).unwrap();
+
+    let error = vm
+        .run(&import_program(&[b"root", b"child", b"value"]))
+        .expect_err("a five-fuel import must not start with four fuel");
+    assert!(matches!(
+        error.kind,
+        rustia_vm::ErrorKind::FuelExhausted { limit: 4 }
+    ));
+    assert_eq!(error.pc, Some(0));
+    assert_eq!(vm.deterministic_collection_count(), 0);
+}
+
+#[test]
+fn getimport_rejects_malformed_descriptors_and_value_loads() {
+    let malformed = [
+        Program::new(
+            Function::new(
+                vec![Instruction::with_aux(Opcode::GetImport, 0, 2, 0, 1)],
+                1,
+            ),
+            vec![
+                Constant::String(b"math".to_vec()),
+                Constant::Import(vec![0]),
+            ],
+        ),
+        Program::new(
+            Function::new(
+                vec![Instruction::with_aux(Opcode::GetImport, 0, 1, 0, 1)],
+                1,
+            ),
+            vec![Constant::Number(1.0), Constant::Import(vec![0])],
+        ),
+        Program::new(
+            Function::new(
+                vec![Instruction::with_aux(Opcode::GetImport, 0, 1, 0, 0)],
+                1,
+            ),
+            vec![Constant::String(b"math".to_vec())],
+        ),
+        Program::new(
+            Function::new(vec![Instruction::new(Opcode::LoadConst, 0, 0, 0)], 1),
+            vec![Constant::Import(vec![1])],
+        ),
+    ];
+
+    for program in malformed {
+        let error = Vm::new(Profile::ReproducibleStandard)
+            .run(&program)
+            .expect_err("malformed import bytecode must be rejected");
+        assert!(matches!(
+            error.kind,
+            rustia_vm::ErrorKind::InvalidProgram { .. }
+        ));
+    }
+}
+
+#[test]
+fn getimport_rejects_invalid_encoding_fields() {
+    let constants = vec![
+        Constant::String(b"math".to_vec()),
+        Constant::Import(vec![0]),
+    ];
+    let invalid_program =
+        |instruction| Program::new(Function::new(vec![instruction], 1), constants.clone());
+
+    for instruction in [
+        Instruction::with_aux(Opcode::GetImport, 0, 1, 0, -1),
+        Instruction::with_aux(Opcode::GetImport, 0, 0, 0, 1),
+        Instruction::with_aux(Opcode::GetImport, 0, 4, 0, 1),
+        Instruction::with_aux(Opcode::GetImport, 0, 1, 1, 1),
+    ] {
+        let error = Vm::new(Profile::ReproducibleStandard)
+            .run(&invalid_program(instruction))
+            .expect_err("invalid import encoding must be rejected");
+        assert!(matches!(
+            error.kind,
+            rustia_vm::ErrorKind::InvalidProgram { .. }
+        ));
+    }
+
+    let error = Vm::new(Profile::ReproducibleStandard)
+        .run(&invalid_program(Instruction::with_aux(
+            Opcode::GetImport,
+            0,
+            1,
+            0,
+            9,
+        )))
+        .expect_err("out-of-range import descriptor must be rejected");
+    assert!(matches!(
+        error.kind,
+        rustia_vm::ErrorKind::ConstantOutOfBounds { index: 9, len: 2 }
+    ));
+}
+
+#[test]
+fn fastcall_reuses_call_argument_validation() {
+    let invalid_arity = Program::new(
+        Function::new(
+            vec![Instruction::with_aux(Opcode::FastCall, 0, 0, 0, -1)],
+            1,
+        ),
+        vec![],
+    );
+    let error = Vm::new(Profile::ReproducibleStandard)
+        .run(&invalid_arity)
+        .expect_err("negative FASTCALL arity must be rejected");
+    assert!(matches!(
+        error.kind,
+        rustia_vm::ErrorKind::InvalidProgram { .. }
+    ));
+
+    let invalid_window = Program::new(
+        Function::new(vec![Instruction::with_aux(Opcode::FastCall, 0, 0, 1, 1)], 1),
+        vec![],
+    );
+    let error = Vm::new(Profile::ReproducibleStandard)
+        .run(&invalid_window)
+        .expect_err("out-of-range FASTCALL argument window must be rejected");
+    assert!(matches!(
+        error.kind,
+        rustia_vm::ErrorKind::RegisterOutOfBounds {
+            register: 2,
+            max: 1
+        }
+    ));
 }
 
 #[test]

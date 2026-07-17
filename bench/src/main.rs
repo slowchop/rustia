@@ -252,6 +252,7 @@ struct Config {
     history: Option<PathBuf>,
     results: Option<PathBuf>,
     latest_json: Option<PathBuf>,
+    samples_json: Option<PathBuf>,
     commit: Option<String>,
     list: bool,
     list_json: bool,
@@ -279,6 +280,7 @@ impl Default for Config {
             history: Some(PathBuf::from(HISTORY_PATH)),
             results: Some(PathBuf::from(RESULTS_PATH)),
             latest_json: Some(PathBuf::from(CURRENT_RESULTS_JSON_PATH)),
+            samples_json: None,
             commit: None,
             list: false,
             list_json: false,
@@ -299,6 +301,7 @@ struct Measurement {
     reps: usize,
     ns_per_unit_min: f64,
     ns_per_unit_median: f64,
+    samples_ns_per_unit: Vec<f64>,
     units_per_sec: f64,
     checksum: String,
     commit: String,
@@ -462,8 +465,7 @@ fn run() -> Result<()> {
             };
             let source =
                 fs::read_to_string(&source_path).map_err(|error| Error::io(&source_path, error))?;
-            let mut prepared = prepare(engine, workload, &source)?;
-            let measurement = measure(&config, engine, workload, &mut *prepared)?;
+            let measurement = measure(&config, engine, workload, &source)?;
             println!(
                 "{:<12} {:<20} {:>10.2} ns/unit min {:>10.2} median n={:<8} checksum={}",
                 measurement.engine,
@@ -489,6 +491,9 @@ fn run() -> Result<()> {
     }
     if let Some(latest_json) = &config.latest_json {
         write_latest_json(latest_json, config.history.as_deref(), &records)?;
+    }
+    if let Some(samples_json) = &config.samples_json {
+        write_samples_json(samples_json, &records)?;
     }
 
     Ok(())
@@ -568,6 +573,12 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
                     .ok_or_else(|| Error::new("--latest-json requires a path"))?;
                 config.latest_json = Some(PathBuf::from(value));
             }
+            "--samples-json" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| Error::new("--samples-json requires a path"))?;
+                config.samples_json = Some(PathBuf::from(value));
+            }
             "--commit" => {
                 let value = args
                     .next()
@@ -615,6 +626,7 @@ fn print_usage() {
     println!("  --history bench/history/runs.jsonl");
     println!("  --results bench/RESULTS.md");
     println!("  --latest-json bench/current-results.json");
+    println!("  --samples-json <path>");
     println!("  --commit <clean-git-id>");
     println!("  --no-history");
     println!("  --no-results");
@@ -899,11 +911,24 @@ fn measure(
     config: &Config,
     engine: &EngineSlot,
     workload: &Workload,
-    prepared: &mut dyn PreparedWorkload,
+    source: &str,
 ) -> Result<Measurement> {
-    let mut n = 16_u64;
+    measure_with_factory(config, engine, workload, || {
+        prepare(engine, workload, source)
+    })
+}
+
+fn measure_with_factory(
+    config: &Config,
+    engine: &EngineSlot,
+    workload: &Workload,
+    mut factory: impl FnMut() -> Result<Box<dyn PreparedWorkload>>,
+) -> Result<Measurement> {
+    let mut n = 16_u64.min(config.max_n);
     loop {
-        let (_, elapsed) = run_once(prepared, n)?;
+        let mut calibration = factory()?;
+        let _ = calibration.run(n)?;
+        let (_, elapsed) = run_once(&mut *calibration, n)?;
         if elapsed >= config.target || n >= config.max_n {
             if elapsed.as_nanos() > 0 {
                 let scale = config.target.as_secs_f64() / elapsed.as_secs_f64();
@@ -914,18 +939,20 @@ fn measure(
         n = n.saturating_mul(2).min(config.max_n);
     }
 
-    let _ = run_once(prepared, n)?;
-    let mut samples = Vec::with_capacity(config.reps);
+    let n_f64 = n as f64;
+    let mut samples_ns_per_unit = Vec::with_capacity(config.reps);
     let mut checksum = String::new();
     for _ in 0..config.reps {
-        let (sample_checksum, elapsed) = run_once(prepared, n)?;
+        let mut prepared = factory()?;
+        let _ = prepared.run(n)?;
+        let (sample_checksum, elapsed) = run_once(&mut *prepared, n)?;
         checksum = sample_checksum;
-        samples.push(elapsed.as_secs_f64());
+        samples_ns_per_unit.push(elapsed.as_secs_f64() * 1e9 / n_f64);
     }
-    samples.sort_by(|lhs, rhs| lhs.total_cmp(rhs));
-    let min_s = samples[0];
-    let median_s = samples[samples.len() / 2];
-    let n_f64 = n as f64;
+    let mut sorted_samples = samples_ns_per_unit.clone();
+    sorted_samples.sort_by(|lhs, rhs| lhs.total_cmp(rhs));
+    let ns_per_unit_min = sorted_samples[0];
+    let ns_per_unit_median = sorted_samples[sorted_samples.len() / 2];
 
     Ok(Measurement {
         engine: engine.id.to_owned(),
@@ -934,9 +961,10 @@ fn measure(
         unit: workload.unit,
         n,
         reps: config.reps,
-        ns_per_unit_min: min_s * 1e9 / n_f64,
-        ns_per_unit_median: median_s * 1e9 / n_f64,
-        units_per_sec: n_f64 / min_s,
+        ns_per_unit_min,
+        ns_per_unit_median,
+        samples_ns_per_unit,
+        units_per_sec: 1e9 / ns_per_unit_min,
         checksum,
         commit: config.commit.clone().unwrap_or_else(git_commit),
         timestamp_unix: unix_time(),
@@ -1617,6 +1645,55 @@ fn write_latest_json(
     Ok(rows.len())
 }
 
+fn write_samples_json(path: &Path, records: &[Measurement]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| Error::io(parent, error))?;
+    }
+    let measurements = records
+        .iter()
+        .map(|record| {
+            serde_json::json!({
+                "timestamp_unix": record.timestamp_unix,
+                "commit": record.commit,
+                "target": record.target,
+                "engine": record.engine,
+                "dialect": record.dialect,
+                "workload": record.workload,
+                "unit": record.unit,
+                "n": record.n,
+                "reps": record.reps,
+                "ns_per_unit_min": record.ns_per_unit_min,
+                "ns_per_unit_median": record.ns_per_unit_median,
+                "units_per_sec": record.units_per_sec,
+                "checksum": record.checksum,
+                "samples_ns_per_unit": record.samples_ns_per_unit,
+            })
+        })
+        .collect::<Vec<_>>();
+    let sample_count = records
+        .iter()
+        .map(|record| record.samples_ns_per_unit.len())
+        .sum::<usize>();
+    let value = serde_json::json!({
+        "schema_version": 1,
+        "schema": "rustia.bench.raw-samples.v1",
+        "source": "script-bench-harness",
+        "metadata": {
+            "description": "Raw per-repetition timings in execution order. This sidecar is separate from the append-only public history schema.",
+            "measurement_isolation": "fresh prepared workload per repetition",
+            "warmup": "one untimed invocation immediately before each recorded sample",
+            "sample_order": "execution order (unsorted)",
+            "measurement_count": records.len(),
+            "sample_count": sample_count,
+        },
+        "measurements": measurements,
+    });
+    let text = serde_json::to_string_pretty(&value)
+        .map_err(|error| Error::new(format!("samples JSON failed: {error}")))?;
+    fs::write(path, format!("{text}\n")).map_err(|error| Error::io(path, error))?;
+    Ok(())
+}
+
 fn latest_result_rows(history: Option<&Path>, records: &[Measurement]) -> Result<Vec<ResultRow>> {
     let mut latest = BTreeMap::<(String, String, String), ResultRow>::new();
     if let Some(history) = history {
@@ -2010,6 +2087,8 @@ fn unix_time() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
 
     #[test]
     fn inventory_json_reports_source_implemented_slots_independent_of_features() {
@@ -2213,6 +2292,81 @@ mod tests {
     }
 
     #[test]
+    fn parse_args_accepts_optional_raw_samples_path() {
+        let config = parse_args(
+            [
+                "--samples-json".to_owned(),
+                "tmp/raw-samples.json".to_owned(),
+            ]
+            .into_iter(),
+        )
+        .expect("samples path");
+
+        assert_eq!(
+            config.samples_json,
+            Some(PathBuf::from("tmp/raw-samples.json"))
+        );
+    }
+
+    #[test]
+    fn each_recorded_sample_uses_fresh_preparation_after_an_untimed_warmup() {
+        struct RecordingPrepared {
+            id: usize,
+            run_count: usize,
+            runs: Rc<RefCell<Vec<(usize, usize, u64)>>>,
+        }
+
+        impl PreparedWorkload for RecordingPrepared {
+            fn run(&mut self, n: u64) -> Result<String> {
+                self.run_count += 1;
+                self.runs.borrow_mut().push((self.id, self.run_count, n));
+                Ok(format!("instance:{}:run:{}", self.id, self.run_count))
+            }
+        }
+
+        let config = Config {
+            target: Duration::ZERO,
+            max_n: 1,
+            reps: 3,
+            commit: Some("test".to_owned()),
+            ..Config::default()
+        };
+        let next_id = Rc::new(Cell::new(0_usize));
+        let runs = Rc::new(RefCell::new(Vec::new()));
+        let measurement = measure_with_factory(&config, &ENGINE_SLOTS[0], &WORKLOADS[0], {
+            let next_id = Rc::clone(&next_id);
+            let runs = Rc::clone(&runs);
+            move || {
+                let id = next_id.get();
+                next_id.set(id + 1);
+                Ok(Box::new(RecordingPrepared {
+                    id,
+                    run_count: 0,
+                    runs: Rc::clone(&runs),
+                }) as Box<dyn PreparedWorkload>)
+            }
+        })
+        .expect("measurement");
+
+        assert_eq!(next_id.get(), 4, "one calibration plus three samples");
+        assert_eq!(
+            runs.borrow().as_slice(),
+            &[
+                (0, 1, 1),
+                (0, 2, 1),
+                (1, 1, 1),
+                (1, 2, 1),
+                (2, 1, 1),
+                (2, 2, 1),
+                (3, 1, 1),
+                (3, 2, 1),
+            ]
+        );
+        assert_eq!(measurement.samples_ns_per_unit.len(), 3);
+        assert_eq!(measurement.checksum, "instance:3:run:2");
+    }
+
+    #[test]
     fn write_results_can_refresh_from_history_without_new_measurements() {
         let history = write_temp_history(
             "refresh-results-history",
@@ -2265,6 +2419,31 @@ mod tests {
         assert_eq!(value["rows"][0]["speed_vs_rustia"].as_f64(), Some(1.0));
     }
 
+    #[test]
+    fn write_samples_json_preserves_execution_order_without_changing_history_records() {
+        let samples = temp_path("raw-samples", "json");
+        let measurement = sample_measurement(100, "rustia", "luau", "dense_tables", "test");
+
+        write_samples_json(&samples, std::slice::from_ref(&measurement))
+            .expect("write samples JSON");
+        let text = fs::read_to_string(&samples).expect("read samples JSON");
+        let value = serde_json::from_str::<serde_json::Value>(&text).expect("parse samples JSON");
+        let _ = fs::remove_file(&samples);
+
+        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["schema"], "rustia.bench.raw-samples.v1");
+        assert_eq!(value["metadata"]["measurement_count"], 1);
+        assert_eq!(value["metadata"]["sample_count"], 3);
+        assert_eq!(
+            value["measurements"][0]["samples_ns_per_unit"],
+            serde_json::json!([3.0, 1.0, 2.0])
+        );
+        assert!(
+            !record_json(&measurement).contains("samples_ns_per_unit"),
+            "the append-only public history schema must remain unchanged"
+        );
+    }
+
     fn sample_history_json(
         timestamp_unix: u64,
         engine: &'static str,
@@ -2281,12 +2460,28 @@ mod tests {
         workload: &'static str,
         commit: &'static str,
     ) -> String {
+        record_json(&sample_measurement(
+            timestamp_unix,
+            engine,
+            dialect,
+            workload,
+            commit,
+        ))
+    }
+
+    fn sample_measurement(
+        timestamp_unix: u64,
+        engine: &'static str,
+        dialect: &'static str,
+        workload: &'static str,
+        commit: &'static str,
+    ) -> Measurement {
         let unit = WORKLOADS
             .iter()
             .find(|entry| entry.id == workload)
             .expect("known workload")
             .unit;
-        record_json(&Measurement {
+        Measurement {
             engine: engine.to_owned(),
             dialect,
             workload: workload.to_owned(),
@@ -2295,12 +2490,13 @@ mod tests {
             reps: 3,
             ns_per_unit_min: 1.0,
             ns_per_unit_median: 1.5,
+            samples_ns_per_unit: vec![3.0, 1.0, 2.0],
             units_per_sec: 1_000_000_000.0,
             checksum: "i64:42".to_owned(),
             commit: commit.to_owned(),
             timestamp_unix,
             target: "test-target".to_owned(),
-        })
+        }
     }
 
     fn assert_sources_for_all_benchmark_dialects(repo: &Path, workload: &Workload) {

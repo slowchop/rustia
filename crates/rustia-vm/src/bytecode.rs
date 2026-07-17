@@ -42,6 +42,8 @@ pub enum Constant {
     Boolean(bool),
     Number(f64),
     String(Vec<u8>),
+    /// A one-to-three component import path whose entries index string constants.
+    Import(Vec<u32>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -179,6 +181,8 @@ pub enum Opcode {
     CallExpand3 = 123,
     CheckMethod = 124,
     CoerceForNumber = 125,
+    GetImport = 126,
+    FastCall = 127,
 }
 
 pub const ASSERT_MESSAGE_NONE: i32 = -1;
