@@ -79,9 +79,11 @@ The native harness now offers `--samples-json` for raw sidecars and isolates eve
 repetition in freshly prepared state. It also offers `--fixed-n` for exact equal-work A/B runs. The earlier
 table/cache slice retained a cooled 1.29% dense-table signal; six uncontaminated diagnostic legs for the current
 field/string working tree reduced that pooled difference to about 0.90% with overlapping spreads, while two
-grossly loaded legs were excluded. Exact-final-commit measurement and history publication remain pending and are
-tracked in [`56-performance-research.md`](56-performance-research.md), so neither diagnostic is a public speed
-claim. `tools/check-workflows.js` guards hosted/self-hosted separation, triggers, exact runner labels, data-repo
+grossly loaded legs were excluded. Static bytecode and release-disassembly analysis then showed that this dense
+workload executes none of the new constant-key/method opcodes and prompted a corrective pass over ordinary fuel
+classification plus numeric table/order paths. Exact-final-commit measurement and history publication remain
+pending and are tracked in [`56-performance-research.md`](56-performance-research.md), so neither diagnostic is a
+public speed claim. `tools/check-workflows.js` guards hosted/self-hosted separation, triggers, exact runner labels, data-repo
 publication, and generated-artifact policy.
 
 The three-independent-run fixed-N rule in `bench/README.md` is the acceptance protocol for this small-regression

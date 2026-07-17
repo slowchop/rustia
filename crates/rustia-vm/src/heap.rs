@@ -957,15 +957,17 @@ impl VmCell {
     }
 
     pub fn table_get(&mut self, table: u32, key: Value) -> Option<Value> {
-        let key = if let Some(short) = key.as_short_string() {
-            Value::string_atom(self.find_string_atom_bytes(short.as_bytes())?)
-        } else {
-            key
-        };
         self.arena.mutate(|mc, root| {
             let root = root.unlock(mc).borrow();
             let table = root.tables.get(table as usize)?;
-            let table_key = table_key_from_value(&root, key)?;
+            let table_key = if let Some(number) = key.as_number() {
+                number_table_key(number)?
+            } else if let Some(short) = key.as_short_string() {
+                let stable_hash = stable_bytes_hash(short.as_bytes());
+                TableKey::String(string_index_lookup(&root, short.as_bytes(), stable_hash)?)
+            } else {
+                table_key_from_value(&root, key)?
+            };
             if let Some(index) = table_key_array_index(table_key) {
                 if let Some(value) = table.array.get(index - 1) {
                     return Some(*value);
@@ -1037,7 +1039,7 @@ impl VmCell {
             let Some(entry) = table.hash.get_mut(slot.index as usize) else {
                 return Some(TableStringHashWrite::Deferred);
             };
-            if entry.key != TableKey::String(atom) || entry.value.kind() == ValueKind::Nil {
+            if entry.key != TableKey::String(atom) || entry.value.is_nil() {
                 return Some(TableStringHashWrite::Deferred);
             }
             if table.readonly {
@@ -1052,17 +1054,21 @@ impl VmCell {
         let key_value = key;
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
-            let key = if let Some(short) = key.as_short_string() {
-                let stable_hash = stable_bytes_hash(short.as_bytes());
-                let atom =
-                    if let Some(atom) = string_index_lookup(&root, short.as_bytes(), stable_hash) {
+            let table_key = if let Some(number) = key.as_number() {
+                number_table_key(number)?
+            } else {
+                let key = if let Some(short) = key.as_short_string() {
+                    let stable_hash = stable_bytes_hash(short.as_bytes());
+                    let atom = if let Some(atom) =
+                        string_index_lookup(&root, short.as_bytes(), stable_hash)
+                    {
                         atom
                     } else {
                         let table = root.tables.get(table as usize)?;
                         if table.readonly {
                             return None;
                         }
-                        if value.kind() == ValueKind::Nil {
+                        if value.is_nil() {
                             return Some(());
                         }
                         ensure_string_index_capacity(&mut root);
@@ -1071,17 +1077,18 @@ impl VmCell {
                         insert_string_index(&mut root, atom);
                         atom
                     };
-                Value::string_atom(atom)
-            } else {
-                key
+                    Value::string_atom(atom)
+                } else {
+                    key
+                };
+                table_key_from_value(&root, key)?
             };
-            let table_key = table_key_from_value(&root, key)?;
             let key_value = table_key_visible_value(&mut root, table_key, key_value)?;
             let table = root.tables.get_mut(table as usize)?;
             if table.readonly {
                 return None;
             }
-            if value.kind() == ValueKind::Nil {
+            if value.is_nil() {
                 if let Some(index) = table_key_array_index(table_key) {
                     if let Some(slot) = table.array.get_mut(index - 1) {
                         *slot = Value::nil();
@@ -1470,11 +1477,7 @@ fn table_key_from_value(root: &RootData<'_>, value: Value) -> Option<TableKey> {
         ValueKind::Boolean => value.as_bool().map(TableKey::Boolean),
         ValueKind::Number => {
             let number = value.as_number()?;
-            if number.is_nan() {
-                None
-            } else {
-                value.table_key_number_bits().map(TableKey::Number)
-            }
+            number_table_key(number)
         }
         ValueKind::String => value.as_string_atom().map(TableKey::String),
         ValueKind::Table => value.as_table().map(TableKey::Table),
@@ -1600,7 +1603,7 @@ fn set_hash_key(table: &mut TableData, key: TableKey, key_value: Value, value: V
             }
         }
         TableHashLookup::Vacant(vacant_hash_index) => {
-            if value.kind() != ValueKind::Nil {
+            if !value.is_nil() {
                 let index = table.hash.len();
                 table.hash.push(TableEntry {
                     key,
@@ -2527,6 +2530,77 @@ mod tests {
             heap.table_get(writable, missing).and_then(Value::as_number),
             Some(42.0)
         );
+    }
+
+    #[test]
+    fn numeric_table_paths_preserve_key_rules_without_creating_string_atoms() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+        let string_count = |heap: &mut VmCell| {
+            heap.arena
+                .mutate(|mc, root| root.unlock(mc).borrow().strings.len())
+        };
+        let cases = [
+            (1.0, 11.0),
+            (1.5, 15.0),
+            (MAX_LUAU_ARRAY_INDEX_F64 + 1.0, 21.0),
+            (f64::INFINITY, 99.0),
+        ];
+
+        for (key, value) in cases {
+            assert_eq!(
+                heap.table_set(table, Value::number(key), Value::number(value)),
+                Some(())
+            );
+            assert_eq!(
+                heap.table_get(table, Value::number(key))
+                    .and_then(Value::as_number),
+                Some(value)
+            );
+        }
+
+        assert_eq!(
+            heap.table_set(table, Value::number(-0.0), Value::number(7.0)),
+            Some(())
+        );
+        assert_eq!(
+            heap.table_get(table, Value::number(0.0))
+                .and_then(Value::as_number),
+            Some(7.0)
+        );
+
+        assert_eq!(
+            heap.table_set(table, Value::number(1.5), Value::nil()),
+            Some(())
+        );
+        assert!(heap
+            .table_get(table, Value::number(1.5))
+            .is_some_and(Value::is_nil));
+        assert_eq!(
+            heap.table_set(table, Value::number(1.0), Value::nil()),
+            Some(())
+        );
+        assert!(heap
+            .table_get(table, Value::number(1.0))
+            .is_some_and(Value::is_nil));
+        assert_eq!(
+            heap.table_set(table, Value::number(f64::NAN), Value::number(1.0)),
+            None
+        );
+        assert!(heap.table_get(table, Value::number(f64::NAN)).is_none());
+
+        let readonly = heap.alloc_array_table(&[]);
+        heap.table_freeze(readonly).expect("table should freeze");
+        assert_eq!(
+            heap.table_set(readonly, Value::number(1.0), Value::number(1.0)),
+            None
+        );
+        assert_eq!(
+            heap.table_set(u32::MAX, Value::number(1.0), Value::number(1.0)),
+            None
+        );
+        assert!(heap.table_get(u32::MAX, Value::number(1.0)).is_none());
+        assert_eq!(string_count(&mut heap), 0);
     }
 
     #[test]

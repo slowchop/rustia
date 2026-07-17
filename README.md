@@ -79,8 +79,11 @@ public rustia project; actual grabby integration work is explicitly out of scope
   material regression above 5% after hot-path hardening: stdlib/string improved 7.25%/19.71%, closures were
   neutral-to-faster, and a cooled dense-table check retained a borderline 1.29% slowdown. Six uncontaminated
   fixed-work diagnostic legs for the new field/string slice measured about +0.90% with overlapping spreads, but
-  the exact final commit has not been accepted or added to public history. Both results remain development
-  evidence, not a blanket release speed claim; details are in
+  the exact final commit has not been accepted or added to public history. Static bytecode and release-codegen
+  analysis showed that the dense workload does not execute the new constant-key/method opcodes; a corrective
+  pass now removes cross-cutting fuel-classification, numeric-key, and numeric-ordering tolls while preserving
+  fuel, validation, GC cadence, key semantics, and string canonicalization. That pass remains an unmeasured
+  hypothesis. Both results remain development evidence, not a blanket release speed claim; details are in
   [`design/56-performance-research.md`](design/56-performance-research.md).
 - Major remaining gates are engine hardening, long-run benchmark history, public benchmark publication, and release
   packaging. Semver policy is tracked in [`design/91-semver-policy.md`](design/91-semver-policy.md), release

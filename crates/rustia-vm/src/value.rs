@@ -1,4 +1,4 @@
-use crate::number::{canonicalize_number, table_key_number_bits};
+use crate::number::canonicalize_number;
 use gc_arena::Collect;
 use std::fmt;
 
@@ -290,8 +290,8 @@ impl Value {
     }
 
     #[inline]
-    pub(crate) fn table_key_number_bits(self) -> Option<u64> {
-        self.as_number().map(table_key_number_bits)
+    pub(crate) const fn is_nil(self) -> bool {
+        self.0.tag == TAG_NIL
     }
 
     pub(crate) fn luau_equals(self, other: Self) -> bool {
@@ -384,5 +384,15 @@ mod tests {
         assert!(lhs.luau_equals(rhs));
         assert!(!lhs.luau_equals(other));
         assert!(!lhs.luau_equals(Value::string_atom(0)));
+    }
+
+    #[test]
+    fn exact_nil_tag_check_only_accepts_nil() {
+        assert!(Value::nil().is_nil());
+        assert!(!Value::boolean(false).is_nil());
+        assert!(!Value::number(0.0).is_nil());
+        assert!(!Value::short_string(b"")
+            .expect("empty short string")
+            .is_nil());
     }
 }

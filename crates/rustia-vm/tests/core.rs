@@ -362,6 +362,82 @@ fn constant_key_and_namecall_opcodes_reserve_fused_fuel_atomically() {
 }
 
 #[test]
+fn special_fuel_lookup_preserves_validation_and_operand_error_order() {
+    let invalid_before_fuel = [
+        (
+            Program::new(
+                Function::new(vec![Instruction::with_aux(Opcode::NameCall, 0, 1, 2, 0)], 2),
+                vec![Constant::String(b"method".to_vec())],
+            ),
+            "namecall mode must be zero or one",
+        ),
+        (
+            Program::new(
+                Function::new(
+                    vec![Instruction::with_aux(Opcode::GetImport, 0, 0, 0, 0)],
+                    1,
+                ),
+                Vec::new(),
+            ),
+            "import path length must be between one and three",
+        ),
+        (
+            Program::new(
+                Function::new(
+                    vec![Instruction::with_aux(Opcode::CallExtension, 0, 0, 0, 0)],
+                    1,
+                ),
+                Vec::new(),
+            ),
+            "unknown extension op id",
+        ),
+    ];
+
+    for (program, expected_reason) in invalid_before_fuel {
+        let settings = VmSettings {
+            initial_fuel: Some(0),
+            deterministic_gc_interval: NonZeroU64::new(1).unwrap(),
+            ..VmSettings::default()
+        };
+        let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
+        let error = vm
+            .run(&program)
+            .expect_err("special opcode validation must happen before fuel charging");
+        assert!(matches!(
+            error.kind,
+            rustia_vm::ErrorKind::InvalidProgram { reason } if reason == expected_reason
+        ));
+        assert_eq!(error.pc, Some(0));
+        assert_eq!(vm.deterministic_collection_count(), 0);
+    }
+
+    for instruction in [
+        Instruction::with_aux(Opcode::GetTableKs, 2, 0, 0, 0),
+        Instruction::with_aux(Opcode::SetTableKs, 0, 2, 0, 0),
+    ] {
+        let settings = VmSettings {
+            initial_fuel: Some(1),
+            deterministic_gc_interval: NonZeroU64::new(1).unwrap(),
+            ..VmSettings::default()
+        };
+        let program = Program::new(
+            Function::new(vec![instruction], 1),
+            vec![Constant::String(b"field".to_vec())],
+        );
+        let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
+        let error = vm
+            .run(&program)
+            .expect_err("fused fuel reservation must precede operand validation");
+        assert!(matches!(
+            error.kind,
+            rustia_vm::ErrorKind::FuelExhausted { limit: 1 }
+        ));
+        assert_eq!(error.pc, Some(0));
+        assert_eq!(vm.deterministic_collection_count(), 0);
+    }
+}
+
+#[test]
 fn constant_key_and_checked_namecall_opcodes_preserve_successful_gc_cadence() {
     let cases = [
         (
@@ -1225,6 +1301,12 @@ fn relational_opcodes_compare_numbers() {
         (Opcode::LessEqual, 2.0, 2.0, true),
         (Opcode::Greater, 1.0, 2.0, false),
         (Opcode::GreaterEqual, 1.0, 2.0, false),
+        (Opcode::Less, -0.0, 0.0, false),
+        (Opcode::LessEqual, -0.0, 0.0, true),
+        (Opcode::Less, f64::NEG_INFINITY, f64::INFINITY, true),
+        (Opcode::GreaterEqual, f64::INFINITY, f64::INFINITY, true),
+        (Opcode::Less, f64::NAN, 1.0, false),
+        (Opcode::Greater, 1.0, f64::NAN, false),
     ];
 
     for (op, lhs, rhs, expected) in cases {

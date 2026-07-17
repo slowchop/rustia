@@ -76,12 +76,14 @@ slots on existing global/index/import opcodes. The first memory hardening pass r
 with compact `u32` slots, reduced the table index to at most 50% load, added a 4-byte per-PC site map with
 16-byte filled live-slot records, and stopped a monomorphic site from thrashing across atom changes. Shared
 compiled constant storage, 13-byte inline literal/runtime strings, constant-key `GETTABLEKS`/`SETTABLEKS`, and two-lane
-live `NAMECALL` lookup have now landed. Next add cached length boundaries and profile the remaining small-table
-scan and dispatch costs.
+live `NAMECALL` lookup have now landed. A first focused hot-loop-hygiene correction also moves ordinary fuel
+classification to a base-cost lookup and gives numeric table access and ordering number-first paths. Next add
+cached length boundaries and profile the remaining small-table scan and dispatch costs.
 Current plan delta: implementation is complete for this slice, but performance validation is not. The earlier
 representation-hardening measurement found no credible material regression above 5% and kept a borderline
 +1.29% dense-table result visible; the newer field/string changes still need fixed-work validation and committed
-repeatable history before attributing a public speedup or claiming the dense follow-up is resolved.
+repeatable history before attributing a public speedup or claiming the dense follow-up is resolved. The corrective
+pass is a profile-guided hypothesis until that evidence exists.
 Expected gain: 2x-20x on table-heavy workloads; likely the fastest route to closing the current benchmark gap.
 
 **3. Adaptive quickening and specializing bytecode.**
@@ -110,8 +112,10 @@ Expected gain: 2x-10x on stdlib-heavy code; essential for matching Luau on `stdl
 Move coverage, fuel, GC debt, root maintenance, and register access checks out of the common one-instruction path
 where correctness permits. Use deterministic fuel batching at basic-block boundaries, direct register windows,
 fallible slow helpers, and hot/cold opcode layout.
-Current plan delta: hot/cold split is already promoted, but the VM loop should get a focused profile pass before
-larger compiler work hides the easy wins.
+Current plan delta: the first focused pass now removes repeated special-opcode comparisons from ordinary fuel
+classification and avoids string/kind decoding on the dense numeric table path. This does not imply that all
+per-instruction bookkeeping is solved; profile the remaining VM loop before larger compiler work hides the easy
+wins.
 Expected gain: 1.2x-3x broad speedup, especially on arithmetic, loops, and small functions.
 
 **6. Superinstructions and tracelet fusion.**
@@ -178,7 +182,7 @@ material-regression threshold; accepted evidence retains that exact JSON
 output. The exact commands and required provenance are in
 [`../bench/README.md`](../bench/README.md).
 
-### Current field/string slice — exact-final measurement pending
+### Current field/string slice — corrective pass landed, exact-final measurement pending
 
 A fixed-work diagnostic has been run for the `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` and string-representation
 working tree, but no accepted exact-final result or public-history row exists yet. Baseline
@@ -186,6 +190,16 @@ working tree, but no accepted exact-final result or public-history row exists ye
 (SHA-256 `9cb397349bf2e630e2ca120bd2b84b70aa83bf1dbeb496aa3f05622b2696325c`) and dense workload source
 (`b0c048b9fb17582fa409ae46b977cc73da635c145df39ea6f8fd756e9e17118d`), fixed `n=1500`, 15 repetitions, and
 the identical checksum `number:193302491.00000000000000000`.
+
+Static bytecode and release-disassembly analysis showed that `dense_tables` executes none of the new
+`GETTABLEKS`, `SETTABLEKS`, or `NAMECALL` opcodes. Its candidate lowering dispatches 6,964 instructions per
+unit versus 6,967 for the baseline, so the small diagnostic disadvantage was not caused by added bytecode
+dispatch. The cross-cutting candidates were instead ordinary opcodes traversing special fuel comparisons,
+numeric table accesses probing the short-string representation first, and numeric ordering repeating kind
+decoding. The corrective pass uses a 256-entry base-cost lookup with validated zero-sentinel special cases,
+number-first table get/set/order paths, and exact-tag nil checks. Logical fuel, invalid-program validation,
+fuel/GC phase and cadence, numeric-key rules, and string canonicalization remain unchanged. This is a
+profile-guided hypothesis until controlled exact-commit evidence accepts or rejects it.
 
 The first six ABBA/BAAB legs were usable. Pooling their 45 samples per variant gave baseline median
 139,964.195 ns/unit (IQR 133,262.333–156,530.778) and candidate median 141,223.833 ns/unit (IQR
@@ -231,7 +245,7 @@ below remain planning estimates rather than measured claims against C++ Luau.
 
 | state | likely position vs C++ Luau interpreter |
 |---|---|
-| Current committed benchmark snapshot | About 8x-20x slower on tracked workloads; roughly 13x slower geomean. The newer field/string code is not represented yet. |
+| Current committed benchmark snapshot | About 8x-20x slower on tracked workloads; roughly 13x slower geomean. The newer field/string and corrective hot-loop code is not represented yet. |
 | Full tables + shared atoms + broader ICs + FASTCALL/GETIMPORT | Could close most table/global/stdlib gaps; target 0.5x-1.0x Luau on many interpreter workloads. |
 | Add quickening + hot-loop hygiene + superinstructions + O2 optimizer | Plausible 0.8x-1.5x Luau interpreter on favorable workloads, but only measurement can bless this. |
 | Add type-directed wasm/AOT tier | Hot type-stable kernels can plausibly beat the C++ Luau interpreter by multiples; this is the main better-than-Luau-interpreter route. |

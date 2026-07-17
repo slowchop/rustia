@@ -33,6 +33,17 @@ const SITE_CACHE_IMPORT_EMPTY: u32 = u32::MAX - 2;
 const SITE_CACHE_TABLE_EMPTY: u32 = u32::MAX - 1;
 const SITE_CACHE_INELIGIBLE: u32 = u32::MAX;
 const IMPORT_CACHE_LANES: usize = 3;
+const OPCODE_TAG_SPACE: usize = u8::MAX as usize + 1;
+// Zero selects the validated special-cost path; every other opcode tag defaults to one fuel.
+const OPCODE_FUEL_OR_SPECIAL: [u8; OPCODE_TAG_SPACE] = {
+    let mut costs = [1; OPCODE_TAG_SPACE];
+    costs[Opcode::CallExtension as usize] = 0;
+    costs[Opcode::GetImport as usize] = 0;
+    costs[Opcode::GetTableKs as usize] = 2;
+    costs[Opcode::SetTableKs as usize] = 0;
+    costs[Opcode::NameCall as usize] = 0;
+    costs
+};
 
 pub type LoadStringCompiler =
     fn(source: &[u8], source_name: Option<&[u8]>) -> std::result::Result<Program, String>;
@@ -5094,6 +5105,9 @@ impl Vm {
         rhs: Value,
         comparison: OrderComparison,
     ) -> Result<Option<bool>> {
+        if let (Some(lhs), Some(rhs)) = (lhs.as_number(), rhs.as_number()) {
+            return Ok(Some(compare_ordering(comparison, lhs.partial_cmp(&rhs))));
+        }
         match (lhs.kind(), rhs.kind()) {
             (ValueKind::Number, ValueKind::Number) => {
                 let lhs = lhs.as_number().ok_or_else(|| {
@@ -14245,30 +14259,32 @@ impl Vm {
     }
 
     fn instruction_fuel_cost(&self, instruction: Instruction) -> Result<u64> {
-        if instruction.op == Opcode::CallExtension {
-            let op = self.extension(instruction)?;
-            Ok(u64::from(op.fuel_cost))
-        } else if instruction.op == Opcode::GetImport {
-            if !(1..=IMPORT_CACHE_LANES as u8).contains(&instruction.b) {
-                return Err(Error::new(ErrorKind::InvalidProgram {
-                    reason: "import path length must be between one and three",
-                }));
+        let cost = OPCODE_FUEL_OR_SPECIAL[instruction.op as usize];
+        if cost != 0 {
+            return Ok(u64::from(cost));
+        }
+        match instruction.op {
+            Opcode::CallExtension => {
+                let op = self.extension(instruction)?;
+                Ok(u64::from(op.fuel_cost))
             }
-            Ok(u64::from(instruction.b) * 2 - 1)
-        } else if instruction.op == Opcode::GetTableKs {
-            Ok(2)
-        } else if instruction.op == Opcode::SetTableKs {
-            Ok(if instruction.c == 0 { 2 } else { 1 })
-        } else if instruction.op == Opcode::NameCall {
-            match instruction.c {
+            Opcode::GetImport => {
+                if !(1..=IMPORT_CACHE_LANES as u8).contains(&instruction.b) {
+                    return Err(Error::new(ErrorKind::InvalidProgram {
+                        reason: "import path length must be between one and three",
+                    }));
+                }
+                Ok(u64::from(instruction.b) * 2 - 1)
+            }
+            Opcode::SetTableKs => Ok(if instruction.c == 0 { 2 } else { 1 }),
+            Opcode::NameCall => match instruction.c {
                 0 => Ok(2),
                 1 => Ok(3),
                 _ => Err(Error::new(ErrorKind::InvalidProgram {
                     reason: "namecall mode must be zero or one",
                 })),
-            }
-        } else {
-            Ok(1)
+            },
+            _ => unreachable!("zero fuel sentinel must name a special-cost opcode"),
         }
     }
 

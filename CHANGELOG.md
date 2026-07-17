@@ -90,6 +90,13 @@ Current unpublished workspace version: `0.0.1`.
   Six uncontaminated fixed-work legs for the subsequent field/string working tree
   measured about +0.90% with overlapping spreads; exact-final publication remains
   pending after two host-load-contaminated legs were excluded.
+- Static bytecode and release-disassembly analysis showed that `dense_tables` does not execute
+  `GETTABLEKS`, `SETTABLEKS`, or `NAMECALL`; its candidate lowering actually dispatches three fewer
+  instructions per unit. A corrective hot-loop pass instead removes cross-cutting costs from the
+  legacy numeric path: ordinary opcode fuel uses a base-cost lookup with validated special-cost
+  fallbacks, numeric table access and ordering take number-first paths, and nil tests use the exact
+  value tag. Logical fuel, invalid-program validation, GC cadence, numeric-key behavior, and string
+  canonicalization remain unchanged. Controlled exact-commit measurement is still pending.
 - The benchmark static site now has a release-preflight contract check for local
   assets, DOM bindings, JSONL history parsing, and current-results agreement.
 - Release preflight now composes release notes, package files, generated leaf

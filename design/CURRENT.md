@@ -75,6 +75,12 @@ diagnostic legs reduced the working-tree dense difference to about +0.90% with o
 legs were excluded after unrelated release builds saturated the host. The preceding local fresh-state ABBA
 against `dac4ec2` found no material regression above 5% after hardening; stdlib/string improved materially,
 closures were neutral-to-faster, and the cooled dense-table confirmation retained a borderline 1.29% slowdown.
+Static bytecode and release-disassembly analysis showed that `dense_tables` executes none of the new
+`GETTABLEKS`/`SETTABLEKS`/`NAMECALL` opcodes and dispatches 6,964 candidate instructions per unit versus 6,967
+for the baseline. A corrective pass therefore targets cross-cutting legacy-path tolls: ordinary fuel
+classification uses a base-cost lookup with validated special-cost fallbacks, numeric table access and ordering
+take number-first paths, and nil tests use the exact value tag. Logical fuel, validation, GC cadence, numeric-key
+semantics, and string canonicalization remain unchanged. Controlled exact-commit measurement is still pending.
 That older result remains development evidence, not a claim that the dense-table follow-up is resolved or a
 blanket release speed claim.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
@@ -110,8 +116,9 @@ API parity release-critical work.
    tests while performance work proceeds. Keep the public workspace's `unsafe_code = "forbid"` gate intact.
    For performance sequencing, use [`56-performance-research.md`](56-performance-research.md): publish the
    implemented table/atom/cache, `GETIMPORT`/`FASTCALL`, constant field/namecall, and string-representation slice
-   through the fixed-work benchmark-history gate; keep the borderline dense-table cost visible until equal-work
-   evidence resolves it; then pursue adaptive specialization and type-directed wasm/AOT.
+   plus its corrective legacy numeric-path pass through the fixed-work benchmark-history gate; keep the
+   borderline dense-table cost visible until equal-work evidence resolves it; then pursue adaptive specialization
+   and type-directed wasm/AOT.
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 12 workload entries including
    source-covered `string_building`, append-only JSONL history, package metadata, split notes, static dashboard
@@ -160,8 +167,10 @@ section below for the full list (GC tuning, benchmark publication, `LuauIntegerT
   literal/runtime strings are landed. A local fresh-state ABBA for the preceding hardening found no credible
   material regression above 5%, while retaining a borderline +1.29% dense-table result. A fixed-work working-tree
   diagnostic for the newer field/string slice measured about +0.90% across six uncontaminated legs, but exact-final
-  evidence and public history are still pending, so neither result is blanket speed evidence. Next come
-  equal-work validation and publication, hot-loop hygiene, adaptive quickening, superinstructions/O2, and
+  evidence and public history are still pending, so neither result is blanket speed evidence. Static analysis
+  traced the dense signal to possible cross-cutting legacy-path tolls rather than the new opcodes; the first
+  corrective hot-loop pass is landed but unmeasured. Next come equal-work validation and publication, further
+  hot-loop hygiene, adaptive quickening, superinstructions/O2, and
   type-directed wasm/AOT. Native copy-and-patch/JIT work remains a research reference unless it can satisfy the
   public `unsafe_code = "forbid"` gate.
 - **Luau target PINNED** (review C1): **Luau 0.709** (= our mlua oracle), standalone (not-Roblox) surface,
@@ -229,7 +238,8 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
    ABBA/BAAB run order so drift is visible. Publish only actual harness-produced summary records from at least
    three clean-final-commit legs and withhold an interpretation unless their retained evidence agrees; do not
    treat either the existing +1.29% dense result or the working-tree +0.90% diagnostic as resolved before that
-   evidence. Keep `RESULTS.md`, claims, and the static benchmark view consuming the same JSONL history.
+   evidence, and treat the corrective numeric-path pass as a hypothesis until the same gate measures it. Keep
+   `RESULTS.md`, claims, and the static benchmark view consuming the same JSONL history.
 3. **Watch `FFlag::LuauIntegerType2`** upstream (the f64-only tripwire).
 
 These are P1-gated; the design itself is otherwise complete. P1 (engine build) starts with the cross-engine +
