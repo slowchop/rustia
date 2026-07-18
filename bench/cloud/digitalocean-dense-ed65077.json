@@ -1,5 +1,5 @@
 {
-  "schema": "rustia.digitalocean-fixed-benchmark.v1",
+  "schema": "rustia.digitalocean-fixed-benchmark.v2",
   "provider": {
     "context": "rustia-bench",
     "region": "syd1",
@@ -62,6 +62,7 @@
     "wait_timeout_seconds": 900
   },
   "publication": {
+    "mode": "acceptance",
     "required_verdict": "material_regression_excluded",
     "final_measurements": 3
   }

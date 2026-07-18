@@ -79,6 +79,18 @@ bench-do-auth:
 bench-do-plan:
     node tools/run-digitalocean-benchmark.js plan
 
+# Read-only validation of one diagnostic shared-CPU trial profile.
+bench-do-trial-plan profile:
+    node tools/run-digitalocean-benchmark.js trial-plan "{{ profile }}"
+
+# Run one qualification-only trial; comparison and history publication are disabled.
+bench-do-trial profile:
+    node tools/run-digitalocean-benchmark.js trial "{{ profile }}"
+
+# Compare the regular and Premium Intel 2-vCPU/4-GiB profiles sequentially.
+bench-do-trials:
+    node tools/run-digitalocean-benchmark.js trial-matrix
+
 # Run the frozen comparison on one ephemeral dedicated-CPU Droplet and confirm destruction.
 bench-do:
     node tools/run-digitalocean-benchmark.js bench

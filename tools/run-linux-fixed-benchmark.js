@@ -57,7 +57,7 @@ function requireInteger(value, location, minimum = 0) {
 
 function validateConfig(config) {
   requireObject(config, "config");
-  if (config.schema !== "rustia.digitalocean-fixed-benchmark.v1") {
+  if (config.schema !== "rustia.digitalocean-fixed-benchmark.v2") {
     fail("unsupported cloud benchmark config schema");
   }
   for (const field of ["provider", "source", "measurement", "qualification", "host_gate", "publication"]) {
@@ -96,6 +96,9 @@ function validateConfig(config) {
   requireInteger(config.measurement.repetitions, "measurement.repetitions", 1);
   requireInteger(config.qualification.candidate_pilot_legs, "qualification.candidate_pilot_legs", 2);
   requireInteger(config.host_gate.benchmark_cpu, "host_gate.benchmark_cpu", 0);
+  if (!["acceptance", "diagnostic"].includes(config.publication.mode)) {
+    fail("publication.mode must be acceptance or diagnostic");
+  }
   requireInteger(config.publication.final_measurements, "publication.final_measurements", 3);
   return config;
 }
@@ -934,10 +937,14 @@ async function execute(configFile, providerFile, bundle) {
     detail: "runner did not reach a terminal protocol state",
     started_at: new Date().toISOString(),
   };
+  const executionStarted = Date.now();
+  const phaseTimings = {};
 
   try {
     log("preparing exact source trees and frozen release binaries");
+    const buildStarted = Date.now();
     const build = installAndBuild(config, bundle);
+    phaseTimings.build_seconds = Number(((Date.now() - buildStarted) / 1000).toFixed(3));
     evidenceDirectory = path.join(SOURCE_B, "bench/history/evidence", config.source.candidate_commit);
     fs.mkdirSync(evidenceDirectory, { recursive: false });
     const gateFile = path.join(evidenceDirectory, "gate.jsonl");
@@ -956,14 +963,91 @@ async function execute(configFile, providerFile, bundle) {
     run("taskset", ["-apc", String(controllerCpu), String(process.pid)], { capture: false });
 
     log("running predeclared candidate-only host stability qualification");
-    const qualification = await runPilot(config, build, gateFile, gateRecords);
+    const qualificationStarted = Date.now();
+    let qualification;
+    try {
+      qualification = await runPilot(config, build, gateFile, gateRecords);
+    } finally {
+      phaseTimings.qualification_seconds = Number(
+        ((Date.now() - qualificationStarted) / 1000).toFixed(3),
+      );
+    }
     writeJson(path.join(evidenceDirectory, "qualification.json"), qualification);
     fs.cpSync(PILOT, path.join(evidenceDirectory, "qualification-sidecars"), { recursive: true });
 
-    log("running frozen eight-leg A/B comparison");
-    const comparison = await runComparison(config, build, evidenceDirectory, gateFile, gateRecords);
-    const verdict = comparison.analysis.comparison.verdict.status;
-    if (verdict !== config.publication.required_verdict) {
+    if (config.publication.mode === "diagnostic") {
+      const diagnostic = {
+        schema: "rustia.bench.cloud-diagnostic.v1",
+        mode: "qualification_only",
+        created_at: new Date().toISOString(),
+        provider,
+        source: {
+          baseline_commit: config.source.baseline_commit,
+          candidate_commit: config.source.candidate_commit,
+          harness_commit: config.source.harness_commit,
+          protocol_config_sha256: sha256File(configFile),
+          git_bundle_sha256: build.bundleHash,
+          baseline_binary_sha256: build.baselineBinaryHash,
+          candidate_binary_sha256: build.candidateBinaryHash,
+        },
+        host: {
+          cpu_model: host.cpu_model,
+          microcode: host.microcode,
+          benchmark_cpu: config.host_gate.benchmark_cpu,
+        },
+        timings: phaseTimings,
+        qualification,
+        gate: {
+          records: gateRecords.length,
+          sha256: sha256File(gateFile),
+        },
+        publication: {
+          performed: false,
+          reason: "diagnostic mode stops after host qualification",
+        },
+      };
+      writeJson(path.join(evidenceDirectory, "diagnostic.json"), diagnostic);
+      status = {
+        ...status,
+        status: "diagnostic_complete",
+        detail: "host qualification completed; comparison and publication were not run",
+        finished_at: new Date().toISOString(),
+        timings: phaseTimings,
+        diagnostic,
+      };
+    } else {
+      log("running frozen eight-leg A/B comparison");
+      const comparison = await runComparison(config, build, evidenceDirectory, gateFile, gateRecords);
+      const verdict = comparison.analysis.comparison.verdict.status;
+      if (verdict !== config.publication.required_verdict) {
+        writeManifest({
+          config,
+          configFile,
+          provider,
+          providerFile,
+          bundle,
+          build,
+          host,
+          hostFile: path.join(evidenceDirectory, "host.json"),
+          gateFile,
+          gateRecords,
+          qualification,
+          comparison,
+          publication: {
+            performed: false,
+            reason: `comparison verdict was ${verdict}`,
+            required_verdict: config.publication.required_verdict,
+          },
+          evidenceDirectory,
+        });
+        throw new ControlledStop(
+          "comparison_not_accepted",
+          `comparison verdict ${verdict}; public history was not changed`,
+        );
+      }
+
+      log("comparison accepted; appending three actual final-binary history measurements");
+      const publication = await publishFinal(config, build, evidenceDirectory, gateFile, gateRecords);
       writeManifest({
         config,
         configFile,
@@ -977,50 +1061,25 @@ async function execute(configFile, providerFile, bundle) {
         gateRecords,
         qualification,
         comparison,
-        publication: {
-          performed: false,
-          reason: `comparison verdict was ${verdict}`,
-          required_verdict: config.publication.required_verdict,
-        },
+        publication: { performed: true, ...publication },
         evidenceDirectory,
       });
-      throw new ControlledStop(
-        "comparison_not_accepted",
-        `comparison verdict ${verdict}; public history was not changed`,
-      );
+      status = {
+        ...status,
+        status: "accepted_and_published",
+        detail: "material regression excluded and three actual final-binary history rows appended",
+        finished_at: new Date().toISOString(),
+        verdict,
+      };
     }
-
-    log("comparison accepted; appending three actual final-binary history measurements");
-    const publication = await publishFinal(config, build, evidenceDirectory, gateFile, gateRecords);
-    writeManifest({
-      config,
-      configFile,
-      provider,
-      providerFile,
-      bundle,
-      build,
-      host,
-      hostFile: path.join(evidenceDirectory, "host.json"),
-      gateFile,
-      gateRecords,
-      qualification,
-      comparison,
-      publication: { performed: true, ...publication },
-      evidenceDirectory,
-    });
-    status = {
-      ...status,
-      status: "accepted_and_published",
-      detail: "material regression excluded and three actual final-binary history rows appended",
-      finished_at: new Date().toISOString(),
-      verdict,
-    };
   } catch (error) {
     status = {
       ...status,
       status: error instanceof ControlledStop ? error.status : "failed",
       detail: error.message,
       finished_at: new Date().toISOString(),
+      timings: phaseTimings,
+      elapsed_seconds: Number(((Date.now() - executionStarted) / 1000).toFixed(3)),
     };
     log(`${status.status}: ${status.detail}`);
   } finally {
@@ -1030,7 +1089,7 @@ async function execute(configFile, providerFile, bundle) {
     }
     exportRun(status, config, evidenceDirectory);
   }
-  return status.status === "accepted_and_published" ? 0 : 2;
+  return ["accepted_and_published", "diagnostic_complete"].includes(status.status) ? 0 : 2;
 }
 
 function selfTest() {

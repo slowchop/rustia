@@ -13,6 +13,13 @@ const DEFAULT_CONFIG = path.join(
   REPO,
   "bench/cloud/digitalocean-dense-ed65077.json",
 );
+const TRIAL_CONFIGS = Object.freeze({
+  "basic-2c4g": path.join(REPO, "bench/cloud/digitalocean-trial-basic-2c4g.json"),
+  "premium-intel-2c4g": path.join(
+    REPO,
+    "bench/cloud/digitalocean-trial-premium-intel-2c4g.json",
+  ),
+});
 const REMOTE_RUNNER = path.join(REPO, "tools/run-linux-fixed-benchmark.js");
 const STATE_ROOT = path.join(REPO, ".rustia-benchmark-state/digitalocean");
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
@@ -104,7 +111,7 @@ function validateConfig(value) {
     ["schema", "provider", "source", "measurement", "qualification", "host_gate", "publication"],
     "config",
   );
-  if (root.schema !== "rustia.digitalocean-fixed-benchmark.v1") {
+  if (root.schema !== "rustia.digitalocean-fixed-benchmark.v2") {
     fail("unsupported cloud benchmark config schema");
   }
 
@@ -266,9 +273,12 @@ function validateConfig(value) {
   const publication = requireObject(root.publication, "config.publication");
   requireExactKeys(
     publication,
-    ["required_verdict", "final_measurements"],
+    ["mode", "required_verdict", "final_measurements"],
     "config.publication",
   );
+  if (!["acceptance", "diagnostic"].includes(publication.mode)) {
+    fail("publication.mode must be acceptance or diagnostic");
+  }
   if (publication.required_verdict !== "material_regression_excluded") {
     fail("publication.required_verdict must be material_regression_excluded");
   }
@@ -285,6 +295,17 @@ function loadConfig(file = DEFAULT_CONFIG) {
     fail(`cannot load ${path.relative(REPO, file)}: ${error.message}`);
   }
   return validateConfig(value);
+}
+
+function trialConfigPath(profile) {
+  const configFile = TRIAL_CONFIGS[profile];
+  if (!configFile) {
+    fail(
+      `unknown trial profile ${JSON.stringify(profile)}; choose one of: ` +
+        Object.keys(TRIAL_CONFIGS).join(", "),
+    );
+  }
+  return configFile;
 }
 
 function sha256(bytes) {
@@ -462,7 +483,11 @@ async function gitBlob(commit, file) {
   return result.stdout;
 }
 
-async function verifySource(config) {
+async function verifySource(config, configFile = DEFAULT_CONFIG) {
+  const relativeConfig = path.relative(REPO, configFile);
+  if (relativeConfig.startsWith("..") || path.isAbsolute(relativeConfig)) {
+    fail("cloud benchmark config must be inside the repository");
+  }
   const trackedStatus = outputText(
     await run("git", ["status", "--porcelain=v1", "--untracked-files=no"]),
   );
@@ -475,7 +500,7 @@ async function verifySource(config) {
   for (const file of [
     "tools/run-digitalocean-benchmark.js",
     "tools/run-linux-fixed-benchmark.js",
-    path.relative(REPO, DEFAULT_CONFIG),
+    relativeConfig,
   ]) {
     await run("git", ["ls-files", "--error-unmatch", file]);
   }
@@ -531,7 +556,8 @@ async function verifySource(config) {
   const head = outputText(await run("git", ["rev-parse", "HEAD"]));
   return {
     orchestration_commit: head,
-    config_sha256: sha256File(DEFAULT_CONFIG),
+    config_path: relativeConfig,
+    config_sha256: sha256File(configFile),
     coordinator_sha256: sha256File(__filename),
     remote_runner_sha256: sha256File(REMOTE_RUNNER),
     verified_source_hashes: Object.fromEntries(checks.map(([name, actual]) => [name, actual])),
@@ -576,6 +602,7 @@ function sanitizedProviderPlan(config, provider, source) {
   return {
     schema: config.schema,
     provider: "digitalocean",
+    protocol_mode: config.publication.mode,
     context: config.provider.context,
     region: provider.region.slug,
     image: {
@@ -614,9 +641,9 @@ function sanitizedProviderPlan(config, provider, source) {
   };
 }
 
-async function buildPlan(config, { print = true } = {}) {
+async function buildPlan(config, { print = true, configFile = DEFAULT_CONFIG } = {}) {
   requireExecutables(["doctl", "git", "node", "scp", "ssh", "ssh-keygen", "tar"]);
-  const source = await verifySource(config);
+  const source = await verifySource(config, configFile);
   const provider = await resolveProviderPlan(config);
   const plan = sanitizedProviderPlan(config, provider, source);
   if (print) {
@@ -1181,6 +1208,25 @@ async function waitForSsh(state) {
   fail(`SSH did not become ready on owned droplet ${state.droplet_id}`);
 }
 
+function verifyDropletMatchesPlan(droplet, plan) {
+  const checks = [
+    ["size slug", droplet.size_slug, plan.size.slug],
+    ["region", droplet.region && droplet.region.slug, plan.region],
+    ["image ID", droplet.image && droplet.image.id, plan.image.id],
+    ["vCPU count", droplet.vcpus, plan.size.vcpus],
+    ["memory MiB", droplet.memory, plan.size.memory_mib],
+    ["disk GiB", droplet.disk, plan.size.disk_gib],
+  ];
+  for (const [field, actual, expected] of checks) {
+    if (String(actual) !== String(expected)) {
+      fail(
+        `activated Droplet ${field} was ${JSON.stringify(actual)}, ` +
+          `expected planned ${JSON.stringify(expected)}`,
+      );
+    }
+  }
+}
+
 function safeDropletMetadata(droplet, plan, state) {
   return {
     provider: "digitalocean",
@@ -1212,8 +1258,131 @@ function extractArchive(archive, destination) {
   return run("tar", ["-xzf", archive, "-C", destination], { capture: false, announce: true });
 }
 
+function readJsonIfPresent(file) {
+  if (!fs.existsSync(file)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (error) {
+    fail(`cannot read downloaded diagnostic JSON ${file}: ${error.message}`);
+  }
+}
+
+function diagnosticSummary(config, state, downloadDirectory) {
+  const statusFile = path.join(downloadDirectory, "status.json");
+  if (!fs.existsSync(statusFile)) fail("diagnostic export did not contain status.json");
+  const status = JSON.parse(fs.readFileSync(statusFile, "utf8"));
+  state.remote_status = status.status;
+  state.remote_status_detail = status.detail || null;
+
+  const started = Date.parse(state.billing_window_started_at || "");
+  const destroyed = Date.parse(state.droplet_destroyed_at || "");
+  const billableSecondsUpperBound =
+    Number.isFinite(started) && Number.isFinite(destroyed)
+      ? Math.max(0, (destroyed - started) / 1000)
+      : null;
+  const hourlyPrice = state.plan.size.price_hourly_usd;
+  const estimatedCharge =
+    billableSecondsUpperBound === null
+      ? null
+      : Math.max(0.01, (hourlyPrice * Math.max(60, billableSecondsUpperBound)) / 3600);
+  const diagnostic = status.diagnostic || null;
+  const evidenceDirectory = path.join(
+    downloadDirectory,
+    "evidence",
+    config.source.candidate_commit,
+  );
+  const qualificationDirectory = path.join(evidenceDirectory, "qualification-sidecars");
+  const qualification =
+    (diagnostic && diagnostic.qualification) ||
+    readJsonIfPresent(path.join(evidenceDirectory, "qualification.json")) ||
+    readJsonIfPresent(path.join(qualificationDirectory, "qualification.json"));
+  const host =
+    (diagnostic && diagnostic.host) || readJsonIfPresent(path.join(evidenceDirectory, "host.json"));
+  let pilotLegs = qualification && Array.isArray(qualification.pilot_legs)
+    ? qualification.pilot_legs
+    : [];
+  if (pilotLegs.length === 0 && fs.existsSync(qualificationDirectory)) {
+    pilotLegs = fs
+      .readdirSync(qualificationDirectory)
+      .filter((file) => /^candidate-pilot-[0-9]+\.json$/.test(file))
+      .sort()
+      .flatMap((file) => {
+        const sidecar = readJsonIfPresent(path.join(qualificationDirectory, file));
+        const measurements = sidecar && sidecar.measurements;
+        return Array.isArray(measurements) && measurements.length === 1
+          ? [{ file, harness_median: measurements[0].ns_per_unit_median }]
+          : [];
+      });
+  }
+  const buildSeconds =
+    diagnostic && diagnostic.timings
+      ? diagnostic.timings.build_seconds
+      : status.timings?.build_seconds || null;
+  const qualificationSeconds =
+    diagnostic && diagnostic.timings
+      ? diagnostic.timings.qualification_seconds
+      : status.timings?.qualification_seconds || null;
+  const qualificationPassed =
+    status.status === "diagnostic_complete" && qualification?.passed === true;
+  const extraAcceptanceLegs =
+    config.measurement.run_order.length + config.publication.final_measurements;
+  const projectedAcceptanceSeconds =
+    qualificationPassed && billableSecondsUpperBound !== null && Number.isFinite(qualificationSeconds)
+      ? billableSecondsUpperBound +
+        (qualificationSeconds / config.qualification.candidate_pilot_legs) * extraAcceptanceLegs
+      : null;
+  const acceptanceConfig = loadConfig(DEFAULT_CONFIG);
+  const acceptanceWorkBudgetSeconds =
+    acceptanceConfig.provider.max_runtime_minutes * 60 - CLEANUP_RESERVE_MS / 1000;
+  const projectionWithinAcceptanceBudget =
+    projectedAcceptanceSeconds !== null &&
+    projectedAcceptanceSeconds <= acceptanceWorkBudgetSeconds;
+  const eligible = qualificationPassed && projectionWithinAcceptanceBudget;
+  const projectedAcceptanceCharge =
+    projectedAcceptanceSeconds === null
+      ? null
+      : Math.max(0.01, (hourlyPrice * Math.max(60, projectedAcceptanceSeconds)) / 3600);
+  const summary = {
+    profile: state.trial_profile,
+    run_id: state.run_id,
+    status: status.status,
+    detail: status.detail || null,
+    size_slug: state.plan.size.slug,
+    hourly_price_usd: hourlyPrice,
+    planned_compute_cost_ceiling_usd: state.plan.planned_compute_cost_ceiling_usd,
+    billable_seconds_upper_bound: billableSecondsUpperBound,
+    estimated_compute_charge_upper_bound_usd:
+      estimatedCharge === null ? null : Number(estimatedCharge.toFixed(6)),
+    projected_acceptance_seconds:
+      projectedAcceptanceSeconds === null ? null : Number(projectedAcceptanceSeconds.toFixed(3)),
+    projected_acceptance_compute_charge_usd:
+      projectedAcceptanceCharge === null ? null : Number(projectedAcceptanceCharge.toFixed(6)),
+    acceptance_work_budget_seconds: acceptanceWorkBudgetSeconds,
+    cpu_model: host ? host.cpu_model : null,
+    build_seconds: buildSeconds,
+    qualification_seconds: qualificationSeconds,
+    pilot_medians_ns_per_unit: Array.isArray(pilotLegs)
+      ? pilotLegs.map((leg) => leg.harness_median)
+      : [],
+    pilot_median_spread_percent:
+      qualification && Number.isFinite(qualification.median_spread_percent)
+        ? qualification.median_spread_percent
+        : null,
+    qualification_passed: qualificationPassed,
+    projection_within_acceptance_budget: projectionWithinAcceptanceBudget,
+    eligible_for_acceptance_profile: eligible,
+    remote_exit_status: state.remote_exit_status,
+    export_directory: path.relative(REPO, downloadDirectory),
+    publication_promoted: false,
+  };
+  state.trial_summary = summary;
+  saveState(state);
+  process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+  return summary;
+}
+
 async function verifyPromotionCheckout(config, state) {
-  const current = await verifySource(config);
+  const current = await verifySource(config, state.source_config_path || DEFAULT_CONFIG);
   const planned = state.plan && state.plan.source;
   if (!planned || JSON.stringify(current) !== JSON.stringify(planned)) {
     fail("local orchestration checkout changed while the cloud run was in flight; retaining export only");
@@ -1337,8 +1506,8 @@ async function promoteAcceptedResult(config, state, downloadDirectory) {
   return true;
 }
 
-async function benchLocked(config) {
-  const { plan, provider } = await buildPlan(config, { print: true });
+async function benchLocked(config, configFile = DEFAULT_CONFIG, { trialProfile = null } = {}) {
+  const { plan, provider } = await buildPlan(config, { print: true, configFile });
   await verifyDeleteAuthority(config);
   fs.mkdirSync(STATE_ROOT, { recursive: true, mode: 0o700 });
   const runId = `${safeTimestamp()}-${crypto.randomBytes(4).toString("hex")}`;
@@ -1352,6 +1521,8 @@ async function benchLocked(config) {
     run_id: runId,
     created_at: new Date().toISOString(),
     context: config.provider.context,
+    protocol_mode: config.publication.mode,
+    trial_profile: trialProfile,
     droplet_name: dropletName,
     droplet_id: null,
     droplet_destroyed_at: null,
@@ -1362,7 +1533,9 @@ async function benchLocked(config) {
     public_key_path: path.join(directory, "id_ed25519.pub"),
     known_hosts_path: path.join(directory, "known_hosts"),
     bundle_path: path.join(directory, "rustia.bundle"),
-    config_path: DEFAULT_CONFIG,
+    source_config_path: configFile,
+    config_path: path.join(directory, "protocol.json"),
+    runner_path: path.join(directory, "run-linux-fixed-benchmark.js"),
     plan,
   };
   saveState(state);
@@ -1371,6 +1544,14 @@ async function benchLocked(config) {
   let cleanupError = null;
   let downloadDirectory = null;
   try {
+    fs.copyFileSync(configFile, state.config_path);
+    fs.copyFileSync(REMOTE_RUNNER, state.runner_path);
+    if (sha256File(state.config_path) !== plan.source.config_sha256) {
+      fail("protocol config changed after planning and before snapshotting");
+    }
+    if (sha256File(state.runner_path) !== plan.source.remote_runner_sha256) {
+      fail("remote runner changed after planning and before snapshotting");
+    }
     await run(
       "ssh-keygen",
       ["-q", "-t", "ed25519", "-N", "", "-C", state.ssh_key_name, "-f", state.private_key_path],
@@ -1470,6 +1651,7 @@ async function benchLocked(config) {
     }
 
     const droplet = await waitForDroplet(state, config);
+    verifyDropletMatchesPlan(droplet, plan);
     await deleteSshKey(state, config);
     await waitForSsh(state);
     await run(
@@ -1537,8 +1719,8 @@ async function benchLocked(config) {
       [
         ...scpOptions(state),
         state.bundle_path,
-        DEFAULT_CONFIG,
-        REMOTE_RUNNER,
+        state.config_path,
+        state.runner_path,
         providerMetadata,
         `root@${state.public_ipv4}:/opt/rustia/incoming/`,
       ],
@@ -1556,7 +1738,7 @@ async function benchLocked(config) {
         `root@${state.public_ipv4}`,
         "node",
         "/opt/rustia/incoming/run-linux-fixed-benchmark.js",
-        "/opt/rustia/incoming/digitalocean-dense-ed65077.json",
+        "/opt/rustia/incoming/protocol.json",
         "/opt/rustia/incoming/provider.json",
         "/opt/rustia/incoming/rustia.bundle",
       ],
@@ -1618,13 +1800,26 @@ async function benchLocked(config) {
   throwIfInterrupted();
   downloadDirectory = path.join(directory, "download");
   await extractArchive(state.export_path, downloadDirectory);
+  if (config.publication.mode === "diagnostic") {
+    const summary = diagnosticSummary(config, state, downloadDirectory);
+    if (summary.status === "accepted_and_published") {
+      fail("diagnostic protocol unexpectedly reported publication; export retained without promotion");
+    }
+    if (!["diagnostic_complete", "host_qualification_failed"].includes(summary.status)) {
+      fail(`diagnostic trial ended in unexpected status ${summary.status}; export retained`);
+    }
+    return summary;
+  }
   const promoted = await promoteAcceptedResult(config, state, downloadDirectory);
   if (!promoted && state.remote_exit_status !== 0) {
     fail(`remote benchmark ended with status ${state.remote_exit_status}; diagnostics were retained`);
   }
 }
 
-async function bench(config) {
+async function bench(config, configFile = DEFAULT_CONFIG) {
+  if (config.publication.mode !== "acceptance") {
+    fail("bench requires an acceptance-mode protocol");
+  }
   const lockToken = acquireCoordinatorLock();
   try {
     const incomplete = incompleteStates();
@@ -1635,7 +1830,93 @@ async function bench(config) {
       );
     }
     throwIfInterrupted();
-    return await benchLocked(config);
+    return await benchLocked(config, configFile);
+  } finally {
+    releaseCoordinatorLock(lockToken);
+  }
+}
+
+async function trial(profile) {
+  const configFile = trialConfigPath(profile);
+  const config = loadConfig(configFile);
+  if (config.publication.mode !== "diagnostic") {
+    fail(`trial profile ${profile} is not diagnostic-only`);
+  }
+  const lockToken = acquireCoordinatorLock();
+  try {
+    const incomplete = incompleteStates();
+    if (incomplete.length > 0) {
+      fail(
+        "incomplete DigitalOcean benchmark cleanup exists; run `just bench-do-status` and " +
+          `clean up: ${incomplete.map((state) => state.run_id).join(", ")}`,
+      );
+    }
+    return await benchLocked(config, configFile, { trialProfile: profile });
+  } finally {
+    releaseCoordinatorLock(lockToken);
+  }
+}
+
+async function trialMatrix() {
+  const lockToken = acquireCoordinatorLock();
+  try {
+    const summaries = [];
+    for (const profile of Object.keys(TRIAL_CONFIGS)) {
+      const incomplete = incompleteStates();
+      if (incomplete.length > 0) {
+        fail(
+          "incomplete DigitalOcean benchmark cleanup exists; run `just bench-do-status` and " +
+            `clean up: ${incomplete.map((state) => state.run_id).join(", ")}`,
+        );
+      }
+      const configFile = trialConfigPath(profile);
+      const config = loadConfig(configFile);
+      if (config.publication.mode !== "diagnostic") {
+        fail(`trial profile ${profile} is not diagnostic-only`);
+      }
+      summaries.push(await benchLocked(config, configFile, { trialProfile: profile }));
+    }
+    const eligible = summaries
+      .filter(
+        (summary) =>
+          summary.eligible_for_acceptance_profile &&
+          Number.isFinite(summary.projected_acceptance_compute_charge_usd),
+      )
+      .sort(
+        (left, right) =>
+          left.projected_acceptance_compute_charge_usd -
+            right.projected_acceptance_compute_charge_usd ||
+          left.hourly_price_usd - right.hourly_price_usd,
+      );
+    const result = {
+      trial_matrix: summaries,
+      planned_compute_cost_ceiling_usd: Number(
+        summaries
+          .reduce((sum, summary) => sum + summary.planned_compute_cost_ceiling_usd, 0)
+          .toFixed(6),
+      ),
+      estimated_compute_charge_upper_bound_usd: Number(
+        summaries
+          .reduce(
+            (sum, summary) =>
+              sum + (summary.estimated_compute_charge_upper_bound_usd || 0),
+            0,
+          )
+          .toFixed(6),
+      ),
+      recommendation:
+        eligible.length > 0
+          ? {
+              profile: eligible[0].profile,
+              basis: "lowest projected full-acceptance compute charge among qualified trials",
+              projected_acceptance_compute_charge_usd:
+                eligible[0].projected_acceptance_compute_charge_usd,
+              caveat: "acceptance provisions a new shared host and repeats qualification",
+            }
+          : null,
+    };
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return result;
   } finally {
     releaseCoordinatorLock(lockToken);
   }
@@ -1695,6 +1976,11 @@ async function status() {
     rows.push({
       run_id: state.run_id,
       created_at: state.created_at,
+      protocol_mode: state.protocol_mode || null,
+      trial_profile: state.trial_profile || null,
+      size_slug: state.plan && state.plan.size ? state.plan.size.slug : null,
+      hourly_price_usd:
+        state.plan && state.plan.size ? state.plan.size.price_hourly_usd : null,
       droplet_id: state.droplet_id,
       droplet_name: state.droplet_name,
       droplet_create_attempted_at: state.droplet_create_attempted_at || null,
@@ -1706,6 +1992,7 @@ async function status() {
       cleanup_complete: Boolean(state.droplet_destroyed_at && state.ssh_key_deleted_at),
       billing_deadline_at: state.billing_deadline_at || null,
       remote_status: state.remote_status || null,
+      trial_summary: state.trial_summary || null,
       remote,
     });
   }
@@ -1730,6 +2017,7 @@ async function destroy(runId) {
 }
 
 async function selfTest(config) {
+  assert.equal(config.publication.mode, "acceptance");
   assert.equal(config.measurement.run_order.length, 8);
   assert.deepEqual(
     config.measurement.run_order.map((entry) => entry.variant),
@@ -1756,13 +2044,59 @@ async function selfTest(config) {
       regions: ["syd1"],
       price_hourly: 0.0357,
     },
+    {
+      slug: "s-2vcpu-4gb-intel",
+      description: "Basic Intel",
+      vcpus: 2,
+      memory: 4096,
+      disk: 80,
+      available: true,
+      regions: ["syd1"],
+      price_hourly: 0.04167,
+    },
   ];
   assert.equal(selectSize(fixture, config).slug, "c-2");
+  const basicTrial = loadConfig(TRIAL_CONFIGS["basic-2c4g"]);
+  const premiumTrial = loadConfig(TRIAL_CONFIGS["premium-intel-2c4g"]);
+  for (const trialConfig of [basicTrial, premiumTrial]) {
+    assert.equal(trialConfig.publication.mode, "diagnostic");
+    for (const field of ["source", "measurement", "qualification", "host_gate"]) {
+      assert.deepEqual(trialConfig[field], config[field]);
+    }
+    assert.equal(trialConfig.provider.context, config.provider.context);
+    assert.equal(trialConfig.provider.region, config.provider.region);
+    assert.equal(trialConfig.provider.image_slug, config.provider.image_slug);
+    assert.equal(trialConfig.publication.required_verdict, config.publication.required_verdict);
+    assert.equal(trialConfig.publication.final_measurements, config.publication.final_measurements);
+  }
+  assert.equal(selectSize(fixture, basicTrial).slug, "s-2vcpu-4gb");
+  assert.equal(selectSize(fixture, premiumTrial).slug, "s-2vcpu-4gb-intel");
+  const plannedShape = {
+    region: "syd1",
+    image: { id: 123 },
+    size: { slug: "s-2vcpu-4gb", vcpus: 2, memory_mib: 4096, disk_gib: 80 },
+  };
+  const actualShape = {
+    region: { slug: "syd1" },
+    image: { id: 123 },
+    size_slug: "s-2vcpu-4gb",
+    vcpus: 2,
+    memory: 4096,
+    disk: 80,
+  };
+  verifyDropletMatchesPlan(actualShape, plannedShape);
+  assert.throws(() => verifyDropletMatchesPlan({ ...actualShape, disk: 81 }, plannedShape));
   assert.throws(() => selectSize([...fixture, { ...fixture[0], slug: "ambiguous" }], config));
   assert.throws(() =>
     validateConfig({
       ...config,
       source: { ...config.source, candidate_commit: config.source.baseline_commit },
+    }),
+  );
+  assert.throws(() =>
+    validateConfig({
+      ...config,
+      publication: { ...config.publication, mode: "unsafe" },
     }),
   );
   const runner = await run("node", [REMOTE_RUNNER, "self-test"]);
@@ -1775,6 +2109,9 @@ function usage() {
   node tools/run-digitalocean-benchmark.js auth
   node tools/run-digitalocean-benchmark.js plan
   node tools/run-digitalocean-benchmark.js bench
+  node tools/run-digitalocean-benchmark.js trial-plan PROFILE
+  node tools/run-digitalocean-benchmark.js trial PROFILE
+  node tools/run-digitalocean-benchmark.js trial-matrix
   node tools/run-digitalocean-benchmark.js status
   node tools/run-digitalocean-benchmark.js destroy [RUN-ID]
   node tools/run-digitalocean-benchmark.js unlock
@@ -1794,6 +2131,22 @@ async function main() {
   }
   if (command === "destroy") {
     await destroy(process.argv[3] || "");
+    return;
+  }
+  if (command === "trial-plan") {
+    const configFile = trialConfigPath(process.argv[3] || "");
+    const config = loadConfig(configFile);
+    await buildPlan(config, { configFile });
+    return;
+  }
+  if (command === "trial") {
+    const summary = await trial(process.argv[3] || "");
+    if (!summary.eligible_for_acceptance_profile) process.exitCode = 2;
+    return;
+  }
+  if (command === "trial-matrix") {
+    const result = await trialMatrix();
+    if (!result.recommendation) process.exitCode = 2;
     return;
   }
   const config = loadConfig();

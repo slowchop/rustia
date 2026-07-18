@@ -232,6 +232,35 @@ priced, or alternate-region VM:
 just bench-do-plan
 ```
 
+When dedicated CPU is unavailable or its higher rate may not repay itself, two
+tracked diagnostic profiles compare the only useful shared-CPU alternatives:
+regular Basic and Premium Intel, both with 2 vCPUs and 4 GiB of RAM. The
+read-only plans and billable trials are reproducible by profile name:
+
+```bash
+just bench-do-trial-plan basic-2c4g
+just bench-do-trial-plan premium-intel-2c4g
+just bench-do-trial basic-2c4g
+just bench-do-trials
+```
+
+`bench-do-trials` intentionally runs the two profiles sequentially so their
+cold setup/build cost can be compared; the two committed 90-minute ceilings
+sum to $0.116070 at current rates. Each trial builds the
+same exact baseline and candidate, runs only the three candidate qualification
+legs, records CPU identity, build time, stability spread, billable lifetime,
+conservative charge upper bound, and projected full-acceptance charge, then
+confirms destruction. A failed qualification is reported as ineligible, and
+the matrix fails if neither profile qualifies. Diagnostic mode is validated
+independently on the guest and coordinator: it cannot run the
+eight-leg comparison, append history, or promote evidence into the repository.
+The 2-GiB, extra-disk, and 4-vCPU shared shapes are excluded because their
+sub-cent savings or extra parallel build capacity do not repay the added OOM
+risk or hourly rate during the protocol's fixed cooldown windows.
+These trials screen one discarded shared host per profile; the eventual
+acceptance command provisions a new host and repeats qualification rather than
+treating a trial as a guarantee about future shared-CPU placement.
+
 The all-in-one billable command creates one uniquely named Droplet, records its
 numeric ID before proceeding, transfers a local Git bundle (so neither frozen
 commit needs to be pushed), keeps equal-length source roots alive for the
@@ -248,11 +277,12 @@ from both account lists, then sends no-op delete-authority probes for that ID.
 A missing Droplet or SSH-key delete scope therefore fails before provisioning
 instead of being discovered during teardown.
 
-The committed 120-minute billable-lifecycle limit starts before Droplet
-creation, bounds every remote phase, and reserves the final eight minutes for
-cleanup. The plan prints the corresponding price-ceiling estimate. A provider
-or API outage can still delay confirmed deletion, so cleanup failure remains a
-hard command error rather than being reported as a stopped bill.
+The acceptance protocol has a committed 120-minute billable-lifecycle limit;
+diagnostic profiles use 90 minutes. The limit starts before Droplet creation,
+bounds every remote phase, and reserves the final eight minutes for cleanup.
+The plan prints the corresponding price-ceiling estimate. A provider or API
+outage can still delay confirmed deletion, so cleanup failure remains a hard
+command error rather than being reported as a stopped bill.
 
 Qualification sidecars never enter the accepted A/B analysis. Every accepted
 leg runs on CPU 1 after the committed idle window and cooldown; any declared

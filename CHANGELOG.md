@@ -90,6 +90,10 @@ Current unpublished workspace version: `0.0.1`.
   publishes three actual final-binary rows only after the analyzer accepts the
   result. Per-run state supports exact-ID crash cleanup, and the Droplet plus
   ephemeral account SSH key are confirmed absent on every normal exit.
+- Qualification-only `just bench-do-trials` profiles can compare regular and
+  Premium Intel shared Droplets by build time, stability, conservative charge
+  upper bound, and projected full-run charge; diagnostic mode cannot run or
+  promote publication.
 - A local fresh-state ABBA against `dac4ec2` found no remaining material
   regression above 5% after restoring the inline GC-debt hot path and separating
   ordinary calls from FASTCALL cache admission. Stdlib/string improved

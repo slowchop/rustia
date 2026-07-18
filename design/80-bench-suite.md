@@ -87,8 +87,10 @@ public speed claim. `tools/check-workflows.js` guards hosted/self-hosted separat
 publication, and generated-artifact policy.
 
 The exact dense follow-up now has a provider-specific but protocol-preserving
-ephemeral runner. `just bench-do` validates a dedicated 2-vCPU DigitalOcean
-shape and price ceiling, transfers a local Git bundle, builds the frozen
+ephemeral runner. Qualification-only `just bench-do-trials` compares regular
+and Premium Intel 2-vCPU/4-GiB shared shapes without running comparison or
+publication. `just bench-do` validates the selected DigitalOcean shape and
+price ceiling, transfers a local Git bundle, builds the frozen
 baseline/candidate with the documented candidate-harness overlay, qualifies
 and CPU-pins the Linux guest, runs the exact eight legs, and conditionally
 publishes the three final rows. It records numeric resource ownership for

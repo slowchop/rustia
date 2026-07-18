@@ -17,7 +17,7 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 82,
+      "file_count": 84,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
@@ -31,6 +31,8 @@
         "STANDALONE.md",
         "analyze-fixed-samples.js",
         "cloud/digitalocean-dense-ed65077.json",
+        "cloud/digitalocean-trial-basic-2c4g.json",
+        "cloud/digitalocean-trial-premium-intel-2c4g.json",
         "current-results.html",
         "current-results.json",
         "history/.gitkeep",
