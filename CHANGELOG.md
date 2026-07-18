@@ -82,6 +82,14 @@ Current unpublished workspace version: `0.0.1`.
   summaries, then emits deterministic pooled and hierarchical bootstrap JSON
   with a conservative-envelope verdict and explicit material-regression
   threshold; its self-test is part of benchmark preflight.
+- A reproducible `just bench-do` workflow now owns the frozen DigitalOcean
+  benchmark lifecycle: it validates the current dedicated-CPU catalog without
+  silently changing plans, transfers the exact local Git objects, builds the
+  baseline with the byte-identical candidate harness overlay, qualifies and
+  CPU-pins a quiet Linux host, runs the predeclared eight-leg comparison, and
+  publishes three actual final-binary rows only after the analyzer accepts the
+  result. Per-run state supports exact-ID crash cleanup, and the Droplet plus
+  ephemeral account SSH key are confirmed absent on every normal exit.
 - A local fresh-state ABBA against `dac4ec2` found no remaining material
   regression above 5% after restoring the inline GC-debt hot path and separating
   ordinary calls from FASTCALL cache admission. Stdlib/string improved

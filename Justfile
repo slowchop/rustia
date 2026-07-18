@@ -40,6 +40,7 @@ check-workflows:
 
 check-benchmark-results:
     node bench/analyze-fixed-samples.js --self-test
+    node tools/run-digitalocean-benchmark.js self-test
     node tools/check-benchmark-results.js
     node tools/check-wasm-gate-results.js
     node bench/render-current-results.js --check
@@ -69,6 +70,30 @@ benchmarks:
     cargo run -p script-bench-harness --release --features all-engines -- --history bench/history/runs.jsonl --commit $(git rev-parse --short HEAD)
     cargo run -p script-bench-harness --release --no-default-features --features mlua-lua54 -- --engines mlua-lua54 --history bench/history/runs.jsonl --commit $(git rev-parse --short HEAD)
     just gen-current-results
+
+# One-time private-prompt DigitalOcean authentication; never pass the token as an argument.
+bench-do-auth:
+    node tools/run-digitalocean-benchmark.js auth
+
+# Read-only validation of the frozen source identities and current DO catalog.
+bench-do-plan:
+    node tools/run-digitalocean-benchmark.js plan
+
+# Run the frozen comparison on one ephemeral dedicated-CPU Droplet and confirm destruction.
+bench-do:
+    node tools/run-digitalocean-benchmark.js bench
+
+# Inspect locally owned run state and its corresponding DigitalOcean resource.
+bench-do-status:
+    node tools/run-digitalocean-benchmark.js status
+
+# Remove only a coordinator lock whose recorded local process no longer exists.
+bench-do-unlock:
+    node tools/run-digitalocean-benchmark.js unlock
+
+# Idempotently clean up an interrupted run; pass an id when more than one remains.
+bench-do-destroy run_id="":
+    node tools/run-digitalocean-benchmark.js destroy "{{ run_id }}"
 
 gen-current-results:
     cargo run -p script-bench-harness -- --refresh-results

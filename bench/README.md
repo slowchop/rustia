@@ -191,6 +191,98 @@ Record the following provenance beside any published interpretation:
 - every leg median and spread, the comparison method and confidence interval,
   and the material-regression threshold chosen before inspecting the result.
 
+### Reproducible ephemeral Linux host
+
+The frozen dense-table follow-up for baseline
+`dac4ec2295f77587c79f04e4ff0a09cb99912f96` and candidate
+`ed65077c2e779ec6a641b8ca2f8c8258b2508a2d` is encoded in
+[`cloud/digitalocean-dense-ed65077.json`](cloud/digitalocean-dense-ed65077.json).
+It predeclares the source hashes, fixed work, repetitions, eight-leg order,
+bootstrap interpretation, candidate-only stability qualification, Linux host
+gate, CPU pin, cooldown, and conditional three-run publication rule.
+
+DigitalOcean authentication is a one-time interactive operation. The token is
+entered at `doctl`'s prompt and must never be passed as a recipe argument,
+environment variable, repository file, or chat message:
+
+```bash
+just bench-do-auth
+```
+
+When authenticating from another computer, run the prompt on the benchmark
+coordinator host over a TTY-preserving SSH session:
+
+```bash
+ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-do-auth'
+```
+
+The short-lived custom token needs only `droplet:create`, `droplet:read`,
+`droplet:delete`, `regions:read`, `sizes:read`, `actions:read`, `image:read`,
+`ssh_key:create`, `ssh_key:read`, and `ssh_key:delete`. The last three allow the
+workflow to import and remove a unique per-run ED25519 key instead of depending
+on a persistent account key.
+
+The read-only plan resolves the mutable Ubuntu image slug to a numeric image ID
+and requires exactly one currently available 2-vCPU/4-GiB/25-GiB
+`CPU-Optimized` size in `syd1` at or below the committed hourly-price ceiling.
+It fails rather than silently choosing a shared, premium, larger, differently
+priced, or alternate-region VM:
+
+```bash
+just bench-do-plan
+```
+
+The all-in-one billable command creates one uniquely named Droplet, records its
+numeric ID before proceeding, transfers a local Git bundle (so neither frozen
+commit needs to be pushed), keeps equal-length source roots alive for the
+runtime workload lookup, overlays only the candidate `bench/src/main.rs` onto
+the baseline, builds both binaries once with the pinned toolchain, and fetches
+the result archive before destroying the VM:
+
+```bash
+just bench-do
+```
+
+Before creating anything billable, it confirms a positive sentinel ID is absent
+from both account lists, then sends no-op delete-authority probes for that ID.
+A missing Droplet or SSH-key delete scope therefore fails before provisioning
+instead of being discovered during teardown.
+
+The committed 120-minute billable-lifecycle limit starts before Droplet
+creation, bounds every remote phase, and reserves the final eight minutes for
+cleanup. The plan prints the corresponding price-ceiling estimate. A provider
+or API outage can still delay confirmed deletion, so cleanup failure remains a
+hard command error rather than being reported as a stopped bill.
+
+Qualification sidecars never enter the accepted A/B analysis. Every accepted
+leg runs on CPU 1 after the committed idle window and cooldown; any declared
+contaminating-process or steal violation discards the whole eight-leg block. Only
+`material_regression_excluded` permits the same frozen candidate binary to
+append three real rows. An accepted run adds the evidence directory and exact
+append-only history locally, regenerates the history-derived reports, and runs
+the benchmark artifact checks. An inconclusive, regressing, unstable, or
+contaminated run leaves diagnostics under `.rustia-benchmark-state/` and does
+not alter public history.
+
+The coordinator confirms destruction through a successful API list, not from
+a failed request or power-off state. Ambiguous create/import responses get a
+bounded unique-name visibility window before absence can be recorded, and an
+exclusive local coordinator lock rejects accidental simultaneous billable
+runs. The ownership journal and recovery artifacts live under the ignored
+`.rustia-benchmark-state/` tree, outside Cargo's disposable `target/` cache, so
+`cargo clean` cannot erase them during a run. They support inspection and
+exact-ID recovery after a client crash:
+
+```bash
+just bench-do-status
+just bench-do-unlock                # only after an ungraceful coordinator crash
+just bench-do-destroy               # when exactly one owned run remains
+just bench-do-destroy RUN_ID        # choose an exact owned run
+```
+
+The resulting evidence is Linux/x86_64-specific. It does not replace a
+separate Apple-Silicon/macOS measurement of the earlier M4 observation.
+
 The append-only JSONL remains the summary source of truth. Raw sidecars and a
 provenance manifest live under [`history/evidence/`](history/evidence/) and must
 not change that public schema.

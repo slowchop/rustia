@@ -31,3 +31,9 @@ analyzer's nominal-coverage caveat retained in the output.
 not add fields to it, and a pooled or hand-computed result must never be inserted
 as a history row. The `final-dense-*` rows must come from the exact candidate
 binary and match the actual summaries appended by those three invocations.
+
+Provider-backed runs may additionally retain `host.json`, `provider.json`,
+`protocol.json`, `gate.jsonl`, `qualification.json`, qualification-only
+sidecars, and a remote log. Those files are provenance around the same fixed
+sample schema; qualification samples are never inputs to `analysis.json` or
+rows in `../runs.jsonl`.

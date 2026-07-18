@@ -1,5 +1,6 @@
 target/
 **/target/
+.rustia-benchmark-state/
 /spikes/**/Cargo.lock
 .fastembed_cache/
 *.profraw

@@ -83,7 +83,11 @@ public rustia project; actual grabby integration work is explicitly out of scope
   analysis showed that the dense workload does not execute the new constant-key/method opcodes; a corrective
   pass now removes cross-cutting fuel-classification, numeric-key, and numeric-ordering tolls while preserving
   fuel, validation, GC cadence, key semantics, and string canonicalization. That pass remains an unmeasured
-  hypothesis. Both results remain development evidence, not a blanket release speed claim; details are in
+  hypothesis. The frozen Linux follow-up is automated by `just bench-do`: it provisions one ephemeral
+  dedicated-CPU DigitalOcean VM, transfers the exact unpublished Git objects, applies the documented
+  byte-identical harness overlay, qualifies the host, runs the eight-leg comparison, conditionally appends three
+  actual final-binary history rows, retrieves the evidence, and confirms VM destruction. Both existing results
+  remain development evidence, not a blanket release speed claim; details are in
   [`design/56-performance-research.md`](design/56-performance-research.md).
 - Major remaining gates are engine hardening, long-run benchmark history, public benchmark publication, and release
   packaging. Semver policy is tracked in [`design/91-semver-policy.md`](design/91-semver-policy.md), release

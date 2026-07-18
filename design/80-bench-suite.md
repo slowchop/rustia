@@ -1,6 +1,6 @@
 # rustia — continuous perf-benchmark suite + CI (design)
 
-> **Status: [IMPLEMENTED — measurements ongoing] (updated 2026-07-17).** Scoped by the `bench-scoping` agent (clone+read of
+> **Status: [IMPLEMENTED — measurements ongoing] (updated 2026-07-18).** Scoped by the `bench-scoping` agent (clone+read of
 > `khvzak/script-bench-rs`, the 11-workload seed in `spikes/bench-suite/`, and the 2025–26 tracker/wasm-shell
 > tooling) + self-hosted benchmark-label constraints + privacy lean. Operationalises principle #3 ("measure,
 > don't assert — the bench suite is a CI gate"). See [`CURRENT.md`](CURRENT.md).
@@ -85,6 +85,16 @@ classification plus numeric table/order paths. Exact-final-commit measurement an
 pending and are tracked in [`56-performance-research.md`](56-performance-research.md), so neither diagnostic is a
 public speed claim. `tools/check-workflows.js` guards hosted/self-hosted separation, triggers, exact runner labels, data-repo
 publication, and generated-artifact policy.
+
+The exact dense follow-up now has a provider-specific but protocol-preserving
+ephemeral runner. `just bench-do` validates a dedicated 2-vCPU DigitalOcean
+shape and price ceiling, transfers a local Git bundle, builds the frozen
+baseline/candidate with the documented candidate-harness overlay, qualifies
+and CPU-pins the Linux guest, runs the exact eight legs, and conditionally
+publishes the three final rows. It records numeric resource ownership for
+idempotent cleanup and confirms Droplet deletion before considering the command
+complete. Live cloud work remains outside release preflight; only dependency-free
+coordinator/runner self-tests are part of the offline benchmark artifact gate.
 
 The three-independent-run fixed-N rule in `bench/README.md` is the acceptance protocol for this small-regression
 milestone. Routine main-push and nightly automation continues to append one calibrated matrix run per workflow;
