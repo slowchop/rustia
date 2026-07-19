@@ -222,39 +222,76 @@ function cpuAllowedListFromStatus(text) {
   return match[1];
 }
 
-function processThreadAffinities(pid) {
+function processThreadIds(pid) {
   const taskDirectory = `/proc/${pid}/task`;
-  const records = [];
-  for (const entry of fs.readdirSync(taskDirectory, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !/^[0-9]+$/.test(entry.name)) continue;
-    const tid = Number(entry.name);
-    try {
-      const status = fs.readFileSync(path.join(taskDirectory, entry.name, "status"), "utf8");
-      records.push({ tid, cpus_allowed_list: cpuAllowedListFromStatus(status) });
-    } catch (error) {
-      if (error && error.code === "ENOENT") continue;
-      throw error;
+  return fs
+    .readdirSync(taskDirectory, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && /^[0-9]+$/.test(entry.name))
+    .map((entry) => Number(entry.name))
+    .sort((left, right) => left - right);
+}
+
+function sameThreadIds(left, right) {
+  return left.length === right.length && left.every((tid, index) => tid === right[index]);
+}
+
+function stableProcessThreadAffinities(pid, maximumAttempts = 5) {
+  const taskDirectory = `/proc/${pid}/task`;
+  for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+    const before = processThreadIds(pid);
+    if (before.length === 0) continue;
+    const records = [];
+    let vanished = false;
+    for (const tid of before) {
+      try {
+        const status = fs.readFileSync(path.join(taskDirectory, String(tid), "status"), "utf8");
+        records.push({ tid, cpus_allowed_list: cpuAllowedListFromStatus(status) });
+      } catch (error) {
+        if (error && error.code === "ENOENT") {
+          vanished = true;
+          break;
+        }
+        throw error;
+      }
     }
+    const after = processThreadIds(pid);
+    if (!vanished && sameThreadIds(before, after)) return records;
   }
-  return records.sort((left, right) => left.tid - right.tid);
+  return null;
+}
+
+function mismatchedThreadAffinities(records, cpu) {
+  return records.filter((record) => record.cpus_allowed_list !== String(cpu));
 }
 
 function pinControllerThreads(cpu) {
-  const pin = run("taskset", ["-apc", String(cpu), String(process.pid)], {
-    capture: false,
-    allowFailure: true,
-  });
-  const affinities = processThreadAffinities(process.pid);
-  if (affinities.length === 0) fail("controller affinity verification found no surviving threads");
-  const mismatched = affinities.filter((record) => record.cpus_allowed_list !== String(cpu));
-  if (mismatched.length > 0) {
-    const detail = mismatched
-      .map((record) => `${record.tid}:${record.cpus_allowed_list}`)
-      .join(", ");
-    fail(`controller affinity verification failed after taskset status ${pin.status}: ${detail}`);
+  let lastPin = null;
+  let lastAffinities = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    lastPin = run("taskset", ["-apc", String(cpu), String(process.pid)], {
+      allowFailure: true,
+    });
+    lastAffinities = stableProcessThreadAffinities(process.pid);
+    if (lastAffinities === null) continue;
+    const mismatched = mismatchedThreadAffinities(lastAffinities, cpu);
+    if (mismatched.length > 0) continue;
+    const transient = lastPin.status === 0 ? "" : ` after taskset status ${lastPin.status}`;
+    log(
+      `verified stable set of ${lastAffinities.length} controller threads on CPU ${cpu}${transient}`,
+    );
+    return;
   }
-  const transient = pin.status === 0 ? "" : ` after taskset status ${pin.status}`;
-  log(`verified ${affinities.length} surviving controller threads on CPU ${cpu}${transient}`);
+  const affinityDetail =
+    lastAffinities === null
+      ? "no stable nonempty thread snapshot"
+      : mismatchedThreadAffinities(lastAffinities, cpu)
+          .map((record) => `${record.tid}:${record.cpus_allowed_list}`)
+          .join(", ");
+  const tasksetDetail = lastPin && lastPin.stderr.trim() ? `: ${lastPin.stderr.trim()}` : "";
+  fail(
+    `controller affinity verification failed after taskset status ${lastPin?.status}: ` +
+      `${affinityDetail}${tasksetDetail}`,
+  );
 }
 
 function contaminatingProcesses(excludedPids = new Set()) {
@@ -1156,6 +1193,18 @@ function selfTest() {
   assert.equal(cpuAllowedListFromStatus("Name:\tnode\nCpus_allowed_list:\t0\n"), "0");
   assert.equal(cpuAllowedListFromStatus("Cpus_allowed_list:\t2-3\n"), "2-3");
   assert.throws(() => cpuAllowedListFromStatus("Name:\tnode\n"));
+  assert.equal(sameThreadIds([1, 2, 8], [1, 2, 8]), true);
+  assert.equal(sameThreadIds([1, 2], [1, 3]), false);
+  assert.deepEqual(
+    mismatchedThreadAffinities(
+      [
+        { tid: 1, cpus_allowed_list: "0" },
+        { tid: 2, cpus_allowed_list: "0-1" },
+      ],
+      0,
+    ),
+    [{ tid: 2, cpus_allowed_list: "0-1" }],
+  );
   assert.equal(new Set(PACKAGE_ACTIVITY_UNITS).size, PACKAGE_ACTIVITY_UNITS.length);
   for (const unit of ["unattended-upgrades.service", "packagekit.service"]) {
     assert.equal(PACKAGE_ACTIVITY_UNITS.includes(unit), true);
