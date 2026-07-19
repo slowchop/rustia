@@ -68,7 +68,8 @@ function validateConfig(config) {
   if (
     config.schema !== "rustia.digitalocean-fixed-benchmark.v2" &&
     config.schema !== "rustia.linode-fixed-benchmark.v1" &&
-    config.schema !== "rustia.vultr-fixed-benchmark.v1"
+    config.schema !== "rustia.vultr-fixed-benchmark.v1" &&
+    config.schema !== "rustia.scaleway-fixed-benchmark.v1"
   ) {
     fail("unsupported cloud benchmark config schema");
   }
@@ -187,61 +188,101 @@ function expandCpuList(text, description) {
   return [...cpus].sort((left, right) => left - right);
 }
 
-function verifyVultrBareMetalHost(config, provider) {
-  if (config.schema !== "rustia.vultr-fixed-benchmark.v1") return null;
+function verifyBareMetalHost(config, provider) {
   requireObject(provider, "provider metadata");
-  const metadataChecks = [
-    ["provider", provider.provider, "vultr"],
-    ["resource type", provider.resource_type, "bare_metal"],
-    ["plan", provider.size_slug, config.provider.size.id],
-    ["region", provider.region, config.provider.region],
-    ["OS ID", provider.os_id, config.provider.os.id],
-    ["logical CPU count", provider.vcpus, config.provider.size.vcpus],
-  ];
-  for (const [field, actual, expected] of metadataChecks) {
+  let profile;
+  if (config.schema === "rustia.vultr-fixed-benchmark.v1") {
+    profile = {
+      label: "Vultr",
+      expectedCpuModel: config.provider.size.cpu_model,
+      expectedLogicalCpus: config.provider.size.vcpus,
+      expectedPhysicalCpus: config.provider.size.physical_cpus,
+      expectedPhysicalCores: config.provider.size.cpu_cores,
+      metadataChecks: [
+        ["provider", provider.provider, "vultr"],
+        ["resource type", provider.resource_type, "bare_metal"],
+        ["plan", provider.size_slug, config.provider.size.id],
+        ["region", provider.region, config.provider.region],
+        ["OS ID", provider.os_id, config.provider.os.id],
+        ["logical CPU count", provider.vcpus, config.provider.size.vcpus],
+      ],
+    };
+  } else if (config.schema === "rustia.scaleway-fixed-benchmark.v1") {
+    profile = {
+      label: "Scaleway",
+      expectedCpuModel: config.provider.size.host_cpu_model,
+      expectedLogicalCpus: config.provider.size.cpu_threads,
+      expectedPhysicalCpus: config.provider.size.physical_cpus,
+      expectedPhysicalCores: config.provider.size.cpu_cores,
+      metadataChecks: [
+        ["provider", provider.provider, "scaleway"],
+        ["resource type", provider.resource_type, "elastic_metal"],
+        ["offer", provider.offer_name, config.provider.size.name],
+        ["logical CPU count", provider.vcpus, config.provider.size.cpu_threads],
+      ],
+    };
+    if (!config.provider.zones.includes(provider.zone)) {
+      fail(
+        `Scaleway Elastic Metal provider zone was ${JSON.stringify(provider.zone)}, ` +
+          `expected one of ${config.provider.zones.join(", ")}`,
+      );
+    }
+    if (provider.os_name !== config.provider.os.name || provider.os_version !== config.provider.os.version) {
+      fail(
+        `Scaleway Elastic Metal OS was ${JSON.stringify(`${provider.os_name} ${provider.os_version}`)}, ` +
+          `expected ${config.provider.os.name} ${config.provider.os.version}`,
+      );
+    }
+  } else {
+    return null;
+  }
+  for (const [field, actual, expected] of profile.metadataChecks) {
     if (String(actual) !== String(expected)) {
-      fail(`Vultr bare-metal provider ${field} was ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`);
+      fail(
+        `${profile.label} bare-metal provider ${field} was ${JSON.stringify(actual)}, ` +
+          `expected ${JSON.stringify(expected)}`,
+      );
     }
   }
 
   const detected = run("systemd-detect-virt", [], { allowFailure: true });
   if (detected.status !== 1 || detected.stdout.trim() !== "none") {
     fail(
-      `Vultr resource failed bare-metal virtualization attestation: systemd-detect-virt ` +
+      `${profile.label} resource failed bare-metal virtualization attestation: systemd-detect-virt ` +
         `reported ${JSON.stringify(detected.stdout.trim())} with status ${detected.status}`,
     );
   }
   const cpuInfo = fs.readFileSync("/proc/cpuinfo", "utf8");
   if (/^flags\s*:.*\bhypervisor\b/m.test(cpuInfo)) {
-    fail("Vultr resource failed bare-metal attestation: /proc/cpuinfo exposes the hypervisor flag");
+    fail(`${profile.label} resource failed bare-metal attestation: /proc/cpuinfo exposes the hypervisor flag`);
   }
   const cpuModels = [...cpuInfo.matchAll(/^model name\s*:\s*(.+)$/gm)].map((match) => match[1].trim());
   if (
-    cpuModels.length !== config.provider.size.vcpus ||
+    cpuModels.length !== profile.expectedLogicalCpus ||
     new Set(cpuModels).size !== 1 ||
-    !cpuModels[0].includes(config.provider.size.cpu_model)
+    !cpuModels[0].includes(profile.expectedCpuModel)
   ) {
     fail(
-      `Vultr bare-metal CPU model rows did not exactly identify one ${config.provider.size.cpu_model} ` +
-        `across ${config.provider.size.vcpus} logical CPUs`,
+      `${profile.label} bare-metal CPU model rows did not exactly identify one ${profile.expectedCpuModel} ` +
+        `across ${profile.expectedLogicalCpus} logical CPUs`,
     );
   }
   const hypervisorType = "/sys/hypervisor/type";
   if (fs.existsSync(hypervisorType) && fs.readFileSync(hypervisorType, "utf8").trim() !== "") {
-    fail("Vultr resource failed bare-metal attestation: /sys/hypervisor/type is populated");
+    fail(`${profile.label} resource failed bare-metal attestation: /sys/hypervisor/type is populated`);
   }
 
   const online = expandCpuList(fs.readFileSync("/sys/devices/system/cpu/online", "utf8"), "online CPU list");
-  const expectedOnline = Array.from({ length: config.provider.size.vcpus }, (_, cpu) => cpu);
+  const expectedOnline = Array.from({ length: profile.expectedLogicalCpus }, (_, cpu) => cpu);
   if (JSON.stringify(online) !== JSON.stringify(expectedOnline)) {
-    fail(`Vultr bare metal exposed CPUs ${online.join(",")}, expected ${expectedOnline.join(",")}`);
+    fail(`${profile.label} bare metal exposed CPUs ${online.join(",")}, expected ${expectedOnline.join(",")}`);
   }
   const sockets = new Set();
   const cores = new Set();
   const topology = {};
-  const expectedSiblings = config.provider.size.cpu_threads / config.provider.size.cpu_cores;
+  const expectedSiblings = profile.expectedLogicalCpus / profile.expectedPhysicalCores;
   if (!Number.isSafeInteger(expectedSiblings) || expectedSiblings < 1) {
-    fail("configured Vultr CPU thread/core ratio is invalid");
+    fail(`configured ${profile.label} CPU thread/core ratio is invalid`);
   }
   for (const cpu of online) {
     const root = `/sys/devices/system/cpu/cpu${cpu}/topology`;
@@ -259,10 +300,10 @@ function verifyVultrBareMetalHost(config, provider) {
     cores.add(`${socket}:${core}`);
     topology[`cpu${cpu}`] = { socket, core, siblings };
   }
-  if (sockets.size !== config.provider.size.physical_cpus || cores.size !== config.provider.size.cpu_cores) {
+  if (sockets.size !== profile.expectedPhysicalCpus || cores.size !== profile.expectedPhysicalCores) {
     fail(
-      `Vultr bare-metal topology exposed ${sockets.size} socket(s) and ${cores.size} core(s), expected ` +
-        `${config.provider.size.physical_cpus} and ${config.provider.size.cpu_cores}`,
+      `${profile.label} bare-metal topology exposed ${sockets.size} socket(s) and ${cores.size} core(s), expected ` +
+        `${profile.expectedPhysicalCpus} and ${profile.expectedPhysicalCores}`,
     );
   }
   for (const [name, entry] of Object.entries(topology)) {
@@ -756,7 +797,10 @@ function collectHost(config, build) {
   const readIfPresent = (file) => (fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim() : "not_exposed");
   const governorRoot = "/sys/devices/system/cpu";
   const governors = {};
-  for (let cpu = 0; cpu < config.provider.size.vcpus; cpu += 1) {
+  const logicalCpus = config.schema === "rustia.scaleway-fixed-benchmark.v1"
+    ? config.provider.size.cpu_threads
+    : config.provider.size.vcpus;
+  for (let cpu = 0; cpu < logicalCpus; cpu += 1) {
     governors[`cpu${cpu}`] = readIfPresent(`${governorRoot}/cpu${cpu}/cpufreq/scaling_governor`);
   }
   const cpuInfo = fs.readFileSync("/proc/cpuinfo", "utf8");
@@ -1157,8 +1201,8 @@ async function execute(configFile, providerFile, bundle) {
   const phaseTimings = {};
 
   try {
-    const bareMetalAttestation = verifyVultrBareMetalHost(config, provider);
-    if (bareMetalAttestation) log("Vultr physical-host topology attestation passed");
+    const bareMetalAttestation = verifyBareMetalHost(config, provider);
+    if (bareMetalAttestation) log(`${provider.provider} physical-host topology attestation passed`);
     log("preparing exact source trees and frozen release binaries");
     const buildStarted = Date.now();
     const build = installAndBuild(config, bundle);

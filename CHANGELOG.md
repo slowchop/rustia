@@ -113,6 +113,12 @@ Current unpublished workspace version: `0.0.1`.
   private-prompt token mode `0600`, rejects virtualization, journals ambiguous
   creates, and confirms deletion before promoting evidence or the conditional
   three history rows.
+- A protocol-identical `just bench-scaleway` fallback now targets the exact
+  `EM-A610R-NVMe` Ryzen PRO 3600 Elastic Metal profile after two Vultr orders
+  remained pending through their activation windows. It stores project-scoped
+  credentials mode `0600`, owns a unique server and IAM SSH key per run, pins a
+  separate cloud-init host key, rejects hardware or virtualization drift, and
+  requires both resources to be confirmed absent before evidence promotion.
 - A local fresh-state ABBA against `dac4ec2` found no remaining material
   regression above 5% after restoring the inline GC-debt hot path and separating
   ordinary calls from FASTCALL cache admission. Stdlib/string improved

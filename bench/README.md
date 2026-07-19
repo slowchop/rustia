@@ -200,7 +200,9 @@ The frozen dense-table follow-up for baseline
 and the protocol-identical dedicated-CPU fallback
 [`cloud/linode-dense-ed65077.json`](cloud/linode-dense-ed65077.json), plus the
 actual-bare-metal fallback
-[`cloud/vultr-dense-ed65077.json`](cloud/vultr-dense-ed65077.json).
+[`cloud/vultr-dense-ed65077.json`](cloud/vultr-dense-ed65077.json), and the
+exact-machine Scaleway fallback
+[`cloud/scaleway-dense-ed65077.json`](cloud/scaleway-dense-ed65077.json).
 It predeclares the source hashes, fixed work, repetitions, eight-leg order,
 bootstrap interpretation, candidate-only stability qualification, Linux host
 gate, CPU pin, cooldown, and conditional three-run publication rule.
@@ -405,6 +407,45 @@ just bench-vultr-status
 just bench-vultr-unlock
 just bench-vultr-destroy
 just bench-vultr-destroy RUN_ID
+```
+
+Two Vultr bare-metal orders remained pending through their committed activation
+windows and were deleted without running the benchmark. The next physical-host
+fallback is Scaleway Elastic Metal `EM-A610R-NVMe`: one AMD Ryzen PRO 3600 with
+6 cores/12 threads, 32 GiB ECC DDR4, and two 1 TB NVMe devices. The coordinator
+selects only the frozen Ubuntu 24.04 LTS image and an `available` or `low` stock
+entry in the committed zone order. Its hourly-price ceiling is EUR 0.110 and
+the 110-minute lifecycle has a conservative EUR 0.220 compute ceiling before
+tax while the coordinator and provider API remain reachable, with the final
+eight minutes reserved for cleanup. This is not a provider-side hard cap: a
+coordinator, network, or API outage can extend billing until deletion succeeds.
+
+Create a Scaleway application scoped to the benchmark project with only
+`ElasticMetalFullAccess` and `SSHKeysFullAccess`, then create an API key for that
+application. Enter the project UUID and secret-key half only through the private
+TTY prompt; they are stored mode `0600` under the ignored
+`.rustia-benchmark-state/scaleway/` directory:
+
+```bash
+ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-scaleway-auth'
+ssh ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-scaleway-plan'
+ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-scaleway'
+```
+
+The Scaleway coordinator creates a unique per-run IAM SSH key and embeds a
+separate pinned host key through cloud-init. It journals both resources before
+creation, reconciles ambiguous responses by exact ownership fields, verifies
+the activated machine is physical and matches the frozen CPU topology, and
+confirms server deletion before deleting the IAM key. Neither accepted evidence
+nor history can be promoted until both resources are confirmed absent.
+
+Scaleway crash recovery remains provider-isolated:
+
+```bash
+just bench-scaleway-status
+just bench-scaleway-unlock
+just bench-scaleway-destroy
+just bench-scaleway-destroy RUN_ID
 ```
 
 The resulting evidence is Linux/x86_64-specific. It does not replace a

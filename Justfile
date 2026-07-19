@@ -43,6 +43,7 @@ check-benchmark-results:
     node tools/run-digitalocean-benchmark.js self-test
     node tools/run-linode-benchmark.js self-test
     node tools/run-vultr-benchmark.js self-test
+    node tools/run-scaleway-benchmark.js self-test
     node tools/check-benchmark-results.js
     node tools/check-wasm-gate-results.js
     node bench/render-current-results.js --check
@@ -156,6 +157,30 @@ bench-vultr-unlock:
 # Idempotently clean up an interrupted run; pass an id when more than one remains.
 bench-vultr-destroy run_id="":
     node tools/run-vultr-benchmark.js destroy "{{ run_id }}"
+
+# One-time private-prompt Scaleway authentication in an isolated ignored state file.
+bench-scaleway-auth:
+    node tools/run-scaleway-benchmark.js auth
+
+# Read-only validation of the frozen source identities, account safety, and Elastic Metal plan.
+bench-scaleway-plan:
+    node tools/run-scaleway-benchmark.js plan
+
+# Run the frozen comparison on one ephemeral Scaleway Elastic Metal server and confirm cleanup.
+bench-scaleway:
+    node tools/run-scaleway-benchmark.js bench
+
+# Inspect locally owned run state and its corresponding Scaleway server and SSH key.
+bench-scaleway-status:
+    node tools/run-scaleway-benchmark.js status
+
+# Remove only a coordinator lock whose recorded local process no longer exists.
+bench-scaleway-unlock:
+    node tools/run-scaleway-benchmark.js unlock
+
+# Idempotently clean up an interrupted run; pass an id when more than one remains.
+bench-scaleway-destroy run_id="":
+    node tools/run-scaleway-benchmark.js destroy "{{ run_id }}"
 
 gen-current-results:
     cargo run -p script-bench-harness -- --refresh-results
