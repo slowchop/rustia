@@ -91,7 +91,7 @@ bench-do-trial profile:
 bench-do-trials:
     node tools/run-digitalocean-benchmark.js trial-matrix
 
-# Run the frozen comparison on one ephemeral dedicated-CPU Droplet and confirm destruction.
+# Run the frozen comparison on one ephemeral Premium Intel Droplet and confirm destruction.
 bench-do:
     node tools/run-digitalocean-benchmark.js bench
 

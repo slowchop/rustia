@@ -5,13 +5,13 @@
     "region": "syd1",
     "image_slug": "ubuntu-24-04-x64",
     "size": {
-      "description": "CPU-Optimized",
+      "description": "Basic Intel",
       "vcpus": 2,
       "memory_mib": 4096,
-      "disk_gib": 25,
-      "max_hourly_price_usd": 0.063
+      "disk_gib": 80,
+      "max_hourly_price_usd": 0.04167
     },
-    "max_runtime_minutes": 120
+    "max_runtime_minutes": 90
   },
   "source": {
     "baseline_commit": "dac4ec2295f77587c79f04e4ff0a09cb99912f96",

@@ -226,19 +226,20 @@ workflow to import and remove a unique per-run ED25519 key instead of depending
 on a persistent account key.
 
 The read-only plan resolves the mutable Ubuntu image slug to a numeric image ID
-and requires exactly one currently available 2-vCPU/4-GiB/25-GiB
-`CPU-Optimized` size in `syd1` at or below the committed hourly-price ceiling.
-It fails rather than silently choosing a shared, premium, larger, differently
-priced, or alternate-region VM:
+and requires exactly one currently available 2-vCPU/4-GiB/80-GiB
+`Basic Intel` size in `syd1` at or below the committed hourly-price ceiling.
+It fails rather than silently choosing a regular Basic, dedicated, larger,
+differently priced, or alternate-region VM:
 
 ```bash
 just bench-do-plan
 ```
 
-When dedicated CPU is unavailable or its higher rate may not repay itself, two
-tracked diagnostic profiles compare the only useful shared-CPU alternatives:
+Two tracked diagnostic profiles compare the useful shared-CPU alternatives:
 regular Basic and Premium Intel, both with 2 vCPUs and 4 GiB of RAM. The
-read-only plans and billable trials are reproducible by profile name:
+acceptance config freezes the qualifying cost-aware matrix winner; rerun the
+read-only plans and billable trials by profile name when price, availability,
+or host consistency needs to be reevaluated:
 
 ```bash
 just bench-do-trial-plan basic-2c4g
@@ -280,12 +281,12 @@ from both account lists, then sends no-op delete-authority probes for that ID.
 A missing Droplet or SSH-key delete scope therefore fails before provisioning
 instead of being discovered during teardown.
 
-The acceptance protocol has a committed 120-minute billable-lifecycle limit;
-diagnostic profiles use 90 minutes. The limit starts before Droplet creation,
-bounds every remote phase, and reserves the final eight minutes for cleanup.
-The plan prints the corresponding price-ceiling estimate. A provider or API
-outage can still delay confirmed deletion, so cleanup failure remains a hard
-command error rather than being reported as a stopped bill.
+The acceptance and diagnostic profiles have a committed 90-minute
+billable-lifecycle limit. The limit starts before Droplet creation, bounds every
+remote phase, and reserves the final eight minutes for cleanup. The plan prints
+the corresponding price-ceiling estimate. A provider or API outage can still
+delay confirmed deletion, so cleanup failure remains a hard command error
+rather than being reported as a stopped bill.
 
 Qualification sidecars never enter the accepted A/B analysis. Every accepted
 leg runs on CPU 1 after the committed idle window and cooldown; any declared

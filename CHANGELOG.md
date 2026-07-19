@@ -83,7 +83,7 @@ Current unpublished workspace version: `0.0.1`.
   with a conservative-envelope verdict and explicit material-regression
   threshold; its self-test is part of benchmark preflight.
 - A reproducible `just bench-do` workflow now owns the frozen DigitalOcean
-  benchmark lifecycle: it validates the current dedicated-CPU catalog without
+  benchmark lifecycle: it validates the frozen Premium Intel VM catalog without
   silently changing plans, transfers the exact local Git objects, builds the
   baseline with the byte-identical candidate harness overlay, qualifies and
   CPU-pins a quiet Linux host, runs the predeclared eight-leg comparison, and

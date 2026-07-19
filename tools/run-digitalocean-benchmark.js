@@ -2071,9 +2071,10 @@ async function selfTest(config) {
       price_hourly: 0.04167,
     },
   ];
-  assert.equal(selectSize(fixture, config).slug, "c-2");
+  assert.equal(selectSize(fixture, config).slug, "s-2vcpu-4gb-intel");
   const basicTrial = loadConfig(TRIAL_CONFIGS["basic-2c4g"]);
   const premiumTrial = loadConfig(TRIAL_CONFIGS["premium-intel-2c4g"]);
+  assert.deepEqual(premiumTrial.provider, config.provider);
   for (const trialConfig of [basicTrial, premiumTrial]) {
     assert.equal(trialConfig.publication.mode, "diagnostic");
     for (const field of ["source", "measurement", "qualification", "host_gate"]) {
@@ -2102,7 +2103,7 @@ async function selfTest(config) {
   };
   verifyDropletMatchesPlan(actualShape, plannedShape);
   assert.throws(() => verifyDropletMatchesPlan({ ...actualShape, disk: 81 }, plannedShape));
-  assert.throws(() => selectSize([...fixture, { ...fixture[0], slug: "ambiguous" }], config));
+  assert.throws(() => selectSize([...fixture, { ...fixture[2], slug: "ambiguous" }], config));
   assert.throws(() =>
     validateConfig({
       ...config,
