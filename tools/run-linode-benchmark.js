@@ -115,7 +115,7 @@ function validateConfig(value) {
     ["schema", "provider", "source", "measurement", "qualification", "host_gate", "publication"],
     "config",
   );
-  if (root.schema !== "rustia.linode-fixed-benchmark.v1") {
+  if (root.schema !== "rustia.linode-fixed-benchmark.v2") {
     fail("unsupported Linode benchmark config schema");
   }
 
@@ -261,6 +261,7 @@ function validateConfig(value) {
       "minimum_idle_percent",
       "maximum_load_1m",
       "maximum_steal_ticks",
+      "maximum_timed_steal_percent",
       "wait_timeout_seconds",
     ],
     "config.host_gate",
@@ -272,6 +273,10 @@ function validateConfig(value) {
   if (gate.minimum_idle_percent > 100) fail("config.host_gate.minimum_idle_percent must be <= 100");
   requireNumber(gate.maximum_load_1m, "config.host_gate.maximum_load_1m", 0);
   requireInteger(gate.maximum_steal_ticks, "config.host_gate.maximum_steal_ticks", 0);
+  requireNumber(gate.maximum_timed_steal_percent, "config.host_gate.maximum_timed_steal_percent", 0);
+  if (gate.maximum_steal_ticks !== 0 || gate.maximum_timed_steal_percent !== 0.1) {
+    fail("Linode v2 steal budget must remain zero while idle and 0.1% during a timed leg");
+  }
   requireInteger(gate.wait_timeout_seconds, "config.host_gate.wait_timeout_seconds", 1);
 
   const publication = requireObject(root.publication, "config.publication");
@@ -2036,6 +2041,12 @@ async function selfTest(config) {
     validateConfig({
       ...config,
       publication: { ...config.publication, mode: "diagnostic" },
+    }),
+  );
+  assert.throws(() =>
+    validateConfig({
+      ...config,
+      host_gate: { ...config.host_gate, maximum_timed_steal_percent: 0.2 },
     }),
   );
 

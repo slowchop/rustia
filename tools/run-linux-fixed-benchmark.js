@@ -63,11 +63,19 @@ function requireInteger(value, location, minimum = 0) {
   return value;
 }
 
+function requireNumber(value, location, minimum = 0) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < minimum) {
+    fail(`${location} must be a finite number >= ${minimum}`);
+  }
+  return value;
+}
+
 function validateConfig(config) {
   requireObject(config, "config");
   if (
     config.schema !== "rustia.digitalocean-fixed-benchmark.v2" &&
     config.schema !== "rustia.linode-fixed-benchmark.v1" &&
+    config.schema !== "rustia.linode-fixed-benchmark.v2" &&
     config.schema !== "rustia.vultr-fixed-benchmark.v1" &&
     config.schema !== "rustia.scaleway-fixed-benchmark.v1"
   ) {
@@ -109,6 +117,20 @@ function validateConfig(config) {
   requireInteger(config.measurement.repetitions, "measurement.repetitions", 1);
   requireInteger(config.qualification.candidate_pilot_legs, "qualification.candidate_pilot_legs", 2);
   requireInteger(config.host_gate.benchmark_cpu, "host_gate.benchmark_cpu", 0);
+  requireInteger(config.host_gate.maximum_steal_ticks, "host_gate.maximum_steal_ticks", 0);
+  if (config.schema === "rustia.linode-fixed-benchmark.v2") {
+    requireNumber(
+      config.host_gate.maximum_timed_steal_percent,
+      "host_gate.maximum_timed_steal_percent",
+      0,
+    );
+    if (
+      config.host_gate.maximum_steal_ticks !== 0 ||
+      config.host_gate.maximum_timed_steal_percent !== 0.1
+    ) {
+      fail("Linode v2 steal budget must remain zero while idle and 0.1% during a timed leg");
+    }
+  }
   if (!["acceptance", "diagnostic"].includes(config.publication.mode)) {
     fail("publication.mode must be acceptance or diagnostic");
   }
@@ -381,6 +403,16 @@ function cpuDelta(before, after) {
   };
 }
 
+function timedStealGatePasses(config, delta) {
+  if (config.schema === "rustia.linode-fixed-benchmark.v2") {
+    return (
+      delta.steal_ticks * 100 <=
+      config.host_gate.maximum_timed_steal_percent * delta.total_ticks
+    );
+  }
+  return delta.steal_ticks <= config.host_gate.maximum_steal_ticks;
+}
+
 function loadOneMinute() {
   const value = Number(fs.readFileSync("/proc/loadavg", "utf8").trim().split(/\s+/)[0]);
   if (!Number.isFinite(value)) fail("invalid /proc/loadavg");
@@ -604,7 +636,7 @@ async function runMonitoredBenchmark({
     passed: false,
   };
   during.passed =
-    during.cpu_delta.steal_ticks <= config.host_gate.maximum_steal_ticks &&
+    timedStealGatePasses(config, during.cpu_delta) &&
     during.contaminants.length === 0;
   appendGateRecord(gateFile, gateRecords, during);
   if (!during.passed) {
@@ -1366,6 +1398,39 @@ function selfTest() {
   assert.equal(delta.idle_ticks, 98);
   assert.equal(delta.idle_percent, 98);
   assert.equal(delta.steal_ticks, 0);
+  const boundedStealConfig = {
+    schema: "rustia.linode-fixed-benchmark.v2",
+    host_gate: {
+      maximum_steal_ticks: 0,
+      maximum_timed_steal_percent: 0.1,
+    },
+  };
+  assert.equal(
+    timedStealGatePasses(boundedStealConfig, { total_ticks: 1000, steal_ticks: 1 }),
+    true,
+  );
+  assert.equal(
+    timedStealGatePasses(boundedStealConfig, { total_ticks: 999, steal_ticks: 1 }),
+    false,
+  );
+  assert.equal(
+    timedStealGatePasses(boundedStealConfig, { total_ticks: 2000, steal_ticks: 2 }),
+    true,
+  );
+  assert.equal(
+    timedStealGatePasses(boundedStealConfig, { total_ticks: 2000, steal_ticks: 3 }),
+    false,
+  );
+  assert.equal(
+    timedStealGatePasses(
+      {
+        schema: "rustia.linode-fixed-benchmark.v1",
+        host_gate: { maximum_steal_ticks: 0, maximum_timed_steal_percent: 0.1 },
+      },
+      { total_ticks: 1000, steal_ticks: 1 },
+    ),
+    false,
+  );
   assert.equal(quantileSorted([1, 2, 3, 4], 0.25), 1.75);
   assert.equal(matchesHistoryPrecision(1.234568, 1.23456789), true);
   assert.equal(matchesHistoryPrecision(1.23457, 1.23456789), false);

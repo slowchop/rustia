@@ -197,7 +197,7 @@ The frozen dense-table follow-up for baseline
 `dac4ec2295f77587c79f04e4ff0a09cb99912f96` and candidate
 `ed65077c2e779ec6a641b8ca2f8c8258b2508a2d` is encoded in
 [`cloud/digitalocean-dense-ed65077.json`](cloud/digitalocean-dense-ed65077.json)
-and the protocol-identical dedicated-CPU fallback
+and the prospectively revised dedicated-CPU protocol
 [`cloud/linode-dense-ed65077.json`](cloud/linode-dense-ed65077.json), plus the
 actual-bare-metal fallback
 [`cloud/vultr-dense-ed65077.json`](cloud/vultr-dense-ed65077.json), and the
@@ -296,7 +296,7 @@ rather than being reported as a stopped bill.
 
 Qualification sidecars never enter the accepted A/B analysis. Every accepted
 leg runs on CPU 1 after the committed idle window and cooldown; any declared
-contaminating-process or steal violation discards the whole eight-leg block. Only
+contaminating-process or out-of-budget steal violation discards the whole eight-leg block. Only
 `material_regression_excluded` permits the same frozen candidate binary to
 append three real rows. An accepted run adds the evidence directory and exact
 append-only history locally, regenerates the history-derived reports, and runs
@@ -366,10 +366,17 @@ just bench-linode-destroy
 just bench-linode-destroy RUN_ID
 ```
 
-The dedicated Linode shape is still a KVM guest. Sydney placements reached
-qualification or the comparison block but eventually recorded a nonzero steal
-tick, so the same frozen gate rejected them without changing benchmark history.
-The next fallback is an actual Vultr `vbm-4c-32gb` bare-metal server in `sgp`,
+The dedicated Linode shape is still a KVM guest. Two Sydney v1 placements
+eventually recorded one steal tick during a timed leg: 1/1,317 ticks (0.075930%)
+and 1/1,320 ticks (0.075758%). The frozen zero-steal rule correctly rejected
+those blocks, and they are not reinterpreted retroactively. The prospectively
+versioned v2 protocol retains zero steal during each pre-leg idle screen and
+allows at most 0.1% steal during a timed leg. The raw gate counters remain in
+the evidence, and the existing zero-contaminant, 3% qualification-spread,
+ABBA/BAAB, bootstrap, verdict, and publication gates are unchanged.
+
+The physical fallback automation remains available. Vultr uses an actual
+`vbm-4c-32gb` bare-metal server in `sgp`,
 running Ubuntu 24.04 x64. Vultr rounds usage up to a one-hour `$0.164` minimum.
 Because physical provisioning can remain `pending` well beyond fifteen
 minutes, the committed 110-minute lifecycle permits a conservative one-hour
