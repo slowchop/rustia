@@ -99,8 +99,9 @@ Current unpublished workspace version: `0.0.1`.
 - A protocol-identical `just bench-linode` fallback now owns an ephemeral
   `g6-dedicated-2` instance after repeated DigitalOcean shared-CPU placements
   violated the zero-steal timed-leg gate. It validates account backup defaults,
-  exact regional type/image metadata, whole-hour cost ceilings, and delete
-  authority before billing; journals ambiguous creates by unique label; passes
+  account-specific region access, exact regional type/image metadata,
+  whole-hour cost ceilings, and delete authority before billing; journals
+  ambiguous creates by unique label; passes
   a local one-run SSH key directly at creation; and forbids evidence promotion
   until the instance is confirmed absent.
 - A local fresh-state ABBA against `dac4ec2` found no remaining material

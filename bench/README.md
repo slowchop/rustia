@@ -339,11 +339,11 @@ ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-linode'
 The Linode coordinator passes a unique local ED25519 public key directly in the
 create request, so no persistent account SSH-key resource or additional token
 scope is needed. Before billing it validates the exact public Ubuntu image,
-dedicated type dimensions, regional availability and price, disabled automatic
-backups, source hashes, clean tracked checkout, and delete authority. It
-journals the unique label before creation, reconciles ambiguous responses only
-by that label, and confirms the numeric instance ID is absent before allowing
-local evidence promotion.
+dedicated type dimensions, public capacity, account-specific region access and
+price, disabled automatic backups, source hashes, clean tracked checkout, and
+delete authority. It journals the unique label before creation, reconciles
+ambiguous responses only by that label, and confirms the numeric instance ID is
+absent before allowing local evidence promotion.
 
 Linode rounds each instance lifetime up to whole hours. The committed 55-minute
 lifecycle therefore has a one-hour `$0.054` compute ceiling at the selected

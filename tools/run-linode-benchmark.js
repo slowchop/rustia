@@ -639,6 +639,30 @@ async function preflightAccount(token, request = apiRequest) {
   return settings;
 }
 
+async function preflightAccountRegion(token, config, request = apiRequest) {
+  const regionId = encodeURIComponent(config.provider.region);
+  const availability = requireApiObject(
+    await request(token, "GET", `/v4/account/availability/${regionId}`),
+    "Linode account region availability",
+  );
+  if (!Array.isArray(availability.available) || !Array.isArray(availability.unavailable)) {
+    fail("Linode account region availability must contain available and unavailable arrays");
+  }
+  const malformed = [...availability.available, ...availability.unavailable].some(
+    (service) => typeof service !== "string" || service.length === 0,
+  );
+  if (malformed) fail("Linode account region availability contains a malformed service name");
+  const available = availability.available.filter((service) => service === "Linodes").length;
+  const unavailable = availability.unavailable.filter((service) => service === "Linodes").length;
+  if (available !== 1 || unavailable !== 0) {
+    fail(
+      `Linode instances are not available to this account in ${config.provider.region}; ` +
+        "select an account-enabled region before billing",
+    );
+  }
+  return availability;
+}
+
 function effectiveTypePrice(type, region) {
   const regional = Array.isArray(type.region_prices)
     ? type.region_prices.filter((entry) => entry && entry.id === region)
@@ -882,6 +906,7 @@ async function buildPlan(config, { print = true, configFile = DEFAULT_CONFIG } =
   requireExecutables(["git", "node", "scp", "ssh", "ssh-keygen", "tar"]);
   const token = readStoredToken();
   await preflightAccount(token);
+  await preflightAccountRegion(token, config);
   const source = await verifySource(config, configFile);
   const provider = await resolveProviderPlan(token, config);
   const plan = sanitizedProviderPlan(config, provider, source);
@@ -1528,6 +1553,7 @@ async function benchLocked(config, configFile = DEFAULT_CONFIG) {
 
     // Repeat every cost/scope-sensitive check immediately before the first billable request.
     await preflightAccount(token);
+    await preflightAccountRegion(token, config);
     const refreshedProvider = await resolveProviderPlan(token, config);
     const refreshedPlan = sanitizedProviderPlan(config, refreshedProvider, source);
     verifyProviderPlanUnchanged(plan, refreshedPlan);
@@ -1735,6 +1761,7 @@ async function authenticate(config) {
   try {
     const token = await readHiddenToken();
     await preflightAccount(token);
+    await preflightAccountRegion(token, config);
     await resolveProviderPlan(token, config);
     await verifyDeleteAuthority(token);
     writeBytesAtomic(TOKEN_FILE, Buffer.from(`${token}\n`), 0o600);
@@ -1916,6 +1943,26 @@ async function selfTest(config) {
   await assert.rejects(() =>
     preflightAccount("fixture-token", async () => ({
       data: { backups_enabled: false, interfaces_for_new_linodes: "linode_only" },
+    })),
+  );
+  await preflightAccountRegion("fixture-token", config, async (_token, method, apiPath) => {
+    assert.equal(method, "GET");
+    assert.equal(apiPath, "/v4/account/availability/ap-southeast");
+    return {
+      data: {
+        available: ["Linodes", "NodeBalancers", "Block Storage", "Kubernetes"],
+        unavailable: [],
+      },
+    };
+  });
+  await assert.rejects(() =>
+    preflightAccountRegion("fixture-token", config, async () => ({
+      data: { available: ["NodeBalancers"], unavailable: ["Linodes"] },
+    })),
+  );
+  await assert.rejects(() =>
+    preflightAccountRegion("fixture-token", config, async () => ({
+      data: { available: null, unavailable: [] },
     })),
   );
 
