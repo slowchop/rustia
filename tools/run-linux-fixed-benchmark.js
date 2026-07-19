@@ -216,6 +216,47 @@ function loadOneMinute() {
   return value;
 }
 
+function cpuAllowedListFromStatus(text) {
+  const match = text.match(/^Cpus_allowed_list:\s*(\S+)\s*$/m);
+  if (!match) fail("missing Cpus_allowed_list in process status");
+  return match[1];
+}
+
+function processThreadAffinities(pid) {
+  const taskDirectory = `/proc/${pid}/task`;
+  const records = [];
+  for (const entry of fs.readdirSync(taskDirectory, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^[0-9]+$/.test(entry.name)) continue;
+    const tid = Number(entry.name);
+    try {
+      const status = fs.readFileSync(path.join(taskDirectory, entry.name, "status"), "utf8");
+      records.push({ tid, cpus_allowed_list: cpuAllowedListFromStatus(status) });
+    } catch (error) {
+      if (error && error.code === "ENOENT") continue;
+      throw error;
+    }
+  }
+  return records.sort((left, right) => left.tid - right.tid);
+}
+
+function pinControllerThreads(cpu) {
+  const pin = run("taskset", ["-apc", String(cpu), String(process.pid)], {
+    capture: false,
+    allowFailure: true,
+  });
+  const affinities = processThreadAffinities(process.pid);
+  if (affinities.length === 0) fail("controller affinity verification found no surviving threads");
+  const mismatched = affinities.filter((record) => record.cpus_allowed_list !== String(cpu));
+  if (mismatched.length > 0) {
+    const detail = mismatched
+      .map((record) => `${record.tid}:${record.cpus_allowed_list}`)
+      .join(", ");
+    fail(`controller affinity verification failed after taskset status ${pin.status}: ${detail}`);
+  }
+  const transient = pin.status === 0 ? "" : ` after taskset status ${pin.status}`;
+  log(`verified ${affinities.length} surviving controller threads on CPU ${cpu}${transient}`);
+}
+
 function contaminatingProcesses(excludedPids = new Set()) {
   const records = [];
   for (const entry of fs.readdirSync("/proc", { withFileTypes: true })) {
@@ -968,7 +1009,7 @@ async function execute(configFile, providerFile, bundle) {
 
     // Keep the coordinator and monitoring work off the benchmark CPU.
     const controllerCpu = config.host_gate.benchmark_cpu === 0 ? 1 : 0;
-    run("taskset", ["-apc", String(controllerCpu), String(process.pid)], { capture: false });
+    pinControllerThreads(controllerCpu);
 
     log("running predeclared candidate-only host stability qualification");
     const qualificationStarted = Date.now();
@@ -1112,6 +1153,9 @@ function selfTest() {
   assert.equal(matchesHistoryPrecision(1.234568, 1.23456789), true);
   assert.equal(matchesHistoryPrecision(1.23457, 1.23456789), false);
   assert.throws(() => readCpuSampleFromText("cpu0 1 2 3\n", 1));
+  assert.equal(cpuAllowedListFromStatus("Name:\tnode\nCpus_allowed_list:\t0\n"), "0");
+  assert.equal(cpuAllowedListFromStatus("Cpus_allowed_list:\t2-3\n"), "2-3");
+  assert.throws(() => cpuAllowedListFromStatus("Name:\tnode\n"));
   assert.equal(new Set(PACKAGE_ACTIVITY_UNITS).size, PACKAGE_ACTIVITY_UNITS.length);
   for (const unit of ["unattended-upgrades.service", "packagekit.service"]) {
     assert.equal(PACKAGE_ACTIVITY_UNITS.includes(unit), true);
