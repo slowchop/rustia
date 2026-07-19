@@ -83,9 +83,10 @@ public rustia project; actual grabby integration work is explicitly out of scope
   analysis showed that the dense workload does not execute the new constant-key/method opcodes; a corrective
   pass now removes cross-cutting fuel-classification, numeric-key, and numeric-ordering tolls while preserving
   fuel, validation, GC cadence, key semantics, and string canonicalization. That pass remains an unmeasured
-  hypothesis. Qualification-only `just bench-do-trials` runs can compare capped shared-CPU profiles without
-  publishing anything. The frozen Linux follow-up is automated by `just bench-do`: it provisions one ephemeral
-  DigitalOcean VM, transfers the exact unpublished Git objects, applies the documented
+  hypothesis. Qualification-only `just bench-do-trials` runs compared capped shared-CPU profiles without
+  publishing anything, but repeated timed-leg steal violations ruled out that tier for acceptance. The frozen
+  Linux follow-up is automated on dedicated CPU by `just bench-linode`: it provisions one ephemeral
+  Akamai/Linode VM, transfers the exact unpublished Git objects, applies the documented
   byte-identical harness overlay, qualifies the host, runs the eight-leg comparison, conditionally appends three
   actual final-binary history rows, retrieves the evidence, and confirms VM destruction. Both existing results
   remain development evidence, not a blanket release speed claim; details are in

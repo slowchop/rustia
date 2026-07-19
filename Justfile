@@ -41,6 +41,7 @@ check-workflows:
 check-benchmark-results:
     node bench/analyze-fixed-samples.js --self-test
     node tools/run-digitalocean-benchmark.js self-test
+    node tools/run-linode-benchmark.js self-test
     node tools/check-benchmark-results.js
     node tools/check-wasm-gate-results.js
     node bench/render-current-results.js --check
@@ -106,6 +107,30 @@ bench-do-unlock:
 # Idempotently clean up an interrupted run; pass an id when more than one remains.
 bench-do-destroy run_id="":
     node tools/run-digitalocean-benchmark.js destroy "{{ run_id }}"
+
+# One-time private-prompt Linode authentication in an isolated ignored state file.
+bench-linode-auth:
+    node tools/run-linode-benchmark.js auth
+
+# Read-only validation of the frozen source identities, account safety, and dedicated plan.
+bench-linode-plan:
+    node tools/run-linode-benchmark.js plan
+
+# Run the frozen comparison on one ephemeral dedicated-CPU Linode and confirm deletion.
+bench-linode:
+    node tools/run-linode-benchmark.js bench
+
+# Inspect locally owned run state and its corresponding Linode instance.
+bench-linode-status:
+    node tools/run-linode-benchmark.js status
+
+# Remove only a coordinator lock whose recorded local process no longer exists.
+bench-linode-unlock:
+    node tools/run-linode-benchmark.js unlock
+
+# Idempotently clean up an interrupted run; pass an id when more than one remains.
+bench-linode-destroy run_id="":
+    node tools/run-linode-benchmark.js destroy "{{ run_id }}"
 
 gen-current-results:
     cargo run -p script-bench-harness -- --refresh-results

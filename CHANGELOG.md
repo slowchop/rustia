@@ -96,6 +96,13 @@ Current unpublished workspace version: `0.0.1`.
   promote publication.
 - `just bench-do-auth` now rotates its dedicated local `doctl` context before
   prompting, instead of silently reusing an expired or under-scoped token.
+- A protocol-identical `just bench-linode` fallback now owns an ephemeral
+  `g6-dedicated-2` instance after repeated DigitalOcean shared-CPU placements
+  violated the zero-steal timed-leg gate. It validates account backup defaults,
+  exact regional type/image metadata, whole-hour cost ceilings, and delete
+  authority before billing; journals ambiguous creates by unique label; passes
+  a local one-run SSH key directly at creation; and forbids evidence promotion
+  until the instance is confirmed absent.
 - A local fresh-state ABBA against `dac4ec2` found no remaining material
   regression above 5% after restoring the inline GC-debt hot path and separating
   ordinary calls from FASTCALL cache admission. Stdlib/string improved

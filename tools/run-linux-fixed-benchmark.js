@@ -65,7 +65,10 @@ function requireInteger(value, location, minimum = 0) {
 
 function validateConfig(config) {
   requireObject(config, "config");
-  if (config.schema !== "rustia.digitalocean-fixed-benchmark.v2") {
+  if (
+    config.schema !== "rustia.digitalocean-fixed-benchmark.v2" &&
+    config.schema !== "rustia.linode-fixed-benchmark.v1"
+  ) {
     fail("unsupported cloud benchmark config schema");
   }
   for (const field of ["provider", "source", "measurement", "qualification", "host_gate", "publication"]) {

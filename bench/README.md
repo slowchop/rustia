@@ -196,7 +196,9 @@ Record the following provenance beside any published interpretation:
 The frozen dense-table follow-up for baseline
 `dac4ec2295f77587c79f04e4ff0a09cb99912f96` and candidate
 `ed65077c2e779ec6a641b8ca2f8c8258b2508a2d` is encoded in
-[`cloud/digitalocean-dense-ed65077.json`](cloud/digitalocean-dense-ed65077.json).
+[`cloud/digitalocean-dense-ed65077.json`](cloud/digitalocean-dense-ed65077.json)
+and the protocol-identical dedicated-CPU fallback
+[`cloud/linode-dense-ed65077.json`](cloud/linode-dense-ed65077.json).
 It predeclares the source hashes, fixed work, repetitions, eight-leg order,
 bootstrap interpretation, candidate-only stability qualification, Linux host
 gate, CPU pin, cooldown, and conditional three-run publication rule.
@@ -312,6 +314,52 @@ just bench-do-status
 just bench-do-unlock                # only after an ungraceful coordinator crash
 just bench-do-destroy               # when exactly one owned run remains
 just bench-do-destroy RUN_ID        # choose an exact owned run
+```
+
+Repeated Premium Intel shared-CPU placements passed the idle gate but accrued
+nonzero hypervisor steal during timed legs, including one placement that stayed
+clean until the eighth comparison leg. Those blocks were correctly discarded.
+DigitalOcean exposes no dedicated-CPU size to this account, so the acceptance
+fallback uses Akamai/Linode `g6-dedicated-2`: 2 dedicated vCPUs, 4 GiB RAM, and
+80 GiB SSD in Melbourne. It keeps every source, workload, order, cooldown,
+qualification, host-gate, bootstrap, verdict, and publication field frozen.
+
+Create a short-lived personal access token with only **Linodes: Read/Write** and
+**Account: Read Only**. Account read access lets the coordinator reject an
+account-wide automatic-backup default before creating a billable instance. The
+token is entered through a private TTY prompt and stored mode `0600` only under
+the ignored `.rustia-benchmark-state/linode/` directory:
+
+```bash
+ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-linode-auth'
+ssh ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-linode-plan'
+ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-linode'
+```
+
+The Linode coordinator passes a unique local ED25519 public key directly in the
+create request, so no persistent account SSH-key resource or additional token
+scope is needed. Before billing it validates the exact public Ubuntu image,
+dedicated type dimensions, regional availability and price, disabled automatic
+backups, source hashes, clean tracked checkout, and delete authority. It
+journals the unique label before creation, reconciles ambiguous responses only
+by that label, and confirms the numeric instance ID is absent before allowing
+local evidence promotion.
+
+Linode rounds each instance lifetime up to whole hours. The committed 55-minute
+lifecycle therefore has a one-hour `$0.054` compute ceiling at the selected
+price and reserves its final eight minutes for cleanup; crossing the provider's
+hour boundary or a delayed API deletion can add another billed hour. A separate
+diagnostic run is intentionally skipped because it would incur another full
+hour minimum and acceptance already begins with the same three candidate-only
+qualification legs.
+
+Crash recovery is provider-isolated:
+
+```bash
+just bench-linode-status
+just bench-linode-unlock
+just bench-linode-destroy
+just bench-linode-destroy RUN_ID
 ```
 
 The resulting evidence is Linux/x86_64-specific. It does not replace a

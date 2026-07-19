@@ -1,0 +1,70 @@
+{
+  "schema": "rustia.linode-fixed-benchmark.v1",
+  "provider": {
+    "region": "au-mel",
+    "image": "linode/ubuntu24.04",
+    "size": {
+      "id": "g6-dedicated-2",
+      "description": "Dedicated 4GB",
+      "class": "dedicated",
+      "vcpus": 2,
+      "memory_mib": 4096,
+      "disk_gib": 80,
+      "max_hourly_price_usd": 0.054
+    },
+    "max_runtime_minutes": 55
+  },
+  "source": {
+    "baseline_commit": "dac4ec2295f77587c79f04e4ff0a09cb99912f96",
+    "candidate_commit": "ed65077c2e779ec6a641b8ca2f8c8258b2508a2d",
+    "harness_commit": "ed65077c2e779ec6a641b8ca2f8c8258b2508a2d",
+    "expected_sha256": {
+      "baseline_original_harness": "6444ba9ec0d13b1a062e912f73b54425b48f34d07410db01a9340a11f2b3efd9",
+      "overlay_harness": "d2996284306250fb3a4684fcb05050f1404d815250042d1660552ed209f2505b",
+      "workload": "b0c048b9fb17582fa409ae46b977cc73da635c145df39ea6f8fd756e9e17118d",
+      "cargo_lock": "f7f511013247d0eb2036380ed428f1e17c81059bdfd647f9183af5b9839d2414",
+      "toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
+      "analyzer": "a66c145df59913813d8df6cb82c563dbec38d3b63671e2db8c27555fe443ea60",
+      "history_before": "46b2d93a9ccde98ff56f78fa260740d0c1788ec2be7ce6aacb217c24f361f85c"
+    }
+  },
+  "measurement": {
+    "workload": "dense_tables",
+    "workload_path": "bench/workloads/luau/01_dense_tables.luau",
+    "fixed_n": 1500,
+    "repetitions": 15,
+    "expected_checksum": "number:193302491.00000000000000000",
+    "run_order": [
+      { "variant": "baseline", "file": "dense-abba-A1.json" },
+      { "variant": "candidate", "file": "dense-abba-B1.json" },
+      { "variant": "candidate", "file": "dense-abba-B2.json" },
+      { "variant": "baseline", "file": "dense-abba-A2.json" },
+      { "variant": "candidate", "file": "dense-baab-B3.json" },
+      { "variant": "baseline", "file": "dense-baab-A3.json" },
+      { "variant": "baseline", "file": "dense-baab-A4.json" },
+      { "variant": "candidate", "file": "dense-baab-B4.json" }
+    ],
+    "bootstrap_repetitions": 20000,
+    "bootstrap_seed": 1381323604,
+    "material_regression_threshold_percent": 5,
+    "expected_legs_per_group": 4
+  },
+  "qualification": {
+    "candidate_pilot_legs": 3,
+    "max_median_spread_percent": 3
+  },
+  "host_gate": {
+    "benchmark_cpu": 1,
+    "cooldown_seconds": 60,
+    "idle_window_seconds": 10,
+    "minimum_idle_percent": 99,
+    "maximum_load_1m": 0.1,
+    "maximum_steal_ticks": 0,
+    "wait_timeout_seconds": 900
+  },
+  "publication": {
+    "mode": "acceptance",
+    "required_verdict": "material_regression_excluded",
+    "final_measurements": 3
+  }
+}
