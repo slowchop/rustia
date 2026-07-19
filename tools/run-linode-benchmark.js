@@ -1832,7 +1832,7 @@ async function destroy(runId) {
 
 async function selfTest(config) {
   assert.equal(config.publication.mode, "acceptance");
-  assert.equal(config.provider.region, "au-mel");
+  assert.equal(config.provider.region, "ap-southeast");
   assert.equal(config.provider.image, "linode/ubuntu24.04");
   assert.equal(config.provider.size.id, "g6-dedicated-2");
   assert.equal(config.provider.size.class, "dedicated");
@@ -1862,8 +1862,8 @@ async function selfTest(config) {
         status: "available",
       },
     },
-    region: { data: { id: "au-mel", label: "Melbourne, AU", country: "au", status: "ok" } },
-    availability: { data: [{ region: "au-mel", plan: "g6-dedicated-2", available: true }] },
+    region: { data: { id: "ap-southeast", label: "Sydney, AU", country: "au", status: "ok" } },
+    availability: { data: [{ region: "ap-southeast", plan: "g6-dedicated-2", available: true }] },
   };
   const selected = validateProviderCatalog(config, responses);
   assert.equal(selected.type.id, "g6-dedicated-2");
@@ -1877,7 +1877,7 @@ async function selfTest(config) {
   assert.throws(() =>
     validateProviderCatalog(config, {
       ...responses,
-      availability: { data: [{ region: "au-mel", plan: "g6-dedicated-2", available: false }] },
+      availability: { data: [{ region: "ap-southeast", plan: "g6-dedicated-2", available: false }] },
     }),
   );
   assert.throws(() =>
@@ -1899,7 +1899,7 @@ async function selfTest(config) {
     throw new Error(`unexpected fixture request ${method} ${apiPath}`);
   };
   const resolved = await resolveProviderPlan("fixture-token", config, catalogRequest);
-  assert.equal(resolved.region.id, "au-mel");
+  assert.equal(resolved.region.id, "ap-southeast");
   assert.equal(readOnlyCalls.length, 4);
   assert(readOnlyCalls.every(([, method]) => method === "GET"));
 
@@ -1961,13 +1961,13 @@ async function selfTest(config) {
   assert.equal(matchingLinodesByLabel([{ label: "a" }, { label: "b" }, { label: "a" }], "a").length, 2);
 
   const plannedShape = {
-    region: { id: "au-mel" },
+    region: { id: "ap-southeast" },
     image: { id: "linode/ubuntu24.04" },
     size: { id: "g6-dedicated-2", vcpus: 2, memory_mib: 4096, disk_gib: 80 },
   };
   const actualShape = {
     type: "g6-dedicated-2",
-    region: "au-mel",
+    region: "ap-southeast",
     image: "linode/ubuntu24.04",
     specs: { vcpus: 2, memory: 4096, disk: 81920 },
     backups: { enabled: false },

@@ -1,7 +1,7 @@
 {
   "schema": "rustia.linode-fixed-benchmark.v1",
   "provider": {
-    "region": "au-mel",
+    "region": "ap-southeast",
     "image": "linode/ubuntu24.04",
     "size": {
       "id": "g6-dedicated-2",

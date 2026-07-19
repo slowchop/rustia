@@ -321,7 +321,7 @@ nonzero hypervisor steal during timed legs, including one placement that stayed
 clean until the eighth comparison leg. Those blocks were correctly discarded.
 DigitalOcean exposes no dedicated-CPU size to this account, so the acceptance
 fallback uses Akamai/Linode `g6-dedicated-2`: 2 dedicated vCPUs, 4 GiB RAM, and
-80 GiB SSD in Melbourne. It keeps every source, workload, order, cooldown,
+80 GiB SSD in Sydney. It keeps every source, workload, order, cooldown,
 qualification, host-gate, bootstrap, verdict, and publication field frozen.
 
 Create a short-lived personal access token with only **Linodes: Read/Write** and
