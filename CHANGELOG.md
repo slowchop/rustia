@@ -94,6 +94,8 @@ Current unpublished workspace version: `0.0.1`.
   Premium Intel shared Droplets by build time, stability, conservative charge
   upper bound, and projected full-run charge; diagnostic mode cannot run or
   promote publication.
+- `just bench-do-auth` now rotates its dedicated local `doctl` context before
+  prompting, instead of silently reusing an expired or under-scoped token.
 - A local fresh-state ABBA against `dac4ec2` found no remaining material
   regression above 5% after restoring the inline GC-debt hot path and separating
   ordinary calls from FASTCALL cache admission. Stdlib/string improved

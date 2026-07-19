@@ -209,6 +209,9 @@ environment variable, repository file, or chat message:
 just bench-do-auth
 ```
 
+The recipe removes only the locally stored `rustia-bench` context before
+initializing it, so an expired or replaced token always produces a fresh prompt.
+
 When authenticating from another computer, run the prompt on the benchmark
 coordinator host over a TTY-preserving SSH session:
 

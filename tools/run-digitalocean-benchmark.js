@@ -1926,6 +1926,22 @@ async function authenticate(config) {
   requireExecutables(["doctl"]);
   const lockToken = acquireCoordinatorLock();
   try {
+    const contexts = normalizeList(
+      parseJsonOutput(
+        await run("doctl", ["auth", "list", "--output", "json"]),
+        "doctl authentication context list",
+      ),
+      "doctl authentication context list",
+    );
+    if (contexts.some((entry) => entry && entry.name === config.provider.context)) {
+      process.stdout.write(
+        `Removing stored doctl context ${config.provider.context} so a replacement token is prompted.\n`,
+      );
+      await run("doctl", ["auth", "remove", "--context", config.provider.context], {
+        capture: false,
+        announce: true,
+      });
+    }
     process.stdout.write(
       `DigitalOcean token entry for doctl context ${config.provider.context}. ` +
         "The token is read by doctl's prompt and is not a recipe argument.\n",
