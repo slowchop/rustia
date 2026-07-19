@@ -21,6 +21,14 @@ const RUN_LOG = path.join(ROOT, "run.log");
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const CONTAMINATING_PROCESS = /^(apt|apt-get|as|cargo|cc|cc1|cc1plus|clang|clang\+\+|curl|dpkg|g\+\+|gcc|git|ld|ld\.lld|make|ninja|node|rustc|rustup|sccache|script-bench|unattended-upgr)$/;
+const PACKAGE_ACTIVITY_UNITS = Object.freeze([
+  "apt-daily.service",
+  "apt-daily-upgrade.service",
+  "apt-daily.timer",
+  "apt-daily-upgrade.timer",
+  "unattended-upgrades.service",
+  "packagekit.service",
+]);
 
 let logReady = false;
 
@@ -451,7 +459,7 @@ function benchmarkEnvironment(targetDirectory) {
 
 function installAndBuild(config, bundle) {
   log("disabling periodic package activity before the quiet measurement phase");
-  for (const unit of ["apt-daily.service", "apt-daily-upgrade.service", "apt-daily.timer", "apt-daily-upgrade.timer"] ) {
+  for (const unit of PACKAGE_ACTIVITY_UNITS) {
     run("systemctl", ["stop", unit], { allowFailure: true });
     run("systemctl", ["mask", unit], { allowFailure: true });
   }
@@ -1104,6 +1112,10 @@ function selfTest() {
   assert.equal(matchesHistoryPrecision(1.234568, 1.23456789), true);
   assert.equal(matchesHistoryPrecision(1.23457, 1.23456789), false);
   assert.throws(() => readCpuSampleFromText("cpu0 1 2 3\n", 1));
+  assert.equal(new Set(PACKAGE_ACTIVITY_UNITS).size, PACKAGE_ACTIVITY_UNITS.length);
+  for (const unit of ["unattended-upgrades.service", "packagekit.service"]) {
+    assert.equal(PACKAGE_ACTIVITY_UNITS.includes(unit), true);
+  }
   process.stdout.write("linux fixed benchmark runner self-test passed\n");
 }
 
