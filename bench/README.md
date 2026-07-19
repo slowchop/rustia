@@ -368,8 +368,12 @@ The dedicated Linode shape is still a KVM guest. Sydney placements reached
 qualification or the comparison block but eventually recorded a nonzero steal
 tick, so the same frozen gate rejected them without changing benchmark history.
 The next fallback is an actual Vultr `vbm-4c-32gb` bare-metal server in `sgp`,
-running Ubuntu 24.04 x64. Vultr rounds usage up to a one-hour `$0.164` minimum;
-deletion, not shutdown, ends further accrual.
+running Ubuntu 24.04 x64. Vultr rounds usage up to a one-hour `$0.164` minimum.
+Because physical provisioning can remain `pending` well beyond fifteen
+minutes, the committed 110-minute lifecycle permits a conservative one-hour
+activation wait and has a two-hour `$0.328` compute ceiling; deletion still
+starts with an eight-minute reserve and normally keeps a prompt deployment
+inside its first billing hour.
 
 Create a service user attached to a role with exactly the Vultr-managed
 policies **Deploy New Servers**, **Manage Servers**, and **View Servers**.

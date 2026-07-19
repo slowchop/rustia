@@ -24,12 +24,13 @@ const API_TIMEOUT_MS = 30 * 1000;
 const CREATE_RECONCILE_TIMEOUT_MS = 2 * 60 * 1000;
 const DELETE_CONFIRM_TIMEOUT_MS = 4 * 60 * 1000;
 const CLEANUP_RESERVE_MS = 8 * 60 * 1000;
+const ACTIVATION_TIMEOUT_MS = 60 * 60 * 1000;
 const FORCE_KILL_DELAY_MS = 10 * 1000;
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SAFE_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.json$/;
-const FROZEN_CONFIG_SHA256 = "4a56375f41ffc40da6903172c4abeb4654dd09d73338e7bc8287eccd000d7801";
+const FROZEN_CONFIG_SHA256 = "8b3d3f27b35c2da9e687cbe567595881bd6f21d242f73686fa7858a998450b15";
 const MAX_EXPORT_ARCHIVE_BYTES = 256 * 1024 * 1024;
 const MAX_EXPORT_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
 const MAX_EXPORT_ENTRIES = 10_000;
@@ -144,8 +145,8 @@ function validateConfig(value) {
   );
   requireString(provider.region, "config.provider.region");
   requireInteger(provider.max_runtime_minutes, "config.provider.max_runtime_minutes", 1);
-  if (provider.region !== "sgp" || provider.max_runtime_minutes !== 55) {
-    fail("Vultr benchmark provider is pinned to sgp with a 55-minute lifecycle");
+  if (provider.region !== "sgp" || provider.max_runtime_minutes !== 110) {
+    fail("Vultr benchmark provider is pinned to sgp with a 110-minute lifecycle");
   }
   const operatingSystem = requireObject(provider.os, "config.provider.os");
   requireExactKeys(operatingSystem, ["id", "name", "arch", "family"], "config.provider.os");
@@ -216,8 +217,8 @@ function validateConfig(value) {
   ) {
     fail("Vultr benchmark size must remain the exact vbm-4c-32gb bare-metal profile at <= $0.164/h");
   }
-  if (provider.max_runtime_minutes >= 60) {
-    fail("config.provider.max_runtime_minutes must remain below Vultr's first whole billing hour");
+  if (provider.max_runtime_minutes >= 120) {
+    fail("config.provider.max_runtime_minutes must remain below Vultr's third whole billing hour");
   }
 
   const source = requireObject(root.source, "config.source");
@@ -1786,7 +1787,7 @@ function publicIpv4(vultr) {
 }
 
 async function waitForVultr(state, token) {
-  const deadline = Date.now() + remainingWorkTimeout(state, 15 * 60 * 1000, "Vultr activation");
+  const deadline = Date.now() + remainingWorkTimeout(state, ACTIVATION_TIMEOUT_MS, "Vultr activation");
   while (Date.now() < deadline) {
     const vultr = await getOwnedVultr(state, token, { allowMissing: true });
     const address = publicIpv4(vultr);
@@ -3715,7 +3716,7 @@ async function selfTest(config) {
   const safePlan = sanitizedProviderPlan(config, selected, { fixture: true });
   assert.equal(safePlan.size.catalog_cpu_count, 4);
   assert.equal(safePlan.size.vcpus, 8);
-  assert.equal(safePlan.planned_compute_cost_ceiling_usd, 0.164);
+  assert.equal(safePlan.planned_compute_cost_ceiling_usd, 0.328);
   assert.equal(safePlan.billing_increment_minutes, 60);
   assert.equal(safePlan.cleanup_reserve_minutes, 8);
   assert.throws(() =>
@@ -4038,7 +4039,8 @@ async function selfTest(config) {
   assert.equal(roundedHourlyCharge(0.164, 1), 0.164);
   assert.equal(roundedHourlyCharge(0.164, 3600), 0.164);
   assert.equal(roundedHourlyCharge(0.164, 3600.001), 0.328);
-  assert.equal(roundedHourlyCharge(0.164, config.provider.max_runtime_minutes * 60), 0.164);
+  assert.equal(roundedHourlyCharge(0.164, config.provider.max_runtime_minutes * 60), 0.328);
+  assert.equal(ACTIVATION_TIMEOUT_MS, 60 * 60 * 1000);
 
   const publicKey = `ssh-ed25519 ${Buffer.alloc(32, 7).toString("base64")} rustia-test`;
   const hostPublicKey = `ssh-ed25519 ${Buffer.alloc(32, 8).toString("base64")} rustia-host-test`;

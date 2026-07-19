@@ -30,7 +30,7 @@
       "deploy_preemptible": false,
       "max_hourly_price_usd": 0.164
     },
-    "max_runtime_minutes": 55
+    "max_runtime_minutes": 110
   },
   "source": {
     "baseline_commit": "dac4ec2295f77587c79f04e4ff0a09cb99912f96",

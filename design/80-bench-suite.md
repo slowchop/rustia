@@ -92,8 +92,9 @@ and Premium Intel 2-vCPU/4-GiB shared shapes without running comparison or
 publication. Repeated nonzero-steal timed legs rejected that shared tier;
 dedicated Akamai/Linode placements also remained KVM guests and eventually
 violated the frozen zero-steal gate. `just bench-vultr` therefore validates an
-Ubuntu 24.04 `vbm-4c-32gb` actual-bare-metal server in Singapore and its
-one-hour `$0.164` minimum, transfers a local Git bundle, builds the frozen
+Ubuntu 24.04 `vbm-4c-32gb` actual-bare-metal server in Singapore, its one-hour
+`$0.164` minimum, and its two-hour `$0.328` lifecycle ceiling; transfers a local
+Git bundle; builds the frozen
 baseline/candidate with the documented candidate-harness overlay, rejects
 virtualization, qualifies and CPU-pins the Linux host, runs the exact eight
 legs, and conditionally publishes the three final rows. It records resource

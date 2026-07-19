@@ -107,8 +107,9 @@ Current unpublished workspace version: `0.0.1`.
 - An actual-bare-metal `just bench-vultr` fallback now follows rejected
   DigitalOcean shared and Linode dedicated-KVM placements without changing the
   frozen zero-steal protocol. It validates the Ubuntu 24.04 `vbm-4c-32gb` plan
-  in Singapore and its one-hour `$0.164` minimum, supports a service user with
-  the three least-privilege Vultr managed server policies, stores its
+  in Singapore, its one-hour `$0.164` minimum, and a two-hour `$0.328` safety
+  ceiling for physical provisioning; supports a service user with the three
+  least-privilege Vultr managed server policies; stores its
   private-prompt token mode `0600`, rejects virtualization, journals ambiguous
   creates, and confirms deletion before promoting evidence or the conditional
   three history rows.
