@@ -67,7 +67,8 @@ function validateConfig(config) {
   requireObject(config, "config");
   if (
     config.schema !== "rustia.digitalocean-fixed-benchmark.v2" &&
-    config.schema !== "rustia.linode-fixed-benchmark.v1"
+    config.schema !== "rustia.linode-fixed-benchmark.v1" &&
+    config.schema !== "rustia.vultr-fixed-benchmark.v1"
   ) {
     fail("unsupported cloud benchmark config schema");
   }
@@ -169,6 +170,132 @@ function run(command, args, options = {}) {
 
 function runText(command, args, options = {}) {
   return run(command, args, options).stdout.trim();
+}
+
+function expandCpuList(text, description) {
+  const cpus = new Set();
+  for (const token of String(text).trim().split(",")) {
+    const match = token.match(/^(\d+)(?:-(\d+))?$/);
+    if (!match) fail(`${description} has invalid CPU-list syntax`);
+    const start = Number(match[1]);
+    const end = match[2] === undefined ? start : Number(match[2]);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start || end - start > 4096) {
+      fail(`${description} has an invalid CPU range`);
+    }
+    for (let cpu = start; cpu <= end; cpu += 1) cpus.add(cpu);
+  }
+  return [...cpus].sort((left, right) => left - right);
+}
+
+function verifyVultrBareMetalHost(config, provider) {
+  if (config.schema !== "rustia.vultr-fixed-benchmark.v1") return null;
+  requireObject(provider, "provider metadata");
+  const metadataChecks = [
+    ["provider", provider.provider, "vultr"],
+    ["resource type", provider.resource_type, "bare_metal"],
+    ["plan", provider.size_slug, config.provider.size.id],
+    ["region", provider.region, config.provider.region],
+    ["OS ID", provider.os_id, config.provider.os.id],
+    ["logical CPU count", provider.vcpus, config.provider.size.vcpus],
+  ];
+  for (const [field, actual, expected] of metadataChecks) {
+    if (String(actual) !== String(expected)) {
+      fail(`Vultr bare-metal provider ${field} was ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`);
+    }
+  }
+
+  const detected = run("systemd-detect-virt", [], { allowFailure: true });
+  if (detected.status !== 1 || detected.stdout.trim() !== "none") {
+    fail(
+      `Vultr resource failed bare-metal virtualization attestation: systemd-detect-virt ` +
+        `reported ${JSON.stringify(detected.stdout.trim())} with status ${detected.status}`,
+    );
+  }
+  const cpuInfo = fs.readFileSync("/proc/cpuinfo", "utf8");
+  if (/^flags\s*:.*\bhypervisor\b/m.test(cpuInfo)) {
+    fail("Vultr resource failed bare-metal attestation: /proc/cpuinfo exposes the hypervisor flag");
+  }
+  const cpuModels = [...cpuInfo.matchAll(/^model name\s*:\s*(.+)$/gm)].map((match) => match[1].trim());
+  if (
+    cpuModels.length !== config.provider.size.vcpus ||
+    new Set(cpuModels).size !== 1 ||
+    !cpuModels[0].includes(config.provider.size.cpu_model)
+  ) {
+    fail(
+      `Vultr bare-metal CPU model rows did not exactly identify one ${config.provider.size.cpu_model} ` +
+        `across ${config.provider.size.vcpus} logical CPUs`,
+    );
+  }
+  const hypervisorType = "/sys/hypervisor/type";
+  if (fs.existsSync(hypervisorType) && fs.readFileSync(hypervisorType, "utf8").trim() !== "") {
+    fail("Vultr resource failed bare-metal attestation: /sys/hypervisor/type is populated");
+  }
+
+  const online = expandCpuList(fs.readFileSync("/sys/devices/system/cpu/online", "utf8"), "online CPU list");
+  const expectedOnline = Array.from({ length: config.provider.size.vcpus }, (_, cpu) => cpu);
+  if (JSON.stringify(online) !== JSON.stringify(expectedOnline)) {
+    fail(`Vultr bare metal exposed CPUs ${online.join(",")}, expected ${expectedOnline.join(",")}`);
+  }
+  const sockets = new Set();
+  const cores = new Set();
+  const topology = {};
+  const expectedSiblings = config.provider.size.cpu_threads / config.provider.size.cpu_cores;
+  if (!Number.isSafeInteger(expectedSiblings) || expectedSiblings < 1) {
+    fail("configured Vultr CPU thread/core ratio is invalid");
+  }
+  for (const cpu of online) {
+    const root = `/sys/devices/system/cpu/cpu${cpu}/topology`;
+    const socket = fs.readFileSync(`${root}/physical_package_id`, "utf8").trim();
+    const core = fs.readFileSync(`${root}/core_id`, "utf8").trim();
+    const siblings = expandCpuList(fs.readFileSync(`${root}/thread_siblings_list`, "utf8"), `CPU ${cpu} siblings`);
+    if (
+      siblings.length !== expectedSiblings ||
+      !siblings.includes(cpu) ||
+      siblings.some((sibling) => !online.includes(sibling))
+    ) {
+      fail(`CPU ${cpu} exposes a malformed SMT sibling set ${siblings.join(",")}`);
+    }
+    sockets.add(socket);
+    cores.add(`${socket}:${core}`);
+    topology[`cpu${cpu}`] = { socket, core, siblings };
+  }
+  if (sockets.size !== config.provider.size.physical_cpus || cores.size !== config.provider.size.cpu_cores) {
+    fail(
+      `Vultr bare-metal topology exposed ${sockets.size} socket(s) and ${cores.size} core(s), expected ` +
+        `${config.provider.size.physical_cpus} and ${config.provider.size.cpu_cores}`,
+    );
+  }
+  for (const [name, entry] of Object.entries(topology)) {
+    for (const sibling of entry.siblings) {
+      const peer = topology[`cpu${sibling}`];
+      if (
+        !peer ||
+        peer.socket !== entry.socket ||
+        peer.core !== entry.core ||
+        JSON.stringify(peer.siblings) !== JSON.stringify(entry.siblings)
+      ) {
+        fail(`${name} has an asymmetric or cross-core SMT sibling set`);
+      }
+    }
+  }
+  const benchmarkCpu = config.host_gate.benchmark_cpu;
+  if (topology.cpu0.siblings.includes(benchmarkCpu)) {
+    fail(`controller CPU 0 and benchmark CPU ${benchmarkCpu} are SMT siblings`);
+  }
+  return {
+    systemd_detect_virt: detected.stdout.trim(),
+    systemd_detect_virt_status: detected.status,
+    hypervisor_cpu_flag: false,
+    sys_hypervisor_type: "absent_or_empty",
+    logical_cpus: online.length,
+    physical_sockets: sockets.size,
+    physical_cores: cores.size,
+    cpu_model: cpuModels[0],
+    controller_cpu: 0,
+    benchmark_cpu: benchmarkCpu,
+    controller_and_benchmark_are_smt_siblings: false,
+    topology,
+  };
 }
 
 function writeJson(file, value) {
@@ -1007,7 +1134,7 @@ function exportRun(status, config, evidenceDirectory) {
     fs.copyFileSync(history, destination);
   }
   fs.rmSync(EXPORT_ARCHIVE, { force: true });
-  run("tar", ["-czf", EXPORT_ARCHIVE, "-C", EXPORT, "."], { capture: false });
+  run("tar", ["--format=ustar", "-czf", EXPORT_ARCHIVE, "-C", EXPORT, "."], { capture: false });
 }
 
 async function execute(configFile, providerFile, bundle) {
@@ -1030,6 +1157,8 @@ async function execute(configFile, providerFile, bundle) {
   const phaseTimings = {};
 
   try {
+    const bareMetalAttestation = verifyVultrBareMetalHost(config, provider);
+    if (bareMetalAttestation) log("Vultr physical-host topology attestation passed");
     log("preparing exact source trees and frozen release binaries");
     const buildStarted = Date.now();
     const build = installAndBuild(config, bundle);
@@ -1040,8 +1169,9 @@ async function execute(configFile, providerFile, bundle) {
     fs.writeFileSync(gateFile, "");
     const gateRecords = [];
     const host = collectHost(config, build);
+    if (bareMetalAttestation) host.bare_metal_attestation = bareMetalAttestation;
     if (config.host_gate.benchmark_cpu >= provider.vcpus) {
-      fail(`benchmark CPU ${config.host_gate.benchmark_cpu} is not present on a ${provider.vcpus}-vCPU VM`);
+      fail(`benchmark CPU ${config.host_gate.benchmark_cpu} is not present on a ${provider.vcpus}-logical-CPU host`);
     }
     writeJson(path.join(evidenceDirectory, "host.json"), host);
     writeJson(path.join(evidenceDirectory, "provider.json"), provider);
@@ -1182,6 +1312,9 @@ async function execute(configFile, providerFile, bundle) {
 }
 
 function selfTest() {
+  assert.deepEqual(expandCpuList("0-3,6,8-9", "fixture"), [0, 1, 2, 3, 6, 8, 9]);
+  assert.throws(() => expandCpuList("0-", "fixture"));
+  assert.throws(() => expandCpuList("3-1", "fixture"));
   const before = readCpuSampleFromText("cpu  1 2 3 4 5 6 7 8\ncpu1 10 0 5 100 2 1 1 0 0 0\n", 1);
   const after = readCpuSampleFromText("cpu  1 2 3 4 5 6 7 8\ncpu1 11 0 6 198 2 1 1 0 0 0\n", 1);
   const delta = cpuDelta(before, after);

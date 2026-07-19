@@ -42,6 +42,7 @@ check-benchmark-results:
     node bench/analyze-fixed-samples.js --self-test
     node tools/run-digitalocean-benchmark.js self-test
     node tools/run-linode-benchmark.js self-test
+    node tools/run-vultr-benchmark.js self-test
     node tools/check-benchmark-results.js
     node tools/check-wasm-gate-results.js
     node bench/render-current-results.js --check
@@ -131,6 +132,30 @@ bench-linode-unlock:
 # Idempotently clean up an interrupted run; pass an id when more than one remains.
 bench-linode-destroy run_id="":
     node tools/run-linode-benchmark.js destroy "{{ run_id }}"
+
+# One-time private-prompt Vultr authentication in an isolated ignored state file.
+bench-vultr-auth:
+    node tools/run-vultr-benchmark.js auth
+
+# Read-only validation of the frozen source identities, account safety, and bare-metal plan.
+bench-vultr-plan:
+    node tools/run-vultr-benchmark.js plan
+
+# Run the frozen comparison on one ephemeral Vultr bare-metal server and confirm deletion.
+bench-vultr:
+    node tools/run-vultr-benchmark.js bench
+
+# Inspect locally owned run state and its corresponding Vultr server.
+bench-vultr-status:
+    node tools/run-vultr-benchmark.js status
+
+# Remove only a coordinator lock whose recorded local process no longer exists.
+bench-vultr-unlock:
+    node tools/run-vultr-benchmark.js unlock
+
+# Idempotently clean up an interrupted run; pass an id when more than one remains.
+bench-vultr-destroy run_id="":
+    node tools/run-vultr-benchmark.js destroy "{{ run_id }}"
 
 gen-current-results:
     cargo run -p script-bench-harness -- --refresh-results

@@ -84,12 +84,14 @@ public rustia project; actual grabby integration work is explicitly out of scope
   pass now removes cross-cutting fuel-classification, numeric-key, and numeric-ordering tolls while preserving
   fuel, validation, GC cadence, key semantics, and string canonicalization. That pass remains an unmeasured
   hypothesis. Qualification-only `just bench-do-trials` runs compared capped shared-CPU profiles without
-  publishing anything, but repeated timed-leg steal violations ruled out that tier for acceptance. The frozen
-  Linux follow-up is automated on dedicated CPU by `just bench-linode`: it provisions one ephemeral
-  Akamai/Linode VM, transfers the exact unpublished Git objects, applies the documented
-  byte-identical harness overlay, qualifies the host, runs the eight-leg comparison, conditionally appends three
-  actual final-binary history rows, retrieves the evidence, and confirms VM destruction. Both existing results
-  remain development evidence, not a blanket release speed claim; details are in
+  publishing anything, but repeated timed-leg steal violations ruled out that tier for acceptance. Dedicated
+  Akamai/Linode placements also remained KVM guests and eventually violated the frozen zero-steal gate. The
+  protocol-identical Linux follow-up is now automated on actual Vultr bare metal by `just bench-vultr`: it
+  provisions one ephemeral `vbm-4c-32gb` server in Singapore, transfers the exact unpublished Git objects,
+  applies the documented byte-identical harness overlay, rejects virtualization, qualifies the host, runs the
+  eight-leg comparison, conditionally appends three actual final-binary history rows, retrieves the evidence,
+  and confirms server deletion before promotion. Existing results remain development evidence, not a blanket
+  release speed claim; details are in
   [`design/56-performance-research.md`](design/56-performance-research.md).
 - Major remaining gates are engine hardening, long-run benchmark history, public benchmark publication, and release
   packaging. Semver policy is tracked in [`design/91-semver-policy.md`](design/91-semver-policy.md), release

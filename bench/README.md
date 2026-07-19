@@ -198,7 +198,9 @@ The frozen dense-table follow-up for baseline
 `ed65077c2e779ec6a641b8ca2f8c8258b2508a2d` is encoded in
 [`cloud/digitalocean-dense-ed65077.json`](cloud/digitalocean-dense-ed65077.json)
 and the protocol-identical dedicated-CPU fallback
-[`cloud/linode-dense-ed65077.json`](cloud/linode-dense-ed65077.json).
+[`cloud/linode-dense-ed65077.json`](cloud/linode-dense-ed65077.json), plus the
+actual-bare-metal fallback
+[`cloud/vultr-dense-ed65077.json`](cloud/vultr-dense-ed65077.json).
 It predeclares the source hashes, fixed work, repetitions, eight-leg order,
 bootstrap interpretation, candidate-only stability qualification, Linux host
 gate, CPU pin, cooldown, and conditional three-run publication rule.
@@ -360,6 +362,45 @@ just bench-linode-status
 just bench-linode-unlock
 just bench-linode-destroy
 just bench-linode-destroy RUN_ID
+```
+
+The dedicated Linode shape is still a KVM guest. Sydney placements reached
+qualification or the comparison block but eventually recorded a nonzero steal
+tick, so the same frozen gate rejected them without changing benchmark history.
+The next fallback is an actual Vultr `vbm-4c-32gb` bare-metal server in `sgp`,
+running Ubuntu 24.04 x64. Vultr rounds usage up to a one-hour `$0.164` minimum;
+deletion, not shutdown, ends further accrual.
+
+Create a service user attached to a role with exactly the Vultr-managed
+policies **Deploy New Servers**, **Manage Servers**, and **View Servers**.
+Allowlist the coordinator host's current public IPv4 address as a `/32` in
+Vultr's API access control. Enter its API key only through the private TTY
+prompt; the coordinator stores it mode `0600` under the ignored
+`.rustia-benchmark-state/vultr/` directory:
+
+```bash
+ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-vultr-auth'
+ssh ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-vultr-plan'
+ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-vultr'
+```
+
+The Vultr coordinator uses a unique ephemeral SSH key only in server user data,
+checks the exact region, plan, Ubuntu image, source identities, clean checkout,
+list/create/delete authority, and rejects any activated host where the runtime
+virtualization gate does not report real bare metal. It retains the same frozen
+qualification, fixed work, repetitions, eight-leg order, cooldowns, bootstrap,
+zero-steal rule, verdict, and conditional three-row publication protocol. The
+unique label is journaled before creation, ambiguous creates are reconciled by
+that label, and API list results must confirm deletion before evidence or
+history can be promoted.
+
+Vultr crash recovery is likewise provider-isolated:
+
+```bash
+just bench-vultr-status
+just bench-vultr-unlock
+just bench-vultr-destroy
+just bench-vultr-destroy RUN_ID
 ```
 
 The resulting evidence is Linux/x86_64-specific. It does not replace a

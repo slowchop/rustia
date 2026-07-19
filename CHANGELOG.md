@@ -104,6 +104,14 @@ Current unpublished workspace version: `0.0.1`.
   ambiguous creates by unique label; passes
   a local one-run SSH key directly at creation; and forbids evidence promotion
   until the instance is confirmed absent.
+- An actual-bare-metal `just bench-vultr` fallback now follows rejected
+  DigitalOcean shared and Linode dedicated-KVM placements without changing the
+  frozen zero-steal protocol. It validates the Ubuntu 24.04 `vbm-4c-32gb` plan
+  in Singapore and its one-hour `$0.164` minimum, supports a service user with
+  the three least-privilege Vultr managed server policies, stores its
+  private-prompt token mode `0600`, rejects virtualization, journals ambiguous
+  creates, and confirms deletion before promoting evidence or the conditional
+  three history rows.
 - A local fresh-state ABBA against `dac4ec2` found no remaining material
   regression above 5% after restoring the inline GC-debt hot path and separating
   ordinary calls from FASTCALL cache admission. Stdlib/string improved
