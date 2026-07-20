@@ -36,7 +36,8 @@ const MAX_EXPORT_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
 const MAX_EXPORT_ENTRIES = 10_000;
 const FIXED_THROUGHPUT_PROTOCOL = "fixed_throughput_v1";
 const VM_STRING_MEMORY_PROTOCOL = "vm_string_memory_v1";
-const CROSS_ENGINE_MATRIX_PROTOCOL = "cross_engine_matrix_v1";
+const CROSS_ENGINE_MATRIX_PROTOCOL = "cross_engine_matrix_v2";
+const MAX_TIMED_ATTEMPTS_PER_GROUP = 3;
 const ALLOWED_PROTOCOLS = new Set([
   FIXED_THROUGHPUT_PROTOCOL,
   VM_STRING_MEMORY_PROTOCOL,
@@ -515,6 +516,9 @@ function validateConfig(value) {
       "maximum_load_1m",
       "maximum_steal_ticks",
       "maximum_timed_steal_percent",
+      ...(kind === CROSS_ENGINE_MATRIX_PROTOCOL
+        ? ["maximum_timed_attempts_per_group"]
+        : []),
       "wait_timeout_seconds",
     ],
     "config.host_gate",
@@ -530,7 +534,26 @@ function validateConfig(value) {
   if (gate.maximum_steal_ticks !== 0 || gate.maximum_timed_steal_percent !== 0.1) {
     fail("Linode v2 steal budget must remain zero while idle and 0.1% during a timed leg");
   }
-  requireInteger(gate.wait_timeout_seconds, "config.host_gate.wait_timeout_seconds", 1);
+  if (kind === CROSS_ENGINE_MATRIX_PROTOCOL) {
+    const maximumTimedAttempts = requireInteger(
+      gate.maximum_timed_attempts_per_group,
+      "config.host_gate.maximum_timed_attempts_per_group",
+      1,
+    );
+    if (maximumTimedAttempts > MAX_TIMED_ATTEMPTS_PER_GROUP) {
+      fail(
+        `config.host_gate.maximum_timed_attempts_per_group must be <= ${MAX_TIMED_ATTEMPTS_PER_GROUP}`,
+      );
+    }
+  }
+  const waitTimeout = requireInteger(
+    gate.wait_timeout_seconds,
+    "config.host_gate.wait_timeout_seconds",
+    1,
+  );
+  if (kind === CROSS_ENGINE_MATRIX_PROTOCOL && waitTimeout !== 900) {
+    fail("config.host_gate.wait_timeout_seconds must be 900 for the matrix protocol");
+  }
 
   const publication = requireObject(root.publication, "config.publication");
   if (kind === CROSS_ENGINE_MATRIX_PROTOCOL) {
@@ -539,7 +562,7 @@ function validateConfig(value) {
       ["mode", "native_rows", "wasm_rows", "dispatch_runtimes"],
       "config.publication",
     );
-    if (publication.mode !== "matrix") fail("cross_engine_matrix_v1 publication.mode must be matrix");
+    if (publication.mode !== "matrix") fail("cross_engine_matrix_v2 publication.mode must be matrix");
     const expectedCounts = {
       native_rows: MATRIX_NATIVE_ENGINES.length * MATRIX_WORKLOADS.length,
       wasm_rows: MATRIX_WASM_RUNTIMES.length * MATRIX_WASM_ADAPTERS.length * MATRIX_WORKLOADS.length,
@@ -1382,6 +1405,8 @@ function sanitizedProviderPlan(config, provider, source) {
           wasm_adapters: config.measurement.wasm_adapters,
           wasm_repetitions: config.measurement.wasm_repetitions,
           dispatch_repetitions: config.measurement.dispatch_repetitions,
+          maximum_timed_attempts_per_group: config.host_gate.maximum_timed_attempts_per_group,
+          wait_timeout_seconds: config.host_gate.wait_timeout_seconds,
           result_shape: {
             native_rows: config.publication.native_rows,
             wasm_rows: config.publication.wasm_rows,
@@ -2352,6 +2377,123 @@ function parseCanonicalJsonl(file, location) {
     if (line !== JSON.stringify(value)) fail(`${location} record ${index + 1} is not canonical JSON`);
     return requireObject(value, `${location} record ${index + 1}`);
   });
+}
+
+function validateMatrixCpuDelta(record, location) {
+  requireInteger(record.total_ticks, `${location}.total_ticks`, 1);
+  requireInteger(record.idle_ticks, `${location}.idle_ticks`, 0);
+  requireInteger(record.steal_ticks, `${location}.steal_ticks`, 0);
+  requireNumber(record.idle_percent, `${location}.idle_percent`, 0);
+  requireNumber(record.steal_percent, `${location}.steal_percent`, 0);
+  if (record.idle_ticks > record.total_ticks || record.steal_ticks > record.total_ticks) {
+    fail(`${location} has impossible CPU tick counts`);
+  }
+  const expectedIdlePercent = (record.idle_ticks / record.total_ticks) * 100;
+  const expectedStealPercent = (record.steal_ticks / record.total_ticks) * 100;
+  if (record.idle_percent !== expectedIdlePercent || record.steal_percent !== expectedStealPercent) {
+    fail(`${location} percentages do not match CPU tick counts`);
+  }
+}
+
+function validateMatrixGateLog(config, gateFile, status) {
+  const records = parseCanonicalJsonl(gateFile, "matrix gate.jsonl");
+  const runStarted = requireIsoTimestamp(status.started_at, "matrix gate status.started_at");
+  const runFinished = requireIsoTimestamp(status.finished_at, "matrix gate status.finished_at");
+  const requireRunTimestamp = (value, location) => {
+    const timestamp = requireIsoTimestamp(value, location);
+    if (timestamp < runStarted || timestamp > runFinished) {
+      fail(`${location} falls outside the matrix run window`);
+    }
+    return timestamp;
+  };
+  const expectedLabels = [
+    "native-all-engines",
+    "native-lua54",
+    "wasm-adapter-matrix",
+    "wasm-dispatch-matrix",
+  ];
+  let recordIndex = 0;
+  for (const label of expectedLabels) {
+    let acceptedTimedAttempt = false;
+    for (
+      let attempt = 1;
+      attempt <= config.host_gate.maximum_timed_attempts_per_group;
+      attempt += 1
+    ) {
+      let acceptedQuietWindow = false;
+      let quietAttempt = 0;
+      while (
+        recordIndex < records.length &&
+        records[recordIndex].phase === "pre" &&
+        records[recordIndex].label === label &&
+        records[recordIndex].timed_attempt === attempt
+      ) {
+        quietAttempt += 1;
+        const record = records[recordIndex];
+        const location = `matrix gate pre-record ${recordIndex + 1}`;
+        requireExactKeys(
+          record,
+          [
+            "phase", "label", "timed_attempt", "quiet_attempt", "captured_at", "load_1m", "total_ticks",
+            "idle_ticks", "steal_ticks", "idle_percent", "steal_percent", "accepted",
+          ],
+          location,
+        );
+        if (record.quiet_attempt !== quietAttempt) fail(`${location}.quiet_attempt is not sequential`);
+        requireRunTimestamp(record.captured_at, `${location}.captured_at`);
+        requireNumber(record.load_1m, `${location}.load_1m`, 0);
+        validateMatrixCpuDelta(record, location);
+        const shouldAccept =
+          record.idle_percent >= config.host_gate.minimum_idle_percent &&
+          record.steal_ticks <= config.host_gate.maximum_steal_ticks &&
+          record.load_1m <= config.host_gate.maximum_load_1m;
+        if (record.accepted !== shouldAccept) fail(`${location} has a false accepted flag`);
+        acceptedQuietWindow = record.accepted;
+        recordIndex += 1;
+        if (acceptedQuietWindow) break;
+      }
+      if (!acceptedQuietWindow) {
+        fail(`matrix gate ${label} attempt ${attempt} lacks a final accepted quiet window`);
+      }
+      if (
+        recordIndex >= records.length ||
+        records[recordIndex].phase !== "timed" ||
+        records[recordIndex].label !== label ||
+        records[recordIndex].timed_attempt !== attempt
+      ) {
+        fail(`matrix gate ${label} attempt ${attempt} lacks one matching timed record`);
+      }
+      const record = records[recordIndex];
+      const location = `matrix gate timed-record ${recordIndex + 1}`;
+      requireExactKeys(
+        record,
+        [
+          "phase", "label", "timed_attempt", "started_at", "finished_at", "total_ticks", "idle_ticks",
+          "steal_ticks", "idle_percent", "steal_percent", "accepted",
+        ],
+        location,
+      );
+      const started = requireRunTimestamp(record.started_at, `${location}.started_at`);
+      const finished = requireRunTimestamp(record.finished_at, `${location}.finished_at`);
+      if (finished < started) fail(`${location} finishes before it starts`);
+      validateMatrixCpuDelta(record, location);
+      const shouldAccept = timedStealGatePasses(config, record);
+      if (record.accepted !== shouldAccept) fail(`${location} has a false accepted flag`);
+      recordIndex += 1;
+      if (record.accepted) {
+        acceptedTimedAttempt = true;
+        break;
+      }
+    }
+    if (!acceptedTimedAttempt) {
+      fail(
+        `matrix gate ${label} exhausted ${config.host_gate.maximum_timed_attempts_per_group} ` +
+        "attempts without passing the 0.1% timed-steal gate",
+      );
+    }
+  }
+  if (recordIndex !== records.length) fail("matrix gate.jsonl contains unexpected labels or extra records");
+  return records;
 }
 
 function validateMemoryGateLog(config, gateFile, declaredRecords, warmupAttempts, acceptedAttempts) {
@@ -3724,7 +3866,7 @@ function validateMatrixDispatch(config, file, status) {
   return value;
 }
 
-function validateMatrixEvidence(config, state, evidenceDirectory, publications) {
+function validateMatrixEvidence(config, state, evidenceDirectory, publications, status) {
   const expectedFiles = [
     "gate.jsonl",
     "host.json",
@@ -3763,6 +3905,7 @@ function validateMatrixEvidence(config, state, evidenceDirectory, publications) 
   if (manifest.host_sha256 !== sha256File(path.join(evidenceDirectory, "host.json"))) {
     fail("matrix manifest host hash is wrong");
   }
+  validateMatrixGateLog(config, path.join(evidenceDirectory, "gate.jsonl"), status);
   const publicationHashes = {
     history: sha256File(publications.history),
     wasm: sha256File(publications.wasm),
@@ -3826,7 +3969,7 @@ async function promoteMatrixResult(config, state, downloadDirectory, verifyCheck
   validateMatrixNativeRows(config, publications.history, status);
   validateMatrixWasm(config, publications.wasm, status);
   validateMatrixDispatch(config, publications.dispatch, status);
-  validateMatrixEvidence(config, state, evidenceSource, publications);
+  validateMatrixEvidence(config, state, evidenceSource, publications, status);
 
   const destinations = {
     history: historyDestination,
@@ -4783,7 +4926,11 @@ async function selfTest(config) {
         MATRIX_WASM_RUNTIMES.map((runtime) => [runtime, { ...matrixArtifact }]),
       ),
     },
-    host_gate: config.host_gate,
+    host_gate: {
+      ...config.host_gate,
+      maximum_timed_attempts_per_group: 3,
+      wait_timeout_seconds: 900,
+    },
     publication: { mode: "matrix", native_rows: 50, wasm_rows: 60, dispatch_runtimes: 4 },
   };
   assert.equal(validateConfig(matrixConfig), matrixConfig);
@@ -4798,6 +4945,47 @@ async function selfTest(config) {
     finished_at: "2026-07-20T00:01:00.000Z",
   };
   validateMatrixStatus(matrixStatus);
+  let matrixGateTimestamp = Date.parse(matrixStatus.started_at);
+  const nextMatrixGateTimestamp = () => new Date(matrixGateTimestamp += 1000).toISOString();
+  const matrixGateRecords = [];
+  for (const label of [
+    "native-all-engines",
+    "native-lua54",
+    "wasm-adapter-matrix",
+    "wasm-dispatch-matrix",
+  ]) {
+    const attempts = label === "native-lua54" ? 2 : 1;
+    for (let timedAttempt = 1; timedAttempt <= attempts; timedAttempt += 1) {
+      matrixGateRecords.push({
+        phase: "pre",
+        label,
+        timed_attempt: timedAttempt,
+        quiet_attempt: 1,
+        captured_at: nextMatrixGateTimestamp(),
+        load_1m: 0.01,
+        total_ticks: 1000,
+        idle_ticks: 1000,
+        steal_ticks: 0,
+        idle_percent: 100,
+        steal_percent: 0,
+        accepted: true,
+      });
+      const rejected = label === "native-lua54" && timedAttempt === 1;
+      matrixGateRecords.push({
+        phase: "timed",
+        label,
+        timed_attempt: timedAttempt,
+        started_at: nextMatrixGateTimestamp(),
+        finished_at: nextMatrixGateTimestamp(),
+        total_ticks: 1000,
+        idle_ticks: rejected ? 998 : 999,
+        steal_ticks: rejected ? 2 : 1,
+        idle_percent: rejected ? 99.8 : 99.9,
+        steal_percent: rejected ? 0.2 : 0.1,
+        accepted: !rejected,
+      });
+    }
+  }
   requireLinuxWasmTarget("wasm32-v8-node-linux-x64", "matrix target fixture");
   requireLinuxWasmTarget("wasm32-dispatch-spidermonkey-spidermonkey-linux-x64", "matrix dispatch target fixture", true);
   assert.throws(() => requireLinuxWasmTarget("wasm32-v8-node-darwin-arm64", "matrix target fixture"));
@@ -4811,6 +4999,27 @@ async function selfTest(config) {
     ...matrixConfig,
     publication: { ...matrixConfig.publication, wasm_rows: 59 },
   }));
+  for (const maximumTimedAttempts of [0, MAX_TIMED_ATTEMPTS_PER_GROUP + 1]) {
+    assert.throws(() => validateConfig({
+      ...matrixConfig,
+      host_gate: {
+        ...matrixConfig.host_gate,
+        maximum_timed_attempts_per_group: maximumTimedAttempts,
+      },
+    }));
+  }
+  for (const waitTimeoutSeconds of [899, 901]) {
+    assert.throws(() => validateConfig({
+      ...matrixConfig,
+      host_gate: {
+        ...matrixConfig.host_gate,
+        wait_timeout_seconds: waitTimeoutSeconds,
+      },
+    }));
+  }
+  assert.equal(timedStealGatePasses(matrixConfig, { total_ticks: 946, steal_ticks: 1 }), false);
+  assert.equal(timedStealGatePasses(matrixConfig, { total_ticks: 1000, steal_ticks: 1 }), true);
+  assert.equal(timedStealGatePasses(matrixConfig, { total_ticks: 10_000, steal_ticks: 2 }), true);
   const firstRoles = [];
   for (let round = 1; round <= 16; round += 1) {
     const order = memoryRoundOrder(round);
@@ -4925,6 +5134,7 @@ async function selfTest(config) {
     fs.writeFileSync(outsideFixture, "{}\n");
     const malformedMemorySamples = path.join(temporary, "malformed-memory-samples.jsonl");
     const malformedMemoryGate = path.join(temporary, "malformed-memory-gate.jsonl");
+    const matrixGate = path.join(temporary, "matrix-gate.jsonl");
     fs.writeFileSync(malformedMemorySamples, "{}\n");
     fs.writeFileSync(malformedMemoryGate, "{}\n");
     assert.throws(() =>
@@ -4939,6 +5149,26 @@ async function selfTest(config) {
     assert.throws(() =>
       validateMemoryGateLog(memoryConfig, malformedMemoryGate, 1, [1], Array(16).fill(1)),
     );
+    const writeMatrixGate = (records) => {
+      fs.writeFileSync(matrixGate, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
+    };
+    writeMatrixGate(matrixGateRecords);
+    validateMatrixGateLog(matrixConfig, matrixGate, matrixStatus);
+    const falseAcceptance = structuredClone(matrixGateRecords);
+    falseAcceptance.find(
+      (record) => record.phase === "timed" && record.label === "native-lua54" && record.timed_attempt === 1,
+    ).accepted = true;
+    writeMatrixGate(falseAcceptance);
+    assert.throws(() => validateMatrixGateLog(matrixConfig, matrixGate, matrixStatus));
+    const missingAcceptedRetry = matrixGateRecords.filter(
+      (record) => !(record.label === "native-lua54" && record.timed_attempt === 2),
+    );
+    writeMatrixGate(missingAcceptedRetry);
+    assert.throws(() => validateMatrixGateLog(matrixConfig, matrixGate, matrixStatus));
+    const outOfWindow = structuredClone(matrixGateRecords);
+    outOfWindow[0].captured_at = "2026-07-19T23:59:59.000Z";
+    writeMatrixGate(outOfWindow);
+    assert.throws(() => validateMatrixGateLog(matrixConfig, matrixGate, matrixStatus));
     const resolverOptions = { repo: fixtureRepo, defaultConfig: defaultFixture };
     assert.equal(resolveConfigFile(undefined, resolverOptions), defaultFixture);
     assert.equal(resolveConfigFile("bench/cloud/alternate.json", resolverOptions), alternateFixture);

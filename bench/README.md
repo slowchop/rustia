@@ -577,6 +577,12 @@ Lua 5.4 binary, and measures the five common workloads. It then runs the three
 wasm adapters on Node, Deno, Bun, and SpiderMonkey on that same host. Promotion
 requires the exact 50 native rows, 60 wasm rows, four dispatch runs, Linux-only
 target identities, a single source revision, and confirmed instance deletion.
+The matrix v2 host gate keeps every prewindow at zero steal. A timed group
+passes only at no more than 0.1% steal; otherwise it restores only that group's
+outputs and retries up to three times after a fresh quiet prewindow, while
+retaining every rejected gate record. Each group shares one 15-minute
+quiet-acquisition deadline across its retries, and the existing 55-minute
+Linode lifecycle remains the outer bound.
 The generic `just benchmarks` local-publication path is retired so a macOS or
 Windows developer machine cannot repopulate active results.
 

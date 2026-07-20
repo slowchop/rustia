@@ -31,7 +31,7 @@
     }
   },
   "measurement": {
-    "protocol": "cross_engine_matrix_v1",
+    "protocol": "cross_engine_matrix_v2",
     "native_target": "linux-x86_64",
     "native_engines": [
       "rustia",
@@ -99,6 +99,7 @@
     "maximum_load_1m": 0.1,
     "maximum_steal_ticks": 0,
     "maximum_timed_steal_percent": 0.1,
+    "maximum_timed_attempts_per_group": 3,
     "wait_timeout_seconds": 900
   },
   "publication": {

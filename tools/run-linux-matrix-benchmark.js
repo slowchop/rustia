@@ -5,6 +5,7 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
@@ -20,7 +21,8 @@ const HISTORY = path.join(ROOT, "matrix-history.jsonl");
 const WASM_RESULTS = path.join(ROOT, "wasm-current-results.json");
 const DISPATCH_RESULTS = path.join(ROOT, "wasm-dispatch-current-results.json");
 const EVIDENCE_ROOT = path.join(ROOT, "matrix-evidence");
-const PROTOCOL = "cross_engine_matrix_v1";
+const PROTOCOL = "cross_engine_matrix_v2";
+const MAX_TIMED_ATTEMPTS_PER_GROUP = 3;
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const NATIVE_TARGET = "linux-x86_64";
@@ -150,7 +152,8 @@ function validateConfig(value) {
   const gate = requireObject(config.host_gate, "host_gate");
   requireExactKeys(gate, [
     "benchmark_cpu", "cooldown_seconds", "idle_window_seconds", "minimum_idle_percent", "maximum_load_1m",
-    "maximum_steal_ticks", "maximum_timed_steal_percent", "wait_timeout_seconds",
+    "maximum_steal_ticks", "maximum_timed_steal_percent", "maximum_timed_attempts_per_group",
+    "wait_timeout_seconds",
   ], "host_gate");
   requireInteger(gate.benchmark_cpu, "host_gate.benchmark_cpu", 0);
   requireInteger(gate.cooldown_seconds, "host_gate.cooldown_seconds", 1);
@@ -163,7 +166,17 @@ function validateConfig(value) {
   if (requireNumber(gate.maximum_timed_steal_percent, "host_gate.maximum_timed_steal_percent", 0) !== 0.1) {
     fail("host_gate.maximum_timed_steal_percent must be 0.1");
   }
-  requireInteger(gate.wait_timeout_seconds, "host_gate.wait_timeout_seconds", 1);
+  const maximumTimedAttempts = requireInteger(
+    gate.maximum_timed_attempts_per_group,
+    "host_gate.maximum_timed_attempts_per_group",
+    1,
+  );
+  if (maximumTimedAttempts > MAX_TIMED_ATTEMPTS_PER_GROUP) {
+    fail(`host_gate.maximum_timed_attempts_per_group must be <= ${MAX_TIMED_ATTEMPTS_PER_GROUP}`);
+  }
+  if (requireInteger(gate.wait_timeout_seconds, "host_gate.wait_timeout_seconds", 1) !== 900) {
+    fail("host_gate.wait_timeout_seconds must be 900");
+  }
   const publication = requireObject(config.publication, "publication");
   requireExactKeys(publication, ["mode", "native_rows", "wasm_rows", "dispatch_runtimes"], "publication");
   if (
@@ -369,16 +382,40 @@ function cpuDelta(before, after) {
   };
 }
 
+function timedStealGatePasses(gate, delta) {
+  return delta.steal_ticks * 100 <= gate.maximum_timed_steal_percent * delta.total_ticks;
+}
+
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function waitForQuiet(config, label, gateFile) {
+function snapshotFiles(files) {
+  const seen = new Set();
+  return files.map((file) => {
+    if (seen.has(file)) fail(`duplicate rollback file ${file}`);
+    seen.add(file);
+    return fs.existsSync(file)
+      ? { file, existed: true, bytes: fs.readFileSync(file) }
+      : { file, existed: false, bytes: null };
+  });
+}
+
+function restoreFileSnapshots(snapshots) {
+  for (const snapshot of snapshots) {
+    if (snapshot.existed) {
+      fs.writeFileSync(snapshot.file, snapshot.bytes);
+    } else {
+      fs.rmSync(snapshot.file, { force: true });
+    }
+  }
+}
+
+async function waitForQuiet(config, label, gateFile, timedAttempt, deadline) {
   const gate = config.host_gate;
-  const deadline = Date.now() + gate.wait_timeout_seconds * 1000;
-  let attempt = 0;
+  let quietAttempt = 0;
   while (Date.now() < deadline) {
-    attempt += 1;
+    quietAttempt += 1;
     const before = readCpu(gate.benchmark_cpu);
     await sleep(gate.idle_window_seconds * 1000);
     const after = readCpu(gate.benchmark_cpu);
@@ -389,25 +426,92 @@ async function waitForQuiet(config, label, gateFile) {
       delta.steal_ticks <= gate.maximum_steal_ticks &&
       load1m <= gate.maximum_load_1m;
     fs.appendFileSync(gateFile, `${JSON.stringify({
-      phase: "pre", label, attempt, captured_at: new Date().toISOString(), load_1m: load1m, ...delta, accepted,
+      phase: "pre", label, timed_attempt: timedAttempt, quiet_attempt: quietAttempt,
+      captured_at: new Date().toISOString(), load_1m: load1m, ...delta, accepted,
     })}\n`);
     if (accepted) return;
     await sleep(gate.cooldown_seconds * 1000);
   }
-  fail(`${label} did not obtain a quiet host window before timeout`);
+  fail(`${label} timed attempt ${timedAttempt} did not obtain a quiet host window before timeout`);
 }
 
-async function timedGroup(config, label, command, args, gateFile, options = {}) {
-  await waitForQuiet(config, label, gateFile);
-  const before = readCpu(config.host_gate.benchmark_cpu);
-  const started = new Date().toISOString();
-  run("taskset", ["-c", String(config.host_gate.benchmark_cpu), command, ...args], { ...options, capture: false });
-  const finished = new Date().toISOString();
-  const delta = cpuDelta(before, readCpu(config.host_gate.benchmark_cpu));
-  const accepted = delta.steal_percent <= config.host_gate.maximum_timed_steal_percent;
-  fs.appendFileSync(gateFile, `${JSON.stringify({ phase: "timed", label, started_at: started, finished_at: finished, ...delta, accepted })}\n`);
-  if (!accepted) fail(`${label} exceeded the timed steal budget (${delta.steal_percent.toFixed(6)}%)`);
-  await sleep(config.host_gate.cooldown_seconds * 1000);
+async function timedGroup(config, label, command, args, gateFile, options = {}, hooks = {}) {
+  const rollbackFiles = options.rollbackFiles ?? [];
+  const runOptions = { ...options };
+  delete runOptions.rollbackFiles;
+  const waitForQuietImpl = hooks.waitForQuiet ?? waitForQuiet;
+  const readCpuImpl = hooks.readCpu ?? readCpu;
+  const runImpl = hooks.run ?? run;
+  const sleepImpl = hooks.sleep ?? sleep;
+  const now = hooks.now ?? (() => new Date().toISOString());
+  const logImpl = hooks.log ?? log;
+  const appendGate = hooks.appendGate ?? ((file, record) => {
+    fs.appendFileSync(file, `${JSON.stringify(record)}\n`);
+  });
+  const maximumAttempts = config.host_gate.maximum_timed_attempts_per_group;
+  const quietDeadline = Date.now() + config.host_gate.wait_timeout_seconds * 1000;
+
+  for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+    await waitForQuietImpl(config, label, gateFile, attempt, quietDeadline);
+    const snapshots = snapshotFiles(rollbackFiles);
+    logImpl(`${label} timed attempt ${attempt}/${maximumAttempts} starting`);
+    const before = readCpuImpl(config.host_gate.benchmark_cpu);
+    const started = now();
+    try {
+      runImpl(
+        "taskset",
+        ["-c", String(config.host_gate.benchmark_cpu), command, ...args],
+        { ...runOptions, capture: false },
+      );
+    } catch (error) {
+      restoreFileSnapshots(snapshots);
+      logImpl(`${label} timed attempt ${attempt}/${maximumAttempts} failed; restored attempt outputs`);
+      throw error;
+    }
+    const finished = now();
+    let delta;
+    try {
+      delta = cpuDelta(before, readCpuImpl(config.host_gate.benchmark_cpu));
+    } catch (error) {
+      restoreFileSnapshots(snapshots);
+      logImpl(`${label} timed attempt ${attempt}/${maximumAttempts} could not be gated; restored attempt outputs`);
+      throw error;
+    }
+    const accepted = timedStealGatePasses(config.host_gate, delta);
+    try {
+      appendGate(gateFile, {
+        phase: "timed", label, timed_attempt: attempt,
+        started_at: started, finished_at: finished, ...delta, accepted,
+      });
+    } catch (error) {
+      restoreFileSnapshots(snapshots);
+      try {
+        logImpl(`${label} timed attempt ${attempt}/${maximumAttempts} gate write failed; restored attempt outputs`);
+      } catch (_) {
+        // Preserve the durable gate-write failure after best-effort logging.
+      }
+      throw error;
+    }
+    if (accepted) {
+      logImpl(`${label} timed attempt ${attempt}/${maximumAttempts} accepted`);
+      await sleepImpl(config.host_gate.cooldown_seconds * 1000);
+      return;
+    }
+
+    restoreFileSnapshots(snapshots);
+    logImpl(
+      `${label} timed attempt ${attempt}/${maximumAttempts} rejected at ` +
+      `${delta.steal_percent.toFixed(6)}% / ${delta.steal_ticks} steal tick(s); restored attempt outputs`,
+    );
+    if (attempt < maximumAttempts) {
+      await sleepImpl(config.host_gate.cooldown_seconds * 1000);
+    }
+  }
+
+  fail(
+    `${label} exhausted ${maximumAttempts} timed attempt(s) without meeting the ` +
+    `${config.host_gate.maximum_timed_steal_percent}% timed-steal gate`,
+  );
 }
 
 function nativeArgs(config, engines, samplesFile) {
@@ -426,22 +530,38 @@ function nativeArgs(config, engines, samplesFile) {
 
 async function measure(config, buildInfo, evidenceDirectory) {
   fs.writeFileSync(HISTORY, "");
+  fs.rmSync(WASM_RESULTS, { force: true });
+  fs.rmSync(DISPATCH_RESULTS, { force: true });
   const gateFile = path.join(evidenceDirectory, "gate.jsonl");
   fs.writeFileSync(gateFile, "");
   const allSamples = path.join(evidenceDirectory, "native-all-samples.json");
   const luaSamples = path.join(evidenceDirectory, "native-lua54-samples.json");
-  await timedGroup(config, "native-all-engines", buildInfo.allBinary, nativeArgs(config, ALL_ENGINES, allSamples), gateFile, { cwd: SOURCE });
-  await timedGroup(config, "native-lua54", buildInfo.lua54Binary, nativeArgs(config, ["mlua-lua54"], luaSamples), gateFile, { cwd: SOURCE });
+  await timedGroup(
+    config,
+    "native-all-engines",
+    buildInfo.allBinary,
+    nativeArgs(config, ALL_ENGINES, allSamples),
+    gateFile,
+    { cwd: SOURCE, rollbackFiles: [HISTORY, allSamples] },
+  );
+  await timedGroup(
+    config,
+    "native-lua54",
+    buildInfo.lua54Binary,
+    nativeArgs(config, ["mlua-lua54"], luaSamples),
+    gateFile,
+    { cwd: SOURCE, rollbackFiles: [HISTORY, luaSamples] },
+  );
   await timedGroup(config, "wasm-adapter-matrix", "node", [
     "tools/run-wasm-gate.js", "--no-build", "--runtime", WASM_RUNTIMES.join(","),
     "--adapters", WASM_ADAPTERS.join(","), "--target-ms", String(config.measurement.wasm_target_ms),
     "--reps", String(config.measurement.wasm_repetitions), "--output", WASM_RESULTS,
-  ], gateFile, { cwd: SOURCE });
+  ], gateFile, { cwd: SOURCE, rollbackFiles: [WASM_RESULTS] });
   await timedGroup(config, "wasm-dispatch-matrix", "node", [
     "tools/run-wasm-dispatch-gate.js", "--runtime", WASM_RUNTIMES.join(","),
     "--target-ms", String(config.measurement.dispatch_target_ms),
     "--reps", String(config.measurement.dispatch_repetitions), "--output", DISPATCH_RESULTS,
-  ], gateFile, { cwd: SOURCE });
+  ], gateFile, { cwd: SOURCE, rollbackFiles: [DISPATCH_RESULTS] });
   return { gateFile, allSamples, luaSamples };
 }
 
@@ -582,7 +702,7 @@ async function execute(configFile, providerFile, bundle) {
   return status.status === "matrix_complete" ? 0 : 2;
 }
 
-function selfTest() {
+async function selfTest() {
   assert.deepEqual(ALL_ENGINES, NATIVE_ENGINES.slice(0, -1));
   assert.equal(NATIVE_ENGINES.length * WORKLOADS.length, 50);
   assert.equal(WASM_RUNTIMES.length * WASM_ADAPTERS.length * WORKLOADS.length, 60);
@@ -590,13 +710,166 @@ function selfTest() {
     { fields: [10, 0, 5, 100, 2, 1, 1, 0] },
     { fields: [11, 0, 6, 198, 2, 1, 1, 0] },
   ), { total_ticks: 100, idle_ticks: 98, steal_ticks: 0, idle_percent: 98, steal_percent: 0 });
+  const timedGate = { maximum_timed_steal_percent: 0.1 };
+  assert.equal(timedStealGatePasses(timedGate, { total_ticks: 946, steal_ticks: 1 }), false);
+  assert.equal(timedStealGatePasses(timedGate, { total_ticks: 1000, steal_ticks: 1 }), true);
+  assert.equal(timedStealGatePasses(timedGate, { total_ticks: 10_000, steal_ticks: 2 }), true);
   assert.throws(() => safeArtifactPath("/tmp/a", "../b", "fixture"));
+
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-linux-matrix-self-test-"));
+  try {
+    const history = path.join(temporary, "history.jsonl");
+    const samples = path.join(temporary, "samples.json");
+    const gate = path.join(temporary, "gate.jsonl");
+    const retryConfig = {
+      host_gate: {
+        benchmark_cpu: 3,
+        cooldown_seconds: 1,
+        maximum_timed_steal_percent: 0.1,
+        maximum_timed_attempts_per_group: 3,
+        wait_timeout_seconds: 900,
+      },
+    };
+    const cpu = (idle, steal) => ({ fields: [0, 0, 0, idle, 0, 0, 0, steal], steal });
+    const timestamps = () => {
+      let value = Date.parse("2026-07-20T00:00:00.000Z");
+      return () => new Date(value += 1000).toISOString();
+    };
+
+    fs.writeFileSync(history, "prior-accepted\n");
+    fs.writeFileSync(gate, "");
+    const cpuReads = [cpu(0, 0), cpu(998, 2), cpu(998, 2), cpu(1997, 3)];
+    const quietAttempts = [];
+    const quietDeadlines = [];
+    const sleeps = [];
+    let runs = 0;
+    await timedGroup(
+      retryConfig,
+      "retry-fixture",
+      "fixture-command",
+      [],
+      gate,
+      { rollbackFiles: [history, samples] },
+      {
+        waitForQuiet: async (_config, _label, _gate, attempt, deadline) => {
+          quietAttempts.push(attempt);
+          quietDeadlines.push(deadline);
+        },
+        readCpu: () => cpuReads.shift(),
+        run: () => {
+          runs += 1;
+          fs.appendFileSync(history, `attempt-${runs}\n`);
+          fs.appendFileSync(samples, `sample-${runs}\n`);
+        },
+        sleep: async (milliseconds) => sleeps.push(milliseconds),
+        now: timestamps(),
+        log: () => {},
+      },
+    );
+    assert.equal(runs, 2);
+    assert.deepEqual(quietAttempts, [1, 2]);
+    assert.equal(quietDeadlines[0], quietDeadlines[1]);
+    assert.deepEqual(sleeps, [1000, 1000]);
+    assert.equal(fs.readFileSync(history, "utf8"), "prior-accepted\nattempt-2\n");
+    assert.equal(fs.readFileSync(samples, "utf8"), "sample-2\n");
+    const acceptedRecords = fs.readFileSync(gate, "utf8").trim().split("\n").map(JSON.parse);
+    assert.deepEqual(
+      acceptedRecords.map((record) => [record.timed_attempt, record.accepted]),
+      [[1, false], [2, true]],
+    );
+    assert.equal(acceptedRecords[0].steal_percent, 0.2);
+    assert.equal(acceptedRecords[1].steal_percent, 0.1);
+
+    fs.writeFileSync(history, "prior-accepted\n");
+    fs.rmSync(samples, { force: true });
+    fs.writeFileSync(gate, "");
+    const rejectedCpuReads = [cpu(0, 0), cpu(998, 2), cpu(998, 2), cpu(1996, 4)];
+    const rejectedQuietAttempts = [];
+    let rejectedRuns = 0;
+    await assert.rejects(
+      timedGroup(
+        { host_gate: { ...retryConfig.host_gate, maximum_timed_attempts_per_group: 2 } },
+        "exhaustion-fixture",
+        "fixture-command",
+        [],
+        gate,
+        { rollbackFiles: [history, samples] },
+        {
+          waitForQuiet: async (_config, _label, _gate, attempt) => rejectedQuietAttempts.push(attempt),
+          readCpu: () => rejectedCpuReads.shift(),
+          run: () => {
+            rejectedRuns += 1;
+            fs.appendFileSync(history, `rejected-${rejectedRuns}\n`);
+            fs.appendFileSync(samples, `rejected-sample-${rejectedRuns}\n`);
+          },
+          sleep: async () => {},
+          now: timestamps(),
+          log: () => {},
+        },
+      ),
+      /exhausted 2 timed attempt\(s\).*0\.1% timed-steal gate/,
+    );
+    assert.equal(rejectedRuns, 2);
+    assert.deepEqual(rejectedQuietAttempts, [1, 2]);
+    assert.equal(fs.readFileSync(history, "utf8"), "prior-accepted\n");
+    assert.equal(fs.existsSync(samples), false);
+    const rejectedRecords = fs.readFileSync(gate, "utf8").trim().split("\n").map(JSON.parse);
+    assert.deepEqual(
+      rejectedRecords.map((record) => [record.timed_attempt, record.accepted]),
+      [[1, false], [2, false]],
+    );
+
+    for (const failureKind of ["command", "gate"]) {
+      fs.writeFileSync(history, "prior-accepted\n");
+      fs.rmSync(samples, { force: true });
+      fs.writeFileSync(gate, "");
+      const failureCpuReads = [cpu(0, 0), cpu(999, 1)];
+      let failureRuns = 0;
+      let failureQuietWindows = 0;
+      await assert.rejects(
+        timedGroup(
+          retryConfig,
+          `${failureKind}-failure-fixture`,
+          "fixture-command",
+          [],
+          gate,
+          { rollbackFiles: [history, samples] },
+          {
+            waitForQuiet: async () => {
+              failureQuietWindows += 1;
+            },
+            readCpu: () => failureCpuReads.shift(),
+            run: () => {
+              failureRuns += 1;
+              fs.appendFileSync(history, `${failureKind}-attempt\n`);
+              fs.appendFileSync(samples, `${failureKind}-sample\n`);
+              if (failureKind === "command") throw new Error("fixture command failure");
+            },
+            appendGate: failureKind === "gate"
+              ? () => { throw new Error("fixture gate failure"); }
+              : undefined,
+            sleep: async () => {},
+            now: timestamps(),
+            log: () => {},
+          },
+        ),
+        new RegExp(`fixture ${failureKind} failure`),
+      );
+      assert.equal(failureRuns, 1);
+      assert.equal(failureQuietWindows, 1);
+      assert.equal(fs.readFileSync(history, "utf8"), "prior-accepted\n");
+      assert.equal(fs.existsSync(samples), false);
+      assert.equal(fs.readFileSync(gate, "utf8"), "");
+    }
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
   process.stdout.write("linux matrix benchmark runner self-test passed\n");
 }
 
 async function main() {
   if (process.argv[2] === "self-test" && process.argv.length === 3) {
-    selfTest();
+    await selfTest();
     return;
   }
   if (process.argv.length !== 5) {

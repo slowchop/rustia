@@ -68,6 +68,10 @@ Current unpublished workspace version: `0.0.1`.
 - The benchmark harness has current-results JSON/HTML, generated per-workload
   claim gating, package-file history, the requested adapter matrix, and
   cross-adapter source coverage for the non-default `string_building` workload.
+- The dedicated Linux matrix v2 gate keeps zero-steal quiet prewindows, accepts
+  timed groups only at no more than 0.1% steal, and retries a rejected group up
+  to three times with output rollback and retained gate evidence inside the
+  existing bounded Linode lifecycle.
 - Benchmark calibration probes and timed repetitions now use freshly prepared
   engine/workload state with an untimed warmup, and `--samples-json` writes
   execution-ordered raw repetitions to a schema-identified sidecar without
