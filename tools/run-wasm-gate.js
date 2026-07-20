@@ -211,6 +211,7 @@ function measureRuntime(runtime, options, commit) {
   }
   if (runtime === "spidermonkey") {
     runtimeSpec.args.push("--runtime-version", commandOutput(runtimeSpec.command, ["--version"]));
+    runtimeSpec.args.push("--host", `${process.platform}-${process.arch}`);
   }
   const { command, args } = runtimeSpec;
   const text = run(command, args);

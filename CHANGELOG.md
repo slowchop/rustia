@@ -168,8 +168,8 @@ Current unpublished workspace version: `0.0.1`.
   canonicalization remain unchanged. The accepted exact-commit Linode result now
   validates that corrective pass for this workload without supporting a blanket
   speed claim.
-- The benchmark static site now has a release-preflight contract check for local
-  assets, DOM bindings, JSONL history parsing, and current-results agreement.
+- The generated `bench/current-results.html` report has a release-preflight
+  freshness check alongside its markdown, JSON, claim, and wasm inputs.
 - Release preflight now composes release notes, package files, generated leaf
   package dry runs, progress HTML, project-status drift checks, benchmark
   result freshness, and workspace tests.
@@ -177,11 +177,11 @@ Current unpublished workspace version: `0.0.1`.
   the pinned Rust toolchain.
 - Crate publishability blockers are generated from cargo metadata and package
   file audits into `design/publishability.json`.
-- GitHub Actions now has hosted release-preflight plus self-hosted main-push,
-  nightly, and manual benchmark workflows that publish to the private
-  benchmark-data repository.
-- Workflow policy is checked in release preflight so hosted CI and benchmark
-  runner labels stay public and generic.
+- GitHub Actions keeps benchmark work validation-only; fresh timing data comes
+  from the explicit ephemeral Linode Linux lifecycle instead of an arbitrary
+  self-hosted runner.
+- Workflow policy is checked in release preflight so hosted CI cannot record or
+  publish fresh benchmark timings.
 - Release preflight and hosted CI now compile the public `rustia` examples
   explicitly.
 - The first public koto-to-rustia migration guide is documented in

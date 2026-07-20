@@ -42,13 +42,14 @@ check-benchmark-results:
     node bench/analyze-fixed-samples.js --self-test
     node tools/run-digitalocean-benchmark.js self-test
     node tools/run-linode-benchmark.js self-test
+    node tools/run-linux-matrix-benchmark.js self-test
     node tools/run-vultr-benchmark.js self-test
     node tools/run-scaleway-benchmark.js self-test
     node tools/check-benchmark-results.js
     node tools/check-wasm-gate-results.js
+    node tools/check-current-report-summary.js
     node bench/render-current-results.js --check
     node bench/render-claims.js --check
-    node tools/check-benchmark-site.js
 
 check-examples:
     cargo test -p rustia --examples --no-run
@@ -68,11 +69,7 @@ release-preflight:
     cargo test --workspace
 
 benchmarks:
-    git diff --quiet --ignore-submodules --
-    git diff --cached --quiet --ignore-submodules --
-    cargo run -p script-bench-harness --release --features all-engines -- --history bench/history/runs.jsonl --commit $(git rev-parse --short HEAD)
-    cargo run -p script-bench-harness --release --no-default-features --features mlua-lua54 -- --engines mlua-lua54 --history bench/history/runs.jsonl --commit $(git rev-parse --short HEAD)
-    just gen-current-results
+    @node -e 'console.error("Local benchmark publication is disabled: use just bench-linode-matrix-plan CONFIG and just bench-linode-matrix CONFIG."); process.exit(2)'
 
 # One-time private-prompt DigitalOcean authentication; never pass the token as an argument.
 bench-do-auth:
@@ -117,6 +114,14 @@ bench-linode-auth:
 # Read-only validation of the selected frozen config, account safety, and dedicated plan.
 bench-linode-plan config="":
     node tools/run-linode-benchmark.js plan {{ if config == "" { "" } else { quote(config) } }}
+
+# Validate a frozen cross-language Linux + wasm matrix config without creating a Linode.
+bench-linode-matrix-plan config:
+    node tools/run-linode-benchmark.js plan "{{ config }}"
+
+# Run and atomically publish one fresh Linux + wasm matrix on an ephemeral dedicated Linode.
+bench-linode-matrix config:
+    node tools/run-linode-benchmark.js bench "{{ config }}"
 
 # Run the selected frozen config on one ephemeral dedicated-CPU Linode and confirm deletion.
 bench-linode config="":

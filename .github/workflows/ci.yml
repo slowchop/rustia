@@ -75,9 +75,9 @@ jobs:
           node bench/analyze-fixed-samples.js --self-test
           node tools/check-benchmark-results.js
           node tools/check-wasm-gate-results.js
+          node tools/check-current-report-summary.js
           node bench/render-current-results.js --check
           node bench/render-claims.js --check
-          node tools/check-benchmark-site.js
 
       - name: Check rustia examples
         run: cargo test -p rustia --examples --no-run

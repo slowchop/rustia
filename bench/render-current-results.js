@@ -11,6 +11,14 @@ const wasmResultsPath = path.join(__dirname, "wasm", "current-results.json");
 const wasmDispatchPath = path.join(__dirname, "wasm", "dispatch-current-results.json");
 const outputPath = path.join(__dirname, "current-results.html");
 const checkOnly = process.argv.includes("--check");
+const REQUIRED_COMMON_WORKLOADS = Object.freeze([
+  "closures_upvalues",
+  "dense_tables",
+  "generic_iteration",
+  "sparse_tables",
+  "stdlib_math_table",
+]);
+const REQUIRED_COMMON_WORKLOAD_SET = new Set(REQUIRED_COMMON_WORKLOADS);
 
 function fail(message) {
   console.error(`render-current-results: ${message}`);
@@ -192,6 +200,9 @@ function validateWasmRun(run, index) {
       fail(`${label}.${key} must be a non-empty string`);
     }
   }
+  if (!Number.isFinite(run.timestamp_unix) || run.timestamp_unix <= 0) {
+    fail(`${label}.timestamp_unix must be a positive finite number`);
+  }
   if (run.runtime == null || typeof run.runtime !== "object" || Array.isArray(run.runtime)) {
     fail(`${label}.runtime must be an object`);
   }
@@ -371,6 +382,23 @@ function geometricMean(values) {
   return Math.exp(finite.reduce((sum, value) => sum + Math.log(value), 0) / finite.length);
 }
 
+function languageLabel(dialect) {
+  const labels = {
+    javascript: "JavaScript",
+    koto: "Koto",
+    lua54: "Lua 5.4",
+    luau: "Luau",
+    rhai: "Rhai",
+    roto: "Roto",
+    wasm: "WebAssembly",
+  };
+  return labels[dialect] ?? String(dialect)
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
 function compareRows(left, right) {
   return (
     left.target.localeCompare(right.target) ||
@@ -401,24 +429,121 @@ function latestBy(values, keyFn) {
   return [...latest.values()];
 }
 
+function summarizeLanguageTargets(summaryRows) {
+  const commonRows = summaryRows
+    .filter((row) => REQUIRED_COMMON_WORKLOAD_SET.has(row.workload))
+    .sort(compareRows);
+
+  return [...groupBy(commonRows, (row) => row.target)]
+    .map(([target, targetValues]) => {
+      const implementationRows = [...groupBy(
+        targetValues,
+        (row) => `${row.dialect}\0${row.engine}`,
+      )]
+        .map(([key, values]) => {
+          const [dialect, engine] = key.split("\0");
+          const measuredRows = latestBy(values, (row) => row.workload)
+            .sort((left, right) => left.workload.localeCompare(right.workload));
+          const measuredWorkloads = unique(measuredRows.map((row) => row.workload));
+          return {
+            dialect,
+            language: languageLabel(dialect),
+            engine,
+            measuredRows,
+            measuredWorkloads,
+            coverage: measuredWorkloads.length,
+            geoSpeed: null,
+            bestCount: null,
+            rank: null,
+          };
+        })
+        .sort((left, right) =>
+          left.language.localeCompare(right.language) ||
+          left.engine.localeCompare(right.engine)
+        );
+      const rustia = implementationRows.find((row) => row.engine === "rustia") ?? null;
+      const baselineComplete = rustia != null &&
+        rustia.coverage === REQUIRED_COMMON_WORKLOADS.length &&
+        rustia.measuredRows.every((row) => Number.isFinite(row.speed_vs_rustia));
+      const complete = implementationRows.length > 1 &&
+        baselineComplete &&
+        implementationRows.every((row) =>
+          row.coverage === REQUIRED_COMMON_WORKLOADS.length &&
+          row.measuredRows.every((measurement) => Number.isFinite(measurement.speed_vs_rustia))
+        );
+
+      if (complete) {
+        for (const row of implementationRows) {
+          row.geoSpeed = geometricMean(row.measuredRows.map((measurement) => measurement.speed_vs_rustia));
+          row.bestCount = 0;
+        }
+        for (const workload of REQUIRED_COMMON_WORKLOADS) {
+          const candidates = implementationRows.map((row) => ({
+            row,
+            measurement: row.measuredRows.find((measurement) => measurement.workload === workload),
+          }));
+          const minimum = Math.min(...candidates.map((candidate) => candidate.measurement.ns_per_unit_min));
+          for (const candidate of candidates) {
+            if (candidate.measurement.ns_per_unit_min === minimum) {
+              candidate.row.bestCount += 1;
+            }
+          }
+        }
+        implementationRows
+          .slice()
+          .sort((left, right) =>
+            right.geoSpeed - left.geoSpeed ||
+            left.language.localeCompare(right.language) ||
+            left.engine.localeCompare(right.engine)
+          )
+          .forEach((row, index) => {
+            row.rank = index + 1;
+          });
+      }
+
+      const timestamps = targetValues.map((row) => row.timestamp_unix);
+      const commits = unique(targetValues.map((row) => row.commit));
+      const runtimes = unique(targetValues.map((row) => row.runtime).filter(Boolean));
+      return {
+        target,
+        targetKind: targetValues[0].targetKind,
+        runtimes,
+        complete,
+        status: complete ? "Complete" : "Partial",
+        revisionStatus: commits.length === 1 ? "Single revision" : "Mixed revisions",
+        commits,
+        minTimestamp: Math.min(...timestamps),
+        maxTimestamp: Math.max(...timestamps),
+        implementationRows,
+      };
+    })
+    .sort((left, right) => left.target.localeCompare(right.target));
+}
+
 function summarize(data, wasmRows) {
   const rows = data.rows.slice().sort(compareRows);
   const summaryRows = [
     ...rows.map((row) => ({
       engine: row.engine,
+      dialect: row.dialect,
       target: row.target,
       targetKind: targetKind(row.target),
-      targetDetail: row.target,
+      runtime: null,
       workload: row.workload,
+      timestamp_unix: row.timestamp_unix,
+      commit: row.commit,
       ns_per_unit_min: row.ns_per_unit_min,
       speed_vs_rustia: row.speed_vs_rustia,
     })),
     ...wasmRows.map((row) => ({
       engine: row.adapter,
+      dialect: row.dialect,
       target: row.target,
       targetKind: targetKind(row.target),
-      targetDetail: `${row.runtime} · ${row.target}`,
+      runtime: row.runtime,
       workload: row.workload,
+      timestamp_unix: row.timestamp_unix,
+      commit: row.commit,
       ns_per_unit_min: row.ns_per_unit_min,
       speed_vs_rustia: row.speed_vs_rustia,
     })),
@@ -427,43 +552,12 @@ function summarize(data, wasmRows) {
   const targetRows = [...groupBy(rows, (row) => row.target)]
     .map(([target, values]) => ({ target, values }))
     .sort((left, right) => left.target.localeCompare(right.target));
-  const engineRows = [...groupBy(summaryRows, (row) => `${row.engine}\0${row.target}`)]
-    .map(([key, values]) => {
-      const [engine, target] = key.split("\0");
-      return {
-        engine,
-        target,
-        targetKind: values[0].targetKind,
-        targetDetail: values[0].targetDetail,
-        workloadCount: unique(values.map((row) => row.workload)).length,
-        bestCount: 0,
-        geoSpeed: geometricMean(values.map((row) => row.speed_vs_rustia)),
-        medianNs: median(values.map((row) => row.ns_per_unit_min)),
-      };
-    })
-    .sort((left, right) => {
-      const leftSpeed = left.geoSpeed ?? -Infinity;
-      const rightSpeed = right.geoSpeed ?? -Infinity;
-      return (
-        rightSpeed - leftSpeed ||
-        left.engine.localeCompare(right.engine) ||
-        left.target.localeCompare(right.target)
-      );
-    });
-
-  for (const group of groupBy(summaryRows, (row) => `${row.target}\0${row.workload}`).values()) {
-    group.sort((left, right) => left.ns_per_unit_min - right.ns_per_unit_min);
-    const winner = engineRows.find((engine) => engine.engine === group[0].engine && engine.target === group[0].target);
-    if (winner) {
-      winner.bestCount += 1;
-    }
-  }
 
   return {
     rows,
     summaryRows,
     targetRows,
-    engineRows,
+    languageTargetRows: summarizeLanguageTargets(summaryRows),
     minTimestamp: Math.min(...timestamps),
     maxTimestamp: Math.max(...timestamps),
   };
@@ -484,19 +578,6 @@ function summarizeHistory(records) {
     minTimestamp: Math.min(...timestamps),
     maxTimestamp: Math.max(...timestamps),
   };
-}
-
-function median(values) {
-  const sorted = values
-    .filter((value) => Number.isFinite(value))
-    .sort((left, right) => left - right);
-  if (sorted.length === 0) {
-    return null;
-  }
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1
-    ? sorted[middle]
-    : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
 function metric(value, label) {
@@ -821,42 +902,77 @@ function engineColor(engine, fallbackIndex = 0) {
   return known[engine] ?? fallback[fallbackIndex % fallback.length];
 }
 
-function engineSummaryTable(engineRows) {
-  const maxSpeed = Math.max(...engineRows.map((row) => row.geoSpeed ?? 0), 1);
+function languagesByTargetSection(targetRows) {
+  const completeCount = targetRows.filter((row) => row.complete).length;
   return `
-    <section class="panel">
+    <section class="panel" id="languages-by-target">
       <div class="section-head">
         <div>
-          <h2>Engine Summary</h2>
-          <p>One row per engine/target pair. Labels show the target kind first, with the full target/runtime underneath.</p>
+          <h2>Languages by Target</h2>
+          <p>${formatInteger(completeCount)} / ${formatInteger(targetRows.length)} exact targets complete. Rankings, workload wins, and dimensionless geomeans use only the five required common workloads.</p>
+        </div>
+      </div>
+      <div class="language-targets">
+        ${targetRows.map(languageTargetSummary).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function languageTargetSummary(targetRow) {
+  const maxSpeed = Math.max(...targetRow.implementationRows.map((row) => row.geoSpeed ?? 0), 1);
+  const runtimeDetail = targetRow.runtimes.length === 0
+    ? "native"
+    : `wasm · ${targetRow.runtimes.join(", ")}`;
+  const implementationLabel = targetRow.implementationRows.length === 1 ? "implementation" : "implementations";
+  const revisionClass = targetRow.commits.length === 1 ? "summary-revision-single" : "summary-revision-mixed";
+  return `
+    <section class="language-target-summary" data-target="${escapeHtml(targetRow.target)}">
+      <div class="language-target-head">
+        <div>
+          <h3>${escapeHtml(targetRow.target)}</h3>
+          <p>${escapeHtml(runtimeDetail)} · exact target · ${formatInteger(targetRow.implementationRows.length)} ${implementationLabel}</p>
+          <p>Measured ${formatTime(targetRow.minTimestamp)} to ${formatTime(targetRow.maxTimestamp)} · commits ${targetRow.commits.map((commit) => `<code>${escapeHtml(commit)}</code>`).join(", ")}</p>
+        </div>
+        <div class="summary-statuses">
+          <span class="summary-pill ${targetRow.complete ? "summary-complete" : "summary-partial"}">${escapeHtml(targetRow.status)}</span>
+          <span class="summary-pill ${revisionClass}">${escapeHtml(targetRow.revisionStatus)}</span>
         </div>
       </div>
       <div class="table-wrap">
-        <table>
+        <table class="language-summary-table">
           <thead>
             <tr>
-              <th>Engine target</th>
+              <th>Language</th>
+              <th>Implementation</th>
+              <th>Rank</th>
               <th>Geomean vs rustia</th>
-              <th>Best results</th>
-              <th>Median min ns/unit</th>
+              <th>Workload wins</th>
               <th>Coverage</th>
             </tr>
           </thead>
           <tbody>
-            ${engineRows.map((row) => {
-              const width = row.geoSpeed ? Math.max(2, (row.geoSpeed / maxSpeed) * 100) : 0;
+            ${targetRow.implementationRows.map((row) => {
+              const width = row.geoSpeed == null ? 0 : Math.max(2, (row.geoSpeed / maxSpeed) * 100);
+              const rank = row.rank == null
+                ? "n/a"
+                : `${formatInteger(row.rank)} / ${formatInteger(targetRow.implementationRows.length)}`;
+              const wins = row.bestCount == null
+                ? "n/a"
+                : `${formatInteger(row.bestCount)} / ${formatInteger(REQUIRED_COMMON_WORKLOADS.length)}`;
               return `
-                <tr>
-                  <td>${engineTargetLabel(row.engine, row.targetKind, row.targetDetail)}</td>
+                <tr data-language="${escapeHtml(row.dialect)}" data-implementation="${escapeHtml(row.engine)}">
+                  <td><strong>${escapeHtml(row.language)}</strong></td>
+                  <td>${escapeHtml(row.engine)}</td>
+                  <td>${escapeHtml(rank)}</td>
                   <td>
                     <div class="bar-cell">
                       <span>${formatSpeed(row.geoSpeed)}</span>
                       <div class="bar" aria-hidden="true"><span style="width: ${width.toFixed(3)}%"></span></div>
                     </div>
                   </td>
-                  <td>${formatInteger(row.bestCount)} / ${formatInteger(row.workloadCount)}</td>
-                  <td>${formatNumber(row.medianNs)}</td>
-                  <td>${formatInteger(row.workloadCount)} workloads</td>
+                  <td>${escapeHtml(wins)}</td>
+                  <td>${formatInteger(row.coverage)} / ${formatInteger(REQUIRED_COMMON_WORKLOADS.length)}</td>
                 </tr>
               `;
             }).join("")}
@@ -865,13 +981,6 @@ function engineSummaryTable(engineRows) {
       </div>
     </section>
   `;
-}
-
-function engineTargetLabel(engine, targetKindValue, targetDetail) {
-  const detail = targetDetail && targetDetail !== targetKindValue
-    ? `<span class="engine-target-detail">${escapeHtml(targetDetail)}</span>`
-    : "";
-  return `<span class="engine-target"><span class="engine-target-main"><strong>${escapeHtml(engine)}</strong><span class="engine-target-kind">(${escapeHtml(targetKindValue)})</span></span>${detail}</span>`;
 }
 
 function workloadSection(target, workload, rows) {
@@ -947,20 +1056,21 @@ function wasmTargetRows(data) {
         ns_per_unit_min: row.ns_per_unit_min,
         ns_per_unit_median: row.ns_per_unit_median,
         commit: run.commit,
+        timestamp_unix: run.timestamp_unix,
       });
     }
   }
   const rustiaBaselines = new Map(
     rows
       .filter((row) => row.adapter === "rustia")
-      .map((row) => [`${row.runtime}\0${row.workload}`, row.ns_per_unit_min]),
+      .map((row) => [`${row.target}\0${row.runtime}\0${row.workload}`, row.ns_per_unit_min]),
   );
   return rows
     .map((row) => ({
       ...row,
-      speed_vs_rustia: rustiaBaselines.get(`${row.runtime}\0${row.workload}`) == null
+      speed_vs_rustia: rustiaBaselines.get(`${row.target}\0${row.runtime}\0${row.workload}`) == null
         ? null
-        : rustiaBaselines.get(`${row.runtime}\0${row.workload}`) / row.ns_per_unit_min,
+        : rustiaBaselines.get(`${row.target}\0${row.runtime}\0${row.workload}`) / row.ns_per_unit_min,
     }))
     .sort((left, right) =>
       left.target.localeCompare(right.target) ||
@@ -1237,35 +1347,73 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords) {
       font-weight: 600;
     }
 
-    .engine-target {
+    .language-targets {
       display: grid;
-      gap: 2px;
-      min-width: 0;
     }
 
-    .engine-target-main {
-      display: inline-flex;
-      align-items: baseline;
-      flex-wrap: wrap;
-      gap: 6px;
-      min-width: 0;
+    .language-target-summary {
+      border-bottom: 1px solid var(--line);
     }
 
-    .engine-target-kind,
-    .engine-target-detail {
+    .language-target-summary:last-child {
+      border-bottom: 0;
+    }
+
+    .language-target-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .language-target-head h3 {
+      margin-bottom: 2px;
+      font-size: 19px;
+    }
+
+    .language-target-head p {
+      margin-bottom: 2px;
       color: var(--muted);
-      font-weight: 700;
-    }
-
-    .engine-target-kind {
-      font-size: 13px;
-    }
-
-    .engine-target-detail {
-      overflow: hidden;
-      text-overflow: ellipsis;
       font-size: 12px;
-      font-weight: 700;
+    }
+
+    .language-target-head p:last-child {
+      margin-bottom: 0;
+    }
+
+    .summary-statuses {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+
+    .summary-pill {
+      display: inline-flex;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .summary-complete,
+    .summary-revision-single {
+      background: #dff7ed;
+      color: #047857;
+    }
+
+    .summary-partial,
+    .summary-revision-mixed {
+      background: #fff1d6;
+      color: #92400e;
+    }
+
+    .language-summary-table {
+      min-width: 820px;
     }
 
     .target-runtime {
@@ -1617,6 +1765,14 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords) {
         grid-template-columns: 1fr;
         gap: 8px;
       }
+
+      .language-target-head {
+        flex-direction: column;
+      }
+
+      .summary-statuses {
+        justify-content: flex-start;
+      }
     }
   </style>
 </head>
@@ -1647,6 +1803,7 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords) {
     </section>
 
     <nav class="nav" aria-label="Targets">
+      <a href="#languages-by-target">Languages by Target</a>
       <a href="#claim-gate">Claim Gate</a>
       <a href="#history">History</a>
       <a href="#wasm-target">Wasm Target</a>
@@ -1654,7 +1811,7 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords) {
       ${summary.targetRows.map((group) => `<a href="#${escapeHtml(slug(group.target))}">${escapeHtml(group.target)}</a>`).join("")}
     </nav>
 
-    ${engineSummaryTable(summary.engineRows)}
+    ${languagesByTargetSection(summary.languageTargetRows)}
     ${claimGateSection(claimRows)}
     ${historySection(history)}
     ${wasmTargetSection(wasmResults)}
@@ -1692,4 +1849,14 @@ function main() {
   }
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  REQUIRED_COMMON_WORKLOADS,
+  languageLabel,
+  languagesByTargetSection,
+  summarizeLanguageTargets,
+  wasmTargetRows,
+};

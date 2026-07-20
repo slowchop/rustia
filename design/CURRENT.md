@@ -19,12 +19,12 @@ performance still needs the continuous benchmark gate before public claims. All 
 ([`30-architecture.md`](30-architecture.md) v3), 10 conformance-verified improvements are adopted
 ([`55-improvements.md`](55-improvements.md)), the no-unsafe SotA performance research stack is now captured in
 [`56-performance-research.md`](56-performance-research.md), and the standalone benchmark harness has the engine/workload/history
-shell, static chart dashboard, 12 workload entries including cross-adapter `string_building` source coverage, and
+shell, generated current-results HTML report, 12 workload entries including cross-adapter `string_building` source coverage, and
 the `rustia`/`boa`/`koto`/`mlua-lua54`/`mlua-luau`/`rhai`/`roto`/`rquickjs`/`wasmi`/`wasmtime` native adapters in
 place.
 The benchmark artifacts now also include a first-class wasm pre-lock gate source
 (`../bench/wasm-gate.json`), production wasm target results for `rustia` and
-`koto` on V8 plus Bun/JavaScriptCore-family runtimes, and static-site panels
+`koto` on V8 plus Bun/JavaScriptCore-family runtimes, and generated report panels
 that make the required production rustia wasm measurements explicit.
 Its generated [`../bench/CLAIMS.md`](../bench/CLAIMS.md) gate keeps public benchmark language per-workload and
 currently approves no blanket speed headline from the committed snapshot.
@@ -62,8 +62,8 @@ key, but lookup misses, nil writes, readonly writes, and invalid-table writes do
 state-preserving line evaluation, expression shorthand, and source-aware diagnostics for compile and runtime
 failures.
 CI wiring now includes pinned-toolchain formatting and strict Clippy gates, hosted release-preflight checks,
-explicit public-example compilation, plus push, nightly, and manual benchmark measurement modes that target only
-the generic `[self-hosted, bench]` runner label and publish generated history to the private benchmark-data repo.
+and explicit public-example compilation. Hosted workflows validate committed benchmark artifacts but never take
+fresh timings; those come only from the explicit ephemeral Linode Linux lifecycle.
 The benchmark harness prepares fresh engine/workload state for calibration and every recorded repetition, warms
 that state once outside the timer, and can write execution-ordered raw samples to a separate
 `rustia.bench.raw-samples.v1` JSON sidecar. `--fixed-n` bypasses calibration and uses exactly the selected work for
@@ -137,15 +137,15 @@ API parity release-critical work.
    type-directed wasm/AOT.
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 12 workload entries including
-   source-covered `string_building`, append-only JSONL history, package metadata, split notes, static dashboard
-   files, an explicit closed wasm pre-lock gate artifact, a wasm target bench for rustia+koto, a `call_ref`
-   versus `br_table` dispatch microbench, and self-hosted push/nightly/manual publication into the private
-   benchmark-data repository. Next work is the actual standalone-project split and longer-run public history.
+   source-covered `string_building`, append-only JSONL history, package metadata, split notes, a standalone HTML
+   report, an explicit closed wasm pre-lock gate artifact, a wasm target bench for rustia+koto+rhai, a `call_ref`
+   versus `br_table` dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle.
+   Next work is the actual standalone-project split and longer-run public history.
 3. **Keep the Luau 0.709 conformance corpus green**. The current repo has 692 executable fixtures covering 491
    behavior refs with no pending rows; new engine work should add focused fixtures rather than re-opening
    pending inventory.
-4. **Maintain benchmark CI operations** — the workflow uses only `[self-hosted, bench]`, restores and publishes
-   the private benchmark-data repository, and requires the matching runner plus deploy key to remain registered.
+4. **Maintain benchmark operations** — hosted CI remains validation-only; the operator-started Linode lifecycle
+   is the sole active timing source and must keep its Linux-only completeness and cleanup gates green.
 
 **Pre-P1-LOCK gates** (finalizing the value-layout/dispatch/wasm story waits on these): see the "What's next"
 section below for the full list (GC tuning, benchmark publication, `LuauIntegerType2` watch).
@@ -223,7 +223,7 @@ section below for the full list (GC tuning, benchmark publication, `LuauIntegerT
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + deterministic extension/linker plan | **implemented first slice** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |
-| [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/site/package metadata and push/nightly/manual data-repo publication implemented; standalone split pending** |
+| [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/target-first report/package metadata and dedicated Linode lifecycle implemented; standalone split pending** |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **metadata/checklist/changelog/preflight/CI gates started; publish=false remains** |
 | [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **policy started; 0.0.x remains unstable** |
 | [`crate-metadata.json`](crate-metadata.json) | generated cargo metadata policy audit for all workspace packages | **current audit: 8 packages / metadata policy ok / publish=false** |
@@ -259,5 +259,5 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
 3. **Watch `FFlag::LuauIntegerType2`** upstream (the f64-only tripwire).
 
 These are P1-gated; the design itself is otherwise complete. P1 (engine build) starts with the cross-engine +
-conformance + benchmark gates prepared from day one; the self-hosted runner and private data-repo deploy key are
-external operational prerequisites for fresh CI measurements.
+conformance + benchmark gates prepared from day one; Linode credentials and an explicit operator start are the
+external operational prerequisites for fresh performance measurements.

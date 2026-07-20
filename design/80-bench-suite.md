@@ -2,7 +2,7 @@
 
 > **Status: [IMPLEMENTED — measurements ongoing] (updated 2026-07-20).** Scoped by the `bench-scoping` agent (clone+read of
 > `khvzak/script-bench-rs`, the 11-workload seed in `spikes/bench-suite/`, and the 2025–26 tracker/wasm-shell
-> tooling) + self-hosted benchmark-label constraints + privacy lean. Operationalises principle #3 ("measure,
+> tooling) + dedicated ephemeral-Linux constraints + privacy lean. Operationalises principle #3 ("measure,
 > don't assert — the bench suite is a CI gate"). See [`CURRENT.md`](CURRENT.md).
 
 ## Decision 1 — REWRITE, not fork (LOCKED, gak + license evidence)
@@ -12,25 +12,26 @@ in-VM-throughput workloads. **Clean rewrite**, keep comparable workload coverage
 [`../bench/PRIOR-ART.md`](../bench/PRIOR-ART.md). (Optional, deferred: run script-bench-rs unmodified at a
 pinned SHA in a separate job for bonus comparison columns — no vendoring, no license issue. Nice-to-have.)
 
-## Tracking pipeline — FULLY SELF-HOSTED, no SaaS (generic runner label + privacy)
+## Tracking pipeline — explicit dedicated Linux lifecycle
 Split by what's measurable; never use one for the other's job:
 - **Release gate = generated-history integrity and conservative claim checks.** Hosted CI validates JSONL,
   generated markdown/JSON/HTML, wasm gate artifacts, and the claim policy without taking fresh noisy timings.
 - **Headline numbers = harness wall clock**, with fresh prepared state, untimed warmup, checksum validation, and
-  min/median summaries on `[self-hosted, bench]`. Claims remain per target/workload.
-- **History/tracking = append-only harness JSONL in the private `rustia-bench-data` repository.** Push and
-  nightly jobs restore it, append real measurements, regenerate artifacts, and commit them back with no SaaS
-  benchmark service.
+  min/median summaries on a dedicated ephemeral Linode. Claims remain per target/workload.
+- **History/tracking = checked benchmark artifacts in this repository.** An explicit operator-started lifecycle
+  provisions the Linux host, validates the complete matrix, confirms deletion, and only then promotes results.
 - **Dashboard = generated `bench/RESULTS.md`, current-results JSON/HTML, and claim markdown**, all derived from
   the same history.
-- *Graduate-to later:* add instruction-count regression alerts or a self-hosted queryable dashboard if the
+- *Graduate-to later:* add instruction-count regression alerts or a queryable dashboard if the
   wall-clock history proves insufficient; do not make either a prerequisite for honest current measurements.
 
 ## The matrix
 - **engine:** `rustia` · `boa` · `koto` · `mlua-luau` · `mlua-lua54` · `rhai` · `roto` · `rquickjs` ·
   `wasmi` · `wasmtime`; feature gates keep adapters independently buildable and Lua 5.4 separate from Luau.
-- **target × arch:** native `{aarch64-mac, x86_64-linux, x86_64-mac(Intel), aarch64-linux, x86_64-windows}` ·
-  wasm32 `{V8 (node/deno/d8), SpiderMonkey (jsvu sm), JSC (jsc/bun)}` — mirrors `00-constraints.md` §C0.
+- **active performance targets:** native `linux-x86_64` on a dedicated Linode; wasm32 under Node/V8,
+  Deno/V8, Bun/JavaScriptCore, and SpiderMonkey on that same Linux host. The broader platform support matrix in
+  `00-constraints.md` remains a correctness/build concern, not a license to mix noisy macOS or Windows timings
+  into the active benchmark product.
 - **determinism:** a **golden-hash column** (bit-identical cross-arch/engine?) + rustia's `mode`
   (LuauCompat/ReproducibleStandard/DeterministicSim). A pass/fail **correctness gate**, NOT a perf trend — a
   hash mismatch FAILS CI; never tracked as a number.
@@ -54,24 +55,20 @@ for analysis, not a new public-history schema. The dependency-free
 emits deterministic pooled and leg-clustered hierarchical bootstrap JSON with
 a conservative-envelope verdict that is retained with accepted evidence.
 
-## CI structure (generic self-hosted label `[self-hosted, bench]`; no infrastructure detail in the repo)
+## Automation structure
 
 1. Hosted pull-request/push CI validates code, history, generated artifacts, and claims without measuring.
-2. Main pushes and manual `rustia` dispatch run the Rustia native matrix plus wasm target/dispatch gates.
-3. Nightly schedule and manual `full` dispatch run the feature-gated comparison matrix, including the separate
-   Lua 5.4 binary, plus the wasm gates.
-4. Both measurement jobs restore the private history, regenerate/check all outputs, and push the updated files
-   to `rustia-bench-data`.
+2. An explicit `just` command plans and starts the billed Linode lifecycle; CI never starts it automatically.
+3. The remote runner builds the feature-gated comparison matrix, including the separate Lua 5.4 binary, then
+   measures all four wasm runtimes on the same Linux placement.
+4. Promotion requires a complete single-revision Linux matrix and confirmed Linode deletion.
 
 **Current implementation slice:** `.github/workflows/ci.yml` runs release-preflight checks on hosted Linux CI
-without fresh benchmark measurements. `.github/workflows/benchmarks.yml` runs on main pushes, a nightly schedule,
-or manual `rustia`/`full` dispatch on `[self-hosted, bench]`; it restores history from the private benchmark-data
-repository, appends current measurements, regenerates and verifies the artifacts, then commits them back to that
-repository. The `bench` crate now enumerates all 10
+without fresh benchmark measurements; no benchmark-measurement workflow is present. The `bench` crate now enumerates all 10
 requested adapters, five default measured workloads, and 12 workload entries including cross-adapter source
 coverage for #15 `string_building`. It also owns `bench/wasm-gate.json`, a deterministic pre-lock gate tracker
-exposed by `script-bench --wasm-gate-json` and rendered by the static dashboard. The wasm target bench now builds
-`bench/wasm/adapter-runner` and records `rustia` plus `koto` on Node/V8, Deno/V8, and Bun/JavaScriptCore-family
+exposed by `script-bench --wasm-gate-json` and rendered by the generated HTML report. The wasm target bench now builds
+`bench/wasm/adapter-runner` and records `rustia`, `koto`, and `rhai` on Node/V8, Deno/V8, Bun/JavaScriptCore, and SpiderMonkey
 runtimes in `bench/wasm/current-results.json`; adapter exclusions are documented in `bench/wasm/ADAPTERS.md`.
 The dispatch gate now records `call_ref` versus `br_table` on V8, JavaScriptCore-family, and SpiderMonkey
 runtimes in `bench/wasm/dispatch-current-results.json`, closing the pre-lock wasm gate.
@@ -90,8 +87,8 @@ constant-field/method paths and a weak-table GC-scan correction; the delta is no
 The separate evidence-only 512-VM protocol retained 16 accepted paired rounds and 160 fresh-process samples. Its
 primary candidate-minus-baseline contrasts saved 32.01, 258.00, 105.39, and 260.97 KiB/VM across unloaded-short,
 unloaded-long, loaded-short, and loaded-long string effects, with a 7.08 KiB/VM loaded-long residual. It never
-modifies throughput history or public claims. `tools/check-workflows.js` guards hosted/self-hosted separation,
-triggers, exact runner labels, data-repo publication, and generated-artifact policy.
+modifies throughput history or public claims. `tools/check-workflows.js` keeps hosted workflows validation-only
+and forbids fresh benchmark commands there.
 
 The exact dense follow-up has provider-specific but protocol-preserving ephemeral runners, while
 `bench/cloud/linode-oop-f208c12.json` and `bench/cloud/linode-vm-string-memory-1370d6c.json` freeze the accepted
@@ -121,8 +118,8 @@ preflight; only dependency-free coordinator/runner self-tests are part of the
 offline benchmark artifact gate.
 
 The three-independent-run fixed-N rule in `bench/README.md` is the acceptance protocol for this small-regression
-milestone. Routine main-push and nightly automation continues to append one calibrated matrix run per workflow;
-it is trend history, not a substitute for the controlled milestone A/B and three-run publication evidence.
+milestone. The broader calibrated language matrix has a separate completeness gate and is not a substitute for
+the controlled milestone A/B and three-run publication evidence.
 
 **Rustia's column:** the `bench` crate enumerates engines by **cargo feature**; `rustia` now runs through the
 default `rustia-engine` feature while the external adapters stay independently gated for standalone builds.
@@ -137,13 +134,11 @@ these measurements fresh as the harness changes.
 ```
 bench/  Cargo.toml(feature-gated adapters)  src/main.rs  workloads/<dialect>/
         history/runs.jsonl  history/evidence/  RESULTS.md  current-results.{json,html}
-        CLAIMS.md  wasm/  site/  PRIOR-ART.md
+        CLAIMS.md  wasm/  PRIOR-ART.md
 ```
 
 ## Open decisions (gak)
-- **D1 — regression alerts:** decide whether longer history justifies an instruction-count gate or self-hosted
-  dashboard; keep SaaS egress opt-in.
-- **D2 — real Safari/iOS JSC:** Bun supplies the current JavaScriptCore-family signal; a shipping Safari/iOS
-  runtime remains desirable when an operational runner is available.
-- **D3 — optional external comparison:** running script-bench-rs at a pinned SHA remains deferred and
+- **D1 — regression alerts:** decide whether longer history justifies an instruction-count gate; keep SaaS
+  egress opt-in.
+- **D2 — optional external comparison:** running script-bench-rs at a pinned SHA remains deferred and
   nonessential.

@@ -15,6 +15,7 @@ const { spawn, spawnSync } = require("node:child_process");
 const REPO = path.resolve(__dirname, "..");
 const DEFAULT_CONFIG = path.join(REPO, "bench/cloud/linode-dense-ed65077.json");
 const REMOTE_RUNNER = path.join(REPO, "tools/run-linux-fixed-benchmark.js");
+const MATRIX_REMOTE_RUNNER = path.join(REPO, "tools/run-linux-matrix-benchmark.js");
 const STATE_ROOT = path.join(REPO, ".rustia-benchmark-state/linode");
 const RUNS_ROOT = path.join(STATE_ROOT, "runs");
 const TOKEN_FILE = path.join(STATE_ROOT, "token");
@@ -35,7 +36,40 @@ const MAX_EXPORT_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
 const MAX_EXPORT_ENTRIES = 10_000;
 const FIXED_THROUGHPUT_PROTOCOL = "fixed_throughput_v1";
 const VM_STRING_MEMORY_PROTOCOL = "vm_string_memory_v1";
-const ALLOWED_PROTOCOLS = new Set([FIXED_THROUGHPUT_PROTOCOL, VM_STRING_MEMORY_PROTOCOL]);
+const CROSS_ENGINE_MATRIX_PROTOCOL = "cross_engine_matrix_v1";
+const ALLOWED_PROTOCOLS = new Set([
+  FIXED_THROUGHPUT_PROTOCOL,
+  VM_STRING_MEMORY_PROTOCOL,
+  CROSS_ENGINE_MATRIX_PROTOCOL,
+]);
+const MATRIX_NATIVE_TARGET = "linux-x86_64";
+const MATRIX_NATIVE_ENGINES = Object.freeze([
+  "rustia",
+  "boa",
+  "koto",
+  "mlua-luau",
+  "rhai",
+  "roto",
+  "rquickjs",
+  "wasmi",
+  "wasmtime",
+  "mlua-lua54",
+]);
+const MATRIX_WORKLOADS = Object.freeze([
+  "dense_tables",
+  "sparse_tables",
+  "closures_upvalues",
+  "generic_iteration",
+  "stdlib_math_table",
+]);
+const MATRIX_WASM_RUNTIMES = Object.freeze(["node", "deno", "bun", "spidermonkey"]);
+const MATRIX_WASM_ADAPTERS = Object.freeze(["rustia", "koto", "rhai"]);
+const MATRIX_RUNTIME_FAMILIES = Object.freeze({
+  node: "V8",
+  deno: "V8",
+  bun: "JavaScriptCore",
+  spidermonkey: "SpiderMonkey",
+});
 const VM_STRING_SCENARIOS = Object.freeze([
   "empty",
   "short_unloaded",
@@ -162,12 +196,67 @@ function isVmStringMemory(config) {
   return protocolKind(config) === VM_STRING_MEMORY_PROTOCOL;
 }
 
+function isCrossEngineMatrix(config) {
+  return protocolKind(config) === CROSS_ENGINE_MATRIX_PROTOCOL;
+}
+
+function benchmarkCommit(config) {
+  return isCrossEngineMatrix(config)
+    ? config.source.benchmark_commit
+    : config.source.candidate_commit;
+}
+
+function remoteRunnerForConfig(config) {
+  return isCrossEngineMatrix(config) ? MATRIX_REMOTE_RUNNER : REMOTE_RUNNER;
+}
+
+function requireFrozenArray(value, frozen, location) {
+  if (canonicalJson(value) !== canonicalJson(frozen)) {
+    fail(`${location} must be exactly ${frozen.join(", ")}`);
+  }
+}
+
+function validateRuntimeArtifacts(value, location) {
+  const artifacts = requireObject(value, location);
+  requireExactKeys(artifacts, MATRIX_WASM_RUNTIMES, location);
+  for (const runtime of MATRIX_WASM_RUNTIMES) {
+    const artifact = requireObject(artifacts[runtime], `${location}.${runtime}`);
+    requireExactKeys(
+      artifact,
+      ["version", "url", "sha256", "archive", "binary_relative_path"],
+      `${location}.${runtime}`,
+    );
+    requireString(artifact.version, `${location}.${runtime}.version`);
+    const url = requireString(artifact.url, `${location}.${runtime}.url`);
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch (error) {
+      fail(`${location}.${runtime}.url must be an absolute URL: ${error.message}`);
+    }
+    if (parsed.protocol !== "https:") fail(`${location}.${runtime}.url must use HTTPS`);
+    if (!SHA256.test(requireString(artifact.sha256, `${location}.${runtime}.sha256`))) {
+      fail(`${location}.${runtime}.sha256 must be a lowercase SHA-256`);
+    }
+    if (!["tar", "zip"].includes(artifact.archive)) {
+      fail(`${location}.${runtime}.archive must be tar or zip`);
+    }
+    const binary = requireString(
+      artifact.binary_relative_path,
+      `${location}.${runtime}.binary_relative_path`,
+    );
+    if (path.isAbsolute(binary) || binary.split(/[\\/]+/).includes("..")) {
+      fail(`${location}.${runtime}.binary_relative_path must be a safe relative path`);
+    }
+  }
+}
+
 function validateConfig(value) {
   const root = requireObject(value, "config");
   const kind = protocolKind(root);
   requireExactKeys(
     root,
-    kind === VM_STRING_MEMORY_PROTOCOL
+    kind === VM_STRING_MEMORY_PROTOCOL || kind === CROSS_ENGINE_MATRIX_PROTOCOL
       ? ["schema", "provider", "source", "measurement", "host_gate", "publication"]
       : ["schema", "provider", "source", "measurement", "qualification", "host_gate", "publication"],
     "config",
@@ -205,21 +294,43 @@ function validateConfig(value) {
   const source = requireObject(root.source, "config.source");
   requireExactKeys(
     source,
-    ["baseline_commit", "candidate_commit", "harness_commit", "expected_sha256"],
+    kind === CROSS_ENGINE_MATRIX_PROTOCOL
+      ? ["benchmark_commit", "expected_sha256"]
+      : ["baseline_commit", "candidate_commit", "harness_commit", "expected_sha256"],
     "config.source",
   );
-  for (const field of ["baseline_commit", "candidate_commit", "harness_commit"]) {
-    if (!FULL_COMMIT.test(requireString(source[field], `config.source.${field}`))) {
-      fail(`config.source.${field} must be a lowercase full commit`);
+  if (kind === CROSS_ENGINE_MATRIX_PROTOCOL) {
+    if (!FULL_COMMIT.test(requireString(source.benchmark_commit, "config.source.benchmark_commit"))) {
+      fail("config.source.benchmark_commit must be a lowercase full commit");
     }
-  }
-  if (source.baseline_commit === source.candidate_commit) {
-    fail("baseline and candidate commits must differ");
+  } else {
+    for (const field of ["baseline_commit", "candidate_commit", "harness_commit"]) {
+      if (!FULL_COMMIT.test(requireString(source[field], `config.source.${field}`))) {
+        fail(`config.source.${field} must be a lowercase full commit`);
+      }
+    }
+    if (source.baseline_commit === source.candidate_commit) {
+      fail("baseline and candidate commits must differ");
+    }
   }
   const expected = requireObject(source.expected_sha256, "config.source.expected_sha256");
   requireExactKeys(
     expected,
-    kind === VM_STRING_MEMORY_PROTOCOL
+    kind === CROSS_ENGINE_MATRIX_PROTOCOL
+      ? [
+          "bench_manifest",
+          "native_harness",
+          "cargo_lock",
+          "toolchain",
+          "wasm_gate",
+          "wasm_dispatch_gate",
+          "wasm_adapter_manifest",
+          "wasm_measure_module",
+          "wasm_measure_spidermonkey",
+          "wasm_dispatch_measure",
+          "history_before",
+        ]
+      : kind === VM_STRING_MEMORY_PROTOCOL
       ? [
           "baseline_original_bench_manifest",
           "candidate_original_bench_manifest",
@@ -245,9 +356,44 @@ function validateConfig(value) {
       fail(`config.source.expected_sha256.${field} must be a lowercase SHA-256`);
     }
   }
-
   const measurement = requireObject(root.measurement, "config.measurement");
-  if (kind === VM_STRING_MEMORY_PROTOCOL) {
+  if (kind === CROSS_ENGINE_MATRIX_PROTOCOL) {
+    requireExactKeys(
+      measurement,
+      [
+        "protocol",
+        "native_target",
+        "native_engines",
+        "workloads",
+        "native_target_ms",
+        "native_repetitions",
+        "wasm_runtimes",
+        "wasm_adapters",
+        "wasm_target_ms",
+        "wasm_repetitions",
+        "dispatch_target_ms",
+        "dispatch_repetitions",
+        "runtime_artifacts",
+      ],
+      "config.measurement",
+    );
+    if (measurement.native_target !== MATRIX_NATIVE_TARGET) {
+      fail(`config.measurement.native_target must be ${MATRIX_NATIVE_TARGET}`);
+    }
+    requireFrozenArray(measurement.native_engines, MATRIX_NATIVE_ENGINES, "config.measurement.native_engines");
+    requireFrozenArray(measurement.workloads, MATRIX_WORKLOADS, "config.measurement.workloads");
+    requireFrozenArray(measurement.wasm_runtimes, MATRIX_WASM_RUNTIMES, "config.measurement.wasm_runtimes");
+    requireFrozenArray(measurement.wasm_adapters, MATRIX_WASM_ADAPTERS, "config.measurement.wasm_adapters");
+    for (const field of ["native_target_ms", "wasm_target_ms", "dispatch_target_ms"]) {
+      requireInteger(measurement[field], `config.measurement.${field}`, 1);
+    }
+    for (const field of ["native_repetitions", "wasm_repetitions", "dispatch_repetitions"]) {
+      if (requireInteger(measurement[field], `config.measurement.${field}`, 1) !== 5) {
+        fail(`config.measurement.${field} must remain frozen at 5`);
+      }
+    }
+    validateRuntimeArtifacts(measurement.runtime_artifacts, "config.measurement.runtime_artifacts");
+  } else if (kind === VM_STRING_MEMORY_PROTOCOL) {
     requireExactKeys(
       measurement,
       [
@@ -387,7 +533,24 @@ function validateConfig(value) {
   requireInteger(gate.wait_timeout_seconds, "config.host_gate.wait_timeout_seconds", 1);
 
   const publication = requireObject(root.publication, "config.publication");
-  if (kind === VM_STRING_MEMORY_PROTOCOL) {
+  if (kind === CROSS_ENGINE_MATRIX_PROTOCOL) {
+    requireExactKeys(
+      publication,
+      ["mode", "native_rows", "wasm_rows", "dispatch_runtimes"],
+      "config.publication",
+    );
+    if (publication.mode !== "matrix") fail("cross_engine_matrix_v1 publication.mode must be matrix");
+    const expectedCounts = {
+      native_rows: MATRIX_NATIVE_ENGINES.length * MATRIX_WORKLOADS.length,
+      wasm_rows: MATRIX_WASM_RUNTIMES.length * MATRIX_WASM_ADAPTERS.length * MATRIX_WORKLOADS.length,
+      dispatch_runtimes: MATRIX_WASM_RUNTIMES.length,
+    };
+    for (const [field, wanted] of Object.entries(expectedCounts)) {
+      if (requireInteger(publication[field], `config.publication.${field}`, 1) !== wanted) {
+        fail(`config.publication.${field} must remain frozen at ${wanted}`);
+      }
+    }
+  } else if (kind === VM_STRING_MEMORY_PROTOCOL) {
     requireExactKeys(publication, ["mode"], "config.publication");
     if (publication.mode !== "evidence_only") {
       fail("vm_string_memory_v1 publication.mode must be evidence_only");
@@ -1024,12 +1187,14 @@ async function verifySource(config, configFile = DEFAULT_CONFIG) {
     await run("git", ["status", "--porcelain=v1", "--untracked-files=no"]),
   );
   if (trackedStatus.length > 0) fail("tracked worktree changes must be committed before a cloud benchmark");
-  for (const field of ["baseline_commit", "candidate_commit", "harness_commit"]) {
-    await run("git", ["cat-file", "-e", `${config.source[field]}^{commit}`]);
-  }
+  const sourceCommits = isCrossEngineMatrix(config)
+    ? [config.source.benchmark_commit]
+    : [config.source.baseline_commit, config.source.candidate_commit, config.source.harness_commit];
+  for (const commit of sourceCommits) await run("git", ["cat-file", "-e", `${commit}^{commit}`]);
+  const selectedRemoteRunner = remoteRunnerForConfig(config);
   for (const file of [
     "tools/run-linode-benchmark.js",
-    "tools/run-linux-fixed-benchmark.js",
+    path.relative(REPO, selectedRemoteRunner),
     relativeConfig,
   ]) {
     await run("git", ["ls-files", "--error-unmatch", file]);
@@ -1037,7 +1202,44 @@ async function verifySource(config, configFile = DEFAULT_CONFIG) {
 
   const source = config.source;
   const expected = source.expected_sha256;
-  const checks = isVmStringMemory(config) ? [
+  const checks = isCrossEngineMatrix(config) ? [
+    ["benchmark manifest", sha256(await gitBlob(source.benchmark_commit, "bench/Cargo.toml")), expected.bench_manifest],
+    ["native harness", sha256(await gitBlob(source.benchmark_commit, "bench/src/main.rs")), expected.native_harness],
+    ["Cargo.lock", sha256(await gitBlob(source.benchmark_commit, "Cargo.lock")), expected.cargo_lock],
+    ["toolchain", sha256(await gitBlob(source.benchmark_commit, "rust-toolchain.toml")), expected.toolchain],
+    ["wasm gate", sha256(await gitBlob(source.benchmark_commit, "tools/run-wasm-gate.js")), expected.wasm_gate],
+    [
+      "wasm dispatch gate",
+      sha256(await gitBlob(source.benchmark_commit, "tools/run-wasm-dispatch-gate.js")),
+      expected.wasm_dispatch_gate,
+    ],
+    [
+      "wasm adapter manifest",
+      sha256(await gitBlob(source.benchmark_commit, "bench/wasm/adapter-runner/Cargo.toml")),
+      expected.wasm_adapter_manifest,
+    ],
+    [
+      "wasm module measurement",
+      sha256(await gitBlob(source.benchmark_commit, "bench/wasm/measure-rustia-wasm.mjs")),
+      expected.wasm_measure_module,
+    ],
+    [
+      "wasm SpiderMonkey measurement",
+      sha256(await gitBlob(source.benchmark_commit, "bench/wasm/measure-rustia-wasm-sm.js")),
+      expected.wasm_measure_spidermonkey,
+    ],
+    [
+      "wasm dispatch measurement",
+      sha256(await gitBlob(source.benchmark_commit, "bench/wasm/measure-dispatch-wasm.js")),
+      expected.wasm_dispatch_measure,
+    ],
+    [
+      "benchmark commit history",
+      sha256(await gitBlob(source.benchmark_commit, "bench/history/runs.jsonl")),
+      expected.history_before,
+    ],
+    ["current history", sha256File(path.join(REPO, "bench/history/runs.jsonl")), expected.history_before],
+  ] : isVmStringMemory(config) ? [
     [
       "baseline original bench manifest",
       sha256(await gitBlob(source.baseline_commit, "bench/Cargo.toml")),
@@ -1118,7 +1320,10 @@ async function verifySource(config, configFile = DEFAULT_CONFIG) {
     config_path: relativeConfig,
     config_sha256: sha256File(configFile),
     coordinator_sha256: sha256File(__filename),
-    remote_runner_sha256: sha256File(REMOTE_RUNNER),
+    ...(isCrossEngineMatrix(config)
+      ? { remote_runner_path: path.relative(REPO, selectedRemoteRunner) }
+      : {}),
+    remote_runner_sha256: sha256File(selectedRemoteRunner),
     verified_source_hashes: Object.fromEntries(checks.map(([name, actual]) => [name, actual])),
   };
 }
@@ -1165,7 +1370,25 @@ function sanitizedProviderPlan(config, provider, source) {
     billing_caveat:
       "Linode usage is rounded up to a whole hour; deletion, not shutdown, stops further accrual, and an API outage can delay confirmed deletion",
     source,
-    comparison: isVmStringMemory(config)
+    comparison: isCrossEngineMatrix(config)
+      ? {
+          protocol: CROSS_ENGINE_MATRIX_PROTOCOL,
+          benchmark_commit: config.source.benchmark_commit,
+          native_target: config.measurement.native_target,
+          native_engines: config.measurement.native_engines,
+          workloads: config.measurement.workloads,
+          native_repetitions: config.measurement.native_repetitions,
+          wasm_runtimes: config.measurement.wasm_runtimes,
+          wasm_adapters: config.measurement.wasm_adapters,
+          wasm_repetitions: config.measurement.wasm_repetitions,
+          dispatch_repetitions: config.measurement.dispatch_repetitions,
+          result_shape: {
+            native_rows: config.publication.native_rows,
+            wasm_rows: config.publication.wasm_rows,
+            dispatch_runtimes: config.publication.dispatch_runtimes,
+          },
+        }
+      : isVmStringMemory(config)
       ? {
           protocol: VM_STRING_MEMORY_PROTOCOL,
           baseline_commit: config.source.baseline_commit,
@@ -1866,10 +2089,11 @@ async function verifyRecoveryCheckout(config, state) {
   ) {
     fail("recorded Linode config path is outside or inconsistent with the repository");
   }
+  const recordedRemoteRunner = planned.remote_runner_path || "tools/run-linux-fixed-benchmark.js";
   const originalFiles = [
     [planned.config_path, planned.config_sha256, "config"],
     ["tools/run-linode-benchmark.js", planned.coordinator_sha256, "coordinator"],
-    ["tools/run-linux-fixed-benchmark.js", planned.remote_runner_sha256, "remote runner"],
+    [recordedRemoteRunner, planned.remote_runner_sha256, "remote runner"],
   ];
   for (const [file, wanted, label] of originalFiles) {
     if (!SHA256.test(wanted) || sha256(await gitBlob(planned.orchestration_commit, file)) !== wanted) {
@@ -1977,6 +2201,7 @@ function validateMemoryEvidenceStatus(status) {
 }
 
 function expectedTerminalStatus(config) {
+  if (isCrossEngineMatrix(config)) return "matrix_complete";
   return isVmStringMemory(config) ? "evidence_complete" : "accepted_and_published";
 }
 
@@ -3264,12 +3489,431 @@ async function promoteMemoryEvidence(
   return true;
 }
 
+function validateMatrixStatus(status) {
+  requireObject(status, "matrix status");
+  requireExactKeys(
+    status,
+    ["schema", "status", "detail", "started_at", "finished_at"],
+    "matrix status",
+  );
+  if (status.schema !== "rustia.bench.cloud-run-status.v1" || status.status !== "matrix_complete") {
+    fail("matrix status has the wrong schema or terminal state");
+  }
+  if (status.detail !== "fresh Linux native and wasm benchmark matrix completed") {
+    fail("matrix status has an unexpected detail");
+  }
+  const started = requireIsoTimestamp(status.started_at, "matrix status.started_at");
+  const finished = requireIsoTimestamp(status.finished_at, "matrix status.finished_at");
+  if (finished < started) fail("matrix status finished before it started");
+}
+
+function loadStrictJsonLines(file, location) {
+  const bytes = fs.readFileSync(file);
+  const text = strictUtf8(bytes, location);
+  if (text.length === 0 || !text.endsWith("\n")) fail(`${location} must be non-empty and newline terminated`);
+  const lines = text.slice(0, -1).split("\n");
+  if (lines.some((line) => line.trim() === "")) fail(`${location} contains a blank row`);
+  return lines.map((line, index) => {
+    try {
+      return JSON.parse(line);
+    } catch (error) {
+      fail(`${location} row ${index + 1} is not JSON: ${error.message}`);
+    }
+  });
+}
+
+function requirePositiveFinite(value, location) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    fail(`${location} must be positive and finite`);
+  }
+  return value;
+}
+
+function requireFreshMatrixTimestamp(value, status, location) {
+  requireInteger(value, location, 1);
+  const started = Date.parse(status.started_at) / 1000;
+  const finished = Date.parse(status.finished_at) / 1000;
+  if (value < Math.floor(started) || value > Math.ceil(finished)) {
+    fail(`${location} falls outside the matrix run window`);
+  }
+}
+
+function validateMatrixNativeRows(config, file, status) {
+  const rows = loadStrictJsonLines(file, "matrix native history");
+  if (rows.length !== config.publication.native_rows) {
+    fail(`matrix native history has ${rows.length} rows, expected ${config.publication.native_rows}`);
+  }
+  const dialects = {
+    rustia: "luau",
+    boa: "javascript",
+    koto: "koto",
+    "mlua-luau": "luau",
+    rhai: "rhai",
+    roto: "roto",
+    rquickjs: "javascript",
+    wasmi: "wasm",
+    wasmtime: "wasm",
+    "mlua-lua54": "lua54",
+  };
+  const expectedKeys = [
+    "timestamp_unix", "commit", "target", "engine", "dialect", "workload", "unit", "n", "reps",
+    "ns_per_unit_min", "ns_per_unit_median", "units_per_sec", "checksum",
+  ];
+  const slots = new Set();
+  for (const [index, row] of rows.entries()) {
+    requireObject(row, `matrix native row ${index + 1}`);
+    requireExactKeys(row, expectedKeys, `matrix native row ${index + 1}`);
+    if (row.commit !== config.source.benchmark_commit) fail(`matrix native row ${index + 1} has the wrong commit`);
+    if (row.target !== MATRIX_NATIVE_TARGET) fail(`matrix native row ${index + 1} is not ${MATRIX_NATIVE_TARGET}`);
+    if (!MATRIX_NATIVE_ENGINES.includes(row.engine) || row.dialect !== dialects[row.engine]) {
+      fail(`matrix native row ${index + 1} has an invalid engine/dialect identity`);
+    }
+    if (!MATRIX_WORKLOADS.includes(row.workload)) fail(`matrix native row ${index + 1} has an invalid workload`);
+    if (row.reps !== config.measurement.native_repetitions) fail(`matrix native row ${index + 1} has the wrong repetitions`);
+    requireFreshMatrixTimestamp(row.timestamp_unix, status, `matrix native row ${index + 1}.timestamp_unix`);
+    requireInteger(row.n, `matrix native row ${index + 1}.n`, 1);
+    for (const field of ["ns_per_unit_min", "ns_per_unit_median", "units_per_sec"]) {
+      requirePositiveFinite(row[field], `matrix native row ${index + 1}.${field}`);
+    }
+    if (row.ns_per_unit_median < row.ns_per_unit_min) fail(`matrix native row ${index + 1} median is below min`);
+    requireString(row.unit, `matrix native row ${index + 1}.unit`);
+    requireString(row.checksum, `matrix native row ${index + 1}.checksum`);
+    const slot = `${row.engine}\0${row.workload}`;
+    if (slots.has(slot)) fail(`matrix native history duplicates ${row.engine}/${row.workload}`);
+    slots.add(slot);
+  }
+  for (const engine of MATRIX_NATIVE_ENGINES) {
+    for (const workload of MATRIX_WORKLOADS) {
+      if (!slots.has(`${engine}\0${workload}`)) fail(`matrix native history is missing ${engine}/${workload}`);
+    }
+  }
+  return rows;
+}
+
+function requireLinuxWasmTarget(target, location, dispatch = false) {
+  requireString(target, location);
+  const prefix = dispatch ? "wasm32-dispatch-" : "wasm32-";
+  if (!target.startsWith(prefix) || !/-linux-(?:x64|x86_64)$/.test(target)) {
+    fail(`${location} must identify a Linux x86-64 wasm host`);
+  }
+}
+
+function validateMatrixWasm(config, file, status) {
+  const value = requireObject(loadJsonRegular(file, "matrix wasm results"), "matrix wasm results");
+  if (
+    value.schema !== "rustia.bench.wasm-gate-current-results.v1" ||
+    value.schema_version !== 1 ||
+    value.commit !== config.source.benchmark_commit
+  ) {
+    fail("matrix wasm results have the wrong schema or commit");
+  }
+  if (!Array.isArray(value.skipped) || value.skipped.length !== 0) fail("matrix wasm results skipped a runtime");
+  if (!Array.isArray(value.runs) || value.runs.length !== MATRIX_WASM_RUNTIMES.length * MATRIX_WASM_ADAPTERS.length) {
+    fail("matrix wasm results have the wrong runtime/adapter run count");
+  }
+  const slots = new Set();
+  let rowCount = 0;
+  for (const [runIndex, run] of value.runs.entries()) {
+    requireObject(run, `matrix wasm run ${runIndex + 1}`);
+    if (run.schema !== "rustia.bench.wasm-runtime-results.v1" || run.commit !== config.source.benchmark_commit) {
+      fail(`matrix wasm run ${runIndex + 1} has the wrong schema or commit`);
+    }
+    requireFreshMatrixTimestamp(run.timestamp_unix, status, `matrix wasm run ${runIndex + 1}.timestamp_unix`);
+    const runtime = requireObject(run.runtime, `matrix wasm run ${runIndex + 1}.runtime`);
+    const adapter = requireObject(run.adapter, `matrix wasm run ${runIndex + 1}.adapter`);
+    if (!MATRIX_WASM_RUNTIMES.includes(runtime.name) || !MATRIX_WASM_ADAPTERS.includes(adapter.id)) {
+      fail(`matrix wasm run ${runIndex + 1} has an unexpected runtime or adapter`);
+    }
+    if (runtime.family !== MATRIX_RUNTIME_FAMILIES[runtime.name]) {
+      fail(`matrix wasm run ${runIndex + 1} has the wrong runtime family`);
+    }
+    requireLinuxWasmTarget(run.target, `matrix wasm run ${runIndex + 1}.target`);
+    const familySlug = runtime.family.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    if (!run.target.startsWith(`wasm32-${familySlug}-${runtime.name}-`)) {
+      fail(`matrix wasm run ${runIndex + 1} target disagrees with its runtime identity`);
+    }
+    const slot = `${runtime.name}\0${adapter.id}`;
+    if (slots.has(slot)) fail(`matrix wasm results duplicate ${runtime.name}/${adapter.id}`);
+    slots.add(slot);
+    if (!Array.isArray(run.rows) || run.rows.length !== MATRIX_WORKLOADS.length) {
+      fail(`matrix wasm run ${runtime.name}/${adapter.id} has the wrong workload count`);
+    }
+    const workloads = new Set();
+    for (const [rowIndex, row] of run.rows.entries()) {
+      requireObject(row, `matrix wasm ${runtime.name}/${adapter.id} row ${rowIndex + 1}`);
+      const adapterDialects = { rustia: "luau", koto: "koto", rhai: "rhai" };
+      if (
+        row.engine !== adapter.id ||
+        row.dialect !== adapterDialects[adapter.id] ||
+        !MATRIX_WORKLOADS.includes(row.workload)
+      ) {
+        fail(`matrix wasm ${runtime.name}/${adapter.id} row ${rowIndex + 1} has the wrong identity`);
+      }
+      if (row.reps !== config.measurement.wasm_repetitions) {
+        fail(`matrix wasm ${runtime.name}/${adapter.id} row ${rowIndex + 1} has the wrong repetitions`);
+      }
+      if (workloads.has(row.workload)) fail(`matrix wasm ${runtime.name}/${adapter.id} duplicates ${row.workload}`);
+      workloads.add(row.workload);
+      requireInteger(row.n, `matrix wasm row ${rowIndex + 1}.n`, 1);
+      for (const field of ["ns_per_unit_min", "ns_per_unit_median", "units_per_sec"]) {
+        requirePositiveFinite(row[field], `matrix wasm row ${rowIndex + 1}.${field}`);
+      }
+      if (row.ns_per_unit_median < row.ns_per_unit_min) fail("matrix wasm median is below min");
+      rowCount += 1;
+    }
+  }
+  if (rowCount !== config.publication.wasm_rows) fail(`matrix wasm result has ${rowCount} rows`);
+  for (const runtime of MATRIX_WASM_RUNTIMES) {
+    for (const adapter of MATRIX_WASM_ADAPTERS) {
+      if (!slots.has(`${runtime}\0${adapter}`)) fail(`matrix wasm results are missing ${runtime}/${adapter}`);
+    }
+  }
+  return value;
+}
+
+function validateMatrixDispatch(config, file, status) {
+  const value = requireObject(loadJsonRegular(file, "matrix wasm dispatch results"), "matrix wasm dispatch results");
+  if (
+    value.schema !== "rustia.bench.wasm-dispatch-current-results.v1" ||
+    value.schema_version !== 1 ||
+    value.commit !== config.source.benchmark_commit
+  ) {
+    fail("matrix dispatch results have the wrong schema or commit");
+  }
+  if (!Array.isArray(value.skipped) || value.skipped.length !== 0) fail("matrix dispatch results skipped a runtime");
+  if (!Array.isArray(value.runs) || value.runs.length !== config.publication.dispatch_runtimes) {
+    fail("matrix dispatch results have the wrong runtime count");
+  }
+  const runtimes = new Set();
+  for (const [index, run] of value.runs.entries()) {
+    requireObject(run, `matrix dispatch run ${index + 1}`);
+    if (run.schema !== "rustia.bench.wasm-dispatch-results.v1" || run.commit !== config.source.benchmark_commit) {
+      fail(`matrix dispatch run ${index + 1} has the wrong schema or commit`);
+    }
+    requireFreshMatrixTimestamp(run.timestamp_unix, status, `matrix dispatch run ${index + 1}.timestamp_unix`);
+    const runtime = requireObject(run.runtime, `matrix dispatch run ${index + 1}.runtime`);
+    if (!MATRIX_WASM_RUNTIMES.includes(runtime.name) || runtimes.has(runtime.name)) {
+      fail(`matrix dispatch run ${index + 1} has an unexpected or duplicate runtime`);
+    }
+    if (runtime.family !== MATRIX_RUNTIME_FAMILIES[runtime.name]) {
+      fail(`matrix dispatch run ${index + 1} has the wrong runtime family`);
+    }
+    runtimes.add(runtime.name);
+    requireLinuxWasmTarget(run.target, `matrix dispatch run ${index + 1}.target`, true);
+    const familySlug = runtime.family.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    if (!run.target.startsWith(`wasm32-dispatch-${familySlug}-${runtime.name}-`)) {
+      fail(`matrix dispatch run ${index + 1} target disagrees with its runtime identity`);
+    }
+    const comparison = requireObject(run.comparison, `matrix dispatch run ${index + 1}.comparison`);
+    if (!["measured", "unsupported"].includes(comparison.status)) {
+      fail(`matrix dispatch run ${index + 1} has an invalid comparison status`);
+    }
+    if (!Array.isArray(run.rows)) fail(`matrix dispatch run ${index + 1}.rows must be an array`);
+    if (comparison.status === "measured" && run.rows.length !== 2) {
+      fail(`matrix dispatch run ${index + 1} must contain two measured styles`);
+    }
+    for (const row of run.rows) {
+      if (row.reps !== config.measurement.dispatch_repetitions) fail("matrix dispatch row has the wrong repetitions");
+      requirePositiveFinite(row.ns_per_dispatch_min, "matrix dispatch row.ns_per_dispatch_min");
+      requirePositiveFinite(row.ns_per_dispatch_median, "matrix dispatch row.ns_per_dispatch_median");
+    }
+  }
+  for (const runtime of MATRIX_WASM_RUNTIMES) {
+    if (!runtimes.has(runtime)) fail(`matrix dispatch results are missing ${runtime}`);
+  }
+  return value;
+}
+
+function validateMatrixEvidence(config, state, evidenceDirectory, publications) {
+  const expectedFiles = [
+    "gate.jsonl",
+    "host.json",
+    "manifest.json",
+    "native-all-samples.json",
+    "native-lua54-samples.json",
+    "protocol.json",
+    "provider.json",
+    "runtime-versions.json",
+  ];
+  requireJsonEqual(evidenceFiles(evidenceDirectory), expectedFiles, "matrix evidence file allowlist");
+  const manifest = requireObject(
+    loadJsonRegular(path.join(evidenceDirectory, "manifest.json"), "matrix evidence manifest"),
+    "matrix evidence manifest",
+  );
+  if (
+    manifest.schema !== "rustia.bench.cross-engine-matrix-evidence.v1" ||
+    manifest.benchmark_commit !== config.source.benchmark_commit
+  ) {
+    fail("matrix evidence manifest has the wrong schema or commit");
+  }
+  requireIsoTimestamp(manifest.created_at, "matrix evidence manifest.created_at");
+  requireJsonEqual(manifest.source_hashes, config.source.expected_sha256, "matrix manifest source hashes");
+  const providerFile = path.join(evidenceDirectory, "provider.json");
+  const localProvider = loadJsonRegular(path.join(state.__directory, "provider.json"), "local matrix provider snapshot");
+  requireJsonEqual(loadJsonRegular(providerFile, "matrix provider evidence"), localProvider, "matrix provider evidence");
+  if (manifest.protocol_sha256 !== sha256File(path.join(evidenceDirectory, "protocol.json"))) {
+    fail("matrix manifest protocol hash is wrong");
+  }
+  if (manifest.protocol_sha256 !== state.plan.source.config_sha256) fail("matrix protocol is not the planned config");
+  if (manifest.provider_sha256 !== sha256File(providerFile)) fail("matrix manifest provider hash is wrong");
+  const host = requireObject(loadJsonRegular(path.join(evidenceDirectory, "host.json"), "matrix host evidence"), "matrix host evidence");
+  if (host.platform !== "linux" || host.arch !== "x86_64" || host.virtualization !== "kvm") {
+    fail("matrix host evidence is not a Linux x86-64 KVM guest");
+  }
+  if (manifest.host_sha256 !== sha256File(path.join(evidenceDirectory, "host.json"))) {
+    fail("matrix manifest host hash is wrong");
+  }
+  const publicationHashes = {
+    history: sha256File(publications.history),
+    wasm: sha256File(publications.wasm),
+    dispatch: sha256File(publications.dispatch),
+  };
+  requireJsonEqual(manifest.publication_sha256, publicationHashes, "matrix publication hashes");
+  const hashes = requireObject(manifest.evidence_sha256, "matrix evidence manifest.evidence_sha256");
+  const hashedFiles = expectedFiles.filter((file) => file !== "manifest.json");
+  requireJsonEqual(Object.keys(hashes).sort(), hashedFiles, "matrix evidence hash keys");
+  for (const file of hashedFiles) {
+    if (!SHA256.test(hashes[file]) || hashes[file] !== sha256File(path.join(evidenceDirectory, file))) {
+      fail(`matrix evidence hash is wrong for ${file}`);
+    }
+  }
+  const shape = {
+    native_rows: config.publication.native_rows,
+    wasm_rows: config.publication.wasm_rows,
+    dispatch_runtimes: config.publication.dispatch_runtimes,
+  };
+  requireJsonEqual(manifest.result_shape, shape, "matrix manifest result shape");
+}
+
+async function promoteMatrixResult(config, state, downloadDirectory, verifyCheckout) {
+  if (!state.linode_destroyed_at) fail("refusing matrix publication before confirmed Linode deletion");
+  const status = loadJsonRegular(path.join(downloadDirectory, "status.json"), "remote matrix status");
+  state.remote_status = status.status;
+  state.remote_status_detail = status.detail || null;
+  saveState(state);
+  if (status.status !== "matrix_complete") {
+    process.stdout.write(
+      `Linode matrix run was retained as diagnostics at ${path.relative(REPO, downloadDirectory)} ` +
+        `(${status.status}${status.detail ? `: ${status.detail}` : ""}).\n`,
+    );
+    return false;
+  }
+  validateMatrixStatus(status);
+  await verifyCheckout(config, state);
+  const evidenceSource = path.join(downloadDirectory, "evidence", "matrix", config.source.benchmark_commit);
+  const evidenceDestination = path.join(
+    REPO,
+    "bench/evidence/matrix",
+    config.source.benchmark_commit,
+    state.run_id,
+  );
+  const publications = {
+    history: path.join(downloadDirectory, "publication/bench/history/runs.jsonl"),
+    wasm: path.join(downloadDirectory, "publication/bench/wasm/current-results.json"),
+    dispatch: path.join(downloadDirectory, "publication/bench/wasm/dispatch-current-results.json"),
+  };
+  for (const file of [path.join(evidenceSource, "manifest.json"), ...Object.values(publications)]) {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
+      fail(`remote matrix export is missing a single regular file at ${file}`);
+    }
+  }
+  if (fs.existsSync(evidenceDestination)) fail(`refusing to overwrite matrix evidence ${evidenceDestination}`);
+  const historyDestination = path.join(REPO, "bench/history/runs.jsonl");
+  if (sha256File(historyDestination) !== config.source.expected_sha256.history_before) {
+    fail("local benchmark history changed while the Linode matrix was in flight");
+  }
+  validateMatrixNativeRows(config, publications.history, status);
+  validateMatrixWasm(config, publications.wasm, status);
+  validateMatrixDispatch(config, publications.dispatch, status);
+  validateMatrixEvidence(config, state, evidenceSource, publications);
+
+  const destinations = {
+    history: historyDestination,
+    wasm: path.join(REPO, "bench/wasm/current-results.json"),
+    dispatch: path.join(REPO, "bench/wasm/dispatch-current-results.json"),
+  };
+  const generated = [
+    path.join(REPO, "bench/RESULTS.md"),
+    path.join(REPO, "bench/current-results.json"),
+    path.join(REPO, "bench/current-results.html"),
+    path.join(REPO, "bench/CLAIMS.md"),
+  ];
+  const snapshots = [...Object.values(destinations), ...generated].map((file) =>
+    fs.existsSync(file)
+      ? { file, existed: true, bytes: fs.readFileSync(file), mode: fs.statSync(file).mode & 0o777 }
+      : { file, existed: false },
+  );
+  const nonce = crypto.randomBytes(6).toString("hex");
+  const evidenceStage = `${evidenceDestination}.incoming-${nonce}`;
+  const stages = Object.fromEntries(
+    Object.entries(destinations).map(([name, destination]) => [name, `${destination}.incoming-${state.run_id}-${nonce}`]),
+  );
+  let evidenceCommitted = false;
+  let publicationsCommitted = false;
+  try {
+    fs.mkdirSync(path.dirname(evidenceDestination), { recursive: true });
+    fs.cpSync(evidenceSource, evidenceStage, { recursive: true, errorOnExist: true, force: false });
+    requireJsonEqual(evidenceFiles(evidenceStage), evidenceFiles(evidenceSource), "staged matrix evidence inventory");
+    for (const file of evidenceFiles(evidenceSource)) {
+      if (sha256File(path.join(evidenceStage, file)) !== sha256File(path.join(evidenceSource, file))) {
+        fail(`staged matrix evidence bytes differ for ${file}`);
+      }
+    }
+    for (const [name, source] of Object.entries(publications)) {
+      fs.copyFileSync(source, stages[name], fs.constants.COPYFILE_EXCL);
+      if (sha256File(stages[name]) !== sha256File(source)) fail(`staged matrix ${name} bytes changed`);
+    }
+    throwIfInterrupted();
+    state.promotion_started_at = new Date().toISOString();
+    saveState(state);
+    fs.renameSync(evidenceStage, evidenceDestination);
+    evidenceCommitted = true;
+    for (const [name, destination] of Object.entries(destinations)) {
+      fs.renameSync(stages[name], destination);
+      publicationsCommitted = true;
+    }
+    await run("env", ["-u", "RUSTC_WRAPPER", "just", "gen-current-results"], {
+      capture: false,
+      announce: true,
+    });
+    await run("env", ["-u", "RUSTC_WRAPPER", "just", "check-benchmark-results"], {
+      capture: false,
+      announce: true,
+    });
+  } catch (error) {
+    fs.rmSync(evidenceStage, { recursive: true, force: true });
+    for (const stage of Object.values(stages)) fs.rmSync(stage, { force: true });
+    if (evidenceCommitted) fs.rmSync(evidenceDestination, { recursive: true, force: true });
+    if (publicationsCommitted) {
+      for (const snapshot of snapshots) {
+        if (snapshot.existed) writeBytesAtomic(snapshot.file, snapshot.bytes, snapshot.mode);
+        else fs.rmSync(snapshot.file, { force: true });
+      }
+    }
+    state.promotion_rolled_back_at = new Date().toISOString();
+    state.promotion_rollback_reason = error.message;
+    saveState(state);
+    throw error;
+  }
+  state.promoted_at = new Date().toISOString();
+  saveState(state);
+  process.stdout.write(
+    `Fresh Linode matrix replaced active history and wasm results; evidence imported to ` +
+      `${path.relative(REPO, evidenceDestination)}.\n`,
+  );
+  return true;
+}
+
 async function promoteAcceptedResult(
   config,
   state,
   downloadDirectory,
   verifyCheckout = verifyPromotionCheckout,
 ) {
+  if (isCrossEngineMatrix(config)) {
+    return promoteMatrixResult(config, state, downloadDirectory, verifyCheckout);
+  }
   if (isVmStringMemory(config)) {
     return promoteMemoryEvidence(config, state, downloadDirectory, verifyCheckout);
   }
@@ -3400,11 +4044,12 @@ async function promoteAcceptedResult(
 
 async function benchLocked(config, configFile = DEFAULT_CONFIG) {
   const { token, plan, provider, source } = await buildPlan(config, { print: true, configFile });
+  const selectedRemoteRunner = remoteRunnerForConfig(config);
   fs.mkdirSync(RUNS_ROOT, { recursive: true, mode: 0o700 });
   const runId = `${safeTimestamp()}-${crypto.randomBytes(4).toString("hex")}`;
   const directory = path.join(RUNS_ROOT, runId);
   fs.mkdirSync(directory, { recursive: false, mode: 0o700 });
-  const shortCandidate = config.source.candidate_commit.slice(0, 8);
+  const shortCandidate = benchmarkCommit(config).slice(0, 8);
   const linodeLabel = `rustia-bench-${shortCandidate}-${crypto.randomBytes(4).toString("hex")}`;
   const state = {
     __directory: directory,
@@ -3421,7 +4066,7 @@ async function benchLocked(config, configFile = DEFAULT_CONFIG) {
     bundle_path: path.join(directory, "rustia.bundle"),
     source_config_path: configFile,
     config_path: path.join(directory, "protocol.json"),
-    runner_path: path.join(directory, "run-linux-fixed-benchmark.js"),
+    runner_path: path.join(directory, path.basename(selectedRemoteRunner)),
     plan,
   };
   saveState(state);
@@ -3430,7 +4075,7 @@ async function benchLocked(config, configFile = DEFAULT_CONFIG) {
   let cleanupError = null;
   try {
     fs.copyFileSync(configFile, state.config_path);
-    fs.copyFileSync(REMOTE_RUNNER, state.runner_path);
+    fs.copyFileSync(selectedRemoteRunner, state.runner_path);
     if (sha256File(state.config_path) !== plan.source.config_sha256) {
       fail("protocol config changed after planning and before snapshotting");
     }
@@ -3533,6 +4178,9 @@ async function benchLocked(config, configFile = DEFAULT_CONFIG) {
         "curl",
         "git",
         "nodejs",
+        "unzip",
+        "xz-utils",
+        "bzip2",
       ],
       {
         capture: false,
@@ -3571,7 +4219,7 @@ async function benchLocked(config, configFile = DEFAULT_CONFIG) {
         ...sshOptions(state),
         `root@${state.public_ipv4}`,
         "node",
-        "/opt/rustia/incoming/run-linux-fixed-benchmark.js",
+        `/opt/rustia/incoming/${path.basename(selectedRemoteRunner)}`,
         "/opt/rustia/incoming/protocol.json",
         "/opt/rustia/incoming/provider.json",
         "/opt/rustia/incoming/rustia.bundle",
@@ -4092,6 +4740,77 @@ async function selfTest(config) {
     assert.throws(() => validateConfig({ ...memoryConfig, ...mutation }));
   }
   assert.throws(() => validateConfig({ ...memoryConfig, qualification: {} }));
+  const matrixArtifact = {
+    version: "fixture",
+    url: "https://example.invalid/runtime.zip",
+    sha256: memoryHash,
+    archive: "zip",
+    binary_relative_path: "bin/runtime",
+  };
+  const matrixConfig = {
+    schema: "rustia.linode-fixed-benchmark.v2",
+    provider: config.provider,
+    source: {
+      benchmark_commit: config.source.candidate_commit,
+      expected_sha256: {
+        bench_manifest: memoryHash,
+        native_harness: memoryHash,
+        cargo_lock: memoryHash,
+        toolchain: memoryHash,
+        wasm_gate: memoryHash,
+        wasm_dispatch_gate: memoryHash,
+        wasm_adapter_manifest: memoryHash,
+        wasm_measure_module: memoryHash,
+        wasm_measure_spidermonkey: memoryHash,
+        wasm_dispatch_measure: memoryHash,
+        history_before: memoryHash,
+      },
+    },
+    measurement: {
+      protocol: CROSS_ENGINE_MATRIX_PROTOCOL,
+      native_target: MATRIX_NATIVE_TARGET,
+      native_engines: [...MATRIX_NATIVE_ENGINES],
+      workloads: [...MATRIX_WORKLOADS],
+      native_target_ms: 120,
+      native_repetitions: 5,
+      wasm_runtimes: [...MATRIX_WASM_RUNTIMES],
+      wasm_adapters: [...MATRIX_WASM_ADAPTERS],
+      wasm_target_ms: 80,
+      wasm_repetitions: 5,
+      dispatch_target_ms: 80,
+      dispatch_repetitions: 5,
+      runtime_artifacts: Object.fromEntries(
+        MATRIX_WASM_RUNTIMES.map((runtime) => [runtime, { ...matrixArtifact }]),
+      ),
+    },
+    host_gate: config.host_gate,
+    publication: { mode: "matrix", native_rows: 50, wasm_rows: 60, dispatch_runtimes: 4 },
+  };
+  assert.equal(validateConfig(matrixConfig), matrixConfig);
+  assert.equal(expectedTerminalStatus(matrixConfig), "matrix_complete");
+  assert.equal(benchmarkCommit(matrixConfig), matrixConfig.source.benchmark_commit);
+  assert.equal(remoteRunnerForConfig(matrixConfig), MATRIX_REMOTE_RUNNER);
+  const matrixStatus = {
+    schema: "rustia.bench.cloud-run-status.v1",
+    status: "matrix_complete",
+    detail: "fresh Linux native and wasm benchmark matrix completed",
+    started_at: "2026-07-20T00:00:00.000Z",
+    finished_at: "2026-07-20T00:01:00.000Z",
+  };
+  validateMatrixStatus(matrixStatus);
+  requireLinuxWasmTarget("wasm32-v8-node-linux-x64", "matrix target fixture");
+  requireLinuxWasmTarget("wasm32-dispatch-spidermonkey-spidermonkey-linux-x64", "matrix dispatch target fixture", true);
+  assert.throws(() => requireLinuxWasmTarget("wasm32-v8-node-darwin-arm64", "matrix target fixture"));
+  requireFreshMatrixTimestamp(1784505630, matrixStatus, "matrix timestamp fixture");
+  assert.throws(() => requireFreshMatrixTimestamp(1784505691, matrixStatus, "matrix timestamp fixture"));
+  assert.throws(() => validateConfig({
+    ...matrixConfig,
+    measurement: { ...matrixConfig.measurement, native_engines: [...MATRIX_NATIVE_ENGINES].reverse() },
+  }));
+  assert.throws(() => validateConfig({
+    ...matrixConfig,
+    publication: { ...matrixConfig.publication, wasm_rows: 59 },
+  }));
   const firstRoles = [];
   for (let round = 1; round <= 16; round += 1) {
     const order = memoryRoundOrder(round);
@@ -4238,6 +4957,8 @@ async function selfTest(config) {
 
   const runner = await run("node", [REMOTE_RUNNER, "self-test"]);
   assert.match(outputText(runner), /self-test passed/);
+  const matrixRunner = await run("node", [MATRIX_REMOTE_RUNNER, "self-test"]);
+  assert.match(outputText(matrixRunner), /self-test passed/);
   process.stdout.write("linode benchmark coordinator offline self-test passed\n");
 }
 

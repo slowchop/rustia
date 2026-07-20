@@ -10,13 +10,13 @@ but it is structured to become a standalone OSS benchmark project.
   `bench/current-results.html` generated from committed history.
 - Keep `bench/wasm-gate.json` as the explicit pre-lock wasm measurement gate
   until production rustia wasm has real V8/JSC/SpiderMonkey history.
-- Keep `bench/site/` static and dependency-free so history can be served from a
-  plain repository or static host.
+- Keep `bench/current-results.html` standalone and dependency-free so the
+  generated report can be served from a plain repository or static host.
 - Keep adapter features independent. `mlua-lua54` must stay in a separate binary
   from `mlua-luau` because `mlua-sys` links both as `lua`.
-- Keep dirty benchmark records out of committed history. `just benchmarks`
-  captures a clean HEAD commit before the first history append and passes it to
-  both runner binaries.
+- Keep active timing records Linux/x86_64-only and sourced from the explicit
+  ephemeral Linode lifecycle. macOS and Windows remain supported build targets,
+  but are outside the performance product until dedicated hosts exist.
 - Keep accepted fixed-work raw sidecars and provenance manifests under
   `history/evidence/<full-commit>/`; they complement rather than extend the
   stable JSONL summary schema.
@@ -33,9 +33,9 @@ workspace coupling is intentional:
   `../crates/`.
 - The root `Justfile` owns convenience recipes while the project remains in this
   workspace.
-- `.github/workflows/benchmarks.yml` owns the current in-repo push, nightly, and
-  manual self-hosted measurement jobs plus private data-repo publication while
-  the project remains in this workspace.
+- The root `Justfile` and `tools/run-linode-benchmark.js` own the explicit,
+  operator-started Linux matrix lifecycle. Hosted CI checks committed artifacts
+  and never records fresh timings.
 - Root license files cover the current in-repo copy.
 
 When the project splits, either publish `rustia-*` crates first, move the rustia

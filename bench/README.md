@@ -11,6 +11,11 @@ The harness writes one JSONL record per completed engine/workload measurement,
 so history can be committed, served statically, or uploaded by CI without needing
 a hosted metrics service.
 
+The active performance product is deliberately narrower than Rustia's build
+support: native measurements are `linux-x86_64` on an ephemeral dedicated
+Linode, and wasm runtimes are measured on that same Linux host. macOS and
+Windows timings are excluded until dedicated machines exist for them.
+
 The default build runs the in-repo `rustia` adapter over five workload families:
 
 - `dense_tables`
@@ -511,8 +516,9 @@ just bench-scaleway-destroy
 just bench-scaleway-destroy RUN_ID
 ```
 
-The resulting evidence is Linux/x86_64-specific. It does not replace a
-separate Apple-Silicon/macOS measurement of the earlier M4 observation.
+The resulting evidence is Linux/x86_64-specific. macOS and Windows remain
+supported build targets, but neither is an active benchmark target without a
+dedicated measurement host.
 
 The append-only JSONL remains the summary source of truth. Raw sidecars and a
 provenance manifest live under [`history/evidence/`](history/evidence/) and must
@@ -525,7 +531,7 @@ cargo run -p script-bench-harness -- --list
 ```
 
 Emit the same engine/workload inventory as deterministic JSON for wrappers,
-CI, or static-site generation:
+CI, or generated-report integration:
 
 ```sh
 cargo run -p script-bench-harness -- --list-json
@@ -555,32 +561,26 @@ The matrix switch is present now:
 cargo run -p script-bench-harness --features all-engines -- --list
 ```
 
-Run and append the full default benchmark matrix with:
+Do not publish the full matrix from a developer machine. Plan and run it through
+the explicit dedicated-Linode lifecycle with a committed frozen config:
 
 ```sh
-just benchmarks
+just bench-linode-matrix-plan bench/cloud/LINODE_MATRIX_CONFIG.json
+just bench-linode-matrix bench/cloud/LINODE_MATRIX_CONFIG.json
 ```
 
-That recipe runs the `all-engines` binary first, runs the Lua 5.4 mlua adapter
-in its required separate binary, appends measurements to `bench/history/runs.jsonl`,
-and refreshes the generated result files. It intentionally requires a clean
-staged/unstaged worktree before appending benchmark history, so committed
-baselines do not get tagged with `-dirty` commit IDs. The recipe pins the clean
-HEAD commit into both benchmark invocations, because the first append dirties
-`bench/history/runs.jsonl` before the separate Lua 5.4 binary runs.
+The coordinator verifies the frozen source and runtime artifacts, provisions the
+declared Linux/x86_64 shape, builds the `all-engines` binary plus the separate
+Lua 5.4 binary, and measures the five common workloads. It then runs the three
+wasm adapters on Node, Deno, Bun, and SpiderMonkey on that same host. Promotion
+requires the exact 50 native rows, 60 wasm rows, four dispatch runs, Linux-only
+target identities, a single source revision, and confirmed instance deletion.
+The generic `just benchmarks` local-publication path is retired so a macOS or
+Windows developer machine cannot repopulate active results.
 
-GitHub Actions runs the same measurement machinery in
-`.github/workflows/benchmarks.yml`. Pushes to `main` run a Rustia-only benchmark
-for commit-level signal. A nightly schedule runs the full comparison matrix, and
-manual dispatch can choose either `rustia` or `full` mode. The workflow requires
-a self-hosted runner with the generic labels `[self-hosted, bench]`. It restores
-prior history from the private `slowchop/rustia-bench-data` repository, appends
-new measurements, regenerates the benchmark reports, and commits the updated
-result files back to that data repository. It also regenerates the data repo's
-root `README.md` with latest-results comparison charts split by native and wasm
-targets, so adapters such as `koto` are not conflated across target families.
-The runner-label, trigger, storage, and mode policy is checked by
-`tools/check-workflows.js`.
+Hosted CI only validates the committed artifacts. `tools/check-workflows.js`
+forbids fresh native or wasm measurement commands in GitHub Actions; starting a
+billed Linode remains an explicit operator action.
 
 `all-engines` intentionally excludes `mlua-lua54` because `mlua-lua54` and
 `mlua-luau` cannot be linked into one binary. Run the Lua 5.4 mlua adapter as a
@@ -607,7 +607,7 @@ Each line in `history/runs.jsonl` is a JSON object:
 {
   "timestamp_unix": 0,
   "commit": "8c0211d",
-  "target": "macos-aarch64",
+  "target": "linux-x86_64",
   "engine": "rustia",
   "dialect": "luau",
   "workload": "dense_tables",
@@ -695,24 +695,14 @@ the tree was clean before the first history append.
 The harness is a clean rewrite. Prior-art and workload-provenance notes are
 tracked in [`PRIOR-ART.md`](PRIOR-ART.md).
 
-## Static Site
+## Static Report
 
-`current-results.html` is the single generated report for current leaderboards,
-per-workload history charts, wasm results, and claim-gate context.
-
-`site/` contains the older dependency-free dashboard that reads `history/runs.jsonl`
-directly. It remains useful while editing the raw JSONL history by hand.
-It also loads `wasm-gate.json` so the closed V8/JSC/SpiderMonkey pre-lock
-requirements stay visible next to the rough performance comparisons.
-The dashboard also reads `wasm/current-results.json` for the browser-wasm target bench.
-The dispatch panel reads `wasm/dispatch-current-results.json` for the
-`call_ref` versus `br_table` microbench.
-That target currently measures the wasm-compatible scripting adapters `rustia`
-and `koto`; current adapter status is tracked in
-[`wasm/ADAPTERS.md`](wasm/ADAPTERS.md).
+`current-results.html` is the single generated report for target-first language
+and implementation summaries, per-workload history charts, Linux-hosted wasm
+results, and claim-gate context.
 
 ```sh
-python3 -m http.server 8000
+python3 -m http.server 8000 --bind 0.0.0.0
 ```
 
-Open `http://127.0.0.1:8000/bench/site/`.
+Open `http://HOST:8000/bench/current-results.html` over the trusted VPN.

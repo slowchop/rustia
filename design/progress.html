@@ -489,7 +489,7 @@
       <div class="meta-line">
         <span class="chip high">80% confidence</span>
       </div>
-      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, exact ephemeral-Linux fixed-throughput and evidence-only memory protocols, a wasm target runner for rustia+koto on V8, JavaScriptCore-family, and SpiderMonkey runtimes, a call_ref versus br_table dispatch microbench on those same families, and push/nightly/manual self-hosted publication to the private benchmark-data repository are present.</p>
+      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, a standalone target-first current-results HTML report, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, exact ephemeral-Linux fixed-throughput and evidence-only memory protocols, a wasm target runner for rustia+koto+rhai on Node/V8, Deno/V8, Bun/JavaScriptCore, and SpiderMonkey, a call_ref versus br_table dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle are present.</p>
       <p class="plan"><strong>Next:</strong> Split from workspace, expand workloads, and accumulate longer-run public history and richer tracking charts.</p>
     </article>
 
@@ -1329,8 +1329,8 @@
     <article class="entry">
       <div class="entry-top">
         <div>
-          <h4>History and static site</h4>
-          <p>Append-only history, dirty-baseline guards, markdown results, current-results JSON, dependency-free dashboard files, claim-gate markdown, six workloads represented in current results, and retained exact dense/OOP Linux evidence are present; the separate string-memory corpus remains evidence-only by design.</p>
+          <h4>History and static report</h4>
+          <p>Append-only history, dirty-baseline guards, markdown results, current-results JSON, a standalone HTML report, claim-gate markdown, six workloads represented in current results, and retained exact dense/OOP Linux evidence are present; the separate string-memory corpus remains evidence-only by design.</p>
         </div>
         <div class="entry-score">
           <strong>82%</strong>
@@ -1338,7 +1338,7 @@
         </div>
       </div>
 
-    <div class="meter" aria-label="History and static site: 82% complete">
+    <div class="meter" aria-label="History and static report: 82% complete">
       <div class="meter-fill" style="width: 82%"></div>
     </div>
 
@@ -1348,8 +1348,8 @@
     <article class="entry">
       <div class="entry-top">
         <div>
-          <h4>Benchmark CI</h4>
-          <p>Main pushes run the Rustia matrix, nightly and full manual dispatches run the comparison matrix, and rustia manual dispatch remains available on the generic [self-hosted, bench] runner. Each mode restores and publishes generated history through the private benchmark-data repository and is guarded by workflow policy checks.</p>
+          <h4>Benchmark operations</h4>
+          <p>Hosted CI validates committed benchmark artifacts without measuring. An explicit operator-started Linode lifecycle is the sole active timing source and promotes only a complete Linux native-plus-wasm matrix after confirmed instance deletion.</p>
         </div>
         <div class="entry-score">
           <strong>75%</strong>
@@ -1357,11 +1357,11 @@
         </div>
       </div>
 
-    <div class="meter" aria-label="Benchmark CI: 75% complete">
+    <div class="meter" aria-label="Benchmark operations: 75% complete">
       <div class="meter-fill" style="width: 75%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Keep the runner and deploy key operational, accumulate longer history, and add regression alerts without exposing infrastructure details.</p>
+      <p class="plan"><strong>Future plan:</strong> Keep the Linode lifecycle reproducible, accumulate longer coherent Linux history, and add regression alerts without mixing developer-machine timings.</p>
     </article>
 
       </div>

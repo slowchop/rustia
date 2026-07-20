@@ -97,7 +97,7 @@
       "name": "Standalone benchmark OSS project",
       "complete": 80,
       "confidence": 80,
-      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, static site, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, exact ephemeral-Linux fixed-throughput and evidence-only memory protocols, a wasm target runner for rustia+koto on V8, JavaScriptCore-family, and SpiderMonkey runtimes, a call_ref versus br_table dispatch microbench on those same families, and push/nightly/manual self-hosted publication to the private benchmark-data repository are present.",
+      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, a standalone target-first current-results HTML report, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, exact ephemeral-Linux fixed-throughput and evidence-only memory protocols, a wasm target runner for rustia+koto+rhai on Node/V8, Deno/V8, Bun/JavaScriptCore, and SpiderMonkey, a call_ref versus br_table dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle are present.",
       "future_plan": "Split from workspace, expand workloads, and accumulate longer-run public history and richer tracking charts."
     },
     {
@@ -400,18 +400,18 @@
           "future_plan": "Expand the remaining #12 interop, #13 serde, and #14 fuel/limit workload plan, then refresh intentional measurement history."
         },
         {
-          "name": "History and static site",
+          "name": "History and static report",
           "complete": 82,
           "confidence": 85,
-          "state": "Append-only history, dirty-baseline guards, markdown results, current-results JSON, dependency-free dashboard files, claim-gate markdown, six workloads represented in current results, and retained exact dense/OOP Linux evidence are present; the separate string-memory corpus remains evidence-only by design.",
+          "state": "Append-only history, dirty-baseline guards, markdown results, current-results JSON, a standalone HTML report, claim-gate markdown, six workloads represented in current results, and retained exact dense/OOP Linux evidence are present; the separate string-memory corpus remains evidence-only by design.",
           "future_plan": "Publish long-run history and richer charts after standalone split."
         },
         {
-          "name": "Benchmark CI",
+          "name": "Benchmark operations",
           "complete": 75,
           "confidence": 90,
-          "state": "Main pushes run the Rustia matrix, nightly and full manual dispatches run the comparison matrix, and rustia manual dispatch remains available on the generic [self-hosted, bench] runner. Each mode restores and publishes generated history through the private benchmark-data repository and is guarded by workflow policy checks.",
-          "future_plan": "Keep the runner and deploy key operational, accumulate longer history, and add regression alerts without exposing infrastructure details."
+          "state": "Hosted CI validates committed benchmark artifacts without measuring. An explicit operator-started Linode lifecycle is the sole active timing source and promotes only a complete Linux native-plus-wasm matrix after confirmed instance deletion.",
+          "future_plan": "Keep the Linode lifecycle reproducible, accumulate longer coherent Linux history, and add regression alerts without mixing developer-machine timings."
         }
       ]
     },

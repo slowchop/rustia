@@ -135,7 +135,7 @@ function runtimeCommand(runtime, commonArgs) {
 }
 
 function measureRuntime(runtime, options, commit) {
-  const runtimeSpec = runtimeCommand(runtime, [
+  const commandArgs = [
     relative(measureScript),
     "--commit",
     commit,
@@ -145,7 +145,9 @@ function measureRuntime(runtime, options, commit) {
     String(options.reps),
     "--max-n",
     String(options.maxN),
-  ]);
+  ];
+  if (runtime === "spidermonkey") commandArgs.push("--host", `${process.platform}-${process.arch}`);
+  const runtimeSpec = runtimeCommand(runtime, commandArgs);
   if (!runtimeSpec) {
     return {
       skipped: {

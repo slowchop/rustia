@@ -108,14 +108,14 @@ from `publish = false` to publishable.
 - `bench/history/runs.jsonl`, `bench/RESULTS.md`,
   `bench/current-results.json`, `bench/current-results.html`, and
   `bench/CLAIMS.md` are generated from the same committed benchmark history.
-- The dependency-free `bench/site/` dashboard has a checked static asset,
-  DOM-binding, JSONL-history, and current-results contract.
+- `bench/current-results.html` is the single checked benchmark report artifact.
 - Native baseline history covers the completed adapter matrix on a clean commit.
 - Public benchmark claims are stated per workload in `bench/CLAIMS.md`, not as
   a single blanket multiplier. The current generated claim gate approves no
   global speed headline.
-- Public benchmark workflows use only the generic `[self-hosted, bench]` runner
-  label after owner setup is confirmed.
+- Fresh performance data comes only from the explicit ephemeral Linode
+  Linux/x86_64 lifecycle. macOS and Windows remain build targets, not active
+  benchmark targets, until dedicated hosts exist.
 
 ## Release Process Gate
 
@@ -128,16 +128,14 @@ from `publish = false` to publishable.
   `cargo clippy --workspace --all-targets -- -D warnings`.
 - `just check-crate-metadata` passes and `design/crate-metadata.json` is
   current.
-- `just check-workflows` passes and keeps the hosted CI workflow, push/nightly/
-  manual benchmark modes, pinned Rust toolchain, action pins, permissions, and
-  generic runner labels in their expected public-safe shape.
+- `just check-workflows` passes and keeps hosted CI validation-only: it pins the
+  Rust toolchain and actions and forbids workflow-based fresh timing runs.
 - `.github/workflows/ci.yml` mirrors the release-preflight gate on hosted Linux
   CI, including example compilation, without running fresh benchmark
   measurements.
-- `.github/workflows/benchmarks.yml` provides main-push Rustia, nightly full-
-  matrix, and manual measurements on the generic `[self-hosted, bench]` runner;
-  it restores and publishes generated artifacts through the private
-  benchmark-data repository.
+- The explicit Linode matrix command provisions, measures, validates, deletes,
+  and only then promotes a coherent native-plus-wasm Linux result set. Hosted
+  workflows do not provision billed resources or publish timings.
 - `cargo test --workspace` passes on the release toolchain.
 - `just check-examples` passes and compiles the public `rustia` examples.
 - `just check-package-files` passes and `design/package-files.json` is current.
