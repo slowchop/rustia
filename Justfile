@@ -45,6 +45,8 @@ check-benchmark-results:
     node tools/run-linux-matrix-benchmark.js self-test
     node tools/run-vultr-benchmark.js self-test
     node tools/run-scaleway-benchmark.js self-test
+    node tools/run-wasm-gate.js self-test
+    node tools/run-wasm-dispatch-gate.js self-test
     node tools/check-benchmark-results.js
     node tools/check-wasm-gate-results.js
     node tools/check-current-report-summary.js

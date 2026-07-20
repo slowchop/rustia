@@ -45,9 +45,10 @@ Pass `--fixed-n <positive integer>` to bypass calibration and use exactly that
 default remains calibrated measurement, so existing commands and public history
 behavior are unchanged.
 
-The append-only history continues to store only the stable min/median summary.
-For local analysis, write the raw per-repetition `ns/unit` values to a separate
-JSON sidecar:
+The JSONL summary stores only the stable min/median values. Direct harness runs
+may append rows, while the dedicated Linode matrix coordinator atomically
+publishes a fresh, complete Linux cohort. For local analysis, write the raw
+per-repetition `ns/unit` values to a separate JSON sidecar:
 
 ```sh
 cargo run -p script-bench-harness --release -- \
@@ -520,9 +521,10 @@ The resulting evidence is Linux/x86_64-specific. macOS and Windows remain
 supported build targets, but neither is an active benchmark target without a
 dedicated measurement host.
 
-The append-only JSONL remains the summary source of truth. Raw sidecars and a
-provenance manifest live under [`history/evidence/`](history/evidence/) and must
-not change that public schema.
+The committed JSONL snapshot remains the summary source of truth. The active
+matrix coordinator replaces it only with a complete single-revision Linux
+cohort. Raw sidecars and provenance manifests live under
+[`history/evidence/`](history/evidence/) and must not change that public schema.
 
 List all configured engine slots:
 
@@ -621,8 +623,9 @@ Each line in `history/runs.jsonl` is a JSON object:
 }
 ```
 
-The future website should treat JSONL as the append-only source of truth and
-generate charts from `engine × target × workload` series.
+The future website should treat the versioned JSONL snapshot as the summary
+source of truth and generate charts from `engine × target × workload`
+series.
 
 Raw repetitions are intentionally excluded from this public history schema.
 `--samples-json <path>` exports them without changing JSONL history records or
@@ -632,8 +635,8 @@ milestone evidence is retained under `history/evidence/<full-commit>/`.
 
 `--list-json` emits a separate schema-identified metadata document for the
 available engine slots, feature gates, workload IDs, default workload set, and
-result paths. It is intended for tooling; benchmark measurements stay in the
-append-only JSONL history above. In that document, `implemented` means the
+result paths. It is intended for tooling; active native benchmark measurements
+stay in the JSONL snapshot above. In that document, `implemented` means the
 source adapter exists, while `available` means this specific binary was compiled
 with the adapter's feature enabled.
 
@@ -644,7 +647,7 @@ cargo run -p script-bench-harness -- --check-history
 ```
 
 The check validates required fields, known engine/workload IDs, dialect and unit
-consistency, positive finite timing values, clean commit IDs, and append-only
+consistency, positive finite timing values, clean commit IDs, and monotonic
 timestamp order.
 
 Refresh generated markdown results from committed history without running

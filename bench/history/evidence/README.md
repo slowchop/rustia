@@ -27,10 +27,13 @@ and SHA-256 value. Accepted eight-leg comparisons use `--expected-legs 4` and
 of pooled and leg-clustered hierarchical bootstrap intervals, with the
 analyzer's nominal-coverage caveat retained in the output.
 
-`../runs.jsonl` remains the append-only public summary schema. Evidence files do
-not add fields to it, and a pooled or hand-computed result must never be inserted
-as a history row. The `final-<workload>-*` rows must come from the exact candidate
-binary and match the actual summaries appended by those three invocations.
+`../runs.jsonl` remains the public summary schema. The active dedicated-Linode
+matrix publishes a fresh, complete Linux cohort there; this directory retains
+older accepted fixed-work sidecars even when their rows are no longer in the
+active snapshot. Evidence files do not add fields to the summary schema, and a
+pooled or hand-computed result must never be inserted as a history row. The
+`final-<workload>-*` rows must come from the exact candidate binary and match the
+actual summaries produced by those three invocations.
 
 Provider-backed runs may additionally retain `host.json`, `provider.json`,
 `protocol.json`, `gate.jsonl`, `qualification.json`, qualification-only

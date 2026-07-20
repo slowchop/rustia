@@ -137,8 +137,8 @@ API parity release-critical work.
    type-directed wasm/AOT.
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 12 workload entries including
-   source-covered `string_building`, append-only JSONL history, package metadata, split notes, a standalone HTML
-   report, an explicit closed wasm pre-lock gate artifact, a wasm target bench for rustia+koto+rhai, a `call_ref`
+   source-covered `string_building`, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
+   a standalone HTML report, an explicit closed wasm pre-lock gate artifact, a wasm target bench for rustia+koto+rhai, a `call_ref`
    versus `br_table` dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle.
    Next work is the actual standalone-project split and longer-run public history.
 3. **Keep the Luau 0.709 conformance corpus green**. The current repo has 692 executable fixtures covering 491
