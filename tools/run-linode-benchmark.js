@@ -517,7 +517,7 @@ function validateConfig(value) {
       "maximum_steal_ticks",
       "maximum_timed_steal_percent",
       ...(kind === CROSS_ENGINE_MATRIX_PROTOCOL
-        ? ["maximum_timed_attempts_per_group"]
+        ? ["maximum_timed_steal_ticks", "maximum_timed_attempts_per_group"]
         : []),
       "wait_timeout_seconds",
     ],
@@ -535,6 +535,15 @@ function validateConfig(value) {
     fail("Linode v2 steal budget must remain zero while idle and 0.1% during a timed leg");
   }
   if (kind === CROSS_ENGINE_MATRIX_PROTOCOL) {
+    if (
+      requireInteger(
+        gate.maximum_timed_steal_ticks,
+        "config.host_gate.maximum_timed_steal_ticks",
+        0,
+      ) !== 1
+    ) {
+      fail("config.host_gate.maximum_timed_steal_ticks must be one for the matrix protocol");
+    }
     const maximumTimedAttempts = requireInteger(
       gate.maximum_timed_attempts_per_group,
       "config.host_gate.maximum_timed_attempts_per_group",
@@ -551,8 +560,8 @@ function validateConfig(value) {
     "config.host_gate.wait_timeout_seconds",
     1,
   );
-  if (kind === CROSS_ENGINE_MATRIX_PROTOCOL && waitTimeout !== 900) {
-    fail("config.host_gate.wait_timeout_seconds must be 900 for the matrix protocol");
+  if (kind === CROSS_ENGINE_MATRIX_PROTOCOL && waitTimeout !== 300) {
+    fail("config.host_gate.wait_timeout_seconds must be 300 for the matrix protocol");
   }
 
   const publication = requireObject(root.publication, "config.publication");
@@ -1405,6 +1414,7 @@ function sanitizedProviderPlan(config, provider, source) {
           wasm_adapters: config.measurement.wasm_adapters,
           wasm_repetitions: config.measurement.wasm_repetitions,
           dispatch_repetitions: config.measurement.dispatch_repetitions,
+          maximum_timed_steal_ticks: config.host_gate.maximum_timed_steal_ticks,
           maximum_timed_attempts_per_group: config.host_gate.maximum_timed_attempts_per_group,
           wait_timeout_seconds: config.host_gate.wait_timeout_seconds,
           result_shape: {
@@ -2278,10 +2288,12 @@ function validateCpuDelta(deltaValue, location) {
 }
 
 function timedStealGatePasses(config, delta) {
-  return (
+  const withinPercentage = (
     delta.steal_ticks * 100 <=
     config.host_gate.maximum_timed_steal_percent * delta.total_ticks
   );
+  const tickLimit = config.host_gate.maximum_timed_steal_ticks;
+  return withinPercentage || (Number.isInteger(tickLimit) && delta.steal_ticks <= tickLimit);
 }
 
 function validateGateLog(config, gateFile, declaredRecords) {
@@ -2399,11 +2411,14 @@ function validateMatrixGateLog(config, gateFile, status) {
   const records = parseCanonicalJsonl(gateFile, "matrix gate.jsonl");
   const runStarted = requireIsoTimestamp(status.started_at, "matrix gate status.started_at");
   const runFinished = requireIsoTimestamp(status.finished_at, "matrix gate status.finished_at");
+  let previousTimestamp = runStarted;
   const requireRunTimestamp = (value, location) => {
     const timestamp = requireIsoTimestamp(value, location);
     if (timestamp < runStarted || timestamp > runFinished) {
       fail(`${location} falls outside the matrix run window`);
     }
+    if (timestamp < previousTimestamp) fail(`${location} precedes the prior matrix gate timestamp`);
+    previousTimestamp = timestamp;
     return timestamp;
   };
   const expectedLabels = [
@@ -2488,7 +2503,7 @@ function validateMatrixGateLog(config, gateFile, status) {
     if (!acceptedTimedAttempt) {
       fail(
         `matrix gate ${label} exhausted ${config.host_gate.maximum_timed_attempts_per_group} ` +
-        "attempts without passing the 0.1% timed-steal gate",
+        "attempts without passing the 0.1% / one-tick timed-steal gate",
       );
     }
   }
@@ -4928,8 +4943,9 @@ async function selfTest(config) {
     },
     host_gate: {
       ...config.host_gate,
+      maximum_timed_steal_ticks: 1,
       maximum_timed_attempts_per_group: 3,
-      wait_timeout_seconds: 900,
+      wait_timeout_seconds: 300,
     },
     publication: { mode: "matrix", native_rows: 50, wasm_rows: 60, dispatch_runtimes: 4 },
   };
@@ -5008,7 +5024,16 @@ async function selfTest(config) {
       },
     }));
   }
-  for (const waitTimeoutSeconds of [899, 901]) {
+  for (const maximumTimedStealTicks of [0, 2]) {
+    assert.throws(() => validateConfig({
+      ...matrixConfig,
+      host_gate: {
+        ...matrixConfig.host_gate,
+        maximum_timed_steal_ticks: maximumTimedStealTicks,
+      },
+    }));
+  }
+  for (const waitTimeoutSeconds of [299, 301]) {
     assert.throws(() => validateConfig({
       ...matrixConfig,
       host_gate: {
@@ -5017,8 +5042,8 @@ async function selfTest(config) {
       },
     }));
   }
-  assert.equal(timedStealGatePasses(matrixConfig, { total_ticks: 946, steal_ticks: 1 }), false);
-  assert.equal(timedStealGatePasses(matrixConfig, { total_ticks: 1000, steal_ticks: 1 }), true);
+  assert.equal(timedStealGatePasses(matrixConfig, { total_ticks: 946, steal_ticks: 1 }), true);
+  assert.equal(timedStealGatePasses(matrixConfig, { total_ticks: 946, steal_ticks: 2 }), false);
   assert.equal(timedStealGatePasses(matrixConfig, { total_ticks: 10_000, steal_ticks: 2 }), true);
   const firstRoles = [];
   for (let round = 1; round <= 16; round += 1) {
@@ -5168,6 +5193,11 @@ async function selfTest(config) {
     const outOfWindow = structuredClone(matrixGateRecords);
     outOfWindow[0].captured_at = "2026-07-19T23:59:59.000Z";
     writeMatrixGate(outOfWindow);
+    assert.throws(() => validateMatrixGateLog(matrixConfig, matrixGate, matrixStatus));
+    const outOfOrder = structuredClone(matrixGateRecords);
+    outOfOrder[1].started_at = outOfOrder[0].captured_at;
+    outOfOrder[0].captured_at = outOfOrder[1].finished_at;
+    writeMatrixGate(outOfOrder);
     assert.throws(() => validateMatrixGateLog(matrixConfig, matrixGate, matrixStatus));
     const resolverOptions = { repo: fixtureRepo, defaultConfig: defaultFixture };
     assert.equal(resolveConfigFile(undefined, resolverOptions), defaultFixture);

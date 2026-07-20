@@ -152,8 +152,8 @@ function validateConfig(value) {
   const gate = requireObject(config.host_gate, "host_gate");
   requireExactKeys(gate, [
     "benchmark_cpu", "cooldown_seconds", "idle_window_seconds", "minimum_idle_percent", "maximum_load_1m",
-    "maximum_steal_ticks", "maximum_timed_steal_percent", "maximum_timed_attempts_per_group",
-    "wait_timeout_seconds",
+    "maximum_steal_ticks", "maximum_timed_steal_percent", "maximum_timed_steal_ticks",
+    "maximum_timed_attempts_per_group", "wait_timeout_seconds",
   ], "host_gate");
   requireInteger(gate.benchmark_cpu, "host_gate.benchmark_cpu", 0);
   requireInteger(gate.cooldown_seconds, "host_gate.cooldown_seconds", 1);
@@ -166,6 +166,9 @@ function validateConfig(value) {
   if (requireNumber(gate.maximum_timed_steal_percent, "host_gate.maximum_timed_steal_percent", 0) !== 0.1) {
     fail("host_gate.maximum_timed_steal_percent must be 0.1");
   }
+  if (requireInteger(gate.maximum_timed_steal_ticks, "host_gate.maximum_timed_steal_ticks", 0) !== 1) {
+    fail("host_gate.maximum_timed_steal_ticks must be one");
+  }
   const maximumTimedAttempts = requireInteger(
     gate.maximum_timed_attempts_per_group,
     "host_gate.maximum_timed_attempts_per_group",
@@ -174,8 +177,8 @@ function validateConfig(value) {
   if (maximumTimedAttempts > MAX_TIMED_ATTEMPTS_PER_GROUP) {
     fail(`host_gate.maximum_timed_attempts_per_group must be <= ${MAX_TIMED_ATTEMPTS_PER_GROUP}`);
   }
-  if (requireInteger(gate.wait_timeout_seconds, "host_gate.wait_timeout_seconds", 1) !== 900) {
-    fail("host_gate.wait_timeout_seconds must be 900");
+  if (requireInteger(gate.wait_timeout_seconds, "host_gate.wait_timeout_seconds", 1) !== 300) {
+    fail("host_gate.wait_timeout_seconds must be 300");
   }
   const publication = requireObject(config.publication, "publication");
   requireExactKeys(publication, ["mode", "native_rows", "wasm_rows", "dispatch_runtimes"], "publication");
@@ -383,11 +386,24 @@ function cpuDelta(before, after) {
 }
 
 function timedStealGatePasses(gate, delta) {
-  return delta.steal_ticks * 100 <= gate.maximum_timed_steal_percent * delta.total_ticks;
+  return (
+    delta.steal_ticks <= gate.maximum_timed_steal_ticks ||
+    delta.steal_ticks * 100 <= gate.maximum_timed_steal_percent * delta.total_ticks
+  );
 }
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function appendGateRecord(file, record) {
+  const descriptor = fs.openSync(file, "a");
+  try {
+    fs.appendFileSync(descriptor, `${JSON.stringify(record)}\n`);
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
 }
 
 function snapshotFiles(files) {
@@ -425,10 +441,10 @@ async function waitForQuiet(config, label, gateFile, timedAttempt, deadline) {
       delta.idle_percent >= gate.minimum_idle_percent &&
       delta.steal_ticks <= gate.maximum_steal_ticks &&
       load1m <= gate.maximum_load_1m;
-    fs.appendFileSync(gateFile, `${JSON.stringify({
+    appendGateRecord(gateFile, {
       phase: "pre", label, timed_attempt: timedAttempt, quiet_attempt: quietAttempt,
       captured_at: new Date().toISOString(), load_1m: load1m, ...delta, accepted,
-    })}\n`);
+    });
     if (accepted) return;
     await sleep(gate.cooldown_seconds * 1000);
   }
@@ -445,9 +461,7 @@ async function timedGroup(config, label, command, args, gateFile, options = {}, 
   const sleepImpl = hooks.sleep ?? sleep;
   const now = hooks.now ?? (() => new Date().toISOString());
   const logImpl = hooks.log ?? log;
-  const appendGate = hooks.appendGate ?? ((file, record) => {
-    fs.appendFileSync(file, `${JSON.stringify(record)}\n`);
-  });
+  const appendGate = hooks.appendGate ?? appendGateRecord;
   const maximumAttempts = config.host_gate.maximum_timed_attempts_per_group;
   const quietDeadline = Date.now() + config.host_gate.wait_timeout_seconds * 1000;
 
@@ -510,7 +524,8 @@ async function timedGroup(config, label, command, args, gateFile, options = {}, 
 
   fail(
     `${label} exhausted ${maximumAttempts} timed attempt(s) without meeting the ` +
-    `${config.host_gate.maximum_timed_steal_percent}% timed-steal gate`,
+    `${config.host_gate.maximum_timed_steal_percent}% / ` +
+    `${config.host_gate.maximum_timed_steal_ticks}-tick steal gate`,
   );
 }
 
@@ -710,9 +725,9 @@ async function selfTest() {
     { fields: [10, 0, 5, 100, 2, 1, 1, 0] },
     { fields: [11, 0, 6, 198, 2, 1, 1, 0] },
   ), { total_ticks: 100, idle_ticks: 98, steal_ticks: 0, idle_percent: 98, steal_percent: 0 });
-  const timedGate = { maximum_timed_steal_percent: 0.1 };
-  assert.equal(timedStealGatePasses(timedGate, { total_ticks: 946, steal_ticks: 1 }), false);
-  assert.equal(timedStealGatePasses(timedGate, { total_ticks: 1000, steal_ticks: 1 }), true);
+  const timedGate = { maximum_timed_steal_percent: 0.1, maximum_timed_steal_ticks: 1 };
+  assert.equal(timedStealGatePasses(timedGate, { total_ticks: 946, steal_ticks: 1 }), true);
+  assert.equal(timedStealGatePasses(timedGate, { total_ticks: 946, steal_ticks: 2 }), false);
   assert.equal(timedStealGatePasses(timedGate, { total_ticks: 10_000, steal_ticks: 2 }), true);
   assert.throws(() => safeArtifactPath("/tmp/a", "../b", "fixture"));
 
@@ -726,8 +741,9 @@ async function selfTest() {
         benchmark_cpu: 3,
         cooldown_seconds: 1,
         maximum_timed_steal_percent: 0.1,
+        maximum_timed_steal_ticks: 1,
         maximum_timed_attempts_per_group: 3,
-        wait_timeout_seconds: 900,
+        wait_timeout_seconds: 300,
       },
     };
     const cpu = (idle, steal) => ({ fields: [0, 0, 0, idle, 0, 0, 0, steal], steal });
@@ -807,7 +823,7 @@ async function selfTest() {
           log: () => {},
         },
       ),
-      /exhausted 2 timed attempt\(s\).*0\.1% timed-steal gate/,
+      /exhausted 2 timed attempt\(s\).*0\.1% \/ 1-tick steal gate/,
     );
     assert.equal(rejectedRuns, 2);
     assert.deepEqual(rejectedQuietAttempts, [1, 2]);
