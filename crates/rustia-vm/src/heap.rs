@@ -479,9 +479,17 @@ impl VmCell {
     pub fn collect_weak_tables_with_roots(&mut self, roots: &[Value]) {
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
+            let mode_key = b"__mode";
+            let Some(mode_atom) = string_index_lookup(&root, mode_key, stable_bytes_hash(mode_key))
+            else {
+                return;
+            };
             let modes = (0..root.tables.len())
-                .map(|index| table_weak_mode(&root, index))
+                .map(|index| table_weak_mode(&root, index, mode_atom))
                 .collect::<Vec<_>>();
+            if modes.iter().all(Option::is_none) {
+                return;
+            }
             let live = mark_weak_reachable(&root, &modes, roots);
             for (index, mode) in modes.into_iter().enumerate() {
                 if let Some(mode) = mode {
@@ -1838,14 +1846,11 @@ impl WeakLiveSet {
     }
 }
 
-fn table_weak_mode(root: &RootData<'_>, table: usize) -> Option<WeakMode> {
+fn table_weak_mode(root: &RootData<'_>, table: usize, mode_atom: u32) -> Option<WeakMode> {
     let table = root.tables.get(table)?;
     let metatable = table.metatable?;
     let metatable = root.tables.get(metatable as usize)?;
-    let mode = metatable
-        .hash
-        .iter()
-        .find_map(|entry| table_key_is_string(root, entry.key, b"__mode").then_some(entry.value))?;
+    let mode = table_hash_entry(metatable, TableKey::String(mode_atom))?.value;
     let weak = WeakMode {
         keys: string_value_contains(root, mode, b'k')?,
         values: string_value_contains(root, mode, b'v')?,
@@ -1861,15 +1866,6 @@ fn string_value_contains(root: &RootData<'_>, value: Value, needle: u8) -> Optio
     root.strings
         .get(atom as usize)
         .map(|value| value.as_bytes().contains(&needle))
-}
-
-fn table_key_is_string(root: &RootData<'_>, key: TableKey, expected: &[u8]) -> bool {
-    let TableKey::String(atom) = key else {
-        return false;
-    };
-    root.strings
-        .get(atom as usize)
-        .is_some_and(|value| value.as_bytes() == expected)
 }
 
 fn mark_weak_reachable(

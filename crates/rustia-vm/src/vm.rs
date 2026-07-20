@@ -2209,7 +2209,7 @@ impl Vm {
                                             }),
                                         ));
                                     }
-                                    preloaded_key
+                                    expected_key
                                 } else {
                                     self.advance_fused_instruction_steps_with_root(1, object);
                                     expected_key
