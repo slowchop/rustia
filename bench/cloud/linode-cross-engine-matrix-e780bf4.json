@@ -15,14 +15,14 @@
     "max_runtime_minutes": 55
   },
   "source": {
-    "benchmark_commit": "d2b457ec76ee8adb786779e180c127ffdac30e0b",
+    "benchmark_commit": "e780bf4a34348ea9f0693a3155908dc1eeaf4aef",
     "expected_sha256": {
       "bench_manifest": "8b74878fadaf3f0548d4a565413579b1b4b0524270b75cf7ebbba75d54fafeb5",
       "native_harness": "d2996284306250fb3a4684fcb05050f1404d815250042d1660552ed209f2505b",
       "cargo_lock": "f7f511013247d0eb2036380ed428f1e17c81059bdfd647f9183af5b9839d2414",
       "toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
-      "wasm_gate": "01631817fe46db6e42183b307b65273781da9a4d69fa3838cca3e9beba30f34a",
-      "wasm_dispatch_gate": "541119569a4d67f34c639b6e42681aac4b96863ef2b1ed760a9e3694452449f6",
+      "wasm_gate": "d51e8b5313f5f70428c569b198143fbc1cf001670fdcfe25a65209fbe8fc3846",
+      "wasm_dispatch_gate": "b89909fa364b6dfa7365b85a5ba7543d46df807fe57f6c0640af1a0858c93a23",
       "wasm_adapter_manifest": "e281bc4a356751ac81c23ab300eb7e2af2019cf2bfdc0bf10ed198b1adbdb0d5",
       "wasm_measure_module": "a2811a6f607ac820799a4fd877e50eea54542a6903aa9d776f91dbec3a942a04",
       "wasm_measure_spidermonkey": "ee948b743bee286e01e5890a32b46a8d762e0e1a65a231cdcb34ecc35f675c97",
