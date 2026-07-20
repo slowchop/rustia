@@ -1,0 +1,130 @@
+{
+  "measurements": [
+    {
+      "checksum": "f64:328850723.00000000000000000",
+      "commit": "e780bf4a34348ea9f0693a3155908dc1eeaf4aef",
+      "dialect": "lua54",
+      "engine": "mlua-lua54",
+      "n": 2552,
+      "n_selection": "calibrated",
+      "ns_per_unit_median": 47195.306818181816,
+      "ns_per_unit_min": 47010.73354231975,
+      "reps": 5,
+      "samples_ns_per_unit": [
+        47104.33738244514,
+        47282.07170846395,
+        47195.306818181816,
+        47010.73354231975,
+        47761.90399686521
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1784542824,
+      "unit": "build+sum+sort of 256-elem array",
+      "units_per_sec": 21271.73784896986,
+      "workload": "dense_tables"
+    },
+    {
+      "checksum": "i64:23936644160",
+      "commit": "e780bf4a34348ea9f0693a3155908dc1eeaf4aef",
+      "dialect": "lua54",
+      "engine": "mlua-lua54",
+      "n": 4796,
+      "n_selection": "calibrated",
+      "ns_per_unit_median": 25302.700166805673,
+      "ns_per_unit_min": 24865.403252710592,
+      "reps": 5,
+      "samples_ns_per_unit": [
+        25355.905963302754,
+        24891.171601334445,
+        25561.823603002504,
+        25302.700166805673,
+        24865.403252710592
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1784542826,
+      "unit": "fill+read 128 hash entries",
+      "units_per_sec": 40216.52051393896,
+      "workload": "sparse_tables"
+    },
+    {
+      "checksum": "i64:1890126617244",
+      "commit": "e780bf4a34348ea9f0693a3155908dc1eeaf4aef",
+      "dialect": "lua54",
+      "engine": "mlua-lua54",
+      "n": 2592372,
+      "n_selection": "calibrated",
+      "ns_per_unit_median": 46.25114528316152,
+      "ns_per_unit_min": 46.01112456082692,
+      "reps": 5,
+      "samples_ns_per_unit": [
+        46.01112456082692,
+        47.1336366848585,
+        46.25114528316152,
+        46.2716164963979,
+        46.10387629553166
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1784542828,
+      "unit": "one upvalue-mutating closure call",
+      "units_per_sec": 21733874.352016658,
+      "workload": "closures_upvalues"
+    },
+    {
+      "checksum": "i64:875069795",
+      "commit": "e780bf4a34348ea9f0693a3155908dc1eeaf4aef",
+      "dialect": "lua54",
+      "engine": "mlua-lua54",
+      "n": 38221,
+      "n_selection": "calibrated",
+      "ns_per_unit_median": 3158.1736218309306,
+      "ns_per_unit_min": 3136.937573585202,
+      "reps": 5,
+      "samples_ns_per_unit": [
+        3136.937573585202,
+        3165.4744250542894,
+        3158.1736218309306,
+        3169.0438764030246,
+        3154.300567750713
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1784542830,
+      "unit": "__iter(32)+pairs(5)+ipairs(32) pass",
+      "units_per_sec": 318782.2443202468,
+      "workload": "generic_iteration"
+    },
+    {
+      "checksum": "f64:6391206.25423152372241020",
+      "commit": "e780bf4a34348ea9f0693a3155908dc1eeaf4aef",
+      "dialect": "lua54",
+      "engine": "mlua-lua54",
+      "n": 429843,
+      "n_selection": "calibrated",
+      "ns_per_unit_median": 283.9034112455013,
+      "ns_per_unit_min": 281.2207084912398,
+      "reps": 5,
+      "samples_ns_per_unit": [
+        281.2207084912398,
+        287.2590643560556,
+        283.8419027412334,
+        285.2791926354506,
+        283.9034112455013
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1784542831,
+      "unit": "math fastcalls + buffered push",
+      "units_per_sec": 3555925.896656187,
+      "workload": "stdlib_math_table"
+    }
+  ],
+  "metadata": {
+    "description": "Raw per-repetition timings in execution order. This sidecar is separate from the append-only public history schema.",
+    "measurement_count": 5,
+    "measurement_isolation": "fresh prepared workload per repetition",
+    "sample_count": 25,
+    "sample_order": "execution order (unsorted)",
+    "warmup": "one untimed invocation immediately before each recorded sample"
+  },
+  "schema": "rustia.bench.raw-samples.v1",
+  "schema_version": 1,
+  "source": "script-bench-harness"
+}

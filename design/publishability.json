@@ -253,7 +253,7 @@
       "publish": false,
       "role": "standalone-benchmark",
       "package_file_audit": {
-        "file_count": 144,
+        "file_count": 152,
         "forbidden_path_violations": 0
       },
       "internal_dependencies": [

@@ -38,7 +38,7 @@
       "benchmark_workloads": {
         "present": 12,
         "default": 5,
-        "current_results": 6,
+        "current_results": 5,
         "source_covered_non_default": [
           "string_building"
         ]
@@ -46,7 +46,8 @@
       "wasm_target_bench": {
         "default_adapters": [
           "rustia",
-          "koto"
+          "koto",
+          "rhai"
         ],
         "runtimes": [
           "Node/V8",
@@ -54,7 +55,7 @@
           "Bun/JavaScriptCore-family",
           "SpiderMonkey/js shell"
         ],
-        "note": "Other requested adapters were compatibility-probed; only rustia and koto currently execute inside the wasm target runner by default."
+        "note": "The wasm target runner executes rustia, koto, and rhai by default; other requested adapters remain native-only or compatibility-probed."
       },
       "wasm_dispatch_bench": {
         "styles": [
@@ -403,7 +404,7 @@
           "name": "History and static report",
           "complete": 82,
           "confidence": 85,
-          "state": "Append-only history, dirty-baseline guards, markdown results, current-results JSON, a standalone HTML report, claim-gate markdown, six workloads represented in current results, and retained exact dense/OOP Linux evidence are present; the separate string-memory corpus remains evidence-only by design.",
+          "state": "A coherent Linux-only 10-adapter result snapshot, dirty-baseline guards, markdown results, current-results JSON, a standalone HTML report, claim-gate markdown, all five default workloads, and retained exact dense/OOP Linux evidence are present; the separate string-memory corpus remains evidence-only by design.",
           "future_plan": "Publish long-run history and richer charts after standalone split."
         },
         {
@@ -429,7 +430,7 @@
           "name": "Native/wasm matrix",
           "complete": 78,
           "confidence": 75,
-          "state": "Native baselines are being recorded, wasm target results cover rustia+koto on Node/V8, Deno/V8, Bun/JavaScriptCore-family, and SpiderMonkey, and dispatch results cover br_table/call_ref on those same families.",
+          "state": "A coherent 10-adapter native Linux baseline is recorded; wasm target results cover rustia+koto+rhai on Node/V8, Deno/V8, Bun/JavaScriptCore-family, and SpiderMonkey, and dispatch results cover br_table/call_ref on those same families.",
           "future_plan": "Broaden public baselines and keep result history fresh across runtime updates."
         }
       ]

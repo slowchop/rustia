@@ -2,8 +2,8 @@
   "schema_version": 1,
   "schema": "rustia.bench.wasm-dispatch-current-results.v1",
   "source": "script-bench-harness",
-  "updated": "2026-07-04",
-  "commit": "a167350",
+  "updated": "2026-07-20",
+  "commit": "e780bf4a34348ea9f0693a3155908dc1eeaf4aef",
   "requirements": {
     "call-ref-vs-br-table": true
   },
@@ -17,15 +17,15 @@
       "schema_version": 1,
       "schema": "rustia.bench.wasm-dispatch-results.v1",
       "source": "script-bench-harness",
-      "timestamp_unix": 1783141490,
-      "commit": "a167350",
-      "target": "wasm32-dispatch-v8-node-darwin-arm64",
+      "timestamp_unix": 1784543067,
+      "commit": "e780bf4a34348ea9f0693a3155908dc1eeaf4aef",
+      "target": "wasm32-dispatch-v8-node-linux-x64",
       "runtime": {
         "name": "node",
         "family": "V8",
-        "version": "25.8.1",
-        "engine_version": "14.1.146.11-node.21",
-        "host": "darwin-arm64"
+        "version": "22.23.1",
+        "engine_version": "12.4.254.21-node.56",
+        "host": "linux-x64"
       },
       "microbench": {
         "id": "call_ref_vs_br_table",
@@ -48,24 +48,24 @@
         {
           "style": "br_table",
           "feature": "core br_table dispatch",
-          "n": 225969001,
+          "n": 92697516,
           "reps": 5,
           "wasm_bytes": 131,
-          "ns_per_dispatch_min": 0.3330556389015501,
-          "ns_per_dispatch_median": 0.3413049252715867,
-          "dispatches_per_sec": 3002501333.705375,
-          "checksum": "i32:1064265492"
+          "ns_per_dispatch_min": 0.8323699849734915,
+          "ns_per_dispatch_median": 0.8555317598801679,
+          "dispatches_per_sec": 1201388827.1473975,
+          "checksum": "i32:-833664779"
         },
         {
           "style": "call_ref",
           "feature": "typed function reference dispatch",
-          "n": 89139422,
+          "n": 16777216,
           "reps": 5,
           "wasm_bytes": 143,
-          "ns_per_dispatch_min": 0.9087398165987648,
-          "ns_per_dispatch_median": 0.9301898210648027,
-          "dispatches_per_sec": 1100424986.0458455,
-          "checksum": "i32:909528739"
+          "ns_per_dispatch_min": 6.662587881088263,
+          "ns_per_dispatch_median": 6.67759543657303,
+          "dispatches_per_sec": 150091828.85804737,
+          "checksum": "i32:-327155712"
         }
       ],
       "skipped": [],
@@ -77,23 +77,23 @@
         "status": "measured",
         "baseline": "br_table",
         "candidate": "call_ref",
-        "candidate_vs_baseline_min": 2.728492511328969,
-        "candidate_vs_baseline_median": 2.72539231692781
+        "candidate_vs_baseline_min": 8.004358640227094,
+        "candidate_vs_baseline_median": 7.805198766096472
       }
     },
     {
       "schema_version": 1,
       "schema": "rustia.bench.wasm-dispatch-results.v1",
       "source": "script-bench-harness",
-      "timestamp_unix": 1783141491,
-      "commit": "a167350",
-      "target": "wasm32-dispatch-v8-deno-darwin-aarch64",
+      "timestamp_unix": 1784543069,
+      "commit": "e780bf4a34348ea9f0693a3155908dc1eeaf4aef",
+      "target": "wasm32-dispatch-v8-deno-linux-x86_64",
       "runtime": {
         "name": "deno",
         "family": "V8",
-        "version": "2.8.2",
+        "version": "2.8.1",
         "engine_version": "14.9.207.2-rusty",
-        "host": "darwin-aarch64"
+        "host": "linux-x86_64"
       },
       "microbench": {
         "id": "call_ref_vs_br_table",
@@ -116,24 +116,24 @@
         {
           "style": "br_table",
           "feature": "core br_table dispatch",
-          "n": 238706898,
+          "n": 95711596,
           "reps": 5,
           "wasm_bytes": 131,
-          "ns_per_dispatch_min": 0.3341517721871614,
-          "ns_per_dispatch_median": 0.350284527596685,
-          "dispatches_per_sec": 2992652091.7563505,
-          "checksum": "i32:-953020790"
+          "ns_per_dispatch_min": 0.8183491475787322,
+          "ns_per_dispatch_median": 0.820560530617419,
+          "dispatches_per_sec": 1221972312.1344016,
+          "checksum": "i32:1147984917"
         },
         {
           "style": "call_ref",
           "feature": "typed function reference dispatch",
-          "n": 89476931,
+          "n": 40616402,
           "reps": 5,
           "wasm_bytes": 143,
-          "ns_per_dispatch_min": 0.9212211469345087,
-          "ns_per_dispatch_median": 0.9671138027744822,
-          "dispatches_per_sec": 1085515680.276814,
-          "checksum": "i32:1774148896"
+          "ns_per_dispatch_min": 2.0203593858461404,
+          "ns_per_dispatch_median": 2.154537494483142,
+          "dispatches_per_sec": 494961444.48636955,
+          "checksum": "i32:-1834781174"
         }
       ],
       "skipped": [],
@@ -145,23 +145,23 @@
         "status": "measured",
         "baseline": "br_table",
         "candidate": "call_ref",
-        "candidate_vs_baseline_min": 2.7568943923437415,
-        "candidate_vs_baseline_median": 2.7609378279134553
+        "candidate_vs_baseline_min": 2.4688232300648476,
+        "candidate_vs_baseline_median": 2.6256898962249515
       }
     },
     {
       "schema_version": 1,
       "schema": "rustia.bench.wasm-dispatch-results.v1",
       "source": "script-bench-harness",
-      "timestamp_unix": 1783141492,
-      "commit": "a167350",
-      "target": "wasm32-dispatch-javascriptcore-bun-darwin-arm64",
+      "timestamp_unix": 1784543070,
+      "commit": "e780bf4a34348ea9f0693a3155908dc1eeaf4aef",
+      "target": "wasm32-dispatch-javascriptcore-bun-linux-x64",
       "runtime": {
         "name": "bun",
         "family": "JavaScriptCore",
-        "version": "1.3.10",
+        "version": "1.3.14",
         "engine_version": "unknown",
-        "host": "darwin-arm64"
+        "host": "linux-x64"
       },
       "microbench": {
         "id": "call_ref_vs_br_table",
@@ -184,24 +184,24 @@
         {
           "style": "br_table",
           "feature": "core br_table dispatch",
-          "n": 109608728,
+          "n": 48335646,
           "reps": 5,
           "wasm_bytes": 131,
-          "ns_per_dispatch_min": 0.6666827663578032,
-          "ns_per_dispatch_median": 0.6789118746091097,
-          "dispatches_per_sec": 1499963776.5697217,
-          "checksum": "i32:-1708989148"
+          "ns_per_dispatch_min": 1.8052618765041442,
+          "ns_per_dispatch_median": 1.8625705964496675,
+          "dispatches_per_sec": 553936253.2468039,
+          "checksum": "i32:-873862205"
         },
         {
           "style": "call_ref",
           "feature": "typed function reference dispatch",
-          "n": 27007118,
+          "n": 26717086,
           "reps": 5,
           "wasm_bytes": 143,
-          "ns_per_dispatch_min": 2.625730631457977,
-          "ns_per_dispatch_median": 2.7851376811105855,
-          "dispatches_per_sec": 380846377.773616,
-          "checksum": "i32:1372856907"
+          "ns_per_dispatch_min": 4.686350300328417,
+          "ns_per_dispatch_median": 4.728668762753545,
+          "dispatches_per_sec": 213385670.2794753,
+          "checksum": "i32:-1141059197"
         }
       ],
       "skipped": [],
@@ -213,23 +213,23 @@
         "status": "measured",
         "baseline": "br_table",
         "candidate": "call_ref",
-        "candidate_vs_baseline_min": 3.9385008342165073,
-        "candidate_vs_baseline_median": 4.102355232354944
+        "candidate_vs_baseline_min": 2.5959393267659574,
+        "candidate_vs_baseline_median": 2.538786326685861
       }
     },
     {
       "schema_version": 1,
       "schema": "rustia.bench.wasm-dispatch-results.v1",
       "source": "script-bench-harness",
-      "timestamp_unix": 1783141493,
-      "commit": "a167350",
-      "target": "wasm32-dispatch-spidermonkey-spidermonkey-unknown-host",
+      "timestamp_unix": 1784543072,
+      "commit": "e780bf4a34348ea9f0693a3155908dc1eeaf4aef",
+      "target": "wasm32-dispatch-spidermonkey-spidermonkey-linux-x64",
       "runtime": {
         "name": "spidermonkey",
         "family": "SpiderMonkey",
         "version": "unknown",
         "engine_version": "unknown",
-        "host": "unknown-host"
+        "host": "linux-x64"
       },
       "microbench": {
         "id": "call_ref_vs_br_table",
@@ -252,24 +252,24 @@
         {
           "style": "br_table",
           "feature": "core br_table dispatch",
-          "n": 160858921,
+          "n": 38462753,
           "reps": 5,
           "wasm_bytes": 131,
-          "ns_per_dispatch_min": 0.4496309436111411,
-          "ns_per_dispatch_median": 0.4540323644841556,
-          "dispatches_per_sec": 2224046218.8137126,
-          "checksum": "i32:1502445492"
+          "ns_per_dispatch_min": 2.507543375389042,
+          "ns_per_dispatch_median": 2.557332818762999,
+          "dispatches_per_sec": 398796690.74312675,
+          "checksum": "i32:-404616176"
         },
         {
           "style": "call_ref",
           "feature": "typed function reference dispatch",
-          "n": 8946393,
+          "n": 3928804,
           "reps": 5,
           "wasm_bytes": 143,
-          "ns_per_dispatch_min": 8.82791839613462,
-          "ns_per_dispatch_median": 8.985295674818332,
-          "dispatches_per_sec": 113276987.294973,
-          "checksum": "i32:-1483563428"
+          "ns_per_dispatch_min": 22.691918357183255,
+          "ns_per_dispatch_median": 23.013871953780335,
+          "dispatches_per_sec": 44068552.70054524,
+          "checksum": "i32:-101492175"
         }
       ],
       "skipped": [],
@@ -281,8 +281,8 @@
         "status": "measured",
         "baseline": "br_table",
         "candidate": "call_ref",
-        "candidate_vs_baseline_min": 19.63369852891922,
-        "candidate_vs_baseline_median": 19.78998938771003
+        "candidate_vs_baseline_min": 9.04946194745789,
+        "candidate_vs_baseline_median": 8.999169675893933
       }
     }
   ],
