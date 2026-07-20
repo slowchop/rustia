@@ -57,3 +57,8 @@ workspace = true
 [[bin]]
 name = "script-bench"
 path = "src/main.rs"
+
+[[bin]]
+name = "vm-string-memory"
+path = "src/bin/vm-string-memory.rs"
+required-features = ["rustia-engine"]
