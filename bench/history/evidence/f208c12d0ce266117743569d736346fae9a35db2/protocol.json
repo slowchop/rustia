@@ -1,0 +1,71 @@
+{
+  "schema": "rustia.linode-fixed-benchmark.v2",
+  "provider": {
+    "region": "ap-southeast",
+    "image": "linode/ubuntu24.04",
+    "size": {
+      "id": "g6-dedicated-2",
+      "description": "Dedicated 4GB",
+      "class": "dedicated",
+      "vcpus": 2,
+      "memory_mib": 4096,
+      "disk_gib": 80,
+      "max_hourly_price_usd": 0.054
+    },
+    "max_runtime_minutes": 55
+  },
+  "source": {
+    "baseline_commit": "ae3beae2025feb21d0e37c70168204ae154ae125",
+    "candidate_commit": "f208c12d0ce266117743569d736346fae9a35db2",
+    "harness_commit": "f208c12d0ce266117743569d736346fae9a35db2",
+    "expected_sha256": {
+      "baseline_original_harness": "54dca797295afc9e2a648d266b19b82b06cbc1d31528ddf507829fac5ca99722",
+      "overlay_harness": "d2996284306250fb3a4684fcb05050f1404d815250042d1660552ed209f2505b",
+      "workload": "ecc18b6e593996d1a6c55faeabddce791af4dd2468d7b231dfc64897037d7e8b",
+      "cargo_lock": "f7f511013247d0eb2036380ed428f1e17c81059bdfd647f9183af5b9839d2414",
+      "toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
+      "analyzer": "a66c145df59913813d8df6cb82c563dbec38d3b63671e2db8c27555fe443ea60",
+      "history_before": "d91031d92a70e3eb870e08d167b150a4d8bb571a24c26e75e3f77867dd917e6b"
+    }
+  },
+  "measurement": {
+    "workload": "oop_metamethods",
+    "workload_path": "bench/workloads/luau/03_oop_metamethods.luau",
+    "fixed_n": 24000,
+    "repetitions": 15,
+    "expected_checksum": "number:7024767535.35616016387939453",
+    "run_order": [
+      { "variant": "baseline", "file": "oop-abba-A1.json" },
+      { "variant": "candidate", "file": "oop-abba-B1.json" },
+      { "variant": "candidate", "file": "oop-abba-B2.json" },
+      { "variant": "baseline", "file": "oop-abba-A2.json" },
+      { "variant": "candidate", "file": "oop-baab-B3.json" },
+      { "variant": "baseline", "file": "oop-baab-A3.json" },
+      { "variant": "baseline", "file": "oop-baab-A4.json" },
+      { "variant": "candidate", "file": "oop-baab-B4.json" }
+    ],
+    "bootstrap_repetitions": 20000,
+    "bootstrap_seed": 1381323604,
+    "material_regression_threshold_percent": 0,
+    "expected_legs_per_group": 4
+  },
+  "qualification": {
+    "candidate_pilot_legs": 3,
+    "max_median_spread_percent": 3
+  },
+  "host_gate": {
+    "benchmark_cpu": 1,
+    "cooldown_seconds": 60,
+    "idle_window_seconds": 10,
+    "minimum_idle_percent": 99,
+    "maximum_load_1m": 0.1,
+    "maximum_steal_ticks": 0,
+    "maximum_timed_steal_percent": 0.1,
+    "wait_timeout_seconds": 900
+  },
+  "publication": {
+    "mode": "acceptance",
+    "required_verdict": "material_regression_excluded",
+    "final_measurements": 3
+  }
+}

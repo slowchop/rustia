@@ -3,6 +3,7 @@
 | target | engine | workload | ns/unit min | ns/unit median | speed vs rustia | units/sec | n | checksum |
 |---|---|---|---:|---:|---:|---:|---:|---|
 | linux-x86_64 | rustia | dense_tables | 296285.32 | 300979.77 | 1.00x | 3375 | 1500 | `number:193302491.00000000000000000` |
+| linux-x86_64 | rustia | oop_metamethods | 6783.39 | 7210.20 | 1.00x | 147419 | 24000 | `number:7024767535.35616016387939453` |
 | macos-aarch64 | rustia | dense_tables | 132121.35 | 136884.91 | 1.00x | 7569 | 1930 | `number:248724390.00000000000000000` |
 | macos-aarch64 | rustia | sparse_tables | 113417.87 | 116401.27 | 1.00x | 8817 | 2284 | `number:5432448320.00000000000000000` |
 | macos-aarch64 | rustia | closures_upvalues | 420.84 | 429.48 | 1.00x | 2376190 | 579836 | `number:94562626538.00000000000000000` |

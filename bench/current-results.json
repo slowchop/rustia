@@ -4,7 +4,8 @@
       "9f3b0d1",
       "d4bb1ed",
       "e48285b",
-      "ed65077c2e779ec6a641b8ca2f8c8258b2508a2d"
+      "ed65077c2e779ec6a641b8ca2f8c8258b2508a2d",
+      "f208c12d0ce266117743569d736346fae9a35db2"
     ],
     "description": "Current benchmark snapshot generated from committed history; no benchmark measurements are run by the renderer.",
     "engines": [
@@ -22,10 +23,10 @@
     "history": "bench/history/runs.jsonl",
     "history_schema": "jsonl-v1",
     "measurement_window_unix": {
-      "end": 1784507549,
+      "end": 1784522531,
       "start": 1783043624
     },
-    "row_count": 51,
+    "row_count": 52,
     "selection": "latest available result per target, engine, and workload in the source history",
     "targets": [
       "linux-x86_64",
@@ -35,6 +36,7 @@
       "closures_upvalues",
       "dense_tables",
       "generic_iteration",
+      "oop_metamethods",
       "sparse_tables",
       "stdlib_math_table"
     ]
@@ -54,6 +56,21 @@
       "unit": "build+sum+sort of 256-elem array",
       "units_per_sec": 3375.125077,
       "workload": "dense_tables"
+    },
+    {
+      "checksum": "number:7024767535.35616016387939453",
+      "commit": "f208c12d0ce266117743569d736346fae9a35db2",
+      "dialect": "luau",
+      "engine": "rustia",
+      "n": 24000,
+      "ns_per_unit_median": 7210.198542,
+      "ns_per_unit_min": 6783.387333,
+      "speed_vs_rustia": 1.0,
+      "target": "linux-x86_64",
+      "timestamp_unix": 1784522531,
+      "unit": "(p+v)*s + :dot + :len2 step",
+      "units_per_sec": 147418.973864,
+      "workload": "oop_metamethods"
     },
     {
       "checksum": "number:248724390.00000000000000000",
