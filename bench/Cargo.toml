@@ -11,6 +11,7 @@ license = "MIT OR Apache-2.0"
 keywords = ["benchmark", "scripting", "lua", "luau", "wasm"]
 categories = ["development-tools::profiling"]
 publish = false
+default-run = "script-bench"
 
 [features]
 default = ["rustia-engine"]
