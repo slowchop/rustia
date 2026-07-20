@@ -2943,8 +2943,10 @@ async function validateMemoryEvidence(config, state, evidenceDirectory) {
   }
 
   const provider = requireObject(loadJsonRegular(files.provider, "memory provider metadata"), "memory provider metadata");
+  const localProvider = loadJsonRegular(path.join(state.__directory, "provider.json"), "local memory provider snapshot");
+  requireJsonEqual(provider, localProvider, "memory evidence provider metadata");
+  requireJsonEqual(provider.catalog_plan, state.plan, "memory evidence provider catalog plan");
   const providerIdentity = [
-    [provider.schema, "rustia.linode-provider-metadata.v1", "schema"],
     [provider.provider, "linode", "provider"],
     [provider.linode_id, state.linode_id, "Linode ID"],
     [provider.linode_label, state.linode_label, "Linode label"],
@@ -2957,6 +2959,7 @@ async function validateMemoryEvidence(config, state, evidenceDirectory) {
     [provider.public_ipv4, state.public_ipv4, "public IPv4"],
     [provider.backups_enabled, false, "backup state"],
     [provider.interface_generation, "legacy_config", "interface generation"],
+    [provider.maintenance_policy, "linode/power_off_on", "maintenance policy"],
   ];
   for (const [actual, wanted, field] of providerIdentity) {
     if (actual !== wanted) fail(`memory evidence provider ${field} does not match the destroyed Linode`);
@@ -3627,7 +3630,17 @@ async function benchLocked(config, configFile = DEFAULT_CONFIG) {
   throwIfInterrupted();
   const downloadDirectory = path.join(directory, "download");
   await extractArchive(state.export_path, downloadDirectory);
-  const promoted = await promoteAcceptedResult(config, state, downloadDirectory);
+  let promoted;
+  try {
+    promoted = await promoteAcceptedResult(config, state, downloadDirectory);
+  } catch (error) {
+    if (!state.promoted_at) {
+      state.promotion_rolled_back_at = new Date().toISOString();
+      state.promotion_rollback_reason = error.message;
+      saveState(state);
+    }
+    throw error;
+  }
   if (!promoted && state.remote_exit_status !== 0) {
     fail(`remote benchmark ended with status ${state.remote_exit_status}; diagnostics were retained`);
   }
@@ -3773,8 +3786,16 @@ async function promote(runId) {
     if (state.remote_status !== expectedTerminalStatus(config)) {
       fail(`offline promotion requires a recorded ${expectedTerminalStatus(config)} result`);
     }
-    if (!state.promotion_rolled_back_at || typeof state.promotion_rollback_reason !== "string") {
-      fail("offline promotion is limited to an accepted result whose first promotion rolled back");
+    const recordedRollback =
+      Number.isFinite(Date.parse(state.promotion_rolled_back_at || "")) &&
+      typeof state.promotion_rollback_reason === "string";
+    const preJournalMemoryFailure =
+      isVmStringMemory(config) &&
+      state.remote_status === "evidence_complete" &&
+      !state.promotion_started_at &&
+      !fs.existsSync(path.join(REPO, memoryEvidenceRelativePath(config.source.candidate_commit)));
+    if (!recordedRollback && !preJournalMemoryFailure) {
+      fail("offline promotion requires a completed result whose first local import failed or was interrupted");
     }
     if (state.promoted_at) fail("Linode result is already promoted");
 
