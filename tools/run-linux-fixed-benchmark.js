@@ -20,6 +20,8 @@ const EXPORT_ARCHIVE = path.join(ROOT, "export.tar.gz");
 const RUN_LOG = path.join(ROOT, "run.log");
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
+const SAFE_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.json$/;
+const SAFE_WORKLOAD_FILE_COMPONENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const CONTAMINATING_PROCESS = /^(apt|apt-get|as|cargo|cc|cc1|cc1plus|clang|clang\+\+|curl|dpkg|g\+\+|gcc|git|ld|ld\.lld|make|ninja|node|rustc|rustup|sccache|script-bench|unattended-upgr)$/;
 const PACKAGE_ACTIVITY_UNITS = Object.freeze([
   "apt-daily.service",
@@ -148,6 +150,27 @@ function loadJson(file, description) {
 
 function sha256(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
+}
+
+function workloadFileComponent(workload) {
+  if (typeof workload !== "string" || workload.length === 0) {
+    fail("benchmark workload must be a non-empty string");
+  }
+  if (SAFE_WORKLOAD_FILE_COMPONENT.test(workload)) return workload;
+  const slug = workload
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[-._]+|[-._]+$/g, "")
+    .slice(0, 48)
+    .replace(/[-._]+$/g, "");
+  return `${slug || "workload"}-${sha256(Buffer.from(workload, "utf8")).slice(0, 12)}`;
+}
+
+function finalSidecarName(config, index) {
+  requireInteger(index, "final sidecar index", 1);
+  const file = `final-${workloadFileComponent(config.measurement.workload)}-${index}.json`;
+  if (!SAFE_FILE.test(file)) fail("generated final sidecar name is not a safe JSON basename");
+  return file;
 }
 
 function sha256File(file) {
@@ -988,7 +1011,7 @@ async function publishFinal(config, build, evidenceDirectory, gateFile, gateReco
     const relativeFile = path.join(
       "bench/history/evidence",
       config.source.candidate_commit,
-      `final-dense-${index}.json`,
+      finalSidecarName(config, index),
     );
     const args = [
       "--engines",
@@ -1388,6 +1411,21 @@ async function execute(configFile, providerFile, bundle) {
 }
 
 function selfTest() {
+  assert.equal(
+    finalSidecarName({ measurement: { workload: "dense" } }, 1),
+    "final-dense-1.json",
+  );
+  assert.equal(
+    finalSidecarName({ measurement: { workload: "oop_metamethods" } }, 3),
+    "final-oop_metamethods-3.json",
+  );
+  const escapedWorkloadFile = finalSidecarName(
+    { measurement: { workload: "../../Odd workload/\u2728" } },
+    2,
+  );
+  assert.match(escapedWorkloadFile, /^final-odd-workload-[0-9a-f]{12}-2\.json$/);
+  assert.equal(path.basename(escapedWorkloadFile), escapedWorkloadFile);
+  assert.throws(() => finalSidecarName({ measurement: { workload: "dense" } }, 0));
   assert.deepEqual(expandCpuList("0-3,6,8-9", "fixture"), [0, 1, 2, 3, 6, 8, 9]);
   assert.throws(() => expandCpuList("0-", "fixture"));
   assert.throws(() => expandCpuList("3-1", "fixture"));

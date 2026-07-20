@@ -28,6 +28,7 @@ const FORCE_KILL_DELAY_MS = 10 * 1000;
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const SAFE_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.json$/;
+const SAFE_WORKLOAD_FILE_COMPONENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const RUN_ID = /^\d{8}T\d{6}Z-[0-9a-f]{8}$/;
 const MAX_EXPORT_ARCHIVE_BYTES = 256 * 1024 * 1024;
 const MAX_EXPORT_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
@@ -305,6 +306,49 @@ function validateConfig(value) {
   return root;
 }
 
+function pathIsInside(directory, candidate) {
+  const relative = path.relative(directory, candidate);
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function resolveConfigFile(argument, { repo = REPO, defaultConfig = DEFAULT_CONFIG } = {}) {
+  let file;
+  if (argument === undefined) {
+    file = path.resolve(defaultConfig);
+  } else {
+    const relative = requireString(argument, "Linode benchmark config path");
+    if (path.isAbsolute(relative) || relative.split(/[\\/]+/).includes("..")) {
+      fail("Linode benchmark config path must be repository-relative and contain no .. segments");
+    }
+    file = path.resolve(repo, relative);
+  }
+
+  const resolvedRepo = fs.realpathSync(repo);
+  if (!pathIsInside(path.resolve(repo), file)) {
+    fail("Linode benchmark config path must resolve inside the repository");
+  }
+
+  let metadata;
+  try {
+    metadata = fs.lstatSync(file);
+  } catch (error) {
+    fail(`cannot inspect Linode benchmark config ${path.relative(repo, file)}: ${error.message}`);
+  }
+  if (metadata.isSymbolicLink()) fail("Linode benchmark config must not be a symbolic link");
+  if (!metadata.isFile()) fail("Linode benchmark config must be a regular file");
+
+  let realFile;
+  try {
+    realFile = fs.realpathSync(file);
+  } catch (error) {
+    fail(`cannot resolve Linode benchmark config ${path.relative(repo, file)}: ${error.message}`);
+  }
+  if (!pathIsInside(resolvedRepo, realFile)) {
+    fail("Linode benchmark config path must resolve inside the repository");
+  }
+  return file;
+}
+
 function loadConfig(file = DEFAULT_CONFIG) {
   try {
     return validateConfig(JSON.parse(fs.readFileSync(file, "utf8")));
@@ -315,6 +359,25 @@ function loadConfig(file = DEFAULT_CONFIG) {
 
 function sha256(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
+}
+
+function workloadFileComponent(workload) {
+  const value = requireString(workload, "benchmark workload");
+  if (SAFE_WORKLOAD_FILE_COMPONENT.test(value)) return value;
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[-._]+|[-._]+$/g, "")
+    .slice(0, 48)
+    .replace(/[-._]+$/g, "");
+  return `${slug || "workload"}-${sha256(Buffer.from(value, "utf8")).slice(0, 12)}`;
+}
+
+function finalSidecarName(config, index) {
+  requireInteger(index, "final sidecar index", 1);
+  const file = `final-${workloadFileComponent(config.measurement.workload)}-${index}.json`;
+  if (!SAFE_FILE.test(file)) fail("generated final sidecar name is not a safe JSON basename");
+  return file;
 }
 
 function sha256File(file) {
@@ -2263,8 +2326,9 @@ async function validateAcceptedEvidence(config, state, evidenceDirectory, localH
   });
   if (historyRows.length !== config.publication.final_measurements) fail("remote history has the wrong suffix length");
   const finalSidecars = historyRows.map((row, index) => {
+    const finalFile = finalSidecarName(config, index + 1);
     const sidecar = validateRawSidecar(
-      path.join(evidenceDirectory, `final-dense-${index + 1}.json`),
+      path.join(evidenceDirectory, finalFile),
       config,
       `final measurement sidecar ${index + 1}`,
       config.source.candidate_commit,
@@ -2286,7 +2350,7 @@ async function validateAcceptedEvidence(config, state, evidenceDirectory, localH
       !matchesHistoryPrecision(row.units_per_sec, measurement.units_per_sec) ||
       row.checksum !== measurement.checksum
     ) {
-      fail(`remote history row ${index + 1} does not match final-dense-${index + 1}.json`);
+      fail(`remote history row ${index + 1} does not match ${finalFile}`);
     }
     return sidecar;
   });
@@ -3066,12 +3130,48 @@ async function selfTest(config) {
     }),
   );
 
+  assert.equal(finalSidecarName(config, 1), `final-${config.measurement.workload}-1.json`);
+  assert.equal(
+    finalSidecarName({ measurement: { workload: "oop_metamethods" } }, 3),
+    "final-oop_metamethods-3.json",
+  );
+  const escapedWorkloadFile = finalSidecarName(
+    { measurement: { workload: "../../Odd workload/\u2728" } },
+    2,
+  );
+  assert.match(escapedWorkloadFile, /^final-odd-workload-[0-9a-f]{12}-2\.json$/);
+  assert.equal(path.basename(escapedWorkloadFile), escapedWorkloadFile);
+  assert.throws(() => finalSidecarName(config, 0));
+
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-linode-self-test-"));
   try {
     const file = path.join(temporary, "secret");
     writeBytesAtomic(file, Buffer.from("fixture\n"), 0o600);
     assert.equal(fs.statSync(file).mode & 0o777, 0o600);
     assert.equal(fs.readFileSync(file, "utf8"), "fixture\n");
+
+    const fixtureRepo = path.join(temporary, "repo");
+    const outside = path.join(temporary, "outside");
+    fs.mkdirSync(path.join(fixtureRepo, "bench", "cloud"), { recursive: true });
+    fs.mkdirSync(outside);
+    const defaultFixture = path.join(fixtureRepo, "bench", "cloud", "default.json");
+    const alternateFixture = path.join(fixtureRepo, "bench", "cloud", "alternate.json");
+    const outsideFixture = path.join(outside, "outside.json");
+    fs.writeFileSync(defaultFixture, "{}\n");
+    fs.writeFileSync(alternateFixture, "{}\n");
+    fs.writeFileSync(outsideFixture, "{}\n");
+    const resolverOptions = { repo: fixtureRepo, defaultConfig: defaultFixture };
+    assert.equal(resolveConfigFile(undefined, resolverOptions), defaultFixture);
+    assert.equal(resolveConfigFile("bench/cloud/alternate.json", resolverOptions), alternateFixture);
+    assert.throws(() => resolveConfigFile("", resolverOptions));
+    assert.throws(() => resolveConfigFile("../outside/outside.json", resolverOptions));
+    assert.throws(() => resolveConfigFile("bench/../bench/cloud/alternate.json", resolverOptions));
+    assert.throws(() => resolveConfigFile(outsideFixture, resolverOptions));
+    assert.throws(() => resolveConfigFile("bench", resolverOptions));
+    fs.symlinkSync(alternateFixture, path.join(fixtureRepo, "linked-config.json"));
+    assert.throws(() => resolveConfigFile("linked-config.json", resolverOptions));
+    fs.symlinkSync(outside, path.join(fixtureRepo, "linked-directory"));
+    assert.throws(() => resolveConfigFile("linked-directory/outside.json", resolverOptions));
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
@@ -3089,13 +3189,16 @@ function requireCommandArguments(minimum, maximum = minimum) {
 function usage() {
   process.stdout.write(`Usage:
   node tools/run-linode-benchmark.js auth
-  node tools/run-linode-benchmark.js plan
-  node tools/run-linode-benchmark.js bench
+  node tools/run-linode-benchmark.js plan [CONFIG.json]
+  node tools/run-linode-benchmark.js bench [CONFIG.json]
   node tools/run-linode-benchmark.js status
   node tools/run-linode-benchmark.js destroy [RUN-ID]
   node tools/run-linode-benchmark.js promote RUN-ID
   node tools/run-linode-benchmark.js unlock
   node tools/run-linode-benchmark.js self-test
+
+CONFIG.json must be a regular, non-symlink repository-relative file. The default is
+${path.relative(REPO, DEFAULT_CONFIG)}.
 `);
 }
 
@@ -3107,12 +3210,18 @@ async function main() {
       await authenticate(loadConfig());
       break;
     case "plan":
-      requireCommandArguments(1);
-      await buildPlan(loadConfig());
+      requireCommandArguments(1, 2);
+      {
+        const configFile = resolveConfigFile(process.argv[3]);
+        await buildPlan(loadConfig(configFile), { configFile });
+      }
       break;
     case "bench":
-      requireCommandArguments(1);
-      await bench(loadConfig());
+      requireCommandArguments(1, 2);
+      {
+        const configFile = resolveConfigFile(process.argv[3]);
+        await bench(loadConfig(configFile), configFile);
+      }
       break;
     case "status":
       requireCommandArguments(1);

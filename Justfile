@@ -114,13 +114,13 @@ bench-do-destroy run_id="":
 bench-linode-auth:
     node tools/run-linode-benchmark.js auth
 
-# Read-only validation of the frozen source identities, account safety, and dedicated plan.
-bench-linode-plan:
-    node tools/run-linode-benchmark.js plan
+# Read-only validation of the selected frozen config, account safety, and dedicated plan.
+bench-linode-plan config="":
+    node tools/run-linode-benchmark.js plan {{ if config == "" { "" } else { quote(config) } }}
 
-# Run the frozen comparison on one ephemeral dedicated-CPU Linode and confirm deletion.
-bench-linode:
-    node tools/run-linode-benchmark.js bench
+# Run the selected frozen config on one ephemeral dedicated-CPU Linode and confirm deletion.
+bench-linode config="":
+    node tools/run-linode-benchmark.js bench {{ if config == "" { "" } else { quote(config) } }}
 
 # Inspect locally owned run state and its corresponding Linode instance.
 bench-linode-status:
