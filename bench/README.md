@@ -60,10 +60,10 @@ changes, so machine drift is visible rather than folded into one best result.
 Fixed-N runs that append history must provide `--samples-json`; the harness
 writes that sidecar before appending its summary row.
 
-The 2026-07-17 local table/cache/`GETIMPORT`/`FASTCALL` hardening comparison is
+The local hardening diagnostics, 2026-07-20 accepted dense/OOP comparisons, and completed string-memory evidence are
 recorded in [`../design/56-performance-research.md`](../design/56-performance-research.md),
-including the baseline and harness hashes, broad ABBA medians, cooled focused
-checks, and the deliberately conservative claim posture.
+including exact identities, paired protocols, confidence intervals, retained artifacts, and the deliberately
+conservative claim posture.
 
 ## Equal-work validation and publication
 
@@ -197,7 +197,7 @@ The frozen dense-table follow-up for baseline
 `dac4ec2295f77587c79f04e4ff0a09cb99912f96` and candidate
 `ed65077c2e779ec6a641b8ca2f8c8258b2508a2d` is encoded in
 [`cloud/digitalocean-dense-ed65077.json`](cloud/digitalocean-dense-ed65077.json)
-and the prospectively revised dedicated-CPU protocol
+and the accepted dedicated-CPU protocol
 [`cloud/linode-dense-ed65077.json`](cloud/linode-dense-ed65077.json), plus the
 actual-bare-metal fallback
 [`cloud/vultr-dense-ed65077.json`](cloud/vultr-dense-ed65077.json), and the
@@ -206,6 +206,20 @@ exact-machine Scaleway fallback
 It predeclares the source hashes, fixed work, repetitions, eight-leg order,
 bootstrap interpretation, candidate-only stability qualification, Linux host
 gate, CPU pin, cooldown, and conditional three-run publication rule.
+
+The accepted OOP comparison is frozen separately in
+[`cloud/linode-oop-f208c12.json`](cloud/linode-oop-f208c12.json). The evidence-only 512-VM string sampler is
+frozen in
+[`cloud/linode-vm-string-memory-1370d6c.json`](cloud/linode-vm-string-memory-1370d6c.json); it uses paired
+fresh-process rounds and never appends throughput history. A no-argument Linode command continues to select the
+dense config. Select another frozen protocol explicitly and use the same path for planning and execution:
+
+```bash
+just bench-linode-plan bench/cloud/linode-oop-f208c12.json
+just bench-linode bench/cloud/linode-oop-f208c12.json
+just bench-linode-plan bench/cloud/linode-vm-string-memory-1370d6c.json
+just bench-linode bench/cloud/linode-vm-string-memory-1370d6c.json
+```
 
 DigitalOcean authentication is a one-time interactive operation. The token is
 entered at `doctl`'s prompt and must never be passed as a recipe argument,
@@ -349,13 +363,13 @@ delete authority. It journals the unique label before creation, reconciles
 ambiguous responses only by that label, and confirms the numeric instance ID is
 absent before allowing local evidence promotion.
 
-Linode rounds each instance lifetime up to whole hours. The committed 55-minute
+Linode rounds each instance lifetime up to whole hours. Each committed 55-minute
 lifecycle therefore has a one-hour `$0.054` compute ceiling at the selected
 price and reserves its final eight minutes for cleanup; crossing the provider's
-hour boundary or a delayed API deletion can add another billed hour. A separate
-diagnostic run is intentionally skipped because it would incur another full
-hour minimum and acceptance already begins with the same three candidate-only
-qualification legs.
+hour boundary or a delayed API deletion can add another billed hour. For the fixed-throughput configs, a separate
+diagnostic run is intentionally skipped because it would incur another full-hour minimum and acceptance already
+begins with the same three candidate-only qualification legs. The evidence-only memory protocol instead uses one
+excluded warmup round followed by its paired measurement rounds.
 
 Crash recovery is provider-isolated:
 
@@ -364,23 +378,23 @@ just bench-linode-status
 just bench-linode-unlock
 just bench-linode-destroy
 just bench-linode-destroy RUN_ID
-just bench-linode-promote RUN_ID       # offline retry after an accepted promotion rolls back
+just bench-linode-promote RUN_ID       # offline retry after a completed local promotion rolls back
 ```
 
-The promotion retry never reads the API token or contacts Linode. It requires a
-confirmed-deleted, accepted run and rechecks the journaled archive, original Git
-identities, raw samples, qualification spread, every host gate, recomputed
-bootstrap verdict, final history rows, and generated result files before it
-records success.
+The promotion retry never reads the API token or contacts Linode. It requires a confirmed-deleted, completed run
+and rechecks the journaled archive, original Git identities, raw samples, and every host gate. Fixed-throughput
+runs additionally require the qualification spread, recomputed bootstrap verdict, exact final-history rows, and
+generated result files. Evidence-only memory runs require `evidence_complete`, recompute the paired analysis, and
+prove that throughput history remains unchanged.
 
 The dedicated Linode shape is still a KVM guest. Two Sydney v1 placements
 eventually recorded one steal tick during a timed leg: 1/1,317 ticks (0.075930%)
 and 1/1,320 ticks (0.075758%). The frozen zero-steal rule correctly rejected
-those blocks, and they are not reinterpreted retroactively. The prospectively
-versioned v2 protocol retains zero steal during each pre-leg idle screen and
-allows at most 0.1% steal during a timed leg. The raw gate counters remain in
-the evidence, and the existing zero-contaminant, 3% qualification-spread,
-ABBA/BAAB, bootstrap, verdict, and publication gates are unchanged.
+those blocks, and they are not reinterpreted retroactively. The accepted v2 fixed-throughput protocol retains
+zero steal during each pre-leg idle screen and allows at most 0.1% steal during a timed leg. Its raw gate counters
+remain in the evidence, and its zero-contaminant, 3% qualification-spread, ABBA/BAAB, bootstrap, verdict, and
+publication gates are unchanged. The v2 memory config has separate paired-round, steal, evidence-completeness,
+and unchanged-history gates.
 
 The accepted v2 Sydney run qualified at 0.4999% pilot-median spread, kept all
 timed legs at zero contaminants and at most 0.0742% steal, and measured the
@@ -392,6 +406,30 @@ The three actual final-candidate medians were 303,918.403, 303,335.093, and
 retained under `history/evidence/ed65077c2e779ec6a641b8ca2f8c8258b2508a2d/`.
 This is acceptance evidence for that exact workload and host protocol, not a
 cross-engine or blanket speed claim.
+
+The accepted OOP run compared baseline `ae3beae2025feb21d0e37c70168204ae154ae125` with exact candidate
+`f208c12d0ce266117743569d736346fae9a35db2` at fixed `n=24000`. Its pooled medians were 21,633.014 and 7,364.006
+ns/unit, a -65.9594% candidate delta; the conservative nominal 95% interval was -66.3876% to -65.5482%, excluding
+the predeclared zero-regression threshold. Three actual final-candidate rows and all raw evidence are retained
+under `history/evidence/f208c12d0ce266117743569d736346fae9a35db2/`. The complete candidate includes both the
+constant-field/method work and a weak-table GC-scan correction, so the result is not attributed to one opcode
+family alone.
+
+The completed evidence-only memory run compared the same baseline with exact candidate
+`1370d6ccefba7a1956441247c3139af2a2cf31fa`. One ten-sample warmup round was excluded; 16 accepted rounds then
+paired five scenarios across both builds for 160 unique fresh-process samples, each creating 512 VMs. Round 14's
+first attempt observed one steal tick, discarded all ten samples, and passed on retry. Using anonymous
+`after_run - program_ready` growth, the paired candidate-minus-baseline medians and nominal 95% intervals were:
+
+- unloaded short minus empty: -32.0078 KiB/VM (-32.0156 to -32.0078);
+- unloaded long minus empty: -258.0000 KiB/VM (-258.0000 to -258.0000);
+- loaded short minus unloaded short: -105.3906 KiB/VM (-105.3984 to -105.3906);
+- loaded long minus unloaded long: -260.9688 KiB/VM (-260.9766 to -260.9609).
+
+The candidate residuals were approximately 0, 0, 0, and 7.0781 KiB/VM respectively. The exact samples, gate
+records, manifest, and analysis are retained under
+`evidence/vm-string-memory/1370d6ccefba7a1956441247c3139af2a2cf31fa/`; they intentionally do not appear in
+throughput history, `RESULTS.md`, or `CLAIMS.md`.
 
 The physical fallback automation remains available. Vultr uses an actual
 `vbm-4c-32gb` bare-metal server in `sgp`,

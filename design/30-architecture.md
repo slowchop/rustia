@@ -16,14 +16,15 @@
 > short-string inlining** resolving the const-pool seam; generic **FASTCALL/GETIMPORT**; a **capability+fuel
 > contract on the op-extension hook**; **clippy-enforced libm-only** transcendentals; **saturating float→int**).
 >
-> **v3.2 implementation update (2026-07-17):** production tables retain tombstones for ordinary nil deletion;
+> **v3.2 implementation update (2026-07-20):** production tables retain tombstones for ordinary nil deletion;
 > VM-local byte atoms and larger hash parts use compact deterministic open-addressed `u32` side indices. Loaded
 > programs store compact `u32` constant atoms and a 4-byte per-PC site map, with lazily allocated 16-byte
 > shape/key/live-slot records at eligible sites. Mutation-safe `GETIMPORT` and guarded generic fixed-result
 > `FASTCALL` are implemented with ordinary semantic fallbacks and logical fuel preserved. Immutable compiled
 > constant storage is shared across VMs, long compiled atoms borrow those bytes, and binary strings up to 13
 > bytes can live inside `Value`. Dedicated `GETTABLEKS`, `SETTABLEKS`, and two-lane live `NAMECALL` lookup are
-> implemented; full Luau `__namecall` context remains a separate conformance item.
+> implemented; full Luau `__namecall` context remains a separate conformance item. Exact dedicated-Linux runs
+> now retain accepted dense/OOP throughput evidence plus a separate paired 512-VM string-memory corpus.
 
 ## 0. The bet — proven, with honest framing
 
@@ -269,8 +270,9 @@ minimal locked-down sandbox/wasm build.
 - **P4 — full public parity + release.** The deferred public-parity libs come IN: **`buffer`, `vector` (+lib),
   `utf8`, `string.pack`**, the rest of `math`/`string`/`table`, `require`/module system, and the **gradual type
   *checker*** (the big LSP-only subsystem). Differential conformance vs full_moon / reference Luau. Per-VM RSS
-  budget + measurement (priority #2). Quantify and harden the landed opcode-specific field/namecall caches before
-  pursuing broader adaptive specialization.
+  budget + measurement (priority #2). The landed opcode-specific field/namecall and string-focused many-VM
+  slices now have exact Linux evidence; extend that evidence to realistic mixed heaps before setting the full
+  budget, then pursue broader adaptive specialization.
   License + clean public codebase (no
   grabby-specific code). *Optional:* native-only JIT (cranelift first). **VALIDATED tier — wasm-emit
   JIT/AOT-to-wasm (the in-browser speed answer, spike `65-wasmjit`):** emitting a hot kernel to wasm at runtime
@@ -303,11 +305,13 @@ minimal locked-down sandbox/wasm build.
 | Live VM is thread-affine instead of `Send` | med | Avoids unsafe in production; hosts should construct VMs on worker threads and share only immutable compiled artifacts/configuration |
 | GC full-collect cost scales O(live-objects) (~10 ns/obj; ~200 µs at 20k objects) | med | tune the instruction-count collection interval at P1 on realistic heap sizes; confirm bit-reproducible native vs wasm |
 | Byte-compat tail (Schubfach, patterns, sort-tie, PCG32) | med | discrete P2 tasks, each gated by a differential test |
-| Per-VM RSS unmeasured (priority #2); 16B Value doubles value memory; GcBox +16 B/obj; grows-only wasm memory | med | measure at P1; set a per-VM budget; wasm binary already 128 KB |
+| Representative mixed-heap/wasm per-VM RSS remains open; 16B Value doubles value memory, GcBox adds 16 B/obj, and wasm memory grows only | med | retain the exact paired 512-VM Linux corpus: the candidate's primary residual string contrasts are approximately 0 KiB/VM for shared short/long program bytes and loaded 13-byte strings, plus 7.078 KiB/VM for loaded long atoms; extend to representative heaps/native+wasm targets, then set the P1 budget |
 | Public-release scope for pinned standalone Luau runtime compatibility is a long tail | low | P4; grabby ships privately on the P2 subset first; analyzer, raw C API, Roblox, Lua 5.4, and bytecode compatibility stay separate unless reclassified |
 
 ## 7. Open sub-decisions (deferred, not blocking)
-- Quantitative per-VM RSS/startup measurement for the landed shared compiled-string and 13-byte inline forms.
+- Shared compiled strings and 13-byte inline strings are quantitatively resolved for the exact Linux fixture by
+  16 paired rounds and 160 accepted samples. Extend that sampler to representative mixed heaps and wasm memory
+  before setting the full per-VM RSS/startup budget.
 - Exact generic-superinstruction set beyond numeric-for — driven by P4 profiling of real scripts.
 - Whether production AI runs inside the rollback sim (host-columnar) or as a separate non-rolled-back layer.
 - Whether any transcendental runs in the 50 Hz per-tick path (vs one-shot scenario gen).

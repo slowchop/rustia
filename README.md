@@ -53,12 +53,12 @@ The canonical decision filter is [`design/02-pillars.md`](design/02-pillars.md).
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](design/progress.json) into
-[`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-16 for the
+[`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-20 for the
 public rustia project; actual grabby integration work is explicitly out of scope.
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 80% | 65% |
+| Whole public rustia project | 81% | 68% |
 | Usable embedded scripting crate | 83% | 70% |
 | Full public standalone Luau engine release | 48% | 58% |
 | Standalone benchmark OSS project | 80% | 80% |
@@ -75,25 +75,24 @@ public rustia project; actual grabby integration work is explicitly out of scope
   publication protocol records three independent measurements of the clean final commit, with each invocation
   writing its sidecar before appending its actual summary. A dependency-free analyzer validates fixed-work
   sidecars and records a deterministic conservative pooled/hierarchical bootstrap verdict with the predeclared
-  regression threshold. The earlier local fresh-state ABBA against `dac4ec2` found no
-  material regression above 5% after hot-path hardening: stdlib/string improved 7.25%/19.71%, closures were
-  neutral-to-faster, and a cooled dense-table check retained a borderline 1.29% slowdown. Six uncontaminated
-  fixed-work diagnostic legs for the new field/string slice measured about +0.90% with overlapping spreads. Static bytecode and release-codegen
-  analysis showed that the dense workload does not execute the new constant-key/method opcodes; a corrective
-  pass now removes cross-cutting fuel-classification, numeric-key, and numeric-ordering tolls while preserving
-  fuel, validation, GC cadence, key semantics, and string canonicalization. The accepted exact-commit Linode v2
-  run measured that candidate 2.42% faster on pooled `dense_tables` samples, with a conservative nominal 95%
-  interval of -3.35% to -1.57%; it excluded the predeclared +5% material regression and published three
-  final-binary Linux history rows. Qualification spread was 0.50%, all process gates were clean, and peak timed
-  steal was 0.074% under the 0.1% ceiling. Qualification-only `just bench-do-trials` runs compared capped shared-CPU profiles without
-  publishing anything, but repeated timed-leg steal violations ruled out that tier for acceptance. Dedicated
-  Akamai/Linode placements also remained KVM guests and each eventually recorded one stolen scheduler tick.
-  Those old zero-steal blocks remain discarded. The prospective Linode v2 protocol keeps the pre-leg idle gate
-  at zero steal but permits at most 0.1% steal during a timed leg, while retaining the 3% qualification spread,
-  fixed ABBA/BAAB order, conservative bootstrap verdict, and zero-contaminating-process rule. Two Vultr
-  bare-metal orders never left provisioning and were safely deleted; the physical Scaleway
-  `EM-A610R-NVMe` lifecycle remains available as a stricter fallback. The accepted result is specific to this
-  workload, comparison, and Linux host; existing results remain
+  regression threshold. Static bytecode and release-codegen analysis showed that the dense workload does not
+  execute the new constant-key/method opcodes; a corrective pass removed cross-cutting fuel-classification,
+  numeric-key, and numeric-ordering tolls while preserving logical fuel, validation, key semantics, and string
+  canonicalization. Semantic fused-op costs remain deterministic, but aggregate GC checkpoints can move when
+  dead cleanup bytecode disappears. The accepted exact-commit Linode v2 run measured 2.42% lower candidate
+  ns/unit on pooled `dense_tables` samples, with a conservative nominal 95% interval of -3.35% to -1.57%; it
+  excluded the predeclared +5% material regression and published three final-binary Linux history rows. A second
+  accepted run measured 65.959% lower candidate ns/unit on `oop_metamethods`, with a conservative 95% interval
+  of -66.39% to -65.55% and three more final-binary rows; that comparison includes both the constant-field/method
+  paths and a weak-table GC-scan correction. The exact 512-VM string
+  sampler then measured per-VM candidate-minus-baseline savings of 32 KiB for unloaded short constants, 258 KiB
+  for unloaded long constants, 105.39 KiB when loading the short form, and 260.97 KiB when loading the long form;
+  the candidate's residual loaded-long increment was 7.08 KiB/VM. Those 16 paired rounds and 160 accepted
+  fresh-process samples are retained as evidence-only data rather than throughput history. Both throughput runs
+  passed their predeclared process and steal gates, and all three Linode instances were confirmed deleted. Shared-CPU
+  DigitalOcean placements were rejected for timed-leg steal, two Vultr bare-metal orders never left provisioning
+  and were safely deleted, and the Scaleway physical-host lifecycle remains available as a stricter fallback.
+  Every accepted result is specific to its workload, comparison, and Linux protocol; existing results remain
   development evidence, not a blanket release speed claim; details are in
   [`design/56-performance-research.md`](design/56-performance-research.md).
 - Major remaining gates are engine hardening, long-run benchmark history, public benchmark publication, and release

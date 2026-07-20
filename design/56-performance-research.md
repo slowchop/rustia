@@ -1,15 +1,17 @@
 # rustia — SotA performance research update
 
-> **Status: [PERFORMANCE RESEARCH v1.3] (updated 2026-07-17).** This note updates
+> **Status: [PERFORMANCE RESEARCH v1.4] (updated 2026-07-20).** This note updates
 > [`55-improvements.md`](55-improvements.md) with the current performance research stack. It is not a new
 > conformance contract; it is the ordered implementation bet list for making rustia fast while keeping the public
 > workspace under `unsafe_code = "forbid"`.
 
 ## Ground truth
 
-The committed benchmark posture is still conservative: rustia is currently far behind the C++ Luau oracle
+The public cross-engine benchmark posture is still conservative: rustia is currently far behind the C++ Luau oracle
 through `mlua-luau` on the tracked workloads, with the generated benchmark claim saying rustia trails by roughly
-8x-20x and about 13x geomean in the committed snapshot. That makes this a catch-up project first.
+8x-20x and about 13x geomean in the committed snapshot. Exact same-engine Linux A/B evidence for the newer
+dense, OOP, and string-memory slices is retained separately and does not turn into a cross-engine headline. That
+makes this a catch-up project first.
 
 The hardened safe table/atom/cache foundation is now in-tree. VM-local byte atoms and insertion-ordered table
 hash parts at 16+ entries use deterministic open-addressed `Vec<u32>` side indices at no more than 50% load.
@@ -80,7 +82,7 @@ live `NAMECALL` lookup have now landed. A first focused hot-loop-hygiene correct
 classification to a base-cost lookup and gives numeric table access and ordering number-first paths. Next add
 cached length boundaries and profile the remaining small-table scan and dispatch costs.
 Current plan delta: implementation and the controlled dense-table material-regression gate are complete. The
-accepted exact-commit Linode v2 comparison measured the corrective candidate 2.42% faster, with a conservative
+accepted exact-commit Linode v2 comparison measured 2.42% lower corrective-candidate ns/unit, with a conservative
 nominal 95% interval of -3.35% to -1.57%, and published three actual final-binary rows plus raw evidence. That
 resolves the predeclared +5% dense regression question for this workload and host protocol; broader speed claims
 still require a multi-engine, multi-workload snapshot.
@@ -202,8 +204,47 @@ dispatch. The cross-cutting candidates were instead ordinary opcodes traversing 
 numeric table accesses probing the short-string representation first, and numeric ordering repeating kind
 decoding. The corrective pass uses a 256-entry base-cost lookup with validated zero-sentinel special cases,
 number-first table get/set/order paths, and exact-tag nil checks. Logical fuel, invalid-program validation,
-fuel/GC phase and cadence, numeric-key rules, and string canonicalization remain unchanged. The controlled
+numeric-key rules, and string canonicalization remain unchanged. Semantic fused-op costs stay deterministic, but
+aggregate GC checkpoints can move when specialization removes dead cleanup bytecode. The controlled
 exact-commit result accepts this corrective pass for the predeclared dense material-regression gate.
+
+### OOP/GC fast-path candidate — exact-final comparison accepted
+
+The second accepted Linode v2 run compared baseline `ae3beae2025feb21d0e37c70168204ae154ae125` with exact
+candidate `f208c12d0ce266117743569d736346fae9a35db2` on `oop_metamethods`, using fixed `n=24000`, 15 repetitions
+per leg, four ABBA/BAAB legs per build, and the predeclared zero-regression threshold. Its pooled baseline and
+candidate medians were 21,633.014 and 7,364.006 ns/unit, a -65.9594% candidate delta. The conservative nominal
+95% interval was -66.3876% to -65.5482%, excluding zero; three actual final-candidate rows and every raw/gate
+artifact are retained under
+[`../bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/`](../bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/).
+The comparison covers the complete candidate, including its constant-field/method paths and a correction that
+avoids repeated weak-table scanning when no `__mode` atom exists. It therefore demonstrates the exact candidate
+and workload, not that one opcode family alone caused the full delta.
+
+### Shared/inline strings — exact 512-VM memory evidence completed
+
+The evidence-only Linode run compared the same baseline with exact candidate
+`1370d6ccefba7a1956441247c3139af2a2cf31fa`. One ten-sample round warmed the host and was excluded. Sixteen
+accepted paired rounds then sampled five scenarios for both builds in 160 unique fresh processes, each creating
+512 VMs around a 1,024-constant program. Round 14's first attempt observed one steal tick and discarded all ten
+samples before its clean retry. Primary memory is `/proc/<pid>/smaps_rollup` anonymous growth from program-ready
+to after-run, analyzed as paired scenario contrasts in KiB/VM with a seeded 100,000-resample bootstrap.
+
+| paired candidate-minus-baseline contrast | median KiB/VM | nominal 95% paired interval | candidate residual |
+|---|---:|---:|---:|
+| unloaded short constants minus empty | -32.0078 | -32.0156 to -32.0078 | approximately 0 KiB/VM |
+| unloaded long constants minus empty | -258.0000 | -258.0000 to -258.0000 | 0 KiB/VM |
+| loaded short minus unloaded short | -105.3906 | -105.3984 to -105.3906 | 0 KiB/VM |
+| loaded long minus unloaded long | -260.9688 | -260.9766 to -260.9609 | 7.0781 KiB/VM |
+
+Corroborating private-dirty/RSS fields agree with the primary contrasts. Descriptive medians show the candidate's
+one-time short-program image was 4 KiB larger and program construction was slower in the sampled scenarios, while
+combined VM creation plus execution was faster in every scenario; those timing summaries do not have the paired
+confidence intervals used for the primary memory contrasts. The corpus is
+retained under
+[`../bench/evidence/vm-string-memory/1370d6ccefba7a1956441247c3139af2a2cf31fa/`](../bench/evidence/vm-string-memory/1370d6ccefba7a1956441247c3139af2a2cf31fa/)
+and intentionally does not append throughput history. It quantifies the shared/inline string slice on this Linux
+fixture, not a general mixed-heap or wasm RSS budget.
 
 The first six ABBA/BAAB legs were usable. Pooling their 45 samples per variant gave baseline median
 139,964.195 ns/unit (IQR 133,262.333–156,530.778) and candidate median 141,223.833 ns/unit (IQR
@@ -248,7 +289,7 @@ below remain planning estimates rather than measured claims against C++ Luau.
 
 | state | likely position vs C++ Luau interpreter |
 |---|---|
-| Current committed benchmark snapshot | About 8x-20x slower on tracked workloads; roughly 13x slower geomean. The newer field/string and corrective hot-loop code is not represented yet. |
+| Current public cross-engine snapshot | About 8x-20x slower on tracked workloads; roughly 13x slower geomean. Newer exact same-engine dense/OOP and string-memory evidence is retained separately and does not alter that cross-engine claim. |
 | Full tables + shared atoms + broader ICs + FASTCALL/GETIMPORT | Could close most table/global/stdlib gaps; target 0.5x-1.0x Luau on many interpreter workloads. |
 | Add quickening + hot-loop hygiene + superinstructions + O2 optimizer | Plausible 0.8x-1.5x Luau interpreter on favorable workloads, but only measurement can bless this. |
 | Add type-directed wasm/AOT tier | Hot type-stable kernels can plausibly beat the C++ Luau interpreter by multiples; this is the main better-than-Luau-interpreter route. |

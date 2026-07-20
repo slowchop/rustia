@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-17.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-20.)
 
 ## One-paragraph state
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
@@ -48,8 +48,9 @@ by `GETTABLEKS` for their later `SETINDEX`, preserving the unfused three-step lo
 and method lookup, not the subsequent `CALL`: its two lanes cover the receiver and the receiver's current
 table-valued `__index`, revalidate both paths, and read the live callee without caching a final value, receiver, or
 class. Lookup-only `NAMECALL` costs fuel 2; the mode that also preserves the prior missing-method check costs 3.
-Fused costs are charged before their side effects, preloaded writes retain the original cross-RHS phase, and the
-equivalent instruction-count/GC cadence is retained.
+Fused costs are charged before their side effects and preloaded writes retain the original cross-RHS phase.
+Their semantic instruction costs remain deterministic, but aggregate GC checkpoints can move when compiler
+specialization removes dead cleanup bytecode.
 Insertion order, metamethod/readonly behavior, mutation visibility, and logical fuel remain preserved.
 Compiled constant pools are immutable and shared across program clones retained by different VMs. Long compiled
 string atoms reference that storage without copying the bytes per VM, and an equal runtime-owned atom upgrades to
@@ -69,7 +70,7 @@ that state once outside the timer, and can write execution-ordered raw samples t
 every warmup and timed repetition; sidecars record whether `n` was fixed or calibrated, while the stable public
 history remains min/median summary JSONL. The equal-work protocol alternates ABBA/BAAB order and requires at least
 three independent publication measurements of the clean final commit, with the sidecar written before each actual
-summary append. The accepted exact-commit Linode v2 comparison measured the corrective candidate 2.42% faster
+summary append. The accepted exact-commit Linode v2 comparison measured 2.42% lower corrective-candidate ns/unit
 on pooled `dense_tables` samples, with a conservative nominal 95% interval of -3.35% to -1.57%, excluding the
 predeclared +5% material regression. Qualification spread was 0.50%, every contaminant gate passed, maximum timed
 steal was 0.074% under the 0.1% ceiling, and three actual final-binary rows plus raw evidence are now in history.
@@ -81,9 +82,23 @@ Static bytecode and release-disassembly analysis showed that `dense_tables` exec
 `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` opcodes and dispatches 6,964 candidate instructions per unit versus 6,967
 for the baseline. A corrective pass therefore targets cross-cutting legacy-path tolls: ordinary fuel
 classification uses a base-cost lookup with validated special-cost fallbacks, numeric table access and ordering
-take number-first paths, and nil tests use the exact value tag. Logical fuel, validation, GC cadence, numeric-key
-semantics, and string canonicalization remain unchanged. The accepted result closes the controlled dense
+take number-first paths, and nil tests use the exact value tag. Logical fuel, validation, numeric-key semantics,
+and string canonicalization remain unchanged. The accepted result closes the controlled dense
 material-regression gate for this workload and Linux protocol; it is not a blanket release speed claim.
+The same dedicated Linode protocol compared `ae3beae2025feb21d0e37c70168204ae154ae125` with exact candidate
+`f208c12d0ce266117743569d736346fae9a35db2` on `oop_metamethods`: candidate ns/unit was 65.9594% lower, with a
+conservative nominal 95% interval of -66.3876% to -65.5482%, excluding the predeclared zero-regression threshold.
+Three final candidate rows and the complete raw evidence are in history. This comparison covers the complete
+candidate, including both the constant-field/method paths and its weak-table GC-scan correction; it does not
+attribute the full delta to one opcode family.
+An evidence-only 512-VM sampler then compared that baseline with exact candidate
+`1370d6ccefba7a1956441247c3139af2a2cf31fa` over 16 accepted paired rounds and 160 fresh processes. The landed
+shared/inline string representation removed 32 KiB/VM of unloaded short-constant growth, 258 KiB/VM of unloaded
+long-constant growth, and 105.39 KiB/VM of loaded-short growth relative to baseline; loaded-long growth fell by
+260.97 KiB/VM and retained a 7.08 KiB/VM residual. Descriptive medians show a 4 KiB larger one-time short-program
+image and slower program construction in the sampled scenarios, while combined VM creation plus program
+execution was faster for every scenario; those timing summaries do not carry the paired confidence intervals of
+the primary memory contrasts. This is exact string-focused Linux evidence, not a complete mixed-heap RSS budget.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
 ## Project pillars
@@ -115,11 +130,11 @@ API parity release-critical work.
    keep the 16-byte tagged `Value` firewall, portable `br_table`-friendly dispatch, instruction-count fuel,
    deterministic f64/libm behavior, table-key `-0` normalization, and profile-specific GC behavior covered by
    tests while performance work proceeds. Keep the public workspace's `unsafe_code = "forbid"` gate intact.
-   For performance sequencing, use [`56-performance-research.md`](56-performance-research.md): publish the
-   implemented table/atom/cache, `GETIMPORT`/`FASTCALL`, constant field/namecall, and string-representation slice
-   plus its corrective legacy numeric-path pass through the fixed-work benchmark-history gate; keep the
-   borderline dense-table cost visible until equal-work evidence resolves it; then pursue adaptive specialization
-   and type-directed wasm/AOT.
+   For performance sequencing, use [`56-performance-research.md`](56-performance-research.md): the dense-table,
+   constant field/namecall, and string-representation gates now have exact accepted dense/OOP throughput evidence
+   and committed string-memory evidence. Keep those
+   protocols repeatable while pursuing cached-length refinements, adaptive specialization, hot-loop hygiene, and
+   type-directed wasm/AOT.
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 12 workload entries including
    source-covered `string_building`, append-only JSONL history, package metadata, split notes, static dashboard
@@ -165,13 +180,14 @@ section below for the full list (GC tuning, benchmark publication, `LuauIntegerT
   current speed work. Compact deterministic table/atom indices, compact site-scoped live-slot caches,
   mutation-safe `GETIMPORT`, guarded generic fixed-result `FASTCALL`, constant-key
   `GETTABLEKS`/`SETTABLEKS`, two-lane live `NAMECALL` lookup, shared compiled constant storage, and 13-byte inline
-  literal/runtime strings are landed. A local fresh-state ABBA for the preceding hardening found no credible
-  material regression above 5%, while retaining a borderline +1.29% dense-table result. A fixed-work working-tree
-  diagnostic for the newer field/string slice measured about +0.90% across six uncontaminated legs, but exact-final
-  evidence and public history are still pending, so neither result is blanket speed evidence. Static analysis
-  traced the dense signal to possible cross-cutting legacy-path tolls rather than the new opcodes; the first
-  corrective hot-loop pass is landed but unmeasured. Next come equal-work validation and publication, further
-  hot-loop hygiene, adaptive quickening, superinstructions/O2, and
+  literal/runtime strings are landed. Exact dedicated-Linode evidence now measures 2.42% lower ns/unit for the
+  corrective dense candidate, with a conservative 95% interval of -3.35% to -1.57%, and 65.959% lower ns/unit
+  for the complete OOP candidate on `oop_metamethods`, with a conservative interval of -66.39% to -65.55%; the latter also includes the
+  weak-table GC-scan correction, and both comparisons retain
+  three final-candidate history rows. A separate exact 512-VM sampler confirms the shared/inline representation's
+  per-VM constant-string savings across 16 paired rounds while exposing the small one-time program-image and
+  construction tradeoffs. These are workload- and protocol-specific results, not blanket speed or RSS claims.
+  Next come broader long-run history, further hot-loop hygiene, adaptive quickening, superinstructions/O2, and
   type-directed wasm/AOT. Native copy-and-patch/JIT work remains a research reference unless it can satisfy the
   public `unsafe_code = "forbid"` gate.
 - **Luau target PINNED** (review C1): **Luau 0.709** (= our mlua oracle), standalone (not-Roblox) surface,
@@ -234,13 +250,12 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items:
 1. **Tune the GC intervals** (Deterministic instruction-count interval = determinism ABI; Standard paced-debt
    multiplier) on realistic heap sizes at P1.
-2. **Record production benchmark baselines** for rustia and each completed external adapter. For the current
-   performance slice, use one recorded fixed `n`, retain separate baseline/candidate raw sidecars, and alternate
-   ABBA/BAAB run order so drift is visible. Publish only actual harness-produced summary records from at least
-   three clean-final-commit legs and withhold an interpretation unless their retained evidence agrees; do not
-   treat either the existing +1.29% dense result or the working-tree +0.90% diagnostic as resolved before that
-   evidence, and treat the corrective numeric-path pass as a hypothesis until the same gate measures it. Keep
-   `RESULTS.md`, claims, and the static benchmark view consuming the same JSONL history.
+2. **Record broader production benchmark baselines** for rustia and each completed external adapter. The exact
+   dense and OOP fixed-work gates, plus the string-focused 512-VM evidence gate, are committed and resolved for
+   their declared Linux protocols. Continue using recorded fixed work, paired order, retained raw samples, and
+   actual harness-produced final rows; extend the evidence to longer-run public history and realistic mixed heaps
+   without generalizing these workload-specific results. Keep `RESULTS.md`, claims, and the static benchmark view
+   consuming the same JSONL history.
 3. **Watch `FFlag::LuauIntegerType2`** upstream (the f64-only tripwire).
 
 These are P1-gated; the design itself is otherwise complete. P1 (engine build) starts with the cross-engine +

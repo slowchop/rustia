@@ -1,6 +1,6 @@
 # rustia — continuous perf-benchmark suite + CI (design)
 
-> **Status: [IMPLEMENTED — measurements ongoing] (updated 2026-07-18).** Scoped by the `bench-scoping` agent (clone+read of
+> **Status: [IMPLEMENTED — measurements ongoing] (updated 2026-07-20).** Scoped by the `bench-scoping` agent (clone+read of
 > `khvzak/script-bench-rs`, the 11-workload seed in `spikes/bench-suite/`, and the 2025–26 tracker/wasm-shell
 > tooling) + self-hosted benchmark-label constraints + privacy lean. Operationalises principle #3 ("measure,
 > don't assert — the bench suite is a CI gate"). See [`CURRENT.md`](CURRENT.md).
@@ -78,26 +78,35 @@ runtimes in `bench/wasm/dispatch-current-results.json`, closing the pre-lock was
 The native harness now offers `--samples-json` for raw sidecars and isolates every calibration probe and timed
 repetition in freshly prepared state. It also offers `--fixed-n` for exact equal-work A/B runs. The earlier
 table/cache slice retained a cooled 1.29% dense-table signal; six later diagnostic legs overlapped around +0.90%.
-The accepted exact-commit Linode v2 comparison then measured the corrective candidate 2.42% faster on pooled
+The accepted exact-commit Linode v2 comparison then measured 2.42% lower corrective-candidate ns/unit on pooled
 `dense_tables` samples, with a conservative nominal 95% interval of -3.35% to -1.57%, excluding the predeclared
 +5% material regression. Qualification spread was 0.50%, all contaminant gates passed, peak timed steal was
 0.074% under the 0.1% ceiling, and three actual final-binary rows plus raw evidence are now in append-only
 history. This closes the dense material-regression gate but is workload/host-specific, not a blanket public
-speed claim. `tools/check-workflows.js` guards hosted/self-hosted separation, triggers, exact runner labels, data-repo
-publication, and generated-artifact policy.
+speed claim. A second exact Linode comparison measured 65.959% lower complete-candidate ns/unit on
+`oop_metamethods`, with a conservative nominal 95% interval of -66.39% to -65.55% against a zero-regression
+threshold, and retained three more final-candidate history rows. That candidate includes both the landed
+constant-field/method paths and a weak-table GC-scan correction; the delta is not attributed to one opcode family.
+The separate evidence-only 512-VM protocol retained 16 accepted paired rounds and 160 fresh-process samples. Its
+primary candidate-minus-baseline contrasts saved 32.01, 258.00, 105.39, and 260.97 KiB/VM across unloaded-short,
+unloaded-long, loaded-short, and loaded-long string effects, with a 7.08 KiB/VM loaded-long residual. It never
+modifies throughput history or public claims. `tools/check-workflows.js` guards hosted/self-hosted separation,
+triggers, exact runner labels, data-repo publication, and generated-artifact policy.
 
-The exact dense follow-up now has provider-specific but protocol-preserving
-ephemeral runners. Qualification-only `just bench-do-trials` compared regular
+The exact dense follow-up has provider-specific but protocol-preserving ephemeral runners, while
+`bench/cloud/linode-oop-f208c12.json` and `bench/cloud/linode-vm-string-memory-1370d6c.json` freeze the accepted
+OOP-throughput and evidence-only memory protocols. Qualification-only `just bench-do-trials` compared regular
 and Premium Intel 2-vCPU/4-GiB shared shapes without running comparison or
 publication. Repeated nonzero-steal timed legs rejected that shared tier;
 dedicated Akamai/Linode placements also remained KVM guests and eventually
 violated the frozen v1 zero-steal gate. Those blocks remain discarded. The
-prospectively versioned Linode v2 protocol keeps every pre-leg idle window at
-zero steal and permits no more than 0.1% steal during a timed leg, while
-preserving the fixed work, 3% qualification spread, ABBA/BAAB ordering,
-contaminant exclusion, conservative bootstrap verdict, and publication rule.
-The accepted Sydney run satisfied those gates, independently excluded a +5%
-material regression, and published its three final candidate rows and evidence.
+prospectively versioned Linode v2 fixed-throughput protocol keeps every pre-leg idle window at zero steal and
+permits no more than 0.1% steal during a timed leg, while preserving the fixed work, 3% qualification spread,
+ABBA/BAAB ordering, contaminant exclusion, conservative bootstrap verdict, and publication rule. The v2 memory
+config instead freezes its own warmup, paired-round, evidence-only analysis, and unchanged-history rules.
+The accepted Sydney dense and OOP runs satisfied their prospectively declared gates and published their three
+final candidate rows and evidence; the memory run satisfied its separate evidence-only gate and left history
+unchanged.
 `just bench-vultr` also validates an
 Ubuntu 24.04 `vbm-4c-32gb` actual-bare-metal server in Singapore, its one-hour
 `$0.164` minimum, and its two-hour `$0.328` lifecycle ceiling; transfers a local

@@ -35,8 +35,9 @@ Current unpublished workspace version: `0.0.1`.
   callee, receiver, or class is cached. Lookup-only mode costs logical fuel 2,
   while the mode that also preserves the existing missing-method diagnostic
   costs 3. Each fused mode charges its full cost before side effects; the
-  preloaded write mode preserves the original cross-RHS fuel/GC phase, and all
-  modes retain the equivalent instruction-count/GC cadence.
+  preloaded write mode preserves the original cross-RHS fuel/GC phase. Semantic
+  fused-op costs remain deterministic, but aggregate GC checkpoints can move
+  when specialization removes dead cleanup bytecode.
 - Compiled constant storage is immutable, exposed through the read-only
   `Program::constants()` accessor, and shared across cloned programs and VMs;
   long compiled string atoms reference those shared bytes rather than copying
@@ -112,13 +113,29 @@ Current unpublished workspace version: `0.0.1`.
   and without reading the token or launching another instance.
 - The accepted Sydney Linode v2 comparison qualified at 0.50% pilot spread,
   kept peak timed steal to 0.074% with no contaminating processes, and measured
-  the exact candidate 2.42% faster than the baseline on pooled `dense_tables`
+  2.42% lower candidate ns/unit than the baseline on pooled `dense_tables`
   samples. Its conservative nominal 95% interval was -3.35% to -1.57%, excluding
   the predeclared +5% material regression; three actual final-binary rows and
   the complete raw evidence are now retained in append-only history. Project
   status validation now accepts intentional partial controlled targets while
   still requiring unique result triples and exact target/engine/workload
   metadata coverage.
+- A second exact Linode v2 comparison measured 65.959% lower candidate ns/unit
+  on `oop_metamethods`, with pooled medians of 21,633.014 and 7,364.006
+  ns/unit and a conservative nominal 95% interval of -66.39% to -65.55% against
+  a zero-regression threshold. Three actual final-candidate rows and the full
+  raw/gate evidence are retained. The comparison includes both the
+  constant-field/method paths and a weak-table GC-scan correction, so the full
+  delta is not attributed to one opcode family.
+- The Linode coordinator now also supports an evidence-only exact 512-VM
+  string-memory protocol. Sixteen accepted paired rounds produced 160 unique
+  fresh-process samples; paired candidate-minus-baseline anonymous-memory
+  contrasts saved 32.01 KiB/VM for unloaded short constants, 258.00 KiB/VM for
+  unloaded long constants, 105.39 KiB/VM for loaded short strings, and 260.97
+  KiB/VM for loaded long strings, leaving a 7.08 KiB/VM loaded-long residual.
+  Its nine-file corpus is retained separately and cannot alter throughput
+  history, results, or claims. Completed evidence-only exports can be promoted
+  offline after confirmed deletion with their analysis recomputed.
 - An actual-bare-metal `just bench-vultr` fallback now follows rejected
   DigitalOcean shared and Linode dedicated-KVM placements without changing the
   frozen zero-steal protocol. It validates the Ubuntu 24.04 `vbm-4c-32gb` plan
@@ -147,7 +164,7 @@ Current unpublished workspace version: `0.0.1`.
   instructions per unit. A corrective hot-loop pass instead removes cross-cutting costs from the
   legacy numeric path: ordinary opcode fuel uses a base-cost lookup with validated special-cost
   fallbacks, numeric table access and ordering take number-first paths, and nil tests use the exact
-  value tag. Logical fuel, invalid-program validation, GC cadence, numeric-key behavior, and string
+  value tag. Logical fuel, invalid-program validation, numeric-key behavior, and string
   canonicalization remain unchanged. The accepted exact-commit Linode result now
   validates that corrective pass for this workload without supporting a blanket
   speed claim.

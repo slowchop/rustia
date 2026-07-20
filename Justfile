@@ -134,7 +134,7 @@ bench-linode-unlock:
 bench-linode-destroy run_id="":
     node tools/run-linode-benchmark.js destroy "{{ run_id }}"
 
-# Re-promote one accepted export after a local publication check rolled back; never contacts Linode.
+# Re-promote one completed fixed-throughput or evidence-only export after local promotion rolled back; never contacts Linode.
 bench-linode-promote run_id:
     node tools/run-linode-benchmark.js promote "{{ run_id }}"
 
