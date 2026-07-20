@@ -79,11 +79,11 @@ compiled constant storage, 13-byte inline literal/runtime strings, constant-key 
 live `NAMECALL` lookup have now landed. A first focused hot-loop-hygiene correction also moves ordinary fuel
 classification to a base-cost lookup and gives numeric table access and ordering number-first paths. Next add
 cached length boundaries and profile the remaining small-table scan and dispatch costs.
-Current plan delta: implementation is complete for this slice, but performance validation is not. The earlier
-representation-hardening measurement found no credible material regression above 5% and kept a borderline
-+1.29% dense-table result visible; the newer field/string changes still need fixed-work validation and committed
-repeatable history before attributing a public speedup or claiming the dense follow-up is resolved. The corrective
-pass is a profile-guided hypothesis until that evidence exists.
+Current plan delta: implementation and the controlled dense-table material-regression gate are complete. The
+accepted exact-commit Linode v2 comparison measured the corrective candidate 2.42% faster, with a conservative
+nominal 95% interval of -3.35% to -1.57%, and published three actual final-binary rows plus raw evidence. That
+resolves the predeclared +5% dense regression question for this workload and host protocol; broader speed claims
+still require a multi-engine, multi-workload snapshot.
 Expected gain: 2x-20x on table-heavy workloads; likely the fastest route to closing the current benchmark gap.
 
 **3. Adaptive quickening and specializing bytecode.**
@@ -182,14 +182,18 @@ material-regression threshold; accepted evidence retains that exact JSON
 output. The exact commands and required provenance are in
 [`../bench/README.md`](../bench/README.md).
 
-### Current field/string slice — corrective pass landed, exact-final measurement pending
+### Current field/string slice — exact-final dense comparison accepted
 
-A fixed-work diagnostic has been run for the `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` and string-representation
-working tree, but no accepted exact-final result or public-history row exists yet. Baseline
-`dac4ec2295f77587c79f04e4ff0a09cb99912f96` and the working candidate used byte-identical harness source
-(SHA-256 `9cb397349bf2e630e2ca120bd2b84b70aa83bf1dbeb496aa3f05622b2696325c`) and dense workload source
-(`b0c048b9fb17582fa409ae46b977cc73da635c145df39ea6f8fd756e9e17118d`), fixed `n=1500`, 15 repetitions, and
-the identical checksum `number:193302491.00000000000000000`.
+The accepted Linode v2 run compared baseline `dac4ec2295f77587c79f04e4ff0a09cb99912f96` with exact candidate
+`ed65077c2e779ec6a641b8ca2f8c8258b2508a2d`, using byte-identical harness, workload, lockfile, and toolchain
+inputs, fixed `n=1500`, 15 repetitions per leg, and the checksum
+`number:193302491.00000000000000000`. Qualification spread was 0.4999%, all timed legs had zero contaminants,
+and maximum timed steal was 0.0742%, below the prospectively declared 0.1% ceiling. The pooled baseline and
+candidate medians were 310,170.536 and 302,665.974 ns/unit respectively, a -2.4195% candidate delta. The
+conservative nominal 95% bootstrap interval was -3.3478% to -1.5699%, independently excluding the predeclared
++5% material regression. Three final candidate medians (303,918.403, 303,335.093, and 300,979.767 ns/unit) were
+appended to public history with their raw sidecars and full gate/comparison evidence. The conclusion is limited
+to this exact dense workload and Linux protocol; it is not a blanket speed claim.
 
 Static bytecode and release-disassembly analysis showed that `dense_tables` executes none of the new
 `GETTABLEKS`, `SETTABLEKS`, or `NAMECALL` opcodes. Its candidate lowering dispatches 6,964 instructions per
@@ -198,18 +202,17 @@ dispatch. The cross-cutting candidates were instead ordinary opcodes traversing 
 numeric table accesses probing the short-string representation first, and numeric ordering repeating kind
 decoding. The corrective pass uses a 256-entry base-cost lookup with validated zero-sentinel special cases,
 number-first table get/set/order paths, and exact-tag nil checks. Logical fuel, invalid-program validation,
-fuel/GC phase and cadence, numeric-key rules, and string canonicalization remain unchanged. This is a
-profile-guided hypothesis until controlled exact-commit evidence accepts or rejects it.
+fuel/GC phase and cadence, numeric-key rules, and string canonicalization remain unchanged. The controlled
+exact-commit result accepts this corrective pass for the predeclared dense material-regression gate.
 
 The first six ABBA/BAAB legs were usable. Pooling their 45 samples per variant gave baseline median
 139,964.195 ns/unit (IQR 133,262.333–156,530.778) and candidate median 141,223.833 ns/unit (IQR
 132,568.028–160,640.917), a +0.90% difference whose leg signs flipped and whose distributions overlap heavily.
 Two subsequent legs measured 978,686.639 and 825,969.167 ns/unit while unrelated release builds drove host load
 into triple digits; both were excluded as externally contaminated rather than selected by outcome. These
-temporary sidecars and the `ae3beae-working-tree` candidate label are diagnostic only. The complete sequence must
-be repeated from hashed exact-commit binaries on an idle host, retained durably, and followed by three actual
-final-commit history appends. Until then, neither the older +1.29% observation nor this +0.90% diagnostic supports
-a speedup, neutrality claim, or dense-regression resolution.
+temporary sidecars and the `ae3beae-working-tree` candidate label remain diagnostic only. The later accepted
+exact-commit Linode sequence supersedes them for the dense material-regression decision; neither the older
++1.29% observation nor the +0.90% working-tree diagnostic is reinterpreted as accepted evidence.
 
 ### 2026-07-17 local hardening measurement
 

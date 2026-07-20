@@ -207,10 +207,28 @@ function checkBenchmark(progress, readme, current) {
   const currentWorkloadCount = currentResults.metadata.workloads.length;
   assertEqual(currentWorkloadCount, workloadFacts.current_results, "current-results workload count");
   assertEqual(currentResults.metadata.row_count, currentResults.rows.length, "current-results row count");
+  const resultKeys = currentResults.rows.map(
+    (row) => `${row.target}\0${row.engine}\0${row.workload}`,
+  );
   assertEqual(
-    currentResults.rows.length,
-    currentEngines.length * currentWorkloadCount * currentResults.metadata.targets.length,
-    "current-results target/engine/workload coverage",
+    new Set(resultKeys).size,
+    resultKeys.length,
+    "current-results unique target/engine/workload rows",
+  );
+  assertArraySetEqual(
+    new Set(currentResults.rows.map((row) => row.target)),
+    currentResults.metadata.targets,
+    "current-results target metadata coverage",
+  );
+  assertArraySetEqual(
+    new Set(currentResults.rows.map((row) => row.engine)),
+    currentResults.metadata.engines,
+    "current-results engine metadata coverage",
+  );
+  assertArraySetEqual(
+    new Set(currentResults.rows.map((row) => row.workload)),
+    currentResults.metadata.workloads,
+    "current-results workload metadata coverage",
   );
 
   requireIncludes(

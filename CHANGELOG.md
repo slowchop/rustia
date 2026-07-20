@@ -110,6 +110,15 @@ Current unpublished workspace version: `0.0.1`.
   publication check rolls back can be retried offline by exact run ID, with
   archive, source, gate, raw-sample, recomputed-analysis, and history validation
   and without reading the token or launching another instance.
+- The accepted Sydney Linode v2 comparison qualified at 0.50% pilot spread,
+  kept peak timed steal to 0.074% with no contaminating processes, and measured
+  the exact candidate 2.42% faster than the baseline on pooled `dense_tables`
+  samples. Its conservative nominal 95% interval was -3.35% to -1.57%, excluding
+  the predeclared +5% material regression; three actual final-binary rows and
+  the complete raw evidence are now retained in append-only history. Project
+  status validation now accepts intentional partial controlled targets while
+  still requiring unique result triples and exact target/engine/workload
+  metadata coverage.
 - An actual-bare-metal `just bench-vultr` fallback now follows rejected
   DigitalOcean shared and Linode dedicated-KVM placements without changing the
   frozen zero-steal protocol. It validates the Ubuntu 24.04 `vbm-4c-32gb` plan
@@ -131,15 +140,17 @@ Current unpublished workspace version: `0.0.1`.
   7.25%/19.71%; a cooled dense-table check retained a borderline 1.29% cost, so
   the result is recorded as hardening evidence rather than a blanket speed claim.
   Six uncontaminated fixed-work legs for the subsequent field/string working tree
-  measured about +0.90% with overlapping spreads; exact-final publication remains
-  pending after two host-load-contaminated legs were excluded.
+  measured about +0.90% with overlapping spreads; the accepted exact-commit
+  Linode comparison above now supersedes that working-tree diagnostic.
 - Static bytecode and release-disassembly analysis showed that `dense_tables` does not execute
   `GETTABLEKS`, `SETTABLEKS`, or `NAMECALL`; its candidate lowering actually dispatches three fewer
   instructions per unit. A corrective hot-loop pass instead removes cross-cutting costs from the
   legacy numeric path: ordinary opcode fuel uses a base-cost lookup with validated special-cost
   fallbacks, numeric table access and ordering take number-first paths, and nil tests use the exact
   value tag. Logical fuel, invalid-program validation, GC cadence, numeric-key behavior, and string
-  canonicalization remain unchanged. Controlled exact-commit measurement is still pending.
+  canonicalization remain unchanged. The accepted exact-commit Linode result now
+  validates that corrective pass for this workload without supporting a blanket
+  speed claim.
 - The benchmark static site now has a release-preflight contract check for local
   assets, DOM bindings, JSONL history parsing, and current-results agreement.
 - Release preflight now composes release notes, package files, generated leaf

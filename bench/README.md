@@ -382,6 +382,17 @@ allows at most 0.1% steal during a timed leg. The raw gate counters remain in
 the evidence, and the existing zero-contaminant, 3% qualification-spread,
 ABBA/BAAB, bootstrap, verdict, and publication gates are unchanged.
 
+The accepted v2 Sydney run qualified at 0.4999% pilot-median spread, kept all
+timed legs at zero contaminants and at most 0.0742% steal, and measured the
+candidate pooled median at 302,665.974 ns/unit versus 310,170.536 for the
+baseline (-2.4195%). Its conservative nominal 95% interval was -3.3478% to
+-1.5699%, so the predeclared +5% material-regression threshold was excluded.
+The three actual final-candidate medians were 303,918.403, 303,335.093, and
+300,979.767 ns/unit; their raw sidecars and the complete comparison evidence are
+retained under `history/evidence/ed65077c2e779ec6a641b8ca2f8c8258b2508a2d/`.
+This is acceptance evidence for that exact workload and host protocol, not a
+cross-engine or blanket speed claim.
+
 The physical fallback automation remains available. Vultr uses an actual
 `vbm-4c-32gb` bare-metal server in `sgp`,
 running Ubuntu 24.04 x64. Vultr rounds usage up to a one-hour `$0.164` minimum.

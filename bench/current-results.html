@@ -528,13 +528,13 @@
       <div class="metrics">
 
     <div class="metric">
-      <strong>50</strong>
+      <strong>51</strong>
       <span>current result rows</span>
     </div>
 
 
     <div class="metric">
-      <strong>200</strong>
+      <strong>203</strong>
       <span>history records</span>
     </div>
 
@@ -552,7 +552,7 @@
 
 
     <div class="metric">
-      <strong>0 / 5</strong>
+      <strong>0 / 6</strong>
       <span>claims ready</span>
     </div>
 
@@ -570,13 +570,13 @@
 
 
     <div class="metric">
-      <strong>9f3b0d1</strong>
+      <strong>ed65077c2e779ec6a641b8ca2f8c8258b2508a2d</strong>
       <span>latest commit in snapshot</span>
     </div>
 
 
     <div class="metric">
-      <strong>2026-07-03 01:53:44 UTC to 2026-07-03 02:27:20 UTC</strong>
+      <strong>2026-07-03 01:53:44 UTC to 2026-07-20 00:32:29 UTC</strong>
       <span>measurement window</span>
     </div>
 
@@ -588,7 +588,7 @@
       <a href="#history">History</a>
       <a href="#wasm-target">Wasm Target</a>
       <a href="#wasm-dispatch">Wasm Dispatch</a>
-      <a href="#macos-aarch64">macos-aarch64</a>
+      <a href="#linux-x86-64">linux-x86_64</a><a href="#macos-aarch64">macos-aarch64</a>
     </nav>
 
 
@@ -821,6 +821,19 @@
                 </tr>
 
                 <tr>
+                  <td><span class="engine-target"><span class="engine-target-main"><strong>rustia</strong><span class="engine-target-kind">(x86_64)</span></span><span class="engine-target-detail">linux-x86_64</span></span></td>
+                  <td>
+                    <div class="bar-cell">
+                      <span>1x</span>
+                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
+                    </div>
+                  </td>
+                  <td>1 / 1</td>
+                  <td>296,285</td>
+                  <td>1 workloads</td>
+                </tr>
+
+                <tr>
                   <td><span class="engine-target"><span class="engine-target-main"><strong>rustia</strong><span class="engine-target-kind">(aarch64)</span></span><span class="engine-target-detail">macos-aarch64</span></span></td>
                   <td>
                     <div class="bar-cell">
@@ -908,7 +921,7 @@
       <div class="section-head">
         <div>
           <h2>Claim Gate</h2>
-          <p>0 / 5 eligible · 5 current workload claims are not public-ready against mlua-luau.</p>
+          <p>0 / 6 eligible · 6 current workload claims are not public-ready against mlua-luau.</p>
         </div>
       </div>
       <div class="table-wrap">
@@ -924,6 +937,20 @@
             </tr>
           </thead>
           <tbody>
+
+    <tr>
+      <td><span class="target-runtime"><strong>linux-x86_64</strong><span>dense_tables · build+sum+sort of 256-elem array</span></span></td>
+      <td>296,285 ns</td>
+      <td>n/a</td>
+      <td>1 / 1</td>
+      <td>rustia · 296,285 ns</td>
+      <td>
+        <span class="claim-posture">
+          <span class="claim-pill claim-blocked">Blocked</span>
+          <small>missing mlua-luau baseline</small>
+        </span>
+      </td>
+    </tr>
 
     <tr>
       <td><span class="target-runtime"><strong>macos-aarch64</strong><span>closures_upvalues · one upvalue-mutating closure call</span></span></td>
@@ -1005,10 +1032,96 @@
       <div class="section-head">
         <div>
           <h2>Benchmark History</h2>
-          <p>200 records · 9 commits · source <code>bench/history/runs.jsonl</code> · 2026-07-03 00:24:19 UTC to 2026-07-03 02:27:20 UTC</p>
+          <p>203 records · 10 commits · source <code>bench/history/runs.jsonl</code> · 2026-07-03 00:24:19 UTC to 2026-07-20 00:32:29 UTC</p>
         </div>
       </div>
       <div class="history-body">
+
+    <section class="history-target">
+      <div class="history-target-head">
+        <h3>linux-x86_64</h3>
+        <p>3 records across 1 workloads</p>
+      </div>
+
+    <section class="history-workload" id="history-linux-x86-64-dense-tables">
+      <div class="history-workload-head">
+        <div>
+          <h4>dense_tables</h4>
+          <p>build+sum+sort of 256-elem array · 3 records · 1 engines</p>
+        </div>
+      </div>
+
+    <div class="history-chart">
+      <svg viewBox="0 0 920 260" role="img" aria-label="dense_tables timing history">
+        <rect x="0" y="0" width="920" height="260" class="history-chart-bg" />
+
+      <line x1="62" y1="20.00" x2="900" y2="20.00" class="history-grid-line" />
+      <text x="8" y="24.00" class="history-axis-label">340,728</text>
+
+      <line x1="62" y1="69.50" x2="900" y2="69.50" class="history-grid-line" />
+      <text x="8" y="73.50" class="history-axis-label">315,677</text>
+
+      <line x1="62" y1="119.00" x2="900" y2="119.00" class="history-grid-line" />
+      <text x="8" y="123.00" class="history-axis-label">292,468</text>
+
+      <line x1="62" y1="168.50" x2="900" y2="168.50" class="history-grid-line" />
+      <text x="8" y="172.50" class="history-axis-label">270,965</text>
+
+      <line x1="62" y1="218.00" x2="900" y2="218.00" class="history-grid-line" />
+      <text x="8" y="222.00" class="history-axis-label">251,043</text>
+
+        <line x1="62" y1="20" x2="62" y2="218" class="history-axis" />
+        <line x1="62" y1="218" x2="900" y2="218" class="history-axis" />
+        <text x="62" y="250" class="history-axis-label">2026-07-20 00:29:42 UTC</text>
+        <text x="900" y="250" text-anchor="end" class="history-axis-label">2026-07-20 00:32:29 UTC</text>
+        <g><polyline points="62.00,111.18 478.49,112.65 900.00,110.59" fill="none" stroke="#2563eb" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="62.00" cy="111.18" r="3.2" fill="#2563eb">
+      <title>rustia ed65077c2e779ec6a641b8ca2f8c8258b2508a2d: 296,017 ns/unit</title>
+    </circle>
+
+    <circle cx="478.49" cy="112.65" r="3.2" fill="#2563eb">
+      <title>rustia ed65077c2e779ec6a641b8ca2f8c8258b2508a2d: 295,345 ns/unit</title>
+    </circle>
+
+    <circle cx="900.00" cy="110.59" r="3.2" fill="#2563eb">
+      <title>rustia ed65077c2e779ec6a641b8ca2f8c8258b2508a2d: 296,285 ns/unit</title>
+    </circle>
+  </g>
+      </svg>
+      <div class="history-legend">
+        <span><span class="swatch" style="color: #2563eb"></span>rustia</span>
+      </div>
+    </div>
+
+      <div class="table-wrap history-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Engine</th>
+              <th>Latest min ns/unit</th>
+              <th>Median</th>
+              <th>Trend vs previous</th>
+              <th>Commit</th>
+              <th>Measured</th>
+            </tr>
+          </thead>
+          <tbody>
+
+    <tr>
+      <td><span class="history-engine"><span class="swatch" style="color: #2563eb"></span><strong>rustia</strong></span></td>
+      <td>296,285</td>
+      <td>300,980</td>
+      <td><span class="trend trend-bad">+0.3%</span></td>
+      <td>ed65077c2e779ec6a641b8ca2f8c8258b2508a2d</td>
+      <td>2026-07-20 00:32:29 UTC</td>
+    </tr>
+
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    </section>
 
     <section class="history-target">
       <div class="history-target-head">
@@ -3283,6 +3396,43 @@
       </div>
     </section>
 
+
+    <section class="target" id="linux-x86-64">
+      <div class="target-head">
+        <div>
+          <h2>linux-x86_64</h2>
+          <p>1 rows across 1 workloads</p>
+        </div>
+      </div>
+
+    <section class="workload" id="linux-x86-64-dense-tables">
+      <div class="workload-head">
+        <div>
+          <h3>dense_tables</h3>
+          <p>build+sum+sort of 256-elem array · fastest 296,285 ns/unit · slowest 296,285 ns/unit</p>
+        </div>
+      </div>
+      <div class="bars">
+
+    <article class="result-row">
+      <div class="result-label">
+        <strong>rustia</strong>
+        <span>luau · ed65077c2e779ec6a641b8ca2f8c8258b2508a2d · 2026-07-20 00:32:29 UTC</span>
+      </div>
+      <div class="result-values">
+        <span>296,285 ns min</span>
+        <span>1x vs rustia</span>
+      </div>
+      <div class="bars-pair">
+        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 100.000%"></span></div>
+        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 100.000%"></span></div>
+      </div>
+    </article>
+
+      </div>
+    </section>
+
+    </section>
 
     <section class="target" id="macos-aarch64">
       <div class="target-head">

@@ -69,9 +69,11 @@ that state once outside the timer, and can write execution-ordered raw samples t
 every warmup and timed repetition; sidecars record whether `n` was fixed or calibrated, while the stable public
 history remains min/median summary JSONL. The equal-work protocol alternates ABBA/BAAB order and requires at least
 three independent publication measurements of the clean final commit, with the sidecar written before each actual
-summary append. No accepted exact-final public-history result has been published for the new field/string slice.
-Six uncontaminated fixed-work
-diagnostic legs reduced the working-tree dense difference to about +0.90% with overlapping spreads; two later
+summary append. The accepted exact-commit Linode v2 comparison measured the corrective candidate 2.42% faster
+on pooled `dense_tables` samples, with a conservative nominal 95% interval of -3.35% to -1.57%, excluding the
+predeclared +5% material regression. Qualification spread was 0.50%, every contaminant gate passed, maximum timed
+steal was 0.074% under the 0.1% ceiling, and three actual final-binary rows plus raw evidence are now in history.
+Earlier diagnostic legs reduced the working-tree dense difference to about +0.90% with overlapping spreads; two later
 legs were excluded after unrelated release builds saturated the host. The preceding local fresh-state ABBA
 against `dac4ec2` found no material regression above 5% after hardening; stdlib/string improved materially,
 closures were neutral-to-faster, and the cooled dense-table confirmation retained a borderline 1.29% slowdown.
@@ -80,9 +82,8 @@ Static bytecode and release-disassembly analysis showed that `dense_tables` exec
 for the baseline. A corrective pass therefore targets cross-cutting legacy-path tolls: ordinary fuel
 classification uses a base-cost lookup with validated special-cost fallbacks, numeric table access and ordering
 take number-first paths, and nil tests use the exact value tag. Logical fuel, validation, GC cadence, numeric-key
-semantics, and string canonicalization remain unchanged. Controlled exact-commit measurement is still pending.
-That older result remains development evidence, not a claim that the dense-table follow-up is resolved or a
-blanket release speed claim.
+semantics, and string canonicalization remain unchanged. The accepted result closes the controlled dense
+material-regression gate for this workload and Linux protocol; it is not a blanket release speed claim.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
 ## Project pillars

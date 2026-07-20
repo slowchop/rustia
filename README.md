@@ -78,19 +78,22 @@ public rustia project; actual grabby integration work is explicitly out of scope
   regression threshold. The earlier local fresh-state ABBA against `dac4ec2` found no
   material regression above 5% after hot-path hardening: stdlib/string improved 7.25%/19.71%, closures were
   neutral-to-faster, and a cooled dense-table check retained a borderline 1.29% slowdown. Six uncontaminated
-  fixed-work diagnostic legs for the new field/string slice measured about +0.90% with overlapping spreads, but
-  the exact final commit has not been accepted or added to public history. Static bytecode and release-codegen
+  fixed-work diagnostic legs for the new field/string slice measured about +0.90% with overlapping spreads. Static bytecode and release-codegen
   analysis showed that the dense workload does not execute the new constant-key/method opcodes; a corrective
   pass now removes cross-cutting fuel-classification, numeric-key, and numeric-ordering tolls while preserving
-  fuel, validation, GC cadence, key semantics, and string canonicalization. That pass remains an unmeasured
-  hypothesis. Qualification-only `just bench-do-trials` runs compared capped shared-CPU profiles without
+  fuel, validation, GC cadence, key semantics, and string canonicalization. The accepted exact-commit Linode v2
+  run measured that candidate 2.42% faster on pooled `dense_tables` samples, with a conservative nominal 95%
+  interval of -3.35% to -1.57%; it excluded the predeclared +5% material regression and published three
+  final-binary Linux history rows. Qualification spread was 0.50%, all process gates were clean, and peak timed
+  steal was 0.074% under the 0.1% ceiling. Qualification-only `just bench-do-trials` runs compared capped shared-CPU profiles without
   publishing anything, but repeated timed-leg steal violations ruled out that tier for acceptance. Dedicated
   Akamai/Linode placements also remained KVM guests and each eventually recorded one stolen scheduler tick.
   Those old zero-steal blocks remain discarded. The prospective Linode v2 protocol keeps the pre-leg idle gate
   at zero steal but permits at most 0.1% steal during a timed leg, while retaining the 3% qualification spread,
   fixed ABBA/BAAB order, conservative bootstrap verdict, and zero-contaminating-process rule. Two Vultr
   bare-metal orders never left provisioning and were safely deleted; the physical Scaleway
-  `EM-A610R-NVMe` lifecycle remains available as a stricter fallback. Existing results remain
+  `EM-A610R-NVMe` lifecycle remains available as a stricter fallback. The accepted result is specific to this
+  workload, comparison, and Linux host; existing results remain
   development evidence, not a blanket release speed claim; details are in
   [`design/56-performance-research.md`](design/56-performance-research.md).
 - Major remaining gates are engine hardening, long-run benchmark history, public benchmark publication, and release
