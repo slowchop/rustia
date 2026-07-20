@@ -106,7 +106,10 @@ Current unpublished workspace version: `0.0.1`.
   whole-hour cost ceilings, and delete authority before billing; journals
   ambiguous creates by unique label; passes
   a local one-run SSH key directly at creation; and forbids evidence promotion
-  until the instance is confirmed absent.
+  until the instance is confirmed absent. Accepted exports whose local
+  publication check rolls back can be retried offline by exact run ID, with
+  archive, source, gate, raw-sample, recomputed-analysis, and history validation
+  and without reading the token or launching another instance.
 - An actual-bare-metal `just bench-vultr` fallback now follows rejected
   DigitalOcean shared and Linode dedicated-KVM placements without changing the
   frozen zero-steal protocol. It validates the Ubuntu 24.04 `vbm-4c-32gb` plan

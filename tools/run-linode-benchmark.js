@@ -9,6 +9,7 @@ const https = require("node:https");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
+const zlib = require("node:zlib");
 const { spawn, spawnSync } = require("node:child_process");
 
 const REPO = path.resolve(__dirname, "..");
@@ -27,6 +28,10 @@ const FORCE_KILL_DELAY_MS = 10 * 1000;
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const SAFE_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.json$/;
+const RUN_ID = /^\d{8}T\d{6}Z-[0-9a-f]{8}$/;
+const MAX_EXPORT_ARCHIVE_BYTES = 256 * 1024 * 1024;
+const MAX_EXPORT_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
+const MAX_EXPORT_ENTRIES = 10_000;
 
 let activeChild = null;
 let activeRequest = null;
@@ -106,6 +111,17 @@ function requireExactKeys(value, expected, location) {
   if (JSON.stringify(actual) !== JSON.stringify(wanted)) {
     fail(`${location} keys must be ${wanted.join(", ")}; got ${actual.join(", ")}`);
   }
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function validateConfig(value) {
@@ -1053,6 +1069,13 @@ function stateForRunId(runId) {
   return states[0];
 }
 
+function completedStateForRunId(runId) {
+  if (!RUN_ID.test(runId)) fail("a valid explicit Linode run id is required for offline promotion");
+  const matches = listStates().filter((state) => state.run_id === runId);
+  if (matches.length !== 1) fail(`no uniquely owned Linode run has id ${runId}`);
+  return matches[0];
+}
+
 function startBillingWindow(state, config) {
   const started = Date.now();
   state.billing_window_started_at = new Date(started).toISOString();
@@ -1385,9 +1408,176 @@ function verifyProviderPlanUnchanged(original, refreshed) {
   }
 }
 
-function extractArchive(archive, destination) {
-  fs.mkdirSync(destination, { recursive: true });
-  return run("tar", ["-xzf", archive, "-C", destination], { capture: false, announce: true });
+function tarAsciiField(header, start, length, location) {
+  const field = header.subarray(start, start + length);
+  const nul = field.indexOf(0);
+  const bytes = nul === -1 ? field : field.subarray(0, nul);
+  for (const byte of bytes) {
+    if (byte < 0x20 || byte > 0x7e) fail(`${location} contains non-ASCII or control bytes`);
+  }
+  return bytes.toString("ascii");
+}
+
+function tarOctalField(header, start, length, location) {
+  const field = header.subarray(start, start + length);
+  if ((field[0] & 0x80) !== 0) fail(`${location} uses an unsupported base-256 number`);
+  const text = field.toString("ascii").replace(/[\0 ]+$/g, "").replace(/^ +/g, "");
+  if (text === "") return 0;
+  if (!/^[0-7]+$/.test(text)) fail(`${location} is not a valid octal number`);
+  const value = Number.parseInt(text, 8);
+  if (!Number.isSafeInteger(value) || value < 0) fail(`${location} is outside the safe integer range`);
+  return value;
+}
+
+function safeArchivePath(rawName, type) {
+  if (rawName === "" || rawName.includes("\\") || !/^[A-Za-z0-9._/-]+$/.test(rawName)) {
+    fail(`unsafe archive path ${JSON.stringify(rawName)}`);
+  }
+  if (path.posix.isAbsolute(rawName)) fail(`archive path is absolute: ${JSON.stringify(rawName)}`);
+  const parts = rawName.split("/");
+  if (parts.includes("..")) fail(`archive path contains a parent component: ${JSON.stringify(rawName)}`);
+  while (parts[0] === ".") parts.shift();
+  while (parts[parts.length - 1] === "") parts.pop();
+  if (parts.some((part) => part === "" || part === ".")) {
+    fail(`archive path is not canonical: ${JSON.stringify(rawName)}`);
+  }
+  const canonical = parts.length === 0 ? "." : parts.join("/");
+  if (canonical === "." && type !== "directory") fail("archive root entry must be a directory");
+  return canonical;
+}
+
+function inspectTarBytes(bytes, location = "export archive") {
+  if (!Buffer.isBuffer(bytes) || bytes.length === 0 || bytes.length > MAX_EXPORT_UNCOMPRESSED_BYTES) {
+    fail(`${location} has an invalid uncompressed size`);
+  }
+  if (bytes.length % 512 !== 0) fail(`${location} is not aligned to 512-byte tar records`);
+  const entries = [];
+  const seen = new Map();
+  let offset = 0;
+  let zeroBlocks = 0;
+  let totalPayloadBytes = 0;
+  while (offset < bytes.length) {
+    const header = bytes.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) {
+      zeroBlocks += 1;
+      offset += 512;
+      if (zeroBlocks >= 2) {
+        if (!bytes.subarray(offset).every((byte) => byte === 0)) {
+          fail(`${location} contains data after its end-of-archive marker`);
+        }
+        break;
+      }
+      continue;
+    }
+    if (zeroBlocks !== 0) fail(`${location} contains an entry after a partial end marker`);
+    if (entries.length >= MAX_EXPORT_ENTRIES) fail(`${location} contains too many entries`);
+    const recordedChecksum = tarOctalField(header, 148, 8, `${location} header checksum`);
+    let computedChecksum = 0;
+    for (let index = 0; index < header.length; index += 1) {
+      computedChecksum += index >= 148 && index < 156 ? 0x20 : header[index];
+    }
+    if (recordedChecksum !== computedChecksum) fail(`${location} contains a header with a bad checksum`);
+    const name = tarAsciiField(header, 0, 100, `${location} entry name`);
+    const magic = header.subarray(257, 263);
+    const version = header.subarray(263, 265);
+    let prefix = "";
+    if (magic.equals(Buffer.from("ustar\0", "binary")) && version.equals(Buffer.from("00", "ascii"))) {
+      prefix = tarAsciiField(header, 345, 155, `${location} entry prefix`);
+    } else {
+      fail(`${location} entry ${JSON.stringify(name)} is not exact POSIX ustar format`);
+    }
+    const rawName = prefix ? `${prefix}/${name}` : name;
+    const typeFlag = header[156];
+    const type = typeFlag === 0 || typeFlag === 0x30 ? "file" : typeFlag === 0x35 ? "directory" : null;
+    if (!type) fail(`${location} entry ${JSON.stringify(rawName)} has a forbidden tar type`);
+    const canonical = safeArchivePath(rawName, type);
+    if (seen.has(canonical)) fail(`${location} contains duplicate path ${JSON.stringify(canonical)}`);
+    const mode = tarOctalField(header, 100, 8, `${location} entry mode`);
+    if ((mode & 0o7000) !== 0) fail(`${location} entry ${JSON.stringify(rawName)} has special mode bits`);
+    const size = tarOctalField(header, 124, 12, `${location} entry size`);
+    if (type === "directory" && size !== 0) {
+      fail(`${location} directory ${JSON.stringify(rawName)} has a non-zero payload`);
+    }
+    totalPayloadBytes += size;
+    if (totalPayloadBytes > MAX_EXPORT_UNCOMPRESSED_BYTES) fail(`${location} payload is too large`);
+    const next = offset + 512 + Math.ceil(size / 512) * 512;
+    if (next > bytes.length) fail(`${location} entry ${JSON.stringify(rawName)} extends past EOF`);
+    const entry = { path: canonical, type, size };
+    seen.set(canonical, entry);
+    entries.push(entry);
+    offset = next;
+  }
+  if (zeroBlocks < 2) fail(`${location} lacks the two-block end-of-archive marker`);
+  if (entries.length === 0) fail(`${location} contains no entries`);
+  for (const entry of entries) {
+    if (entry.path === ".") continue;
+    const parts = entry.path.split("/");
+    for (let index = 1; index < parts.length; index += 1) {
+      const parent = parts.slice(0, index).join("/");
+      const parentEntry = seen.get(parent);
+      if (parentEntry && parentEntry.type !== "directory") {
+        fail(`${location} places ${JSON.stringify(entry.path)} below a non-directory`);
+      }
+    }
+  }
+  return entries;
+}
+
+function inspectArchive(archive) {
+  const stat = fs.lstatSync(archive);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
+    fail("export archive must be a single regular file");
+  }
+  if (stat.size <= 0 || stat.size > MAX_EXPORT_ARCHIVE_BYTES) fail("export archive compressed size is invalid");
+  let bytes;
+  try {
+    bytes = zlib.gunzipSync(fs.readFileSync(archive), { maxOutputLength: MAX_EXPORT_UNCOMPRESSED_BYTES });
+  } catch (error) {
+    fail(`cannot safely decompress export archive: ${error.message}`);
+  }
+  return inspectTarBytes(bytes);
+}
+
+function validateExtractedTree(destination, archiveEntries) {
+  const root = fs.lstatSync(destination);
+  if (!root.isDirectory() || root.isSymbolicLink()) fail("extraction destination is not a real directory");
+  const actual = new Map();
+  const visit = (directory, prefix = "") => {
+    for (const name of fs.readdirSync(directory).sort()) {
+      const relative = prefix ? `${prefix}/${name}` : name;
+      const absolute = path.join(directory, name);
+      const stat = fs.lstatSync(absolute);
+      if (stat.isSymbolicLink()) fail(`extracted export contains symlink ${JSON.stringify(relative)}`);
+      if (stat.isDirectory()) {
+        actual.set(relative, "directory");
+        visit(absolute, relative);
+      } else if (stat.isFile() && stat.nlink === 1) {
+        actual.set(relative, "file");
+      } else {
+        fail(`extracted export contains unsafe entry ${JSON.stringify(relative)}`);
+      }
+    }
+  };
+  visit(destination);
+  const expected = new Map(
+    archiveEntries.filter((entry) => entry.path !== ".").map((entry) => [entry.path, entry.type]),
+  );
+  if (canonicalJson(Object.fromEntries(actual)) !== canonicalJson(Object.fromEntries(expected))) {
+    fail("extracted export tree does not exactly match the validated archive listing");
+  }
+}
+
+async function extractArchive(archive, destination) {
+  const entries = inspectArchive(archive);
+  if (fs.existsSync(destination)) fail("refusing to extract an export over an existing path");
+  fs.mkdirSync(destination, { recursive: false, mode: 0o700 });
+  try {
+    await run("tar", ["-xzf", archive, "-C", destination], { capture: false, announce: true });
+    validateExtractedTree(destination, entries);
+  } catch (error) {
+    fs.rmSync(destination, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 async function verifyPromotionCheckout(config, state) {
@@ -1398,14 +1588,742 @@ async function verifyPromotionCheckout(config, state) {
   }
 }
 
-async function promoteAcceptedResult(config, state, downloadDirectory) {
+async function verifyRecoveryCheckout(config, state) {
+  const planned = requireObject(state.plan && state.plan.source, "state.plan.source");
+  if (!FULL_COMMIT.test(planned.orchestration_commit)) {
+    fail("recorded Linode orchestration commit is invalid");
+  }
+  const configFile = path.join(REPO, planned.config_path);
+  if (
+    path.relative(REPO, configFile).startsWith("..") ||
+    path.isAbsolute(path.relative(REPO, configFile)) ||
+    path.resolve(state.source_config_path || "") !== configFile
+  ) {
+    fail("recorded Linode config path is outside or inconsistent with the repository");
+  }
+  const originalFiles = [
+    [planned.config_path, planned.config_sha256, "config"],
+    ["tools/run-linode-benchmark.js", planned.coordinator_sha256, "coordinator"],
+    ["tools/run-linux-fixed-benchmark.js", planned.remote_runner_sha256, "remote runner"],
+  ];
+  for (const [file, wanted, label] of originalFiles) {
+    if (!SHA256.test(wanted) || sha256(await gitBlob(planned.orchestration_commit, file)) !== wanted) {
+      fail(`recorded ${label} does not match the original Linode orchestration commit`);
+    }
+  }
+  const ancestry = await run(
+    "git",
+    ["merge-base", "--is-ancestor", planned.orchestration_commit, "HEAD"],
+    { allowFailure: true },
+  );
+  if (ancestry.status !== 0) {
+    fail("offline promotion requires a checkout descended from the recorded orchestration commit");
+  }
+  if (sha256File(state.config_path) !== planned.config_sha256) {
+    fail("saved Linode protocol snapshot no longer matches the recorded plan");
+  }
+  if (sha256File(state.runner_path) !== planned.remote_runner_sha256) {
+    fail("saved Linode runner snapshot no longer matches the recorded plan");
+  }
+  const current = await verifySource(config, configFile);
+  for (const field of ["config_path", "config_sha256", "remote_runner_sha256"]) {
+    if (current[field] !== planned[field]) {
+      fail(`current ${field} is incompatible with the recorded Linode run`);
+    }
+  }
+  if (JSON.stringify(current.verified_source_hashes) !== JSON.stringify(planned.verified_source_hashes)) {
+    fail("current verified sources are incompatible with the recorded Linode run");
+  }
+}
+
+function evidenceFiles(directory, relative = "") {
+  const files = [];
+  for (const entry of fs.readdirSync(path.join(directory, relative), { withFileTypes: true })) {
+    const child = path.posix.join(relative.split(path.sep).join(path.posix.sep), entry.name);
+    const full = path.join(directory, ...child.split("/"));
+    const stat = fs.lstatSync(full);
+    if (stat.isSymbolicLink()) fail(`accepted Linode evidence contains symlink ${child}`);
+    if (stat.isDirectory()) files.push(...evidenceFiles(directory, path.join(relative, entry.name)));
+    else if (stat.isFile() && stat.nlink === 1) files.push(child);
+    else fail(`accepted Linode evidence contains non-regular entry ${child}`);
+  }
+  return files.sort();
+}
+
+function requireJsonEqual(actual, expected, location) {
+  if (canonicalJson(actual) !== canonicalJson(expected)) fail(`${location} does not match the frozen value`);
+}
+
+function loadJsonRegular(file, location) {
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
+    fail(`${location} must be a single regular file`);
+  }
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (error) {
+    fail(`${location} is not valid JSON: ${error.message}`);
+  }
+}
+
+function requireIsoTimestamp(value, location) {
+  requireString(value, location);
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value) {
+    fail(`${location} must be an exact ISO-8601 UTC timestamp`);
+  }
+  return milliseconds;
+}
+
+function validateAcceptedStatus(status, requiredVerdict) {
+  requireObject(status, "accepted status");
+  requireExactKeys(
+    status,
+    ["schema", "status", "detail", "started_at", "finished_at", "verdict"],
+    "accepted status",
+  );
+  if (status.schema !== "rustia.bench.cloud-run-status.v1") fail("accepted status has the wrong schema");
+  if (status.status !== "accepted_and_published") fail("accepted status is not accepted_and_published");
+  if (status.detail !== "material regression excluded and three actual final-binary history rows appended") {
+    fail("accepted status has an unexpected detail");
+  }
+  if (status.verdict !== requiredVerdict) fail("accepted status has the wrong verdict");
+  const started = requireIsoTimestamp(status.started_at, "accepted status.started_at");
+  const finished = requireIsoTimestamp(status.finished_at, "accepted status.finished_at");
+  if (finished < started) fail("accepted status finished before it started");
+}
+
+function strictUtf8(bytes, location) {
+  const text = bytes.toString("utf8");
+  if (!Buffer.from(text, "utf8").equals(bytes)) fail(`${location} is not valid UTF-8`);
+  return text;
+}
+
+function numbersClose(left, right) {
+  if (typeof left !== "number" || !Number.isFinite(left) || typeof right !== "number" || !Number.isFinite(right)) {
+    return false;
+  }
+  const scale = Math.max(1, Math.abs(left), Math.abs(right));
+  return Math.abs(left - right) <= scale * 1e-12;
+}
+
+function matchesHistoryPrecision(serialized, raw) {
+  return (
+    typeof serialized === "number" &&
+    Number.isFinite(serialized) &&
+    typeof raw === "number" &&
+    Number.isFinite(raw) &&
+    Math.abs(serialized - raw) <= 0.500001e-6
+  );
+}
+
+function quantileSorted(values, probability) {
+  if (values.length === 1) return values[0];
+  const position = (values.length - 1) * probability;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  if (lower === upper) return values[lower];
+  const fraction = position - lower;
+  return values[lower] * (1 - fraction) + values[upper] * fraction;
+}
+
+function validateCpuDelta(deltaValue, location) {
+  const delta = requireObject(deltaValue, location);
+  requireExactKeys(delta, ["total_ticks", "idle_ticks", "idle_percent", "steal_ticks"], location);
+  requireInteger(delta.total_ticks, `${location}.total_ticks`, 1);
+  requireInteger(delta.idle_ticks, `${location}.idle_ticks`, 0);
+  requireInteger(delta.steal_ticks, `${location}.steal_ticks`, 0);
+  requireNumber(delta.idle_percent, `${location}.idle_percent`, 0);
+  if (delta.idle_ticks > delta.total_ticks || delta.idle_percent > 100) fail(`${location} has impossible data`);
+  const expectedIdle = Number(((delta.idle_ticks / delta.total_ticks) * 100).toFixed(6));
+  if (delta.idle_percent !== expectedIdle) fail(`${location}.idle_percent does not match its tick counts`);
+  return delta;
+}
+
+function timedStealGatePasses(config, delta) {
+  return (
+    delta.steal_ticks * 100 <=
+    config.host_gate.maximum_timed_steal_percent * delta.total_ticks
+  );
+}
+
+function validateGateLog(config, gateFile, declaredRecords) {
+  const text = strictUtf8(fs.readFileSync(gateFile), "gate.jsonl");
+  if (!text.endsWith("\n") || text.includes("\r")) fail("gate.jsonl is not canonical JSONL");
+  const lines = text.slice(0, -1).split("\n");
+  if (lines.length !== declaredRecords || lines.some((line) => line === "")) {
+    fail("gate.jsonl record count does not match the manifest");
+  }
+  const records = lines.map((line, index) => {
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch (error) {
+      fail(`gate.jsonl record ${index + 1} is invalid JSON: ${error.message}`);
+    }
+    if (line !== JSON.stringify(record)) fail(`gate.jsonl record ${index + 1} is not canonical JSON`);
+    return requireObject(record, `gate.jsonl record ${index + 1}`);
+  });
+  const expectedLabels = [
+    ...Array.from({ length: config.qualification.candidate_pilot_legs }, (_, index) => `qualification-${index + 1}`),
+    ...config.measurement.run_order.map((leg, index) => `accepted-${index + 1}-${leg.file}`),
+    ...Array.from({ length: config.publication.final_measurements }, (_, index) => `publication-${index + 1}`),
+  ];
+  let recordIndex = 0;
+  for (const label of expectedLabels) {
+    let passedPre = false;
+    while (
+      recordIndex < records.length &&
+      records[recordIndex].label === label &&
+      records[recordIndex].phase === "pre_leg_idle_window"
+    ) {
+      const record = records[recordIndex];
+      requireExactKeys(
+        record,
+        ["phase", "label", "timestamp", "cpu", "load_1m", "cpu_delta", "contaminants", "passed"],
+        `gate pre-record ${recordIndex + 1}`,
+      );
+      requireIsoTimestamp(record.timestamp, `gate pre-record ${recordIndex + 1}.timestamp`);
+      if (record.cpu !== config.host_gate.benchmark_cpu) fail("gate pre-record has the wrong CPU");
+      requireNumber(record.load_1m, `gate pre-record ${recordIndex + 1}.load_1m`, 0);
+      const delta = validateCpuDelta(record.cpu_delta, `gate pre-record ${recordIndex + 1}.cpu_delta`);
+      if (!Array.isArray(record.contaminants)) fail("gate pre-record contaminants is not an array");
+      const shouldPass =
+        record.load_1m <= config.host_gate.maximum_load_1m &&
+        delta.idle_percent >= config.host_gate.minimum_idle_percent &&
+        delta.steal_ticks <= config.host_gate.maximum_steal_ticks &&
+        record.contaminants.length === 0;
+      if (record.passed !== shouldPass) fail("gate pre-record has a false passed flag");
+      passedPre = record.passed;
+      recordIndex += 1;
+      if (passedPre) break;
+    }
+    if (!passedPre) fail(`gate label ${label} lacks a final passing pre-idle record`);
+    if (
+      recordIndex >= records.length ||
+      records[recordIndex].label !== label ||
+      records[recordIndex].phase !== "during_leg"
+    ) {
+      fail(`gate label ${label} lacks exactly one during-leg record`);
+    }
+    const during = records[recordIndex];
+    requireExactKeys(
+      during,
+      ["phase", "label", "timestamp", "cpu", "cpu_delta", "contaminants", "passed"],
+      `gate during-record ${recordIndex + 1}`,
+    );
+    requireIsoTimestamp(during.timestamp, `gate during-record ${recordIndex + 1}.timestamp`);
+    if (during.cpu !== config.host_gate.benchmark_cpu) fail("gate during-record has the wrong CPU");
+    const delta = validateCpuDelta(during.cpu_delta, `gate during-record ${recordIndex + 1}.cpu_delta`);
+    if (!Array.isArray(during.contaminants)) fail("gate during-record contaminants is not an array");
+    const shouldPass = timedStealGatePasses(config, delta) && during.contaminants.length === 0;
+    if (during.passed !== shouldPass || !shouldPass) {
+      fail(`gate label ${label} did not pass the 0.1%-steal/clean-process timed gate`);
+    }
+    recordIndex += 1;
+  }
+  if (recordIndex !== records.length) fail("gate.jsonl contains unexpected labels or extra records");
+}
+
+function validateRawSidecar(file, config, location, expectedCommit, expectedIdentity = null) {
+  const sidecar = requireObject(loadJsonRegular(file, location), location);
+  if (sidecar.schema !== "rustia.bench.raw-samples.v1" || sidecar.schema_version !== 1) {
+    fail(`${location} has the wrong raw-sample schema`);
+  }
+  if (sidecar.source !== "script-bench-harness") fail(`${location} has the wrong source`);
+  const metadata = requireObject(sidecar.metadata, `${location}.metadata`);
+  if (
+    metadata.measurement_count !== 1 ||
+    metadata.sample_count !== config.measurement.repetitions ||
+    !Array.isArray(sidecar.measurements) ||
+    sidecar.measurements.length !== 1
+  ) {
+    fail(`${location} has the wrong measurement/sample counts`);
+  }
+  const measurement = requireObject(sidecar.measurements[0], `${location}.measurements[0]`);
+  const expected = {
+    commit: expectedCommit,
+    target: "linux-x86_64",
+    engine: "rustia",
+    workload: config.measurement.workload,
+    n: config.measurement.fixed_n,
+    n_selection: "fixed",
+    reps: config.measurement.repetitions,
+    checksum: config.measurement.expected_checksum,
+  };
+  for (const [field, wanted] of Object.entries(expected)) {
+    if (measurement[field] !== wanted) fail(`${location}.measurement.${field} is not frozen`);
+  }
+  requireInteger(measurement.timestamp_unix, `${location}.measurement.timestamp_unix`, 1);
+  for (const field of ["dialect", "unit"]) requireString(measurement[field], `${location}.measurement.${field}`);
+  if (
+    expectedIdentity &&
+    (measurement.dialect !== expectedIdentity.dialect || measurement.unit !== expectedIdentity.unit)
+  ) {
+    fail(`${location} dialect/unit do not match the recomputed comparison identity`);
+  }
+  if (!Array.isArray(measurement.samples_ns_per_unit) || measurement.samples_ns_per_unit.length !== measurement.reps) {
+    fail(`${location} has the wrong sample count`);
+  }
+  const ordered = measurement.samples_ns_per_unit.slice().sort((left, right) => left - right);
+  if (ordered.some((sample) => typeof sample !== "number" || !Number.isFinite(sample) || sample <= 0)) {
+    fail(`${location} contains invalid raw samples`);
+  }
+  const minimum = ordered[0];
+  const harnessMedian = ordered[Math.floor(ordered.length / 2)];
+  if (!numbersClose(measurement.ns_per_unit_min, minimum)) fail(`${location} minimum does not match its samples`);
+  if (!numbersClose(measurement.ns_per_unit_median, harnessMedian)) fail(`${location} median does not match its samples`);
+  if (!numbersClose(measurement.units_per_sec, 1e9 / minimum)) fail(`${location} throughput does not match its samples`);
+  const q1 = quantileSorted(ordered, 0.25);
+  const q3 = quantileSorted(ordered, 0.75);
+  return {
+    file: path.basename(file),
+    sha256: sha256File(file),
+    measurement,
+    derived: {
+      sample_count: ordered.length,
+      min: minimum,
+      q1,
+      median: quantileSorted(ordered, 0.5),
+      harness_median: measurement.ns_per_unit_median,
+      q3,
+      max: ordered[ordered.length - 1],
+      iqr: q3 - q1,
+    },
+  };
+}
+
+function requireCompleteSummary(summaryValue, sidecar, config, location, variant = null) {
+  const summary = requireObject(summaryValue, location);
+  const measurement = sidecar.measurement;
+  const expected = {
+    file: sidecar.file,
+    sha256: sidecar.sha256,
+    timestamp_unix: measurement.timestamp_unix,
+    commit: measurement.commit,
+    target: measurement.target,
+    engine: measurement.engine,
+    dialect: measurement.dialect,
+    workload: config.measurement.workload,
+    unit: measurement.unit,
+    n: config.measurement.fixed_n,
+    reps: config.measurement.repetitions,
+    checksum: config.measurement.expected_checksum,
+    ns_per_unit_min: measurement.ns_per_unit_min,
+    ns_per_unit_median: measurement.ns_per_unit_median,
+    units_per_sec: measurement.units_per_sec,
+    ...sidecar.derived,
+  };
+  if (variant !== null) expected.variant = variant;
+  if (Object.keys(summary).length !== Object.keys(expected).length) fail(`${location} has unexpected fields`);
+  for (const [field, wanted] of Object.entries(expected)) {
+    const matches = typeof wanted === "number" ? numbersClose(summary[field], wanted) : summary[field] === wanted;
+    if (!matches) fail(`${location}.${field} does not match its raw sidecar`);
+  }
+}
+
+function normalizedAnalysis(value) {
+  const copy = JSON.parse(JSON.stringify(value));
+  for (const group of ["baseline", "candidate"]) {
+    if (copy[group] && Array.isArray(copy[group].legs)) {
+      for (const leg of copy[group].legs) leg.file = path.basename(leg.file);
+    }
+  }
+  return copy;
+}
+
+async function recomputeAnalysis(config, evidenceDirectory) {
+  const argumentsList = [path.join(REPO, "bench/analyze-fixed-samples.js")];
+  for (const leg of config.measurement.run_order.filter((entry) => entry.variant === "baseline")) {
+    argumentsList.push("--baseline", path.join(evidenceDirectory, leg.file));
+  }
+  for (const leg of config.measurement.run_order.filter((entry) => entry.variant === "candidate")) {
+    argumentsList.push("--candidate", path.join(evidenceDirectory, leg.file));
+  }
+  argumentsList.push(
+    "--bootstrap-reps",
+    String(config.measurement.bootstrap_repetitions),
+    "--seed",
+    String(config.measurement.bootstrap_seed),
+    "--material-threshold",
+    String(config.measurement.material_regression_threshold_percent),
+    "--expected-legs",
+    String(config.measurement.expected_legs_per_group),
+    "--require-full-commits",
+  );
+  const result = await run("node", argumentsList);
+  try {
+    return JSON.parse(result.stdout.toString("utf8"));
+  } catch (error) {
+    fail(`local fixed-sample analyzer returned invalid JSON: ${error.message}`);
+  }
+}
+
+async function validateAcceptedEvidence(config, state, evidenceDirectory, localHistory, remoteHistory) {
+  const manifestFile = path.join(evidenceDirectory, "manifest.json");
+  const analysisFile = path.join(evidenceDirectory, "analysis.json");
+  const protocolFile = path.join(evidenceDirectory, "protocol.json");
+  const providerFile = path.join(evidenceDirectory, "provider.json");
+  for (const [file, location] of [
+    [manifestFile, "evidence manifest"],
+    [analysisFile, "fixed-sample analysis"],
+    [protocolFile, "evidence protocol"],
+    [providerFile, "evidence provider metadata"],
+  ]) {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) fail(`${location} is not a regular file`);
+  }
+
+  const manifest = requireObject(loadJsonRegular(manifestFile, "evidence manifest"), "evidence manifest");
+  requireExactKeys(
+    manifest,
+    [
+      "schema_version",
+      "schema",
+      "created_at",
+      "provider",
+      "source",
+      "build",
+      "host",
+      "protocol",
+      "qualification",
+      "comparison",
+      "publication",
+      "evidence_sha256",
+    ],
+    "evidence manifest",
+  );
+  if (manifest.schema_version !== 1 || manifest.schema !== "rustia.bench.cloud-evidence.v1") {
+    fail("accepted Linode evidence has the wrong manifest schema");
+  }
+  requireIsoTimestamp(manifest.created_at, "evidence manifest.created_at");
+  const actualFiles = evidenceFiles(evidenceDirectory).filter((file) => file !== "manifest.json");
+  const hashes = requireObject(manifest.evidence_sha256, "evidence manifest.evidence_sha256");
+  const listed = Object.keys(hashes).sort();
+  if (canonicalJson(listed) !== canonicalJson(actualFiles)) {
+    fail("accepted Linode evidence hash inventory does not exactly match its files");
+  }
+  for (const file of listed) {
+    if (
+      file.split("/").includes("..") ||
+      !SHA256.test(hashes[file]) ||
+      sha256File(path.join(evidenceDirectory, ...file.split("/"))) !== hashes[file]
+    ) {
+      fail(`accepted Linode evidence hash is wrong or unsafe for ${file}`);
+    }
+  }
+
+  const protocol = loadJsonRegular(protocolFile, "evidence protocol");
+  validateConfig(protocol);
+  requireJsonEqual(protocol, config, "evidence protocol");
+  if (sha256File(protocolFile) !== state.plan.source.config_sha256) {
+    fail("evidence protocol bytes do not match the planned frozen config");
+  }
+  const provider = requireObject(loadJsonRegular(providerFile, "evidence provider metadata"), "evidence provider metadata");
+  const localProvider = loadJsonRegular(path.join(state.__directory, "provider.json"), "local provider snapshot");
+  requireJsonEqual(provider, localProvider, "evidence provider metadata");
+  requireJsonEqual(provider.catalog_plan, state.plan, "evidence provider catalog plan");
+  const providerIdentity = [
+    [provider.provider, "linode", "provider"],
+    [provider.linode_id, state.linode_id, "Linode ID"],
+    [provider.linode_label, state.linode_label, "Linode label"],
+    [provider.region, config.provider.region, "region"],
+    [provider.size_slug, config.provider.size.id, "plan"],
+    [provider.image, config.provider.image, "image"],
+    [provider.vcpus, config.provider.size.vcpus, "vCPUs"],
+    [provider.memory_mib, config.provider.size.memory_mib, "memory"],
+    [provider.disk_gib, config.provider.size.disk_gib, "disk"],
+    [provider.public_ipv4, state.public_ipv4, "public IPv4"],
+    [provider.backups_enabled, false, "backup state"],
+    [provider.interface_generation, "legacy_config", "interface generation"],
+  ];
+  for (const [actual, expected, field] of providerIdentity) {
+    if (actual !== expected) fail(`evidence provider ${field} does not match the destroyed Linode`);
+  }
+  requireJsonEqual(manifest.provider, provider, "manifest provider identity");
+
+  const source = requireObject(manifest.source, "evidence manifest.source");
+  const expectedSource = {
+    baseline_commit: config.source.baseline_commit,
+    candidate_commit: config.source.candidate_commit,
+    harness_commit: config.source.harness_commit,
+    baseline_original_harness_sha256: config.source.expected_sha256.baseline_original_harness,
+    baseline_overlay_harness_sha256: config.source.expected_sha256.overlay_harness,
+    baseline_overlay_disclosure:
+      "bench/src/main.rs from the harness commit was copied byte-for-byte over the baseline source before compilation",
+    workload_sha256: config.source.expected_sha256.workload,
+    cargo_lock_sha256: config.source.expected_sha256.cargo_lock,
+    toolchain_sha256: config.source.expected_sha256.toolchain,
+    analyzer_sha256: config.source.expected_sha256.analyzer,
+    git_bundle_sha256: state.bundle_sha256,
+    protocol_config_sha256: sha256File(protocolFile),
+    provider_metadata_sha256: sha256File(providerFile),
+  };
+  requireJsonEqual(source, expectedSource, "manifest source identity");
+  if (sha256File(path.join(REPO, "bench/analyze-fixed-samples.js")) !== source.analyzer_sha256) {
+    fail("local analyzer does not match the frozen manifest identity");
+  }
+
+  const hostFile = path.join(evidenceDirectory, "host.json");
+  const hostJson = requireObject(loadJsonRegular(hostFile, "host.json"), "host.json");
+  if (hostJson.virtualization !== "kvm") fail("Linode host evidence is not a KVM guest");
+  const host = requireObject(manifest.host, "manifest.host");
+  if (host.file !== "host.json" || host.sha256 !== sha256File(hostFile)) {
+    fail("manifest host identity does not match host.json");
+  }
+  for (const [field, wanted] of Object.entries({
+    cpu_model: hostJson.cpu_model,
+    microcode: hostJson.microcode,
+    clocksource: hostJson.clocksource,
+    scaling_governors: hostJson.scaling_governors,
+    benchmark_cpu: config.host_gate.benchmark_cpu,
+  })) {
+    requireJsonEqual(host[field], wanted, `manifest.host.${field}`);
+  }
+
+  const protocolManifest = requireObject(manifest.protocol, "manifest.protocol");
+  const expectedProtocol = {
+    workload: config.measurement.workload,
+    fixed_n: config.measurement.fixed_n,
+    repetitions_per_leg: config.measurement.repetitions,
+    order: config.measurement.run_order,
+    common_arguments: [
+      "--engines",
+      "rustia",
+      "--workloads",
+      config.measurement.workload,
+      "--fixed-n",
+      String(config.measurement.fixed_n),
+      "--reps",
+      String(config.measurement.repetitions),
+      "--no-history",
+      "--no-results",
+      "--no-latest-json",
+    ],
+    bootstrap_repetitions: config.measurement.bootstrap_repetitions,
+    bootstrap_seed: config.measurement.bootstrap_seed,
+    material_regression_threshold_percent: config.measurement.material_regression_threshold_percent,
+    required_verdict: config.publication.required_verdict,
+    host_gate: config.host_gate,
+  };
+  for (const [field, wanted] of Object.entries(expectedProtocol)) {
+    requireJsonEqual(protocolManifest[field], wanted, `manifest.protocol.${field}`);
+  }
+  if (
+    protocolManifest.exclusion_rule !==
+    "any pre/during-leg host-gate violation discards the whole eight-leg block; no leg is selected by timing outcome"
+  ) {
+    fail("manifest protocol exclusion rule is not frozen");
+  }
+  const gateLog = requireObject(protocolManifest.gate_log, "manifest.protocol.gate_log");
+  const gateFile = path.join(evidenceDirectory, "gate.jsonl");
+  if (gateLog.file !== "gate.jsonl" || gateLog.sha256 !== sha256File(gateFile)) {
+    fail("manifest gate log identity does not match gate.jsonl");
+  }
+  requireInteger(gateLog.records, "manifest.protocol.gate_log.records", 1);
+  validateGateLog(config, gateFile, gateLog.records);
+
+  const analysis = requireObject(loadJsonRegular(analysisFile, "fixed-sample analysis"), "fixed-sample analysis");
+  const recomputed = await recomputeAnalysis(config, evidenceDirectory);
+  requireJsonEqual(normalizedAnalysis(analysis), normalizedAnalysis(recomputed), "fixed-sample analysis");
+  if (
+    analysis.schema_version !== 1 ||
+    analysis.schema !== "rustia.bench.fixed-sample-analysis.v1" ||
+    analysis.comparison.verdict.status !== config.publication.required_verdict
+  ) {
+    fail("fixed-sample analysis did not independently exclude a material regression");
+  }
+  const analysisIdentity = requireObject(analysis.identity, "fixed-sample analysis.identity");
+  const expectedAnalysisIdentity = {
+    target: "linux-x86_64",
+    engine: "rustia",
+    workload: config.measurement.workload,
+    fixed_n: config.measurement.fixed_n,
+    reps_per_leg: config.measurement.repetitions,
+    legs_per_group: config.measurement.expected_legs_per_group,
+    checksum: config.measurement.expected_checksum,
+  };
+  for (const [field, wanted] of Object.entries(expectedAnalysisIdentity)) {
+    if (analysisIdentity[field] !== wanted) fail(`fixed-sample analysis.identity.${field} is not frozen`);
+  }
+  for (const field of ["dialect", "unit"]) requireString(analysisIdentity[field], `analysis.identity.${field}`);
+  if (
+    analysis.baseline.commit !== config.source.baseline_commit ||
+    analysis.candidate.commit !== config.source.candidate_commit ||
+    analysis.method.bootstrap_iterations !== config.measurement.bootstrap_repetitions ||
+    analysis.method.bootstrap_seed_uint32 !== config.measurement.bootstrap_seed ||
+    analysis.method.expected_legs !== config.measurement.expected_legs_per_group ||
+    analysis.method.require_full_commits !== true ||
+    analysis.comparison.material_regression_threshold_percent !==
+      config.measurement.material_regression_threshold_percent
+  ) {
+    fail("fixed-sample analysis source or method identity is not frozen");
+  }
+
+  const qualification = requireObject(manifest.qualification, "evidence manifest.qualification");
+  if (
+    qualification.schema !== "rustia.bench.cloud-qualification.v1" ||
+    qualification.passed !== true ||
+    qualification.maximum_median_spread_percent !== config.qualification.max_median_spread_percent ||
+    qualification.note !== "qualification-only runs; never accepted as A/B evidence or public history" ||
+    !Array.isArray(qualification.pilot_legs) ||
+    qualification.pilot_legs.length !== config.qualification.candidate_pilot_legs
+  ) {
+    fail("accepted Linode evidence did not pass the frozen qualification gate");
+  }
+  const qualificationDirectory = path.join(evidenceDirectory, "qualification-sidecars");
+  const pilotMedians = [];
+  qualification.pilot_legs.forEach((summary, index) => {
+    const sidecar = validateRawSidecar(
+      path.join(qualificationDirectory, `candidate-pilot-${index + 1}.json`),
+      config,
+      `qualification sidecar ${index + 1}`,
+      config.source.candidate_commit,
+      analysisIdentity,
+    );
+    requireCompleteSummary(summary, sidecar, config, `manifest qualification.pilot_legs[${index}]`);
+    pilotMedians.push(sidecar.measurement.ns_per_unit_median);
+  });
+  const spread = ((Math.max(...pilotMedians) - Math.min(...pilotMedians)) / Math.min(...pilotMedians)) * 100;
+  if (!numbersClose(qualification.median_spread_percent, spread) || spread > config.qualification.max_median_spread_percent) {
+    fail("qualification spread does not match its raw pilot sidecars or threshold");
+  }
+  requireJsonEqual(
+    loadJsonRegular(path.join(evidenceDirectory, "qualification.json"), "qualification.json"),
+    qualification,
+    "qualification.json",
+  );
+  requireJsonEqual(
+    loadJsonRegular(path.join(qualificationDirectory, "qualification.json"), "qualification sidecar summary"),
+    qualification,
+    "qualification-sidecars/qualification.json",
+  );
+
+  const comparison = requireObject(manifest.comparison, "evidence manifest.comparison");
+  if (
+    comparison.analysis_sha256 !== sha256File(analysisFile) ||
+    comparison.verdict.status !== config.publication.required_verdict
+  ) {
+    fail("manifest comparison analysis identity or verdict is wrong");
+  }
+  requireJsonEqual(comparison.verdict, analysis.comparison.verdict, "manifest comparison verdict");
+  for (const [field, wanted] of Object.entries({
+    candidate_delta_percent: analysis.comparison.candidate_delta_percent,
+    pooled_bootstrap_ci_95_percent: analysis.comparison.pooled_bootstrap_ci_95_percent,
+    hierarchical_bootstrap_ci_95_percent: analysis.comparison.hierarchical_bootstrap_ci_95_percent,
+    conservative_bootstrap_ci_95_percent: analysis.comparison.bootstrap_ci_95_percent,
+  })) {
+    requireJsonEqual(comparison[field], wanted, `manifest.comparison.${field}`);
+  }
+  if (!Array.isArray(comparison.legs) || comparison.legs.length !== config.measurement.run_order.length) {
+    fail("manifest comparison has the wrong number of legs");
+  }
+  config.measurement.run_order.forEach((leg, index) => {
+    const expectedCommit = leg.variant === "baseline" ? config.source.baseline_commit : config.source.candidate_commit;
+    const sidecar = validateRawSidecar(
+      path.join(evidenceDirectory, leg.file),
+      config,
+      `comparison sidecar ${leg.file}`,
+      expectedCommit,
+      analysisIdentity,
+    );
+    requireCompleteSummary(comparison.legs[index], sidecar, config, `manifest comparison.legs[${index}]`, leg.variant);
+  });
+
+  const suffix = strictUtf8(remoteHistory.subarray(localHistory.length), "remote history suffix");
+  if (!suffix.endsWith("\n") || suffix.includes("\r")) fail("remote history suffix is not canonical JSONL");
+  const historyRows = suffix.slice(0, -1).split("\n").map((line, index) => {
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch (error) {
+      fail(`remote history row ${index + 1} is invalid JSON: ${error.message}`);
+    }
+    requireObject(row, `remote history row ${index + 1}`);
+    requireExactKeys(
+      row,
+      [
+        "timestamp_unix",
+        "commit",
+        "target",
+        "engine",
+        "dialect",
+        "workload",
+        "unit",
+        "n",
+        "reps",
+        "ns_per_unit_min",
+        "ns_per_unit_median",
+        "units_per_sec",
+        "checksum",
+      ],
+      `remote history row ${index + 1}`,
+    );
+    return row;
+  });
+  if (historyRows.length !== config.publication.final_measurements) fail("remote history has the wrong suffix length");
+  const finalSidecars = historyRows.map((row, index) => {
+    const sidecar = validateRawSidecar(
+      path.join(evidenceDirectory, `final-dense-${index + 1}.json`),
+      config,
+      `final measurement sidecar ${index + 1}`,
+      config.source.candidate_commit,
+      analysisIdentity,
+    );
+    const measurement = sidecar.measurement;
+    if (
+      row.timestamp_unix !== measurement.timestamp_unix ||
+      row.commit !== measurement.commit ||
+      row.target !== measurement.target ||
+      row.engine !== measurement.engine ||
+      row.dialect !== measurement.dialect ||
+      row.workload !== measurement.workload ||
+      row.unit !== measurement.unit ||
+      row.n !== measurement.n ||
+      row.reps !== measurement.reps ||
+      !matchesHistoryPrecision(row.ns_per_unit_min, measurement.ns_per_unit_min) ||
+      !matchesHistoryPrecision(row.ns_per_unit_median, measurement.ns_per_unit_median) ||
+      !matchesHistoryPrecision(row.units_per_sec, measurement.units_per_sec) ||
+      row.checksum !== measurement.checksum
+    ) {
+      fail(`remote history row ${index + 1} does not match final-dense-${index + 1}.json`);
+    }
+    return sidecar;
+  });
+
+  const publication = requireObject(manifest.publication, "evidence manifest.publication");
+  const beforeLines = strictUtf8(localHistory, "local history").trimEnd().split("\n").length;
+  const expectedPublication = {
+    performed: true,
+    history_before_sha256: config.source.expected_sha256.history_before,
+    history_after_sha256: sha256(remoteHistory),
+    history_lines_before: beforeLines,
+    history_lines_after: beforeLines + config.publication.final_measurements,
+  };
+  for (const [field, wanted] of Object.entries(expectedPublication)) {
+    if (publication[field] !== wanted) fail(`accepted Linode evidence publication.${field} is wrong`);
+  }
+  requireJsonEqual(publication.appended_rows, historyRows, "manifest publication rows");
+  if (!Array.isArray(publication.sidecars) || publication.sidecars.length !== finalSidecars.length) {
+    fail("manifest publication has the wrong number of sidecars");
+  }
+  finalSidecars.forEach((sidecar, index) =>
+    requireCompleteSummary(publication.sidecars[index], sidecar, config, `manifest publication.sidecars[${index}]`),
+  );
+}
+
+async function promoteAcceptedResult(
+  config,
+  state,
+  downloadDirectory,
+  verifyCheckout = verifyPromotionCheckout,
+) {
   if (!state.linode_destroyed_at) {
     fail("refusing publication before the Linode API has confirmed instance deletion");
   }
   throwIfInterrupted();
   const statusFile = path.join(downloadDirectory, "status.json");
-  if (!fs.existsSync(statusFile)) fail("remote export did not contain status.json");
-  const status = JSON.parse(fs.readFileSync(statusFile, "utf8"));
+  const status = loadJsonRegular(statusFile, "remote status");
   state.remote_status = status.status;
   state.remote_status_detail = status.detail || null;
   saveState(state);
@@ -1416,7 +2334,8 @@ async function promoteAcceptedResult(config, state, downloadDirectory) {
     );
     return false;
   }
-  await verifyPromotionCheckout(config, state);
+  validateAcceptedStatus(status, config.publication.required_verdict);
+  await verifyCheckout(config, state);
 
   const candidate = config.source.candidate_commit;
   const evidenceSource = path.join(downloadDirectory, "evidence", candidate);
@@ -1428,7 +2347,10 @@ async function promoteAcceptedResult(config, state, downloadDirectory) {
     path.join(evidenceSource, "analysis.json"),
     historySource,
   ]) {
-    if (!fs.existsSync(required)) fail(`remote accepted export is missing ${required}`);
+    const stat = fs.lstatSync(required);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
+      fail(`remote accepted export is missing a single regular file at ${required}`);
+    }
   }
   if (fs.existsSync(evidenceDestination)) {
     fail(`refusing to overwrite existing evidence directory ${evidenceDestination}`);
@@ -1449,9 +2371,11 @@ async function promoteAcceptedResult(config, state, downloadDirectory) {
   if (newLines - oldLines !== config.publication.final_measurements) {
     fail(`remote history appended ${newLines - oldLines} rows, expected ${config.publication.final_measurements}`);
   }
+  await validateAcceptedEvidence(config, state, evidenceSource, localHistory, remoteHistory);
 
-  const evidenceStage = `${evidenceDestination}.incoming-${state.run_id}`;
-  const historyStage = `${historyDestination}.incoming-${state.run_id}`;
+  const stageNonce = crypto.randomBytes(6).toString("hex");
+  const evidenceStage = `${evidenceDestination}.incoming-${state.run_id}-${stageNonce}`;
+  const historyStage = `${historyDestination}.incoming-${state.run_id}-${stageNonce}`;
   const generatedFiles = [
     path.join(REPO, "bench/RESULTS.md"),
     path.join(REPO, "bench/current-results.json"),
@@ -1465,8 +2389,21 @@ async function promoteAcceptedResult(config, state, downloadDirectory) {
   let evidenceCommitted = false;
   let historyCommitted = false;
   try {
-    fs.cpSync(evidenceSource, evidenceStage, { recursive: true, errorOnExist: true });
+    if (fs.existsSync(evidenceStage) || fs.existsSync(historyStage)) fail("randomized promotion stage already exists");
+    fs.cpSync(evidenceSource, evidenceStage, { recursive: true, errorOnExist: true, force: false });
     fs.copyFileSync(historySource, historyStage, fs.constants.COPYFILE_EXCL);
+    const sourceFiles = evidenceFiles(evidenceSource);
+    const stagedFiles = evidenceFiles(evidenceStage);
+    requireJsonEqual(stagedFiles, sourceFiles, "staged evidence inventory");
+    for (const file of sourceFiles) {
+      if (
+        sha256File(path.join(evidenceStage, ...file.split("/"))) !==
+        sha256File(path.join(evidenceSource, ...file.split("/")))
+      ) {
+        fail(`staged evidence bytes differ for ${file}`);
+      }
+    }
+    if (sha256File(historyStage) !== sha256(remoteHistory)) fail("staged history bytes differ from the export");
     throwIfInterrupted();
     state.promotion_started_at = new Date().toISOString();
     saveState(state);
@@ -1862,6 +2799,85 @@ async function destroy(runId) {
   }
 }
 
+async function promote(runId) {
+  const lockToken = acquireCoordinatorLock();
+  let recoveryDirectory = null;
+  try {
+    const state = completedStateForRunId(runId);
+    const expectedDirectory = path.join(RUNS_ROOT, runId);
+    if (
+      state.schema !== "rustia.linode-benchmark-state.v1" ||
+      path.resolve(state.__directory) !== expectedDirectory
+    ) {
+      fail("Linode run state identity or directory is invalid");
+    }
+    if (!state.linode_destroyed_at || !Number.isFinite(Date.parse(state.linode_destroyed_at))) {
+      fail("offline promotion requires API-confirmed Linode deletion");
+    }
+    if (state.remote_exit_status !== 0 || state.remote_timed_out !== false) {
+      fail("offline promotion requires a successful, non-timeout remote benchmark");
+    }
+    if (state.remote_status !== "accepted_and_published") {
+      fail("offline promotion requires a recorded accepted_and_published result");
+    }
+    if (!state.promotion_rolled_back_at || typeof state.promotion_rollback_reason !== "string") {
+      fail("offline promotion is limited to an accepted result whose first promotion rolled back");
+    }
+    if (state.promoted_at) fail("Linode result is already promoted");
+
+    const archive = path.join(expectedDirectory, "export.tar.gz");
+    if (
+      path.resolve(state.export_path || "") !== archive ||
+      !SHA256.test(state.export_sha256 || "") ||
+      !fs.lstatSync(archive).isFile() ||
+      sha256File(archive) !== state.export_sha256
+    ) {
+      fail("Linode export archive is missing, redirected, or differs from the journaled download");
+    }
+    const config = loadConfig(state.config_path);
+    await verifyRecoveryCheckout(config, state);
+    await run("env", ["-u", "RUSTC_WRAPPER", "just", "check-benchmark-results"], {
+      capture: false,
+      announce: true,
+    });
+
+    recoveryDirectory = path.join(
+      expectedDirectory,
+      `recovery-download-${safeTimestamp()}-${crypto.randomBytes(4).toString("hex")}`,
+    );
+    state.recovery_promotion_started_at = new Date().toISOString();
+    state.recovery_promotion_commit = outputText(await run("git", ["rev-parse", "HEAD"]));
+    saveState(state);
+    await extractArchive(archive, recoveryDirectory);
+    if (sha256File(archive) !== state.export_sha256) {
+      fail("Linode export archive changed during offline promotion");
+    }
+    const promoted = await promoteAcceptedResult(
+      config,
+      state,
+      recoveryDirectory,
+      verifyRecoveryCheckout,
+    );
+    if (!promoted) fail("journaled Linode export is no longer accepted_and_published");
+    state.recovery_promoted_at = new Date().toISOString();
+    saveState(state);
+    process.stdout.write(`Offline promotion completed for Linode run ${runId}.\n`);
+  } catch (error) {
+    if (runId && RUN_ID.test(runId)) {
+      const matches = listStates().filter((state) => state.run_id === runId);
+      if (matches.length === 1 && matches[0].recovery_promotion_started_at && !matches[0].promoted_at) {
+        matches[0].recovery_promotion_failed_at = new Date().toISOString();
+        matches[0].recovery_promotion_failure = error.message;
+        saveState(matches[0]);
+      }
+    }
+    throw error;
+  } finally {
+    if (recoveryDirectory) fs.rmSync(recoveryDirectory, { recursive: true, force: true });
+    releaseCoordinatorLock(lockToken);
+  }
+}
+
 async function selfTest(config) {
   assert.equal(config.publication.mode, "acceptance");
   assert.equal(config.provider.region, "ap-southeast");
@@ -2077,6 +3093,7 @@ function usage() {
   node tools/run-linode-benchmark.js bench
   node tools/run-linode-benchmark.js status
   node tools/run-linode-benchmark.js destroy [RUN-ID]
+  node tools/run-linode-benchmark.js promote RUN-ID
   node tools/run-linode-benchmark.js unlock
   node tools/run-linode-benchmark.js self-test
 `);
@@ -2104,6 +3121,10 @@ async function main() {
     case "destroy":
       requireCommandArguments(1, 2);
       await destroy(process.argv[3] || "");
+      break;
+    case "promote":
+      requireCommandArguments(2);
+      await promote(process.argv[3]);
       break;
     case "unlock":
       requireCommandArguments(1);

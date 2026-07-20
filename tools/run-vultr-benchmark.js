@@ -4456,7 +4456,15 @@ async function selfTest(config) {
         checksum: measurement.checksum,
       });
     }
-    const localHistoryFixture = fs.readFileSync(path.join(REPO, "bench/history/runs.jsonl"));
+    const localHistoryFixture = await gitBlob(
+      config.source.candidate_commit,
+      "bench/history/runs.jsonl",
+    );
+    assert.equal(
+      sha256(localHistoryFixture),
+      config.source.expected_sha256.history_before,
+      "candidate history fixture does not match frozen history_before",
+    );
     const remoteHistoryFixture = Buffer.concat([
       localHistoryFixture,
       Buffer.from(`${historyRowsFixture.map((row) => JSON.stringify(row)).join("\n")}\n`),

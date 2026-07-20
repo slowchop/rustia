@@ -364,7 +364,14 @@ just bench-linode-status
 just bench-linode-unlock
 just bench-linode-destroy
 just bench-linode-destroy RUN_ID
+just bench-linode-promote RUN_ID       # offline retry after an accepted promotion rolls back
 ```
+
+The promotion retry never reads the API token or contacts Linode. It requires a
+confirmed-deleted, accepted run and rechecks the journaled archive, original Git
+identities, raw samples, qualification spread, every host gate, recomputed
+bootstrap verdict, final history rows, and generated result files before it
+records success.
 
 The dedicated Linode shape is still a KVM guest. Two Sydney v1 placements
 eventually recorded one steal tick during a timed leg: 1/1,317 ticks (0.075930%)
