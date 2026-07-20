@@ -33,6 +33,30 @@ const RUN_ID = /^\d{8}T\d{6}Z-[0-9a-f]{8}$/;
 const MAX_EXPORT_ARCHIVE_BYTES = 256 * 1024 * 1024;
 const MAX_EXPORT_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
 const MAX_EXPORT_ENTRIES = 10_000;
+const FIXED_THROUGHPUT_PROTOCOL = "fixed_throughput_v1";
+const VM_STRING_MEMORY_PROTOCOL = "vm_string_memory_v1";
+const ALLOWED_PROTOCOLS = new Set([FIXED_THROUGHPUT_PROTOCOL, VM_STRING_MEMORY_PROTOCOL]);
+const VM_STRING_SCENARIOS = Object.freeze([
+  "empty",
+  "short_unloaded",
+  "short_loaded",
+  "long_unloaded",
+  "long_loaded",
+]);
+const VM_STRING_EVIDENCE_FILES = Object.freeze([
+  "analysis.json",
+  "gate.jsonl",
+  "host.json",
+  "manifest.json",
+  "protocol.json",
+  "provider.json",
+  "remote-run.log",
+  "samples.jsonl",
+  "warmup-samples.jsonl",
+]);
+const VM_STRING_HASHED_EVIDENCE_FILES = Object.freeze(
+  VM_STRING_EVIDENCE_FILES.filter((file) => file !== "manifest.json"),
+);
 
 let activeChild = null;
 let activeRequest = null;
@@ -125,11 +149,27 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
+function protocolKind(config) {
+  const measurement = requireObject(config.measurement, "config.measurement");
+  const kind = measurement.protocol === undefined ? FIXED_THROUGHPUT_PROTOCOL : measurement.protocol;
+  if (!ALLOWED_PROTOCOLS.has(kind)) {
+    fail(`config.measurement.protocol must be one of ${[...ALLOWED_PROTOCOLS].join(", ")}`);
+  }
+  return kind;
+}
+
+function isVmStringMemory(config) {
+  return protocolKind(config) === VM_STRING_MEMORY_PROTOCOL;
+}
+
 function validateConfig(value) {
   const root = requireObject(value, "config");
+  const kind = protocolKind(root);
   requireExactKeys(
     root,
-    ["schema", "provider", "source", "measurement", "qualification", "host_gate", "publication"],
+    kind === VM_STRING_MEMORY_PROTOCOL
+      ? ["schema", "provider", "source", "measurement", "host_gate", "publication"]
+      : ["schema", "provider", "source", "measurement", "qualification", "host_gate", "publication"],
     "config",
   );
   if (root.schema !== "rustia.linode-fixed-benchmark.v2") {
@@ -179,15 +219,25 @@ function validateConfig(value) {
   const expected = requireObject(source.expected_sha256, "config.source.expected_sha256");
   requireExactKeys(
     expected,
-    [
-      "baseline_original_harness",
-      "overlay_harness",
-      "workload",
-      "cargo_lock",
-      "toolchain",
-      "analyzer",
-      "history_before",
-    ],
+    kind === VM_STRING_MEMORY_PROTOCOL
+      ? [
+          "baseline_original_bench_manifest",
+          "candidate_original_bench_manifest",
+          "overlay_bench_manifest",
+          "sampler",
+          "analyzer",
+          "cargo_lock",
+          "toolchain",
+        ]
+      : [
+          "baseline_original_harness",
+          "overlay_harness",
+          "workload",
+          "cargo_lock",
+          "toolchain",
+          "analyzer",
+          "history_before",
+        ],
     "config.source.expected_sha256",
   );
   for (const [field, hash] of Object.entries(expected)) {
@@ -197,9 +247,45 @@ function validateConfig(value) {
   }
 
   const measurement = requireObject(root.measurement, "config.measurement");
+  if (kind === VM_STRING_MEMORY_PROTOCOL) {
+    requireExactKeys(
+      measurement,
+      [
+        "protocol",
+        "vm_count",
+        "accepted_rounds",
+        "warmup_rounds",
+        "round_retry_limit",
+        "scenarios",
+        "bootstrap_repetitions",
+        "bootstrap_seed",
+      ],
+      "config.measurement",
+    );
+    if (root.schema !== "rustia.linode-fixed-benchmark.v2") {
+      fail("vm_string_memory_v1 is supported only by the Linode v2 lifecycle");
+    }
+    const frozenIntegers = {
+      vm_count: 512,
+      accepted_rounds: 16,
+      warmup_rounds: 1,
+      round_retry_limit: 3,
+      bootstrap_repetitions: 100000,
+      bootstrap_seed: 1381323604,
+    };
+    for (const [field, frozen] of Object.entries(frozenIntegers)) {
+      if (requireInteger(measurement[field], `config.measurement.${field}`, field === "bootstrap_seed" ? 0 : 1) !== frozen) {
+        fail(`config.measurement.${field} must remain frozen at ${frozen}`);
+      }
+    }
+    if (canonicalJson(measurement.scenarios) !== canonicalJson(VM_STRING_SCENARIOS)) {
+      fail(`config.measurement.scenarios must be exactly ${VM_STRING_SCENARIOS.join(", ")}`);
+    }
+  } else {
   requireExactKeys(
     measurement,
     [
+      ...(measurement.protocol === undefined ? [] : ["protocol"]),
       "workload",
       "workload_path",
       "fixed_n",
@@ -255,18 +341,22 @@ function validateConfig(value) {
     fail("run order must contain the declared number of baseline and candidate legs");
   }
 
-  const qualification = requireObject(root.qualification, "config.qualification");
-  requireExactKeys(
-    qualification,
-    ["candidate_pilot_legs", "max_median_spread_percent"],
-    "config.qualification",
-  );
-  requireInteger(qualification.candidate_pilot_legs, "config.qualification.candidate_pilot_legs", 2);
-  requireNumber(
-    qualification.max_median_spread_percent,
-    "config.qualification.max_median_spread_percent",
-    0,
-  );
+  }
+
+  if (kind === FIXED_THROUGHPUT_PROTOCOL) {
+    const qualification = requireObject(root.qualification, "config.qualification");
+    requireExactKeys(
+      qualification,
+      ["candidate_pilot_legs", "max_median_spread_percent"],
+      "config.qualification",
+    );
+    requireInteger(qualification.candidate_pilot_legs, "config.qualification.candidate_pilot_legs", 2);
+    requireNumber(
+      qualification.max_median_spread_percent,
+      "config.qualification.max_median_spread_percent",
+      0,
+    );
+  }
 
   const gate = requireObject(root.host_gate, "config.host_gate");
   requireExactKeys(
@@ -297,12 +387,19 @@ function validateConfig(value) {
   requireInteger(gate.wait_timeout_seconds, "config.host_gate.wait_timeout_seconds", 1);
 
   const publication = requireObject(root.publication, "config.publication");
-  requireExactKeys(publication, ["mode", "required_verdict", "final_measurements"], "config.publication");
-  if (publication.mode !== "acceptance") fail("Linode coordinator is acceptance-only");
-  if (publication.required_verdict !== "material_regression_excluded") {
-    fail("config.publication.required_verdict must be material_regression_excluded");
+  if (kind === VM_STRING_MEMORY_PROTOCOL) {
+    requireExactKeys(publication, ["mode"], "config.publication");
+    if (publication.mode !== "evidence_only") {
+      fail("vm_string_memory_v1 publication.mode must be evidence_only");
+    }
+  } else {
+    requireExactKeys(publication, ["mode", "required_verdict", "final_measurements"], "config.publication");
+    if (publication.mode !== "acceptance") fail("Linode coordinator is acceptance-only");
+    if (publication.required_verdict !== "material_regression_excluded") {
+      fail("config.publication.required_verdict must be material_regression_excluded");
+    }
+    requireInteger(publication.final_measurements, "config.publication.final_measurements", 3);
   }
-  requireInteger(publication.final_measurements, "config.publication.final_measurements", 3);
   return root;
 }
 
@@ -378,6 +475,67 @@ function finalSidecarName(config, index) {
   const file = `final-${workloadFileComponent(config.measurement.workload)}-${index}.json`;
   if (!SAFE_FILE.test(file)) fail("generated final sidecar name is not a safe JSON basename");
   return file;
+}
+
+function rotatedMemoryScenarios(round, scenarios = VM_STRING_SCENARIOS) {
+  requireInteger(round, "memory round", 1);
+  // Consecutive rounds invert the first build while retaining the same scenario
+  // rotation. This makes every scenario's baseline/candidate position sum exact
+  // within each pair instead of relying on the 40-round joint cycle.
+  const rotation = Math.floor((round - 1) / 2) % scenarios.length;
+  return [...scenarios.slice(rotation), ...scenarios.slice(0, rotation)];
+}
+
+function memoryRoundOrder(round, scenarios = VM_STRING_SCENARIOS) {
+  const firstBuildCycle = [
+    "baseline",
+    "candidate",
+    "candidate",
+    "baseline",
+    "candidate",
+    "baseline",
+    "baseline",
+    "candidate",
+  ];
+  const firstRole = firstBuildCycle[(round - 1) % firstBuildCycle.length];
+  const secondRole = firstRole === "baseline" ? "candidate" : "baseline";
+  const firstScenarios = rotatedMemoryScenarios(round, scenarios);
+  return [
+    ...firstScenarios.map((scenario) => ({ role: firstRole, scenario })),
+    ...[...firstScenarios].reverse().map((scenario) => ({ role: secondRole, scenario })),
+  ];
+}
+
+function memorySampleId(prefix, round, role, scenario) {
+  if (!/^(warmup|round)$/.test(prefix)) fail("memory sample prefix is invalid");
+  if (!/^(baseline|candidate)$/.test(role) || !VM_STRING_SCENARIOS.includes(scenario)) {
+    fail("memory sample identity is invalid");
+  }
+  return `${prefix}-${String(round).padStart(2, "0")}-${role}-${scenario.replaceAll("_", "-")}`;
+}
+
+function addFreshMemoryProcessId(processIds, pid, location) {
+  requireInteger(pid, `${location} process ID`, 1);
+  if (processIds.has(pid)) {
+    fail(`${location} reuses process ID ${pid}; every sample must be a fresh process`);
+  }
+  processIds.add(pid);
+}
+
+function memoryEvidenceRelativePath(commit) {
+  if (!FULL_COMMIT.test(commit)) fail("memory evidence commit must be a lowercase full commit");
+  return path.join("bench/evidence/vm-string-memory", commit);
+}
+
+function memoryPromotionLayout(config, downloadDirectory) {
+  if (!isVmStringMemory(config)) fail("memory promotion layout requires vm_string_memory_v1");
+  const relativeEvidence = memoryEvidenceRelativePath(config.source.candidate_commit);
+  return {
+    evidence_source: path.join(downloadDirectory, relativeEvidence.replace(/^bench\//, "")),
+    evidence_destination: path.join(REPO, relativeEvidence),
+    publication_source: null,
+    history_destination: null,
+  };
 }
 
 function sha256File(file) {
@@ -879,7 +1037,37 @@ async function verifySource(config, configFile = DEFAULT_CONFIG) {
 
   const source = config.source;
   const expected = source.expected_sha256;
-  const checks = [
+  const checks = isVmStringMemory(config) ? [
+    [
+      "baseline original bench manifest",
+      sha256(await gitBlob(source.baseline_commit, "bench/Cargo.toml")),
+      expected.baseline_original_bench_manifest,
+    ],
+    [
+      "candidate original bench manifest",
+      sha256(await gitBlob(source.candidate_commit, "bench/Cargo.toml")),
+      expected.candidate_original_bench_manifest,
+    ],
+    [
+      "overlay bench manifest",
+      sha256(await gitBlob(source.harness_commit, "bench/Cargo.toml")),
+      expected.overlay_bench_manifest,
+    ],
+    [
+      "vm string memory sampler",
+      sha256(await gitBlob(source.harness_commit, "bench/src/bin/vm-string-memory.rs")),
+      expected.sampler,
+    ],
+    [
+      "vm string memory analyzer",
+      sha256(await gitBlob(source.harness_commit, "bench/analyze-vm-string-memory.js")),
+      expected.analyzer,
+    ],
+    ...[source.baseline_commit, source.candidate_commit, source.harness_commit].flatMap((commit, index) => [
+      [`source ${index + 1} Cargo.lock`, null, expected.cargo_lock, commit, "Cargo.lock"],
+      [`source ${index + 1} toolchain`, null, expected.toolchain, commit, "rust-toolchain.toml"],
+    ]),
+  ] : [
     [
       "baseline original harness",
       sha256(await gitBlob(source.baseline_commit, "bench/src/main.rs")),
@@ -919,7 +1107,10 @@ async function verifySource(config, configFile = DEFAULT_CONFIG) {
     ],
     ["current history", sha256File(path.join(REPO, "bench/history/runs.jsonl")), expected.history_before],
   ];
-  for (const [name, actual, wanted] of checks) {
+  for (const check of checks) {
+    const [name, immediate, wanted, commit, file] = check;
+    const actual = immediate === null ? sha256(await gitBlob(commit, file)) : immediate;
+    check[1] = actual;
     if (actual !== wanted) fail(`${name} SHA-256 is ${actual}, expected ${wanted}`);
   }
   return {
@@ -937,7 +1128,7 @@ function sanitizedProviderPlan(config, provider, source) {
   return {
     schema: config.schema,
     provider: "linode",
-    protocol_mode: "acceptance",
+    protocol_mode: config.publication.mode,
     region: {
       id: provider.region.id,
       label: provider.region.label,
@@ -974,15 +1165,26 @@ function sanitizedProviderPlan(config, provider, source) {
     billing_caveat:
       "Linode usage is rounded up to a whole hour; deletion, not shutdown, stops further accrual, and an API outage can delay confirmed deletion",
     source,
-    comparison: {
-      baseline_commit: config.source.baseline_commit,
-      candidate_commit: config.source.candidate_commit,
-      harness_overlay_commit: config.source.harness_commit,
-      workload: config.measurement.workload,
-      fixed_n: config.measurement.fixed_n,
-      repetitions: config.measurement.repetitions,
-      order: config.measurement.run_order,
-    },
+    comparison: isVmStringMemory(config)
+      ? {
+          protocol: VM_STRING_MEMORY_PROTOCOL,
+          baseline_commit: config.source.baseline_commit,
+          candidate_commit: config.source.candidate_commit,
+          harness_overlay_commit: config.source.harness_commit,
+          vm_count: config.measurement.vm_count,
+          warmup_rounds: config.measurement.warmup_rounds,
+          accepted_rounds: config.measurement.accepted_rounds,
+          scenarios: config.measurement.scenarios,
+        }
+      : {
+          baseline_commit: config.source.baseline_commit,
+          candidate_commit: config.source.candidate_commit,
+          harness_overlay_commit: config.source.harness_commit,
+          workload: config.measurement.workload,
+          fixed_n: config.measurement.fixed_n,
+          repetitions: config.measurement.repetitions,
+          order: config.measurement.run_order,
+        },
   };
 }
 
@@ -1756,6 +1958,28 @@ function validateAcceptedStatus(status, requiredVerdict) {
   if (finished < started) fail("accepted status finished before it started");
 }
 
+function validateMemoryEvidenceStatus(status) {
+  requireObject(status, "memory evidence status");
+  requireExactKeys(
+    status,
+    ["schema", "status", "detail", "started_at", "finished_at"],
+    "memory evidence status",
+  );
+  if (status.schema !== "rustia.bench.cloud-run-status.v1" || status.status !== "evidence_complete") {
+    fail("memory evidence status has the wrong schema or terminal state");
+  }
+  if (status.detail !== "vm string memory evidence completed; public throughput history was not changed") {
+    fail("memory evidence status has an unexpected detail");
+  }
+  const started = requireIsoTimestamp(status.started_at, "memory evidence status.started_at");
+  const finished = requireIsoTimestamp(status.finished_at, "memory evidence status.finished_at");
+  if (finished < started) fail("memory evidence status finished before it started");
+}
+
+function expectedTerminalStatus(config) {
+  return isVmStringMemory(config) ? "evidence_complete" : "accepted_and_published";
+}
+
 function strictUtf8(bytes, location) {
   const text = bytes.toString("utf8");
   if (!Buffer.from(text, "utf8").equals(bytes)) fail(`${location} is not valid UTF-8`);
@@ -1886,6 +2110,260 @@ function validateGateLog(config, gateFile, declaredRecords) {
     recordIndex += 1;
   }
   if (recordIndex !== records.length) fail("gate.jsonl contains unexpected labels or extra records");
+}
+
+function parseCanonicalJsonl(file, location) {
+  const text = strictUtf8(fs.readFileSync(file), location);
+  if (!text.endsWith("\n") || text.includes("\r")) fail(`${location} is not canonical JSONL`);
+  const lines = text.slice(0, -1).split("\n");
+  if (lines.some((line) => line === "")) fail(`${location} contains an empty record`);
+  return lines.map((line, index) => {
+    let value;
+    try {
+      value = JSON.parse(line);
+    } catch (error) {
+      fail(`${location} record ${index + 1} is invalid JSON: ${error.message}`);
+    }
+    if (line !== JSON.stringify(value)) fail(`${location} record ${index + 1} is not canonical JSON`);
+    return requireObject(value, `${location} record ${index + 1}`);
+  });
+}
+
+function validateMemoryGateLog(config, gateFile, declaredRecords, warmupAttempts, acceptedAttempts) {
+  const records = parseCanonicalJsonl(gateFile, "memory gate.jsonl");
+  if (records.length !== declaredRecords) fail("memory gate record count does not match the manifest");
+  const rounds = [
+    ...warmupAttempts.map((attempts, index) => ({ prefix: "warmup", round: index + 1, attempts })),
+    ...acceptedAttempts.map((attempts, index) => ({ prefix: "round", round: index + 1, attempts })),
+  ];
+  let recordIndex = 0;
+  for (const logical of rounds) {
+    requireInteger(logical.attempts, `${logical.prefix} ${logical.round} attempts`, 1);
+    if (logical.attempts > config.measurement.round_retry_limit + 1) {
+      fail(`${logical.prefix} ${logical.round} exceeded the frozen retry limit`);
+    }
+    for (let attempt = 1; attempt <= logical.attempts; attempt += 1) {
+      const label = `memory-${logical.prefix}-${String(logical.round).padStart(2, "0")}-attempt-${attempt}`;
+      let passedPre = false;
+      while (
+        recordIndex < records.length &&
+        records[recordIndex].label === label &&
+        records[recordIndex].phase === "pre_leg_idle_window"
+      ) {
+        const record = records[recordIndex];
+        requireExactKeys(
+          record,
+          ["phase", "label", "timestamp", "cpu", "load_1m", "cpu_delta", "contaminants", "passed"],
+          `memory gate pre-record ${recordIndex + 1}`,
+        );
+        requireIsoTimestamp(record.timestamp, `memory gate pre-record ${recordIndex + 1}.timestamp`);
+        if (record.cpu !== config.host_gate.benchmark_cpu) fail("memory gate pre-record has the wrong CPU");
+        requireNumber(record.load_1m, `memory gate pre-record ${recordIndex + 1}.load_1m`, 0);
+        const delta = validateCpuDelta(record.cpu_delta, `memory gate pre-record ${recordIndex + 1}.cpu_delta`);
+        if (!Array.isArray(record.contaminants)) fail("memory gate pre-record contaminants is not an array");
+        const shouldPass =
+          record.load_1m <= config.host_gate.maximum_load_1m &&
+          delta.idle_percent >= config.host_gate.minimum_idle_percent &&
+          delta.steal_ticks <= config.host_gate.maximum_steal_ticks &&
+          record.contaminants.length === 0;
+        if (record.passed !== shouldPass) fail("memory gate pre-record has a false passed flag");
+        passedPre = record.passed;
+        recordIndex += 1;
+        if (passedPre) break;
+      }
+      if (!passedPre) fail(`memory gate label ${label} lacks a passing pre-idle record`);
+      const during = records[recordIndex];
+      if (!during || during.label !== label || during.phase !== "during_leg") {
+        fail(`memory gate label ${label} lacks exactly one whole-round record`);
+      }
+      requireExactKeys(
+        during,
+        ["phase", "label", "timestamp", "cpu", "cpu_delta", "contaminants", "passed"],
+        `memory gate during-record ${recordIndex + 1}`,
+      );
+      requireIsoTimestamp(during.timestamp, `memory gate during-record ${recordIndex + 1}.timestamp`);
+      if (during.cpu !== config.host_gate.benchmark_cpu) fail("memory gate during-record has the wrong CPU");
+      const delta = validateCpuDelta(during.cpu_delta, `memory gate during-record ${recordIndex + 1}.cpu_delta`);
+      if (!Array.isArray(during.contaminants)) fail("memory gate during-record contaminants is not an array");
+      const shouldPass = timedStealGatePasses(config, delta) && during.contaminants.length === 0;
+      if (during.passed !== shouldPass) fail("memory gate during-record has a false passed flag");
+      const isFinalAttempt = attempt === logical.attempts;
+      if (during.passed !== isFinalAttempt) {
+        fail(`memory gate ${label} acceptance does not match the frozen first-clean-attempt rule`);
+      }
+      recordIndex += 1;
+    }
+  }
+  if (recordIndex !== records.length) fail("memory gate.jsonl contains unexpected labels or extra records");
+}
+
+function validateMemorySampleSnapshot(snapshotValue, location) {
+  const snapshot = requireObject(snapshotValue, location);
+  requireExactKeys(snapshot, ["status", "smaps_rollup"], location);
+  const status = requireObject(snapshot.status, `${location}.status`);
+  requireExactKeys(status, ["vm_rss", "vm_hwm", "rss_anon", "rss_file", "rss_shmem"], `${location}.status`);
+  for (const [field, value] of Object.entries(status)) requireInteger(value, `${location}.status.${field}`, 0);
+  const smaps = requireObject(snapshot.smaps_rollup, `${location}.smaps_rollup`);
+  requireExactKeys(
+    smaps,
+    ["rss", "pss", "private_clean", "private_dirty", "anonymous", "swap"],
+    `${location}.smaps_rollup`,
+  );
+  for (const [field, value] of Object.entries(smaps)) requireInteger(value, `${location}.smaps_rollup.${field}`, 0);
+  if (smaps.swap !== 0) fail(`${location}.smaps_rollup.swap must be zero`);
+}
+
+function validateMemorySampleRecord(value, expected, config, location) {
+  requireExactKeys(
+    value,
+    [
+      "schema_version",
+      "schema",
+      "sample_id",
+      "protocol_sha256",
+      "timestamp_unix",
+      "build",
+      "round",
+      "scenario",
+      "platform",
+      "layout_bytes",
+      "timing_ns",
+      "memory_kib",
+      "validation",
+    ],
+    location,
+  );
+  if (value.schema_version !== 1 || value.schema !== "rustia.bench.vm-string-sample.v1") {
+    fail(`${location} has the wrong schema`);
+  }
+  if (
+    value.sample_id !== expected.sampleId ||
+    value.protocol_sha256 !== expected.protocolHash ||
+    value.round !== expected.round
+  ) {
+    fail(`${location} has the wrong sample, protocol, or round identity`);
+  }
+  requireInteger(value.timestamp_unix, `${location}.timestamp_unix`, 1);
+  const build = requireObject(value.build, `${location}.build`);
+  requireExactKeys(build, ["role", "commit"], `${location}.build`);
+  if (build.role !== expected.role || build.commit !== expected.commit) fail(`${location} has the wrong build identity`);
+
+  const scenario = requireObject(value.scenario, `${location}.scenario`);
+  requireExactKeys(
+    scenario,
+    [
+      "id",
+      "vm_count",
+      "profile",
+      "constant_slots",
+      "instruction_slots",
+      "executes_constants",
+      "strings",
+      "nil_constant_count",
+    ],
+    `${location}.scenario`,
+  );
+  const shapes = {
+    empty: [false, "none", 0, 0, 1024],
+    short_unloaded: [false, "short", 1024, 13, 0],
+    short_loaded: [true, "short", 1024, 13, 0],
+    long_unloaded: [false, "long", 128, 2048, 896],
+    long_loaded: [true, "long", 128, 2048, 896],
+  };
+  const shape = shapes[expected.scenario];
+  const strings = requireObject(scenario.strings, `${location}.scenario.strings`);
+  requireExactKeys(strings, ["kind", "count", "bytes_each", "generator"], `${location}.scenario.strings`);
+  if (
+    scenario.id !== expected.scenario ||
+    scenario.vm_count !== config.measurement.vm_count ||
+    scenario.profile !== "reproducible-standard" ||
+    scenario.constant_slots !== 1024 ||
+    scenario.instruction_slots !== 1025 ||
+    scenario.executes_constants !== shape[0] ||
+    strings.kind !== shape[1] ||
+    strings.count !== shape[2] ||
+    strings.bytes_each !== shape[3] ||
+    strings.generator !== "indexed-binary-v1" ||
+    scenario.nil_constant_count !== shape[4]
+  ) {
+    fail(`${location} scenario shape is not frozen`);
+  }
+  const platform = requireObject(value.platform, `${location}.platform`);
+  requireExactKeys(platform, ["os", "arch", "pid", "memory_probe_warmups"], `${location}.platform`);
+  if (platform.os !== "linux" || platform.arch !== "x86_64" || platform.memory_probe_warmups !== 2) {
+    fail(`${location} platform is not frozen to linux-x86_64`);
+  }
+  requireInteger(platform.pid, `${location}.platform.pid`, 1);
+  for (const [section, fields] of [
+    ["layout_bytes", ["value", "instruction", "constant", "vm"]],
+    ["timing_ns", ["program_build", "vm_create", "program_run"]],
+  ]) {
+    const object = requireObject(value[section], `${location}.${section}`);
+    requireExactKeys(object, fields, `${location}.${section}`);
+    for (const [field, fieldValue] of Object.entries(object)) {
+      requireInteger(fieldValue, `${location}.${section}.${field}`, 1);
+    }
+  }
+  const memory = requireObject(value.memory_kib, `${location}.memory_kib`);
+  requireExactKeys(memory, ["clean", "program_ready", "vms_ready", "after_run"], `${location}.memory_kib`);
+  for (const snapshot of ["clean", "program_ready", "vms_ready", "after_run"]) {
+    validateMemorySampleSnapshot(memory[snapshot], `${location}.memory_kib.${snapshot}`);
+  }
+  const validation = requireObject(value.validation, `${location}.validation`);
+  requireExactKeys(
+    validation,
+    [
+      "created_vms",
+      "ran_vms",
+      "expected_result_kind",
+      "expected_result_bytes",
+      "expected_result_fnv1a64",
+      "all_results_matched",
+    ],
+    `${location}.validation`,
+  );
+  const loaded = shape[0];
+  if (
+    validation.created_vms !== config.measurement.vm_count ||
+    validation.ran_vms !== config.measurement.vm_count ||
+    validation.expected_result_kind !== (loaded ? "string" : "nil") ||
+    validation.expected_result_bytes !== (loaded ? shape[3] : null) ||
+    (loaded ? !/^[0-9a-f]{16}$/.test(validation.expected_result_fnv1a64) : validation.expected_result_fnv1a64 !== null) ||
+    validation.all_results_matched !== true
+  ) {
+    fail(`${location} validation identity is wrong`);
+  }
+}
+
+function validateMemorySampleFile(config, file, prefix, rounds, protocolHash) {
+  const records = parseCanonicalJsonl(file, path.basename(file));
+  const expectedCount = rounds * config.measurement.scenarios.length * 2;
+  if (records.length !== expectedCount) {
+    fail(`${path.basename(file)} has ${records.length} records, expected ${expectedCount}`);
+  }
+  let index = 0;
+  const processIds = new Set();
+  for (let round = 1; round <= rounds; round += 1) {
+    for (const entry of memoryRoundOrder(round, config.measurement.scenarios)) {
+      const commit = entry.role === "baseline" ? config.source.baseline_commit : config.source.candidate_commit;
+      validateMemorySampleRecord(
+        records[index],
+        {
+          sampleId: memorySampleId(prefix, round, entry.role, entry.scenario),
+          protocolHash,
+          round,
+          role: entry.role,
+          commit,
+          scenario: entry.scenario,
+        },
+        config,
+        `${path.basename(file)} record ${index + 1}`,
+      );
+      addFreshMemoryProcessId(processIds, records[index].platform.pid, path.basename(file));
+      index += 1;
+    }
+  }
+  return records;
 }
 
 function validateRawSidecar(file, config, location, expectedCommit, expectedIdentity = null) {
@@ -2376,12 +2854,422 @@ async function validateAcceptedEvidence(config, state, evidenceDirectory, localH
   );
 }
 
+async function recomputeMemoryAnalysis(config, evidenceDirectory) {
+  const argumentsList = [
+    path.join(REPO, "bench/analyze-vm-string-memory.js"),
+    "--input",
+    path.join(evidenceDirectory, "samples.jsonl"),
+    "--baseline",
+    config.source.baseline_commit,
+    "--candidate",
+    config.source.candidate_commit,
+    "--rounds",
+    String(config.measurement.accepted_rounds),
+    "--bootstrap-reps",
+    String(config.measurement.bootstrap_repetitions),
+    "--seed",
+    String(config.measurement.bootstrap_seed),
+  ];
+  const result = await run("node", argumentsList);
+  try {
+    return requireObject(JSON.parse(result.stdout.toString("utf8")), "recomputed vm string memory analysis");
+  } catch (error) {
+    fail(`local vm string memory analyzer returned invalid JSON: ${error.message}`);
+  }
+}
+
+async function validateMemoryEvidence(config, state, evidenceDirectory) {
+  const files = {
+    manifest: path.join(evidenceDirectory, "manifest.json"),
+    analysis: path.join(evidenceDirectory, "analysis.json"),
+    protocol: path.join(evidenceDirectory, "protocol.json"),
+    provider: path.join(evidenceDirectory, "provider.json"),
+    host: path.join(evidenceDirectory, "host.json"),
+    samples: path.join(evidenceDirectory, "samples.jsonl"),
+    warmup: path.join(evidenceDirectory, "warmup-samples.jsonl"),
+    gate: path.join(evidenceDirectory, "gate.jsonl"),
+  };
+  for (const [name, file] of Object.entries(files)) {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
+      fail(`vm string memory ${name} must be a single regular file`);
+    }
+  }
+  requireJsonEqual(loadJsonRegular(files.protocol, "memory protocol"), config, "memory evidence protocol");
+  const manifest = requireObject(loadJsonRegular(files.manifest, "memory evidence manifest"), "memory evidence manifest");
+  requireExactKeys(
+    manifest,
+    [
+      "schema_version",
+      "schema",
+      "created_at",
+      "provider",
+      "source",
+      "build",
+      "host",
+      "protocol",
+      "analysis",
+      "publication",
+      "evidence_sha256",
+    ],
+    "memory evidence manifest",
+  );
+  if (manifest.schema_version !== 1 || manifest.schema !== "rustia.bench.vm-string-memory-evidence.v1") {
+    fail("vm string memory evidence has the wrong manifest schema");
+  }
+  requireIsoTimestamp(manifest.created_at, "memory evidence manifest.created_at");
+  const completeInventory = evidenceFiles(evidenceDirectory);
+  requireJsonEqual(
+    completeInventory,
+    VM_STRING_EVIDENCE_FILES,
+    "vm string memory evidence file allowlist",
+  );
+  const actualFiles = completeInventory.filter((file) => file !== "manifest.json");
+  const hashes = requireObject(manifest.evidence_sha256, "memory evidence manifest.evidence_sha256");
+  if (
+    canonicalJson(Object.keys(hashes).sort()) !== canonicalJson(VM_STRING_HASHED_EVIDENCE_FILES) ||
+    canonicalJson(actualFiles) !== canonicalJson(VM_STRING_HASHED_EVIDENCE_FILES)
+  ) {
+    fail("vm string memory evidence hash inventory does not exactly match its files");
+  }
+  for (const file of actualFiles) {
+    if (
+      file.split("/").includes("..") ||
+      !SHA256.test(hashes[file]) ||
+      sha256File(path.join(evidenceDirectory, ...file.split("/"))) !== hashes[file]
+    ) {
+      fail(`vm string memory evidence hash is wrong or unsafe for ${file}`);
+    }
+  }
+
+  const provider = requireObject(loadJsonRegular(files.provider, "memory provider metadata"), "memory provider metadata");
+  const providerIdentity = [
+    [provider.schema, "rustia.linode-provider-metadata.v1", "schema"],
+    [provider.provider, "linode", "provider"],
+    [provider.linode_id, state.linode_id, "Linode ID"],
+    [provider.linode_label, state.linode_label, "Linode label"],
+    [provider.region, config.provider.region, "region"],
+    [provider.size_slug, config.provider.size.id, "plan"],
+    [provider.image, config.provider.image, "image"],
+    [provider.vcpus, config.provider.size.vcpus, "vCPUs"],
+    [provider.memory_mib, config.provider.size.memory_mib, "memory"],
+    [provider.disk_gib, config.provider.size.disk_gib, "disk"],
+    [provider.public_ipv4, state.public_ipv4, "public IPv4"],
+    [provider.backups_enabled, false, "backup state"],
+    [provider.interface_generation, "legacy_config", "interface generation"],
+  ];
+  for (const [actual, wanted, field] of providerIdentity) {
+    if (actual !== wanted) fail(`memory evidence provider ${field} does not match the destroyed Linode`);
+  }
+  requireJsonEqual(manifest.provider, provider, "memory manifest provider identity");
+
+  const source = requireObject(manifest.source, "memory manifest.source");
+  const expectedSource = {
+    baseline_commit: config.source.baseline_commit,
+    candidate_commit: config.source.candidate_commit,
+    harness_commit: config.source.harness_commit,
+    baseline_original_bench_manifest_sha256: config.source.expected_sha256.baseline_original_bench_manifest,
+    candidate_original_bench_manifest_sha256: config.source.expected_sha256.candidate_original_bench_manifest,
+    overlay_bench_manifest_sha256: config.source.expected_sha256.overlay_bench_manifest,
+    sampler_sha256: config.source.expected_sha256.sampler,
+    analyzer_sha256: config.source.expected_sha256.analyzer,
+    overlay_disclosure:
+      "bench/Cargo.toml and bench/src/bin/vm-string-memory.rs from the harness commit were copied byte-for-byte over both source trees before compilation",
+    cargo_lock_sha256: config.source.expected_sha256.cargo_lock,
+    toolchain_sha256: config.source.expected_sha256.toolchain,
+    git_bundle_sha256: state.bundle_sha256,
+    protocol_config_sha256: sha256File(files.protocol),
+    provider_metadata_sha256: sha256File(files.provider),
+  };
+  requireJsonEqual(source, expectedSource, "memory manifest source identity");
+  if (sha256File(path.join(REPO, "bench/analyze-vm-string-memory.js")) !== source.analyzer_sha256) {
+    fail("local vm string memory analyzer does not match the frozen source identity");
+  }
+
+  const hostJson = requireObject(loadJsonRegular(files.host, "memory host.json"), "memory host.json");
+  if (hostJson.virtualization !== "kvm") fail("memory host evidence is not a KVM guest");
+  const host = requireObject(manifest.host, "memory manifest.host");
+  const expectedHost = {
+    file: "host.json",
+    sha256: sha256File(files.host),
+    cpu_model: hostJson.cpu_model,
+    microcode: hostJson.microcode,
+    clocksource: hostJson.clocksource,
+    scaling_governors: hostJson.scaling_governors,
+    benchmark_cpu: config.host_gate.benchmark_cpu,
+  };
+  requireJsonEqual(host, expectedHost, "memory manifest host identity");
+
+  const build = requireObject(manifest.build, "memory manifest.build");
+  requireExactKeys(
+    build,
+    [
+      "rustc_vv",
+      "cargo_version",
+      "baseline_binary_sha256",
+      "baseline_binary_bytes",
+      "candidate_binary_sha256",
+      "candidate_binary_bytes",
+      "baseline_command",
+      "candidate_command",
+      "binary",
+      "cargo_incremental",
+      "rustc_wrapper",
+      "locked",
+      "offline_build_after_fetch",
+      "source_paths_retained_through_all_measurements",
+    ],
+    "memory manifest.build",
+  );
+  for (const field of ["baseline_binary_sha256", "candidate_binary_sha256"]) {
+    if (!SHA256.test(build[field])) fail(`memory manifest.build.${field} is not a SHA-256`);
+  }
+  for (const field of ["baseline_binary_bytes", "candidate_binary_bytes"]) {
+    requireInteger(build[field], `memory manifest.build.${field}`, 1);
+  }
+  for (const field of ["rustc_vv", "cargo_version"]) requireString(build[field], `memory manifest.build.${field}`);
+  if (build.rustc_vv !== hostJson.rustc_vv || build.cargo_version !== hostJson.cargo_version) {
+    fail("memory manifest build tool versions do not match host.json");
+  }
+  if (
+    build.binary !== "vm-string-memory" ||
+    build.cargo_incremental !== "0" ||
+    build.rustc_wrapper !== "unset" ||
+    build.locked !== true ||
+    build.offline_build_after_fetch !== true
+  ) {
+    fail("memory manifest build mode is not frozen");
+  }
+  const expectedBuildSuffix = [
+    "+1.95.0",
+    "build",
+    "--locked",
+    "--offline",
+    "--manifest-path",
+  ];
+  for (const [role, sourcePath] of [["baseline", "/opt/rustia/src-a/Cargo.toml"], ["candidate", "/opt/rustia/src-b/Cargo.toml"]]) {
+    const command = build[`${role}_command`];
+    const expected = [
+      "/root/.cargo/bin/cargo",
+      ...expectedBuildSuffix,
+      sourcePath,
+      "-p",
+      "script-bench-harness",
+      "--bin",
+      "vm-string-memory",
+      "--release",
+    ];
+    requireJsonEqual(command, expected, `memory manifest ${role} build command`);
+  }
+  requireJsonEqual(
+    build.source_paths_retained_through_all_measurements,
+    ["/opt/rustia/src-a", "/opt/rustia/src-b", "/opt/rustia/src-harness"],
+    "memory manifest retained source paths",
+  );
+
+  const protocol = requireObject(manifest.protocol, "memory manifest.protocol");
+  const warmupAttempts = protocol.warmup_attempts;
+  const acceptedAttempts = protocol.accepted_attempts;
+  const expectedAnalyzerCommand = [
+    "node",
+    "bench/analyze-vm-string-memory.js",
+    "--input",
+    "samples.jsonl",
+    "--baseline",
+    config.source.baseline_commit,
+    "--candidate",
+    config.source.candidate_commit,
+    "--rounds",
+    String(config.measurement.accepted_rounds),
+    "--bootstrap-reps",
+    String(config.measurement.bootstrap_repetitions),
+    "--seed",
+    String(config.measurement.bootstrap_seed),
+  ];
+  const expectedProtocol = {
+    kind: VM_STRING_MEMORY_PROTOCOL,
+    vm_count: config.measurement.vm_count,
+    scenarios: config.measurement.scenarios,
+    warmup_rounds: config.measurement.warmup_rounds,
+    accepted_rounds: config.measurement.accepted_rounds,
+    round_retry_limit: config.measurement.round_retry_limit,
+    warmup_sample_count: config.measurement.warmup_rounds * config.measurement.scenarios.length * 2,
+    accepted_sample_count: config.measurement.accepted_rounds * config.measurement.scenarios.length * 2,
+    warmup_attempts: warmupAttempts,
+    accepted_attempts: acceptedAttempts,
+    warmup_order: memoryRoundOrder(1, config.measurement.scenarios),
+    accepted_orders: Array.from(
+      { length: config.measurement.accepted_rounds },
+      (_, index) => memoryRoundOrder(index + 1, config.measurement.scenarios),
+    ),
+    order_rule:
+      "ABBA/BAAB build-block alternation in consecutive opposite-role pairs; each pair shares one rotated first-block scenario order and the second block reverses it; every sample is a fresh process",
+    bootstrap_repetitions: config.measurement.bootstrap_repetitions,
+    bootstrap_seed: config.measurement.bootstrap_seed,
+    analyzer_command: expectedAnalyzerCommand,
+    host_gate: config.host_gate,
+    contaminating_process_comm_regex:
+      "^(apt|apt-get|as|cargo|cc|cc1|cc1plus|clang|clang\\+\\+|curl|dpkg|g\\+\\+|gcc|git|ld|ld\\.lld|make|ninja|node|rustc|rustup|sccache|script-bench|unattended-upgr|vm-string-memor|vm-string-memory)$",
+    exclusion_rule:
+      "a host-gate violation discards all ten samples in the round; retries are capped before execution and never selected by measurement outcome",
+    gate_log: protocol.gate_log,
+  };
+  requireJsonEqual(protocol, expectedProtocol, "memory manifest protocol");
+  if (!Array.isArray(warmupAttempts) || warmupAttempts.length !== config.measurement.warmup_rounds) {
+    fail("memory manifest has the wrong warmup attempt count");
+  }
+  if (!Array.isArray(acceptedAttempts) || acceptedAttempts.length !== config.measurement.accepted_rounds) {
+    fail("memory manifest has the wrong accepted attempt count");
+  }
+  const gateLog = requireObject(protocol.gate_log, "memory manifest.protocol.gate_log");
+  requireExactKeys(gateLog, ["file", "sha256", "records"], "memory manifest.protocol.gate_log");
+  if (gateLog.file !== "gate.jsonl" || gateLog.sha256 !== sha256File(files.gate)) {
+    fail("memory manifest gate log identity is wrong");
+  }
+  requireInteger(gateLog.records, "memory manifest gate records", 1);
+  validateMemoryGateLog(config, files.gate, gateLog.records, warmupAttempts, acceptedAttempts);
+
+  const protocolHash = sha256File(files.protocol);
+  validateMemorySampleFile(config, files.warmup, "warmup", config.measurement.warmup_rounds, protocolHash);
+  validateMemorySampleFile(config, files.samples, "round", config.measurement.accepted_rounds, protocolHash);
+  const analysis = requireObject(loadJsonRegular(files.analysis, "vm string memory analysis"), "vm string memory analysis");
+  const recomputed = await recomputeMemoryAnalysis(config, evidenceDirectory);
+  requireJsonEqual(analysis, recomputed, "vm string memory analysis");
+  requireExactKeys(
+    analysis,
+    ["schema_version", "schema", "identity", "method", "baseline", "candidate", "comparison"],
+    "vm string memory analysis",
+  );
+  if (analysis.schema_version !== 1 || analysis.schema !== "rustia.bench.vm-string-memory-analysis.v1") {
+    fail("vm string memory analysis has the wrong schema");
+  }
+  const identity = requireObject(analysis.identity, "vm string memory analysis.identity");
+  const expectedIdentity = {
+    baseline_commit: config.source.baseline_commit,
+    candidate_commit: config.source.candidate_commit,
+    accepted_rounds: config.measurement.accepted_rounds,
+    sample_count: config.measurement.accepted_rounds * config.measurement.scenarios.length * 2,
+    protocol_sha256: protocolHash,
+  };
+  for (const [field, wanted] of Object.entries(expectedIdentity)) {
+    if (identity[field] !== wanted) fail(`vm string memory analysis.identity.${field} is not frozen`);
+  }
+  if (
+    analysis.method.bootstrap_repetitions !== config.measurement.bootstrap_repetitions ||
+    analysis.method.bootstrap_seed_uint32 !== config.measurement.bootstrap_seed ||
+    analysis.baseline.commit !== config.source.baseline_commit ||
+    analysis.candidate.commit !== config.source.candidate_commit
+  ) {
+    fail("vm string memory analysis method or commit identity is not frozen");
+  }
+  requireJsonEqual(
+    manifest.analysis,
+    { file: "analysis.json", sha256: sha256File(files.analysis), schema: analysis.schema, identity: analysis.identity },
+    "memory manifest analysis identity",
+  );
+  requireJsonEqual(
+    manifest.publication,
+    {
+      mode: "evidence_only",
+      throughput_history_modified: false,
+      imported_path: `bench/evidence/vm-string-memory/${config.source.candidate_commit}`,
+    },
+    "memory manifest publication",
+  );
+}
+
+async function promoteMemoryEvidence(
+  config,
+  state,
+  downloadDirectory,
+  verifyCheckout = verifyPromotionCheckout,
+) {
+  if (!state.linode_destroyed_at) fail("refusing memory evidence import before confirmed Linode deletion");
+  throwIfInterrupted();
+  const status = loadJsonRegular(path.join(downloadDirectory, "status.json"), "remote memory status");
+  state.remote_status = status.status;
+  state.remote_status_detail = status.detail || null;
+  saveState(state);
+  if (status.status !== "evidence_complete") {
+    process.stdout.write(
+      `Linode memory run was retained as diagnostics at ${path.relative(REPO, downloadDirectory)} ` +
+        `(${status.status}${status.detail ? `: ${status.detail}` : ""}).\n`,
+    );
+    return false;
+  }
+  validateMemoryEvidenceStatus(status);
+  await verifyCheckout(config, state);
+  const layout = memoryPromotionLayout(config, downloadDirectory);
+  const evidenceSource = layout.evidence_source;
+  const evidenceDestination = layout.evidence_destination;
+  for (const required of ["manifest.json", "analysis.json", "samples.jsonl", "warmup-samples.jsonl"]) {
+    const file = path.join(evidenceSource, required);
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
+      fail(`remote memory export is missing a single regular ${required}`);
+    }
+  }
+  if (fs.existsSync(path.join(downloadDirectory, "publication"))) {
+    fail("evidence-only memory export unexpectedly contains a publication tree");
+  }
+  if (fs.existsSync(evidenceDestination)) {
+    fail(`refusing to overwrite existing memory evidence directory ${evidenceDestination}`);
+  }
+  const historyFile = path.join(REPO, "bench/history/runs.jsonl");
+  const historyBefore = sha256File(historyFile);
+  await validateMemoryEvidence(config, state, evidenceSource);
+  if (sha256File(historyFile) !== historyBefore) fail("memory evidence validation changed throughput history");
+
+  const stageNonce = crypto.randomBytes(6).toString("hex");
+  const evidenceStage = `${evidenceDestination}.incoming-${state.run_id}-${stageNonce}`;
+  let evidenceCommitted = false;
+  try {
+    fs.mkdirSync(path.dirname(evidenceDestination), { recursive: true });
+    if (fs.existsSync(evidenceStage)) fail("randomized memory evidence stage already exists");
+    fs.cpSync(evidenceSource, evidenceStage, { recursive: true, errorOnExist: true, force: false });
+    const sourceFiles = evidenceFiles(evidenceSource);
+    const stagedFiles = evidenceFiles(evidenceStage);
+    requireJsonEqual(stagedFiles, sourceFiles, "staged memory evidence inventory");
+    for (const file of sourceFiles) {
+      if (
+        sha256File(path.join(evidenceStage, ...file.split("/"))) !==
+        sha256File(path.join(evidenceSource, ...file.split("/")))
+      ) {
+        fail(`staged memory evidence bytes differ for ${file}`);
+      }
+    }
+    if (sha256File(historyFile) !== historyBefore) fail("throughput history changed during memory evidence staging");
+    throwIfInterrupted();
+    state.promotion_started_at = new Date().toISOString();
+    saveState(state);
+    fs.renameSync(evidenceStage, evidenceDestination);
+    evidenceCommitted = true;
+    if (sha256File(historyFile) !== historyBefore) fail("memory evidence import changed throughput history");
+  } catch (error) {
+    fs.rmSync(evidenceStage, { recursive: true, force: true });
+    if (evidenceCommitted) fs.rmSync(evidenceDestination, { recursive: true, force: true });
+    state.promotion_rolled_back_at = new Date().toISOString();
+    state.promotion_rollback_reason = error.message;
+    saveState(state);
+    throw error;
+  }
+  state.promoted_at = new Date().toISOString();
+  saveState(state);
+  process.stdout.write(
+    `Memory evidence imported to ${path.relative(REPO, evidenceDestination)}; throughput history was untouched.\n`,
+  );
+  return true;
+}
+
 async function promoteAcceptedResult(
   config,
   state,
   downloadDirectory,
   verifyCheckout = verifyPromotionCheckout,
 ) {
+  if (isVmStringMemory(config)) {
+    return promoteMemoryEvidence(config, state, downloadDirectory, verifyCheckout);
+  }
   if (!state.linode_destroyed_at) {
     fail("refusing publication before the Linode API has confirmed instance deletion");
   }
@@ -2520,7 +3408,7 @@ async function benchLocked(config, configFile = DEFAULT_CONFIG) {
     schema: "rustia.linode-benchmark-state.v1",
     run_id: runId,
     created_at: new Date().toISOString(),
-    protocol_mode: "acceptance",
+    protocol_mode: config.publication.mode,
     linode_label: linodeLabel,
     linode_id: null,
     linode_destroyed_at: null,
@@ -2881,8 +3769,9 @@ async function promote(runId) {
     if (state.remote_exit_status !== 0 || state.remote_timed_out !== false) {
       fail("offline promotion requires a successful, non-timeout remote benchmark");
     }
-    if (state.remote_status !== "accepted_and_published") {
-      fail("offline promotion requires a recorded accepted_and_published result");
+    const config = loadConfig(state.config_path);
+    if (state.remote_status !== expectedTerminalStatus(config)) {
+      fail(`offline promotion requires a recorded ${expectedTerminalStatus(config)} result`);
     }
     if (!state.promotion_rolled_back_at || typeof state.promotion_rollback_reason !== "string") {
       fail("offline promotion is limited to an accepted result whose first promotion rolled back");
@@ -2898,12 +3787,13 @@ async function promote(runId) {
     ) {
       fail("Linode export archive is missing, redirected, or differs from the journaled download");
     }
-    const config = loadConfig(state.config_path);
     await verifyRecoveryCheckout(config, state);
-    await run("env", ["-u", "RUSTC_WRAPPER", "just", "check-benchmark-results"], {
-      capture: false,
-      announce: true,
-    });
+    if (!isVmStringMemory(config)) {
+      await run("env", ["-u", "RUSTC_WRAPPER", "just", "check-benchmark-results"], {
+        capture: false,
+        announce: true,
+      });
+    }
 
     recoveryDirectory = path.join(
       expectedDirectory,
@@ -2922,7 +3812,7 @@ async function promote(runId) {
       recoveryDirectory,
       verifyRecoveryCheckout,
     );
-    if (!promoted) fail("journaled Linode export is no longer accepted_and_published");
+    if (!promoted) fail(`journaled Linode export is no longer ${expectedTerminalStatus(config)}`);
     state.recovery_promoted_at = new Date().toISOString();
     saveState(state);
     process.stdout.write(`Offline promotion completed for Linode run ${runId}.\n`);
@@ -3129,6 +4019,139 @@ async function selfTest(config) {
       host_gate: { ...config.host_gate, maximum_timed_steal_percent: 0.2 },
     }),
   );
+  assert.equal(
+    validateConfig({
+      ...config,
+      measurement: { protocol: FIXED_THROUGHPUT_PROTOCOL, ...config.measurement },
+    }).measurement.protocol,
+    FIXED_THROUGHPUT_PROTOCOL,
+  );
+
+  const memoryHash = "a".repeat(64);
+  const memoryConfig = {
+    schema: "rustia.linode-fixed-benchmark.v2",
+    provider: config.provider,
+    source: {
+      baseline_commit: config.source.baseline_commit,
+      candidate_commit: config.source.candidate_commit,
+      harness_commit: config.source.harness_commit,
+      expected_sha256: {
+        baseline_original_bench_manifest: memoryHash,
+        candidate_original_bench_manifest: memoryHash,
+        overlay_bench_manifest: memoryHash,
+        sampler: memoryHash,
+        analyzer: memoryHash,
+        cargo_lock: memoryHash,
+        toolchain: memoryHash,
+      },
+    },
+    measurement: {
+      protocol: VM_STRING_MEMORY_PROTOCOL,
+      vm_count: 512,
+      accepted_rounds: 16,
+      warmup_rounds: 1,
+      round_retry_limit: 3,
+      scenarios: [...VM_STRING_SCENARIOS],
+      bootstrap_repetitions: 100000,
+      bootstrap_seed: 1381323604,
+    },
+    host_gate: config.host_gate,
+    publication: { mode: "evidence_only" },
+  };
+  assert.equal(validateConfig(memoryConfig), memoryConfig);
+  for (const mutation of [
+    { measurement: { ...memoryConfig.measurement, protocol: "unknown" } },
+    { measurement: { ...memoryConfig.measurement, vm_count: 511 } },
+    { measurement: { ...memoryConfig.measurement, accepted_rounds: 15 } },
+    { measurement: { ...memoryConfig.measurement, warmup_rounds: 2 } },
+    { measurement: { ...memoryConfig.measurement, round_retry_limit: 4 } },
+    { measurement: { ...memoryConfig.measurement, scenarios: [...VM_STRING_SCENARIOS].reverse() } },
+    { publication: { mode: "acceptance" } },
+  ]) {
+    assert.throws(() => validateConfig({ ...memoryConfig, ...mutation }));
+  }
+  assert.throws(() => validateConfig({ ...memoryConfig, qualification: {} }));
+  const firstRoles = [];
+  for (let round = 1; round <= 16; round += 1) {
+    const order = memoryRoundOrder(round);
+    assert.equal(order.length, 10);
+    firstRoles.push(order[0].role);
+    assert(order.slice(0, 5).every((entry) => entry.role === order[0].role));
+    assert(order.slice(5).every((entry) => entry.role !== order[0].role));
+    assert.deepEqual(
+      order.slice(5).map((entry) => entry.scenario),
+      order.slice(0, 5).map((entry) => entry.scenario).reverse(),
+    );
+    for (const role of ["baseline", "candidate"]) {
+      assert.deepEqual(
+        order.filter((entry) => entry.role === role).map((entry) => entry.scenario).sort(),
+        [...VM_STRING_SCENARIOS].sort(),
+      );
+    }
+  }
+  assert.deepEqual(firstRoles, [
+    "baseline", "candidate", "candidate", "baseline", "candidate", "baseline", "baseline", "candidate",
+    "baseline", "candidate", "candidate", "baseline", "candidate", "baseline", "baseline", "candidate",
+  ]);
+  assert.equal(firstRoles.filter((role) => role === "baseline").length, 8);
+  assert.equal(firstRoles.filter((role) => role === "candidate").length, 8);
+  const memoryPositions = Object.fromEntries(
+    VM_STRING_SCENARIOS.map((scenario) => [scenario, { baseline: [], candidate: [] }]),
+  );
+  for (let round = 1; round <= 16; round += 1) {
+    memoryRoundOrder(round).forEach((entry, index) => {
+      memoryPositions[entry.scenario][entry.role].push(index + 1);
+    });
+    if (round % 2 === 1) {
+      const first = memoryRoundOrder(round);
+      const second = memoryRoundOrder(round + 1);
+      assert.notEqual(first[0].role, second[0].role);
+      assert.deepEqual(first.slice(0, 5).map((entry) => entry.scenario), second.slice(0, 5).map((entry) => entry.scenario));
+    }
+  }
+  for (const positions of Object.values(memoryPositions)) {
+    assert.deepEqual([...positions.baseline].sort((left, right) => left - right), [...positions.candidate].sort((left, right) => left - right));
+    assert.equal(positions.baseline.reduce((sum, value) => sum + value, 0), 88);
+    assert.equal(positions.candidate.reduce((sum, value) => sum + value, 0), 88);
+  }
+  assert.deepEqual([...VM_STRING_EVIDENCE_FILES].sort(), VM_STRING_EVIDENCE_FILES);
+  assert.deepEqual(
+    VM_STRING_HASHED_EVIDENCE_FILES,
+    VM_STRING_EVIDENCE_FILES.filter((file) => file !== "manifest.json"),
+  );
+  const memoryProcessIds = new Set();
+  addFreshMemoryProcessId(memoryProcessIds, 101, "fixture");
+  assert.throws(() => addFreshMemoryProcessId(memoryProcessIds, 101, "fixture"));
+  assert.equal(memorySampleId("round", 16, "candidate", "long_loaded"), "round-16-candidate-long-loaded");
+  assert.equal(expectedTerminalStatus(memoryConfig), "evidence_complete");
+  assert.equal(expectedTerminalStatus(config), "accepted_and_published");
+  assert.equal(
+    memoryEvidenceRelativePath(memoryConfig.source.candidate_commit),
+    path.join("bench/evidence/vm-string-memory", memoryConfig.source.candidate_commit),
+  );
+  const memoryLayout = memoryPromotionLayout(memoryConfig, "/tmp/fixture-download");
+  assert.equal(
+    memoryLayout.evidence_source,
+    path.join("/tmp/fixture-download/evidence/vm-string-memory", memoryConfig.source.candidate_commit),
+  );
+  assert.equal(
+    memoryLayout.evidence_destination,
+    path.join(REPO, "bench/evidence/vm-string-memory", memoryConfig.source.candidate_commit),
+  );
+  assert.equal(memoryLayout.publication_source, null);
+  assert.equal(memoryLayout.history_destination, null);
+  assert.throws(() => memoryPromotionLayout(config, "/tmp/fixture-download"));
+  assert.throws(() => memoryEvidenceRelativePath("not-a-commit"));
+  const evidenceStatus = {
+    schema: "rustia.bench.cloud-run-status.v1",
+    status: "evidence_complete",
+    detail: "vm string memory evidence completed; public throughput history was not changed",
+    started_at: "2026-07-20T00:00:00.000Z",
+    finished_at: "2026-07-20T00:01:00.000Z",
+  };
+  validateMemoryEvidenceStatus(evidenceStatus);
+  assert.throws(() => validateMemoryEvidenceStatus({ ...evidenceStatus, status: "accepted_and_published" }));
+  assert.throws(() => validateMemoryEvidenceStatus({ ...evidenceStatus, verdict: "anything" }));
 
   assert.equal(finalSidecarName(config, 1), `final-${config.measurement.workload}-1.json`);
   assert.equal(
@@ -3160,6 +4183,22 @@ async function selfTest(config) {
     fs.writeFileSync(defaultFixture, "{}\n");
     fs.writeFileSync(alternateFixture, "{}\n");
     fs.writeFileSync(outsideFixture, "{}\n");
+    const malformedMemorySamples = path.join(temporary, "malformed-memory-samples.jsonl");
+    const malformedMemoryGate = path.join(temporary, "malformed-memory-gate.jsonl");
+    fs.writeFileSync(malformedMemorySamples, "{}\n");
+    fs.writeFileSync(malformedMemoryGate, "{}\n");
+    assert.throws(() =>
+      validateMemorySampleFile(
+        memoryConfig,
+        malformedMemorySamples,
+        "round",
+        memoryConfig.measurement.accepted_rounds,
+        memoryHash,
+      ),
+    );
+    assert.throws(() =>
+      validateMemoryGateLog(memoryConfig, malformedMemoryGate, 1, [1], Array(16).fill(1)),
+    );
     const resolverOptions = { repo: fixtureRepo, defaultConfig: defaultFixture };
     assert.equal(resolveConfigFile(undefined, resolverOptions), defaultFixture);
     assert.equal(resolveConfigFile("bench/cloud/alternate.json", resolverOptions), alternateFixture);
