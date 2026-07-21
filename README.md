@@ -24,6 +24,10 @@ benchmark, API, and release gates are satisfied.
   `GETTABLEKS`/`SETTABLEKS`; two-lane live receiver/`__index`-table `NAMECALL` lookup; and mutation-safe
   `GETIMPORT` plus guarded fixed-result `FASTCALL`, all with ordinary semantic fallbacks and logical fuel
   preserved. `NAMECALL` does not fuse the subsequent `CALL` or cache a final callee.
+- Profiled hot-loop hygiene skips zero-debt GC work and synchronizes weak roots only at possible collection or
+  guest-entry boundaries. The accepted exact-commit Linux matrix improved rustia's median ns/unit by
+  22.08%-34.97% across all five tracked workloads versus the prior snapshot, while the generated minimum-time
+  `mlua-luau` geometric-mean gap fell from 10.1x to 7.30x; this remains per-workload development evidence.
 - Compiled constant pools are immutable and shared across program clones and VMs. Long compiled string atoms
   reuse those shared bytes, while ordinary compiled literals and runtime-produced binary strings up to 13 bytes
   can be stored directly in the sealed 16-byte `Value`; constant-key/cache paths atomize only when needed, and
@@ -89,7 +93,9 @@ public rustia project; actual grabby integration work is explicitly out of scope
   for unloaded long constants, 105.39 KiB when loading the short form, and 260.97 KiB when loading the long form;
   the candidate's residual loaded-long increment was 7.08 KiB/VM. Those 16 paired rounds and 160 accepted
   fresh-process samples are retained as evidence-only data rather than throughput history. Both throughput runs
-  passed their predeclared process and steal gates, and all three Linode instances were confirmed deleted. Shared-CPU
+  passed their predeclared process and steal gates. The subsequent exact-commit cross-engine matrix accepted all
+  native and wasm timed groups on the first attempt with zero timed steal, improving rustia's median ns/unit by
+  22.08%-34.97% across the five tracked workloads. All four accepted-run Linode instances were confirmed deleted. Shared-CPU
   DigitalOcean placements were rejected for timed-leg steal, two Vultr bare-metal orders never left provisioning
   and were safely deleted, and the Scaleway physical-host lifecycle remains available as a stricter fallback.
   Every accepted result is specific to its workload, comparison, and Linux protocol; existing results remain

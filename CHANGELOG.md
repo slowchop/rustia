@@ -148,6 +148,18 @@ Current unpublished workspace version: `0.0.1`.
   Its nine-file corpus is retained separately and cannot alter throughput
   history, results, or claims. Completed evidence-only exports can be promoted
   offline after confirmed deletion with their analysis recomputed.
+- The VM hot loop now bypasses `gc-arena` when allocation debt is already zero
+  and refreshes weak-table root snapshots only at possible collection or
+  guest-entry boundaries. Focused tests preserve collection cadence and prove
+  that an outer-only weak value remains live across nested guest execution with
+  explicit `collectgarbage`.
+- The exact-commit `87db17542e19ae77ec92463f8a5b8e8b8a21a666`
+  cross-engine Linode matrix accepted every native and wasm timed group on its
+  first attempt with zero timed steal. Rustia median ns/unit improved
+  34.97%/27.20%/27.44%/22.08%/22.77% on dense/sparse/closures/iteration/stdlib
+  versus the prior committed Linux snapshot; the generated minimum-time
+  `mlua-luau` geometric-mean gap fell from 10.1x to 7.30x. The VM was confirmed
+  deleted before evidence and results promotion.
 - An actual-bare-metal `just bench-vultr` fallback now follows rejected
   DigitalOcean shared and Linode dedicated-KVM placements without changing the
   frozen zero-steal protocol. It validates the Ubuntu 24.04 `vbm-4c-32gb` plan

@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-20.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-22.)
 
 ## One-paragraph state
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
@@ -15,7 +15,8 @@ handles with freshness checks and current-generation accessors, public source-sp
 accessors, owned-value/table serde, deterministic extension registration, hot reload, and macro sugar.
 A from-scratch Rust Luau
 interpreter is validated as **GO** by the earlier spikes and is now backed by the production conformance suite;
-performance still needs the continuous benchmark gate before public claims. All 8 architecture axes are decided
+performance is continuously benchmark-gated, and the generated gate does not yet approve a blanket public speed
+headline. All 8 architecture axes are decided
 ([`30-architecture.md`](30-architecture.md) v3), 10 conformance-verified improvements are adopted
 ([`55-improvements.md`](55-improvements.md)), the no-unsafe SotA performance research stack is now captured in
 [`56-performance-research.md`](56-performance-research.md), and the standalone benchmark harness has the engine/workload/history
@@ -58,6 +59,10 @@ the shared bytes when the compiled literal arrives later. Ordinary loaded litera
 strings of up to 13 bytes can live directly in the sealed 16-byte `Value`. Constant-key
 and cache paths still atomize when identity is required, and table insertion canonicalizes a new non-nil short
 key, but lookup misses, nil writes, readonly writes, and invalid-table writes do not create atoms.
+The first profiled hot-loop hygiene pass now avoids entering `gc-arena` when allocation debt is already zero and
+refreshes weak-table root snapshots only before a possible collection boundary or an instruction that can enter
+guest code. Focused tests cover ordinary collection cadence plus nested guest execution with explicit
+`collectgarbage`, while the full pending-free conformance suite preserves the public semantics.
 `rustia-cli` supports file, stdin, `--eval`, and `--repl` execution with profile, fuel, source-name options,
 state-preserving line evaluation, expression shorthand, and source-aware diagnostics for compile and runtime
 failures.
@@ -99,6 +104,13 @@ long-constant growth, and 105.39 KiB/VM of loaded-short growth relative to basel
 image and slower program construction in the sampled scenarios, while combined VM creation plus program
 execution was faster for every scenario; those timing summaries do not carry the paired confidence intervals of
 the primary memory contrasts. This is exact string-focused Linux evidence, not a complete mixed-heap RSS budget.
+The subsequent exact-commit `87db17542e19ae77ec92463f8a5b8e8b8a21a666` cross-engine Linode matrix accepted
+all native and wasm timed groups on their first attempt with zero timed steal. Against the preceding committed
+Linux snapshot, rustia median ns/unit improved 34.97% on `dense_tables`, 27.20% on `sparse_tables`, 27.44% on
+`closures_upvalues`, 22.08% on `generic_iteration`, and 22.77% on `stdlib_math_table`. The generated minimum-time
+claim gate's `mlua-luau` gap therefore moved from a 10.1x geometric mean (7.1x-14.1x range) to 7.30x
+(5.25x-9.53x). This is still development evidence rather than a blanket release claim. The matrix's ephemeral
+VM was confirmed deleted before its evidence, native rows, and Node wasm rows were promoted.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
 ## Project pillars
@@ -131,10 +143,9 @@ API parity release-critical work.
    deterministic f64/libm behavior, table-key `-0` normalization, and profile-specific GC behavior covered by
    tests while performance work proceeds. Keep the public workspace's `unsafe_code = "forbid"` gate intact.
    For performance sequencing, use [`56-performance-research.md`](56-performance-research.md): the dense-table,
-   constant field/namecall, and string-representation gates now have exact accepted dense/OOP throughput evidence
-   and committed string-memory evidence. Keep those
-   protocols repeatable while pursuing cached-length refinements, adaptive specialization, hot-loop hygiene, and
-   type-directed wasm/AOT.
+   constant field/namecall, string-representation, and first profiled hot-loop gates now have exact accepted
+   Linux evidence. Keep those protocols repeatable while pursuing cached-length refinements, adaptive
+   specialization, further profile-led hot-loop work, and type-directed wasm/AOT.
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 12 workload entries including
    source-covered `string_building`, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
@@ -186,10 +197,13 @@ section below for the full list (GC tuning, benchmark publication, `LuauIntegerT
   weak-table GC-scan correction, and both comparisons retain
   three final-candidate history rows. A separate exact 512-VM sampler confirms the shared/inline representation's
   per-VM constant-string savings across 16 paired rounds while exposing the small one-time program-image and
-  construction tradeoffs. These are workload- and protocol-specific results, not blanket speed or RSS claims.
-  Next come broader long-run history, further hot-loop hygiene, adaptive quickening, superinstructions/O2, and
-  type-directed wasm/AOT. Native copy-and-patch/JIT work remains a research reference unless it can satisfy the
-  public `unsafe_code = "forbid"` gate.
+  construction tradeoffs. The latest exact cross-engine matrix then reduced rustia's median ns/unit by
+  22.08%-34.97% across all five tracked workloads versus the previous committed Linux snapshot; the generated
+  minimum-time `mlua-luau` gap fell from a 10.1x to 7.30x geometric mean, with a current 5.25x-9.53x range.
+  These are workload- and protocol-specific results, not blanket speed or RSS claims. Next come broader long-run
+  history, adaptive quickening, superinstructions/O2, further profile-led hot-loop work, and type-directed
+  wasm/AOT. Native copy-and-patch/JIT work remains a research reference unless it can satisfy the public
+  `unsafe_code = "forbid"` gate.
 - **Luau target PINNED** (review C1): **Luau 0.709** (= our mlua oracle), standalone (not-Roblox) surface,
   vector width 3, flags-off — see [`05-luau-target.md`](05-luau-target.md). **f64-only is VERIFIED correct**
   (`math.type==nil`; integers are default-OFF even at HEAD 0.727 behind `FFlag::LuauIntegerType2`).

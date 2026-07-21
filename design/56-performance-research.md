@@ -1,17 +1,19 @@
 # rustia — SotA performance research update
 
-> **Status: [PERFORMANCE RESEARCH v1.5] (updated 2026-07-22).** This note updates
+> **Status: [PERFORMANCE RESEARCH v1.6] (updated 2026-07-22).** This note updates
 > [`55-improvements.md`](55-improvements.md) with the current performance research stack. It is not a new
 > conformance contract; it is the ordered implementation bet list for making rustia fast while keeping the public
 > workspace under `unsafe_code = "forbid"`.
 
 ## Ground truth
 
-The public cross-engine benchmark posture is still conservative: rustia is currently far behind the C++ Luau oracle
-through `mlua-luau` on the tracked workloads, with the current Linux matrix showing a roughly 7.1x-14.1x range
-and about 10.1x geometric-mean gap. Exact same-engine Linux A/B evidence for the newer
-dense, OOP, and string-memory slices is retained separately and does not turn into a cross-engine headline. That
-makes this a catch-up project first.
+The public cross-engine benchmark posture is still conservative: rustia remains behind the C++ Luau oracle
+through `mlua-luau` on the tracked workloads. The 2026-07-21 exact-commit Linux matrix reduced the generated
+minimum-time comparison from a roughly 7.1x-14.1x range and 10.1x geometric-mean gap to 5.25x-9.53x and 7.30x.
+Rustia's median ns/unit also fell 22.08%-34.97% across all five workloads relative to the previous committed
+Linux snapshot. Exact same-engine Linux A/B evidence for the earlier dense, OOP, and string-memory slices is
+retained separately; none of these results turns into a blanket cross-engine headline. This remains a catch-up
+project first.
 
 The hardened safe table/atom/cache foundation is now in-tree. VM-local byte atoms and insertion-ordered table
 hash parts at 16+ entries use deterministic open-addressed `Vec<u32>` side indices at no more than 50% load.
@@ -119,7 +121,13 @@ Current plan delta: the first focused pass removed repeated special-opcode compa
 classification and avoided string/kind decoding on the dense numeric table path. The next profiled pass adds an
 inlined zero-debt GC fast path and replaces unconditional per-instruction weak-root rescans with conservative
 collection-boundary and guest-entry synchronization. Fuel, collection boundaries, metamethod entry, and explicit
-`collectgarbage` behavior are unchanged; the pending dedicated-Linux matrix decides the cross-engine result.
+`collectgarbage` behavior are unchanged. The exact `87db17542e19ae77ec92463f8a5b8e8b8a21a666` dedicated-Linode
+matrix accepted every native and wasm timed group on its first attempt with zero timed steal. Relative to the
+previous committed Linux snapshot, rustia's median ns/unit fell 34.97% on `dense_tables`, 27.20% on
+`sparse_tables`, 27.44% on `closures_upvalues`, 22.08% on `generic_iteration`, and 22.77% on
+`stdlib_math_table`. The generated minimum-time claim gate now places `mlua-luau` 5.25x-9.53x faster, with a
+7.30x geometric mean instead of 10.1x. The ephemeral VM was confirmed deleted before the evidence and 50-row
+matrix were promoted.
 Expected gain: 1.2x-3x broad speedup, especially on arithmetic, loops, and small functions.
 
 **6. Superinstructions and tracelet fusion.**
