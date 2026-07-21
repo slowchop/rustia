@@ -1183,11 +1183,6 @@ impl Vm {
 
                 let loop_result = (|| -> VmFlowResult<Vec<Value>> {
                     loop {
-                        self.update_current_gc_roots(
-                            &registers,
-                            &varargs,
-                            &pending_return_prefixes,
-                        );
                         let instruction = *function.code.get(pc).ok_or_else(|| {
                             Error::new(ErrorKind::InvalidProgram {
                                 reason: "program counter ran off the end of the function",
@@ -1200,6 +1195,18 @@ impl Vm {
                             .map_err(|e| e.at_pc(pc))?;
                         charge_fuel(fuel, self.settings.initial_fuel, fuel_cost)
                             .map_err(|error| error.at_pc(pc))?;
+                        if weak_collection_due_within(
+                            self.executed_instructions,
+                            self.settings.deterministic_gc_interval.get(),
+                            fuel_cost,
+                        ) || instruction_may_invoke_guest(&registers, instruction)
+                        {
+                            self.update_current_gc_roots(
+                                &registers,
+                                &varargs,
+                                &pending_return_prefixes,
+                            );
+                        }
                         self.executed_instructions = self.executed_instructions.wrapping_add(1);
                         self.maybe_collect();
                         self.record_coverage_hit(program_id, context.prototype, function, pc);
@@ -17997,6 +18004,177 @@ fn checked_jump(aux: i32) -> Result<usize> {
     Ok(aux as usize)
 }
 
+fn weak_collection_due_within(executed: u64, interval: u64, steps: u64) -> bool {
+    let remainder = executed % interval;
+    let until_boundary = if remainder == 0 {
+        interval
+    } else {
+        interval - remainder
+    };
+    steps >= until_boundary
+}
+
+fn instruction_may_invoke_guest(registers: &[Value], instruction: Instruction) -> bool {
+    let number_pair = || {
+        registers
+            .get(instruction.b as usize)
+            .and_then(|value| value.as_number())
+            .is_some()
+            && registers
+                .get(instruction.c as usize)
+                .and_then(|value| value.as_number())
+                .is_some()
+    };
+    let ordered_primitive_pair = || {
+        let Some(lhs) = registers.get(instruction.b as usize) else {
+            return false;
+        };
+        let Some(rhs) = registers.get(instruction.c as usize) else {
+            return false;
+        };
+        matches!(
+            (lhs.kind(), rhs.kind()),
+            (ValueKind::Number, ValueKind::Number) | (ValueKind::String, ValueKind::String)
+        )
+    };
+
+    match instruction.op {
+        Opcode::Add
+        | Opcode::Sub
+        | Opcode::Mul
+        | Opcode::Div
+        | Opcode::Mod
+        | Opcode::FloorDiv
+        | Opcode::Pow
+        | Opcode::Equal
+        | Opcode::NotEqual => !number_pair(),
+        Opcode::Neg => registers
+            .get(instruction.b as usize)
+            .and_then(|value| value.as_number())
+            .is_none(),
+        Opcode::Less | Opcode::LessEqual | Opcode::Greater | Opcode::GreaterEqual => {
+            !ordered_primitive_pair()
+        }
+        Opcode::GetImport
+        | Opcode::GetGlobal
+        | Opcode::SetGlobal
+        | Opcode::Concat
+        | Opcode::Len
+        | Opcode::GetIndex
+        | Opcode::SetIndex
+        | Opcode::ConcatArgs
+        | Opcode::ToString
+        | Opcode::TableFind
+        | Opcode::Call
+        | Opcode::CallMulti
+        | Opcode::ReturnCall
+        | Opcode::CallExpand
+        | Opcode::CallVarargs
+        | Opcode::ReturnCallVarargs
+        | Opcode::ReturnCallExpand
+        | Opcode::CallExpand2
+        | Opcode::CallExpandVarargs
+        | Opcode::ReturnCallExpand2
+        | Opcode::ReturnCallExpandVarargs
+        | Opcode::AppendCall
+        | Opcode::AppendCallVarargs
+        | Opcode::AppendCallExpand
+        | Opcode::ReturnCallExpand2Varargs
+        | Opcode::GenericCallPrep
+        | Opcode::GenericCallLoop
+        | Opcode::GeneralizedIterPrep
+        | Opcode::GeneralizedIterLoop
+        | Opcode::CallExpand3
+        | Opcode::FastCall
+        | Opcode::GetTableKs
+        | Opcode::SetTableKs
+        | Opcode::NameCall => true,
+        Opcode::Halt
+        | Opcode::LoadConst
+        | Opcode::Move
+        | Opcode::Jump
+        | Opcode::JumpIfNot
+        | Opcode::JumpIf
+        | Opcode::Return
+        | Opcode::CallExtension
+        | Opcode::Assert
+        | Opcode::Not
+        | Opcode::ForPrep
+        | Opcode::ForLoop
+        | Opcode::ToNumber
+        | Opcode::NewArray
+        | Opcode::IpairsPrep
+        | Opcode::IpairsLoop
+        | Opcode::PairsPrep
+        | Opcode::PairsLoop
+        | Opcode::TableConcat
+        | Opcode::NextKey
+        | Opcode::TypeOf
+        | Opcode::Abs
+        | Opcode::StringSub
+        | Opcode::StringLen
+        | Opcode::StringByte
+        | Opcode::StringUpper
+        | Opcode::StringLower
+        | Opcode::StringReverse
+        | Opcode::StringRep
+        | Opcode::StringFind
+        | Opcode::StringSplit
+        | Opcode::TableGetN
+        | Opcode::TableMaxN
+        | Opcode::MathFloor
+        | Opcode::MathCeil
+        | Opcode::MathRound
+        | Opcode::MathSign
+        | Opcode::MathClamp
+        | Opcode::MathMap
+        | Opcode::MathLerp
+        | Opcode::MathMin
+        | Opcode::MathMax
+        | Opcode::MathFmod
+        | Opcode::MathPow
+        | Opcode::MathSqrt
+        | Opcode::MathDeg
+        | Opcode::MathRad
+        | Opcode::MathIsNan
+        | Opcode::MathIsInf
+        | Opcode::MathIsFinite
+        | Opcode::MathSin
+        | Opcode::MathCos
+        | Opcode::MathTan
+        | Opcode::MathAsin
+        | Opcode::MathAcos
+        | Opcode::MathAtan
+        | Opcode::MathAtan2
+        | Opcode::MathSinh
+        | Opcode::MathCosh
+        | Opcode::MathTanh
+        | Opcode::MathExp
+        | Opcode::MathLog
+        | Opcode::MathLog10
+        | Opcode::MathLdexp
+        | Opcode::RawGet
+        | Opcode::RawSet
+        | Opcode::RawLen
+        | Opcode::TableCreate
+        | Opcode::TableInsert
+        | Opcode::TableRemove
+        | Opcode::LoadFunction
+        | Opcode::LoadCurrentFunction
+        | Opcode::GetLocalCell
+        | Opcode::SetLocalCell
+        | Opcode::GetUpvalue
+        | Opcode::SetUpvalue
+        | Opcode::ClearLocalCell
+        | Opcode::LoadVarargs
+        | Opcode::ReturnVarargs
+        | Opcode::AppendVarargs
+        | Opcode::LoadConstWide
+        | Opcode::CheckMethod
+        | Opcode::CoerceForNumber => false,
+    }
+}
+
 fn get_register(registers: &[Value], register: u8) -> Result<Value> {
     registers.get(register as usize).copied().ok_or_else(|| {
         Error::new(ErrorKind::RegisterOutOfBounds {
@@ -20957,6 +21135,24 @@ fn table_expected_error() -> Error {
 #[cfg(test)]
 mod inline_cache_tests {
     use super::*;
+
+    #[test]
+    fn hot_loop_root_sync_keeps_collection_and_guest_entry_boundaries() {
+        assert!(!weak_collection_due_within(0, 10_000, 1));
+        assert!(weak_collection_due_within(9_999, 10_000, 1));
+        assert!(weak_collection_due_within(9_998, 10_000, 2));
+
+        let numbers = [Value::number(1.0), Value::number(2.0)];
+        let add = Instruction::new(Opcode::Add, 0, 0, 1);
+        assert!(!instruction_may_invoke_guest(&numbers, add));
+
+        let dynamic = [Value::table(0), Value::number(2.0)];
+        assert!(instruction_may_invoke_guest(&dynamic, add));
+        assert!(instruction_may_invoke_guest(
+            &numbers,
+            Instruction::new(Opcode::Call, 0, 0, 0)
+        ));
+    }
 
     fn cache_program() -> Program {
         Program::new(

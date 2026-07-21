@@ -6183,6 +6183,28 @@ mod tests {
     }
 
     #[test]
+    fn guest_call_root_snapshot_preserves_newly_weak_outer_values() {
+        let chunk = parse_source(
+            r#"
+                local holder = {}
+                local outerOnly = {}
+                holder[1] = outerOnly
+                local function activateWeakValues()
+                    setmetatable(holder, { __mode = "v" })
+                    collectgarbage()
+                end
+                activateWeakValues()
+                return holder[1] == outerOnly
+            "#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_bool(), Some(true));
+    }
+
+    #[test]
     fn constant_folded_number_equality_uses_luau_semantics() {
         let cases = [
             ("return -0 == 0", true),

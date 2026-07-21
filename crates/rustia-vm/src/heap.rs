@@ -501,8 +501,15 @@ impl VmCell {
         })
     }
 
+    #[inline(always)]
     pub fn collect_debt(&mut self) {
-        self.arena.collect_debt();
+        // `Arena::collect_debt` performs this same test inside the collector.
+        // Keep the idle path here so the interpreter does not enter the GC
+        // machinery on every bytecode instruction when no allocation debt is
+        // outstanding.
+        if self.arena.metrics().allocation_debt() > 0.0 {
+            self.arena.collect_debt();
+        }
     }
 
     pub fn intern_string(&mut self, value: &str) -> u32 {

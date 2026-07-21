@@ -1,6 +1,6 @@
 # rustia — SotA performance research update
 
-> **Status: [PERFORMANCE RESEARCH v1.4] (updated 2026-07-20).** This note updates
+> **Status: [PERFORMANCE RESEARCH v1.5] (updated 2026-07-22).** This note updates
 > [`55-improvements.md`](55-improvements.md) with the current performance research stack. It is not a new
 > conformance contract; it is the ordered implementation bet list for making rustia fast while keeping the public
 > workspace under `unsafe_code = "forbid"`.
@@ -8,8 +8,8 @@
 ## Ground truth
 
 The public cross-engine benchmark posture is still conservative: rustia is currently far behind the C++ Luau oracle
-through `mlua-luau` on the tracked workloads, with the generated benchmark claim saying rustia trails by roughly
-8x-20x and about 13x geomean in the committed snapshot. Exact same-engine Linux A/B evidence for the newer
+through `mlua-luau` on the tracked workloads, with the current Linux matrix showing a roughly 7.1x-14.1x range
+and about 10.1x geometric-mean gap. Exact same-engine Linux A/B evidence for the newer
 dense, OOP, and string-memory slices is retained separately and does not turn into a cross-engine headline. That
 makes this a catch-up project first.
 
@@ -53,8 +53,9 @@ cross-RHS fuel/GC phase, and synthetic instruction/GC steps preserve the unfused
 semantics; this opcode is a lowering fast path, not a claim of full Luau `__namecall` context support.
 
 The remaining avoidable costs include small-table scans, cached length-boundary work, no fused
-`GETIMPORT`+`FASTCALL` form, heavy per-instruction book-keeping, no shared frozen standard-library state, and no
-type-directed hot tier.
+`GETIMPORT`+`FASTCALL` form, remaining dispatch and register tolls, no shared frozen standard-library state, and
+no type-directed hot tier. A profiled hot-loop candidate now bypasses `gc-arena` when allocation debt is already
+zero and refreshes weak-table root snapshots only before a possible collection boundary or guest-code entry.
 
 The no-unsafe policy is a feature, not a speed dead-end. The product path below assumes safe Rust in the public
 workspace. Techniques that require writable executable memory, raw code patching, or unsafe FFI remain research
@@ -114,10 +115,11 @@ Expected gain: 2x-10x on stdlib-heavy code; essential for matching Luau on `stdl
 Move coverage, fuel, GC debt, root maintenance, and register access checks out of the common one-instruction path
 where correctness permits. Use deterministic fuel batching at basic-block boundaries, direct register windows,
 fallible slow helpers, and hot/cold opcode layout.
-Current plan delta: the first focused pass now removes repeated special-opcode comparisons from ordinary fuel
-classification and avoids string/kind decoding on the dense numeric table path. This does not imply that all
-per-instruction bookkeeping is solved; profile the remaining VM loop before larger compiler work hides the easy
-wins.
+Current plan delta: the first focused pass removed repeated special-opcode comparisons from ordinary fuel
+classification and avoided string/kind decoding on the dense numeric table path. The next profiled pass adds an
+inlined zero-debt GC fast path and replaces unconditional per-instruction weak-root rescans with conservative
+collection-boundary and guest-entry synchronization. Fuel, collection boundaries, metamethod entry, and explicit
+`collectgarbage` behavior are unchanged; the pending dedicated-Linux matrix decides the cross-engine result.
 Expected gain: 1.2x-3x broad speedup, especially on arithmetic, loops, and small functions.
 
 **6. Superinstructions and tracelet fusion.**
@@ -183,6 +185,23 @@ intervals, with a conservative-envelope verdict against the predeclared
 material-regression threshold; accepted evidence retains that exact JSON
 output. The exact commands and required provenance are in
 [`../bench/README.md`](../bench/README.md).
+
+### GC idle/root synchronization candidate — local directional evidence
+
+Symbolized optimized sampling on the allocation-light closure workload attributed 7.1% of baseline samples to
+`gc_arena::context::Context::do_collection`, even though most instructions had no outstanding allocation debt.
+The explicit zero-debt check removed that sampled bucket. A deliberately non-semantic diagnostic that omitted
+the per-instruction weak-root refresh then established a roughly 25%-30% upper bound for the remaining root-copy
+toll, so the production candidate keeps snapshots before any imminent weak-collection boundary and before every
+opcode path that can enter guest code. A targeted test creates a weak-value table inside a nested call and proves
+that a value live only in its caller register remains rooted; the complete 692-fixture conformance corpus also
+passes.
+
+A local optimized fixed-work ABBA/BAAB screen compared the clean pre-candidate binary with the complete candidate
+over nine repetitions per leg and identical checksums. Averaging the two medians per variant gave directional
+reductions of approximately 32% for `dense_tables`, 32% for `sparse_tables`, 29% for `closures_upvalues`, 27% for
+`generic_iteration`, and 25% for `stdlib_math_table`. This developer-host screen selects the candidate for a
+dedicated Linode matrix; it is not retained benchmark history or a public speed claim.
 
 ### Current field/string slice — exact-final dense comparison accepted
 

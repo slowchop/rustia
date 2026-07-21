@@ -235,6 +235,11 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Changed
 
+- The VM's ordinary instruction loop now bypasses `gc-arena` when allocation
+  debt is already zero and refreshes weak-table root snapshots only before an
+  imminent collection boundary or a path that can enter guest code. Explicit
+  collection, metamethod, fuel, and weak-root semantics remain covered by the
+  conformance suite and a nested-call root-liveness regression test.
 - The mutable public `Program::constants` field is now an immutable shared pool
   exposed through `Program::constants()`. This is an intentional `0.0.x`
   source-level API change that prevents compiled-string metadata from drifting
