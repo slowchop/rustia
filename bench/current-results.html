@@ -194,8 +194,287 @@
       color: #92400e;
     }
 
-    .language-summary-table {
-      min-width: 820px;
+    .metric-toggle {
+      display: inline-flex;
+      flex: 0 0 auto;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+    }
+
+    .metric-toggle button {
+      padding: 6px 11px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .metric-toggle button[aria-pressed="true"] {
+      background: var(--text);
+      color: var(--panel);
+    }
+
+    .ranked-headline,
+    .heatmap-detail {
+      padding: 18px 20px;
+    }
+
+    .heatmap-detail {
+      border-top: 1px solid var(--line);
+      background: var(--panel-soft);
+    }
+
+    .rank-axis-caption,
+    .heatmap-head,
+    .heat-legend {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .rank-axis-caption {
+      margin: 0 0 8px min(290px, 35%);
+      text-align: right;
+    }
+
+    .ranked-bars {
+      display: grid;
+      gap: 4px;
+    }
+
+    .language-rank-row {
+      display: grid;
+      grid-template-columns: 28px minmax(180px, 240px) minmax(140px, 1fr) 90px 96px;
+      gap: 12px;
+      align-items: center;
+      min-height: 38px;
+    }
+
+    .rank-number,
+    .rank-meta,
+    .implementation-language span,
+    .metric-caption {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .rank-number,
+    .rank-value,
+    .heat-cell {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .rank-track {
+      height: 11px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e2e8ef;
+    }
+
+    .rank-fill {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width 180ms ease;
+    }
+
+    .rank-value {
+      text-align: right;
+    }
+
+    .rank-meta {
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .implementation-language {
+      display: grid;
+      gap: 1px;
+      min-width: 0;
+    }
+
+    .implementation-language strong,
+    .implementation-language span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .heatmap-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+
+    .heatmap-head strong {
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .language-heatmap {
+      min-width: 790px;
+      table-layout: fixed;
+      background: var(--panel);
+    }
+
+    .language-heatmap th:first-child {
+      width: 190px;
+    }
+
+    .language-heatmap th:not(:first-child),
+    .language-heatmap td {
+      text-align: center;
+    }
+
+    .language-heatmap tbody th {
+      color: var(--text);
+      font-size: 14px;
+      text-transform: none;
+    }
+
+    .heat-cell {
+      transition: background 180ms ease;
+    }
+
+    .heat-0 { background: #fee2e2; }
+    .heat-1 { background: #f1f5f9; }
+    .heat-2 { background: #dff7ed; }
+    .heat-3 { background: #b7ead7; }
+    .heat-4 { background: #86d8bf; }
+    .heat-5 { background: #58c3a3; }
+
+    .heat-baseline {
+      box-shadow: inset 0 0 0 1px var(--text);
+    }
+
+    .heat-missing {
+      color: var(--muted);
+      background: var(--panel-soft);
+    }
+
+    .heat-legend {
+      margin-top: 8px;
+    }
+
+    .cohort-chart {
+      padding: 20px;
+    }
+
+    .cohort-axis {
+      position: relative;
+      height: 28px;
+      margin-left: 170px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .cohort-axis::after,
+    .cohort-track::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: var(--zero);
+      width: 1px;
+      background: var(--text);
+      opacity: .6;
+    }
+
+    .cohort-axis span {
+      position: absolute;
+      bottom: 5px;
+      transform: translateX(-50%);
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .cohort-plot-row {
+      display: grid;
+      grid-template-columns: 158px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      min-height: 54px;
+    }
+
+    .cohort-plot-name strong,
+    .cohort-plot-name span {
+      display: block;
+    }
+
+    .cohort-plot-name span,
+    .cohort-point-label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .cohort-track {
+      position: relative;
+      height: 28px;
+      background: var(--panel-soft);
+    }
+
+    .cohort-interval {
+      position: absolute;
+      top: 13px;
+      height: 3px;
+      background: var(--accent-2);
+    }
+
+    .cohort-point {
+      position: absolute;
+      top: 9px;
+      width: 11px;
+      height: 11px;
+      transform: translateX(-50%);
+      border: 2px solid var(--panel);
+      border-radius: 999px;
+      background: var(--accent-2);
+    }
+
+    .cohort-point-label {
+      position: absolute;
+      top: -2px;
+      white-space: nowrap;
+    }
+
+    .cohort-label-left { transform: translateX(calc(-100% - 9px)); }
+    .cohort-label-right { transform: translateX(9px); }
+
+    .cohort-table {
+      min-width: 760px;
+    }
+
+    .cohort-table-wrap {
+      border-top: 1px solid var(--line);
+    }
+
+    .cohort-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 700;
+    }
+
+    .cohort-status::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .cohort-note {
+      margin: 0;
+      padding: 12px 20px 16px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
     }
 
     .target-runtime {
@@ -552,6 +831,39 @@
         flex-direction: column;
       }
 
+      #languages-by-target > .section-head {
+        flex-direction: column;
+      }
+
+      .language-rank-row {
+        grid-template-columns: 24px minmax(120px, 1fr) 68px;
+        gap: 8px;
+        padding: 4px 0;
+      }
+
+      .language-rank-row .rank-track {
+        grid-column: 2 / 4;
+        grid-row: 2;
+      }
+
+      .rank-meta {
+        display: none;
+      }
+
+      .rank-axis-caption {
+        margin-left: 0;
+      }
+
+      .cohort-axis {
+        margin-left: 0;
+      }
+
+      .cohort-plot-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
+        margin-top: 12px;
+      }
+
       .summary-statuses {
         justify-content: flex-start;
       }
@@ -564,7 +876,7 @@
       <div class="hero-panel">
         <p class="eyebrow">script-bench current snapshot</p>
         <h1>rustia Benchmark Results and History</h1>
-        <p class="lead">Static HTML generated from the committed current benchmark JSON and append-only history. Bars compare current rows, the claim gate keeps public wording honest, and the history section renders per-workload timing trends directly from JSONL.</p>
+        <p class="lead">Committed Linux results with a best-first language headline, workload-level detail, and protocol-aware benchmark history.</p>
         <p class="source-line">
           <span>Source <code>bench/current-results.json</code></span>
           <span>History <code>bench/history/runs.jsonl</code></span>
@@ -643,7 +955,11 @@
       <div class="section-head">
         <div>
           <h2>Languages by Target</h2>
-          <p>2 / 2 exact targets complete. Rankings, workload wins, and dimensionless geomeans use only the five required common workloads.</p>
+          <p>2 / 2 exact targets complete · ranked headline and per-workload detail use the same five common workloads.</p>
+        </div>
+        <div class="metric-toggle" role="group" aria-label="Benchmark value display">
+          <button type="button" data-metric="relative" aria-pressed="true">vs rustia</button>
+          <button type="button" data-metric="absolute" aria-pressed="false">absolute</button>
         </div>
       </div>
       <div class="language-targets">
@@ -660,162 +976,158 @@
           <span class="summary-pill summary-revision-single">Single revision</span>
         </div>
       </div>
-      <div class="table-wrap">
-        <table class="language-summary-table">
-          <thead>
-            <tr>
-              <th>Language</th>
-              <th>Implementation</th>
-              <th>Rank</th>
-              <th>Geomean vs rustia</th>
-              <th>Workload wins</th>
-              <th>Coverage</th>
+      <div class="ranked-headline">
+        <div class="rank-axis-caption metric-caption" data-relative="geometric mean speed vs rustia · higher is faster" data-absolute="geometric mean ns/unit · lower is faster">geometric mean speed vs rustia · higher is faster</div>
+        <div class="ranked-bars" role="list" aria-label="Best-first implementation ranking for linux-x86_64">
+
+    <div class="language-rank-row" role="listitem" data-language="wasm" data-implementation="wasmtime">
+      <span class="rank-number">1</span>
+      <span class="implementation-language"><strong>wasmtime</strong><span>WebAssembly</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="100.000" data-absolute-width="100.000" style="width:100.000%"></span></div>
+      <strong class="rank-value metric-value" data-relative="210x" data-absolute="94.3 ns">210x</strong>
+      <span class="rank-meta">4 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="wasm" data-implementation="wasmi">
+      <span class="rank-number">2</span>
+      <span class="implementation-language"><strong>wasmi</strong><span>WebAssembly</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="78.146" data-absolute-width="78.146" style="width:78.146%"></span></div>
+      <strong class="rank-value metric-value" data-relative="44.6x" data-absolute="444 ns">44.6x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="mlua-luau">
+      <span class="rank-number">3</span>
+      <span class="implementation-language"><strong>mlua</strong><span>Luau</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="57.247" data-absolute-width="57.247" style="width:57.247%"></span></div>
+      <strong class="rank-value metric-value" data-relative="10.1x" data-absolute="1,953 ns">10.1x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="lua54" data-implementation="mlua-lua54">
+      <span class="rank-number">4</span>
+      <span class="implementation-language"><strong>mlua</strong><span>Lua 5.4</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="55.802" data-absolute-width="55.802" style="width:55.802%"></span></div>
+      <strong class="rank-value metric-value" data-relative="9.152x" data-absolute="2,164 ns">9.152x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="roto" data-implementation="roto">
+      <span class="rank-number">5</span>
+      <span class="implementation-language"><strong>roto</strong><span>Roto</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="50.132" data-absolute-width="50.132" style="width:50.132%"></span></div>
+      <strong class="rank-value metric-value" data-relative="6.122x" data-absolute="3,235 ns">6.122x</strong>
+      <span class="rank-meta">1 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="javascript" data-implementation="rquickjs">
+      <span class="rank-number">6</span>
+      <span class="implementation-language"><strong>rquickjs</strong><span>JavaScript</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="38.889" data-absolute-width="38.889" style="width:38.889%"></span></div>
+      <strong class="rank-value metric-value" data-relative="2.759x" data-absolute="7,178 ns">2.759x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="koto" data-implementation="koto">
+      <span class="rank-number">7</span>
+      <span class="implementation-language"><strong>koto</strong><span>Koto</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="32.903" data-absolute-width="32.903" style="width:32.903%"></span></div>
+      <strong class="rank-value metric-value" data-relative="1.805x" data-absolute="10,972 ns">1.805x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="rustia">
+      <span class="rank-number">8</span>
+      <span class="implementation-language"><strong>rustia</strong><span>Luau</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="24.573" data-absolute-width="24.573" style="width:24.573%"></span></div>
+      <strong class="rank-value metric-value" data-relative="1x" data-absolute="19,804 ns">1x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="rhai" data-implementation="rhai">
+      <span class="rank-number">9</span>
+      <span class="implementation-language"><strong>rhai</strong><span>Rhai</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="23.122" data-absolute-width="23.122" style="width:23.122%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.902x" data-absolute="21,951 ns">0.902x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="javascript" data-implementation="boa">
+      <span class="rank-number">10</span>
+      <span class="implementation-language"><strong>boa</strong><span>JavaScript</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="14.000" data-absolute-width="14.000" style="width:14.000%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.473x" data-absolute="41,908 ns">0.473x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+        </div>
+      </div>
+      <div class="heatmap-detail">
+        <div class="heatmap-head">
+          <strong>Workload detail</strong>
+          <span class="metric-caption" data-relative="speed vs rustia · higher is faster" data-absolute="minimum ns/unit · lower is faster">speed vs rustia · higher is faster</span>
+        </div>
+
+    <div class="table-wrap">
+      <table class="language-heatmap">
+        <thead><tr><th>Implementation · language</th><th>Closures</th><th>Dense tables</th><th>Iteration</th><th>Sparse tables</th><th>Math / table</th></tr></thead>
+        <tbody>
+
+            <tr data-language="wasm" data-implementation="wasmtime">
+              <th><span class="implementation-language"><strong>wasmtime</strong><span>WebAssembly</span></span></th>
+              <td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-2" data-relative="27.1x" data-absolute="31.1 ns">27.1x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="509x" data-absolute="540 ns">509x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="320x" data-absolute="121 ns">320x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="302x" data-absolute="531 ns">302x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="306x" data-absolute="6.92 ns">306x</td>
             </tr>
-          </thead>
-          <tbody>
 
-                <tr data-language="wasm" data-implementation="wasmtime">
-                  <td><strong>WebAssembly</strong></td>
-                  <td>wasmtime</td>
-                  <td>1 / 10</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>210x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 100.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>4 / 5</td>
-                  <td>5 / 5</td>
-                </tr>
+            <tr data-language="wasm" data-implementation="wasmi">
+              <th><span class="implementation-language"><strong>wasmi</strong><span>WebAssembly</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="4.577x" data-absolute="184 ns">4.577x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-2" data-relative="83.4x" data-absolute="3,294 ns">83.4x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-3" data-relative="120x" data-absolute="322 ns">120x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-2" data-relative="46.3x" data-absolute="3,465 ns">46.3x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-3" data-relative="83.3x" data-absolute="25.4 ns">83.3x</td>
+            </tr>
 
-                <tr data-language="wasm" data-implementation="wasmi">
-                  <td><strong>WebAssembly</strong></td>
-                  <td>wasmi</td>
-                  <td>2 / 10</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>44.6x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 21.239%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>5 / 5</td>
-                </tr>
+            <tr data-language="luau" data-implementation="mlua-luau">
+              <th><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></th>
+              <td class="heat-cell heat-4" data-heat-relative="heat-4" data-heat-absolute="heat-1" data-relative="13.2x" data-absolute="63.7 ns">13.2x</td><td class="heat-cell heat-4" data-heat-relative="heat-4" data-heat-absolute="heat-0" data-relative="14.1x" data-absolute="19,508 ns">14.1x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="9.036x" data-absolute="4,274 ns">9.036x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="7.143x" data-absolute="22,469 ns">7.143x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="8.901x" data-absolute="238 ns">8.901x</td>
+            </tr>
 
-                <tr data-language="luau" data-implementation="mlua-luau">
-                  <td><strong>Luau</strong></td>
-                  <td>mlua-luau</td>
-                  <td>3 / 10</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>10.1x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 4.827%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>5 / 5</td>
-                </tr>
+            <tr data-language="lua54" data-implementation="mlua-lua54">
+              <th><span class="implementation-language"><strong>mlua</strong><span>Lua 5.4</span></span></th>
+              <td class="heat-cell heat-4" data-heat-relative="heat-4" data-heat-absolute="heat-2" data-relative="18.3x" data-absolute="46 ns">18.3x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="5.845x" data-absolute="47,011 ns">5.845x</td><td class="heat-cell heat-4" data-heat-relative="heat-4" data-heat-absolute="heat-0" data-relative="12.3x" data-absolute="3,137 ns">12.3x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="6.454x" data-absolute="24,865 ns">6.454x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="7.536x" data-absolute="281 ns">7.536x</td>
+            </tr>
 
-                <tr data-language="lua54" data-implementation="mlua-lua54">
-                  <td><strong>Lua 5.4</strong></td>
-                  <td>mlua-lua54</td>
-                  <td>4 / 10</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>9.152x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 4.357%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>5 / 5</td>
-                </tr>
+            <tr data-language="roto" data-implementation="roto">
+              <th><span class="implementation-language"><strong>roto</strong><span>Roto</span></span></th>
+              <td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="144x" data-absolute="5.868 ns">144x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.154x" data-absolute="1,786,981 ns">0.154x</td><td class="heat-cell heat-4" data-heat-relative="heat-4" data-heat-absolute="heat-1" data-relative="19.7x" data-absolute="1,965 ns">19.7x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="2.032x" data-absolute="78,999 ns">2.032x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="9.74x" data-absolute="218 ns">9.74x</td>
+            </tr>
 
-                <tr data-language="roto" data-implementation="roto">
-                  <td><strong>Roto</strong></td>
-                  <td>roto</td>
-                  <td>5 / 10</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>6.122x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.915%"></span></div>
-                    </div>
-                  </td>
-                  <td>1 / 5</td>
-                  <td>5 / 5</td>
-                </tr>
+            <tr data-language="javascript" data-implementation="rquickjs">
+              <th><span class="implementation-language"><strong>rquickjs</strong><span>JavaScript</span></span></th>
+              <td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="1.791x" data-absolute="471 ns">1.791x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="2.399x" data-absolute="114,518 ns">2.399x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="6.596x" data-absolute="5,855 ns">6.596x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="1.604x" data-absolute="100,077 ns">1.604x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="3.517x" data-absolute="603 ns">3.517x</td>
+            </tr>
 
-                <tr data-language="javascript" data-implementation="rquickjs">
-                  <td><strong>JavaScript</strong></td>
-                  <td>rquickjs</td>
-                  <td>6 / 10</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>2.759x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>5 / 5</td>
-                </tr>
+            <tr data-language="koto" data-implementation="koto">
+              <th><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></th>
+              <td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="2.583x" data-absolute="327 ns">2.583x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="0.963x" data-absolute="285,453 ns">0.963x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="5.665x" data-absolute="6,817 ns">5.665x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1.058x" data-absolute="151,620 ns">1.058x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="1.285x" data-absolute="1,649 ns">1.285x</td>
+            </tr>
 
-                <tr data-language="koto" data-implementation="koto">
-                  <td><strong>Koto</strong></td>
-                  <td>koto</td>
-                  <td>7 / 10</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>1.805x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>5 / 5</td>
-                </tr>
+            <tr data-language="luau" data-implementation="rustia">
+              <th><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></th>
+              <td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="844 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="274,757 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="38,617 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="160,487 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="2,119 ns">1x</td>
+            </tr>
 
-                <tr data-language="luau" data-implementation="rustia">
-                  <td><strong>Luau</strong></td>
-                  <td>rustia</td>
-                  <td>8 / 10</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>1x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>5 / 5</td>
-                </tr>
+            <tr data-language="rhai" data-implementation="rhai">
+              <th><span class="implementation-language"><strong>rhai</strong><span>Rhai</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.591x" data-absolute="1,428 ns">0.591x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="0.841x" data-absolute="326,742 ns">0.841x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="3.534x" data-absolute="10,929 ns">3.534x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.505x" data-absolute="317,886 ns">0.505x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.674x" data-absolute="3,144 ns">0.674x</td>
+            </tr>
 
-                <tr data-language="rhai" data-implementation="rhai">
-                  <td><strong>Rhai</strong></td>
-                  <td>rhai</td>
-                  <td>9 / 10</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>0.902x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>5 / 5</td>
-                </tr>
+            <tr data-language="javascript" data-implementation="boa">
+              <th><span class="implementation-language"><strong>boa</strong><span>JavaScript</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.332x" data-absolute="2,539 ns">0.332x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.298x" data-absolute="922,430 ns">0.298x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1.097x" data-absolute="35,212 ns">1.097x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.424x" data-absolute="378,824 ns">0.424x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.512x" data-absolute="4,138 ns">0.512x</td>
+            </tr>
 
-                <tr data-language="javascript" data-implementation="boa">
-                  <td><strong>JavaScript</strong></td>
-                  <td>boa</td>
-                  <td>10 / 10</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>0.473x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>5 / 5</td>
-                </tr>
+        </tbody>
+      </table>
+    </div>
 
-          </tbody>
-        </table>
+        <div class="heat-legend metric-caption" data-relative="Color: red below 0.75× · neutral near rustia · stronger green above 1.25×" data-absolute="Color: strongest for the fastest implementation in each workload">Color: red below 0.75× · neutral near rustia · stronger green above 1.25×</div>
       </div>
     </section>
 
@@ -831,64 +1143,67 @@
           <span class="summary-pill summary-revision-single">Single revision</span>
         </div>
       </div>
-      <div class="table-wrap">
-        <table class="language-summary-table">
-          <thead>
-            <tr>
-              <th>Language</th>
-              <th>Implementation</th>
-              <th>Rank</th>
-              <th>Geomean vs rustia</th>
-              <th>Workload wins</th>
-              <th>Coverage</th>
+      <div class="ranked-headline">
+        <div class="rank-axis-caption metric-caption" data-relative="geometric mean speed vs rustia · higher is faster" data-absolute="geometric mean ns/unit · lower is faster">geometric mean speed vs rustia · higher is faster</div>
+        <div class="ranked-bars" role="list" aria-label="Best-first implementation ranking for wasm32-v8-node-linux-x64">
+
+    <div class="language-rank-row" role="listitem" data-language="koto" data-implementation="koto">
+      <span class="rank-number">1</span>
+      <span class="implementation-language"><strong>koto</strong><span>Koto</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="100.000" data-absolute-width="100.000" style="width:100.000%"></span></div>
+      <strong class="rank-value metric-value" data-relative="2.668x" data-absolute="13,348 ns">2.668x</strong>
+      <span class="rank-meta">5 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="rhai" data-implementation="rhai">
+      <span class="rank-number">2</span>
+      <span class="implementation-language"><strong>rhai</strong><span>Rhai</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="38.573" data-absolute-width="38.573" style="width:38.573%"></span></div>
+      <strong class="rank-value metric-value" data-relative="1.324x" data-absolute="26,901 ns">1.324x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="rustia">
+      <span class="rank-number">3</span>
+      <span class="implementation-language"><strong>rustia</strong><span>Luau</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="14.000" data-absolute-width="14.000" style="width:14.000%"></span></div>
+      <strong class="rank-value metric-value" data-relative="1x" data-absolute="35,606 ns">1x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+        </div>
+      </div>
+      <div class="heatmap-detail">
+        <div class="heatmap-head">
+          <strong>Workload detail</strong>
+          <span class="metric-caption" data-relative="speed vs rustia · higher is faster" data-absolute="minimum ns/unit · lower is faster">speed vs rustia · higher is faster</span>
+        </div>
+
+    <div class="table-wrap">
+      <table class="language-heatmap">
+        <thead><tr><th>Implementation · language</th><th>Closures</th><th>Dense tables</th><th>Iteration</th><th>Sparse tables</th><th>Math / table</th></tr></thead>
+        <tbody>
+
+            <tr data-language="koto" data-implementation="koto">
+              <th><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-5" data-relative="3.327x" data-absolute="413 ns">3.327x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-5" data-relative="2.56x" data-absolute="352,561 ns">2.56x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-5" data-relative="6.698x" data-absolute="8,460 ns">6.698x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-5" data-relative="1.412x" data-absolute="175,327 ns">1.412x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-5" data-relative="1.677x" data-absolute="1,963 ns">1.677x</td>
             </tr>
-          </thead>
-          <tbody>
 
-                <tr data-language="koto" data-implementation="koto">
-                  <td><strong>Koto</strong></td>
-                  <td>koto</td>
-                  <td>1 / 3</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>2.668x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 100.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>5 / 5</td>
-                  <td>5 / 5</td>
-                </tr>
+            <tr data-language="rhai" data-implementation="rhai">
+              <th><span class="implementation-language"><strong>rhai</strong><span>Rhai</span></span></th>
+              <td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-3" data-relative="0.84x" data-absolute="1,634 ns">0.84x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-4" data-relative="2.191x" data-absolute="411,898 ns">2.191x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-4" data-relative="4.385x" data-absolute="12,921 ns">4.385x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-3" data-relative="0.632x" data-absolute="391,701 ns">0.632x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-3" data-relative="0.796x" data-absolute="4,135 ns">0.796x</td>
+            </tr>
 
-                <tr data-language="rhai" data-implementation="rhai">
-                  <td><strong>Rhai</strong></td>
-                  <td>rhai</td>
-                  <td>2 / 3</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>1.324x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 49.618%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>5 / 5</td>
-                </tr>
+            <tr data-language="luau" data-implementation="rustia">
+              <th><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></th>
+              <td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-3" data-relative="1x" data-absolute="1,373 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-3" data-relative="1x" data-absolute="902,399 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-2" data-relative="1x" data-absolute="56,664 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-4" data-relative="1x" data-absolute="247,603 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-4" data-relative="1x" data-absolute="3,291 ns">1x</td>
+            </tr>
 
-                <tr data-language="luau" data-implementation="rustia">
-                  <td><strong>Luau</strong></td>
-                  <td>rustia</td>
-                  <td>3 / 3</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>1x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 37.487%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>5 / 5</td>
-                </tr>
+        </tbody>
+      </table>
+    </div>
 
-          </tbody>
-        </table>
+        <div class="heat-legend metric-caption" data-relative="Color: red below 0.75× · neutral near rustia · stronger green above 1.25×" data-absolute="Color: strongest for the fastest implementation in each workload">Color: red below 0.75× · neutral near rustia · stronger green above 1.25×</div>
       </div>
     </section>
 
@@ -922,7 +1237,7 @@
       <td>844 ns</td>
       <td>13.2x</td>
       <td>8 / 10</td>
-      <td>roto · 5.868 ns</td>
+      <td>roto · Roto · 5.868 ns</td>
       <td>
         <span class="claim-posture">
           <span class="claim-pill claim-blocked">Not ready</span>
@@ -936,7 +1251,7 @@
       <td>274,757 ns</td>
       <td>14.1x</td>
       <td>6 / 10</td>
-      <td>wasmtime · 540 ns</td>
+      <td>wasmtime · WebAssembly · 540 ns</td>
       <td>
         <span class="claim-posture">
           <span class="claim-pill claim-blocked">Not ready</span>
@@ -950,7 +1265,7 @@
       <td>38,617 ns</td>
       <td>9.036x</td>
       <td>10 / 10</td>
-      <td>wasmtime · 121 ns</td>
+      <td>wasmtime · WebAssembly · 121 ns</td>
       <td>
         <span class="claim-posture">
           <span class="claim-pill claim-blocked">Not ready</span>
@@ -964,7 +1279,7 @@
       <td>160,487 ns</td>
       <td>7.143x</td>
       <td>8 / 10</td>
-      <td>wasmtime · 531 ns</td>
+      <td>wasmtime · WebAssembly · 531 ns</td>
       <td>
         <span class="claim-posture">
           <span class="claim-pill claim-blocked">Not ready</span>
@@ -978,7 +1293,7 @@
       <td>2,119 ns</td>
       <td>8.901x</td>
       <td>8 / 10</td>
-      <td>wasmtime · 6.92 ns</td>
+      <td>wasmtime · WebAssembly · 6.92 ns</td>
       <td>
         <span class="claim-posture">
           <span class="claim-pill claim-blocked">Not ready</span>
@@ -997,955 +1312,62 @@
       <div class="section-head">
         <div>
           <h2>Benchmark History</h2>
-          <p>50 records · 1 commits · source <code>bench/history/runs.jsonl</code> · 2026-07-20 10:16:58 UTC to 2026-07-20 10:20:31 UTC</p>
+          <p>Controlled deltas stay separate from the full language-matrix baseline.</p>
         </div>
       </div>
-      <div class="history-body">
-
-    <section class="history-target">
-      <div class="history-target-head">
-        <h3>linux-x86_64</h3>
-        <p>50 records across 5 workloads</p>
-      </div>
-
-    <section class="history-workload" id="history-linux-x86-64-closures-upvalues">
-      <div class="history-workload-head">
-        <div>
-          <h4>closures_upvalues</h4>
-          <p>one upvalue-mutating closure call · 10 records · 10 engines</p>
+      <div class="cohort-chart" role="img" aria-label="Accepted controlled benchmark cohort deltas; lower percentages are faster">
+        <div class="cohort-axis" style="--zero: 87.500%" aria-hidden="true">
+          <span style="left:0.000%">-70%</span><span style="left:25.000%">-50%</span><span style="left:50.000%">-30%</span><span style="left:87.500%">0%</span><span style="left:100.000%">+10%</span>
         </div>
-      </div>
 
-    <div class="history-chart">
-      <svg viewBox="0 0 920 260" role="img" aria-label="closures_upvalues timing history">
-        <rect x="0" y="0" width="920" height="260" class="history-chart-bg" />
-
-      <line x1="62" y1="20.00" x2="900" y2="20.00" class="history-grid-line" />
-      <text x="8" y="24.00" class="history-axis-label">2,920</text>
-
-      <line x1="62" y1="69.50" x2="900" y2="69.50" class="history-grid-line" />
-      <text x="8" y="73.50" class="history-axis-label">594</text>
-
-      <line x1="62" y1="119.00" x2="900" y2="119.00" class="history-grid-line" />
-      <text x="8" y="123.00" class="history-axis-label">121</text>
-
-      <line x1="62" y1="168.50" x2="900" y2="168.50" class="history-grid-line" />
-      <text x="8" y="172.50" class="history-axis-label">24.5</text>
-
-      <line x1="62" y1="218.00" x2="900" y2="218.00" class="history-grid-line" />
-      <text x="8" y="222.00" class="history-axis-label">4.987</text>
-
-        <line x1="62" y1="20" x2="62" y2="218" class="history-axis" />
-        <line x1="62" y1="218" x2="900" y2="218" class="history-axis" />
-        <text x="62" y="250" class="history-axis-label">2026-07-20 10:17:02 UTC</text>
-        <text x="900" y="250" text-anchor="end" class="history-axis-label">2026-07-20 10:20:28 UTC</text>
-        <g>
-    <circle cx="98.61" cy="24.34" r="3.2" fill="#047857">
-      <title>boa e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 2,539 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="135.22" cy="88.04" r="3.2" fill="#0f766e">
-      <title>koto e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 327 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="900.00" cy="148.96" r="3.2" fill="#7c3aed">
-      <title>mlua-lua54 e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 46 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="175.90" cy="138.83" r="3.2" fill="#b45309">
-      <title>mlua-luau e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 63.7 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="212.51" cy="42.22" r="3.2" fill="#b91c1c">
-      <title>rhai e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 1,428 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="249.13" cy="212.95" r="3.2" fill="#475569">
-      <title>roto e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 5.868 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="289.81" cy="76.67" r="3.2" fill="#be185d">
-      <title>rquickjs e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 471 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="62.00" cy="58.56" r="3.2" fill="#2563eb">
-      <title>rustia e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 844 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="330.49" cy="105.82" r="3.2" fill="#be185d">
-      <title>wasmi e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 184 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="367.10" cy="161.12" r="3.2" fill="#111827">
-      <title>wasmtime e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 31.1 ns/unit</title>
-    </circle>
-  </g>
-      </svg>
-      <div class="history-legend">
-        <span><span class="swatch" style="color: #047857"></span>boa</span><span><span class="swatch" style="color: #0f766e"></span>koto</span><span><span class="swatch" style="color: #7c3aed"></span>mlua-lua54</span><span><span class="swatch" style="color: #b45309"></span>mlua-luau</span><span><span class="swatch" style="color: #b91c1c"></span>rhai</span><span><span class="swatch" style="color: #475569"></span>roto</span><span><span class="swatch" style="color: #be185d"></span>rquickjs</span><span><span class="swatch" style="color: #2563eb"></span>rustia</span><span><span class="swatch" style="color: #be185d"></span>wasmi</span><span><span class="swatch" style="color: #111827"></span>wasmtime</span>
+    <div class="cohort-plot-row">
+      <div class="cohort-plot-name"><strong>Dense tables</strong><span>ed65077 · 2026-07-20</span></div>
+      <div class="cohort-track" style="--zero: 87.500%">
+        <span class="cohort-interval" style="left:83.315%;width:2.222%"></span>
+        <span class="cohort-point" style="left:84.476%"></span>
+        <span class="cohort-point-label cohort-label-left" style="left:84.476%">-2.42%</span>
       </div>
     </div>
 
-      <div class="table-wrap history-table">
-        <table>
-          <thead>
-            <tr>
-              <th>Engine</th>
-              <th>Latest min ns/unit</th>
-              <th>Median</th>
-              <th>Trend vs previous</th>
-              <th>Commit</th>
-              <th>Measured</th>
-            </tr>
-          </thead>
-          <tbody>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #475569"></span><strong>roto</strong></span></td>
-      <td>5.868</td>
-      <td>5.869</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:48 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #111827"></span><strong>wasmtime</strong></span></td>
-      <td>31.1</td>
-      <td>31.1</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:18:17 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #7c3aed"></span><strong>mlua-lua54</strong></span></td>
-      <td>46</td>
-      <td>46.3</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:20:28 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #b45309"></span><strong>mlua-luau</strong></span></td>
-      <td>63.7</td>
-      <td>63.8</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:30 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>wasmi</strong></span></td>
-      <td>184</td>
-      <td>185</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:18:08 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #0f766e"></span><strong>koto</strong></span></td>
-      <td>327</td>
-      <td>327</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:20 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>rquickjs</strong></span></td>
-      <td>471</td>
-      <td>474</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:58 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #2563eb"></span><strong>rustia</strong></span></td>
-      <td>844</td>
-      <td>862</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:02 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #b91c1c"></span><strong>rhai</strong></span></td>
-      <td>1,428</td>
-      <td>1,429</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:39 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #047857"></span><strong>boa</strong></span></td>
-      <td>2,539</td>
-      <td>2,589</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:11 UTC</td>
-    </tr>
-
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="history-workload" id="history-linux-x86-64-dense-tables">
-      <div class="history-workload-head">
-        <div>
-          <h4>dense_tables</h4>
-          <p>build+sum+sort of 256-elem array · 10 records · 10 engines</p>
-        </div>
-      </div>
-
-    <div class="history-chart">
-      <svg viewBox="0 0 920 260" role="img" aria-label="dense_tables timing history">
-        <rect x="0" y="0" width="920" height="260" class="history-chart-bg" />
-
-      <line x1="62" y1="20.00" x2="900" y2="20.00" class="history-grid-line" />
-      <text x="8" y="24.00" class="history-axis-label">2,055,028</text>
-
-      <line x1="62" y1="69.50" x2="900" y2="69.50" class="history-grid-line" />
-      <text x="8" y="73.50" class="history-axis-label">251,224</text>
-
-      <line x1="62" y1="119.00" x2="900" y2="119.00" class="history-grid-line" />
-      <text x="8" y="123.00" class="history-axis-label">30,712</text>
-
-      <line x1="62" y1="168.50" x2="900" y2="168.50" class="history-grid-line" />
-      <text x="8" y="172.50" class="history-axis-label">3,754</text>
-
-      <line x1="62" y1="218.00" x2="900" y2="218.00" class="history-grid-line" />
-      <text x="8" y="222.00" class="history-axis-label">459</text>
-
-        <line x1="62" y1="20" x2="62" y2="218" class="history-axis" />
-        <line x1="62" y1="218" x2="900" y2="218" class="history-axis" />
-        <text x="62" y="250" class="history-axis-label">2026-07-20 10:16:58 UTC</text>
-        <text x="900" y="250" text-anchor="end" class="history-axis-label">2026-07-20 10:20:24 UTC</text>
-        <g>
-    <circle cx="98.61" cy="38.87" r="3.2" fill="#047857">
-      <title>boa e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 922,430 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="135.22" cy="66.49" r="3.2" fill="#0f766e">
-      <title>koto e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 285,453 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="900.00" cy="108.97" r="3.2" fill="#7c3aed">
-      <title>mlua-lua54 e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 47,011 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="175.90" cy="129.69" r="3.2" fill="#b45309">
-      <title>mlua-luau e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 19,508 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="212.51" cy="63.31" r="3.2" fill="#b91c1c">
-      <title>rhai e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 326,742 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="253.19" cy="23.29" r="3.2" fill="#475569">
-      <title>roto e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 1,786,981 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="293.87" cy="88.00" r="3.2" fill="#be185d">
-      <title>rquickjs e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 114,518 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="62.00" cy="67.39" r="3.2" fill="#2563eb">
-      <title>rustia e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 274,757 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="330.49" cy="171.58" r="3.2" fill="#be185d">
-      <title>wasmi e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 3,294 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="371.17" cy="214.17" r="3.2" fill="#111827">
-      <title>wasmtime e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 540 ns/unit</title>
-    </circle>
-  </g>
-      </svg>
-      <div class="history-legend">
-        <span><span class="swatch" style="color: #047857"></span>boa</span><span><span class="swatch" style="color: #0f766e"></span>koto</span><span><span class="swatch" style="color: #7c3aed"></span>mlua-lua54</span><span><span class="swatch" style="color: #b45309"></span>mlua-luau</span><span><span class="swatch" style="color: #b91c1c"></span>rhai</span><span><span class="swatch" style="color: #475569"></span>roto</span><span><span class="swatch" style="color: #be185d"></span>rquickjs</span><span><span class="swatch" style="color: #2563eb"></span>rustia</span><span><span class="swatch" style="color: #be185d"></span>wasmi</span><span><span class="swatch" style="color: #111827"></span>wasmtime</span>
+    <div class="cohort-plot-row">
+      <div class="cohort-plot-name"><strong>OOP metamethods</strong><span>f208c12 · 2026-07-20</span></div>
+      <div class="cohort-track" style="--zero: 87.500%">
+        <span class="cohort-interval" style="left:4.515%;width:1.049%"></span>
+        <span class="cohort-point" style="left:5.051%"></span>
+        <span class="cohort-point-label cohort-label-right" style="left:5.051%">-65.96%</span>
       </div>
     </div>
 
-      <div class="table-wrap history-table">
-        <table>
-          <thead>
-            <tr>
-              <th>Engine</th>
-              <th>Latest min ns/unit</th>
-              <th>Median</th>
-              <th>Trend vs previous</th>
-              <th>Commit</th>
-              <th>Measured</th>
-            </tr>
-          </thead>
+      </div>
+      <div class="table-wrap cohort-table-wrap">
+        <table class="cohort-table">
+          <thead><tr><th>Accepted cohort</th><th>Coverage</th><th>Comparable result</th><th>Status</th></tr></thead>
           <tbody>
 
     <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #111827"></span><strong>wasmtime</strong></span></td>
-      <td>540</td>
-      <td>540</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:18:14 UTC</td>
+      <td><span class="implementation-language"><strong>Dense tables</strong><span>ed65077 · 2026-07-20</span></span></td>
+      <td>8 legs · 120 samples</td>
+      <td>-2.42% · 95% CI -3.35% to -1.57%</td>
+      <td><span class="cohort-status">published</span></td>
     </tr>
 
     <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>wasmi</strong></span></td>
-      <td>3,294</td>
-      <td>3,312</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:18:04 UTC</td>
+      <td><span class="implementation-language"><strong>OOP metamethods</strong><span>f208c12 · 2026-07-20</span></span></td>
+      <td>8 legs · 120 samples</td>
+      <td>-65.96% · 95% CI -66.39% to -65.55%</td>
+      <td><span class="cohort-status">published</span></td>
     </tr>
 
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #b45309"></span><strong>mlua-luau</strong></span></td>
-      <td>19,508</td>
-      <td>19,658</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:26 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #7c3aed"></span><strong>mlua-lua54</strong></span></td>
-      <td>47,011</td>
-      <td>47,195</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:20:24 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>rquickjs</strong></span></td>
-      <td>114,518</td>
-      <td>114,651</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:55 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #2563eb"></span><strong>rustia</strong></span></td>
-      <td>274,757</td>
-      <td>280,439</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:16:58 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #0f766e"></span><strong>koto</strong></span></td>
-      <td>285,453</td>
-      <td>286,749</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:16 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #b91c1c"></span><strong>rhai</strong></span></td>
-      <td>326,742</td>
-      <td>327,480</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:35 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #047857"></span><strong>boa</strong></span></td>
-      <td>922,430</td>
-      <td>926,800</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:07 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #475569"></span><strong>roto</strong></span></td>
-      <td>1,786,981</td>
-      <td>1,789,373</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:45 UTC</td>
-    </tr>
-
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="history-workload" id="history-linux-x86-64-generic-iteration">
-      <div class="history-workload-head">
-        <div>
-          <h4>generic_iteration</h4>
-          <p>__iter(32)+pairs(5)+ipairs(32) pass · 10 records · 10 engines</p>
-        </div>
-      </div>
-
-    <div class="history-chart">
-      <svg viewBox="0 0 920 260" role="img" aria-label="generic_iteration timing history">
-        <rect x="0" y="0" width="920" height="260" class="history-chart-bg" />
-
-      <line x1="62" y1="20.00" x2="900" y2="20.00" class="history-grid-line" />
-      <text x="8" y="24.00" class="history-axis-label">44,409</text>
-
-      <line x1="62" y1="69.50" x2="900" y2="69.50" class="history-grid-line" />
-      <text x="8" y="73.50" class="history-axis-label">9,735</text>
-
-      <line x1="62" y1="119.00" x2="900" y2="119.00" class="history-grid-line" />
-      <text x="8" y="123.00" class="history-axis-label">2,134</text>
-
-      <line x1="62" y1="168.50" x2="900" y2="168.50" class="history-grid-line" />
-      <text x="8" y="172.50" class="history-axis-label">468</text>
-
-      <line x1="62" y1="218.00" x2="900" y2="218.00" class="history-grid-line" />
-      <text x="8" y="222.00" class="history-axis-label">103</text>
-
-        <line x1="62" y1="20" x2="62" y2="218" class="history-axis" />
-        <line x1="62" y1="218" x2="900" y2="218" class="history-axis" />
-        <text x="62" y="250" class="history-axis-label">2026-07-20 10:17:04 UTC</text>
-        <text x="900" y="250" text-anchor="end" class="history-axis-label">2026-07-20 10:20:30 UTC</text>
-        <g>
-    <circle cx="98.61" cy="27.57" r="3.2" fill="#047857">
-      <title>boa e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 35,212 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="135.22" cy="81.12" r="3.2" fill="#0f766e">
-      <title>koto e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 6,817 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="900.00" cy="106.43" r="3.2" fill="#7c3aed">
-      <title>mlua-lua54 e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 3,137 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="175.90" cy="96.35" r="3.2" fill="#b45309">
-      <title>mlua-luau e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 4,274 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="212.51" cy="65.73" r="3.2" fill="#b91c1c">
-      <title>rhai e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 10,929 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="249.13" cy="121.69" r="3.2" fill="#475569">
-      <title>roto e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 1,965 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="289.81" cy="86.08" r="3.2" fill="#be185d">
-      <title>rquickjs e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 5,855 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="62.00" cy="24.56" r="3.2" fill="#2563eb">
-      <title>rustia e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 38,617 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="330.49" cy="180.70" r="3.2" fill="#be185d">
-      <title>wasmi e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 322 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="367.10" cy="212.70" r="3.2" fill="#111827">
-      <title>wasmtime e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 121 ns/unit</title>
-    </circle>
-  </g>
-      </svg>
-      <div class="history-legend">
-        <span><span class="swatch" style="color: #047857"></span>boa</span><span><span class="swatch" style="color: #0f766e"></span>koto</span><span><span class="swatch" style="color: #7c3aed"></span>mlua-lua54</span><span><span class="swatch" style="color: #b45309"></span>mlua-luau</span><span><span class="swatch" style="color: #b91c1c"></span>rhai</span><span><span class="swatch" style="color: #475569"></span>roto</span><span><span class="swatch" style="color: #be185d"></span>rquickjs</span><span><span class="swatch" style="color: #2563eb"></span>rustia</span><span><span class="swatch" style="color: #be185d"></span>wasmi</span><span><span class="swatch" style="color: #111827"></span>wasmtime</span>
-      </div>
-    </div>
-
-      <div class="table-wrap history-table">
-        <table>
-          <thead>
             <tr>
-              <th>Engine</th>
-              <th>Latest min ns/unit</th>
-              <th>Median</th>
-              <th>Trend vs previous</th>
-              <th>Commit</th>
-              <th>Measured</th>
+              <td><span class="implementation-language"><strong>Language matrix</strong><span>e780bf4 · 2026-07-20 10:20:31 UTC</span></span></td>
+              <td>50 native · 15 Wasm rows</td>
+              <td>Implementations within one exact target</td>
+              <td><span class="cohort-status">current baseline</span></td>
             </tr>
-          </thead>
-          <tbody>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #111827"></span><strong>wasmtime</strong></span></td>
-      <td>121</td>
-      <td>122</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:18:19 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>wasmi</strong></span></td>
-      <td>322</td>
-      <td>367</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:18:10 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #475569"></span><strong>roto</strong></span></td>
-      <td>1,965</td>
-      <td>2,027</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:50 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #7c3aed"></span><strong>mlua-lua54</strong></span></td>
-      <td>3,137</td>
-      <td>3,158</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:20:30 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #b45309"></span><strong>mlua-luau</strong></span></td>
-      <td>4,274</td>
-      <td>4,285</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:32 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>rquickjs</strong></span></td>
-      <td>5,855</td>
-      <td>5,887</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:18:00 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #0f766e"></span><strong>koto</strong></span></td>
-      <td>6,817</td>
-      <td>6,863</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:22 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #b91c1c"></span><strong>rhai</strong></span></td>
-      <td>10,929</td>
-      <td>10,986</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:41 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #047857"></span><strong>boa</strong></span></td>
-      <td>35,212</td>
-      <td>35,438</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:13 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #2563eb"></span><strong>rustia</strong></span></td>
-      <td>38,617</td>
-      <td>39,083</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:04 UTC</td>
-    </tr>
-
           </tbody>
         </table>
       </div>
-    </section>
-
-    <section class="history-workload" id="history-linux-x86-64-sparse-tables">
-      <div class="history-workload-head">
-        <div>
-          <h4>sparse_tables</h4>
-          <p>fill+read 128 hash entries · 10 records · 10 engines</p>
-        </div>
-      </div>
-
-    <div class="history-chart">
-      <svg viewBox="0 0 920 260" role="img" aria-label="sparse_tables timing history">
-        <rect x="0" y="0" width="920" height="260" class="history-chart-bg" />
-
-      <line x1="62" y1="20.00" x2="900" y2="20.00" class="history-grid-line" />
-      <text x="8" y="24.00" class="history-axis-label">435,648</text>
-
-      <line x1="62" y1="69.50" x2="900" y2="69.50" class="history-grid-line" />
-      <text x="8" y="73.50" class="history-axis-label">78,173</text>
-
-      <line x1="62" y1="119.00" x2="900" y2="119.00" class="history-grid-line" />
-      <text x="8" y="123.00" class="history-axis-label">14,028</text>
-
-      <line x1="62" y1="168.50" x2="900" y2="168.50" class="history-grid-line" />
-      <text x="8" y="172.50" class="history-axis-label">2,517</text>
-
-      <line x1="62" y1="218.00" x2="900" y2="218.00" class="history-grid-line" />
-      <text x="8" y="222.00" class="history-axis-label">452</text>
-
-        <line x1="62" y1="20" x2="62" y2="218" class="history-axis" />
-        <line x1="62" y1="218" x2="900" y2="218" class="history-axis" />
-        <text x="62" y="250" class="history-axis-label">2026-07-20 10:17:00 UTC</text>
-        <text x="900" y="250" text-anchor="end" class="history-axis-label">2026-07-20 10:20:26 UTC</text>
-        <g>
-    <circle cx="98.61" cy="24.03" r="3.2" fill="#047857">
-      <title>boa e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 378,824 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="135.22" cy="50.41" r="3.2" fill="#0f766e">
-      <title>koto e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 151,620 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="900.00" cy="102.51" r="3.2" fill="#7c3aed">
-      <title>mlua-lua54 e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 24,865 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="175.90" cy="105.43" r="3.2" fill="#b45309">
-      <title>mlua-luau e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 22,469 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="212.51" cy="29.08" r="3.2" fill="#b91c1c">
-      <title>rhai e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 317,886 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="249.13" cy="69.20" r="3.2" fill="#475569">
-      <title>roto e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 78,999 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="293.87" cy="62.38" r="3.2" fill="#be185d">
-      <title>rquickjs e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 100,077 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="62.00" cy="48.77" r="3.2" fill="#2563eb">
-      <title>rustia e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 160,487 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="330.49" cy="159.29" r="3.2" fill="#be185d">
-      <title>wasmi e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 3,465 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="371.17" cy="213.32" r="3.2" fill="#111827">
-      <title>wasmtime e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 531 ns/unit</title>
-    </circle>
-  </g>
-      </svg>
-      <div class="history-legend">
-        <span><span class="swatch" style="color: #047857"></span>boa</span><span><span class="swatch" style="color: #0f766e"></span>koto</span><span><span class="swatch" style="color: #7c3aed"></span>mlua-lua54</span><span><span class="swatch" style="color: #b45309"></span>mlua-luau</span><span><span class="swatch" style="color: #b91c1c"></span>rhai</span><span><span class="swatch" style="color: #475569"></span>roto</span><span><span class="swatch" style="color: #be185d"></span>rquickjs</span><span><span class="swatch" style="color: #2563eb"></span>rustia</span><span><span class="swatch" style="color: #be185d"></span>wasmi</span><span><span class="swatch" style="color: #111827"></span>wasmtime</span>
-      </div>
-    </div>
-
-      <div class="table-wrap history-table">
-        <table>
-          <thead>
-            <tr>
-              <th>Engine</th>
-              <th>Latest min ns/unit</th>
-              <th>Median</th>
-              <th>Trend vs previous</th>
-              <th>Commit</th>
-              <th>Measured</th>
-            </tr>
-          </thead>
-          <tbody>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #111827"></span><strong>wasmtime</strong></span></td>
-      <td>531</td>
-      <td>532</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:18:16 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>wasmi</strong></span></td>
-      <td>3,465</td>
-      <td>3,585</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:18:06 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #b45309"></span><strong>mlua-luau</strong></span></td>
-      <td>22,469</td>
-      <td>22,650</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:28 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #7c3aed"></span><strong>mlua-lua54</strong></span></td>
-      <td>24,865</td>
-      <td>25,303</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:20:26 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #475569"></span><strong>roto</strong></span></td>
-      <td>78,999</td>
-      <td>79,240</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:46 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>rquickjs</strong></span></td>
-      <td>100,077</td>
-      <td>100,893</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:57 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #0f766e"></span><strong>koto</strong></span></td>
-      <td>151,620</td>
-      <td>152,034</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:18 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #2563eb"></span><strong>rustia</strong></span></td>
-      <td>160,487</td>
-      <td>161,659</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:00 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #b91c1c"></span><strong>rhai</strong></span></td>
-      <td>317,886</td>
-      <td>321,454</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:37 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #047857"></span><strong>boa</strong></span></td>
-      <td>378,824</td>
-      <td>384,556</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:09 UTC</td>
-    </tr>
-
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="history-workload" id="history-linux-x86-64-stdlib-math-table">
-      <div class="history-workload-head">
-        <div>
-          <h4>stdlib_math_table</h4>
-          <p>math fastcalls + buffered push · 10 records · 10 engines</p>
-        </div>
-      </div>
-
-    <div class="history-chart">
-      <svg viewBox="0 0 920 260" role="img" aria-label="stdlib_math_table timing history">
-        <rect x="0" y="0" width="920" height="260" class="history-chart-bg" />
-
-      <line x1="62" y1="20.00" x2="900" y2="20.00" class="history-grid-line" />
-      <text x="8" y="24.00" class="history-axis-label">4,759</text>
-
-      <line x1="62" y1="69.50" x2="900" y2="69.50" class="history-grid-line" />
-      <text x="8" y="73.50" class="history-axis-label">892</text>
-
-      <line x1="62" y1="119.00" x2="900" y2="119.00" class="history-grid-line" />
-      <text x="8" y="123.00" class="history-axis-label">167</text>
-
-      <line x1="62" y1="168.50" x2="900" y2="168.50" class="history-grid-line" />
-      <text x="8" y="172.50" class="history-axis-label">31.4</text>
-
-      <line x1="62" y1="218.00" x2="900" y2="218.00" class="history-grid-line" />
-      <text x="8" y="222.00" class="history-axis-label">5.882</text>
-
-        <line x1="62" y1="20" x2="62" y2="218" class="history-axis" />
-        <line x1="62" y1="218" x2="900" y2="218" class="history-axis" />
-        <text x="62" y="250" class="history-axis-label">2026-07-20 10:17:06 UTC</text>
-        <text x="900" y="250" text-anchor="end" class="history-axis-label">2026-07-20 10:20:31 UTC</text>
-        <g>
-    <circle cx="98.79" cy="24.13" r="3.2" fill="#047857">
-      <title>boa e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 4,138 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="135.58" cy="51.34" r="3.2" fill="#0f766e">
-      <title>koto e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 1,649 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="900.00" cy="103.64" r="3.2" fill="#7c3aed">
-      <title>mlua-lua54 e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 281 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="172.37" cy="108.57" r="3.2" fill="#b45309">
-      <title>mlua-luau e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 238 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="213.25" cy="32.26" r="3.2" fill="#b91c1c">
-      <title>rhai e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 3,144 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="250.04" cy="111.23" r="3.2" fill="#475569">
-      <title>roto e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 218 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="290.92" cy="81.11" r="3.2" fill="#be185d">
-      <title>rquickjs e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 603 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="62.00" cy="43.92" r="3.2" fill="#2563eb">
-      <title>rustia e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 2,119 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="331.80" cy="174.69" r="3.2" fill="#be185d">
-      <title>wasmi e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 25.4 ns/unit</title>
-    </circle>
-  </g><g>
-    <circle cx="368.59" cy="213.19" r="3.2" fill="#111827">
-      <title>wasmtime e780bf4a34348ea9f0693a3155908dc1eeaf4aef: 6.92 ns/unit</title>
-    </circle>
-  </g>
-      </svg>
-      <div class="history-legend">
-        <span><span class="swatch" style="color: #047857"></span>boa</span><span><span class="swatch" style="color: #0f766e"></span>koto</span><span><span class="swatch" style="color: #7c3aed"></span>mlua-lua54</span><span><span class="swatch" style="color: #b45309"></span>mlua-luau</span><span><span class="swatch" style="color: #b91c1c"></span>rhai</span><span><span class="swatch" style="color: #475569"></span>roto</span><span><span class="swatch" style="color: #be185d"></span>rquickjs</span><span><span class="swatch" style="color: #2563eb"></span>rustia</span><span><span class="swatch" style="color: #be185d"></span>wasmi</span><span><span class="swatch" style="color: #111827"></span>wasmtime</span>
-      </div>
-    </div>
-
-      <div class="table-wrap history-table">
-        <table>
-          <thead>
-            <tr>
-              <th>Engine</th>
-              <th>Latest min ns/unit</th>
-              <th>Median</th>
-              <th>Trend vs previous</th>
-              <th>Commit</th>
-              <th>Measured</th>
-            </tr>
-          </thead>
-          <tbody>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #111827"></span><strong>wasmtime</strong></span></td>
-      <td>6.92</td>
-      <td>6.967</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:18:21 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>wasmi</strong></span></td>
-      <td>25.4</td>
-      <td>25.5</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:18:12 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #475569"></span><strong>roto</strong></span></td>
-      <td>218</td>
-      <td>219</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:52 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #b45309"></span><strong>mlua-luau</strong></span></td>
-      <td>238</td>
-      <td>242</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:33 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #7c3aed"></span><strong>mlua-lua54</strong></span></td>
-      <td>281</td>
-      <td>284</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:20:31 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #be185d"></span><strong>rquickjs</strong></span></td>
-      <td>603</td>
-      <td>604</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:18:02 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #0f766e"></span><strong>koto</strong></span></td>
-      <td>1,649</td>
-      <td>1,656</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:24 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #2563eb"></span><strong>rustia</strong></span></td>
-      <td>2,119</td>
-      <td>2,127</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:06 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #b91c1c"></span><strong>rhai</strong></span></td>
-      <td>3,144</td>
-      <td>3,154</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:43 UTC</td>
-    </tr>
-
-    <tr>
-      <td><span class="history-engine"><span class="swatch" style="color: #047857"></span><strong>boa</strong></span></td>
-      <td>4,138</td>
-      <td>4,166</td>
-      <td><span class="trend trend-flat">n/a</span></td>
-      <td>e780bf4a34348ea9f0693a3155908dc1eeaf4aef</td>
-      <td>2026-07-20 10:17:15 UTC</td>
-    </tr>
-
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    </section>
-
-      </div>
+      <p class="cohort-note">Lower is faster. Confidence intervals appear only for same-protocol candidate/baseline cohorts; the language matrix remains a baseline until another complete cohort exists. Source <code>bench/history/runs.jsonl</code>.</p>
     </section>
 
 
@@ -1973,7 +1395,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td><strong>koto</strong> <span class="subtle">Koto</span></td>
                 <td>closures_upvalues</td>
                 <td>413</td>
                 <td>413</td>
@@ -1983,7 +1405,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
+                <td><strong>rhai</strong> <span class="subtle">Rhai</span></td>
                 <td>closures_upvalues</td>
                 <td>1,634</td>
                 <td>1,636</td>
@@ -1993,7 +1415,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td><strong>rustia</strong> <span class="subtle">Luau</span></td>
                 <td>closures_upvalues</td>
                 <td>1,373</td>
                 <td>1,390</td>
@@ -2003,7 +1425,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td><strong>koto</strong> <span class="subtle">Koto</span></td>
                 <td>dense_tables</td>
                 <td>352,561</td>
                 <td>353,629</td>
@@ -2013,7 +1435,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
+                <td><strong>rhai</strong> <span class="subtle">Rhai</span></td>
                 <td>dense_tables</td>
                 <td>411,898</td>
                 <td>450,660</td>
@@ -2023,7 +1445,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td><strong>rustia</strong> <span class="subtle">Luau</span></td>
                 <td>dense_tables</td>
                 <td>902,399</td>
                 <td>959,582</td>
@@ -2033,7 +1455,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td><strong>koto</strong> <span class="subtle">Koto</span></td>
                 <td>generic_iteration</td>
                 <td>8,460</td>
                 <td>8,475</td>
@@ -2043,7 +1465,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
+                <td><strong>rhai</strong> <span class="subtle">Rhai</span></td>
                 <td>generic_iteration</td>
                 <td>12,921</td>
                 <td>12,932</td>
@@ -2053,7 +1475,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td><strong>rustia</strong> <span class="subtle">Luau</span></td>
                 <td>generic_iteration</td>
                 <td>56,664</td>
                 <td>57,236</td>
@@ -2063,7 +1485,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td><strong>koto</strong> <span class="subtle">Koto</span></td>
                 <td>sparse_tables</td>
                 <td>175,327</td>
                 <td>183,935</td>
@@ -2073,7 +1495,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
+                <td><strong>rhai</strong> <span class="subtle">Rhai</span></td>
                 <td>sparse_tables</td>
                 <td>391,701</td>
                 <td>393,166</td>
@@ -2083,7 +1505,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td><strong>rustia</strong> <span class="subtle">Luau</span></td>
                 <td>sparse_tables</td>
                 <td>247,603</td>
                 <td>248,804</td>
@@ -2093,7 +1515,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
+                <td><strong>koto</strong> <span class="subtle">Koto</span></td>
                 <td>stdlib_math_table</td>
                 <td>1,963</td>
                 <td>1,966</td>
@@ -2103,7 +1525,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
+                <td><strong>rhai</strong> <span class="subtle">Rhai</span></td>
                 <td>stdlib_math_table</td>
                 <td>4,135</td>
                 <td>4,138</td>
@@ -2113,7 +1535,7 @@
 
               <tr>
                 <td><span class="target-runtime"><strong>wasm32-v8-node-linux-x64</strong><span>V8/node</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
+                <td><strong>rustia</strong> <span class="subtle">Luau</span></td>
                 <td>stdlib_math_table</td>
                 <td>3,291</td>
                 <td>3,314</td>
@@ -2192,7 +1614,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>roto</strong>
-        <span>roto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:48 UTC</span>
+        <span>Roto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:48 UTC</span>
       </div>
       <div class="result-values">
         <span>5.868 ns min</span>
@@ -2207,7 +1629,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>wasmtime</strong>
-        <span>wasm · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:17 UTC</span>
+        <span>WebAssembly · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:17 UTC</span>
       </div>
       <div class="result-values">
         <span>31.1 ns min</span>
@@ -2221,8 +1643,8 @@
 
     <article class="result-row">
       <div class="result-label">
-        <strong>mlua-lua54</strong>
-        <span>lua54 · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:20:28 UTC</span>
+        <strong>mlua</strong>
+        <span>Lua 5.4 · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:20:28 UTC</span>
       </div>
       <div class="result-values">
         <span>46 ns min</span>
@@ -2236,8 +1658,8 @@
 
     <article class="result-row">
       <div class="result-label">
-        <strong>mlua-luau</strong>
-        <span>luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:30 UTC</span>
+        <strong>mlua</strong>
+        <span>Luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:30 UTC</span>
       </div>
       <div class="result-values">
         <span>63.7 ns min</span>
@@ -2252,7 +1674,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>wasmi</strong>
-        <span>wasm · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:08 UTC</span>
+        <span>WebAssembly · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:08 UTC</span>
       </div>
       <div class="result-values">
         <span>184 ns min</span>
@@ -2267,7 +1689,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>koto</strong>
-        <span>koto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:20 UTC</span>
+        <span>Koto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:20 UTC</span>
       </div>
       <div class="result-values">
         <span>327 ns min</span>
@@ -2282,7 +1704,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rquickjs</strong>
-        <span>javascript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:58 UTC</span>
+        <span>JavaScript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:58 UTC</span>
       </div>
       <div class="result-values">
         <span>471 ns min</span>
@@ -2297,7 +1719,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rustia</strong>
-        <span>luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:02 UTC</span>
+        <span>Luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:02 UTC</span>
       </div>
       <div class="result-values">
         <span>844 ns min</span>
@@ -2312,7 +1734,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rhai</strong>
-        <span>rhai · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:39 UTC</span>
+        <span>Rhai · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:39 UTC</span>
       </div>
       <div class="result-values">
         <span>1,428 ns min</span>
@@ -2327,7 +1749,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>boa</strong>
-        <span>javascript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:11 UTC</span>
+        <span>JavaScript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:11 UTC</span>
       </div>
       <div class="result-values">
         <span>2,539 ns min</span>
@@ -2354,7 +1776,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>wasmtime</strong>
-        <span>wasm · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:14 UTC</span>
+        <span>WebAssembly · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:14 UTC</span>
       </div>
       <div class="result-values">
         <span>540 ns min</span>
@@ -2369,7 +1791,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>wasmi</strong>
-        <span>wasm · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:04 UTC</span>
+        <span>WebAssembly · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:04 UTC</span>
       </div>
       <div class="result-values">
         <span>3,294 ns min</span>
@@ -2383,8 +1805,8 @@
 
     <article class="result-row">
       <div class="result-label">
-        <strong>mlua-luau</strong>
-        <span>luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:26 UTC</span>
+        <strong>mlua</strong>
+        <span>Luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:26 UTC</span>
       </div>
       <div class="result-values">
         <span>19,508 ns min</span>
@@ -2398,8 +1820,8 @@
 
     <article class="result-row">
       <div class="result-label">
-        <strong>mlua-lua54</strong>
-        <span>lua54 · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:20:24 UTC</span>
+        <strong>mlua</strong>
+        <span>Lua 5.4 · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:20:24 UTC</span>
       </div>
       <div class="result-values">
         <span>47,011 ns min</span>
@@ -2414,7 +1836,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rquickjs</strong>
-        <span>javascript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:55 UTC</span>
+        <span>JavaScript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:55 UTC</span>
       </div>
       <div class="result-values">
         <span>114,518 ns min</span>
@@ -2429,7 +1851,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rustia</strong>
-        <span>luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:16:58 UTC</span>
+        <span>Luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:16:58 UTC</span>
       </div>
       <div class="result-values">
         <span>274,757 ns min</span>
@@ -2444,7 +1866,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>koto</strong>
-        <span>koto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:16 UTC</span>
+        <span>Koto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:16 UTC</span>
       </div>
       <div class="result-values">
         <span>285,453 ns min</span>
@@ -2459,7 +1881,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rhai</strong>
-        <span>rhai · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:35 UTC</span>
+        <span>Rhai · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:35 UTC</span>
       </div>
       <div class="result-values">
         <span>326,742 ns min</span>
@@ -2474,7 +1896,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>boa</strong>
-        <span>javascript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:07 UTC</span>
+        <span>JavaScript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:07 UTC</span>
       </div>
       <div class="result-values">
         <span>922,430 ns min</span>
@@ -2489,7 +1911,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>roto</strong>
-        <span>roto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:45 UTC</span>
+        <span>Roto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:45 UTC</span>
       </div>
       <div class="result-values">
         <span>1,786,981 ns min</span>
@@ -2516,7 +1938,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>wasmtime</strong>
-        <span>wasm · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:19 UTC</span>
+        <span>WebAssembly · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:19 UTC</span>
       </div>
       <div class="result-values">
         <span>121 ns min</span>
@@ -2531,7 +1953,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>wasmi</strong>
-        <span>wasm · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:10 UTC</span>
+        <span>WebAssembly · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:10 UTC</span>
       </div>
       <div class="result-values">
         <span>322 ns min</span>
@@ -2546,7 +1968,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>roto</strong>
-        <span>roto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:50 UTC</span>
+        <span>Roto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:50 UTC</span>
       </div>
       <div class="result-values">
         <span>1,965 ns min</span>
@@ -2560,8 +1982,8 @@
 
     <article class="result-row">
       <div class="result-label">
-        <strong>mlua-lua54</strong>
-        <span>lua54 · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:20:30 UTC</span>
+        <strong>mlua</strong>
+        <span>Lua 5.4 · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:20:30 UTC</span>
       </div>
       <div class="result-values">
         <span>3,137 ns min</span>
@@ -2575,8 +1997,8 @@
 
     <article class="result-row">
       <div class="result-label">
-        <strong>mlua-luau</strong>
-        <span>luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:32 UTC</span>
+        <strong>mlua</strong>
+        <span>Luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:32 UTC</span>
       </div>
       <div class="result-values">
         <span>4,274 ns min</span>
@@ -2591,7 +2013,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rquickjs</strong>
-        <span>javascript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:00 UTC</span>
+        <span>JavaScript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:00 UTC</span>
       </div>
       <div class="result-values">
         <span>5,855 ns min</span>
@@ -2606,7 +2028,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>koto</strong>
-        <span>koto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:22 UTC</span>
+        <span>Koto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:22 UTC</span>
       </div>
       <div class="result-values">
         <span>6,817 ns min</span>
@@ -2621,7 +2043,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rhai</strong>
-        <span>rhai · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:41 UTC</span>
+        <span>Rhai · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:41 UTC</span>
       </div>
       <div class="result-values">
         <span>10,929 ns min</span>
@@ -2636,7 +2058,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>boa</strong>
-        <span>javascript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:13 UTC</span>
+        <span>JavaScript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:13 UTC</span>
       </div>
       <div class="result-values">
         <span>35,212 ns min</span>
@@ -2651,7 +2073,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rustia</strong>
-        <span>luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:04 UTC</span>
+        <span>Luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:04 UTC</span>
       </div>
       <div class="result-values">
         <span>38,617 ns min</span>
@@ -2678,7 +2100,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>wasmtime</strong>
-        <span>wasm · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:16 UTC</span>
+        <span>WebAssembly · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:16 UTC</span>
       </div>
       <div class="result-values">
         <span>531 ns min</span>
@@ -2693,7 +2115,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>wasmi</strong>
-        <span>wasm · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:06 UTC</span>
+        <span>WebAssembly · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:06 UTC</span>
       </div>
       <div class="result-values">
         <span>3,465 ns min</span>
@@ -2707,8 +2129,8 @@
 
     <article class="result-row">
       <div class="result-label">
-        <strong>mlua-luau</strong>
-        <span>luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:28 UTC</span>
+        <strong>mlua</strong>
+        <span>Luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:28 UTC</span>
       </div>
       <div class="result-values">
         <span>22,469 ns min</span>
@@ -2722,8 +2144,8 @@
 
     <article class="result-row">
       <div class="result-label">
-        <strong>mlua-lua54</strong>
-        <span>lua54 · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:20:26 UTC</span>
+        <strong>mlua</strong>
+        <span>Lua 5.4 · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:20:26 UTC</span>
       </div>
       <div class="result-values">
         <span>24,865 ns min</span>
@@ -2738,7 +2160,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>roto</strong>
-        <span>roto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:46 UTC</span>
+        <span>Roto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:46 UTC</span>
       </div>
       <div class="result-values">
         <span>78,999 ns min</span>
@@ -2753,7 +2175,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rquickjs</strong>
-        <span>javascript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:57 UTC</span>
+        <span>JavaScript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:57 UTC</span>
       </div>
       <div class="result-values">
         <span>100,077 ns min</span>
@@ -2768,7 +2190,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>koto</strong>
-        <span>koto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:18 UTC</span>
+        <span>Koto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:18 UTC</span>
       </div>
       <div class="result-values">
         <span>151,620 ns min</span>
@@ -2783,7 +2205,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rustia</strong>
-        <span>luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:00 UTC</span>
+        <span>Luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:00 UTC</span>
       </div>
       <div class="result-values">
         <span>160,487 ns min</span>
@@ -2798,7 +2220,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rhai</strong>
-        <span>rhai · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:37 UTC</span>
+        <span>Rhai · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:37 UTC</span>
       </div>
       <div class="result-values">
         <span>317,886 ns min</span>
@@ -2813,7 +2235,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>boa</strong>
-        <span>javascript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:09 UTC</span>
+        <span>JavaScript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:09 UTC</span>
       </div>
       <div class="result-values">
         <span>378,824 ns min</span>
@@ -2840,7 +2262,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>wasmtime</strong>
-        <span>wasm · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:21 UTC</span>
+        <span>WebAssembly · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:21 UTC</span>
       </div>
       <div class="result-values">
         <span>6.92 ns min</span>
@@ -2855,7 +2277,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>wasmi</strong>
-        <span>wasm · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:12 UTC</span>
+        <span>WebAssembly · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:12 UTC</span>
       </div>
       <div class="result-values">
         <span>25.4 ns min</span>
@@ -2870,7 +2292,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>roto</strong>
-        <span>roto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:52 UTC</span>
+        <span>Roto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:52 UTC</span>
       </div>
       <div class="result-values">
         <span>218 ns min</span>
@@ -2884,8 +2306,8 @@
 
     <article class="result-row">
       <div class="result-label">
-        <strong>mlua-luau</strong>
-        <span>luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:33 UTC</span>
+        <strong>mlua</strong>
+        <span>Luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:33 UTC</span>
       </div>
       <div class="result-values">
         <span>238 ns min</span>
@@ -2899,8 +2321,8 @@
 
     <article class="result-row">
       <div class="result-label">
-        <strong>mlua-lua54</strong>
-        <span>lua54 · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:20:31 UTC</span>
+        <strong>mlua</strong>
+        <span>Lua 5.4 · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:20:31 UTC</span>
       </div>
       <div class="result-values">
         <span>281 ns min</span>
@@ -2915,7 +2337,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rquickjs</strong>
-        <span>javascript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:02 UTC</span>
+        <span>JavaScript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:18:02 UTC</span>
       </div>
       <div class="result-values">
         <span>603 ns min</span>
@@ -2930,7 +2352,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>koto</strong>
-        <span>koto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:24 UTC</span>
+        <span>Koto · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:24 UTC</span>
       </div>
       <div class="result-values">
         <span>1,649 ns min</span>
@@ -2945,7 +2367,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rustia</strong>
-        <span>luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:06 UTC</span>
+        <span>Luau · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:06 UTC</span>
       </div>
       <div class="result-values">
         <span>2,119 ns min</span>
@@ -2960,7 +2382,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>rhai</strong>
-        <span>rhai · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:43 UTC</span>
+        <span>Rhai · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:43 UTC</span>
       </div>
       <div class="result-values">
         <span>3,144 ns min</span>
@@ -2975,7 +2397,7 @@
     <article class="result-row">
       <div class="result-label">
         <strong>boa</strong>
-        <span>javascript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:15 UTC</span>
+        <span>JavaScript · e780bf4a34348ea9f0693a3155908dc1eeaf4aef · 2026-07-20 10:17:15 UTC</span>
       </div>
       <div class="result-values">
         <span>4,138 ns min</span>
@@ -2993,7 +2415,35 @@
     </section>
 
 
-    <p class="footnote">Schema <code>rustia.bench.current-results.v1</code>. Wasm sources <code>bench/wasm/current-results.json</code> and <code>bench/wasm/dispatch-current-results.json</code>. History <code>bench/history/runs.jsonl</code> (jsonl-v1). The report is deterministic and contains no external assets or runtime JavaScript. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>rustia.bench.current-results.v1</code>. Wasm sources <code>bench/wasm/current-results.json</code> and <code>bench/wasm/dispatch-current-results.json</code>. History <code>bench/history/runs.jsonl</code> (jsonl-v1). The report is deterministic, contains no external assets, and uses one inline presentation toggle. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
+  <script>
+    (() => {
+      const root = document.getElementById("languages-by-target");
+      if (!root) return;
+      const heatClasses = ["heat-0", "heat-1", "heat-2", "heat-3", "heat-4", "heat-5"];
+      const setMetric = (metric) => {
+        root.dataset.metric = metric;
+        root.querySelectorAll("[data-metric]").forEach((button) => {
+          button.setAttribute("aria-pressed", String(button.dataset.metric === metric));
+        });
+        root.querySelectorAll(".metric-value, .metric-caption").forEach((element) => {
+          element.textContent = element.dataset[metric];
+        });
+        root.querySelectorAll(".metric-bar").forEach((bar) => {
+          bar.style.width = bar.dataset[metric + "Width"] + "%";
+        });
+        root.querySelectorAll(".heat-cell[data-heat-relative]").forEach((cell) => {
+          cell.textContent = cell.dataset[metric];
+          cell.classList.remove(...heatClasses);
+          cell.classList.add(cell.dataset[metric === "relative" ? "heatRelative" : "heatAbsolute"]);
+        });
+      };
+      root.querySelectorAll("[data-metric]").forEach((button) => {
+        button.addEventListener("click", () => setMetric(button.dataset.metric));
+      });
+      setMetric("relative");
+    })();
+  </script>
 </body>
 </html>

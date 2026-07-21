@@ -686,7 +686,8 @@ just gen-current-results
 
 `gen-current-results` does not run measurements; it only regenerates result
 artifacts from committed history, including [`current-results.html`](current-results.html)
-with the current leaderboard and history charts, plus [`CLAIMS.md`](CLAIMS.md),
+with best-first ranked bars, workload heatmaps, and the controlled-cohort history
+ledger, plus [`CLAIMS.md`](CLAIMS.md),
 the per-workload public-claim gate. `gen-benchmark-results` is kept as a recipe
 alias.
 
@@ -708,9 +709,10 @@ tracked in [`PRIOR-ART.md`](PRIOR-ART.md).
 
 ## Static Report
 
-`current-results.html` is the single generated report for target-first language
-and implementation summaries, per-workload history charts, Linux-hosted wasm
-results, and claim-gate context.
+`current-results.html` is the single generated report for target-first
+implementation and language summaries, workload detail, protocol-aware history,
+Linux-hosted wasm results, and claim-gate context. Its display toggle switches
+the headline and heatmaps between absolute timing and speed relative to rustia.
 
 ```sh
 python3 -m http.server 8000 --bind 0.0.0.0
@@ -718,7 +720,6 @@ python3 -m http.server 8000 --bind 0.0.0.0
 
 Open `http://HOST:8000/bench/current-results.html` over the trusted VPN.
 
-Alternative presentations of the same committed data are kept as disposable
-HTML mockups under [`chart-mockups/`](chart-mockups/): a best-first ratio chart,
-a workload heatmap, and a cohort ledger that keeps controlled comparisons
-separate from the single full-matrix baseline.
+The earlier alternatives remain under [`chart-mockups/`](chart-mockups/) as
+design references; the ranked bars, heatmap, and cohort-ledger approach is now
+the canonical report.

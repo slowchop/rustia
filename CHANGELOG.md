@@ -69,7 +69,11 @@ Current unpublished workspace version: `0.0.1`.
   claim gating, package-file history, the requested adapter matrix, and
   cross-adapter source coverage for the non-default `string_building` workload.
 - Languages-by-target summaries rank implementations by their five-workload
-  geometric mean, best first. Recurring wasm publication now uses Node/V8 only;
+  geometric mean, best first. The canonical report now presents implementation
+  before language, uses ranked bars for the headline, workload heatmaps for
+  detail, and a controlled-cohort ledger for history; one toggle switches both
+  current-result views between absolute timing and speed relative to rustia.
+  Recurring wasm publication now uses Node/V8 only;
   the accepted Deno, Bun/JavaScriptCore, and SpiderMonkey matrix remains archived
   as historical portability evidence.
 - The dedicated Linux matrix v3 gate keeps zero-steal quiet prewindows, accepts

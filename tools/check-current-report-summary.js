@@ -4,6 +4,7 @@
 const assert = require("assert/strict");
 const {
   REQUIRED_COMMON_WORKLOADS,
+  implementationLabel,
   languageLabel,
   languagesByTargetSection,
   summarizeLanguageTargets,
@@ -42,6 +43,10 @@ function main() {
   assert.deepEqual(
     ["javascript", "koto", "lua54", "luau", "rhai", "roto", "wasm"].map(languageLabel),
     ["JavaScript", "Koto", "Lua 5.4", "Luau", "Rhai", "Roto", "WebAssembly"],
+  );
+  assert.deepEqual(
+    ["rustia", "mlua-luau", "mlua-lua54", "rquickjs"].map(implementationLabel),
+    ["rustia", "mlua", "mlua", "rquickjs"],
   );
 
   const rows = [];
@@ -117,6 +122,7 @@ function main() {
   assert.equal(completeKoto.bestCount, 3);
   assert.equal(completeKoto.rank, 1);
   assert.ok(completeKoto.geoSpeed > 1);
+  assert.ok(completeKoto.geoTime < completeRustia.geoTime);
   assert.equal(completeRustia.bestCount, 2);
   assert.equal(completeRustia.rank, 2);
   assert.equal(completeRustia.geoSpeed, 1);
@@ -130,6 +136,7 @@ function main() {
   assert.equal(partial.implementationRows[0].coverage, 2);
   assert.equal(partial.implementationRows[0].rank, null);
   assert.equal(partial.implementationRows[0].geoSpeed, null);
+  assert.equal(partial.implementationRows[0].geoTime, null);
   assert.equal(partial.implementationRows[0].bestCount, null);
 
   const html = languagesByTargetSection(summaries);
@@ -143,8 +150,12 @@ function main() {
   assert.match(html, />Mixed revisions<\/span>/);
   assert.match(html, /Measured 1970-01-01 00:01:40 UTC to 1970-01-01 00:01:49 UTC/);
   assert.match(html, /commits <code>partial-revision-a<\/code>, <code>partial-revision-b<\/code>/);
-  assert.match(html, /<strong>Koto<\/strong>/);
-  assert.match(html, /<strong>Luau<\/strong>/);
+  assert.match(html, /<strong>koto<\/strong><span>Koto<\/span>/);
+  assert.match(html, /<strong>rustia<\/strong><span>Luau<\/span>/);
+  assert.match(html, /data-metric="relative" aria-pressed="true"/);
+  assert.match(html, /data-metric="absolute" aria-pressed="false"/);
+  assert.match(html, /class="language-heatmap"/);
+  assert.match(html, /data-relative="2x" data-absolute="50 ns"/);
   assert.ok(html.indexOf('data-implementation="koto"') < html.indexOf('data-implementation="rustia"'));
   assert.doesNotMatch(html, /oop_metamethods|excluded-revision/);
 

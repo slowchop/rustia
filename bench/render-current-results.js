@@ -9,6 +9,7 @@ const sourcePath = path.join(__dirname, "current-results.json");
 const historyPath = path.join(__dirname, "history", "runs.jsonl");
 const wasmResultsPath = path.join(__dirname, "wasm", "current-results.json");
 const wasmDispatchPath = path.join(__dirname, "wasm", "dispatch-current-results.json");
+const cohortEvidencePath = path.join(__dirname, "history", "evidence");
 const outputPath = path.join(__dirname, "current-results.html");
 const checkOnly = process.argv.includes("--check");
 const REQUIRED_COMMON_WORKLOADS = Object.freeze([
@@ -171,6 +172,56 @@ function readWasmDispatchResults() {
   }
   data.runs.forEach(validateWasmDispatchRun);
   return data;
+}
+
+function readCohortEvidence() {
+  let entries;
+  try {
+    entries = fs.readdirSync(cohortEvidencePath, { withFileTypes: true });
+  } catch (error) {
+    fail(`could not read ${relative(cohortEvidencePath)}: ${error.message}`);
+  }
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(cohortEvidencePath, entry.name, "manifest.json"))
+    .filter((filePath) => fs.existsSync(filePath))
+    .map((filePath) => normalizeCohortEvidence(readJson(filePath), filePath))
+    .filter((cohort) => cohort.published)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+function normalizeCohortEvidence(data, filePath) {
+  const label = relative(filePath);
+  if (data.schema !== "rustia.bench.cloud-evidence.v1") {
+    fail(`${label}.schema must be rustia.bench.cloud-evidence.v1`);
+  }
+  if (!data.comparison || !Array.isArray(data.comparison.legs) || data.comparison.legs.length === 0) {
+    fail(`${label}.comparison.legs must be a non-empty array`);
+  }
+  const interval = data.comparison.conservative_bootstrap_ci_95_percent;
+  for (const [key, value] of Object.entries({
+    delta: data.comparison.candidate_delta_percent,
+    lower: interval?.lower,
+    upper: interval?.upper,
+  })) {
+    if (!Number.isFinite(value)) fail(`${label} ${key} must be finite`);
+  }
+  const workload = data.comparison.legs[0].workload;
+  if (typeof workload !== "string" || workload === "") fail(`${label} workload must be present`);
+  const sampleCount = data.comparison.legs.reduce((sum, leg) => sum + Number(leg.sample_count ?? 0), 0);
+  if (!Number.isSafeInteger(sampleCount) || sampleCount <= 0) fail(`${label} sample count must be positive`);
+  return {
+    workload,
+    createdAt: data.created_at,
+    candidateCommit: data.source?.candidate_commit,
+    delta: data.comparison.candidate_delta_percent,
+    lower: interval.lower,
+    upper: interval.upper,
+    legCount: data.comparison.legs.length,
+    sampleCount,
+    verdict: data.comparison.verdict?.status,
+    published: data.publication?.performed === true,
+  };
 }
 
 function validateRow(row, index) {
@@ -399,6 +450,11 @@ function languageLabel(dialect) {
     .join(" ");
 }
 
+function implementationLabel(engine) {
+  if (engine === "mlua-luau" || engine === "mlua-lua54") return "mlua";
+  return engine;
+}
+
 function compareRows(left, right) {
   return (
     left.target.localeCompare(right.target) ||
@@ -453,6 +509,7 @@ function summarizeLanguageTargets(summaryRows) {
             measuredWorkloads,
             coverage: measuredWorkloads.length,
             geoSpeed: null,
+            geoTime: null,
             bestCount: null,
             rank: null,
           };
@@ -475,6 +532,7 @@ function summarizeLanguageTargets(summaryRows) {
       if (complete) {
         for (const row of implementationRows) {
           row.geoSpeed = geometricMean(row.measuredRows.map((measurement) => measurement.speed_vs_rustia));
+          row.geoTime = geometricMean(row.measuredRows.map((measurement) => measurement.ns_per_unit_min));
           row.bestCount = 0;
         }
         for (const workload of REQUIRED_COMMON_WORKLOADS) {
@@ -691,7 +749,7 @@ function claimGateTableRow(row) {
     ? "n/a"
     : `${formatInteger(row.rustiaRank)} / ${formatInteger(row.engineCount)}`;
   const fastest = row.fastest
-    ? `${row.fastest.engine} · ${formatNumber(row.fastest.ns_per_unit_min)} ns`
+    ? `${implementationLabel(row.fastest.engine)} · ${languageLabel(row.fastest.dialect)} · ${formatNumber(row.fastest.ns_per_unit_min)} ns`
     : "n/a";
   const postureClass = row.posture.ready ? "claim-ready" : "claim-blocked";
   return `
@@ -715,20 +773,92 @@ function claimWorkloadLabel(row) {
   return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.workload)} · ${escapeHtml(row.unit)}</span></span>`;
 }
 
-function historySection(history) {
+function historySection(history, cohorts, currentRows, wasmRows) {
+  const allBounds = cohorts.flatMap((cohort) => [cohort.lower, cohort.upper, cohort.delta, 0]);
+  const axisMin = Math.min(-10, Math.floor((Math.min(...allBounds) - 2) / 10) * 10);
+  const axisMax = Math.max(10, Math.ceil((Math.max(...allBounds) + 2) / 10) * 10);
+  const axisPosition = (value) => ((value - axisMin) / (axisMax - axisMin)) * 100;
+  const zeroPosition = axisPosition(0);
+  const ticks = [axisMin, axisMin + (axisMax - axisMin) / 4, axisMin + (axisMax - axisMin) / 2, 0, axisMax]
+    .filter((value, index, values) => values.findIndex((candidate) => Math.abs(candidate - value) < 0.001) === index)
+    .sort((left, right) => left - right);
+  const currentCommit = unique(currentRows.map((row) => row.commit)).join(", ");
+  const latestTimestamp = Math.max(...currentRows.map((row) => row.timestamp_unix));
   return `
     <section class="panel" id="history">
       <div class="section-head">
         <div>
           <h2>Benchmark History</h2>
-          <p>${formatInteger(history.rows.length)} records · ${formatInteger(history.commitCount)} commits · source <code>${escapeHtml(relative(historyPath))}</code> · ${formatTime(history.minTimestamp)} to ${formatTime(history.maxTimestamp)}</p>
+          <p>Controlled deltas stay separate from the full language-matrix baseline.</p>
         </div>
       </div>
-      <div class="history-body">
-        ${history.targetRows.map(historyTargetSection).join("")}
+      <div class="cohort-chart" role="img" aria-label="Accepted controlled benchmark cohort deltas; lower percentages are faster">
+        <div class="cohort-axis" style="--zero: ${zeroPosition.toFixed(3)}%" aria-hidden="true">
+          ${ticks.map((tick) => `<span style="left:${axisPosition(tick).toFixed(3)}%">${tick > 0 ? "+" : ""}${formatNumber(tick)}%</span>`).join("")}
+        </div>
+        ${cohorts.map((cohort) => cohortPlotRow(cohort, axisPosition, zeroPosition)).join("")}
       </div>
+      <div class="table-wrap cohort-table-wrap">
+        <table class="cohort-table">
+          <thead><tr><th>Accepted cohort</th><th>Coverage</th><th>Comparable result</th><th>Status</th></tr></thead>
+          <tbody>
+            ${cohorts.map(cohortTableRow).join("")}
+            <tr>
+              <td><span class="implementation-language"><strong>Language matrix</strong><span>${escapeHtml(currentCommit.slice(0, 7))} · ${formatTime(latestTimestamp)}</span></span></td>
+              <td>${formatInteger(currentRows.length)} native · ${formatInteger(wasmRows.length)} Wasm rows</td>
+              <td>Implementations within one exact target</td>
+              <td><span class="cohort-status">current baseline</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="cohort-note">Lower is faster. Confidence intervals appear only for same-protocol candidate/baseline cohorts; the language matrix remains a baseline until another complete cohort exists. Source <code>${escapeHtml(relative(historyPath))}</code>.</p>
     </section>
   `;
+}
+
+function cohortPlotRow(cohort, axisPosition, zeroPosition) {
+  const low = axisPosition(cohort.lower);
+  const high = axisPosition(cohort.upper);
+  const mid = axisPosition(cohort.delta);
+  const labelSide = mid < 18 ? "cohort-label-right" : "cohort-label-left";
+  return `
+    <div class="cohort-plot-row">
+      <div class="cohort-plot-name"><strong>${escapeHtml(workloadLabel(cohort.workload))}</strong><span>${escapeHtml(cohort.candidateCommit.slice(0, 7))} · ${escapeHtml(formatIsoDate(cohort.createdAt))}</span></div>
+      <div class="cohort-track" style="--zero: ${zeroPosition.toFixed(3)}%">
+        <span class="cohort-interval" style="left:${low.toFixed(3)}%;width:${Math.max(0.2, high - low).toFixed(3)}%"></span>
+        <span class="cohort-point" style="left:${mid.toFixed(3)}%"></span>
+        <span class="cohort-point-label ${labelSide}" style="left:${mid.toFixed(3)}%">${cohort.delta > 0 ? "+" : ""}${cohort.delta.toFixed(2)}%</span>
+      </div>
+    </div>
+  `;
+}
+
+function cohortTableRow(cohort) {
+  return `
+    <tr>
+      <td><span class="implementation-language"><strong>${escapeHtml(workloadLabel(cohort.workload))}</strong><span>${escapeHtml(cohort.candidateCommit.slice(0, 7))} · ${escapeHtml(formatIsoDate(cohort.createdAt))}</span></span></td>
+      <td>${formatInteger(cohort.legCount)} legs · ${formatInteger(cohort.sampleCount)} samples</td>
+      <td>${cohort.delta.toFixed(2)}% · 95% CI ${cohort.lower.toFixed(2)}% to ${cohort.upper.toFixed(2)}%</td>
+      <td><span class="cohort-status">published</span></td>
+    </tr>
+  `;
+}
+
+function workloadLabel(workload) {
+  const labels = {
+    dense_tables: "Dense tables",
+    sparse_tables: "Sparse tables",
+    closures_upvalues: "Closures",
+    generic_iteration: "Iteration",
+    stdlib_math_table: "Math / table",
+    oop_metamethods: "OOP metamethods",
+  };
+  return labels[workload] ?? languageLabel(workload);
+}
+
+function formatIsoDate(value) {
+  return new Date(value).toISOString().slice(0, 10);
 }
 
 function historyTargetSection(group) {
@@ -915,7 +1045,11 @@ function languagesByTargetSection(targetRows) {
       <div class="section-head">
         <div>
           <h2>Languages by Target</h2>
-          <p>${formatInteger(completeCount)} / ${formatInteger(targetRows.length)} exact targets complete. Rankings, workload wins, and dimensionless geomeans use only the five required common workloads.</p>
+          <p>${formatInteger(completeCount)} / ${formatInteger(targetRows.length)} exact targets complete · ranked headline and per-workload detail use the same five common workloads.</p>
+        </div>
+        <div class="metric-toggle" role="group" aria-label="Benchmark value display">
+          <button type="button" data-metric="relative" aria-pressed="true">vs rustia</button>
+          <button type="button" data-metric="absolute" aria-pressed="false">absolute</button>
         </div>
       </div>
       <div class="language-targets">
@@ -926,7 +1060,6 @@ function languagesByTargetSection(targetRows) {
 }
 
 function languageTargetSummary(targetRow) {
-  const maxSpeed = Math.max(...targetRow.implementationRows.map((row) => row.geoSpeed ?? 0), 1);
   const runtimeDetail = targetRow.runtimes.length === 0
     ? "native"
     : `wasm · ${targetRow.runtimes.join(", ")}`;
@@ -945,48 +1078,104 @@ function languageTargetSummary(targetRow) {
           <span class="summary-pill ${revisionClass}">${escapeHtml(targetRow.revisionStatus)}</span>
         </div>
       </div>
-      <div class="table-wrap">
-        <table class="language-summary-table">
-          <thead>
-            <tr>
-              <th>Language</th>
-              <th>Implementation</th>
-              <th>Rank</th>
-              <th>Geomean vs rustia</th>
-              <th>Workload wins</th>
-              <th>Coverage</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${targetRow.implementationRows.map((row) => {
-              const width = row.geoSpeed == null ? 0 : Math.max(2, (row.geoSpeed / maxSpeed) * 100);
-              const rank = row.rank == null
-                ? "n/a"
-                : `${formatInteger(row.rank)} / ${formatInteger(targetRow.implementationRows.length)}`;
-              const wins = row.bestCount == null
-                ? "n/a"
-                : `${formatInteger(row.bestCount)} / ${formatInteger(REQUIRED_COMMON_WORKLOADS.length)}`;
-              return `
-                <tr data-language="${escapeHtml(row.dialect)}" data-implementation="${escapeHtml(row.engine)}">
-                  <td><strong>${escapeHtml(row.language)}</strong></td>
-                  <td>${escapeHtml(row.engine)}</td>
-                  <td>${escapeHtml(rank)}</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>${formatSpeed(row.geoSpeed)}</span>
-                      <div class="bar" aria-hidden="true"><span style="width: ${width.toFixed(3)}%"></span></div>
-                    </div>
-                  </td>
-                  <td>${escapeHtml(wins)}</td>
-                  <td>${formatInteger(row.coverage)} / ${formatInteger(REQUIRED_COMMON_WORKLOADS.length)}</td>
-                </tr>
-              `;
-            }).join("")}
-          </tbody>
-        </table>
+      <div class="ranked-headline">
+        <div class="rank-axis-caption metric-caption" data-relative="geometric mean speed vs rustia · higher is faster" data-absolute="geometric mean ns/unit · lower is faster">geometric mean speed vs rustia · higher is faster</div>
+        <div class="ranked-bars" role="list" aria-label="Best-first implementation ranking for ${escapeHtml(targetRow.target)}">
+          ${targetRow.implementationRows.map((row) => languageRankRow(row, targetRow)).join("")}
+        </div>
+      </div>
+      <div class="heatmap-detail">
+        <div class="heatmap-head">
+          <strong>Workload detail</strong>
+          <span class="metric-caption" data-relative="speed vs rustia · higher is faster" data-absolute="minimum ns/unit · lower is faster">speed vs rustia · higher is faster</span>
+        </div>
+        ${languageHeatmap(targetRow)}
+        <div class="heat-legend metric-caption" data-relative="Color: red below 0.75× · neutral near rustia · stronger green above 1.25×" data-absolute="Color: strongest for the fastest implementation in each workload">Color: red below 0.75× · neutral near rustia · stronger green above 1.25×</div>
       </div>
     </section>
   `;
+}
+
+function languageRankRow(row, targetRow) {
+  const rank = row.rank == null ? "–" : formatInteger(row.rank);
+  const width = rankBarWidth(row, targetRow.implementationRows);
+  const wins = row.bestCount == null ? "n/a" : `${formatInteger(row.bestCount)} wins`;
+  const relative = formatSpeed(row.geoSpeed);
+  const absolute = row.geoTime == null ? "n/a" : `${formatNumber(row.geoTime)} ns`;
+  return `
+    <div class="language-rank-row" role="listitem" data-language="${escapeHtml(row.dialect)}" data-implementation="${escapeHtml(row.engine)}">
+      <span class="rank-number">${rank}</span>
+      ${implementationLanguage(row.engine, row.language)}
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="${width.toFixed(3)}" data-absolute-width="${width.toFixed(3)}" style="width:${width.toFixed(3)}%"></span></div>
+      <strong class="rank-value metric-value" data-relative="${escapeHtml(relative)}" data-absolute="${escapeHtml(absolute)}">${escapeHtml(relative)}</strong>
+      <span class="rank-meta">${escapeHtml(wins)} · ${formatInteger(row.coverage)}/${formatInteger(REQUIRED_COMMON_WORKLOADS.length)}</span>
+    </div>
+  `;
+}
+
+function rankBarWidth(row, rows) {
+  if (!Number.isFinite(row.geoTime) || row.geoTime <= 0) return 0;
+  const values = rows.map((candidate) => candidate.geoTime).filter((value) => Number.isFinite(value) && value > 0);
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  if (low === high) return 100;
+  return 14 + ((Math.log(high) - Math.log(row.geoTime)) / (Math.log(high) - Math.log(low))) * 86;
+}
+
+function implementationLanguage(engine, language) {
+  return `<span class="implementation-language"><strong>${escapeHtml(implementationLabel(engine))}</strong><span>${escapeHtml(language)}</span></span>`;
+}
+
+function languageHeatmap(targetRow) {
+  const fastest = new Map(REQUIRED_COMMON_WORKLOADS.map((workload) => {
+    const values = targetRow.implementationRows
+      .map((row) => row.measuredRows.find((measurement) => measurement.workload === workload)?.ns_per_unit_min)
+      .filter((value) => Number.isFinite(value) && value > 0);
+    return [workload, values.length === 0 ? null : Math.min(...values)];
+  }));
+  return `
+    <div class="table-wrap">
+      <table class="language-heatmap">
+        <thead><tr><th>Implementation · language</th>${REQUIRED_COMMON_WORKLOADS.map((workload) => `<th>${escapeHtml(workloadLabel(workload))}</th>`).join("")}</tr></thead>
+        <tbody>
+          ${targetRow.implementationRows.map((row) => `
+            <tr data-language="${escapeHtml(row.dialect)}" data-implementation="${escapeHtml(row.engine)}">
+              <th>${implementationLanguage(row.engine, row.language)}</th>
+              ${REQUIRED_COMMON_WORKLOADS.map((workload) => heatmapCell(row, workload, fastest.get(workload))).join("")}
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function heatmapCell(row, workload, fastest) {
+  const measurement = row.measuredRows.find((candidate) => candidate.workload === workload);
+  if (!measurement) return '<td class="heat-cell heat-missing">–</td>';
+  const relativeClass = relativeHeatClass(measurement.speed_vs_rustia);
+  const absoluteScore = fastest / measurement.ns_per_unit_min;
+  const absoluteClass = absoluteHeatClass(absoluteScore);
+  const baselineClass = row.engine === "rustia" ? " heat-baseline" : "";
+  return `<td class="heat-cell ${relativeClass}${baselineClass}" data-heat-relative="${relativeClass}" data-heat-absolute="${absoluteClass}" data-relative="${escapeHtml(formatSpeed(measurement.speed_vs_rustia))}" data-absolute="${escapeHtml(`${formatNumber(measurement.ns_per_unit_min)} ns`)}">${escapeHtml(formatSpeed(measurement.speed_vs_rustia))}</td>`;
+}
+
+function relativeHeatClass(value) {
+  if (value >= 25) return "heat-5";
+  if (value >= 10) return "heat-4";
+  if (value >= 3) return "heat-3";
+  if (value >= 1.25) return "heat-2";
+  if (value >= 0.75) return "heat-1";
+  return "heat-0";
+}
+
+function absoluteHeatClass(value) {
+  if (value >= 0.9) return "heat-5";
+  if (value >= 0.5) return "heat-4";
+  if (value >= 0.25) return "heat-3";
+  if (value >= 0.1) return "heat-2";
+  if (value >= 0.04) return "heat-1";
+  return "heat-0";
 }
 
 function workloadSection(target, workload, rows) {
@@ -1016,8 +1205,8 @@ function resultBar(row, fastest, maxSpeed) {
   return `
     <article class="result-row">
       <div class="result-label">
-        <strong>${escapeHtml(row.engine)}</strong>
-        <span>${escapeHtml(row.dialect)} · ${escapeHtml(row.commit)} · ${formatTime(row.timestamp_unix)}</span>
+        <strong>${escapeHtml(implementationLabel(row.engine))}</strong>
+        <span>${escapeHtml(languageLabel(row.dialect))} · ${escapeHtml(row.commit)} · ${formatTime(row.timestamp_unix)}</span>
       </div>
       <div class="result-values">
         <span>${formatNumber(row.ns_per_unit_min)} ns min</span>
@@ -1150,7 +1339,7 @@ function wasmTargetSection(data) {
             ${rows.map((row) => `
               <tr>
                 <td>${targetRuntimeLabel(row)}</td>
-                <td><strong>${escapeHtml(row.adapter)}</strong> <span class="subtle">${escapeHtml(row.dialect)}</span></td>
+                <td><strong>${escapeHtml(implementationLabel(row.adapter))}</strong> <span class="subtle">${escapeHtml(languageLabel(row.dialect))}</span></td>
                 <td>${escapeHtml(row.workload)}</td>
                 <td>${formatNumber(row.ns_per_unit_min)}</td>
                 <td>${formatNumber(row.ns_per_unit_median)}</td>
@@ -1211,7 +1400,7 @@ function targetRuntimeLabel(row) {
   return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.runtime)}</span></span>`;
 }
 
-function render(data, wasmResults, wasmDispatchResults, historyRecords) {
+function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts) {
   const wasmRows = wasmTargetRows(wasmResults);
   const summary = summarize(data, wasmRows);
   const history = summarizeHistory(historyRecords);
@@ -1418,8 +1607,287 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords) {
       color: #92400e;
     }
 
-    .language-summary-table {
-      min-width: 820px;
+    .metric-toggle {
+      display: inline-flex;
+      flex: 0 0 auto;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+    }
+
+    .metric-toggle button {
+      padding: 6px 11px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .metric-toggle button[aria-pressed="true"] {
+      background: var(--text);
+      color: var(--panel);
+    }
+
+    .ranked-headline,
+    .heatmap-detail {
+      padding: 18px 20px;
+    }
+
+    .heatmap-detail {
+      border-top: 1px solid var(--line);
+      background: var(--panel-soft);
+    }
+
+    .rank-axis-caption,
+    .heatmap-head,
+    .heat-legend {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .rank-axis-caption {
+      margin: 0 0 8px min(290px, 35%);
+      text-align: right;
+    }
+
+    .ranked-bars {
+      display: grid;
+      gap: 4px;
+    }
+
+    .language-rank-row {
+      display: grid;
+      grid-template-columns: 28px minmax(180px, 240px) minmax(140px, 1fr) 90px 96px;
+      gap: 12px;
+      align-items: center;
+      min-height: 38px;
+    }
+
+    .rank-number,
+    .rank-meta,
+    .implementation-language span,
+    .metric-caption {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .rank-number,
+    .rank-value,
+    .heat-cell {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .rank-track {
+      height: 11px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e2e8ef;
+    }
+
+    .rank-fill {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width 180ms ease;
+    }
+
+    .rank-value {
+      text-align: right;
+    }
+
+    .rank-meta {
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .implementation-language {
+      display: grid;
+      gap: 1px;
+      min-width: 0;
+    }
+
+    .implementation-language strong,
+    .implementation-language span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .heatmap-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+
+    .heatmap-head strong {
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .language-heatmap {
+      min-width: 790px;
+      table-layout: fixed;
+      background: var(--panel);
+    }
+
+    .language-heatmap th:first-child {
+      width: 190px;
+    }
+
+    .language-heatmap th:not(:first-child),
+    .language-heatmap td {
+      text-align: center;
+    }
+
+    .language-heatmap tbody th {
+      color: var(--text);
+      font-size: 14px;
+      text-transform: none;
+    }
+
+    .heat-cell {
+      transition: background 180ms ease;
+    }
+
+    .heat-0 { background: #fee2e2; }
+    .heat-1 { background: #f1f5f9; }
+    .heat-2 { background: #dff7ed; }
+    .heat-3 { background: #b7ead7; }
+    .heat-4 { background: #86d8bf; }
+    .heat-5 { background: #58c3a3; }
+
+    .heat-baseline {
+      box-shadow: inset 0 0 0 1px var(--text);
+    }
+
+    .heat-missing {
+      color: var(--muted);
+      background: var(--panel-soft);
+    }
+
+    .heat-legend {
+      margin-top: 8px;
+    }
+
+    .cohort-chart {
+      padding: 20px;
+    }
+
+    .cohort-axis {
+      position: relative;
+      height: 28px;
+      margin-left: 170px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .cohort-axis::after,
+    .cohort-track::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: var(--zero);
+      width: 1px;
+      background: var(--text);
+      opacity: .6;
+    }
+
+    .cohort-axis span {
+      position: absolute;
+      bottom: 5px;
+      transform: translateX(-50%);
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .cohort-plot-row {
+      display: grid;
+      grid-template-columns: 158px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      min-height: 54px;
+    }
+
+    .cohort-plot-name strong,
+    .cohort-plot-name span {
+      display: block;
+    }
+
+    .cohort-plot-name span,
+    .cohort-point-label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .cohort-track {
+      position: relative;
+      height: 28px;
+      background: var(--panel-soft);
+    }
+
+    .cohort-interval {
+      position: absolute;
+      top: 13px;
+      height: 3px;
+      background: var(--accent-2);
+    }
+
+    .cohort-point {
+      position: absolute;
+      top: 9px;
+      width: 11px;
+      height: 11px;
+      transform: translateX(-50%);
+      border: 2px solid var(--panel);
+      border-radius: 999px;
+      background: var(--accent-2);
+    }
+
+    .cohort-point-label {
+      position: absolute;
+      top: -2px;
+      white-space: nowrap;
+    }
+
+    .cohort-label-left { transform: translateX(calc(-100% - 9px)); }
+    .cohort-label-right { transform: translateX(9px); }
+
+    .cohort-table {
+      min-width: 760px;
+    }
+
+    .cohort-table-wrap {
+      border-top: 1px solid var(--line);
+    }
+
+    .cohort-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 700;
+    }
+
+    .cohort-status::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .cohort-note {
+      margin: 0;
+      padding: 12px 20px 16px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
     }
 
     .target-runtime {
@@ -1776,6 +2244,39 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords) {
         flex-direction: column;
       }
 
+      #languages-by-target > .section-head {
+        flex-direction: column;
+      }
+
+      .language-rank-row {
+        grid-template-columns: 24px minmax(120px, 1fr) 68px;
+        gap: 8px;
+        padding: 4px 0;
+      }
+
+      .language-rank-row .rank-track {
+        grid-column: 2 / 4;
+        grid-row: 2;
+      }
+
+      .rank-meta {
+        display: none;
+      }
+
+      .rank-axis-caption {
+        margin-left: 0;
+      }
+
+      .cohort-axis {
+        margin-left: 0;
+      }
+
+      .cohort-plot-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
+        margin-top: 12px;
+      }
+
       .summary-statuses {
         justify-content: flex-start;
       }
@@ -1788,7 +2289,7 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords) {
       <div class="hero-panel">
         <p class="eyebrow">script-bench current snapshot</p>
         <h1>rustia Benchmark Results and History</h1>
-        <p class="lead">Static HTML generated from the committed current benchmark JSON and append-only history. Bars compare current rows, the claim gate keeps public wording honest, and the history section renders per-workload timing trends directly from JSONL.</p>
+        <p class="lead">Committed Linux results with a best-first language headline, workload-level detail, and protocol-aware benchmark history.</p>
         <p class="source-line">
           <span>Source <code>${escapeHtml(relative(sourcePath))}</code></span>
           <span>History <code>${escapeHtml(relative(historyPath))}</code></span>
@@ -1819,13 +2320,41 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords) {
 
     ${languagesByTargetSection(summary.languageTargetRows)}
     ${claimGateSection(claimRows)}
-    ${historySection(history)}
+    ${historySection(history, cohorts, summary.rows, wasmRows)}
     ${wasmTargetSection(wasmResults)}
     ${wasmDispatchSection(wasmDispatchResults)}
     ${summary.targetRows.map(targetSection).join("")}
 
-    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic and contains no external assets or runtime JavaScript. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses one inline presentation toggle. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
+  <script>
+    (() => {
+      const root = document.getElementById("languages-by-target");
+      if (!root) return;
+      const heatClasses = ["heat-0", "heat-1", "heat-2", "heat-3", "heat-4", "heat-5"];
+      const setMetric = (metric) => {
+        root.dataset.metric = metric;
+        root.querySelectorAll("[data-metric]").forEach((button) => {
+          button.setAttribute("aria-pressed", String(button.dataset.metric === metric));
+        });
+        root.querySelectorAll(".metric-value, .metric-caption").forEach((element) => {
+          element.textContent = element.dataset[metric];
+        });
+        root.querySelectorAll(".metric-bar").forEach((bar) => {
+          bar.style.width = bar.dataset[metric + "Width"] + "%";
+        });
+        root.querySelectorAll(".heat-cell[data-heat-relative]").forEach((cell) => {
+          cell.textContent = cell.dataset[metric];
+          cell.classList.remove(...heatClasses);
+          cell.classList.add(cell.dataset[metric === "relative" ? "heatRelative" : "heatAbsolute"]);
+        });
+      };
+      root.querySelectorAll("[data-metric]").forEach((button) => {
+        button.addEventListener("click", () => setMetric(button.dataset.metric));
+      });
+      setMetric("relative");
+    })();
+  </script>
 </body>
 </html>
 `;
@@ -1836,7 +2365,8 @@ function main() {
   const historyRecords = readHistory();
   const wasmResults = readWasmResults();
   const wasmDispatchResults = readWasmDispatchResults();
-  const html = render(data, wasmResults, wasmDispatchResults, historyRecords).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
+  const cohorts = readCohortEvidence();
+  const html = render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
   const output = `${html}\n`;
   if (checkOnly) {
     let current;
@@ -1861,6 +2391,7 @@ if (require.main === module) {
 
 module.exports = {
   REQUIRED_COMMON_WORKLOADS,
+  implementationLabel,
   languageLabel,
   languagesByTargetSection,
   summarizeLanguageTargets,
