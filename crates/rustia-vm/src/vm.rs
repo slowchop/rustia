@@ -13518,6 +13518,8 @@ impl Vm {
             let results =
                 self.call_value_non_yieldable(program, comparator, &[lhs, rhs], depth, fuel)?;
             first_result_or_nil(results).truthy()
+        } else if let (Some(lhs), Some(rhs)) = (lhs.as_number(), rhs.as_number()) {
+            compare_ordering(OrderComparison::Less, lhs.partial_cmp(&rhs))
         } else {
             self.less_than(program, lhs, rhs, depth, fuel)?
         };

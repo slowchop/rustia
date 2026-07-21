@@ -1,6 +1,6 @@
 # rustia — SotA performance research update
 
-> **Status: [PERFORMANCE RESEARCH v1.6] (updated 2026-07-22).** This note updates
+> **Status: [PERFORMANCE RESEARCH v1.7] (updated 2026-07-22).** This note updates
 > [`55-improvements.md`](55-improvements.md) with the current performance research stack. It is not a new
 > conformance contract; it is the ordered implementation bet list for making rustia fast while keeping the public
 > workspace under `unsafe_code = "forbid"`.
@@ -311,6 +311,20 @@ and keeps ordinary calls on their original helper. The raw sidecars were tempora
 were not retained in the repository or appended to public history; this summary is the durable evidence. The
 result supports hardening decisions but does not authorize a blanket release speed headline. The projected gains
 below remain planning estimates rather than measured claims against C++ Luau.
+
+### Numeric default `table.sort` candidate — local directional evidence
+
+Symbolized optimized sampling attributed approximately 10.6% of `dense_tables` leaf samples to generic raw
+ordering inside the native heap-sort loop. The candidate recognizes a pair of numeric `Value`s at the sort
+comparison boundary and performs the same partial-order `<` decision directly. String ordering, custom guest
+comparators, mutation detection, errors, and all nonnumeric fallback behavior continue through the existing
+paths.
+
+A fixed-work local ABBA screen used nine repetitions per leg at `n=3000`, with byte-identical harness source
+and matching checksums. Averaged minimum time moved from 73,953.28 to 64,815.11 ns/unit (-12.35%); averaged
+median time moved from 74,663.19 to 66,236.49 ns/unit (-11.29%). This developer-host result selected the focused
+two-line candidate for exact-commit Linux measurement. It is directional evidence, not retained public history
+or a cross-engine claim.
 
 ## Estimate vs C++ Luau
 

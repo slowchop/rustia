@@ -247,6 +247,9 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Changed
 
+- Default `table.sort` comparisons now handle numeric pairs directly in the
+  native heap-sort loop, while string ordering, custom comparators, mutation
+  checks, and dynamic comparison errors retain their existing paths.
 - The VM's ordinary instruction loop now bypasses `gc-arena` when allocation
   debt is already zero and refreshes weak-table root snapshots only before an
   imminent collection boundary or a path that can enter guest code. Explicit
