@@ -27,7 +27,10 @@ benchmark, API, and release gates are satisfied.
 - Profiled hot-loop hygiene skips zero-debt GC work and synchronizes weak roots only at possible collection or
   guest-entry boundaries. The accepted exact-commit Linux matrix improved rustia's median ns/unit by
   22.08%-34.97% across all five tracked workloads versus the prior snapshot, while the generated minimum-time
-  `mlua-luau` geometric-mean gap fell from 10.1x to 7.30x; this remains per-workload development evidence.
+  `mlua-luau` geometric-mean gap fell from 10.1x to 7.30x. A subsequent numeric `table.sort` specialization
+  improved the dense-table median another 8.90% in the latest exact matrix and reduced that workload's
+  `mlua-luau` minimum-time gap from 9.20x to 8.54x; the current five-workload geometric mean is 7.29x. These
+  remain per-workload development results, not blanket speed claims.
 - Compiled constant pools are immutable and shared across program clones and VMs. Long compiled string atoms
   reuse those shared bytes, while ordinary compiled literals and runtime-produced binary strings up to 13 bytes
   can be stored directly in the sealed 16-byte `Value`; constant-key/cache paths atomize only when needed, and

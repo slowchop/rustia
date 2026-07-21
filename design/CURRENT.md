@@ -111,6 +111,13 @@ Linux snapshot, rustia median ns/unit improved 34.97% on `dense_tables`, 27.20% 
 claim gate's `mlua-luau` gap therefore moved from a 10.1x geometric mean (7.1x-14.1x range) to 7.30x
 (5.25x-9.53x). This is still development evidence rather than a blanket release claim. The matrix's ephemeral
 VM was confirmed deleted before its evidence, native rows, and Node wasm rows were promoted.
+The following exact-commit `b1cd2841fb8fc2d916047391a1d757d53a1303cd` matrix accepted all timed groups on
+their first attempt and measured the focused numeric default-`table.sort` guard. Against the immediately prior
+snapshot, rustia dense-table minimum/median ns/unit improved 7.42%/8.90%, and its minimum-time `mlua-luau` gap
+fell from 9.20x to 8.54x. One primary-native steal tick was 0.0118%, within the frozen 0.1% allowance; all other
+timed groups observed zero. The VM was confirmed deleted after 1,364 seconds and before promotion, with a
+$0.108 rounded compute ceiling. Independent-host movement elsewhere leaves the current five-workload gap at a
+7.29x geometric mean over a 5.09x-10.02x range.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
 ## Project pillars
@@ -197,12 +204,14 @@ section below for the full list (GC tuning, benchmark publication, `LuauIntegerT
   weak-table GC-scan correction, and both comparisons retain
   three final-candidate history rows. A separate exact 512-VM sampler confirms the shared/inline representation's
   per-VM constant-string savings across 16 paired rounds while exposing the small one-time program-image and
-  construction tradeoffs. The latest exact cross-engine matrix then reduced rustia's median ns/unit by
-  22.08%-34.97% across all five tracked workloads versus the previous committed Linux snapshot; the generated
-  minimum-time `mlua-luau` gap fell from a 10.1x to 7.30x geometric mean, with a current 5.25x-9.53x range.
+  construction tradeoffs. The first current exact cross-engine matrix reduced rustia's median ns/unit by
+  22.08%-34.97% across all five tracked workloads versus the previous committed Linux snapshot. The following
+  numeric-sort matrix improved dense median time another 8.90% and reduced that workload's `mlua-luau` gap from
+  9.20x to 8.54x; the current five-workload gap is a 7.29x geometric mean over a 5.09x-10.02x range.
   These are workload- and protocol-specific results, not blanket speed or RSS claims. Next come broader long-run
-  history, adaptive quickening, superinstructions/O2, further profile-led hot-loop work, and type-directed
-  wasm/AOT. Native copy-and-patch/JIT work remains a research reference unless it can satisfy the public
+  history, a redesigned specialization/quickening approach (the first per-site cache shape regressed locally),
+  superinstructions/O2, further profile-led hot-loop work, and type-directed wasm/AOT. Native copy-and-patch/JIT
+  work remains a research reference unless it can satisfy the public
   `unsafe_code = "forbid"` gate.
 - **Luau target PINNED** (review C1): **Luau 0.709** (= our mlua oracle), standalone (not-Roblox) surface,
   vector width 3, flags-off — see [`05-luau-target.md`](05-luau-target.md). **f64-only is VERIFIED correct**

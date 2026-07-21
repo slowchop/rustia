@@ -8,12 +8,14 @@
 ## Ground truth
 
 The public cross-engine benchmark posture is still conservative: rustia remains behind the C++ Luau oracle
-through `mlua-luau` on the tracked workloads. The 2026-07-21 exact-commit Linux matrix reduced the generated
-minimum-time comparison from a roughly 7.1x-14.1x range and 10.1x geometric-mean gap to 5.25x-9.53x and 7.30x.
-Rustia's median ns/unit also fell 22.08%-34.97% across all five workloads relative to the previous committed
-Linux snapshot. Exact same-engine Linux A/B evidence for the earlier dense, OOP, and string-memory slices is
-retained separately; none of these results turns into a blanket cross-engine headline. This remains a catch-up
-project first.
+through `mlua-luau` on the tracked workloads. The first 2026-07-21 exact-commit Linux matrix reduced the
+generated minimum-time comparison from a roughly 7.1x-14.1x range and 10.1x geometric-mean gap to
+5.25x-9.53x and 7.30x. Rustia's median ns/unit also fell 22.08%-34.97% across all five workloads relative to the
+previous committed Linux snapshot. The subsequent exact numeric-sort matrix improved the dense-table median a
+further 8.90% and moved that workload's gap from 9.20x to 8.54x; independent-host variance elsewhere leaves the
+latest overall range at 5.09x-10.02x and geometric mean at 7.29x. Exact same-engine Linux A/B evidence for the
+earlier dense, OOP, and string-memory slices is retained separately; none of these results turns into a blanket
+cross-engine headline. This remains a catch-up project first.
 
 The hardened safe table/atom/cache foundation is now in-tree. VM-local byte atoms and insertion-ordered table
 hash parts at 16+ entries use deterministic open-addressed `Vec<u32>` side indices at no more than 50% load.
@@ -127,7 +129,10 @@ previous committed Linux snapshot, rustia's median ns/unit fell 34.97% on `dense
 `sparse_tables`, 27.44% on `closures_upvalues`, 22.08% on `generic_iteration`, and 22.77% on
 `stdlib_math_table`. The generated minimum-time claim gate now places `mlua-luau` 5.25x-9.53x faster, with a
 7.30x geometric mean instead of 10.1x. The ephemeral VM was confirmed deleted before the evidence and 50-row
-matrix were promoted.
+matrix were promoted. The next exact matrix at `b1cd2841fb8fc2d916047391a1d757d53a1303cd` adds the focused
+numeric default-sort guard: dense-table median time improved another 8.90% versus that snapshot and its
+`mlua-luau` gap moved from 9.20x to 8.54x. All timed groups passed on their first attempt; one native steal tick
+(0.0118%) stayed inside the frozen allowance, and the VM was confirmed deleted before promotion.
 Expected gain: 1.2x-3x broad speedup, especially on arithmetic, loops, and small functions.
 
 **6. Superinstructions and tracelet fusion.**
@@ -312,7 +317,7 @@ were not retained in the repository or appended to public history; this summary 
 result supports hardening decisions but does not authorize a blanket release speed headline. The projected gains
 below remain planning estimates rather than measured claims against C++ Luau.
 
-### Numeric default `table.sort` candidate — local directional evidence
+### Numeric default `table.sort` candidate — exact matrix accepted
 
 Symbolized optimized sampling attributed approximately 10.6% of `dense_tables` leaf samples to generic raw
 ordering inside the native heap-sort loop. The candidate recognizes a pair of numeric `Value`s at the sort
@@ -325,6 +330,23 @@ and matching checksums. Averaged minimum time moved from 73,953.28 to 64,815.11 
 median time moved from 74,663.19 to 66,236.49 ns/unit (-11.29%). This developer-host result selected the focused
 two-line candidate for exact-commit Linux measurement. It is directional evidence, not retained public history
 or a cross-engine claim.
+
+The exact-commit `b1cd2841fb8fc2d916047391a1d757d53a1303cd` dedicated-Linode matrix then accepted every
+native and wasm timed group on its first attempt. The primary native group observed one steal tick (0.0118%,
+within the frozen 0.1% allowance); all other timed groups observed zero. Relative to the immediately preceding
+exact Linux snapshot, rustia dense-table minimum time moved from 177,347.826 to 164,192.888 ns/unit (-7.42%)
+and median time from 182,365.970 to 166,135.066 ns/unit (-8.90%). The generated dense `mlua-luau` minimum-time
+gap moved from 9.20x to 8.54x. Independent-host variation in unaffected workloads left the five-workload
+geometric mean effectively flat at 7.29x, with a current 5.09x-10.02x range; no unrelated delta is attributed to
+the sort guard. The VM was confirmed deleted after 1,364 seconds, before promotion, with a rounded $0.108
+compute-charge ceiling. The complete corpus is retained under
+[`../bench/evidence/matrix/b1cd2841fb8fc2d916047391a1d757d53a1303cd/`](../bench/evidence/matrix/b1cd2841fb8fc2d916047391a1d757d53a1303cd/).
+
+An earlier persistent per-site numeric quickening experiment was rejected before this focused change: fixed-work
+screens regressed representative dense, closure, and generic-iteration paths by roughly 3%-7%. A stateless
+operand-preparation variant produced only mixed marginal results and was removed too. Neither experiment is in
+the accepted commit; future quickening work needs a different dispatch/state design rather than reviving that
+cache shape.
 
 ## Estimate vs C++ Luau
 

@@ -160,6 +160,15 @@ Current unpublished workspace version: `0.0.1`.
   versus the prior committed Linux snapshot; the generated minimum-time
   `mlua-luau` geometric-mean gap fell from 10.1x to 7.30x. The VM was confirmed
   deleted before evidence and results promotion.
+- The subsequent exact-commit `b1cd2841fb8fc2d916047391a1d757d53a1303cd`
+  cross-engine Linode matrix accepted all native and wasm timed groups on
+  their first attempt. Default numeric `table.sort` moved from 182,365.970 to
+  166,135.066 median ns/unit (-8.90%) versus the immediately preceding Linux
+  snapshot, and its minimum-time `mlua-luau` gap fell from 9.20x to 8.54x.
+  The primary native group observed one steal tick (0.0118%, within the frozen
+  0.1% allowance); every other timed group observed zero. The VM was confirmed
+  deleted after 1,364 seconds and before evidence/results promotion, with a
+  rounded compute-charge ceiling of $0.108.
 - An actual-bare-metal `just bench-vultr` fallback now follows rejected
   DigitalOcean shared and Linode dedicated-KVM placements without changing the
   frozen zero-steal protocol. It validates the Ubuntu 24.04 `vbm-4c-32gb` plan

@@ -3,7 +3,7 @@
   "schema": "rustia.bench.wasm-dispatch-current-results.v1",
   "source": "script-bench-harness",
   "updated": "2026-07-21",
-  "commit": "87db17542e19ae77ec92463f8a5b8e8b8a21a666",
+  "commit": "b1cd2841fb8fc2d916047391a1d757d53a1303cd",
   "requirements": {
     "call-ref-vs-br-table": true
   },
@@ -15,8 +15,8 @@
       "schema_version": 1,
       "schema": "rustia.bench.wasm-dispatch-results.v1",
       "source": "script-bench-harness",
-      "timestamp_unix": 1784673084,
-      "commit": "87db17542e19ae77ec92463f8a5b8e8b8a21a666",
+      "timestamp_unix": 1784676945,
+      "commit": "b1cd2841fb8fc2d916047391a1d757d53a1303cd",
       "target": "wasm32-dispatch-v8-node-linux-x64",
       "runtime": {
         "name": "node",
@@ -46,13 +46,13 @@
         {
           "style": "br_table",
           "feature": "core br_table dispatch",
-          "n": 90153297,
+          "n": 97425378,
           "reps": 5,
           "wasm_bytes": 131,
-          "ns_per_dispatch_min": 0.8483605430425912,
-          "ns_per_dispatch_median": 0.859659053844697,
-          "dispatches_per_sec": 1178744117.935475,
-          "checksum": "i32:-1743994520"
+          "ns_per_dispatch_min": 0.81947756979706,
+          "ns_per_dispatch_median": 0.821309033052969,
+          "dispatches_per_sec": 1220289653.867702,
+          "checksum": "i32:-1962359182"
         },
         {
           "style": "call_ref",
@@ -60,9 +60,9 @@
           "n": 16777216,
           "reps": 5,
           "wasm_bytes": 143,
-          "ns_per_dispatch_min": 6.69476246833802,
-          "ns_per_dispatch_median": 6.700419664382929,
-          "dispatches_per_sec": 149370497.4193432,
+          "ns_per_dispatch_min": 6.688721299171448,
+          "ns_per_dispatch_median": 6.7183457016944965,
+          "dispatches_per_sec": 149505406.97874093,
           "checksum": "i32:-327155712"
         }
       ],
@@ -75,8 +75,8 @@
         "status": "measured",
         "baseline": "br_table",
         "candidate": "call_ref",
-        "candidate_vs_baseline_min": 7.891411880528624,
-        "candidate_vs_baseline_median": 7.794275689200621
+        "candidate_vs_baseline_min": 8.162177398983452,
+        "candidate_vs_baseline_median": 8.180046037873307
       }
     }
   ],
