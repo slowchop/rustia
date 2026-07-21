@@ -501,6 +501,12 @@ function summarizeLanguageTargets(summaryRows) {
           });
       }
 
+      implementationRows.sort((left, right) =>
+        (left.rank ?? Number.POSITIVE_INFINITY) - (right.rank ?? Number.POSITIVE_INFINITY) ||
+        left.language.localeCompare(right.language) ||
+        left.engine.localeCompare(right.engine)
+      );
+
       const timestamps = targetValues.map((row) => row.timestamp_unix);
       const commits = unique(targetValues.map((row) => row.commit));
       const runtimes = unique(targetValues.map((row) => row.runtime).filter(Boolean));

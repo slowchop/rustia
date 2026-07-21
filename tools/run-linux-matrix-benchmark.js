@@ -21,7 +21,7 @@ const HISTORY = path.join(ROOT, "matrix-history.jsonl");
 const WASM_RESULTS = path.join(ROOT, "wasm-current-results.json");
 const DISPATCH_RESULTS = path.join(ROOT, "wasm-dispatch-current-results.json");
 const EVIDENCE_ROOT = path.join(ROOT, "matrix-evidence");
-const PROTOCOL = "cross_engine_matrix_v2";
+const PROTOCOL = "cross_engine_matrix_v3";
 const MAX_TIMED_ATTEMPTS_PER_GROUP = 3;
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -33,7 +33,7 @@ const ALL_ENGINES = Object.freeze(NATIVE_ENGINES.filter((engine) => engine !== "
 const WORKLOADS = Object.freeze([
   "dense_tables", "sparse_tables", "closures_upvalues", "generic_iteration", "stdlib_math_table",
 ]);
-const WASM_RUNTIMES = Object.freeze(["node", "deno", "bun", "spidermonkey"]);
+const WASM_RUNTIMES = Object.freeze(["node"]);
 const WASM_ADAPTERS = Object.freeze(["rustia", "koto", "rhai"]);
 const PACKAGE_ACTIVITY_UNITS = Object.freeze([
   "apt-daily.service",
@@ -111,7 +111,7 @@ function validateConfig(value) {
   const expectedHashes = requireObject(source.expected_sha256, "source.expected_sha256");
   requireExactKeys(expectedHashes, [
     "bench_manifest", "native_harness", "cargo_lock", "toolchain", "wasm_gate", "wasm_dispatch_gate",
-    "wasm_adapter_manifest", "wasm_measure_module", "wasm_measure_spidermonkey", "wasm_dispatch_measure",
+    "wasm_adapter_manifest", "wasm_measure_module", "wasm_dispatch_measure",
     "history_before",
   ], "source.expected_sha256");
   for (const [field, hash] of Object.entries(expectedHashes)) {
@@ -184,9 +184,9 @@ function validateConfig(value) {
   requireExactKeys(publication, ["mode", "native_rows", "wasm_rows", "dispatch_runtimes"], "publication");
   if (
     publication.mode !== "matrix" || publication.native_rows !== 50 ||
-    publication.wasm_rows !== 60 || publication.dispatch_runtimes !== 4
+    publication.wasm_rows !== 15 || publication.dispatch_runtimes !== 1
   ) {
-    fail("publication matrix dimensions are not frozen at 50/60/4");
+    fail("publication matrix dimensions are not frozen at 50/15/1");
   }
   return config;
 }
@@ -263,7 +263,6 @@ function verifySource(config, bundle) {
     wasm_dispatch_gate: "tools/run-wasm-dispatch-gate.js",
     wasm_adapter_manifest: "bench/wasm/adapter-runner/Cargo.toml",
     wasm_measure_module: "bench/wasm/measure-rustia-wasm.mjs",
-    wasm_measure_spidermonkey: "bench/wasm/measure-rustia-wasm-sm.js",
     wasm_dispatch_measure: "bench/wasm/measure-dispatch-wasm.js",
     history_before: "bench/history/runs.jsonl",
   };
@@ -315,15 +314,7 @@ function installRuntime(runtime, artifact) {
 function installRuntimes(config) {
   const installed = {};
   for (const runtime of WASM_RUNTIMES) installed[runtime] = installRuntime(runtime, config.measurement.runtime_artifacts[runtime]);
-  const spiderMonkeyLibraryDirectory = path.join(ROOT, "runtimes", "spidermonkey");
-  process.env.LD_LIBRARY_PATH = process.env.LD_LIBRARY_PATH
-    ? `${spiderMonkeyLibraryDirectory}:${process.env.LD_LIBRARY_PATH}`
-    : spiderMonkeyLibraryDirectory;
   installed.node.reported_version = runText("node", ["--version"]);
-  installed.deno.reported_version = runText("deno", ["--version"]).split("\n")[0];
-  installed.bun.reported_version = runText("bun", ["--version"]);
-  installed.spidermonkey.reported_version = runText("js", ["--version"]);
-  installed.spidermonkey.library_path = spiderMonkeyLibraryDirectory;
   return installed;
 }
 
@@ -720,7 +711,7 @@ async function execute(configFile, providerFile, bundle) {
 async function selfTest() {
   assert.deepEqual(ALL_ENGINES, NATIVE_ENGINES.slice(0, -1));
   assert.equal(NATIVE_ENGINES.length * WORKLOADS.length, 50);
-  assert.equal(WASM_RUNTIMES.length * WASM_ADAPTERS.length * WORKLOADS.length, 60);
+  assert.equal(WASM_RUNTIMES.length * WASM_ADAPTERS.length * WORKLOADS.length, 15);
   assert.deepEqual(cpuDelta(
     { fields: [10, 0, 5, 100, 2, 1, 1, 0] },
     { fields: [11, 0, 6, 198, 2, 1, 1, 0] },

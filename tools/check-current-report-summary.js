@@ -111,6 +111,7 @@ function main() {
   assert.equal(complete.maxTimestamp, 109);
   const completeKoto = complete.implementationRows.find((row) => row.engine === "koto");
   const completeRustia = complete.implementationRows.find((row) => row.engine === "rustia");
+  assert.deepEqual(complete.implementationRows.map((row) => row.engine), ["koto", "rustia"]);
   assert.equal(completeKoto.language, "Koto");
   assert.equal(completeKoto.coverage, 5);
   assert.equal(completeKoto.bestCount, 3);
@@ -144,6 +145,7 @@ function main() {
   assert.match(html, /commits <code>partial-revision-a<\/code>, <code>partial-revision-b<\/code>/);
   assert.match(html, /<strong>Koto<\/strong>/);
   assert.match(html, /<strong>Luau<\/strong>/);
+  assert.ok(html.indexOf('data-implementation="koto"') < html.indexOf('data-implementation="rustia"'));
   assert.doesNotMatch(html, /oop_metamethods|excluded-revision/);
 
   const wasmRows = wasmTargetRows({

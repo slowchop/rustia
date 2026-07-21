@@ -8,12 +8,9 @@ const root = path.resolve(__dirname, "..");
 const resultsPath = path.join(root, "bench", "wasm", "current-results.json");
 const dispatchResultsPath = path.join(root, "bench", "wasm", "dispatch-current-results.json");
 const gatePath = path.join(root, "bench", "wasm-gate.json");
-const requiredDispatchFamilies = ["V8", "JavaScriptCore", "SpiderMonkey"];
+const requiredDispatchFamilies = ["V8"];
 const expectedRuntimes = new Map([
   ["node", "V8"],
-  ["deno", "V8"],
-  ["bun", "JavaScriptCore"],
-  ["spidermonkey", "SpiderMonkey"],
 ]);
 const linuxHosts = new Set(["linux-x64", "linux-x86_64"]);
 const fullCommit = /^[0-9a-f]{40}$/;
@@ -136,7 +133,7 @@ function validateResults(data) {
     fail(`results runs must contain exactly ${expectedRunCount} runtime/adapter runs`);
   }
   if (!Array.isArray(data.skipped) || data.skipped.length !== 0) {
-    fail("results skipped must be an empty array for the complete Linux runtime matrix");
+    fail("results skipped must be an empty array for the active Node/V8 matrix");
   }
   const rustiaFamilies = new Set();
   const adaptersByTarget = new Map();
@@ -214,7 +211,11 @@ function validateResults(data) {
     }
   }
 
-  assertEqual(rowCount, 60, "results total workload row count");
+  assertEqual(
+    rowCount,
+    expectedRuntimes.size * expectedAdapters.size * expectedWorkloads.size,
+    "results total workload row count",
+  );
   for (const runtime of expectedRuntimes.keys()) {
     for (const adapter of expectedAdapters.keys()) {
       if (!runtimeAdapterSlots.has(`${runtime}\0${adapter}`)) {
@@ -234,29 +235,35 @@ function validateResults(data) {
   assertEqual(Boolean(data.requirements["v8-production-rustia-wasm"]), rustiaFamilies.has("V8"), "V8 requirement summary");
   assertEqual(
     Boolean(data.requirements["javascriptcore-production-rustia-wasm"]),
-    rustiaFamilies.has("JavaScriptCore"),
-    "JavaScriptCore requirement summary",
+    false,
+    "active JavaScriptCore requirement summary",
   );
   assertEqual(
     Boolean(data.requirements["spidermonkey-production-rustia-wasm"]),
-    rustiaFamilies.has("SpiderMonkey"),
-    "SpiderMonkey requirement summary",
+    false,
+    "active SpiderMonkey requirement summary",
   );
   return rustiaFamilies;
 }
 
 function validateGate(gate, results) {
+  assertEqual(gate.status, "complete", "historical wasm gate status");
+  assertEqual(gate.gate_complete, true, "historical wasm gate completion");
   const requirements = new Map(gate.requirements.map((requirement) => [requirement.id, requirement]));
-  for (const [id, complete] of Object.entries(results.requirements)) {
+  for (const id of [
+    "v8-production-rustia-wasm",
+    "javascriptcore-production-rustia-wasm",
+    "spidermonkey-production-rustia-wasm",
+  ]) {
     const requirement = requirements.get(id);
     if (!requirement) {
       fail(`${relative(gatePath)} is missing requirement ${id}`);
     }
-    const measured = requirement.status === "measured";
-    if (measured !== complete) {
-      fail(`${id} gate status ${requirement.status} does not match current wasm results`);
+    if (requirement.status !== "measured") {
+      fail(`${id} historical gate status must remain measured`);
     }
   }
+  assertEqual(Boolean(results.requirements["v8-production-rustia-wasm"]), true, "active V8 result requirement");
 }
 
 function validateDispatchResults(data) {
@@ -281,7 +288,7 @@ function validateDispatchResults(data) {
     fail(`dispatch results runs must contain exactly ${expectedRuntimes.size} runtime results`);
   }
   if (!Array.isArray(data.skipped) || data.skipped.length !== 0) {
-    fail("dispatch results skipped must be an empty array for the complete Linux runtime matrix");
+    fail("dispatch results skipped must be an empty array for the active Node/V8 matrix");
   }
 
   const measuredFamilies = new Set();

@@ -44,6 +44,7 @@ baseline, and `wasmtime` is the Wasmtime JIT baseline for the shared `.wat`
 workload set.
 
 The `wasmi` and `wasmtime` adapters are benchmark baselines for the shared `.wat`
-workloads. They do not close rustia's browser-wasm pre-lock gate; that gate is
-tracked separately in [`wasm-gate.json`](wasm-gate.json) and requires production
-rustia wasm measurements on V8, JavaScriptCore, and SpiderMonkey.
+workloads. They do not close rustia's browser-wasm pre-lock gate. That completed
+gate is tracked separately in [`wasm-gate.json`](wasm-gate.json): the recurring
+benchmark uses Node/V8, while accepted JavaScriptCore and SpiderMonkey results
+remain retained as historical portability evidence.

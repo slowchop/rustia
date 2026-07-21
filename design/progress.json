@@ -50,12 +50,9 @@
           "rhai"
         ],
         "runtimes": [
-          "Node/V8",
-          "Deno/V8",
-          "Bun/JavaScriptCore-family",
-          "SpiderMonkey/js shell"
+          "Node/V8"
         ],
-        "note": "The wasm target runner executes rustia, koto, and rhai by default; other requested adapters remain native-only or compatibility-probed."
+        "note": "The recurring wasm target runner executes rustia, koto, and rhai on Node/V8; the earlier four-runtime matrix is retained as historical portability evidence."
       },
       "wasm_dispatch_bench": {
         "styles": [
@@ -63,12 +60,9 @@
           "call_ref"
         ],
         "runtimes": [
-          "Node/V8",
-          "Deno/V8",
-          "Bun/JavaScriptCore-family",
-          "SpiderMonkey/js shell"
+          "Node/V8"
         ],
-        "note": "call_ref is slower than br_table across the measured engine families."
+        "note": "The recurring dispatch check runs on Node/V8; historical cross-engine evidence also found call_ref slower than br_table."
       }
     }
   },
@@ -98,7 +92,7 @@
       "name": "Standalone benchmark OSS project",
       "complete": 80,
       "confidence": 80,
-      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, a standalone target-first current-results HTML report, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, exact ephemeral-Linux fixed-throughput and evidence-only memory protocols, a wasm target runner for rustia+koto+rhai on Node/V8, Deno/V8, Bun/JavaScriptCore, and SpiderMonkey, a call_ref versus br_table dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle are present.",
+      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, a standalone target-first current-results HTML report, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, exact ephemeral-Linux fixed-throughput and evidence-only memory protocols, a recurring wasm target runner for rustia+koto+rhai on Node/V8, retained cross-engine wasm evidence, a call_ref versus br_table dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle are present.",
       "future_plan": "Split from workspace, expand workloads, and accumulate longer-run public history and richer tracking charts."
     },
     {
@@ -430,7 +424,7 @@
           "name": "Native/wasm matrix",
           "complete": 78,
           "confidence": 75,
-          "state": "A coherent 10-adapter native Linux baseline is recorded; wasm target results cover rustia+koto+rhai on Node/V8, Deno/V8, Bun/JavaScriptCore-family, and SpiderMonkey, and dispatch results cover br_table/call_ref on those same families.",
+          "state": "A coherent 10-adapter native Linux baseline is recorded; recurring wasm target results cover rustia+koto+rhai and br_table/call_ref dispatch on Node/V8, while the accepted four-runtime matrix remains archived as historical portability evidence.",
           "future_plan": "Broaden public baselines and keep result history fresh across runtime updates."
         }
       ]

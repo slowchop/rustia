@@ -28,8 +28,9 @@ Split by what's measurable; never use one for the other's job:
 ## The matrix
 - **engine:** `rustia` · `boa` · `koto` · `mlua-luau` · `mlua-lua54` · `rhai` · `roto` · `rquickjs` ·
   `wasmi` · `wasmtime`; feature gates keep adapters independently buildable and Lua 5.4 separate from Luau.
-- **active performance targets:** native `linux-x86_64` on a dedicated Linode; wasm32 under Node/V8,
-  Deno/V8, Bun/JavaScriptCore, and SpiderMonkey on that same Linux host. The broader platform support matrix in
+- **active performance targets:** native `linux-x86_64` on a dedicated Linode; wasm32 under Node/V8 on that
+  same Linux host. The accepted Deno/V8, Bun/JavaScriptCore, and SpiderMonkey matrix is historical portability
+  evidence. The broader platform support matrix in
   `00-constraints.md` remains a correctness/build concern, not a license to mix noisy macOS or Windows timings
   into the active benchmark product.
 - **determinism:** a **golden-hash column** (bit-identical cross-arch/engine?) + rustia's `mode`
@@ -60,18 +61,19 @@ a conservative-envelope verdict that is retained with accepted evidence.
 1. Hosted pull-request/push CI validates code, history, generated artifacts, and claims without measuring.
 2. An explicit `just` command plans and starts the billed Linode lifecycle; CI never starts it automatically.
 3. The remote runner builds the feature-gated comparison matrix, including the separate Lua 5.4 binary, then
-   measures all four wasm runtimes on the same Linux placement.
+   measures the recurring wasm adapters and dispatch check under Node/V8 on the same Linux placement.
 4. Promotion requires a complete single-revision Linux matrix and confirmed Linode deletion.
 
 **Current implementation slice:** `.github/workflows/ci.yml` runs release-preflight checks on hosted Linux CI
 without fresh benchmark measurements; no benchmark-measurement workflow is present. The `bench` crate now enumerates all 10
 requested adapters, five default measured workloads, and 12 workload entries including cross-adapter source
 coverage for #15 `string_building`. It also owns `bench/wasm-gate.json`, a deterministic pre-lock gate tracker
-exposed by `script-bench --wasm-gate-json` and rendered by the generated HTML report. The wasm target bench now builds
-`bench/wasm/adapter-runner` and records `rustia`, `koto`, and `rhai` on Node/V8, Deno/V8, Bun/JavaScriptCore, and SpiderMonkey
-runtimes in `bench/wasm/current-results.json`; adapter exclusions are documented in `bench/wasm/ADAPTERS.md`.
-The dispatch gate now records `call_ref` versus `br_table` on V8, JavaScriptCore-family, and SpiderMonkey
-runtimes in `bench/wasm/dispatch-current-results.json`, closing the pre-lock wasm gate.
+exposed by `script-bench --wasm-gate-json` and rendered by the generated HTML report. The wasm target bench builds
+`bench/wasm/adapter-runner` and records `rustia`, `koto`, and `rhai` under Node/V8 in
+`bench/wasm/current-results.json`; the accepted four-runtime matrix is retained under `bench/wasm/history/`, and
+adapter exclusions are documented in `bench/wasm/ADAPTERS.md`. The recurring dispatch gate records `call_ref`
+versus `br_table` under Node/V8 in `bench/wasm/dispatch-current-results.json`; the completed cross-engine result
+is retained beside the historical matrix.
 The native harness now offers `--samples-json` for raw sidecars and isolates every calibration probe and timed
 repetition in freshly prepared state. It also offers `--fixed-n` for exact equal-work A/B runs. The earlier
 table/cache slice retained a cooled 1.29% dense-table signal; six later diagnostic legs overlapped around +0.90%.
@@ -125,10 +127,10 @@ the controlled milestone A/B and three-run publication evidence.
 default `rustia-engine` feature while the external adapters stay independently gated for standalone builds.
 
 ## ⚠️ Remaining wasm gate
-Production rustia wasm now runs through the bench wasm adapter runner, and koto is the current wasm-compatible
-comparison adapter. V8, Bun/JavaScriptCore-family, and SpiderMonkey measurements exist, and the dispatch
-microbench shows `call_ref` behind `br_table` on those same families. The pre-lock wasm gate is closed; keep
-these measurements fresh as the harness changes.
+Production rustia wasm now runs through the bench wasm adapter runner, with koto and rhai as wasm-compatible
+comparison adapters. The recurring public benchmark uses Node/V8. Accepted V8, Bun/JavaScriptCore-family, and
+SpiderMonkey measurements show `call_ref` behind `br_table` and remain archived as portability evidence. The
+pre-lock wasm gate is closed; keep the Node/V8 measurements fresh as the harness changes.
 
 ## Where it lives
 ```

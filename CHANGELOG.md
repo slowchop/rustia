@@ -68,7 +68,11 @@ Current unpublished workspace version: `0.0.1`.
 - The benchmark harness has current-results JSON/HTML, generated per-workload
   claim gating, package-file history, the requested adapter matrix, and
   cross-adapter source coverage for the non-default `string_building` workload.
-- The dedicated Linux matrix v2 gate keeps zero-steal quiet prewindows, accepts
+- Languages-by-target summaries rank implementations by their five-workload
+  geometric mean, best first. Recurring wasm publication now uses Node/V8 only;
+  the accepted Deno, Bun/JavaScriptCore, and SpiderMonkey matrix remains archived
+  as historical portability evidence.
+- The dedicated Linux matrix v3 gate keeps zero-steal quiet prewindows, accepts
   timed groups at no more than 0.1% steal or one accounting tick, and retries a
   rejected group up to three times with output rollback and retained gate
   evidence inside the existing bounded Linode lifecycle.

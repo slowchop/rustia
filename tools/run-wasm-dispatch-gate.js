@@ -8,7 +8,7 @@ const path = require("path");
 const root = path.resolve(__dirname, "..");
 const measureScript = path.join(root, "bench", "wasm", "measure-dispatch-wasm.js");
 const outputPath = path.join(root, "bench", "wasm", "dispatch-current-results.json");
-const requiredFamilies = ["V8", "JavaScriptCore", "SpiderMonkey"];
+const requiredFamilies = ["V8"];
 const fullCommit = /^[0-9a-f]{40}$/;
 
 function fail(message) {

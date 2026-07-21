@@ -759,24 +759,24 @@ fn wasm_gate_json_value() -> serde_json::Value {
         "schema_version": 1,
         "schema": "rustia.bench.wasm-gate.v1",
         "source": "script-bench-harness",
-        "updated": "2026-07-03",
+        "updated": "2026-07-22",
         "scope": "Production rustia wasm value-layout and dispatch pre-lock gate. Grabby integration work is excluded.",
         "status": "complete",
         "gate_complete": true,
-        "summary": "Production rustia wasm is measured on V8, JavaScriptCore-family, and SpiderMonkey runtimes, and call_ref vs br_table dispatch is measured across those same engine families. The pre-lock wasm decision is closed: keep br_table as the portable dispatch baseline.",
+        "summary": "The recurring public wasm benchmark uses Node/V8, the most widely used JavaScript runtime. The completed V8, JavaScriptCore-family, and SpiderMonkey pre-lock evidence is retained as historical coverage, and br_table remains the portable dispatch baseline.",
         "requirements": [
             {
                 "id": "v8-production-rustia-wasm",
                 "label": "V8 production rustia wasm",
                 "engine": "V8",
-                "runtime": "node / deno / d8",
+                "runtime": "node",
                 "required": true,
                 "status": "measured",
                 "evidence": [
                     {
                         "kind": "current-results",
                         "path": "bench/wasm/current-results.json",
-                        "summary": "Production rustia wasm retained-function workloads measured under Node and Deno V8.",
+                        "summary": "Production rustia wasm retained-function workloads measured under the active Node/V8 runtime.",
                     },
                     {
                         "kind": "design-spike",
@@ -795,9 +795,9 @@ fn wasm_gate_json_value() -> serde_json::Value {
                 "status": "measured",
                 "evidence": [
                     {
-                        "kind": "current-results",
-                        "path": "bench/wasm/current-results.json",
-                        "summary": "Production rustia wasm retained-function workloads measured under Bun's JavaScriptCore runtime.",
+                        "kind": "historical-results",
+                        "path": "bench/wasm/history/20260720T100056Z-62bed545-full-matrix.json",
+                        "summary": "The retained full matrix measured production rustia wasm under Bun's JavaScriptCore runtime.",
                     },
                 ],
                 "next": "Add a Safari Technology Preview or jsc-shell run when that runtime is available.",
@@ -811,9 +811,9 @@ fn wasm_gate_json_value() -> serde_json::Value {
                 "status": "measured",
                 "evidence": [
                     {
-                        "kind": "current-results",
-                        "path": "bench/wasm/current-results.json",
-                        "summary": "Production rustia wasm retained-function workloads measured under the SpiderMonkey js shell.",
+                        "kind": "historical-results",
+                        "path": "bench/wasm/history/20260720T100056Z-62bed545-full-matrix.json",
+                        "summary": "The retained full matrix measured production rustia wasm under the SpiderMonkey js shell.",
                     },
                 ],
                 "next": "Keep SpiderMonkey history fresh as the benchmark harness and production wasm artifact evolve.",
@@ -821,15 +821,20 @@ fn wasm_gate_json_value() -> serde_json::Value {
             {
                 "id": "call-ref-vs-br-table",
                 "label": "call_ref vs br_table dispatch",
-                "engine": "Cross-engine wasm",
-                "runtime": "V8 / JavaScriptCore / SpiderMonkey",
+                "engine": "Wasm",
+                "runtime": "Node/V8 active; V8 / JavaScriptCore / SpiderMonkey historical",
                 "required": true,
                 "status": "measured",
                 "evidence": [
                     {
                         "kind": "dispatch-current-results",
                         "path": "bench/wasm/dispatch-current-results.json",
-                        "summary": "call_ref vs br_table dispatch measured under V8, JavaScriptCore-family, and SpiderMonkey runtimes.",
+                        "summary": "The active dispatch comparison is measured under Node/V8.",
+                    },
+                    {
+                        "kind": "historical-results",
+                        "path": "bench/wasm/history/20260720T100056Z-62bed545-dispatch-matrix.json",
+                        "summary": "The retained full matrix covers V8, JavaScriptCore-family, and SpiderMonkey runtimes.",
                     },
                 ],
                 "next": "Keep the microbench in the wasm gate checks so future runtime shifts cannot reopen the dispatch assumption silently.",

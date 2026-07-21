@@ -36,7 +36,7 @@ const MAX_EXPORT_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
 const MAX_EXPORT_ENTRIES = 10_000;
 const FIXED_THROUGHPUT_PROTOCOL = "fixed_throughput_v1";
 const VM_STRING_MEMORY_PROTOCOL = "vm_string_memory_v1";
-const CROSS_ENGINE_MATRIX_PROTOCOL = "cross_engine_matrix_v2";
+const CROSS_ENGINE_MATRIX_PROTOCOL = "cross_engine_matrix_v3";
 const MAX_TIMED_ATTEMPTS_PER_GROUP = 3;
 const ALLOWED_PROTOCOLS = new Set([
   FIXED_THROUGHPUT_PROTOCOL,
@@ -63,13 +63,10 @@ const MATRIX_WORKLOADS = Object.freeze([
   "generic_iteration",
   "stdlib_math_table",
 ]);
-const MATRIX_WASM_RUNTIMES = Object.freeze(["node", "deno", "bun", "spidermonkey"]);
+const MATRIX_WASM_RUNTIMES = Object.freeze(["node"]);
 const MATRIX_WASM_ADAPTERS = Object.freeze(["rustia", "koto", "rhai"]);
 const MATRIX_RUNTIME_FAMILIES = Object.freeze({
   node: "V8",
-  deno: "V8",
-  bun: "JavaScriptCore",
-  spidermonkey: "SpiderMonkey",
 });
 const VM_STRING_SCENARIOS = Object.freeze([
   "empty",
@@ -327,7 +324,6 @@ function validateConfig(value) {
           "wasm_dispatch_gate",
           "wasm_adapter_manifest",
           "wasm_measure_module",
-          "wasm_measure_spidermonkey",
           "wasm_dispatch_measure",
           "history_before",
         ]
@@ -571,7 +567,7 @@ function validateConfig(value) {
       ["mode", "native_rows", "wasm_rows", "dispatch_runtimes"],
       "config.publication",
     );
-    if (publication.mode !== "matrix") fail("cross_engine_matrix_v2 publication.mode must be matrix");
+    if (publication.mode !== "matrix") fail("cross_engine_matrix_v3 publication.mode must be matrix");
     const expectedCounts = {
       native_rows: MATRIX_NATIVE_ENGINES.length * MATRIX_WORKLOADS.length,
       wasm_rows: MATRIX_WASM_RUNTIMES.length * MATRIX_WASM_ADAPTERS.length * MATRIX_WORKLOADS.length,
@@ -1254,11 +1250,6 @@ async function verifySource(config, configFile = DEFAULT_CONFIG) {
       "wasm module measurement",
       sha256(await gitBlob(source.benchmark_commit, "bench/wasm/measure-rustia-wasm.mjs")),
       expected.wasm_measure_module,
-    ],
-    [
-      "wasm SpiderMonkey measurement",
-      sha256(await gitBlob(source.benchmark_commit, "bench/wasm/measure-rustia-wasm-sm.js")),
-      expected.wasm_measure_spidermonkey,
     ],
     [
       "wasm dispatch measurement",
@@ -3838,6 +3829,11 @@ function validateMatrixDispatch(config, file, status) {
     fail("matrix dispatch results have the wrong schema or commit");
   }
   if (!Array.isArray(value.skipped) || value.skipped.length !== 0) fail("matrix dispatch results skipped a runtime");
+  requireJsonEqual(value.required_families, ["V8"], "matrix dispatch required families");
+  const requirements = requireObject(value.requirements, "matrix dispatch requirements");
+  if (requirements["call-ref-vs-br-table"] !== true) {
+    fail("matrix dispatch Node/V8 requirement is not measured");
+  }
   if (!Array.isArray(value.runs) || value.runs.length !== config.publication.dispatch_runtimes) {
     fail("matrix dispatch results have the wrong runtime count");
   }
@@ -4919,7 +4915,6 @@ async function selfTest(config) {
         wasm_dispatch_gate: memoryHash,
         wasm_adapter_manifest: memoryHash,
         wasm_measure_module: memoryHash,
-        wasm_measure_spidermonkey: memoryHash,
         wasm_dispatch_measure: memoryHash,
         history_before: memoryHash,
       },
@@ -4947,7 +4942,7 @@ async function selfTest(config) {
       maximum_timed_attempts_per_group: 3,
       wait_timeout_seconds: 300,
     },
-    publication: { mode: "matrix", native_rows: 50, wasm_rows: 60, dispatch_runtimes: 4 },
+    publication: { mode: "matrix", native_rows: 50, wasm_rows: 15, dispatch_runtimes: 1 },
   };
   assert.equal(validateConfig(matrixConfig), matrixConfig);
   assert.equal(expectedTerminalStatus(matrixConfig), "matrix_complete");
@@ -5003,7 +4998,7 @@ async function selfTest(config) {
     }
   }
   requireLinuxWasmTarget("wasm32-v8-node-linux-x64", "matrix target fixture");
-  requireLinuxWasmTarget("wasm32-dispatch-spidermonkey-spidermonkey-linux-x64", "matrix dispatch target fixture", true);
+  requireLinuxWasmTarget("wasm32-dispatch-v8-node-linux-x64", "matrix dispatch target fixture", true);
   assert.throws(() => requireLinuxWasmTarget("wasm32-v8-node-darwin-arm64", "matrix target fixture"));
   requireFreshMatrixTimestamp(1784505630, matrixStatus, "matrix timestamp fixture");
   assert.throws(() => requireFreshMatrixTimestamp(1784505691, matrixStatus, "matrix timestamp fixture"));
@@ -5013,7 +5008,7 @@ async function selfTest(config) {
   }));
   assert.throws(() => validateConfig({
     ...matrixConfig,
-    publication: { ...matrixConfig.publication, wasm_rows: 59 },
+    publication: { ...matrixConfig.publication, wasm_rows: 14 },
   }));
   for (const maximumTimedAttempts of [0, MAX_TIMED_ATTEMPTS_PER_GROUP + 1]) {
     assert.throws(() => validateConfig({

@@ -574,10 +574,12 @@ just bench-linode-matrix bench/cloud/LINODE_MATRIX_CONFIG.json
 The coordinator verifies the frozen source and runtime artifacts, provisions the
 declared Linux/x86_64 shape, builds the `all-engines` binary plus the separate
 Lua 5.4 binary, and measures the five common workloads. It then runs the three
-wasm adapters on Node, Deno, Bun, and SpiderMonkey on that same host. Promotion
-requires the exact 50 native rows, 60 wasm rows, four dispatch runs, Linux-only
+wasm adapters on Node/V8, the most widely used JavaScript runtime, on that same
+host. Promotion requires the exact 50 native rows, 15 wasm rows, one dispatch run, Linux-only
 target identities, a single source revision, and confirmed instance deletion.
-The matrix v2 host gate keeps every prewindow at zero steal. A timed group
+The accepted four-runtime matrix is retained under `bench/wasm/history/` as
+historical portability evidence; it is not repeated in the recurring public
+benchmark. The matrix v3 host gate keeps every prewindow at zero steal. A timed group
 passes at no more than 0.1% steal or one accounting tick; otherwise it restores
 only that group's outputs and retries up to three times after a fresh quiet
 prewindow, while retaining every rejected gate record. Each group shares one
@@ -715,3 +717,8 @@ python3 -m http.server 8000 --bind 0.0.0.0
 ```
 
 Open `http://HOST:8000/bench/current-results.html` over the trusted VPN.
+
+Alternative presentations of the same committed data are kept as disposable
+HTML mockups under [`chart-mockups/`](chart-mockups/): a best-first ratio chart,
+a workload heatmap, and a cohort ledger that keeps controlled comparisons
+separate from the single full-matrix baseline.

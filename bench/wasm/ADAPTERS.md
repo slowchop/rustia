@@ -10,8 +10,10 @@ Currently measured:
 - `koto` - pure Rust Koto adapter compiled to wasm.
 - `rhai` - Rhai adapter compiled to wasm with deterministic hashing features.
 
-Current committed runtime coverage is Node/V8, Deno/V8,
-Bun/JavaScriptCore-family, and the SpiderMonkey `js` shell.
+The active recurring runtime is Node/V8. The accepted Deno/V8,
+Bun/JavaScriptCore-family, and SpiderMonkey `js` shell measurements are kept in
+[`history/`](history/) as portability evidence instead of being repeated in
+every public benchmark run.
 
 Not currently measured:
 
