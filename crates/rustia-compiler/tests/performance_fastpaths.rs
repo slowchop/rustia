@@ -427,3 +427,62 @@ fn leaf_plans_preserve_fuel_and_deterministic_collection_boundaries() {
         ErrorKind::RecursionLimit { limit: 0 }
     ));
 }
+
+#[test]
+fn numeric_loop_kernels_do_not_elide_overwritten_index_metamethod_reads() {
+    let program = compile_source(
+        r#"
+            local hits = 0
+            local mt = {
+                __index = function(_, index)
+                    hits = hits + 1
+                    return index
+                end,
+            }
+            local function scan(n, values)
+                for i = 1, n do
+                    local dead = values[i]
+                    dead = 0
+                end
+            end
+            scan(4, setmetatable({}, mt))
+            return hits
+        "#,
+    );
+    let mut fast = Vm::new(Profile::ReproducibleStandard);
+    assert_eq!(fast.run(&program).unwrap().as_number(), Some(4.0));
+    let mut fuelled = Vm::with_settings(
+        Profile::ReproducibleStandard,
+        VmSettings {
+            initial_fuel: Some(1_000_000),
+            ..VmSettings::default()
+        },
+    );
+    assert_eq!(fuelled.run(&program).unwrap().as_number(), Some(4.0));
+}
+
+#[test]
+fn numeric_loop_kernels_do_not_elide_overwritten_arithmetic_errors() {
+    let program = compile_source(
+        r#"
+            local function scan(n, values)
+                for i = 1, n do
+                    local dead = values[i] + 1
+                    dead = 0
+                end
+                return true
+            end
+            return pcall(scan, 2, {1, {}})
+        "#,
+    );
+    let mut fast = Vm::new(Profile::ReproducibleStandard);
+    assert_eq!(fast.run(&program).unwrap().as_bool(), Some(false));
+    let mut fuelled = Vm::with_settings(
+        Profile::ReproducibleStandard,
+        VmSettings {
+            initial_fuel: Some(1_000_000),
+            ..VmSettings::default()
+        },
+    );
+    assert_eq!(fuelled.run(&program).unwrap().as_bool(), Some(false));
+}

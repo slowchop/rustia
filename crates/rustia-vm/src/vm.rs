@@ -12,6 +12,9 @@ use crate::heap::{
 };
 use crate::number::{binary, canonicalize_number, NumericOp};
 use crate::profile::Profile;
+use crate::quickening::{
+    recognize_numeric_loop_kernels, KernelNumberExpr, KernelValueExpr, NumericLoopKernel,
+};
 use crate::value::{Value, ValueKind};
 use smallvec::SmallVec;
 use std::collections::BTreeMap;
@@ -124,17 +127,23 @@ struct LoadedProgram {
     native_call_inline_cache_hits: u64,
     #[cfg(test)]
     native_call_inline_cache_fills: u64,
+    #[cfg(test)]
+    numeric_loop_kernel_iterations: u64,
 }
 
 impl LoadedProgram {
     fn new(program: Program) -> Self {
         let constant_atoms = vec![CONSTANT_ATOM_EMPTY; program.constants().len()];
-        let main_inline_caches = FunctionInlineCaches::new(&program.main, None);
+        let main_inline_caches = FunctionInlineCaches::new(&program, &program.main, None);
         let function_inline_caches = program
             .functions
             .iter()
             .map(|function| {
-                FunctionInlineCaches::new(function, recognize_leaf_call_plan(&program, function))
+                FunctionInlineCaches::new(
+                    &program,
+                    function,
+                    recognize_leaf_call_plan(&program, function),
+                )
             })
             .collect();
         Self {
@@ -150,6 +159,8 @@ impl LoadedProgram {
             native_call_inline_cache_hits: 0,
             #[cfg(test)]
             native_call_inline_cache_fills: 0,
+            #[cfg(test)]
+            numeric_loop_kernel_iterations: 0,
         }
     }
 
@@ -242,6 +253,20 @@ impl LoadedProgram {
             .leaf_call_plan
     }
 
+    fn numeric_loop_kernel(
+        &self,
+        prototype: Option<u32>,
+        pc: usize,
+    ) -> Option<Arc<NumericLoopKernel>> {
+        match prototype {
+            Some(prototype) => self
+                .function_inline_caches
+                .get(prototype as usize)?
+                .numeric_loop_kernel(pc),
+            None => self.main_inline_caches.numeric_loop_kernel(pc),
+        }
+    }
+
     fn constant_atom(&self, index: usize) -> Option<u32> {
         self.constant_atoms.get(index).copied()?.checked_sub(1)
     }
@@ -259,10 +284,19 @@ struct FunctionInlineCaches {
     import_entries: Vec<[TableStringInlineCache; IMPORT_CACHE_LANES]>,
     native_call_entries: Vec<NativeCallInlineCache>,
     leaf_call_plan: Option<LeafCallPlan>,
+    numeric_loop_kernel_by_pc: Option<Box<[u32]>>,
+    numeric_loop_kernels: Vec<Arc<NumericLoopKernel>>,
+}
+
+#[derive(Clone, Copy)]
+struct NumericKernelInputs {
+    index_register: u8,
+    visible_register: u8,
+    next: f64,
 }
 
 impl FunctionInlineCaches {
-    fn new(function: &Function, leaf_call_plan: Option<LeafCallPlan>) -> Self {
+    fn new(program: &Program, function: &Function, leaf_call_plan: Option<LeafCallPlan>) -> Self {
         let entry_by_pc = function
             .code
             .iter()
@@ -273,13 +307,33 @@ impl FunctionInlineCaches {
                 _ => SITE_CACHE_INELIGIBLE,
             })
             .collect();
+        let numeric_loop_kernels = recognize_numeric_loop_kernels(program, function);
+        let numeric_loop_kernel_by_pc = if numeric_loop_kernels.is_empty() {
+            None
+        } else {
+            let mut by_pc = vec![u32::MAX; function.code.len()];
+            for (index, kernel) in numeric_loop_kernels.iter().enumerate() {
+                let Some(index) = u32::try_from(index).ok() else {
+                    break;
+                };
+                by_pc[kernel.backedge_pc] = index;
+            }
+            Some(by_pc.into_boxed_slice())
+        };
         Self {
             entry_by_pc,
             table_entries: Vec::new(),
             import_entries: Vec::new(),
             native_call_entries: Vec::new(),
             leaf_call_plan,
+            numeric_loop_kernel_by_pc,
+            numeric_loop_kernels,
         }
+    }
+
+    fn numeric_loop_kernel(&self, pc: usize) -> Option<Arc<NumericLoopKernel>> {
+        let index = *self.numeric_loop_kernel_by_pc.as_ref()?.get(pc)?;
+        (index != u32::MAX).then(|| self.numeric_loop_kernels.get(index as usize).cloned())?
     }
 
     fn table_inline_cache(&self, pc: usize) -> Option<TableStringInlineCache> {
@@ -1501,6 +1555,29 @@ impl Vm {
                             })
                             .at_pc(pc)
                         })?;
+
+                        if instruction.op == Opcode::ForLoop
+                            && fuel.is_none()
+                            && !self.settings.enable_conformance_coverage
+                            && !self.heap.has_allocation_debt()
+                            && !self.weak_collection_due_within(1)
+                        {
+                            if let Some(program_id) = program_id {
+                                if let Some(kernel) =
+                                    self.numeric_loop_kernel(program_id, context.prototype, pc)
+                                {
+                                    if let Some(next_pc) = self.try_numeric_loop_kernel(
+                                        program_id,
+                                        &kernel,
+                                        &mut registers,
+                                        &mut register_cells,
+                                    ) {
+                                        pc = next_pc;
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
 
                         let is_common_fast_path_candidate = matches!(
                             instruction.op,
@@ -5752,6 +5829,139 @@ impl Vm {
         }
     }
 
+    /// Execute as many complete, policy-invisible iterations as possible. Every fallible
+    /// operand/table guard is evaluated before the loop index, registers, cells, or table are
+    /// mutated, so a failed guard resumes at the original `ForLoop` without a deopt repair pass.
+    fn try_numeric_loop_kernel(
+        &mut self,
+        program_id: u32,
+        kernel: &NumericLoopKernel,
+        registers: &mut [Value],
+        register_cells: &mut [Option<u32>],
+    ) -> Option<usize> {
+        #[cfg(not(test))]
+        let _ = program_id;
+        let mut completed_iterations = 0u64;
+        loop {
+            let index = registers
+                .get(usize::from(kernel.index_register))?
+                .as_number()?;
+            let limit = registers
+                .get(usize::from(kernel.limit_register))?
+                .as_number()?;
+            let step = registers
+                .get(usize::from(kernel.step_register))?
+                .as_number()?;
+            let next = binary(NumericOp::Add, index, step);
+            let continues = numeric_for_should_continue(next, limit, step);
+            let logical_steps = if continues {
+                kernel.continuing_iteration_instruction_count()
+            } else {
+                1
+            };
+            if self.weak_collection_due_within(logical_steps) {
+                break;
+            }
+
+            if !continues {
+                registers[usize::from(kernel.index_register)] = Value::number(next);
+                self.executed_instructions = self.executed_instructions.wrapping_add(1);
+                #[cfg(test)]
+                self.record_numeric_loop_kernel_iterations(program_id, completed_iterations);
+                return Some(kernel.backedge_pc + 1);
+            }
+
+            let inputs = NumericKernelInputs {
+                index_register: kernel.index_register,
+                visible_register: kernel.visible_register,
+                next,
+            };
+            let mut writes = SmallVec::<[(u8, Value); 16]>::new();
+            for write in kernel.register_writes.iter() {
+                let value = self.eval_kernel_value(&write.value, registers, inputs)?;
+                writes.push((write.register, value));
+            }
+            let array_write = if let Some(write) = &kernel.array_write {
+                let table = self.eval_kernel_value(&write.table, registers, inputs)?;
+                let table = table.as_table()?;
+                let index = self.eval_kernel_number(&write.index, registers, inputs)?;
+                let index = array_iterator_index(index)?;
+                let value = self.eval_kernel_value(&write.value, registers, inputs)?;
+                Some((table, index, value))
+            } else {
+                None
+            };
+
+            if let Some((table, index, value)) = array_write {
+                if !matches!(
+                    self.heap.try_write_numeric_array_slot(table, index, value),
+                    Some(TableNumericArrayWrite::Stored)
+                ) {
+                    break;
+                }
+            }
+
+            registers[usize::from(kernel.index_register)] = Value::number(next);
+            registers[usize::from(kernel.visible_register)] = Value::number(next);
+            register_cells[usize::from(kernel.visible_register)] = None;
+            for (register, value) in writes {
+                registers[usize::from(register)] = value;
+            }
+            for register in kernel.cell_clears.iter().copied() {
+                register_cells[usize::from(register)] = None;
+            }
+            self.executed_instructions = self.executed_instructions.wrapping_add(logical_steps);
+            completed_iterations = completed_iterations.saturating_add(1);
+        }
+
+        #[cfg(test)]
+        self.record_numeric_loop_kernel_iterations(program_id, completed_iterations);
+        (completed_iterations != 0).then_some(kernel.backedge_pc)
+    }
+
+    fn eval_kernel_value(
+        &mut self,
+        expression: &KernelValueExpr,
+        registers: &[Value],
+        inputs: NumericKernelInputs,
+    ) -> Option<Value> {
+        match expression {
+            KernelValueExpr::Input(register) => kernel_input_value(registers, *register, inputs),
+            KernelValueExpr::Nil => Some(Value::nil()),
+            KernelValueExpr::Boolean(value) => Some(Value::boolean(*value)),
+            KernelValueExpr::Number(expression) => self
+                .eval_kernel_number(expression, registers, inputs)
+                .map(Value::number),
+        }
+    }
+
+    fn eval_kernel_number(
+        &mut self,
+        expression: &KernelNumberExpr,
+        registers: &[Value],
+        inputs: NumericKernelInputs,
+    ) -> Option<f64> {
+        match expression {
+            KernelNumberExpr::Input(register) => {
+                kernel_input_value(registers, *register, inputs)?.as_number()
+            }
+            KernelNumberExpr::Constant(value) => Some(*value),
+            KernelNumberExpr::Binary { op, lhs, rhs } => Some(binary(
+                *op,
+                self.eval_kernel_number(lhs, registers, inputs)?,
+                self.eval_kernel_number(rhs, registers, inputs)?,
+            )),
+            KernelNumberExpr::NumericArrayGet { table, index } => {
+                let table = self
+                    .eval_kernel_value(table, registers, inputs)?
+                    .as_table()?;
+                let index = self.eval_kernel_number(index, registers, inputs)?;
+                let index = array_iterator_index(index)?;
+                self.heap.read_numeric_array_slot(table, index)?.as_number()
+            }
+        }
+    }
+
     fn get_index_value_with_inline_cache(
         &mut self,
         program: &Program,
@@ -7199,6 +7409,17 @@ impl Vm {
             })
     }
 
+    fn numeric_loop_kernel(
+        &self,
+        program_id: u32,
+        prototype: Option<u32>,
+        pc: usize,
+    ) -> Option<Arc<NumericLoopKernel>> {
+        self.dynamic_programs
+            .get(program_id as usize)?
+            .numeric_loop_kernel(prototype, pc)
+    }
+
     fn table_inline_cache(
         &self,
         program_id: u32,
@@ -7310,6 +7531,16 @@ impl Vm {
         if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
             program.table_inline_cache_hits = program.table_inline_cache_hits.saturating_add(1);
         }
+    }
+
+    #[cfg(test)]
+    fn record_numeric_loop_kernel_iterations(&mut self, program_id: u32, iterations: u64) {
+        let Some(program) = self.dynamic_programs.get_mut(program_id as usize) else {
+            return;
+        };
+        program.numeric_loop_kernel_iterations = program
+            .numeric_loop_kernel_iterations
+            .saturating_add(iterations);
     }
 
     fn host_function(&self, host: u32) -> Result<&HostFunctionOp> {
@@ -18862,10 +19093,20 @@ fn perlin_grad(hash: u8, x: f32, y: f32, z: f32) -> f32 {
 }
 
 fn array_iterator_index(value: f64) -> Option<usize> {
-    if value.is_finite() && (1.0..=MAX_LUAU_TABLE_INDEX).contains(&value) && value.fract() == 0.0 {
-        Some(value as usize)
+    let index = value as i32;
+    (index >= 1 && f64::from(index) == value).then_some(index as usize)
+}
+
+#[inline(always)]
+fn kernel_input_value(
+    registers: &[Value],
+    register: u8,
+    inputs: NumericKernelInputs,
+) -> Option<Value> {
+    if register == inputs.index_register || register == inputs.visible_register {
+        Some(Value::number(inputs.next))
     } else {
-        None
+        registers.get(usize::from(register)).copied()
     }
 }
 
@@ -22012,6 +22253,168 @@ mod inline_cache_tests {
     use super::*;
 
     #[test]
+    fn array_iterator_index_uses_exact_i32_round_trip_bounds() {
+        assert_eq!(array_iterator_index(1.0), Some(1));
+        assert_eq!(
+            array_iterator_index(f64::from(i32::MAX)),
+            Some(i32::MAX as usize)
+        );
+        for invalid in [
+            0.0,
+            -1.0,
+            1.5,
+            f64::from(i32::MAX) + 1.0,
+            f64::INFINITY,
+            f64::NAN,
+        ] {
+            assert_eq!(array_iterator_index(invalid), None);
+        }
+    }
+
+    fn numeric_loop_array_program() -> Program {
+        Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::NewArray, 4, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                    Instruction::new(Opcode::LoadConst, 2, 0, 0),
+                    Instruction::new(Opcode::CoerceForNumber, 0, 0, 0),
+                    Instruction::new(Opcode::CoerceForNumber, 1, 1, 1),
+                    Instruction::new(Opcode::CoerceForNumber, 2, 2, 2),
+                    Instruction::with_aux(Opcode::ForPrep, 0, 0, 0, 16),
+                    Instruction::new(Opcode::Move, 5, 4, 0),
+                    Instruction::new(Opcode::Move, 6, 3, 0),
+                    Instruction::new(Opcode::Move, 7, 3, 0),
+                    Instruction::new(Opcode::SetIndex, 5, 6, 7),
+                    Instruction::new(Opcode::ClearLocalCell, 7, 0, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 6, 0, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 5, 0, 0),
+                    Instruction::with_aux(Opcode::ForLoop, 0, 0, 0, 8),
+                    Instruction::new(Opcode::LoadConst, 5, 0, 1),
+                    Instruction::new(Opcode::GetIndex, 6, 4, 5),
+                    Instruction::new(Opcode::Return, 6, 1, 0),
+                    Instruction::new(Opcode::Halt, 0, 0, 0),
+                ],
+                8,
+            ),
+            vec![Constant::Number(1.0), Constant::Number(64.0)],
+        )
+    }
+
+    #[test]
+    fn numeric_loop_kernel_executes_general_array_fill_and_preserves_policy_fallbacks() {
+        let program = numeric_loop_array_program();
+        let mut fast = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(fast.run(&program).unwrap().as_number(), Some(64.0));
+        assert!(fast.dynamic_programs[0].numeric_loop_kernel_iterations > 0);
+
+        let mut covered = Vm::with_settings(
+            Profile::ReproducibleStandard,
+            VmSettings {
+                enable_conformance_coverage: true,
+                ..VmSettings::default()
+            },
+        );
+        assert_eq!(covered.run(&program).unwrap().as_number(), Some(64.0));
+        assert_eq!(
+            covered.dynamic_programs[0].numeric_loop_kernel_iterations,
+            0
+        );
+
+        let mut fuelled = Vm::with_settings(
+            Profile::ReproducibleStandard,
+            VmSettings {
+                initial_fuel: Some(10_000),
+                ..VmSettings::default()
+            },
+        );
+        assert_eq!(fuelled.run(&program).unwrap().as_number(), Some(64.0));
+        assert_eq!(
+            fuelled.dynamic_programs[0].numeric_loop_kernel_iterations,
+            0
+        );
+    }
+
+    #[test]
+    fn numeric_loop_kernel_preserves_deterministic_collection_cadence() {
+        let program = numeric_loop_array_program();
+        let interval = NonZeroU64::new(17).unwrap();
+        let mut fast = Vm::with_settings(
+            Profile::DeterministicSim,
+            VmSettings {
+                deterministic_gc_interval: interval,
+                ..VmSettings::default()
+            },
+        );
+        let fast_result = fast.run(&program).unwrap();
+        let mut interpreted = Vm::with_settings(
+            Profile::DeterministicSim,
+            VmSettings {
+                deterministic_gc_interval: interval,
+                enable_conformance_coverage: true,
+                ..VmSettings::default()
+            },
+        );
+        let interpreted_result = interpreted.run(&program).unwrap();
+        assert_eq!(fast_result.as_number(), interpreted_result.as_number());
+        assert_eq!(
+            fast.deterministic_collection_count(),
+            interpreted.deterministic_collection_count()
+        );
+        assert!(fast.dynamic_programs[0].numeric_loop_kernel_iterations > 0);
+    }
+
+    #[test]
+    fn numeric_loop_kernel_guard_failure_is_atomic() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let table = vm.heap.alloc_array_table(&[Value::number(1.0)]);
+        vm.heap.table_freeze(table).unwrap();
+        let mut registers = vec![
+            Value::number(1.0),
+            Value::number(2.0),
+            Value::number(1.0),
+            Value::number(1.0),
+            Value::table(table),
+            Value::number(99.0),
+        ];
+        let before = registers.clone();
+        let mut cells = vec![None; registers.len()];
+        cells[5] = Some(123);
+        let kernel = NumericLoopKernel {
+            backedge_pc: 10,
+            body_instruction_count: 1,
+            index_register: 0,
+            limit_register: 1,
+            step_register: 2,
+            visible_register: 3,
+            register_writes: vec![crate::quickening::KernelRegisterWrite {
+                register: 5,
+                value: KernelValueExpr::Nil,
+            }]
+            .into_boxed_slice(),
+            cell_clears: vec![5].into_boxed_slice(),
+            array_write: Some(crate::quickening::KernelArrayWrite {
+                table: KernelValueExpr::Input(4),
+                index: Arc::new(KernelNumberExpr::Input(3)),
+                value: KernelValueExpr::Number(Arc::new(KernelNumberExpr::Input(3))),
+            }),
+        };
+
+        assert_eq!(
+            vm.try_numeric_loop_kernel(0, &kernel, &mut registers, &mut cells),
+            None
+        );
+        for (actual, expected) in registers.iter().zip(&before) {
+            assert_eq!(actual.kind(), expected.kind());
+            assert_eq!(actual.as_number(), expected.as_number());
+            assert_eq!(actual.as_table(), expected.as_table());
+        }
+        assert_eq!(cells[5], Some(123));
+        assert!(vm.heap.read_numeric_array_slot(table, 2).is_none());
+    }
+
+    #[test]
     fn leaf_plans_require_the_complete_bytecode_shape_not_debug_names() {
         let code = vec![
             Instruction::with_aux(Opcode::GetUpvalue, 0, 0, 0, 0),
@@ -23210,7 +23613,7 @@ mod inline_cache_tests {
     #[test]
     fn dynamic_string_cache_stays_monomorphic_on_atom_mismatch() {
         let program = cache_program();
-        let mut caches = FunctionInlineCaches::new(&program.main, None);
+        let mut caches = FunctionInlineCaches::new(&program, &program.main, None);
         let x = TableStringInlineCache::new(1, TableStringHashSlot::from_parts(1, 2));
         let y = TableStringInlineCache::new(2, TableStringHashSlot::from_parts(1, 3));
         assert_eq!(caches.set_table_inline_cache(0, x), Some(()));

@@ -10,6 +10,7 @@ pub mod extension;
 mod heap;
 pub mod number;
 pub mod profile;
+mod quickening;
 mod value;
 pub mod vm;
 
