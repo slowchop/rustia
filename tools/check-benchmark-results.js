@@ -12,17 +12,39 @@ const expectedResults = path.join(root, "bench", "RESULTS.md");
 const expectedJson = path.join(root, "bench", "current-results.json");
 const expectedClaims = path.join(root, "bench", "CLAIMS.md");
 const dedicatedLinuxTarget = "linux-x86_64";
-const expectedEngines = new Map([
-  ["rustia", "luau"],
-  ["boa", "javascript"],
-  ["koto", "koto"],
-  ["mlua-luau", "luau"],
-  ["rhai", "rhai"],
-  ["roto", "roto"],
-  ["rquickjs", "javascript"],
-  ["wasmi", "wasm"],
-  ["wasmtime", "wasm"],
-  ["mlua-lua54", "lua54"],
+const expectedEngineCohorts = new Map([
+  [
+    "b1cd2841fb8fc2d916047391a1d757d53a1303cd",
+    new Map([
+      ["rustia", "luau"],
+      ["boa", "javascript"],
+      ["koto", "koto"],
+      ["mlua-luau", "luau"],
+      ["rhai", "rhai"],
+      ["roto", "roto"],
+      ["rquickjs", "javascript"],
+      ["wasmi", "wasm"],
+      ["wasmtime", "wasm"],
+      ["mlua-lua54", "lua54"],
+    ]),
+  ],
+  [
+    "e53cbcffc08a5924f16c7b6114f3f7c9dae92162",
+    new Map([
+      ["rustia", "luau"],
+      ["boa", "javascript"],
+      ["koto", "koto"],
+      ["luaur", "luau"],
+      ["mlua-luau", "luau"],
+      ["rhai", "rhai"],
+      ["roto", "roto"],
+      ["ruau", "luau"],
+      ["rquickjs", "javascript"],
+      ["wasmi", "wasm"],
+      ["wasmtime", "wasm"],
+      ["mlua-lua54", "lua54"],
+    ]),
+  ],
 ]);
 const expectedWorkloads = [
   "dense_tables",
@@ -112,6 +134,11 @@ function readHistory() {
 
 function validateDedicatedLinuxMatrix() {
   const rows = readHistory();
+  const cohortCommit = rows[0] && rows[0].commit;
+  const expectedEngines = expectedEngineCohorts.get(cohortCommit);
+  if (expectedEngines == null) {
+    fail(`${relative(historyPath)} uses an unknown frozen matrix cohort: ${JSON.stringify(cohortCommit)}`);
+  }
   const expectedRowCount = expectedEngines.size * expectedWorkloads.length;
   if (rows.length !== expectedRowCount) {
     fail(
@@ -134,7 +161,7 @@ function validateDedicatedLinuxMatrix() {
     }
     const expectedDialect = expectedEngines.get(row.engine);
     if (expectedDialect == null) {
-      fail(`${label}.engine is not in the frozen 10-engine matrix: ${JSON.stringify(row.engine)}`);
+      fail(`${label}.engine is not in the frozen ${expectedEngines.size}-engine matrix: ${JSON.stringify(row.engine)}`);
     }
     if (row.dialect !== expectedDialect) {
       fail(`${label}.dialect must be ${JSON.stringify(expectedDialect)} for ${row.engine}`);
