@@ -27,6 +27,7 @@ publish = false
 gc-arena = "0.6.0"
 libm = "0.2"
 serde = { version = "1", features = ["derive"] }
+smallvec = "1.15.2"
 rustia = { version = "0.0.1", path = "crates/rustia" }
 rustia-compiler = { version = "0.0.1", path = "crates/rustia-compiler" }
 rustia-lexer = { version = "0.0.1", path = "crates/rustia-lexer" }

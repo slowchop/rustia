@@ -1,5 +1,6 @@
 use gc_arena::lock::RefLock;
 use gc_arena::{Arena, Collect, DynamicRootSet, Gc, Rootable, Static};
+use smallvec::SmallVec;
 use std::collections::{BTreeSet, VecDeque};
 
 use crate::bytecode::{stable_bytes_hash, SharedProgramString};
@@ -18,8 +19,6 @@ struct RootData<'gc> {
     strings: Vec<InternedString<'gc>>,
     string_index: Vec<u32>,
     tables: Vec<TableData>,
-    functions: Vec<FunctionData>,
-    upvalues: Vec<UpvalueData>,
     userdatas: Vec<UserdataData>,
     buffers: Vec<BufferData>,
     vectors: Vec<VectorData>,
@@ -67,13 +66,14 @@ struct TableData {
     shape_version: u64,
 }
 
-#[derive(Collect)]
-#[collect(no_drop)]
+#[derive(Clone)]
 struct FunctionData {
     kind: FunctionKind,
-    upvalues: Vec<u32>,
+    upvalues: SmallVec<[u32; 4]>,
     environment: u32,
 }
+
+pub(crate) type FunctionDispatchData = (FunctionKind, Option<(SmallVec<[u32; 4]>, u32)>);
 
 #[derive(Clone, Copy, Collect)]
 #[collect(no_drop)]
@@ -433,6 +433,13 @@ pub(crate) enum TableStringHashWrite {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TableNumericArrayWrite {
+    Stored,
+    Deferred,
+    Readonly,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TableIterationOrder {
     Insertion,
     LuauHash,
@@ -448,35 +455,49 @@ type VmArena = Arena<ArenaRoot>;
 /// compiled programs/configuration between workers instead of moving a live VM.
 pub struct VmCell {
     arena: VmArena,
+    allocation_debt_pending: bool,
+    // Function metadata contains only stable compact handles, not GC pointers.
+    // Keeping it beside the arena avoids entering `Arena::mutate` for every
+    // bytecode/native dispatch while weak-table traversal can still inspect it.
+    functions: Vec<FunctionData>,
+    // Upvalues are compact `Value` handles as well. Their hot read/write path
+    // does not need a GC mutation boundary; weak traversal receives this slice.
+    upvalues: Vec<UpvalueData>,
 }
 
 impl VmCell {
     pub fn new() -> Self {
+        let arena = VmArena::new(|mc| {
+            Gc::new(
+                mc,
+                RefLock::new(RootData {
+                    _roots: DynamicRootSet::new(mc),
+                    strings: Vec::new(),
+                    string_index: Vec::new(),
+                    tables: Vec::new(),
+                    userdatas: Vec::new(),
+                    buffers: Vec::new(),
+                    vectors: Vec::new(),
+                }),
+            )
+        });
+        let allocation_debt_pending = arena.metrics().allocation_debt() > 0.0;
         Self {
-            arena: VmArena::new(|mc| {
-                Gc::new(
-                    mc,
-                    RefLock::new(RootData {
-                        _roots: DynamicRootSet::new(mc),
-                        strings: Vec::new(),
-                        string_index: Vec::new(),
-                        tables: Vec::new(),
-                        functions: Vec::new(),
-                        upvalues: Vec::new(),
-                        userdatas: Vec::new(),
-                        buffers: Vec::new(),
-                        vectors: Vec::new(),
-                    }),
-                )
-            }),
+            arena,
+            allocation_debt_pending,
+            functions: Vec::new(),
+            upvalues: Vec::new(),
         }
     }
 
     pub fn finish_collection_cycle(&mut self) {
         self.arena.finish_cycle();
+        self.allocation_debt_pending = self.arena.metrics().allocation_debt() > 0.0;
     }
 
     pub fn collect_weak_tables_with_roots(&mut self, roots: &[Value]) {
+        let functions = &self.functions;
+        let upvalues = &self.upvalues;
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
             let mode_key = b"__mode";
@@ -490,7 +511,7 @@ impl VmCell {
             if modes.iter().all(Option::is_none) {
                 return;
             }
-            let live = mark_weak_reachable(&root, &modes, roots);
+            let live = mark_weak_reachable(&root, functions, upvalues, &modes, roots);
             for (index, mode) in modes.into_iter().enumerate() {
                 if let Some(mode) = mode {
                     if let Some(table) = root.tables.get_mut(index) {
@@ -503,13 +524,16 @@ impl VmCell {
 
     #[inline(always)]
     pub fn collect_debt(&mut self) {
-        // `Arena::collect_debt` performs this same test inside the collector.
-        // Keep the idle path here so the interpreter does not enter the GC
-        // machinery on every bytecode instruction when no allocation debt is
-        // outstanding.
-        if self.arena.metrics().allocation_debt() > 0.0 {
-            self.arena.collect_debt();
+        if !self.allocation_debt_pending {
+            return;
         }
+        self.arena.collect_debt();
+        self.allocation_debt_pending = self.arena.metrics().allocation_debt() > 0.0;
+    }
+
+    #[inline(always)]
+    pub(crate) fn has_allocation_debt(&self) -> bool {
+        self.allocation_debt_pending
     }
 
     pub fn intern_string(&mut self, value: &str) -> u32 {
@@ -518,7 +542,8 @@ impl VmCell {
 
     pub fn intern_string_bytes(&mut self, value: &[u8]) -> u32 {
         let hash = stable_bytes_hash(value);
-        self.arena.mutate(|mc, root| {
+        let mut allocated_gc_string = false;
+        let atom = self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
             if let Some(atom) = string_index_lookup(&root, value, hash) {
                 return atom;
@@ -536,13 +561,19 @@ impl VmCell {
                 .ok()
                 .and_then(|atom| atom.checked_add(1).map(|_| atom))
                 .expect("string atom table exceeds compact u32 index address space");
-            let stored = ShortString::new(value)
-                .map(InternedString::Inline)
-                .unwrap_or_else(|| InternedString::Owned(Gc::new(mc, Static(value.to_vec()))));
+            let stored = ShortString::new(value).map_or_else(
+                || {
+                    allocated_gc_string = true;
+                    InternedString::Owned(Gc::new(mc, Static(value.to_vec())))
+                },
+                InternedString::Inline,
+            );
             root.strings.push(stored);
             insert_string_index(&mut root, atom);
             atom
-        })
+        });
+        self.allocation_debt_pending |= allocated_gc_string;
+        atom
     }
 
     pub(crate) fn intern_shared_string(&mut self, value: SharedProgramString) -> u32 {
@@ -664,29 +695,23 @@ impl VmCell {
         upvalues: Vec<u32>,
         environment: u32,
     ) -> Option<u32> {
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
-            let handle = u32::try_from(root.functions.len()).ok()?;
-            root.functions.push(FunctionData {
-                kind: FunctionKind::Bytecode { program, prototype },
-                upvalues,
-                environment,
-            });
-            Some(handle)
-        })
+        let handle = u32::try_from(self.functions.len()).ok()?;
+        self.functions.push(FunctionData {
+            kind: FunctionKind::Bytecode { program, prototype },
+            upvalues: upvalues.into_iter().collect(),
+            environment,
+        });
+        Some(handle)
     }
 
     pub fn alloc_dynamic_main_function(&mut self, program: u32, environment: u32) -> Option<u32> {
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
-            let handle = u32::try_from(root.functions.len()).ok()?;
-            root.functions.push(FunctionData {
-                kind: FunctionKind::DynamicMain { program },
-                upvalues: Vec::new(),
-                environment,
-            });
-            Some(handle)
-        })
+        let handle = u32::try_from(self.functions.len()).ok()?;
+        self.functions.push(FunctionData {
+            kind: FunctionKind::DynamicMain { program },
+            upvalues: SmallVec::new(),
+            environment,
+        });
+        Some(handle)
     }
 
     pub fn alloc_native_function(
@@ -694,30 +719,28 @@ impl VmCell {
         native: NativeFunction,
         environment: u32,
     ) -> Option<u32> {
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
-            let handle = u32::try_from(root.functions.len()).ok()?;
-            root.functions.push(FunctionData {
-                kind: FunctionKind::Native(native),
-                upvalues: Vec::new(),
-                environment,
-            });
-            Some(handle)
-        })
+        let handle = u32::try_from(self.functions.len()).ok()?;
+        self.functions.push(FunctionData {
+            kind: FunctionKind::Native(native),
+            upvalues: SmallVec::new(),
+            environment,
+        });
+        Some(handle)
     }
 
     pub fn alloc_host_function(&mut self, host: u32, environment: u32) -> Option<u32> {
         self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+            let root = root.unlock(mc).borrow();
             root.tables.get(environment as usize)?;
-            let handle = u32::try_from(root.functions.len()).ok()?;
-            root.functions.push(FunctionData {
-                kind: FunctionKind::Host(host),
-                upvalues: Vec::new(),
-                environment,
-            });
-            Some(handle)
-        })
+            Some(())
+        })?;
+        let handle = u32::try_from(self.functions.len()).ok()?;
+        self.functions.push(FunctionData {
+            kind: FunctionKind::Host(host),
+            upvalues: SmallVec::new(),
+            environment,
+        });
+        Some(handle)
     }
 
     pub fn alloc_native_function_with_upvalues(
@@ -726,86 +749,80 @@ impl VmCell {
         upvalues: Vec<u32>,
         environment: u32,
     ) -> Option<u32> {
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
-            for upvalue in &upvalues {
-                root.upvalues.get(*upvalue as usize)?;
+        for upvalue in &upvalues {
+            self.upvalues.get(*upvalue as usize)?;
+        }
+        let handle = u32::try_from(self.functions.len()).ok()?;
+        self.functions.push(FunctionData {
+            kind: FunctionKind::Native(native),
+            upvalues: upvalues.into_iter().collect(),
+            environment,
+        });
+        Some(handle)
+    }
+
+    #[inline]
+    pub fn function_kind(&self, handle: u32) -> Option<FunctionKind> {
+        self.functions
+            .get(handle as usize)
+            .map(|function| function.kind)
+    }
+
+    /// Returns the data needed to dispatch a function call in one arena access.
+    ///
+    /// Bytecode calls need their captured upvalues and environment immediately
+    /// after inspecting the function kind. Native and host calls deliberately do
+    /// not clone that metadata on their dispatch path.
+    #[inline]
+    pub fn function_dispatch_data(&self, handle: u32) -> Option<FunctionDispatchData> {
+        let function = self.functions.get(handle as usize)?;
+        let bytecode_data = match function.kind {
+            FunctionKind::Bytecode { .. } | FunctionKind::DynamicMain { .. } => {
+                Some((function.upvalues.clone(), function.environment))
             }
-            let handle = u32::try_from(root.functions.len()).ok()?;
-            root.functions.push(FunctionData {
-                kind: FunctionKind::Native(native),
-                upvalues,
-                environment,
-            });
-            Some(handle)
-        })
+            FunctionKind::Host(_) | FunctionKind::Native(_) => None,
+        };
+        Some((function.kind, bytecode_data))
     }
 
-    pub fn function_kind(&mut self, handle: u32) -> Option<FunctionKind> {
-        self.arena.mutate(|mc, root| {
-            root.unlock(mc)
-                .borrow()
-                .functions
-                .get(handle as usize)
-                .map(|function| function.kind)
-        })
+    #[inline]
+    pub fn function_upvalues(&self, handle: u32) -> Option<SmallVec<[u32; 4]>> {
+        self.functions
+            .get(handle as usize)
+            .map(|function| function.upvalues.clone())
     }
 
-    pub fn function_upvalues(&mut self, handle: u32) -> Option<Vec<u32>> {
-        self.arena.mutate(|mc, root| {
-            root.unlock(mc)
-                .borrow()
-                .functions
-                .get(handle as usize)
-                .map(|function| function.upvalues.clone())
-        })
-    }
-
-    pub fn function_environment(&mut self, handle: u32) -> Option<u32> {
-        self.arena.mutate(|mc, root| {
-            root.unlock(mc)
-                .borrow()
-                .functions
-                .get(handle as usize)
-                .map(|function| function.environment)
-        })
+    #[inline]
+    pub fn function_environment(&self, handle: u32) -> Option<u32> {
+        self.functions
+            .get(handle as usize)
+            .map(|function| function.environment)
     }
 
     pub fn set_function_environment(&mut self, handle: u32, environment: u32) -> Option<()> {
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
-            let function = root.functions.get_mut(handle as usize)?;
-            function.environment = environment;
-            Some(())
-        })
+        let function = self.functions.get_mut(handle as usize)?;
+        function.environment = environment;
+        Some(())
     }
 
     pub fn alloc_upvalue(&mut self, value: Value) -> Option<u32> {
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
-            let handle = u32::try_from(root.upvalues.len()).ok()?;
-            root.upvalues.push(UpvalueData { value });
-            Some(handle)
-        })
+        let handle = u32::try_from(self.upvalues.len()).ok()?;
+        self.upvalues.push(UpvalueData { value });
+        Some(handle)
     }
 
-    pub fn upvalue_get(&mut self, handle: u32) -> Option<Value> {
-        self.arena.mutate(|mc, root| {
-            root.unlock(mc)
-                .borrow()
-                .upvalues
-                .get(handle as usize)
-                .map(|upvalue| upvalue.value)
-        })
+    #[inline]
+    pub fn upvalue_get(&self, handle: u32) -> Option<Value> {
+        self.upvalues
+            .get(handle as usize)
+            .map(|upvalue| upvalue.value)
     }
 
+    #[inline]
     pub fn upvalue_set(&mut self, handle: u32, value: Value) -> Option<()> {
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
-            let upvalue = root.upvalues.get_mut(handle as usize)?;
-            upvalue.value = value;
-            Some(())
-        })
+        let upvalue = self.upvalues.get_mut(handle as usize)?;
+        upvalue.value = value;
+        Some(())
     }
 
     pub fn alloc_userdata(&mut self, metatable: Option<u32>) -> Option<u32> {
@@ -989,6 +1006,122 @@ impl VmCell {
                 }
             }
             table_hash_entry(table, table_key).map(|entry| entry.value)
+        })
+    }
+
+    /// Reads an already-materialized numeric array slot without constructing or hashing a key.
+    ///
+    /// A missing table and an index outside the current array both return `None`; callers that
+    /// need to distinguish those cases must use the general table path.
+    pub(crate) fn read_numeric_array_slot(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+    ) -> Option<Value> {
+        if one_based_index == 0 {
+            return None;
+        }
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            root.tables
+                .get(table as usize)?
+                .array
+                .get(one_based_index - 1)
+                .copied()
+        })
+    }
+
+    pub(crate) fn read_array_prefix(&mut self, table: u32, len: usize) -> Option<Vec<Value>> {
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = root.tables.get(table as usize)?;
+            Some(table.array.get(..len)?.to_vec())
+        })
+    }
+
+    pub(crate) fn try_write_array_prefix(
+        &mut self,
+        table: u32,
+        values: &[Value],
+    ) -> Option<TableNumericArrayWrite> {
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let table = root.tables.get_mut(table as usize)?;
+            if table.readonly {
+                return Some(TableNumericArrayWrite::Readonly);
+            }
+            if values.len() > table.array.len() {
+                return Some(TableNumericArrayWrite::Deferred);
+            }
+
+            for (offset, value) in values.iter().copied().enumerate() {
+                table.array[offset] = value;
+                if table.hash.is_empty() {
+                    continue;
+                }
+                let key = number_table_key((offset + 1) as f64)
+                    .expect("materialized array offsets are valid numeric table keys");
+                if value.is_nil() {
+                    if let Some(entry) = table_hash_entry_mut(table, key) {
+                        entry.value = Value::nil();
+                    }
+                } else {
+                    remove_hash_key(table, key);
+                }
+            }
+            Some(TableNumericArrayWrite::Stored)
+        })
+    }
+
+    /// Stores a numeric array slot when doing so cannot observe `__newindex`.
+    ///
+    /// Existing non-nil slots always bypass `__newindex`. Missing slots may be stored directly
+    /// only on tables without a metatable; sparse/hash cases stay on the general path.
+    pub(crate) fn try_write_numeric_array_slot(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+    ) -> Option<TableNumericArrayWrite> {
+        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
+            return Some(TableNumericArrayWrite::Deferred);
+        }
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            let table = root.tables.get_mut(table as usize)?;
+            let existing = table
+                .array
+                .get(one_based_index - 1)
+                .copied()
+                .unwrap_or_else(Value::nil);
+            if existing.is_nil() && table.metatable.is_some() {
+                return Some(TableNumericArrayWrite::Deferred);
+            }
+            if table.readonly {
+                return Some(TableNumericArrayWrite::Readonly);
+            }
+
+            if value.is_nil() {
+                let Some(slot) = table.array.get_mut(one_based_index - 1) else {
+                    // A numeric hash entry can exist beyond the array boundary.
+                    return Some(TableNumericArrayWrite::Deferred);
+                };
+                *slot = Value::nil();
+                return Some(TableNumericArrayWrite::Stored);
+            }
+            if one_based_index > table.array.len() + 1 {
+                return Some(TableNumericArrayWrite::Deferred);
+            }
+            if one_based_index > table.array.len() {
+                table.array.resize(one_based_index, Value::nil());
+            }
+            table.array[one_based_index - 1] = value;
+            if !table.hash.is_empty() {
+                let key = number_table_key(one_based_index as f64)
+                    .expect("validated Luau array indices are valid numeric table keys");
+                remove_hash_key(table, key);
+            }
+            Some(TableNumericArrayWrite::Stored)
         })
     }
 
@@ -1877,6 +2010,8 @@ fn string_value_contains(root: &RootData<'_>, value: Value, needle: u8) -> Optio
 
 fn mark_weak_reachable(
     root: &RootData<'_>,
+    functions: &[FunctionData],
+    upvalues: &[UpvalueData],
     modes: &[Option<WeakMode>],
     roots: &[Value],
 ) -> WeakLiveSet {
@@ -1899,12 +2034,12 @@ fn mark_weak_reachable(
                 }
             }
             WeakRef::Function(handle) => {
-                let Some(function) = root.functions.get(handle as usize) else {
+                let Some(function) = functions.get(handle as usize) else {
                     continue;
                 };
                 mark_weak_value(Value::table(function.environment), &mut refs, &mut queue);
                 for upvalue in &function.upvalues {
-                    if let Some(upvalue) = root.upvalues.get(*upvalue as usize) {
+                    if let Some(upvalue) = upvalues.get(*upvalue as usize) {
                         mark_weak_value(upvalue.value, &mut refs, &mut queue);
                     }
                 }
@@ -2604,6 +2739,82 @@ mod tests {
         );
         assert!(heap.table_get(u32::MAX, Value::number(1.0)).is_none());
         assert_eq!(string_count(&mut heap), 0);
+    }
+
+    #[test]
+    fn numeric_array_shortcuts_only_store_when_metamethods_cannot_intercept() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[Value::number(10.0)]);
+
+        assert_eq!(
+            heap.read_numeric_array_slot(table, 1)
+                .and_then(Value::as_number),
+            Some(10.0)
+        );
+        assert!(heap.read_numeric_array_slot(table, 2).is_none());
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 1, Value::number(11.0)),
+            Some(TableNumericArrayWrite::Stored)
+        );
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 2, Value::number(12.0)),
+            Some(TableNumericArrayWrite::Stored)
+        );
+        assert_eq!(
+            heap.read_array_prefix(table, 2)
+                .expect("materialized prefix")
+                .into_iter()
+                .map(Value::as_number)
+                .collect::<Vec<_>>(),
+            vec![Some(11.0), Some(12.0)]
+        );
+        assert_eq!(
+            heap.try_write_array_prefix(table, &[Value::number(12.0), Value::number(11.0)]),
+            Some(TableNumericArrayWrite::Stored)
+        );
+        assert_eq!(
+            heap.try_write_array_prefix(
+                table,
+                &[Value::number(1.0), Value::number(2.0), Value::number(3.0)]
+            ),
+            Some(TableNumericArrayWrite::Deferred)
+        );
+
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 10, Value::number(99.0)),
+            Some(TableNumericArrayWrite::Deferred)
+        );
+        assert_eq!(
+            heap.table_set(table, Value::number(10.0), Value::number(99.0)),
+            Some(())
+        );
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 10, Value::nil()),
+            Some(TableNumericArrayWrite::Deferred)
+        );
+        assert_eq!(
+            heap.table_get(table, Value::number(10.0))
+                .and_then(Value::as_number),
+            Some(99.0)
+        );
+
+        let metatable = heap.alloc_array_table(&[]);
+        heap.table_set_metatable(table, Some(metatable))
+            .expect("table should accept a metatable");
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 3, Value::number(13.0)),
+            Some(TableNumericArrayWrite::Deferred)
+        );
+
+        heap.table_freeze(table).expect("table should freeze");
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 1, Value::number(20.0)),
+            Some(TableNumericArrayWrite::Readonly)
+        );
+        assert_eq!(
+            heap.try_write_numeric_array_slot(u32::MAX, 1, Value::number(1.0)),
+            None
+        );
     }
 
     #[test]

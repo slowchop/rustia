@@ -153,6 +153,16 @@ Current unpublished workspace version: `0.0.1`.
   guest-entry boundaries. Focused tests preserve collection cadence and prove
   that an outer-only weak value remains live across nested guest execution with
   explicit `collectgarbage`.
+- A second safe-Rust hot-loop pass adds guarded numeric arithmetic and array-slot
+  lanes, exact `next`/`inext` iteration, scalar-math fast calls, compact inline
+  register/return/upvalue storage, allocation-debt and weak-collection countdowns,
+  and complete-bytecode-shape leaf-call plans for small counters and array
+  iterators. Specialized paths retain ordinary fallback behavior for fuel,
+  coverage, metamethods, coercion, mutation, recursion, and GC boundaries.
+  Focused regression tests cover formatting, modulo, sorting, iterator cells,
+  retained weak roots, and deterministic collection parity. A fresh local paired
+  screen now has rustia ahead of Ruau on all five tracked workloads; a clean
+  dedicated-Linux matrix remains the publication gate for that result.
 - The exact-commit `87db17542e19ae77ec92463f8a5b8e8b8a21a666`
   cross-engine Linode matrix accepted every native and wasm timed group on its
   first attempt with zero timed steal. Rustia median ns/unit improved

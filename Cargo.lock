@@ -2465,6 +2465,7 @@ version = "0.0.1"
 dependencies = [
  "gc-arena",
  "libm",
+ "smallvec",
 ]
 
 [[package]]

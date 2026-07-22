@@ -10,7 +10,7 @@ pub struct Program {
     /// even when the same program is loaded into multiple VMs.
     constants: Arc<ConstantStorage>,
     pub functions: Vec<Function>,
-    pub source_name: Option<String>,
+    pub source_name: Option<Arc<str>>,
 }
 
 #[derive(Debug)]
@@ -287,7 +287,7 @@ impl Program {
     }
 
     pub fn with_source_name(mut self, source_name: Option<String>) -> Self {
-        self.source_name = source_name;
+        self.source_name = source_name.map(Arc::from);
         self
     }
 

@@ -178,6 +178,25 @@ catch-up work.
 
 ## Measurement protocol for this slice
 
+### Current all-five candidate — local directional evidence
+
+The latest safe-Rust interpreter pass combines guarded common numeric and array
+opcode lanes, direct exact built-in iteration and scalar math calls, compact
+inline register/return/upvalue storage, cached allocation debt, exact weak-GC
+countdowns, and complete-prototype leaf plans for the small closure shapes found
+by profiling. Every shortcut falls back before observable mutation when its
+guards do not hold; fuel, coverage, recursion, coercion, metamethod, and
+collection-boundary tests exercise the deopt paths.
+
+On the developer host, a fresh 15-repetition paired screen at 500 ms per
+repetition measured minimum times of 25,590.58 versus 27,209.26 ns/unit for
+`dense_tables`, 30,078.22 versus 38,954.95 for `sparse_tables`, 85.56 versus
+122.41 for `closures_upvalues`, 3,935.23 versus 6,642.56 for
+`generic_iteration`, and 436.19 versus 626.72 for `stdlib_math_table`, with
+rustia listed first and Ruau second. This is candidate-selection evidence only;
+the dedicated Linux matrix must reproduce all five wins before the public
+results or headline change.
+
 The harness now creates fresh prepared engine/workload state for each calibration probe and each recorded
 repetition. Each recorded instance runs one untimed warmup followed by exactly one timed invocation, preventing
 growing VM state and caches from leaking across samples while keeping setup/compilation outside the timer.

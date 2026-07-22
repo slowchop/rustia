@@ -7,12 +7,13 @@ use crate::bytecode::{
 use crate::error::{Error, ErrorKind, ErrorLocation, Result};
 use crate::extension::{validate_registered_op, ExtensionOp, ExtensionRegistry, HostFunctionOp};
 use crate::heap::{
-    FunctionKind, NativeFunction, TableIterationOrder, TableNext, TableStringHashSlot,
-    TableStringHashWrite, UserdataPayload, VectorData, VmCell,
+    FunctionKind, NativeFunction, TableIterationOrder, TableNext, TableNumericArrayWrite,
+    TableStringHashSlot, TableStringHashWrite, UserdataPayload, VectorData, VmCell,
 };
 use crate::number::{binary, canonicalize_number, NumericOp};
 use crate::profile::Profile;
 use crate::value::{Value, ValueKind};
+use smallvec::SmallVec;
 use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 use std::sync::Arc;
@@ -105,6 +106,7 @@ pub struct Vm {
     gc_step_counter: u64,
     gc_stopped: bool,
     executed_instructions: u64,
+    next_weak_collection_instruction: u64,
     deterministic_collection_count: u64,
     coverage_hits: BTreeMap<CoverageKey, u64>,
 }
@@ -127,11 +129,13 @@ struct LoadedProgram {
 impl LoadedProgram {
     fn new(program: Program) -> Self {
         let constant_atoms = vec![CONSTANT_ATOM_EMPTY; program.constants().len()];
-        let main_inline_caches = FunctionInlineCaches::new(&program.main);
+        let main_inline_caches = FunctionInlineCaches::new(&program.main, None);
         let function_inline_caches = program
             .functions
             .iter()
-            .map(FunctionInlineCaches::new)
+            .map(|function| {
+                FunctionInlineCaches::new(function, recognize_leaf_call_plan(&program, function))
+            })
             .collect();
         Self {
             program: Arc::new(program),
@@ -232,6 +236,12 @@ impl LoadedProgram {
         caches.set_native_call_inline_cache(pc, entry)
     }
 
+    fn leaf_call_plan(&self, prototype: u32) -> Option<LeafCallPlan> {
+        self.function_inline_caches
+            .get(prototype as usize)?
+            .leaf_call_plan
+    }
+
     fn constant_atom(&self, index: usize) -> Option<u32> {
         self.constant_atoms.get(index).copied()?.checked_sub(1)
     }
@@ -248,10 +258,11 @@ struct FunctionInlineCaches {
     table_entries: Vec<TableStringInlineCache>,
     import_entries: Vec<[TableStringInlineCache; IMPORT_CACHE_LANES]>,
     native_call_entries: Vec<NativeCallInlineCache>,
+    leaf_call_plan: Option<LeafCallPlan>,
 }
 
 impl FunctionInlineCaches {
-    fn new(function: &Function) -> Self {
+    fn new(function: &Function, leaf_call_plan: Option<LeafCallPlan>) -> Self {
         let entry_by_pc = function
             .code
             .iter()
@@ -267,6 +278,7 @@ impl FunctionInlineCaches {
             table_entries: Vec::new(),
             import_entries: Vec::new(),
             native_call_entries: Vec::new(),
+            leaf_call_plan,
         }
     }
 
@@ -365,6 +377,299 @@ impl FunctionInlineCaches {
             }
         }
     }
+}
+
+/// A tiny, side-effect-audited bytecode leaf that can run without allocating a
+/// register file or materializing a call frame. Plans are recognized from the
+/// complete prototype, never from a source/debug name, and execution falls
+/// back before mutating an upvalue whenever a runtime guard does not hold.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum LeafCallPlan {
+    UpvalueCounter {
+        value_upvalue: usize,
+        step_upvalue: usize,
+    },
+    ArrayIterator {
+        index_upvalue: usize,
+        items_upvalue: usize,
+        increment: f64,
+    },
+}
+
+impl LeafCallPlan {
+    const fn maximum_instruction_count(self) -> u64 {
+        match self {
+            Self::UpvalueCounter { .. } => 8,
+            Self::ArrayIterator { .. } => 19,
+        }
+    }
+}
+
+fn recognize_leaf_call_plan(program: &Program, function: &Function) -> Option<LeafCallPlan> {
+    recognize_upvalue_counter_plan(function)
+        .or_else(|| recognize_array_iterator_plan(program, function))
+}
+
+fn recognize_upvalue_counter_plan(function: &Function) -> Option<LeafCallPlan> {
+    if function.parameter_count != 0
+        || function.is_vararg
+        || function.max_registers != 2
+        || function.upvalues.len() != 2
+        || !function.captured_registers.is_empty()
+        || !function.parameter_types.is_empty()
+    {
+        return None;
+    }
+    let [get_value, get_step, add, clear_step, set_value, clear_value, reload_value, ret, empty_ret] =
+        function.code.as_slice()
+    else {
+        return None;
+    };
+    let value_upvalue = usize::try_from(get_value.aux).ok()?;
+    let step_upvalue = usize::try_from(get_step.aux).ok()?;
+    if value_upvalue >= function.upvalues.len()
+        || step_upvalue >= function.upvalues.len()
+        || usize::from(get_value.a) >= function.max_registers
+        || usize::from(get_step.a) >= function.max_registers
+    {
+        return None;
+    }
+    if !instruction_is(
+        *get_value,
+        Opcode::GetUpvalue,
+        get_value.a,
+        0,
+        0,
+        get_value.aux,
+    ) || !instruction_is(
+        *get_step,
+        Opcode::GetUpvalue,
+        get_step.a,
+        0,
+        0,
+        get_step.aux,
+    ) || !instruction_is(*add, Opcode::Add, get_value.a, get_value.a, get_step.a, 0)
+        || !instruction_is(*clear_step, Opcode::ClearLocalCell, get_step.a, 0, 0, 0)
+        || !instruction_is(
+            *set_value,
+            Opcode::SetUpvalue,
+            get_value.a,
+            0,
+            0,
+            get_value.aux,
+        )
+        || !instruction_is(*clear_value, Opcode::ClearLocalCell, get_value.a, 0, 0, 0)
+        || !instruction_is(
+            *reload_value,
+            Opcode::GetUpvalue,
+            get_value.a,
+            0,
+            0,
+            get_value.aux,
+        )
+        || !instruction_is(*ret, Opcode::Return, get_value.a, 1, 0, 0)
+        || !instruction_is(*empty_ret, Opcode::Return, 0, 0, 0, 0)
+        || get_value.a == get_step.a
+    {
+        return None;
+    }
+    Some(LeafCallPlan::UpvalueCounter {
+        value_upvalue,
+        step_upvalue,
+    })
+}
+
+fn recognize_array_iterator_plan(program: &Program, function: &Function) -> Option<LeafCallPlan> {
+    if function.parameter_count != 0
+        || function.is_vararg
+        || function.max_registers != 3
+        || function.upvalues.len() != 2
+        || !function.captured_registers.is_empty()
+        || !function.parameter_types.is_empty()
+    {
+        return None;
+    }
+    let [get_index, load_increment, add, clear_increment, set_index, clear_index, reload_for_len, get_items_for_len, len, less_equal, clear_len, jump_if_not, clear_condition, reload_index, reload_items, get_index_key, get_index_value, clear_key, ret_pair, clear_return_index, clear_return_value, empty_ret] =
+        function.code.as_slice()
+    else {
+        return None;
+    };
+    let index_upvalue = usize::try_from(get_index.aux).ok()?;
+    let items_upvalue = usize::try_from(get_items_for_len.aux).ok()?;
+    if index_upvalue >= function.upvalues.len() || items_upvalue >= function.upvalues.len() {
+        return None;
+    }
+    let increment = match program.constants().get(load_increment.c as usize)? {
+        Constant::Number(value) => *value,
+        _ => return None,
+    };
+    let index_register = get_index.a;
+    let value_register = get_items_for_len.a;
+    let key_register = get_index_key.a;
+    if usize::from(index_register) >= function.max_registers
+        || usize::from(value_register) >= function.max_registers
+        || usize::from(key_register) >= function.max_registers
+        || value_register != index_register.checked_add(1)?
+        || key_register == index_register
+        || key_register == value_register
+        || !instruction_is(
+            *get_index,
+            Opcode::GetUpvalue,
+            index_register,
+            0,
+            0,
+            get_index.aux,
+        )
+        || !instruction_is(
+            *load_increment,
+            Opcode::LoadConst,
+            value_register,
+            0,
+            load_increment.c,
+            0,
+        )
+        || !instruction_is(
+            *add,
+            Opcode::Add,
+            index_register,
+            index_register,
+            value_register,
+            0,
+        )
+        || !instruction_is(
+            *clear_increment,
+            Opcode::ClearLocalCell,
+            value_register,
+            0,
+            0,
+            0,
+        )
+        || !instruction_is(
+            *set_index,
+            Opcode::SetUpvalue,
+            index_register,
+            0,
+            0,
+            get_index.aux,
+        )
+        || !instruction_is(
+            *clear_index,
+            Opcode::ClearLocalCell,
+            index_register,
+            0,
+            0,
+            0,
+        )
+        || !instruction_is(
+            *reload_for_len,
+            Opcode::GetUpvalue,
+            index_register,
+            0,
+            0,
+            get_index.aux,
+        )
+        || !instruction_is(
+            *get_items_for_len,
+            Opcode::GetUpvalue,
+            value_register,
+            0,
+            0,
+            get_items_for_len.aux,
+        )
+        || !instruction_is(*len, Opcode::Len, value_register, value_register, 0, 0)
+        || !instruction_is(
+            *less_equal,
+            Opcode::LessEqual,
+            index_register,
+            index_register,
+            value_register,
+            0,
+        )
+        || !instruction_is(*clear_len, Opcode::ClearLocalCell, value_register, 0, 0, 0)
+        || !instruction_is(*jump_if_not, Opcode::JumpIfNot, index_register, 0, 0, 21)
+        || !instruction_is(
+            *clear_condition,
+            Opcode::ClearLocalCell,
+            index_register,
+            0,
+            0,
+            0,
+        )
+        || !instruction_is(
+            *reload_index,
+            Opcode::GetUpvalue,
+            index_register,
+            0,
+            0,
+            get_index.aux,
+        )
+        || !instruction_is(
+            *reload_items,
+            Opcode::GetUpvalue,
+            value_register,
+            0,
+            0,
+            get_items_for_len.aux,
+        )
+        || !instruction_is(
+            *get_index_key,
+            Opcode::GetUpvalue,
+            key_register,
+            0,
+            0,
+            get_index.aux,
+        )
+        || !instruction_is(
+            *get_index_value,
+            Opcode::GetIndex,
+            value_register,
+            value_register,
+            key_register,
+            0,
+        )
+        || !instruction_is(*clear_key, Opcode::ClearLocalCell, key_register, 0, 0, 0)
+        || !instruction_is(*ret_pair, Opcode::Return, index_register, 2, 0, 0)
+        || !instruction_is(
+            *clear_return_index,
+            Opcode::ClearLocalCell,
+            index_register,
+            0,
+            0,
+            0,
+        )
+        || !instruction_is(
+            *clear_return_value,
+            Opcode::ClearLocalCell,
+            value_register,
+            0,
+            0,
+            0,
+        )
+        || !instruction_is(*empty_ret, Opcode::Return, 0, 0, 0, 0)
+    {
+        return None;
+    }
+    Some(LeafCallPlan::ArrayIterator {
+        index_upvalue,
+        items_upvalue,
+        increment,
+    })
+}
+
+#[inline]
+const fn instruction_is(
+    instruction: Instruction,
+    op: Opcode,
+    a: u8,
+    b: u8,
+    c: u8,
+    aux: i32,
+) -> bool {
+    instruction.op as u8 == op as u8
+        && instruction.a == a
+        && instruction.b == b
+        && instruction.c == c
+        && instruction.aux == aux
 }
 
 fn compact_site_cache_index(index: usize) -> Option<u32> {
@@ -595,6 +900,9 @@ enum VmFlow<T> {
 }
 
 type VmFlowResult<T> = std::result::Result<VmFlow<T>, Error>;
+type ReturnValues = SmallVec<[Value; 4]>;
+type RegisterValues = SmallVec<[Value; 32]>;
+type RegisterCells = SmallVec<[Option<u32>; 32]>;
 
 #[derive(Clone)]
 struct CoroutineYield {
@@ -619,8 +927,8 @@ struct SuspendedBytecodeFrame {
     environment: u32,
     call_site: Option<ErrorLocation>,
     pc: usize,
-    registers: Vec<Value>,
-    register_cells: Vec<Option<u32>>,
+    registers: RegisterValues,
+    register_cells: RegisterCells,
     varargs: Vec<Value>,
     pending_return_prefixes: Vec<Value>,
     continuation: BytecodeContinuation,
@@ -638,8 +946,8 @@ struct SuspendedXPCallFrame {
 
 struct ResumedFunctionState {
     pc: usize,
-    registers: Vec<Value>,
-    register_cells: Vec<Option<u32>>,
+    registers: RegisterValues,
+    register_cells: RegisterCells,
     varargs: Vec<Value>,
     pending_return_prefixes: Vec<Value>,
     continuation: BytecodeContinuation,
@@ -651,8 +959,8 @@ struct ResumedFunctionState {
 #[derive(Clone)]
 struct StacklessSelfCallFrame {
     pc: usize,
-    registers: Vec<Value>,
-    register_cells: Vec<Option<u32>>,
+    registers: RegisterValues,
+    register_cells: RegisterCells,
     varargs: Vec<Value>,
     pending_return_prefixes: Vec<Value>,
     continuation: BytecodeContinuation,
@@ -718,6 +1026,7 @@ impl Vm {
             settings.enable_conformance_pcall_helpers,
         );
         let rng_state = pcg32_seed(0);
+        let next_weak_collection_instruction = settings.deterministic_gc_interval.get();
         Self {
             profile,
             settings,
@@ -743,6 +1052,7 @@ impl Vm {
             gc_step_counter: 0,
             gc_stopped: false,
             executed_instructions: 0,
+            next_weak_collection_instruction,
             deterministic_collection_count: 0,
             coverage_hits: BTreeMap::new(),
         }
@@ -963,7 +1273,7 @@ impl Vm {
         context: FunctionCallContext<'_>,
         resumed: Option<ResumedFunctionState>,
         fuel: &mut Option<u64>,
-    ) -> VmFlowResult<Vec<Value>> {
+    ) -> VmFlowResult<ReturnValues> {
         self.call_stack.push(CallStackFrame {
             function: context.current_function,
             debug_name: function.debug_name.clone(),
@@ -973,7 +1283,7 @@ impl Vm {
             stackless_roots: Vec::new(),
             stackless_debug_frames: Vec::new(),
         });
-        let result = (|| -> VmFlowResult<Vec<Value>> {
+        let result = (|| -> VmFlowResult<ReturnValues> {
             self.check_recursion_depth(context.depth)?;
             if function.max_registers == 0 {
                 return Err(Error::new(ErrorKind::InvalidProgram {
@@ -1012,8 +1322,10 @@ impl Vm {
             } else {
                 stackless_self_calls = Vec::new();
                 tail_call_count = 0usize;
-                let mut registers = vec![Value::nil(); function.max_registers];
-                let register_cells = vec![None; function.max_registers];
+                let mut registers = RegisterValues::new();
+                registers.resize(function.max_registers, Value::nil());
+                let mut register_cells = RegisterCells::new();
+                register_cells.resize(function.max_registers, None);
                 for (index, arg) in args
                     .iter()
                     .copied()
@@ -1039,7 +1351,7 @@ impl Vm {
 
             macro_rules! unwind_stackless_return {
                 ($returned:expr) => {{
-                    let mut returned = $returned;
+                    let mut returned: ReturnValues = ($returned).into();
                     loop {
                         let Some(frame) = stackless_self_calls.pop() else {
                             return Ok(VmFlow::Return(returned));
@@ -1073,12 +1385,12 @@ impl Vm {
                             &mut registers,
                             &mut pending_return_prefixes,
                             continuation,
-                            returned,
+                            returned.into_vec(),
                             fuel,
                         );
                         self.truncate_stackless_self_call_roots(root_mark);
                         if let Some(next_returned) = continuation_result? {
-                            returned = next_returned;
+                            returned = next_returned.into();
                             continue;
                         }
                         break;
@@ -1181,7 +1493,7 @@ impl Vm {
                     }
                 }
 
-                let loop_result = (|| -> VmFlowResult<Vec<Value>> {
+                let loop_result = (|| -> VmFlowResult<ReturnValues> {
                     loop {
                         let instruction = *function.code.get(pc).ok_or_else(|| {
                             Error::new(ErrorKind::InvalidProgram {
@@ -1190,26 +1502,59 @@ impl Vm {
                             .at_pc(pc)
                         })?;
 
-                        let fuel_cost = self
-                            .instruction_fuel_cost(instruction)
-                            .map_err(|e| e.at_pc(pc))?;
-                        charge_fuel(fuel, self.settings.initial_fuel, fuel_cost)
-                            .map_err(|error| error.at_pc(pc))?;
-                        if weak_collection_due_within(
-                            self.executed_instructions,
-                            self.settings.deterministic_gc_interval.get(),
-                            fuel_cost,
-                        ) || instruction_may_invoke_guest(&registers, instruction)
-                        {
+                        let is_common_fast_path_candidate = matches!(
+                            instruction.op,
+                            Opcode::Add
+                                | Opcode::Sub
+                                | Opcode::Mul
+                                | Opcode::Div
+                                | Opcode::FloorDiv
+                                | Opcode::Mod
+                                | Opcode::Pow
+                                | Opcode::GetIndex
+                                | Opcode::SetIndex
+                        );
+                        let can_try_common_fast_path = is_common_fast_path_candidate
+                            && fuel.is_none()
+                            && !self.settings.enable_conformance_coverage
+                            && !self.heap.has_allocation_debt()
+                            && !self.weak_collection_due_within(1);
+                        if can_try_common_fast_path {
+                            self.executed_instructions = self.executed_instructions.wrapping_add(1);
+                            if self
+                                .try_common_instruction(&mut registers, instruction)
+                                .map_err(|error| {
+                                    attach_instruction_source(program, function, pc, error)
+                                })?
+                            {
+                                pc += 1;
+                                continue;
+                            }
                             self.update_current_gc_roots(
                                 &registers,
                                 &varargs,
                                 &pending_return_prefixes,
                             );
+                        } else {
+                            let fuel_cost = self
+                                .instruction_fuel_cost(instruction)
+                                .map_err(|e| e.at_pc(pc))?;
+                            charge_fuel(fuel, self.settings.initial_fuel, fuel_cost)
+                                .map_err(|error| error.at_pc(pc))?;
+                            let weak_collection_due = self.weak_collection_due_within(fuel_cost);
+                            if weak_collection_due
+                                || instruction_may_invoke_guest(&registers, instruction)
+                            {
+                                self.update_current_gc_roots(
+                                    &registers,
+                                    &varargs,
+                                    &pending_return_prefixes,
+                                );
+                            }
+                            self.executed_instructions = self.executed_instructions.wrapping_add(1);
+                            self.maybe_collect();
+                            self.record_coverage_hit(program_id, context.prototype, function, pc);
                         }
-                        self.executed_instructions = self.executed_instructions.wrapping_add(1);
-                        self.maybe_collect();
-                        self.record_coverage_hit(program_id, context.prototype, function, pc);
 
                         pc += 1;
                         match instruction.op {
@@ -1531,7 +1876,7 @@ impl Vm {
                                 }
                                 let returned = finish_function_results(
                                     &mut pending_return_prefixes,
-                                    registers[first..end].to_vec(),
+                                    ReturnValues::from_slice(&registers[first..end]),
                                 );
                                 unwind_stackless_return!(returned);
                                 continue;
@@ -1665,7 +2010,7 @@ impl Vm {
                                 let mut results = registers[prefix_first..prefix_end].to_vec();
                                 let call_site =
                                     instruction_source_location(program, function, pc - 1);
-                                let mut call_results = match self
+                                let call_results = match self
                                     .call_function_resumable(
                                         program,
                                         &registers,
@@ -1697,7 +2042,7 @@ impl Vm {
                                         );
                                     }
                                 };
-                                results.append(&mut call_results);
+                                results.extend(call_results);
                                 return Ok(VmFlow::Return(finish_function_results(
                                     &mut pending_return_prefixes,
                                     results,
@@ -2631,8 +2976,10 @@ impl Vm {
                                         debug_frame,
                                     };
                                     stackless_self_calls.push(frame);
-                                    registers = vec![Value::nil(); function.max_registers];
-                                    register_cells = vec![None; function.max_registers];
+                                    registers = RegisterValues::new();
+                                    registers.resize(function.max_registers, Value::nil());
+                                    register_cells = RegisterCells::new();
+                                    register_cells.resize(function.max_registers, None);
                                     for (index, arg) in call_args
                                         .iter()
                                         .copied()
@@ -2664,6 +3011,42 @@ impl Vm {
                                     pc = 0;
                                     tail_call_count = 0;
                                     continue;
+                                }
+                                if instruction.op == Opcode::FastCall {
+                                    if let Some(program_id) = program_id {
+                                        let cache_site = NativeCallCacheSite {
+                                            program_id,
+                                            prototype: context.prototype,
+                                            pc: pc - 1,
+                                        };
+                                        if let Some(value) = self
+                                            .try_fast_scalar_math_call(
+                                                program,
+                                                &registers,
+                                                instruction,
+                                                context.depth,
+                                                cache_site,
+                                                fuel,
+                                            )
+                                            .map_err(|error| {
+                                                attach_instruction_source(
+                                                    program,
+                                                    function,
+                                                    pc - 1,
+                                                    error,
+                                                )
+                                            })?
+                                        {
+                                            self.sync_register_cells(
+                                                &mut registers,
+                                                &register_cells,
+                                            )
+                                            .map_err(|error| error.at_pc(pc - 1))?;
+                                            set_register(&mut registers, instruction.a, value)
+                                                .map_err(|error| error.at_pc(pc - 1))?;
+                                            continue;
+                                        }
+                                    }
                                 }
                                 let call_site =
                                     instruction_source_location(program, function, pc - 1);
@@ -2833,8 +3216,10 @@ impl Vm {
                                         debug_frame,
                                     };
                                     stackless_self_calls.push(frame);
-                                    registers = vec![Value::nil(); function.max_registers];
-                                    register_cells = vec![None; function.max_registers];
+                                    registers = RegisterValues::new();
+                                    registers.resize(function.max_registers, Value::nil());
+                                    register_cells = RegisterCells::new();
+                                    register_cells.resize(function.max_registers, None);
                                     for (index, arg) in call_args
                                         .iter()
                                         .copied()
@@ -3239,7 +3624,7 @@ impl Vm {
                                 let mut args = registers[args_start..args_end].to_vec();
                                 args.extend(varargs.iter().copied());
                                 let mut results = registers[prefix_first..prefix_end].to_vec();
-                                let mut call_results = match self
+                                let call_results = match self
                                     .call_value_with_site_resumable(
                                         program,
                                         callee,
@@ -3271,7 +3656,7 @@ impl Vm {
                                         );
                                     }
                                 };
-                                results.append(&mut call_results);
+                                results.extend(call_results);
                                 return Ok(VmFlow::Return(finish_function_results(
                                     &mut pending_return_prefixes,
                                     results,
@@ -3297,7 +3682,7 @@ impl Vm {
                                 let mut results = registers[prefix_first..prefix_end].to_vec();
                                 let call_site =
                                     instruction_source_location(program, function, pc - 1);
-                                let mut call_results = self
+                                let call_results = self
                                     .nested_expand_results(
                                         program,
                                         &registers,
@@ -3310,7 +3695,7 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
-                                results.append(&mut call_results);
+                                results.extend(call_results);
                                 return Ok(VmFlow::Return(finish_function_results(
                                     &mut pending_return_prefixes,
                                     results,
@@ -3336,7 +3721,7 @@ impl Vm {
                                 let mut results = registers[prefix_first..prefix_end].to_vec();
                                 let call_site =
                                     instruction_source_location(program, function, pc - 1);
-                                let mut call_results = self
+                                let call_results = self
                                     .nested_expand2_varargs_results(
                                         program,
                                         &registers,
@@ -3352,7 +3737,7 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
-                                results.append(&mut call_results);
+                                results.extend(call_results);
                                 return Ok(VmFlow::Return(finish_function_results(
                                     &mut pending_return_prefixes,
                                     results,
@@ -3378,7 +3763,7 @@ impl Vm {
                                 let mut results = registers[prefix_first..prefix_end].to_vec();
                                 let call_site =
                                     instruction_source_location(program, function, pc - 1);
-                                let mut call_results = self
+                                let call_results = self
                                     .nested_expand_varargs_results(
                                         program,
                                         &registers,
@@ -3394,7 +3779,7 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
-                                results.append(&mut call_results);
+                                results.extend(call_results);
                                 return Ok(VmFlow::Return(finish_function_results(
                                     &mut pending_return_prefixes,
                                     results,
@@ -3493,7 +3878,7 @@ impl Vm {
                                 args.append(&mut expanded_args);
                                 let mut results =
                                     registers[return_prefix_first..return_prefix_end].to_vec();
-                                let mut call_results = match self
+                                let call_results = match self
                                     .call_value_with_site_resumable(
                                         program,
                                         outer_callee,
@@ -3527,7 +3912,7 @@ impl Vm {
                                         );
                                     }
                                 };
-                                results.append(&mut call_results);
+                                results.extend(call_results);
                                 return Ok(VmFlow::Return(finish_function_results(
                                     &mut pending_return_prefixes,
                                     results,
@@ -4160,15 +4545,15 @@ impl Vm {
         program_id: Option<u32>,
         context: &FunctionCallContext<'_>,
         pc: usize,
-        mut registers: Vec<Value>,
-        register_cells: Vec<Option<u32>>,
+        mut registers: RegisterValues,
+        register_cells: RegisterCells,
         varargs: Vec<Value>,
         pending_return_prefixes: Vec<Value>,
         continuation: BytecodeContinuation,
         stackless_self_calls: Vec<StacklessSelfCallFrame>,
         tail_call_count: usize,
         mut suspension: CoroutineYield,
-    ) -> VmFlowResult<Vec<Value>> {
+    ) -> VmFlowResult<ReturnValues> {
         self.sync_register_cells(&mut registers, &register_cells)?;
         let program_id = program_id.ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
@@ -4245,10 +4630,9 @@ impl Vm {
             }
             BytecodeContinuation::ReturnWithPrefix { mut prefix } => {
                 prefix.append(&mut results);
-                Ok(Some(finish_function_results(
-                    pending_return_prefixes,
-                    prefix,
-                )))
+                Ok(Some(
+                    finish_function_results(pending_return_prefixes, prefix).into_vec(),
+                ))
             }
             BytecodeContinuation::AppendToTable { table, start_index } => {
                 self.append_call_results_to_table(table, start_index, &results)?;
@@ -4835,6 +5219,7 @@ impl Vm {
             .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))
     }
 
+    #[inline(always)]
     fn numeric_binop(
         &mut self,
         program: &Program,
@@ -4846,7 +5231,12 @@ impl Vm {
     ) -> Result<()> {
         let lhs = get_register(registers, instruction.b)?;
         let rhs = get_register(registers, instruction.c)?;
-        let result = self.numeric_binop_value(program, lhs, rhs, op, depth, fuel)?;
+        let result =
+            if let (Some(lhs_number), Some(rhs_number)) = (lhs.as_number(), rhs.as_number()) {
+                Value::number(binary(op, lhs_number, rhs_number))
+            } else {
+                self.numeric_binop_value(program, lhs, rhs, op, depth, fuel)?
+            };
         set_register(registers, instruction.a, result)
     }
 
@@ -5270,6 +5660,98 @@ impl Vm {
         Err(self.index_error(object, key)?)
     }
 
+    #[inline(always)]
+    fn try_common_instruction(
+        &mut self,
+        registers: &mut [Value],
+        instruction: Instruction,
+    ) -> Result<bool> {
+        match instruction.op {
+            Opcode::Add
+            | Opcode::Sub
+            | Opcode::Mul
+            | Opcode::Div
+            | Opcode::FloorDiv
+            | Opcode::Mod
+            | Opcode::Pow => {
+                let Some(lhs) = registers
+                    .get(instruction.b as usize)
+                    .and_then(|value| value.as_number())
+                else {
+                    return Ok(false);
+                };
+                let Some(rhs) = registers
+                    .get(instruction.c as usize)
+                    .and_then(|value| value.as_number())
+                else {
+                    return Ok(false);
+                };
+                let op = match instruction.op {
+                    Opcode::Add => NumericOp::Add,
+                    Opcode::Sub => NumericOp::Sub,
+                    Opcode::Mul => NumericOp::Mul,
+                    Opcode::Div => NumericOp::Div,
+                    Opcode::FloorDiv => NumericOp::FloorDiv,
+                    Opcode::Mod => NumericOp::Mod,
+                    Opcode::Pow => NumericOp::Pow,
+                    _ => unreachable!("numeric fast path accepts only binary numeric opcodes"),
+                };
+                set_register(
+                    registers,
+                    instruction.a,
+                    Value::number(binary(op, lhs, rhs)),
+                )?;
+                Ok(true)
+            }
+            Opcode::GetIndex => {
+                let Some(object) = registers.get(instruction.b as usize).copied() else {
+                    return Ok(false);
+                };
+                let Some(table) = object.as_table() else {
+                    return Ok(false);
+                };
+                let Some(index) = registers
+                    .get(instruction.c as usize)
+                    .and_then(|key| key.as_number())
+                    .and_then(array_iterator_index)
+                else {
+                    return Ok(false);
+                };
+                let Some(value) = self.heap.read_numeric_array_slot(table, index) else {
+                    return Ok(false);
+                };
+                if value.is_nil() {
+                    return Ok(false);
+                }
+                set_register(registers, instruction.a, value)?;
+                Ok(true)
+            }
+            Opcode::SetIndex => {
+                let Some(object) = registers.get(instruction.a as usize).copied() else {
+                    return Ok(false);
+                };
+                let Some(table) = object.as_table() else {
+                    return Ok(false);
+                };
+                let Some(index) = registers
+                    .get(instruction.b as usize)
+                    .and_then(|key| key.as_number())
+                    .and_then(array_iterator_index)
+                else {
+                    return Ok(false);
+                };
+                let Some(value) = registers.get(instruction.c as usize).copied() else {
+                    return Ok(false);
+                };
+                Ok(matches!(
+                    self.heap.try_write_numeric_array_slot(table, index, value),
+                    Some(TableNumericArrayWrite::Stored)
+                ))
+            }
+            _ => Ok(false),
+        }
+    }
+
     fn get_index_value_with_inline_cache(
         &mut self,
         program: &Program,
@@ -5444,6 +5926,13 @@ impl Vm {
         fuel: &mut Option<u64>,
     ) -> Result<Value> {
         self.check_recursion_depth(depth)?;
+        if let Some(index) = key.as_number().and_then(array_iterator_index) {
+            if let Some(value) = self.heap.read_numeric_array_slot(table, index) {
+                if !value.is_nil() {
+                    return Ok(value);
+                }
+            }
+        }
         if let Some(value) = self.raw_table_slot(table, key)? {
             if value.kind() != ValueKind::Nil
                 || self.table_uses_standard_global_type_surface(table)?
@@ -5466,6 +5955,13 @@ impl Vm {
         fuel: &mut Option<u64>,
     ) -> Result<Value> {
         self.check_recursion_depth(depth)?;
+        if let Some(index) = key.as_number().and_then(array_iterator_index) {
+            if let Some(value) = self.heap.read_numeric_array_slot(table, index) {
+                if !value.is_nil() {
+                    return Ok(value);
+                }
+            }
+        }
         let Some(program_id) = program_id else {
             return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
         };
@@ -5681,6 +6177,15 @@ impl Vm {
         fuel: &mut Option<u64>,
     ) -> Result<()> {
         self.check_recursion_depth(depth)?;
+        if let Some(index) = key.as_number().and_then(array_iterator_index) {
+            match self.heap.try_write_numeric_array_slot(table, index, value) {
+                Some(TableNumericArrayWrite::Stored) => return Ok(()),
+                Some(TableNumericArrayWrite::Readonly) => {
+                    return Err(readonly_table_error());
+                }
+                Some(TableNumericArrayWrite::Deferred) | None => {}
+            }
+        }
         let Some(program_id) = program_id else {
             return self.set_table_index_with_metamethod(program, table, key, value, depth, fuel);
         };
@@ -6237,7 +6742,7 @@ impl Vm {
         depth: usize,
         call_site: Option<ErrorLocation>,
         fuel: &mut Option<u64>,
-    ) -> VmFlowResult<Vec<Value>> {
+    ) -> VmFlowResult<ReturnValues> {
         if instruction.aux < 0 || instruction.aux > i32::from(u8::MAX) {
             return Err(Error::new(ErrorKind::InvalidProgram {
                 reason: "invalid function call arity",
@@ -6274,7 +6779,7 @@ impl Vm {
         call_site: Option<ErrorLocation>,
         cache_site: NativeCallCacheSite,
         fuel: &mut Option<u64>,
-    ) -> VmFlowResult<Vec<Value>> {
+    ) -> VmFlowResult<ReturnValues> {
         if instruction.aux < 0 || instruction.aux > i32::from(u8::MAX) {
             return Err(Error::new(ErrorKind::InvalidProgram {
                 reason: "invalid function call arity",
@@ -6304,6 +6809,81 @@ impl Vm {
         )
     }
 
+    fn try_fast_scalar_math_call(
+        &mut self,
+        program: &Program,
+        registers: &[Value],
+        instruction: Instruction,
+        depth: usize,
+        cache_site: NativeCallCacheSite,
+        fuel: &mut Option<u64>,
+    ) -> Result<Option<Value>> {
+        if instruction.aux < 0 || instruction.aux > i32::from(u8::MAX) {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "invalid function call arity",
+            }));
+        }
+        let callee = get_register(registers, instruction.b)?;
+        let Some(handle) = callee.as_function() else {
+            return Ok(None);
+        };
+        let cached = self
+            .native_call_inline_cache(cache_site.program_id, cache_site.prototype, cache_site.pc)
+            .filter(|entry| entry.function_handle == handle);
+        let native = if let Some(entry) = cached {
+            #[cfg(test)]
+            self.record_native_call_inline_cache_hit(cache_site.program_id);
+            entry.native
+        } else {
+            let Some(FunctionKind::Native(native)) = self.heap.function_kind(handle) else {
+                return Ok(None);
+            };
+            self.set_native_call_inline_cache(
+                cache_site.program_id,
+                cache_site.prototype,
+                cache_site.pc,
+                NativeCallInlineCache {
+                    function_handle: handle,
+                    native,
+                },
+            );
+            native
+        };
+        if !matches!(
+            native,
+            NativeFunction::MathAbs
+                | NativeFunction::MathFloor
+                | NativeFunction::MathSqrt
+                | NativeFunction::MathSin
+                | NativeFunction::MathCos
+        ) {
+            return Ok(None);
+        }
+        let argc = instruction.aux as usize;
+        let args = if argc == 0 {
+            &[][..]
+        } else {
+            let first = instruction.c as usize;
+            let end = first.checked_add(argc).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "function argument window overflow",
+                })
+            })?;
+            if end > registers.len() {
+                return Err(Error::new(ErrorKind::RegisterOutOfBounds {
+                    register: end,
+                    max: registers.len(),
+                }));
+            }
+            &registers[first..end]
+        };
+        self.check_recursion_depth(depth)?;
+        let extra_fuel = self.native_extra_fuel_cost(handle, native, args);
+        charge_fuel(fuel, self.settings.initial_fuel, extra_fuel)?;
+        self.call_native_scalar_function(program, native, args, None)
+            .map(Some)
+    }
+
     fn call_value(
         &mut self,
         program: &Program,
@@ -6313,7 +6893,7 @@ impl Vm {
         fuel: &mut Option<u64>,
     ) -> Result<Vec<Value>> {
         match self.call_value_with_site_resumable(program, callee, args, depth, None, fuel)? {
-            VmFlow::Return(results) => Ok(results),
+            VmFlow::Return(results) => Ok(results.into_vec()),
             VmFlow::Yield(_) => Err(non_yieldable_boundary_error()),
         }
     }
@@ -6328,7 +6908,7 @@ impl Vm {
         fuel: &mut Option<u64>,
     ) -> Result<Vec<Value>> {
         match self.call_value_with_site_resumable(program, callee, args, depth, call_site, fuel)? {
-            VmFlow::Return(results) => Ok(results),
+            VmFlow::Return(results) => Ok(results.into_vec()),
             VmFlow::Yield(_) => Err(non_yieldable_boundary_error()),
         }
     }
@@ -6386,20 +6966,29 @@ impl Vm {
         depth: usize,
         call_site: Option<ErrorLocation>,
         fuel: &mut Option<u64>,
-    ) -> VmFlowResult<Vec<Value>> {
+    ) -> VmFlowResult<ReturnValues> {
         self.check_recursion_depth(depth)?;
         let Some(handle) = callee.as_function() else {
             return self
                 .call_metamethod(program, callee, args, depth, fuel)
+                .map(ReturnValues::from_vec)
                 .map(VmFlow::Return);
         };
-        let kind = self.heap.function_kind(handle).ok_or_else(|| {
+        let (kind, bytecode_data) = self.heap.function_dispatch_data(handle).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "function handle is missing",
             })
         })?;
         self.call_function_kind_with_site_resumable(
-            program, callee, handle, kind, args, depth, call_site, fuel,
+            program,
+            callee,
+            handle,
+            kind,
+            bytecode_data,
+            args,
+            depth,
+            call_site,
+            fuel,
         )
     }
 
@@ -6412,11 +7001,12 @@ impl Vm {
         call_site: Option<ErrorLocation>,
         cache_site: NativeCallCacheSite,
         fuel: &mut Option<u64>,
-    ) -> VmFlowResult<Vec<Value>> {
+    ) -> VmFlowResult<ReturnValues> {
         self.check_recursion_depth(depth)?;
         let Some(handle) = callee.as_function() else {
             return self
                 .call_metamethod(program, callee, args, depth, fuel)
+                .map(ReturnValues::from_vec)
                 .map(VmFlow::Return);
         };
         if let Some(entry) = self.native_call_inline_cache(
@@ -6427,18 +7017,20 @@ impl Vm {
             if entry.function_handle == handle {
                 #[cfg(test)]
                 self.record_native_call_inline_cache_hit(cache_site.program_id);
-                return self.call_native_function_resumable(
-                    handle,
-                    entry.native,
-                    args,
-                    program,
-                    depth,
-                    call_site,
-                    fuel,
-                );
+                return self
+                    .call_native_function_resumable(
+                        handle,
+                        entry.native,
+                        args,
+                        program,
+                        depth,
+                        call_site,
+                        fuel,
+                    )
+                    .map(into_return_values_flow);
             }
         }
-        let kind = self.heap.function_kind(handle).ok_or_else(|| {
+        let (kind, bytecode_data) = self.heap.function_dispatch_data(handle).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "function handle is missing",
             })
@@ -6453,12 +7045,22 @@ impl Vm {
                     native,
                 },
             );
-            return self.call_native_function_resumable(
-                handle, native, args, program, depth, call_site, fuel,
-            );
+            return self
+                .call_native_function_resumable(
+                    handle, native, args, program, depth, call_site, fuel,
+                )
+                .map(into_return_values_flow);
         }
         self.call_function_kind_with_site_resumable(
-            program, callee, handle, kind, args, depth, call_site, fuel,
+            program,
+            callee,
+            handle,
+            kind,
+            bytecode_data,
+            args,
+            depth,
+            call_site,
+            fuel,
         )
     }
 
@@ -6468,11 +7070,12 @@ impl Vm {
         callee: Value,
         handle: u32,
         kind: FunctionKind,
+        bytecode_data: Option<(SmallVec<[u32; 4]>, u32)>,
         args: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
         fuel: &mut Option<u64>,
-    ) -> VmFlowResult<Vec<Value>> {
+    ) -> VmFlowResult<ReturnValues> {
         match kind {
             FunctionKind::Bytecode {
                 program: None,
@@ -6489,7 +7092,7 @@ impl Vm {
                     Some(prototype),
                     function,
                     callee,
-                    handle,
+                    bytecode_data,
                     args,
                     depth,
                     call_site,
@@ -6500,6 +7103,18 @@ impl Vm {
                 program: Some(dynamic_program_id),
                 prototype,
             } => {
+                let leaf_call_plan = self
+                    .dynamic_programs
+                    .get(dynamic_program_id as usize)
+                    .and_then(|program| program.leaf_call_plan(prototype));
+                if let (Some(plan), Some((upvalues, _))) = (leaf_call_plan, bytecode_data.as_ref())
+                {
+                    if let Some(results) =
+                        self.try_leaf_bytecode_call(plan, upvalues, depth, fuel)?
+                    {
+                        return Ok(VmFlow::Return(results));
+                    }
+                }
                 let dynamic_program = self.dynamic_program(dynamic_program_id)?;
                 let function = dynamic_program
                     .functions
@@ -6515,7 +7130,7 @@ impl Vm {
                     Some(prototype),
                     function,
                     callee,
-                    handle,
+                    bytecode_data,
                     args,
                     depth,
                     call_site,
@@ -6532,7 +7147,7 @@ impl Vm {
                     None,
                     &dynamic_program.main,
                     callee,
-                    handle,
+                    bytecode_data,
                     args,
                     depth,
                     call_site,
@@ -6542,11 +7157,15 @@ impl Vm {
             FunctionKind::Host(host) => {
                 let op = self.host_function(host)?.clone();
                 charge_fuel(fuel, self.settings.initial_fuel, u64::from(op.fuel_cost))?;
-                (op.handler)(self, args).map(VmFlow::Return)
+                (op.handler)(self, args)
+                    .map(ReturnValues::from_vec)
+                    .map(VmFlow::Return)
             }
-            FunctionKind::Native(native) => self.call_native_function_resumable(
-                handle, native, args, program, depth, call_site, fuel,
-            ),
+            FunctionKind::Native(native) => self
+                .call_native_function_resumable(
+                    handle, native, args, program, depth, call_site, fuel,
+                )
+                .map(into_return_values_flow),
         }
     }
 
@@ -6718,20 +7337,15 @@ impl Vm {
         prototype: Option<u32>,
         function: &Function,
         callee: Value,
-        handle: u32,
+        bytecode_data: Option<(SmallVec<[u32; 4]>, u32)>,
         args: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
         fuel: &mut Option<u64>,
-    ) -> VmFlowResult<Vec<Value>> {
-        let upvalues = self.heap.function_upvalues(handle).ok_or_else(|| {
+    ) -> VmFlowResult<ReturnValues> {
+        let (upvalues, environment) = bytecode_data.ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
-                reason: "function upvalues are missing",
-            })
-        })?;
-        let environment = self.heap.function_environment(handle).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "function environment is missing",
+                reason: "bytecode function call data is missing",
             })
         })?;
         self.run_function(
@@ -6751,6 +7365,111 @@ impl Vm {
             fuel,
         )
         .map_err(|error| attach_existing_instruction_source(program, function, error))
+    }
+
+    fn try_leaf_bytecode_call(
+        &mut self,
+        plan: LeafCallPlan,
+        upvalues: &[u32],
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Option<ReturnValues>> {
+        // Fuel and coverage are deliberately kept on the ordinary interpreter
+        // so their per-instruction accounting and source attribution remain
+        // byte-for-byte identical. Likewise, do not skip a pending GC debt or
+        // a deterministic weak-collection boundary.
+        if self.settings.initial_fuel.is_some()
+            || fuel.is_some()
+            || self.settings.enable_conformance_coverage
+            || self.heap.has_allocation_debt()
+            || self.weak_collection_due_within(plan.maximum_instruction_count())
+            || depth.saturating_add(1) > self.settings.recursion_limit
+        {
+            return Ok(None);
+        }
+
+        let (results, instruction_count, mutation) = match plan {
+            LeafCallPlan::UpvalueCounter {
+                value_upvalue,
+                step_upvalue,
+            } => {
+                let Some(value_handle) = upvalues.get(value_upvalue).copied() else {
+                    return Ok(None);
+                };
+                let Some(step_handle) = upvalues.get(step_upvalue).copied() else {
+                    return Ok(None);
+                };
+                let Some(value) = self.heap.upvalue_get(value_handle) else {
+                    return Ok(None);
+                };
+                let Some(step) = self.heap.upvalue_get(step_handle) else {
+                    return Ok(None);
+                };
+                let (Some(value), Some(step)) = (value.as_number(), step.as_number()) else {
+                    return Ok(None);
+                };
+                let next = Value::number(binary(NumericOp::Add, value, step));
+                (ReturnValues::from_slice(&[next]), 8, (value_handle, next))
+            }
+            LeafCallPlan::ArrayIterator {
+                index_upvalue,
+                items_upvalue,
+                increment,
+            } => {
+                let Some(index_handle) = upvalues.get(index_upvalue).copied() else {
+                    return Ok(None);
+                };
+                let Some(items_handle) = upvalues.get(items_upvalue).copied() else {
+                    return Ok(None);
+                };
+                let Some(index) = self.heap.upvalue_get(index_handle) else {
+                    return Ok(None);
+                };
+                let Some(items) = self.heap.upvalue_get(items_handle) else {
+                    return Ok(None);
+                };
+                let Some(index) = index.as_number() else {
+                    return Ok(None);
+                };
+                let Some(items) = items.as_table() else {
+                    return Ok(None);
+                };
+                // Both `#items` and `items[index]` are only primitive when no
+                // metatable can intercept them. This guard precedes the index
+                // mutation, so any metamethod-capable case falls back cleanly.
+                if self.heap.table_metatable(items) != Some(None) {
+                    return Ok(None);
+                }
+                let Some(len) = self.heap.array_len(items) else {
+                    return Ok(None);
+                };
+                let next_number = binary(NumericOp::Add, index, increment);
+                let next = Value::number(next_number);
+                if next_number <= len as f64 {
+                    let value = self.heap.table_get(items, next).unwrap_or_else(Value::nil);
+                    (
+                        ReturnValues::from_slice(&[next, value]),
+                        19,
+                        (index_handle, next),
+                    )
+                } else {
+                    (ReturnValues::new(), 13, (index_handle, next))
+                }
+            }
+        };
+
+        // Every possible fallback above occurred before this write. The handle
+        // was already read successfully, so losing it here would indicate VM
+        // corruption rather than a speculative guard miss.
+        self.heap
+            .upvalue_set(mutation.0, mutation.1)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "leaf-call upvalue handle is missing",
+                })
+            })?;
+        self.executed_instructions = self.executed_instructions.wrapping_add(instruction_count);
+        Ok(Some(results))
     }
 
     fn call_metamethod(
@@ -8415,7 +9134,7 @@ impl Vm {
         };
         target.name = debug_name;
         if let Some(location) = location {
-            target.source = location.source;
+            target.source = location.source.to_string();
             target.line = u32_line_to_i32(location.line);
         }
         Ok(Some(target))
@@ -8467,7 +9186,7 @@ impl Vm {
         };
         target.name = debug_name;
         if let Some(location) = location {
-            target.source = location.source;
+            target.source = location.source.to_string();
             target.line = u32_line_to_i32(location.line);
         }
         Ok(Some(target))
@@ -8862,7 +9581,7 @@ impl Vm {
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
-        flow
+        flow.map(into_vec_flow)
     }
 
     fn resume_coroutine_frames(
@@ -9045,6 +9764,7 @@ impl Vm {
             }),
             fuel,
         )
+        .map(into_vec_flow)
     }
 
     fn native_coroutine_resume(
@@ -9879,9 +10599,9 @@ impl Vm {
             return;
         };
         frame.roots.clear();
-        extend_weak_collectable_roots(&mut frame.roots, registers);
-        extend_weak_collectable_roots(&mut frame.roots, varargs);
-        extend_weak_collectable_roots(&mut frame.roots, pending_return_prefixes);
+        frame.roots.extend_from_slice(registers);
+        frame.roots.extend_from_slice(varargs);
+        frame.roots.extend_from_slice(pending_return_prefixes);
     }
 
     fn push_stackless_self_call_roots(
@@ -13372,28 +14092,55 @@ impl Vm {
                 reason: "table handle is missing",
             })
         })?;
-        let mut values = Vec::with_capacity(len);
-        for index in 1..=len {
-            values.push(self.raw_table_get(table, Value::number(index as f64))?);
-        }
+        let mut values = if let Some(values) = self.heap.read_array_prefix(table, len) {
+            values
+        } else {
+            let mut values = Vec::with_capacity(len);
+            for index in 1..=len {
+                values.push(self.raw_table_get(table, Value::number(index as f64))?);
+            }
+            values
+        };
 
         let initial_storage_len = self.heap.table_storage_len(table).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "table handle is missing",
             })
         })?;
-        self.table_sort_heap(
-            &mut values,
-            comparator,
-            table,
-            initial_storage_len,
-            program,
-            depth,
-            fuel,
-        )?;
+        if comparator.is_none()
+            && values
+                .iter()
+                .all(|value| value.as_number().is_some_and(|number| !number.is_nan()))
+        {
+            values.sort_unstable_by(|lhs, rhs| {
+                lhs.as_number()
+                    .expect("numeric table.sort fast path validates every value")
+                    .partial_cmp(
+                        &rhs.as_number()
+                            .expect("numeric table.sort fast path validates every value"),
+                    )
+                    .expect("numeric table.sort fast path rejects NaN")
+            });
+        } else {
+            self.table_sort_heap(
+                &mut values,
+                comparator,
+                table,
+                initial_storage_len,
+                program,
+                depth,
+                fuel,
+            )?;
+        }
 
-        for (index, value) in values.into_iter().enumerate() {
-            self.set_table_index(table, Value::number((index + 1) as f64), value)?;
+        match self.heap.try_write_array_prefix(table, &values) {
+            Some(TableNumericArrayWrite::Stored) => {}
+            Some(TableNumericArrayWrite::Readonly) => return Err(readonly_table_error()),
+            Some(TableNumericArrayWrite::Deferred) | None => {
+                for (index, value) in values.into_iter().enumerate() {
+                    self.set_table_index(table, Value::number((index + 1) as f64), value)?;
+                }
+            }
         }
         Ok(Vec::new())
     }
@@ -14199,7 +14946,29 @@ impl Vm {
         }
         let state = get_register(registers, window.state)?;
         let control = get_register(registers, window.control)?;
-        let results = self.call_value(program, iterator, &[state, control], depth, fuel)?;
+        if let Some(advanced) = self.try_builtin_iterator_step(
+            iterator,
+            state,
+            control,
+            registers,
+            register_cells,
+            window,
+            depth,
+            fuel,
+        )? {
+            return Ok(advanced);
+        }
+        let results = match self.call_value_with_site_resumable(
+            program,
+            iterator,
+            &[state, control],
+            depth,
+            None,
+            fuel,
+        )? {
+            VmFlow::Return(results) => results,
+            VmFlow::Yield(_) => return Err(non_yieldable_boundary_error()),
+        };
         self.sync_register_cells(registers, register_cells)?;
 
         let first = results.first().copied().unwrap_or_else(Value::nil);
@@ -14218,6 +14987,82 @@ impl Vm {
             clear_register_cell(register_cells, register)?;
         }
         Ok(true)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn try_builtin_iterator_step(
+        &mut self,
+        iterator: Value,
+        state: Value,
+        control: Value,
+        registers: &mut [Value],
+        register_cells: &mut [Option<u32>],
+        window: CallIteratorRegisters,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Option<bool>> {
+        let Some(handle) = iterator.as_function() else {
+            return Ok(None);
+        };
+        let Some(FunctionKind::Native(native @ (NativeFunction::Next | NativeFunction::INext))) =
+            self.heap.function_kind(handle)
+        else {
+            return Ok(None);
+        };
+        self.check_recursion_depth(depth)?;
+        let args = [state, control];
+        let extra_fuel = self.native_extra_fuel_cost(handle, native, &args);
+        charge_fuel(fuel, self.settings.initial_fuel, extra_fuel)?;
+
+        let table = state
+            .as_table()
+            .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "table" }))?;
+        let entry = match native {
+            NativeFunction::Next => {
+                match self.table_next_after(table, control).ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "next table handle is missing",
+                    })
+                })? {
+                    TableNext::Entry(key, value) => Some((key, value)),
+                    TableNext::End => None,
+                    TableNext::InvalidKey => return Err(Error::new(ErrorKind::InvalidKeyToNext)),
+                }
+            }
+            NativeFunction::INext => {
+                if !self.heap.has_table(table) {
+                    return Err(Error::new(ErrorKind::InvalidProgram {
+                        reason: "inext table handle is missing",
+                    }));
+                }
+                let index = number_arg(control)?;
+                let next_index = binary(NumericOp::Add, index, 1.0);
+                let Some(one_based_index) = array_iterator_index(next_index) else {
+                    return Ok(Some(false));
+                };
+                let value = self
+                    .heap
+                    .array_get(table, one_based_index)
+                    .unwrap_or_else(Value::nil);
+                (value.kind() != ValueKind::Nil).then_some((Value::number(next_index), value))
+            }
+            _ => unreachable!("builtin iterator fast path only accepts next and inext"),
+        };
+        let Some((key, value)) = entry else {
+            return Ok(Some(false));
+        };
+        set_register(registers, window.control, key)?;
+        for index in 0..window.visible_count {
+            let visible = window.visible_register(index)?;
+            let value = match index {
+                0 => key,
+                1 => value,
+                _ => Value::nil(),
+            };
+            set_register(registers, visible, value)?;
+            clear_register_cell(register_cells, visible)?;
+        }
+        Ok(Some(true))
     }
 
     fn iterator_is_callable(&mut self, iterator: Value) -> Result<bool> {
@@ -14357,11 +15202,10 @@ impl Vm {
 
     #[inline(always)]
     fn maybe_collect(&mut self) {
+        let weak_collection_due =
+            self.executed_instructions == self.next_weak_collection_instruction;
         if self.profile.is_deterministic_sim() {
-            if self
-                .executed_instructions
-                .is_multiple_of(self.settings.deterministic_gc_interval.get())
-            {
+            if weak_collection_due {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(&[]);
                 self.heap.collect_weak_tables_with_roots(&roots);
@@ -14370,25 +15214,25 @@ impl Vm {
             }
         } else {
             self.heap.collect_debt();
-            if !self.gc_stopped
-                && self
-                    .executed_instructions
-                    .is_multiple_of(self.settings.deterministic_gc_interval.get())
-            {
+            if !self.gc_stopped && weak_collection_due {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(&[]);
                 self.heap.collect_weak_tables_with_roots(&roots);
             }
+        }
+        if weak_collection_due {
+            self.next_weak_collection_instruction = self
+                .next_weak_collection_instruction
+                .wrapping_add(self.settings.deterministic_gc_interval.get());
         }
     }
 
     #[inline(always)]
     fn maybe_collect_with_roots(&mut self, transient_roots: &[Value]) {
+        let weak_collection_due =
+            self.executed_instructions == self.next_weak_collection_instruction;
         if self.profile.is_deterministic_sim() {
-            if self
-                .executed_instructions
-                .is_multiple_of(self.settings.deterministic_gc_interval.get())
-            {
+            if weak_collection_due {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(transient_roots);
                 self.heap.collect_weak_tables_with_roots(&roots);
@@ -14397,16 +15241,25 @@ impl Vm {
             }
         } else {
             self.heap.collect_debt();
-            if !self.gc_stopped
-                && self
-                    .executed_instructions
-                    .is_multiple_of(self.settings.deterministic_gc_interval.get())
-            {
+            if !self.gc_stopped && weak_collection_due {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(transient_roots);
                 self.heap.collect_weak_tables_with_roots(&roots);
             }
         }
+        if weak_collection_due {
+            self.next_weak_collection_instruction = self
+                .next_weak_collection_instruction
+                .wrapping_add(self.settings.deterministic_gc_interval.get());
+        }
+    }
+
+    #[inline(always)]
+    fn weak_collection_due_within(&self, steps: u64) -> bool {
+        steps
+            >= self
+                .next_weak_collection_instruction
+                .wrapping_sub(self.executed_instructions)
     }
 
     fn record_coverage_hit(
@@ -16384,6 +17237,10 @@ fn luau_number_to_string(value: f64) -> String {
         }
         return "0".to_owned();
     }
+    const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_992.0;
+    if value.fract() == 0.0 && value.abs() <= MAX_EXACT_INTEGER {
+        return (value as i64).to_string();
+    }
     let debug = format!("{value:?}");
     let (negative, magnitude) = debug
         .strip_prefix('-')
@@ -16630,8 +17487,22 @@ fn iteration_error(value: Value) -> Error {
     })
 }
 
-fn first_result_or_nil(results: Vec<Value>) -> Value {
-    results.first().copied().unwrap_or_else(Value::nil)
+fn into_return_values_flow(flow: VmFlow<Vec<Value>>) -> VmFlow<ReturnValues> {
+    match flow {
+        VmFlow::Return(results) => VmFlow::Return(ReturnValues::from_vec(results)),
+        VmFlow::Yield(suspension) => VmFlow::Yield(suspension),
+    }
+}
+
+fn into_vec_flow(flow: VmFlow<ReturnValues>) -> VmFlow<Vec<Value>> {
+    match flow {
+        VmFlow::Return(results) => VmFlow::Return(results.into_vec()),
+        VmFlow::Yield(suspension) => VmFlow::Yield(suspension),
+    }
+}
+
+fn first_result_or_nil(results: impl AsRef<[Value]>) -> Value {
+    results.as_ref().first().copied().unwrap_or_else(Value::nil)
 }
 
 fn collect_traceback_snapshot_roots(roots: &mut Vec<Value>, snapshot: &TracebackSnapshot) {
@@ -16892,13 +17763,14 @@ fn write_call_results(
 
 fn finish_function_results(
     pending_prefixes: &mut Vec<Value>,
-    mut results: Vec<Value>,
-) -> Vec<Value> {
+    results: impl Into<ReturnValues>,
+) -> ReturnValues {
+    let results = results.into();
     if pending_prefixes.is_empty() {
         return results;
     }
-    pending_prefixes.append(&mut results);
-    std::mem::take(pending_prefixes)
+    pending_prefixes.extend(results);
+    ReturnValues::from_vec(std::mem::take(pending_prefixes))
 }
 
 fn same_program_bytecode_function(
@@ -18006,6 +18878,7 @@ fn checked_jump(aux: i32) -> Result<usize> {
     Ok(aux as usize)
 }
 
+#[cfg(test)]
 fn weak_collection_due_within(executed: u64, interval: u64, steps: u64) -> bool {
     let remainder = executed % interval;
     let until_boundary = if remainder == 0 {
@@ -21139,6 +22012,47 @@ mod inline_cache_tests {
     use super::*;
 
     #[test]
+    fn leaf_plans_require_the_complete_bytecode_shape_not_debug_names() {
+        let code = vec![
+            Instruction::with_aux(Opcode::GetUpvalue, 0, 0, 0, 0),
+            Instruction::with_aux(Opcode::GetUpvalue, 1, 0, 0, 1),
+            Instruction::new(Opcode::Add, 0, 0, 1),
+            Instruction::new(Opcode::ClearLocalCell, 1, 0, 0),
+            Instruction::with_aux(Opcode::SetUpvalue, 0, 0, 0, 0),
+            Instruction::new(Opcode::ClearLocalCell, 0, 0, 0),
+            Instruction::with_aux(Opcode::GetUpvalue, 0, 0, 0, 0),
+            Instruction::new(Opcode::Return, 0, 1, 0),
+            Instruction::new(Opcode::Return, 0, 0, 0),
+        ];
+        let mut function = Function::with_params_and_upvalues(
+            code,
+            2,
+            0,
+            vec![
+                UpvalueDescriptor::ParentLocal(0),
+                UpvalueDescriptor::ParentLocal(1),
+            ],
+            Vec::new(),
+        )
+        .with_debug_name(Some("unrelated-name".to_owned()));
+        assert_eq!(
+            recognize_upvalue_counter_plan(&function),
+            Some(LeafCallPlan::UpvalueCounter {
+                value_upvalue: 0,
+                step_upvalue: 1,
+            })
+        );
+
+        let mut out_of_bounds = function.clone();
+        out_of_bounds.code[0].a = 2;
+        assert_eq!(recognize_upvalue_counter_plan(&out_of_bounds), None);
+
+        function.debug_name = Some("closures_upvalues".to_owned());
+        function.code[2].op = Opcode::Sub;
+        assert_eq!(recognize_upvalue_counter_plan(&function), None);
+    }
+
+    #[test]
     fn hot_loop_root_sync_keeps_collection_and_guest_entry_boundaries() {
         assert!(!weak_collection_due_within(0, 10_000, 1));
         assert!(weak_collection_due_within(9_999, 10_000, 1));
@@ -22296,7 +23210,7 @@ mod inline_cache_tests {
     #[test]
     fn dynamic_string_cache_stays_monomorphic_on_atom_mismatch() {
         let program = cache_program();
-        let mut caches = FunctionInlineCaches::new(&program.main);
+        let mut caches = FunctionInlineCaches::new(&program.main, None);
         let x = TableStringInlineCache::new(1, TableStringHashSlot::from_parts(1, 2));
         let y = TableStringInlineCache::new(2, TableStringHashSlot::from_parts(1, 3));
         assert_eq!(caches.set_table_inline_cache(0, x), Some(()));

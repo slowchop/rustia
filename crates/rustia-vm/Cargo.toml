@@ -15,6 +15,7 @@ publish.workspace = true
 [dependencies]
 gc-arena.workspace = true
 libm.workspace = true
+smallvec.workspace = true
 
 [lints]
 workspace = true
