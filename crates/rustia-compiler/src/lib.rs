@@ -62,7 +62,24 @@ pub fn compile(chunk: &Chunk) -> Result<Program> {
 }
 
 pub fn compile_with_options(chunk: &Chunk, options: CompileOptions) -> Result<Program> {
-    Compiler::new(options).compile_chunk(chunk)
+    // Capture discovery is intentionally a complete compiler pass. Nested functions can make a
+    // source-earlier assignment target captured (including when that assignment executes again at
+    // a loop backedge), so a single source-order pass cannot safely decide whether that write must
+    // update a shared cell. The second deterministic pass starts with the complete captured-register
+    // sets and therefore emits cell write-throughs at every assignment site.
+    let capture_hints = Compiler::new(options.clone()).discover_capture_hints(chunk)?;
+    Compiler::with_capture_hints(options, capture_hints).compile_chunk(chunk)
+}
+
+fn collect_capture_hints(main: &BTreeSet<u8>, functions: &[Function]) -> Vec<Vec<u8>> {
+    let mut capture_hints = Vec::with_capacity(functions.len().saturating_add(1));
+    capture_hints.push(main.iter().copied().collect());
+    capture_hints.extend(
+        functions
+            .iter()
+            .map(|function| function.captured_registers.clone()),
+    );
+    capture_hints
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -161,6 +178,7 @@ struct Compiler {
     disable_builtin_fastpaths: bool,
     upvalues: Vec<UpvalueDescriptor>,
     captured_registers: BTreeSet<u8>,
+    capture_hints: Vec<Vec<u8>>,
     capture_stack: Vec<CaptureScope>,
     source_map: Vec<InstructionSource>,
     current_function_is_vararg: bool,
@@ -174,6 +192,16 @@ struct Compiler {
 
 impl Compiler {
     fn new(options: CompileOptions) -> Self {
+        Self::with_capture_hints(options, Vec::new())
+    }
+
+    fn with_capture_hints(options: CompileOptions, capture_hints: Vec<Vec<u8>>) -> Self {
+        let captured_registers = capture_hints
+            .first()
+            .into_iter()
+            .flatten()
+            .copied()
+            .collect();
         Self {
             options,
             constants: Vec::new(),
@@ -187,7 +215,8 @@ impl Compiler {
             global_environment_escaped: false,
             disable_builtin_fastpaths: false,
             upvalues: Vec::new(),
-            captured_registers: BTreeSet::new(),
+            captured_registers,
+            capture_hints,
             capture_stack: Vec::new(),
             source_map: Vec::new(),
             current_function_is_vararg: true,
@@ -200,18 +229,38 @@ impl Compiler {
         }
     }
 
+    fn discover_capture_hints(mut self, chunk: &Chunk) -> Result<Vec<Vec<u8>>> {
+        // Compile every statement and nested prototype so the normal lexical
+        // resolver—not a second shadow implementation—discovers captures.
+        // Final bytecode packaging and immutable-origin rewriting are skipped.
+        self.compile_block(&chunk.statements)?;
+        Ok(collect_capture_hints(
+            &self.captured_registers,
+            &self.functions,
+        ))
+    }
+
     fn compile_chunk(mut self, chunk: &Chunk) -> Result<Program> {
         self.compile_block(&chunk.statements)?;
         self.code.push(Instruction::new(Opcode::Halt, 0, 0, 0));
+        if !self.capture_hints.is_empty()
+            && self.capture_hints.len() != self.functions.len().saturating_add(1)
+        {
+            return Err(CompileError::new(
+                "capture discovery changed the function prototype graph",
+            ));
+        }
         let max_registers = usize::from(self.max_registers.max(1));
+        let main_captured_registers = self.captured_registers.iter().copied().collect();
         let main_source_map = self.source_map;
-        Ok(Program::with_functions(
-            Function::with_params_and_vararg(self.code, max_registers, 0, true)
-                .with_source_map(main_source_map),
-            self.constants,
-            self.functions,
+        let mut main = Function::with_params_and_vararg(self.code, max_registers, 0, true)
+            .with_source_map(main_source_map);
+        main.captured_registers = main_captured_registers;
+        mark_immutable_capture_descriptors(&mut main, &mut self.functions);
+        Ok(
+            Program::with_functions(main, self.constants, self.functions)
+                .with_source_name(self.options.source_name),
         )
-        .with_source_name(self.options.source_name))
     }
 
     fn compile_block(&mut self, statements: &[Stmt]) -> Result<()> {
@@ -464,7 +513,15 @@ impl Compiler {
             i32::try_from(prototype)
                 .map_err(|_| CompileError::at("too many function prototypes", span))?,
         ));
-        if self.local_register_is_captured(register) {
+        // A nested closure compiled as part of this initializer can already capture the local
+        // function (for example, `f` returns a closure that refers to `f`). In that case
+        // LoadFunction must publish the just-created value into the cell it captured. A capture
+        // hinted only by a source-later sibling remains an immutable initialization and is
+        // captured lazily when that sibling is created.
+        if matches!(
+            self.locals.get(name),
+            Some(Binding::CapturedLocal(captured)) if *captured == register
+        ) {
             self.code.push(Instruction::new(
                 Opcode::SetLocalCell,
                 register,
@@ -533,6 +590,14 @@ impl Compiler {
                     0,
                     prototype,
                 ));
+                if self.local_register_is_captured(register) {
+                    self.code.push(Instruction::new(
+                        Opcode::SetLocalCell,
+                        register,
+                        register,
+                        0,
+                    ));
+                }
             }
             CompiledAssignmentTarget::CapturedLocal(register) => {
                 self.code.push(Instruction::with_aux(
@@ -653,8 +718,17 @@ impl Compiler {
             let result = self.alloc_register_at(span)?;
             match &target {
                 CompiledAssignmentTarget::Local(register) => {
-                    self.code
-                        .push(Instruction::new(Opcode::Move, result, *register, 0));
+                    if self.local_register_is_captured(*register) {
+                        self.code.push(Instruction::new(
+                            Opcode::GetLocalCell,
+                            result,
+                            *register,
+                            0,
+                        ));
+                    } else {
+                        self.code
+                            .push(Instruction::new(Opcode::Move, result, *register, 0));
+                    }
                 }
                 CompiledAssignmentTarget::CapturedLocal(register) => {
                     self.code
@@ -1222,7 +1296,14 @@ impl Compiler {
                 if let Some(binding) = self.locals.get(name).copied() {
                     match binding {
                         Binding::Register(source) => {
-                            if source != target {
+                            if self.local_register_is_captured(source) {
+                                self.code.push(Instruction::new(
+                                    Opcode::GetLocalCell,
+                                    target,
+                                    source,
+                                    0,
+                                ));
+                            } else if source != target {
                                 self.code
                                     .push(Instruction::new(Opcode::Move, target, source, 0));
                             }
@@ -1475,6 +1556,16 @@ impl Compiler {
 
         self.next_register = 0;
         self.max_registers = 0;
+        self.captured_registers = match self.capture_hints.get(prototype.saturating_add(1)) {
+            Some(hints) => hints.iter().copied().collect(),
+            None if self.capture_hints.is_empty() => BTreeSet::new(),
+            None => {
+                return Err(CompileError::at(
+                    "capture discovery changed the function prototype graph",
+                    span,
+                ));
+            }
+        };
         self.current_function_is_vararg = is_vararg;
         self.disable_builtin_fastpaths = true;
         if let Some(name) = self_name {
@@ -3103,6 +3194,16 @@ impl Compiler {
 
         self.next_register = 0;
         self.max_registers = 0;
+        self.captured_registers = match self.capture_hints.get(prototype.saturating_add(1)) {
+            Some(hints) => hints.iter().copied().collect(),
+            None if self.capture_hints.is_empty() => BTreeSet::new(),
+            None => {
+                return Err(CompileError::at(
+                    "capture discovery changed the function prototype graph",
+                    span,
+                ));
+            }
+        };
         self.current_function_is_vararg = true;
         self.disable_builtin_fastpaths = true;
         self.compile_block(&chunk.statements)?;
@@ -3111,13 +3212,14 @@ impl Compiler {
         let function_code = std::mem::take(&mut self.code);
         let function_source_map = std::mem::take(&mut self.source_map);
         let function_max_registers = usize::from(self.max_registers.max(1));
+        let function_captured_registers = self.captured_registers.iter().copied().collect();
         self.functions[prototype] = Function::with_params_vararg_and_upvalues(
             function_code,
             function_max_registers,
             0,
             true,
             Vec::new(),
-            Vec::new(),
+            function_captured_registers,
         )
         .with_source_map(function_source_map);
 
@@ -5791,6 +5893,175 @@ fn expr_is_call(expr: &Expr) -> bool {
     matches!(expr, Expr::Call { .. } | Expr::MethodCall { .. })
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct CaptureOrigin {
+    scope: usize,
+    register: u8,
+}
+
+#[derive(Clone, Copy)]
+enum CaptureParent {
+    Missing,
+    One(usize),
+    Ambiguous,
+}
+
+#[derive(Clone, Copy)]
+enum CaptureOriginState {
+    Unresolved,
+    Resolving,
+    Resolved(Option<CaptureOrigin>),
+}
+
+/// Rewrites only captures whose lexical source is provably never assigned.
+/// Existing cell descriptors are the conservative bytecode contract; the two
+/// value variants are an optimization emitted after the complete nested
+/// function graph and all writes are visible.
+fn mark_immutable_capture_descriptors(main: &mut Function, functions: &mut [Function]) {
+    let scope_count = functions.len().saturating_add(1);
+    let mut parents = vec![CaptureParent::Missing; scope_count];
+
+    for scope in 0..scope_count {
+        let function = if scope == 0 {
+            &*main
+        } else {
+            &functions[scope - 1]
+        };
+        for instruction in &function.code {
+            if instruction.op != Opcode::LoadFunction || instruction.aux < 0 {
+                continue;
+            }
+            let Some(child_scope) = usize::try_from(instruction.aux)
+                .ok()
+                .and_then(|prototype| prototype.checked_add(1))
+                .filter(|child| *child < scope_count)
+            else {
+                continue;
+            };
+            parents[child_scope] = match parents[child_scope] {
+                CaptureParent::Missing => CaptureParent::One(scope),
+                CaptureParent::One(existing) if existing == scope => CaptureParent::One(scope),
+                CaptureParent::One(_) | CaptureParent::Ambiguous => CaptureParent::Ambiguous,
+            };
+        }
+    }
+
+    let mut origins = functions
+        .iter()
+        .map(|function| vec![CaptureOriginState::Unresolved; function.upvalues.len()])
+        .collect::<Vec<_>>();
+    for prototype in 0..functions.len() {
+        for upvalue in 0..functions[prototype].upvalues.len() {
+            let _ = resolve_capture_origin(prototype, upvalue, functions, &parents, &mut origins);
+        }
+    }
+
+    let mut mutated = BTreeSet::new();
+    for scope in 0..scope_count {
+        let function = if scope == 0 {
+            &*main
+        } else {
+            &functions[scope - 1]
+        };
+        for instruction in &function.code {
+            match instruction.op {
+                Opcode::SetLocalCell => {
+                    mutated.insert(CaptureOrigin {
+                        scope,
+                        register: instruction.b,
+                    });
+                }
+                Opcode::SetUpvalue if scope != 0 && instruction.aux >= 0 => {
+                    if let Some(origin) = usize::try_from(instruction.aux)
+                        .ok()
+                        .and_then(|index| origins[scope - 1].get(index))
+                        .and_then(|state| match state {
+                            CaptureOriginState::Resolved(origin) => *origin,
+                            CaptureOriginState::Unresolved | CaptureOriginState::Resolving => None,
+                        })
+                    {
+                        mutated.insert(origin);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    for (prototype, function) in functions.iter_mut().enumerate() {
+        for (index, descriptor) in function.upvalues.iter_mut().enumerate() {
+            let immutable = matches!(
+                origins[prototype].get(index),
+                Some(CaptureOriginState::Resolved(Some(origin))) if !mutated.contains(origin)
+            );
+            *descriptor = match (*descriptor, immutable) {
+                (UpvalueDescriptor::ParentLocal(register), true)
+                | (UpvalueDescriptor::ParentLocalValue(register), true) => {
+                    UpvalueDescriptor::ParentLocalValue(register)
+                }
+                (UpvalueDescriptor::ParentUpvalue(index), true)
+                | (UpvalueDescriptor::ParentUpvalueValue(index), true) => {
+                    UpvalueDescriptor::ParentUpvalueValue(index)
+                }
+                (UpvalueDescriptor::ParentLocal(register), false)
+                | (UpvalueDescriptor::ParentLocalValue(register), false) => {
+                    UpvalueDescriptor::ParentLocal(register)
+                }
+                (UpvalueDescriptor::ParentUpvalue(index), false)
+                | (UpvalueDescriptor::ParentUpvalueValue(index), false) => {
+                    UpvalueDescriptor::ParentUpvalue(index)
+                }
+            };
+        }
+    }
+}
+
+fn resolve_capture_origin(
+    prototype: usize,
+    upvalue: usize,
+    functions: &[Function],
+    parents: &[CaptureParent],
+    states: &mut [Vec<CaptureOriginState>],
+) -> Option<CaptureOrigin> {
+    match *states.get(prototype)?.get(upvalue)? {
+        CaptureOriginState::Resolved(origin) => return origin,
+        CaptureOriginState::Resolving => return None,
+        CaptureOriginState::Unresolved => {}
+    }
+    states[prototype][upvalue] = CaptureOriginState::Resolving;
+
+    let child_scope = prototype.checked_add(1)?;
+    let parent_scope = match *parents.get(child_scope)? {
+        CaptureParent::One(parent) => parent,
+        CaptureParent::Missing | CaptureParent::Ambiguous => {
+            states[prototype][upvalue] = CaptureOriginState::Resolved(None);
+            return None;
+        }
+    };
+    let descriptor = *functions.get(prototype)?.upvalues.get(upvalue)?;
+    let origin = match descriptor {
+        UpvalueDescriptor::ParentLocal(register)
+        | UpvalueDescriptor::ParentLocalValue(register) => Some(CaptureOrigin {
+            scope: parent_scope,
+            register,
+        }),
+        UpvalueDescriptor::ParentUpvalue(parent_upvalue)
+        | UpvalueDescriptor::ParentUpvalueValue(parent_upvalue) => {
+            parent_scope.checked_sub(1).and_then(|parent| {
+                resolve_capture_origin(
+                    parent,
+                    usize::from(parent_upvalue),
+                    functions,
+                    parents,
+                    states,
+                )
+            })
+        }
+    };
+    states[prototype][upvalue] = CaptureOriginState::Resolved(origin);
+    origin
+}
+
 #[derive(Clone, Copy)]
 enum Binding {
     Register(u8),
@@ -6168,7 +6439,7 @@ fn compare_ordered_constants(op: BinaryOp, lhs: &Constant, rhs: &Constant) -> Op
 mod tests {
     use super::{compile, compile_with_options, BuiltinEnvironment, CompileOptions};
     use rustia_parser::{parse_source, parse_source_bytes};
-    use rustia_vm::bytecode::{Constant, Opcode, Program};
+    use rustia_vm::bytecode::{Constant, Opcode, Program, UpvalueDescriptor};
     use rustia_vm::{ErrorKind, HostFunctionOp, OpCapability, Profile, Vm, VmSettings};
     use std::sync::Arc;
 
@@ -9116,6 +9387,185 @@ return #s * 1000 + string.byte(s, 256)
             let result = vm.run(&program).unwrap();
             assert_eq!(result.as_number(), Some(expected), "{source}");
         }
+    }
+
+    #[test]
+    fn immutable_capture_analysis_tracks_sibling_and_transitive_mutation() {
+        let counter = compile(
+            &parse_source(
+                "local function make(start, step) local c = start return function() c += step return c end end return make(1, 2)()",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let counter_leaf = counter
+            .functions
+            .iter()
+            .find(|function| function.upvalues.len() == 2)
+            .expect("counter leaf");
+        assert!(matches!(
+            counter_leaf.upvalues[0],
+            UpvalueDescriptor::ParentLocal(_)
+        ));
+        assert!(matches!(
+            counter_leaf.upvalues[1],
+            UpvalueDescriptor::ParentLocalValue(_)
+        ));
+
+        let siblings = compile(
+            &parse_source(
+                "local x = 1 local function get() return x end local function set(v) x = v end set(4) return get()",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(siblings.functions.len(), 2);
+        for function in &siblings.functions {
+            assert!(matches!(
+                function.upvalues.as_slice(),
+                [UpvalueDescriptor::ParentLocal(_)]
+            ));
+        }
+
+        let transitive = compile(
+            &parse_source(
+                "local x = 7 local function outer() return function() return x end end return outer()()",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            transitive.functions[0].upvalues.as_slice(),
+            [UpvalueDescriptor::ParentLocalValue(_)]
+        ));
+        assert!(matches!(
+            transitive.functions[1].upvalues.as_slice(),
+            [UpvalueDescriptor::ParentUpvalueValue(_)]
+        ));
+
+        let transitive_mutation = compile(
+            &parse_source(
+                "local x=1 local function outer() local function get() return x end local function set(v) x=v end set(9) return get() end return outer()",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            transitive_mutation.functions[0].upvalues.as_slice(),
+            [UpvalueDescriptor::ParentLocal(_)]
+        ));
+        for function in &transitive_mutation.functions[1..=2] {
+            assert!(matches!(
+                function.upvalues.as_slice(),
+                [UpvalueDescriptor::ParentUpvalue(_)]
+            ));
+        }
+
+        let immutable_function = compile(
+            &parse_source(
+                "local function f() return 7 end local function get() return f end return get()()",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            immutable_function.functions[1].upvalues.as_slice(),
+            [UpvalueDescriptor::ParentLocalValue(_)]
+        ));
+
+        let nested_self = compile(
+            &parse_source(
+                "local function f() return function() return f end end return f()()==f and 1 or 0",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            nested_self.functions[0].upvalues.as_slice(),
+            [UpvalueDescriptor::ParentLocal(_)]
+        ));
+        assert!(matches!(
+            nested_self.functions[1].upvalues.as_slice(),
+            [UpvalueDescriptor::ParentUpvalue(_)]
+        ));
+
+        for (program, expected) in [
+            (counter, 3.0),
+            (siblings, 4.0),
+            (transitive, 7.0),
+            (transitive_mutation, 9.0),
+            (immutable_function, 7.0),
+            (nested_self, 1.0),
+        ] {
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            assert_eq!(vm.run(&program).unwrap().as_number(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn capture_discovery_precedes_every_loop_write_form() {
+        let cases = [
+            (
+                "local x=0 local fs={} for i=1,3 do x += 1 fs[i]=function() return x end end return fs[1]()*100+fs[2]()*10+fs[3]()",
+                333.0,
+            ),
+            (
+                "local x=0 local fs={} for i=1,3 do x=i fs[i]=function() return x end end return fs[1]()*100+fs[2]()*10+fs[3]()",
+                333.0,
+            ),
+            (
+                "local x=0 local f for i=1,3 do x += 1 if i==1 then f=function() return x end end if i==3 then break end end return f()",
+                3.0,
+            ),
+            (
+                "local x=0 local f for i=1,3 do x += 1 if i==1 then local function middle() return function() return x end end f=middle() end end return f()",
+                3.0,
+            ),
+            (
+                "local x,y=0,0 local fs={} for i=1,3 do x,y=i,i*2 fs[i]=function() return x*10+y end end return fs[1]()*10000+fs[2]()*100+fs[3]()",
+                363_636.0,
+            ),
+            (
+                "local function pair(i) return i,i*2 end local x,y=0,0 local fs={} for i=1,3 do x,y=pair(i) fs[i]=function() return x*10+y end end return fs[1]()*10000+fs[2]()*100+fs[3]()",
+                363_636.0,
+            ),
+            (
+                "local function outer() local x=0 local fs={} for i=1,3 do x += 1 fs[i]=function() return x end end return fs[1]()*100+fs[2]()*10+fs[3]() end return outer()",
+                333.0,
+            ),
+            (
+                "local x=0 local f for outer=1,3 do for i=1,16 do x += 1 end if outer==1 then f=function() return x end end end return f()",
+                48.0,
+            ),
+            (
+                "local x=0 local proxy local ys={} for i=1,3 do if proxy then local z=proxy+1 end ys[i]=x proxy=setmetatable({}, {__add=function() x += 1 return 0 end}) end return ys[1]*100+ys[2]*10+ys[3]",
+                12.0,
+            ),
+            (
+                "local f=function() return 0 end local fs={} for i=1,3 do function f() return i end fs[i]=function() return f end end local a,b,c=fs[1](),fs[2](),fs[3]() return (a()==3 and b()==3 and c()==3) and 1 or 0",
+                1.0,
+            ),
+            (
+                "local fs={} for i=1,3 do local x=i fs[i]=function() return x end end return fs[1]()*100+fs[2]()*10+fs[3]()",
+                123.0,
+            ),
+        ];
+
+        for (source, expected) in cases {
+            let program = compile(&parse_source(source).unwrap()).unwrap();
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            assert_eq!(
+                vm.run(&program).unwrap().as_number(),
+                Some(expected),
+                "{source}"
+            );
+        }
+
+        let source = "local f=(loadstring('local x=0 local fs={} for i=1,3 do x += 1 fs[i]=function() return x end end return fs[1]()*100+fs[2]()*10+fs[3]()')) return f()";
+        let program =
+            compile_with_options(&parse_source(source).unwrap(), conformance_options()).unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(333.0));
     }
 
     #[test]

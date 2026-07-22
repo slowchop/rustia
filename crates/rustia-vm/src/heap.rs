@@ -66,11 +66,45 @@ struct TableData {
 #[derive(Clone)]
 struct FunctionData {
     kind: FunctionKind,
-    upvalues: SmallVec<[u32; 4]>,
+    captures: SmallVec<[FunctionCapture; 2]>,
     environment: u32,
 }
 
-pub(crate) type FunctionDispatchData = (FunctionKind, Option<(SmallVec<[u32; 4]>, u32)>);
+pub(crate) type FunctionDispatchData =
+    (FunctionKind, Option<(SmallVec<[FunctionCapture; 2]>, u32)>);
+
+/// A closure capture is either a shared mutable cell or an immutable value
+/// copied into the closure. The compiler only emits `Direct` after proving
+/// that every lexical alias of the source binding is never assigned.
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub(crate) struct FunctionCapture(Value);
+
+impl FunctionCapture {
+    #[inline]
+    pub(crate) const fn from_cell(cell: u32) -> Self {
+        Self(Value::capture_cell(cell))
+    }
+
+    #[inline]
+    pub(crate) const fn direct(value: Value) -> Self {
+        Self(value)
+    }
+
+    #[inline]
+    pub(crate) const fn cell(self) -> Option<u32> {
+        self.0.as_capture_cell()
+    }
+
+    #[inline]
+    const fn direct_value(self) -> Option<Value> {
+        if self.cell().is_some() {
+            None
+        } else {
+            Some(self.0)
+        }
+    }
+}
 
 #[derive(Clone, Copy, Collect)]
 #[collect(no_drop)]
@@ -687,13 +721,13 @@ impl VmCell {
         &mut self,
         program: Option<u32>,
         prototype: u32,
-        upvalues: Vec<u32>,
+        captures: Vec<FunctionCapture>,
         environment: u32,
     ) -> Option<u32> {
         let handle = u32::try_from(self.functions.len()).ok()?;
         self.functions.push(FunctionData {
             kind: FunctionKind::Bytecode { program, prototype },
-            upvalues: upvalues.into_iter().collect(),
+            captures: captures.into_iter().collect(),
             environment,
         });
         Some(handle)
@@ -703,7 +737,7 @@ impl VmCell {
         let handle = u32::try_from(self.functions.len()).ok()?;
         self.functions.push(FunctionData {
             kind: FunctionKind::DynamicMain { program },
-            upvalues: SmallVec::new(),
+            captures: SmallVec::new(),
             environment,
         });
         Some(handle)
@@ -717,7 +751,7 @@ impl VmCell {
         let handle = u32::try_from(self.functions.len()).ok()?;
         self.functions.push(FunctionData {
             kind: FunctionKind::Native(native),
-            upvalues: SmallVec::new(),
+            captures: SmallVec::new(),
             environment,
         });
         Some(handle)
@@ -728,7 +762,7 @@ impl VmCell {
         let handle = u32::try_from(self.functions.len()).ok()?;
         self.functions.push(FunctionData {
             kind: FunctionKind::Host(host),
-            upvalues: SmallVec::new(),
+            captures: SmallVec::new(),
             environment,
         });
         Some(handle)
@@ -746,7 +780,10 @@ impl VmCell {
         let handle = u32::try_from(self.functions.len()).ok()?;
         self.functions.push(FunctionData {
             kind: FunctionKind::Native(native),
-            upvalues: upvalues.into_iter().collect(),
+            captures: upvalues
+                .into_iter()
+                .map(FunctionCapture::from_cell)
+                .collect(),
             environment,
         });
         Some(handle)
@@ -769,7 +806,7 @@ impl VmCell {
         let function = self.functions.get(handle as usize)?;
         let bytecode_data = match function.kind {
             FunctionKind::Bytecode { .. } | FunctionKind::DynamicMain { .. } => {
-                Some((function.upvalues.clone(), function.environment))
+                Some((function.captures.clone(), function.environment))
             }
             FunctionKind::Host(_) | FunctionKind::Native(_) => None,
         };
@@ -778,9 +815,36 @@ impl VmCell {
 
     #[inline]
     pub fn function_upvalues(&self, handle: u32) -> Option<SmallVec<[u32; 4]>> {
+        let function = self.functions.get(handle as usize)?;
+        function
+            .captures
+            .iter()
+            .copied()
+            .map(FunctionCapture::cell)
+            .collect()
+    }
+
+    #[inline]
+    pub(crate) fn function_capture(&self, handle: u32, index: usize) -> Option<FunctionCapture> {
         self.functions
-            .get(handle as usize)
-            .map(|function| function.upvalues.clone())
+            .get(handle as usize)?
+            .captures
+            .get(index)
+            .copied()
+    }
+
+    #[inline]
+    pub(crate) fn capture_get(&self, capture: FunctionCapture) -> Option<Value> {
+        if let Some(cell) = capture.cell() {
+            self.upvalue_get(cell)
+        } else {
+            capture.direct_value()
+        }
+    }
+
+    #[inline]
+    pub(crate) fn capture_set(&mut self, capture: FunctionCapture, value: Value) -> Option<()> {
+        self.upvalue_set(capture.cell()?, value)
     }
 
     #[inline]
@@ -1958,10 +2022,19 @@ fn mark_weak_reachable(
                     continue;
                 };
                 mark_weak_value(Value::table(function.environment), &mut refs, &mut queue);
-                for upvalue in &function.upvalues {
-                    if let Some(upvalue) = upvalues.get(*upvalue as usize) {
-                        mark_weak_value(upvalue.value, &mut refs, &mut queue);
-                    }
+                for capture in &function.captures {
+                    let value = if let Some(cell) = capture.cell() {
+                        let Some(upvalue) = upvalues.get(cell as usize) else {
+                            continue;
+                        };
+                        upvalue.value
+                    } else {
+                        let Some(value) = capture.direct_value() else {
+                            continue;
+                        };
+                        value
+                    };
+                    mark_weak_value(value, &mut refs, &mut queue);
                 }
             }
             WeakRef::Table(handle) => {

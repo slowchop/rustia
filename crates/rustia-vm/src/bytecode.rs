@@ -491,8 +491,14 @@ impl Function {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UpvalueDescriptor {
+    /// Capture a parent local through a shared mutable cell.
     ParentLocal(u8),
+    /// Capture a parent upvalue through its shared mutable cell.
     ParentUpvalue(u8),
+    /// Copy a compiler-proven immutable parent local into the closure.
+    ParentLocalValue(u8),
+    /// Copy a compiler-proven immutable parent upvalue into the closure.
+    ParentUpvalueValue(u8),
 }
 
 #[cfg(test)]

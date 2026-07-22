@@ -7,8 +7,9 @@ use crate::bytecode::{
 use crate::error::{Error, ErrorKind, ErrorLocation, Result};
 use crate::extension::{validate_registered_op, ExtensionOp, ExtensionRegistry, HostFunctionOp};
 use crate::heap::{
-    FunctionKind, NativeFunction, TableIterationOrder, TableNext, TableNumericArrayWrite,
-    TableStringHashSlot, TableStringHashWrite, UserdataPayload, VectorData, VmCell,
+    FunctionCapture, FunctionKind, NativeFunction, TableIterationOrder, TableNext,
+    TableNumericArrayWrite, TableStringHashSlot, TableStringHashWrite, UserdataPayload, VectorData,
+    VmCell,
 };
 use crate::hot_ir::{recognize_hot_ir_loops, HotIr, HotIrNumber, HotIrOpKind, HotIrValue};
 #[cfg(test)]
@@ -32,11 +33,13 @@ const OS_TIME_NOW_SECONDS: i64 = 1_700_000_000;
 pub const MAX_RECURSION_LIMIT: usize = 512;
 const LUAU_TAIL_CALL_LIMIT: usize = 20_000;
 const CONSTANT_ATOM_EMPTY: u32 = 0;
+const SITE_CACHE_CLOSURE_CALL_EMPTY: u32 = u32::MAX - 4;
 const SITE_CACHE_FAST_CALL_EMPTY: u32 = u32::MAX - 3;
 const SITE_CACHE_IMPORT_EMPTY: u32 = u32::MAX - 2;
 const SITE_CACHE_TABLE_EMPTY: u32 = u32::MAX - 1;
 const SITE_CACHE_INELIGIBLE: u32 = u32::MAX;
 const IMPORT_CACHE_LANES: usize = 3;
+const CLOSURE_CALL_CACHE_LANES: usize = 4;
 const OPCODE_TAG_SPACE: usize = u8::MAX as usize + 1;
 // Zero selects the validated special-cost path; every other opcode tag defaults to one fuel.
 const OPCODE_FUEL_OR_SPECIAL: [u8; OPCODE_TAG_SPACE] = {
@@ -114,11 +117,21 @@ pub struct Vm {
     coverage_hits: BTreeMap<CoverageKey, u64>,
     #[cfg(test)]
     hot_ir_mode: HotIrTestMode,
+    #[cfg(test)]
+    closure_call_mode: ClosureCallTestMode,
 }
 
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HotIrTestMode {
+    Off,
+    Auto,
+    Force,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ClosureCallTestMode {
     Off,
     Auto,
     Force,
@@ -143,6 +156,14 @@ struct LoadedProgram {
     hot_ir_iterations: u64,
     #[cfg(test)]
     hot_ir_guard_exits: u64,
+    #[cfg(test)]
+    closure_call_cache_fills: u64,
+    #[cfg(test)]
+    closure_call_prototype_hits: u64,
+    #[cfg(test)]
+    closure_call_fast_entries: u64,
+    #[cfg(test)]
+    closure_call_guard_exits: u64,
 }
 
 impl LoadedProgram {
@@ -179,6 +200,14 @@ impl LoadedProgram {
             hot_ir_iterations: 0,
             #[cfg(test)]
             hot_ir_guard_exits: 0,
+            #[cfg(test)]
+            closure_call_cache_fills: 0,
+            #[cfg(test)]
+            closure_call_prototype_hits: 0,
+            #[cfg(test)]
+            closure_call_fast_entries: 0,
+            #[cfg(test)]
+            closure_call_guard_exits: 0,
         }
     }
 
@@ -271,6 +300,33 @@ impl LoadedProgram {
             .leaf_call_plan
     }
 
+    fn closure_call_inline_cache(
+        &self,
+        caller_prototype: Option<u32>,
+        pc: usize,
+        callee_program: u32,
+        callee_prototype: u32,
+    ) -> Option<ClosureCallCacheEntry> {
+        let caches = match caller_prototype {
+            Some(prototype) => self.function_inline_caches.get(prototype as usize)?,
+            None => &self.main_inline_caches,
+        };
+        caches.closure_call_inline_cache(pc, callee_program, callee_prototype)
+    }
+
+    fn set_closure_call_inline_cache(
+        &mut self,
+        caller_prototype: Option<u32>,
+        pc: usize,
+        entry: ClosureCallCacheEntry,
+    ) -> Option<bool> {
+        let caches = match caller_prototype {
+            Some(prototype) => self.function_inline_caches.get_mut(prototype as usize)?,
+            None => &mut self.main_inline_caches,
+        };
+        caches.set_closure_call_inline_cache(pc, entry)
+    }
+
     fn hot_ir(&self, prototype: Option<u32>, pc: usize) -> Option<Arc<HotIr>> {
         match prototype {
             Some(prototype) => self
@@ -297,6 +353,10 @@ struct FunctionInlineCaches {
     table_entries: Vec<TableStringInlineCache>,
     import_entries: Vec<[TableStringInlineCache; IMPORT_CACHE_LANES]>,
     native_call_entries: Vec<NativeCallInlineCache>,
+    // The extra indirection is deliberate: cold prototypes pay one nullable
+    // pointer instead of an always-present three-word Vec.
+    #[allow(clippy::box_collection)]
+    closure_call_entries: Option<Box<Vec<ClosureCallInlineCache>>>,
     leaf_call_plan: Option<LeafCallPlan>,
     hot_ir_by_pc: Option<Box<[u32]>>,
     hot_irs: Vec<Arc<HotIr>>,
@@ -317,6 +377,7 @@ impl FunctionInlineCaches {
             .map(|instruction| match instruction.op {
                 Opcode::GetImport | Opcode::NameCall => SITE_CACHE_IMPORT_EMPTY,
                 Opcode::FastCall => SITE_CACHE_FAST_CALL_EMPTY,
+                Opcode::Call => SITE_CACHE_CLOSURE_CALL_EMPTY,
                 opcode if opcode_uses_table_inline_cache(opcode) => SITE_CACHE_TABLE_EMPTY,
                 _ => SITE_CACHE_INELIGIBLE,
             })
@@ -339,6 +400,7 @@ impl FunctionInlineCaches {
             table_entries: Vec::new(),
             import_entries: Vec::new(),
             native_call_entries: Vec::new(),
+            closure_call_entries: None,
             leaf_call_plan,
             hot_ir_by_pc,
             hot_irs,
@@ -361,7 +423,10 @@ impl FunctionInlineCaches {
     fn set_table_inline_cache(&mut self, pc: usize, entry: TableStringInlineCache) -> Option<()> {
         let index = self.entry_by_pc.get_mut(pc)?;
         match *index {
-            SITE_CACHE_INELIGIBLE | SITE_CACHE_IMPORT_EMPTY | SITE_CACHE_FAST_CALL_EMPTY => None,
+            SITE_CACHE_INELIGIBLE
+            | SITE_CACHE_IMPORT_EMPTY
+            | SITE_CACHE_FAST_CALL_EMPTY
+            | SITE_CACHE_CLOSURE_CALL_EMPTY => None,
             SITE_CACHE_TABLE_EMPTY => {
                 let new_index = compact_site_cache_index(self.table_entries.len())?;
                 self.table_entries.push(entry);
@@ -399,7 +464,10 @@ impl FunctionInlineCaches {
         }
         let index = self.entry_by_pc.get_mut(pc)?;
         match *index {
-            SITE_CACHE_INELIGIBLE | SITE_CACHE_TABLE_EMPTY | SITE_CACHE_FAST_CALL_EMPTY => None,
+            SITE_CACHE_INELIGIBLE
+            | SITE_CACHE_TABLE_EMPTY
+            | SITE_CACHE_FAST_CALL_EMPTY
+            | SITE_CACHE_CLOSURE_CALL_EMPTY => None,
             SITE_CACHE_IMPORT_EMPTY => {
                 let new_index = compact_site_cache_index(self.import_entries.len())?;
                 let mut entries = [TableStringInlineCache::EMPTY; IMPORT_CACHE_LANES];
@@ -431,7 +499,10 @@ impl FunctionInlineCaches {
     ) -> Option<()> {
         let index = self.entry_by_pc.get_mut(pc)?;
         match *index {
-            SITE_CACHE_INELIGIBLE | SITE_CACHE_TABLE_EMPTY | SITE_CACHE_IMPORT_EMPTY => None,
+            SITE_CACHE_INELIGIBLE
+            | SITE_CACHE_TABLE_EMPTY
+            | SITE_CACHE_IMPORT_EMPTY
+            | SITE_CACHE_CLOSURE_CALL_EMPTY => None,
             SITE_CACHE_FAST_CALL_EMPTY => {
                 let new_index = compact_site_cache_index(self.native_call_entries.len())?;
                 self.native_call_entries.push(entry);
@@ -445,6 +516,63 @@ impl FunctionInlineCaches {
             }
         }
     }
+
+    fn closure_call_inline_cache(
+        &self,
+        pc: usize,
+        callee_program: u32,
+        callee_prototype: u32,
+    ) -> Option<ClosureCallCacheEntry> {
+        let index = *self.entry_by_pc.get(pc)?;
+        self.closure_call_entries
+            .as_ref()?
+            .get(index as usize)?
+            .lanes
+            .iter()
+            .flatten()
+            .copied()
+            .find(|entry| {
+                entry.callee_program == callee_program && entry.callee_prototype == callee_prototype
+            })
+    }
+
+    /// Returns `Some(true)` for a new lane, `Some(false)` for an existing
+    /// lane, and `None` for an ineligible or saturated site.
+    fn set_closure_call_inline_cache(
+        &mut self,
+        pc: usize,
+        entry: ClosureCallCacheEntry,
+    ) -> Option<bool> {
+        let site = self.entry_by_pc.get_mut(pc)?;
+        let cache = match *site {
+            SITE_CACHE_CLOSURE_CALL_EMPTY => {
+                let entries = self
+                    .closure_call_entries
+                    .get_or_insert_with(|| Box::new(Vec::new()));
+                let new_index = compact_site_cache_index(entries.len())?;
+                entries.push(ClosureCallInlineCache::default());
+                *site = new_index;
+                entries.get_mut(new_index as usize)?
+            }
+            SITE_CACHE_INELIGIBLE
+            | SITE_CACHE_TABLE_EMPTY
+            | SITE_CACHE_IMPORT_EMPTY
+            | SITE_CACHE_FAST_CALL_EMPTY => return None,
+            index => self
+                .closure_call_entries
+                .as_mut()?
+                .get_mut(index as usize)?,
+        };
+        if cache.lanes.iter().flatten().any(|existing| {
+            existing.callee_program == entry.callee_program
+                && existing.callee_prototype == entry.callee_prototype
+        }) {
+            return Some(false);
+        }
+        let lane = cache.lanes.iter_mut().find(|lane| lane.is_none())?;
+        *lane = Some(entry);
+        Some(true)
+    }
 }
 
 /// A tiny, side-effect-audited bytecode leaf that can run without allocating a
@@ -454,14 +582,64 @@ impl FunctionInlineCaches {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum LeafCallPlan {
     UpvalueCounter {
-        value_upvalue: usize,
-        step_upvalue: usize,
+        value_upvalue: u8,
+        step_upvalue: u8,
     },
     ArrayIterator {
-        index_upvalue: usize,
-        items_upvalue: usize,
+        index_upvalue: u8,
+        items_upvalue: u8,
         increment: f64,
     },
+}
+
+#[derive(Clone, Copy)]
+struct ClosureCallCacheEntry {
+    callee_program: u32,
+    callee_prototype: u32,
+    plan: LeafCallPlan,
+}
+
+#[derive(Clone, Copy, Default)]
+struct ClosureCallInlineCache {
+    lanes: [Option<ClosureCallCacheEntry>; CLOSURE_CALL_CACHE_LANES],
+}
+
+#[derive(Clone, Copy)]
+struct LeafCallOutcome {
+    // The first return value is also the mutated cell value. Zero-result plans
+    // keep their mutation here while result_count makes scalar CALL write nil.
+    first: Value,
+    second: Value,
+    mutation_cell: u32,
+    result_count: u8,
+    instruction_count: u8,
+}
+
+fn selected_leaf_captures(
+    plan: LeafCallPlan,
+    mut get: impl FnMut(usize) -> Option<FunctionCapture>,
+) -> Option<(FunctionCapture, FunctionCapture)> {
+    let (first, second) = match plan {
+        LeafCallPlan::UpvalueCounter {
+            value_upvalue,
+            step_upvalue,
+        } => (value_upvalue, step_upvalue),
+        LeafCallPlan::ArrayIterator {
+            index_upvalue,
+            items_upvalue,
+            ..
+        } => (index_upvalue, items_upvalue),
+    };
+    Some((get(usize::from(first))?, get(usize::from(second))?))
+}
+
+fn leaf_outcome_return_values(outcome: LeafCallOutcome) -> ReturnValues {
+    match outcome.result_count {
+        0 => ReturnValues::new(),
+        1 => ReturnValues::from_slice(&[outcome.first]),
+        2 => ReturnValues::from_slice(&[outcome.first, outcome.second]),
+        _ => unreachable!("leaf-call plans return at most two values"),
+    }
 }
 
 impl LeafCallPlan {
@@ -493,10 +671,10 @@ fn recognize_upvalue_counter_plan(function: &Function) -> Option<LeafCallPlan> {
     else {
         return None;
     };
-    let value_upvalue = usize::try_from(get_value.aux).ok()?;
-    let step_upvalue = usize::try_from(get_step.aux).ok()?;
-    if value_upvalue >= function.upvalues.len()
-        || step_upvalue >= function.upvalues.len()
+    let value_upvalue = u8::try_from(get_value.aux).ok()?;
+    let step_upvalue = u8::try_from(get_step.aux).ok()?;
+    if usize::from(value_upvalue) >= function.upvalues.len()
+        || usize::from(step_upvalue) >= function.upvalues.len()
         || usize::from(get_value.a) >= function.max_registers
         || usize::from(get_step.a) >= function.max_registers
     {
@@ -562,9 +740,11 @@ fn recognize_array_iterator_plan(program: &Program, function: &Function) -> Opti
     else {
         return None;
     };
-    let index_upvalue = usize::try_from(get_index.aux).ok()?;
-    let items_upvalue = usize::try_from(get_items_for_len.aux).ok()?;
-    if index_upvalue >= function.upvalues.len() || items_upvalue >= function.upvalues.len() {
+    let index_upvalue = u8::try_from(get_index.aux).ok()?;
+    let items_upvalue = u8::try_from(get_items_for_len.aux).ok()?;
+    if usize::from(index_upvalue) >= function.upvalues.len()
+        || usize::from(items_upvalue) >= function.upvalues.len()
+    {
         return None;
     }
     let increment = match program.constants().get(load_increment.c as usize)? {
@@ -742,7 +922,7 @@ const fn instruction_is(
 
 fn compact_site_cache_index(index: usize) -> Option<u32> {
     let index = u32::try_from(index).ok()?;
-    (index < SITE_CACHE_FAST_CALL_EMPTY).then_some(index)
+    (index < SITE_CACHE_CLOSURE_CALL_EMPTY).then_some(index)
 }
 
 const fn opcode_uses_table_inline_cache(opcode: Opcode) -> bool {
@@ -810,7 +990,7 @@ struct NativeCallCacheSite {
 
 struct FunctionCallContext<'a> {
     current_function: Option<Value>,
-    upvalues: &'a [u32],
+    captures: &'a [FunctionCapture],
     depth: usize,
     environment: u32,
     call_site: Option<ErrorLocation>,
@@ -990,7 +1170,7 @@ struct SuspendedBytecodeFrame {
     program_id: u32,
     prototype: Option<u32>,
     current_function: Option<Value>,
-    upvalues: Vec<u32>,
+    captures: Vec<FunctionCapture>,
     depth: usize,
     environment: u32,
     call_site: Option<ErrorLocation>,
@@ -1125,6 +1305,8 @@ impl Vm {
             coverage_hits: BTreeMap::new(),
             #[cfg(test)]
             hot_ir_mode: HotIrTestMode::Auto,
+            #[cfg(test)]
+            closure_call_mode: ClosureCallTestMode::Auto,
         }
     }
 
@@ -1133,6 +1315,18 @@ impl Vm {
         #[cfg(test)]
         {
             self.hot_ir_mode != HotIrTestMode::Off
+        }
+        #[cfg(not(test))]
+        {
+            true
+        }
+    }
+
+    #[inline]
+    fn closure_call_fast_path_enabled(&self) -> bool {
+        #[cfg(test)]
+        {
+            self.closure_call_mode != ClosureCallTestMode::Off
         }
         #[cfg(not(test))]
         {
@@ -1317,7 +1511,7 @@ impl Vm {
                 &[],
                 FunctionCallContext {
                     current_function: None,
-                    upvalues: &[],
+                    captures: &[],
                     depth: 0,
                     environment: self.globals,
                     call_site: None,
@@ -1607,6 +1801,52 @@ impl Vm {
                             }
                         }
 
+                        // Ordinary scalar calls get a caller-site prototype PIC
+                        // before generic CALL bookkeeping. A committed leaf is
+                        // guaranteed not to allocate, collect, invoke guest code,
+                        // or throw, so it can skip root refresh, source-location
+                        // materialization, capture-vector cloning, and result
+                        // packing while retaining exact logical instruction
+                        // accounting.
+                        if instruction.op == Opcode::Call {
+                            if let Some(program_id) = program_id {
+                                if let Some(outcome) = self
+                                    .try_closure_call_scalar(
+                                        program_id,
+                                        context.prototype,
+                                        pc,
+                                        &registers,
+                                        instruction,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|error| {
+                                        attach_instruction_source(program, function, pc, error)
+                                    })?
+                                {
+                                    self.executed_instructions =
+                                        self.executed_instructions.wrapping_add(
+                                            u64::from(outcome.instruction_count).saturating_add(1),
+                                        );
+                                    sync_leaf_mutation_to_registers(
+                                        &mut registers,
+                                        &register_cells,
+                                        outcome.mutation_cell,
+                                        outcome.first,
+                                    );
+                                    let scalar_result = if outcome.result_count == 0 {
+                                        Value::nil()
+                                    } else {
+                                        outcome.first
+                                    };
+                                    set_register(&mut registers, instruction.a, scalar_result)
+                                        .map_err(|error| error.at_pc(pc))?;
+                                    pc += 1;
+                                    continue;
+                                }
+                            }
+                        }
+
                         let is_common_fast_path_candidate = matches!(
                             instruction.op,
                             Opcode::Add
@@ -1785,8 +2025,8 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::GetUpvalue => {
-                                let upvalue = context
-                                    .upvalues
+                                let capture = context
+                                    .captures
                                     .get(upvalue_index(instruction.aux)?)
                                     .copied()
                                     .ok_or_else(|| {
@@ -1795,7 +2035,7 @@ impl Vm {
                                         })
                                     })
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                let value = self.heap.upvalue_get(upvalue).ok_or_else(|| {
+                                let value = self.heap.capture_get(capture).ok_or_else(|| {
                                     Error::new(ErrorKind::InvalidProgram {
                                         reason: "upvalue handle is missing",
                                     })
@@ -1804,8 +2044,8 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::SetUpvalue => {
-                                let upvalue = context
-                                    .upvalues
+                                let capture = context
+                                    .captures
                                     .get(upvalue_index(instruction.aux)?)
                                     .copied()
                                     .ok_or_else(|| {
@@ -1816,7 +2056,7 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let value = get_register(&registers, instruction.a)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                self.heap.upvalue_set(upvalue, value).ok_or_else(|| {
+                                self.heap.capture_set(capture, value).ok_or_else(|| {
                                     Error::new(ErrorKind::InvalidProgram {
                                         reason: "upvalue handle is missing",
                                     })
@@ -2934,7 +3174,7 @@ impl Vm {
                                     instruction,
                                     &registers,
                                     &mut register_cells,
-                                    context.upvalues,
+                                    context.captures,
                                     environment,
                                 )
                                 .map_err(|e| e.at_pc(pc - 1))?;
@@ -4671,7 +4911,7 @@ impl Vm {
                 program_id,
                 prototype: context.prototype,
                 current_function: context.current_function,
-                upvalues: context.upvalues.to_vec(),
+                captures: context.captures.to_vec(),
                 depth: context.depth,
                 environment: context.environment,
                 call_site: context.call_site.clone(),
@@ -7227,6 +7467,14 @@ impl Vm {
                 .map(ReturnValues::from_vec)
                 .map(VmFlow::Return);
         };
+        let kind = self.heap.function_kind(handle).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "function handle is missing",
+            })
+        })?;
+        if let Some(results) = self.try_leaf_bytecode_handle(kind, handle, depth, fuel)? {
+            return Ok(VmFlow::Return(results));
+        }
         let (kind, bytecode_data) = self.heap.function_dispatch_data(handle).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "function handle is missing",
@@ -7283,7 +7531,7 @@ impl Vm {
                     .map(into_return_values_flow);
             }
         }
-        let (kind, bytecode_data) = self.heap.function_dispatch_data(handle).ok_or_else(|| {
+        let kind = self.heap.function_kind(handle).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "function handle is missing",
             })
@@ -7304,6 +7552,14 @@ impl Vm {
                 )
                 .map(into_return_values_flow);
         }
+        if let Some(results) = self.try_leaf_bytecode_handle(kind, handle, depth, fuel)? {
+            return Ok(VmFlow::Return(results));
+        }
+        let (kind, bytecode_data) = self.heap.function_dispatch_data(handle).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "function handle is missing",
+            })
+        })?;
         self.call_function_kind_with_site_resumable(
             program,
             callee,
@@ -7323,7 +7579,7 @@ impl Vm {
         callee: Value,
         handle: u32,
         kind: FunctionKind,
-        bytecode_data: Option<(SmallVec<[u32; 4]>, u32)>,
+        bytecode_data: Option<(SmallVec<[FunctionCapture; 2]>, u32)>,
         args: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
@@ -7356,18 +7612,6 @@ impl Vm {
                 program: Some(dynamic_program_id),
                 prototype,
             } => {
-                let leaf_call_plan = self
-                    .dynamic_programs
-                    .get(dynamic_program_id as usize)
-                    .and_then(|program| program.leaf_call_plan(prototype));
-                if let (Some(plan), Some((upvalues, _))) = (leaf_call_plan, bytecode_data.as_ref())
-                {
-                    if let Some(results) =
-                        self.try_leaf_bytecode_call(plan, upvalues, depth, fuel)?
-                    {
-                        return Ok(VmFlow::Return(results));
-                    }
-                }
                 let dynamic_program = self.dynamic_program(dynamic_program_id)?;
                 let function = dynamic_program
                     .functions
@@ -7556,6 +7800,58 @@ impl Vm {
         }
     }
 
+    fn closure_call_inline_cache(
+        &self,
+        caller_program: u32,
+        caller_prototype: Option<u32>,
+        pc: usize,
+        callee_program: u32,
+        callee_prototype: u32,
+    ) -> Option<ClosureCallCacheEntry> {
+        self.dynamic_programs
+            .get(caller_program as usize)?
+            .closure_call_inline_cache(caller_prototype, pc, callee_program, callee_prototype)
+    }
+
+    fn set_closure_call_inline_cache(
+        &mut self,
+        caller_program: u32,
+        caller_prototype: Option<u32>,
+        pc: usize,
+        entry: ClosureCallCacheEntry,
+    ) {
+        if let Some(program) = self.dynamic_programs.get_mut(caller_program as usize) {
+            let _filled = program.set_closure_call_inline_cache(caller_prototype, pc, entry);
+            #[cfg(test)]
+            if matches!(_filled, Some(true)) {
+                program.closure_call_cache_fills =
+                    program.closure_call_cache_fills.saturating_add(1);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn record_closure_call_prototype_hit(&mut self, program_id: u32) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+            program.closure_call_prototype_hits =
+                program.closure_call_prototype_hits.saturating_add(1);
+        }
+    }
+
+    #[cfg(test)]
+    fn record_closure_call_fast_entry(&mut self, program_id: u32) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+            program.closure_call_fast_entries = program.closure_call_fast_entries.saturating_add(1);
+        }
+    }
+
+    #[cfg(test)]
+    fn record_closure_call_guard_exit(&mut self, program_id: u32) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+            program.closure_call_guard_exits = program.closure_call_guard_exits.saturating_add(1);
+        }
+    }
+
     #[cfg(test)]
     fn record_native_call_inline_cache_hit(&mut self, program_id: u32) {
         if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
@@ -7618,13 +7914,13 @@ impl Vm {
         prototype: Option<u32>,
         function: &Function,
         callee: Value,
-        bytecode_data: Option<(SmallVec<[u32; 4]>, u32)>,
+        bytecode_data: Option<(SmallVec<[FunctionCapture; 2]>, u32)>,
         args: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
         fuel: &mut Option<u64>,
     ) -> VmFlowResult<ReturnValues> {
-        let (upvalues, environment) = bytecode_data.ok_or_else(|| {
+        let (captures, environment) = bytecode_data.ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "bytecode function call data is missing",
             })
@@ -7636,7 +7932,7 @@ impl Vm {
             args,
             FunctionCallContext {
                 current_function: Some(callee),
-                upvalues: &upvalues,
+                captures: &captures,
                 depth: depth + 1,
                 environment,
                 call_site,
@@ -7648,18 +7944,29 @@ impl Vm {
         .map_err(|error| attach_existing_instruction_source(program, function, error))
     }
 
-    fn try_leaf_bytecode_call(
+    fn try_leaf_bytecode_handle(
         &mut self,
-        plan: LeafCallPlan,
-        upvalues: &[u32],
+        kind: FunctionKind,
+        handle: u32,
         depth: usize,
         fuel: &mut Option<u64>,
     ) -> Result<Option<ReturnValues>> {
-        // Fuel and coverage are deliberately kept on the ordinary interpreter
-        // so their per-instruction accounting and source attribution remain
-        // byte-for-byte identical. Likewise, do not skip a pending GC debt or
-        // a deterministic weak-collection boundary.
-        if self.settings.initial_fuel.is_some()
+        let FunctionKind::Bytecode {
+            program: Some(program_id),
+            prototype,
+        } = kind
+        else {
+            return Ok(None);
+        };
+        let Some(plan) = self
+            .dynamic_programs
+            .get(program_id as usize)
+            .and_then(|program| program.leaf_call_plan(prototype))
+        else {
+            return Ok(None);
+        };
+        if !self.closure_call_fast_path_enabled()
+            || self.settings.initial_fuel.is_some()
             || fuel.is_some()
             || self.settings.enable_conformance_coverage
             || self.heap.has_allocation_debt()
@@ -7668,48 +7975,199 @@ impl Vm {
         {
             return Ok(None);
         }
+        let Some((first_capture, second_capture)) =
+            selected_leaf_captures(plan, |index| self.heap.function_capture(handle, index))
+        else {
+            return Ok(None);
+        };
+        let Some(outcome) = self.try_leaf_call_outcome(plan, first_capture, second_capture)? else {
+            return Ok(None);
+        };
+        self.executed_instructions = self
+            .executed_instructions
+            .wrapping_add(u64::from(outcome.instruction_count));
+        Ok(Some(leaf_outcome_return_values(outcome)))
+    }
 
-        let (results, instruction_count, mutation) = match plan {
-            LeafCallPlan::UpvalueCounter {
-                value_upvalue,
-                step_upvalue,
-            } => {
-                let Some(value_handle) = upvalues.get(value_upvalue).copied() else {
+    fn try_closure_call_scalar(
+        &mut self,
+        caller_program: u32,
+        caller_prototype: Option<u32>,
+        pc: usize,
+        registers: &[Value],
+        instruction: Instruction,
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Option<LeafCallOutcome>> {
+        if instruction.op != Opcode::Call
+            || !self.closure_call_fast_path_enabled()
+            || self.settings.initial_fuel.is_some()
+            || fuel.is_some()
+            || self.settings.enable_conformance_coverage
+            || self.heap.has_allocation_debt()
+        {
+            return Ok(None);
+        }
+        if instruction.aux < 0 || instruction.aux > i32::from(u8::MAX) {
+            return Ok(None);
+        }
+        let argc = instruction.aux as usize;
+        if argc != 0 {
+            let Some(end) = usize::from(instruction.c).checked_add(argc) else {
+                return Ok(None);
+            };
+            if end > registers.len() {
+                return Ok(None);
+            }
+        }
+        let Some(callee) = registers.get(instruction.b as usize).copied() else {
+            return Ok(None);
+        };
+        let Some(handle) = callee.as_function() else {
+            return Ok(None);
+        };
+        let Some(FunctionKind::Bytecode {
+            program: Some(callee_program),
+            prototype: callee_prototype,
+        }) = self.heap.function_kind(handle)
+        else {
+            return Ok(None);
+        };
+
+        let cached = self.closure_call_inline_cache(
+            caller_program,
+            caller_prototype,
+            pc,
+            callee_program,
+            callee_prototype,
+        );
+        let (plan, cache_hit) = if let Some(entry) = cached {
+            (entry.plan, true)
+        } else {
+            let Some(plan) = self
+                .dynamic_programs
+                .get(callee_program as usize)
+                .and_then(|program| program.leaf_call_plan(callee_prototype))
+            else {
+                return Ok(None);
+            };
+            (plan, false)
+        };
+
+        if self.weak_collection_due_within(plan.maximum_instruction_count().saturating_add(1))
+            || depth.saturating_add(1) > self.settings.recursion_limit
+        {
+            return Ok(None);
+        }
+        if cache_hit {
+            #[cfg(test)]
+            self.record_closure_call_prototype_hit(caller_program);
+        } else {
+            self.set_closure_call_inline_cache(
+                caller_program,
+                caller_prototype,
+                pc,
+                ClosureCallCacheEntry {
+                    callee_program,
+                    callee_prototype,
+                    plan,
+                },
+            );
+        }
+
+        let Some((first_capture, second_capture)) =
+            selected_leaf_captures(plan, |index| self.heap.function_capture(handle, index))
+        else {
+            #[cfg(test)]
+            self.record_closure_call_guard_exit(caller_program);
+            return Ok(None);
+        };
+        let Some(outcome) = self.try_leaf_call_outcome(plan, first_capture, second_capture)? else {
+            #[cfg(test)]
+            self.record_closure_call_guard_exit(caller_program);
+            return Ok(None);
+        };
+        #[cfg(test)]
+        self.record_closure_call_fast_entry(caller_program);
+        Ok(Some(outcome))
+    }
+
+    #[cfg(test)]
+    fn try_leaf_bytecode_call(
+        &mut self,
+        plan: LeafCallPlan,
+        captures: &[FunctionCapture],
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Option<ReturnValues>> {
+        // Fuel and coverage are deliberately kept on the ordinary interpreter
+        // so their per-instruction accounting and source attribution remain
+        // byte-for-byte identical. Likewise, do not skip a pending GC debt or
+        // a deterministic weak-collection boundary.
+        if !self.closure_call_fast_path_enabled()
+            || self.settings.initial_fuel.is_some()
+            || fuel.is_some()
+            || self.settings.enable_conformance_coverage
+            || self.heap.has_allocation_debt()
+            || self.weak_collection_due_within(plan.maximum_instruction_count())
+            || depth.saturating_add(1) > self.settings.recursion_limit
+        {
+            return Ok(None);
+        }
+        let Some((first_capture, second_capture)) =
+            selected_leaf_captures(plan, |index| captures.get(index).copied())
+        else {
+            return Ok(None);
+        };
+        let Some(outcome) = self.try_leaf_call_outcome(plan, first_capture, second_capture)? else {
+            return Ok(None);
+        };
+        self.executed_instructions = self
+            .executed_instructions
+            .wrapping_add(u64::from(outcome.instruction_count));
+        Ok(Some(leaf_outcome_return_values(outcome)))
+    }
+
+    fn try_leaf_call_outcome(
+        &mut self,
+        plan: LeafCallPlan,
+        first_capture: FunctionCapture,
+        second_capture: FunctionCapture,
+    ) -> Result<Option<LeafCallOutcome>> {
+        let outcome = match plan {
+            LeafCallPlan::UpvalueCounter { .. } => {
+                let Some(value) = self.heap.capture_get(first_capture) else {
                     return Ok(None);
                 };
-                let Some(step_handle) = upvalues.get(step_upvalue).copied() else {
-                    return Ok(None);
-                };
-                let Some(value) = self.heap.upvalue_get(value_handle) else {
-                    return Ok(None);
-                };
-                let Some(step) = self.heap.upvalue_get(step_handle) else {
+                let Some(step) = self.heap.capture_get(second_capture) else {
                     return Ok(None);
                 };
                 let (Some(value), Some(step)) = (value.as_number(), step.as_number()) else {
                     return Ok(None);
                 };
+                let Some(value_cell) = first_capture.cell() else {
+                    return Ok(None);
+                };
                 let next = Value::number(binary(NumericOp::Add, value, step));
-                (ReturnValues::from_slice(&[next]), 8, (value_handle, next))
+                LeafCallOutcome {
+                    first: next,
+                    second: Value::nil(),
+                    mutation_cell: value_cell,
+                    result_count: 1,
+                    instruction_count: 8,
+                }
             }
-            LeafCallPlan::ArrayIterator {
-                index_upvalue,
-                items_upvalue,
-                increment,
-            } => {
-                let Some(index_handle) = upvalues.get(index_upvalue).copied() else {
+            LeafCallPlan::ArrayIterator { increment, .. } => {
+                let Some(index) = self.heap.capture_get(first_capture) else {
                     return Ok(None);
                 };
-                let Some(items_handle) = upvalues.get(items_upvalue).copied() else {
-                    return Ok(None);
-                };
-                let Some(index) = self.heap.upvalue_get(index_handle) else {
-                    return Ok(None);
-                };
-                let Some(items) = self.heap.upvalue_get(items_handle) else {
+                let Some(items) = self.heap.capture_get(second_capture) else {
                     return Ok(None);
                 };
                 let Some(index) = index.as_number() else {
+                    return Ok(None);
+                };
+                let Some(index_cell) = first_capture.cell() else {
                     return Ok(None);
                 };
                 let Some(items) = items.as_table() else {
@@ -7727,30 +8185,36 @@ impl Vm {
                 let next_number = binary(NumericOp::Add, index, increment);
                 let next = Value::number(next_number);
                 if next_number <= len as f64 {
-                    let value = self.heap.table_get(items, next).unwrap_or_else(Value::nil);
-                    (
-                        ReturnValues::from_slice(&[next, value]),
-                        19,
-                        (index_handle, next),
-                    )
+                    LeafCallOutcome {
+                        first: next,
+                        second: self.heap.table_get(items, next).unwrap_or_else(Value::nil),
+                        mutation_cell: index_cell,
+                        result_count: 2,
+                        instruction_count: 19,
+                    }
                 } else {
-                    (ReturnValues::new(), 13, (index_handle, next))
+                    LeafCallOutcome {
+                        first: next,
+                        second: Value::nil(),
+                        mutation_cell: index_cell,
+                        result_count: 0,
+                        instruction_count: 13,
+                    }
                 }
             }
         };
 
-        // Every possible fallback above occurred before this write. The handle
-        // was already read successfully, so losing it here would indicate VM
+        // Every possible fallback above occurred before this write. The cell
+        // was read successfully, so losing it here would indicate VM
         // corruption rather than a speculative guard miss.
         self.heap
-            .upvalue_set(mutation.0, mutation.1)
+            .upvalue_set(outcome.mutation_cell, outcome.first)
             .ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "leaf-call upvalue handle is missing",
                 })
             })?;
-        self.executed_instructions = self.executed_instructions.wrapping_add(instruction_count);
-        Ok(Some(results))
+        Ok(Some(outcome))
     }
 
     fn call_metamethod(
@@ -10018,7 +10482,7 @@ impl Vm {
             })?,
             None => &program.main,
         };
-        let upvalues = frame.upvalues;
+        let captures = frame.captures;
         self.run_function(
             &program,
             Some(frame.program_id),
@@ -10026,7 +10490,7 @@ impl Vm {
             &[],
             FunctionCallContext {
                 current_function: frame.current_function,
-                upvalues: &upvalues,
+                captures: &captures,
                 depth: frame.depth,
                 environment: frame.environment,
                 call_site: frame.call_site,
@@ -17049,6 +17513,19 @@ fn clear_register_cell(register_cells: &mut [Option<u32>], register: u8) -> Resu
     Ok(())
 }
 
+fn sync_leaf_mutation_to_registers(
+    registers: &mut [Value],
+    register_cells: &[Option<u32>],
+    mutation_cell: u32,
+    mutation_value: Value,
+) {
+    for (register, cell) in registers.iter_mut().zip(register_cells) {
+        if *cell == Some(mutation_cell) {
+            *register = mutation_value;
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct FormatSpec {
     left_align: bool,
@@ -18230,7 +18707,7 @@ fn load_function_value(
     instruction: Instruction,
     registers: &[Value],
     register_cells: &mut [Option<u32>],
-    parent_upvalues: &[u32],
+    parent_captures: &[FunctionCapture],
     environment: u32,
 ) -> Result<Value> {
     if instruction.aux < 0 {
@@ -18249,16 +18726,16 @@ fn load_function_value(
             reason: "function prototype index overflow",
         })
     })?;
-    let upvalues = program.functions[prototype as usize]
+    let captures = program.functions[prototype as usize]
         .upvalues
         .iter()
         .copied()
         .map(|descriptor| {
-            capture_upvalue(heap, registers, register_cells, parent_upvalues, descriptor)
+            capture_upvalue(heap, registers, register_cells, parent_captures, descriptor)
         })
         .collect::<Result<Vec<_>>>()?;
     let handle = heap
-        .alloc_function(program_id, prototype, upvalues, environment)
+        .alloc_function(program_id, prototype, captures, environment)
         .ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "function handle overflow",
@@ -18271,19 +18748,51 @@ fn capture_upvalue(
     heap: &mut VmCell,
     registers: &[Value],
     register_cells: &mut [Option<u32>],
-    parent_upvalues: &[u32],
+    parent_captures: &[FunctionCapture],
     descriptor: UpvalueDescriptor,
-) -> Result<u32> {
+) -> Result<FunctionCapture> {
     match descriptor {
         UpvalueDescriptor::ParentLocal(register) => {
             ensure_register_cell_for_closure(heap, registers, register_cells, register)
+                .map(FunctionCapture::from_cell)
         }
         UpvalueDescriptor::ParentUpvalue(index) => {
-            parent_upvalues.get(index as usize).copied().ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "parent upvalue index is missing",
+            let capture = parent_captures
+                .get(index as usize)
+                .copied()
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "parent upvalue index is missing",
+                    })
+                })?;
+            capture
+                .cell()
+                .map(FunctionCapture::from_cell)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "mutable parent upvalue cell is missing",
+                    })
                 })
-            })
+        }
+        UpvalueDescriptor::ParentLocalValue(register) => {
+            get_register(registers, register).map(FunctionCapture::direct)
+        }
+        UpvalueDescriptor::ParentUpvalueValue(index) => {
+            let capture = parent_captures
+                .get(index as usize)
+                .copied()
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "parent upvalue index is missing",
+                    })
+                })?;
+            heap.capture_get(capture)
+                .map(FunctionCapture::direct)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "parent upvalue handle is missing",
+                    })
+                })
         }
     }
 }
@@ -22845,6 +23354,628 @@ mod inline_cache_tests {
         assert_eq!(recognize_upvalue_counter_plan(&function), None);
     }
 
+    fn closure_call_counter_program() -> Program {
+        let leaf = Function::with_params_and_upvalues(
+            vec![
+                Instruction::with_aux(Opcode::GetUpvalue, 0, 0, 0, 0),
+                Instruction::with_aux(Opcode::GetUpvalue, 1, 0, 0, 1),
+                Instruction::new(Opcode::Add, 0, 0, 1),
+                Instruction::new(Opcode::ClearLocalCell, 1, 0, 0),
+                Instruction::with_aux(Opcode::SetUpvalue, 0, 0, 0, 0),
+                Instruction::new(Opcode::ClearLocalCell, 0, 0, 0),
+                Instruction::with_aux(Opcode::GetUpvalue, 0, 0, 0, 0),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+                Instruction::new(Opcode::Return, 0, 0, 0),
+            ],
+            2,
+            0,
+            vec![
+                UpvalueDescriptor::ParentLocal(0),
+                UpvalueDescriptor::ParentLocalValue(1),
+            ],
+            Vec::new(),
+        );
+        Program::with_functions(
+            Function::new(
+                vec![
+                    Instruction::with_aux(Opcode::Call, 0, 1, 0, 0),
+                    Instruction::new(Opcode::Halt, 0, 0, 0),
+                ],
+                2,
+            ),
+            Vec::new(),
+            vec![leaf],
+        )
+    }
+
+    fn closure_call_loop_program() -> Program {
+        let mut program = closure_call_counter_program();
+        program.main = Function::new(
+            vec![
+                Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                Instruction::with_aux(Opcode::LoadFunction, 2, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 3, 0, 1),
+                Instruction::new(Opcode::LoadConst, 4, 0, 2),
+                Instruction::new(Opcode::LoadConst, 5, 0, 1),
+                Instruction::new(Opcode::CoerceForNumber, 3, 3, 0),
+                Instruction::new(Opcode::CoerceForNumber, 4, 4, 1),
+                Instruction::new(Opcode::CoerceForNumber, 5, 5, 2),
+                Instruction::with_aux(Opcode::ForPrep, 3, 0, 0, 12),
+                Instruction::with_aux(Opcode::Call, 7, 2, 0, 0),
+                Instruction::with_aux(Opcode::ForLoop, 3, 0, 0, 10),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+                Instruction::new(Opcode::Halt, 0, 0, 0),
+            ],
+            8,
+        );
+        program = Program::with_functions(
+            program.main,
+            vec![
+                Constant::Number(0.0),
+                Constant::Number(1.0),
+                Constant::Number(16.0),
+            ],
+            program.functions,
+        );
+        program
+    }
+
+    fn closure_call_array_iterator_program() -> Program {
+        let leaf = Function::with_params_and_upvalues(
+            vec![
+                Instruction::with_aux(Opcode::GetUpvalue, 0, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 1, 0, 0),
+                Instruction::new(Opcode::Add, 0, 0, 1),
+                Instruction::new(Opcode::ClearLocalCell, 1, 0, 0),
+                Instruction::with_aux(Opcode::SetUpvalue, 0, 0, 0, 0),
+                Instruction::new(Opcode::ClearLocalCell, 0, 0, 0),
+                Instruction::with_aux(Opcode::GetUpvalue, 0, 0, 0, 0),
+                Instruction::with_aux(Opcode::GetUpvalue, 1, 0, 0, 1),
+                Instruction::new(Opcode::Len, 1, 1, 0),
+                Instruction::new(Opcode::LessEqual, 0, 0, 1),
+                Instruction::new(Opcode::ClearLocalCell, 1, 0, 0),
+                Instruction::with_aux(Opcode::JumpIfNot, 0, 0, 0, 21),
+                Instruction::new(Opcode::ClearLocalCell, 0, 0, 0),
+                Instruction::with_aux(Opcode::GetUpvalue, 0, 0, 0, 0),
+                Instruction::with_aux(Opcode::GetUpvalue, 1, 0, 0, 1),
+                Instruction::with_aux(Opcode::GetUpvalue, 2, 0, 0, 0),
+                Instruction::new(Opcode::GetIndex, 1, 1, 2),
+                Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
+                Instruction::new(Opcode::Return, 0, 2, 0),
+                Instruction::new(Opcode::ClearLocalCell, 0, 0, 0),
+                Instruction::new(Opcode::ClearLocalCell, 1, 0, 0),
+                Instruction::new(Opcode::Return, 0, 0, 0),
+            ],
+            3,
+            0,
+            vec![
+                UpvalueDescriptor::ParentLocal(0),
+                UpvalueDescriptor::ParentLocalValue(3),
+            ],
+            Vec::new(),
+        );
+        Program::with_functions(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 1),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 2),
+                    Instruction::new(Opcode::LoadConst, 2, 0, 3),
+                    Instruction::new(Opcode::NewArray, 3, 1, 2),
+                    Instruction::with_aux(Opcode::LoadFunction, 4, 0, 0, 0),
+                    Instruction::with_aux(Opcode::Call, 5, 4, 0, 0),
+                    Instruction::with_aux(Opcode::Call, 6, 4, 0, 0),
+                    Instruction::with_aux(Opcode::Call, 7, 4, 0, 0),
+                    Instruction::new(Opcode::NewArray, 8, 5, 3),
+                    Instruction::new(Opcode::Return, 8, 1, 0),
+                    Instruction::new(Opcode::Halt, 0, 0, 0),
+                ],
+                9,
+            ),
+            vec![
+                Constant::Number(1.0),
+                Constant::Number(0.0),
+                Constant::Number(10.0),
+                Constant::Number(20.0),
+            ],
+            vec![leaf],
+        )
+    }
+
+    #[test]
+    fn closure_call_opcode_matches_interpreter_and_syncs_caller_cells() {
+        let program = closure_call_loop_program();
+        let mut fast = Vm::new(Profile::ReproducibleStandard);
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        let fast_result = fast.run(&program).unwrap();
+
+        let mut interpreted = Vm::new(Profile::ReproducibleStandard);
+        interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        let interpreted_result = interpreted.run(&program).unwrap();
+
+        assert_eq!(fast_result.as_number(), Some(16.0));
+        assert_eq!(fast_result.as_number(), interpreted_result.as_number());
+        assert_eq!(
+            fast.executed_instructions,
+            interpreted.executed_instructions
+        );
+        let fast_loaded = &fast.dynamic_programs[0];
+        assert_eq!(fast_loaded.closure_call_cache_fills, 1);
+        assert_eq!(fast_loaded.closure_call_prototype_hits, 15);
+        assert_eq!(fast_loaded.closure_call_fast_entries, 16);
+        assert_eq!(fast_loaded.closure_call_guard_exits, 0);
+        let interpreted_loaded = &interpreted.dynamic_programs[0];
+        assert_eq!(interpreted_loaded.closure_call_cache_fills, 0);
+        assert_eq!(interpreted_loaded.closure_call_prototype_hits, 0);
+        assert_eq!(interpreted_loaded.closure_call_fast_entries, 0);
+        assert_eq!(interpreted_loaded.closure_call_guard_exits, 0);
+    }
+
+    #[test]
+    fn closure_call_scalar_array_iterator_preserves_pair_and_empty_results() {
+        let program = closure_call_array_iterator_program();
+        let mut fast = Vm::new(Profile::ReproducibleStandard);
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        let fast_result = fast.run(&program).unwrap().as_table().unwrap();
+
+        let mut interpreted = Vm::new(Profile::ReproducibleStandard);
+        interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        let interpreted_result = interpreted.run(&program).unwrap().as_table().unwrap();
+
+        for (index, expected) in [(1, Some(1.0)), (2, Some(2.0)), (3, None)] {
+            assert_eq!(
+                fast.heap
+                    .read_numeric_array_slot(fast_result, index)
+                    .and_then(Value::as_number),
+                expected
+            );
+            assert_eq!(
+                interpreted
+                    .heap
+                    .read_numeric_array_slot(interpreted_result, index)
+                    .and_then(Value::as_number),
+                expected
+            );
+        }
+        assert_eq!(
+            fast.executed_instructions,
+            interpreted.executed_instructions
+        );
+        assert_eq!(fast.dynamic_programs[0].closure_call_cache_fills, 3);
+        assert_eq!(fast.dynamic_programs[0].closure_call_prototype_hits, 0);
+        assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 3);
+        assert_eq!(fast.dynamic_programs[0].closure_call_guard_exits, 0);
+        assert_eq!(interpreted.dynamic_programs[0].closure_call_fast_entries, 0);
+    }
+
+    #[test]
+    fn closure_call_preserves_deterministic_collection_cadence() {
+        let program = closure_call_loop_program();
+        let mut saw_fast_entry = false;
+        for interval in 1..=23 {
+            let interval = NonZeroU64::new(interval).unwrap();
+            let mut fast = Vm::with_settings(
+                Profile::DeterministicSim,
+                VmSettings {
+                    deterministic_gc_interval: interval,
+                    ..VmSettings::default()
+                },
+            );
+            fast.closure_call_mode = ClosureCallTestMode::Force;
+            let fast_result = fast.run(&program).unwrap();
+
+            let mut interpreted = Vm::with_settings(
+                Profile::DeterministicSim,
+                VmSettings {
+                    deterministic_gc_interval: interval,
+                    ..VmSettings::default()
+                },
+            );
+            interpreted.closure_call_mode = ClosureCallTestMode::Off;
+            let interpreted_result = interpreted.run(&program).unwrap();
+
+            assert_eq!(fast_result.as_number(), interpreted_result.as_number());
+            assert_eq!(
+                fast.deterministic_collection_count(),
+                interpreted.deterministic_collection_count()
+            );
+            assert_eq!(
+                fast.next_weak_collection_instruction,
+                interpreted.next_weak_collection_instruction
+            );
+            assert_eq!(
+                fast.executed_instructions,
+                interpreted.executed_instructions
+            );
+            saw_fast_entry |= fast.dynamic_programs[0].closure_call_fast_entries > 0;
+            assert_eq!(interpreted.dynamic_programs[0].closure_call_fast_entries, 0);
+        }
+        assert!(saw_fast_entry);
+    }
+
+    #[test]
+    fn closure_call_policy_fallbacks_match_the_interpreter() {
+        let program = closure_call_loop_program();
+
+        let mut accounting = Vm::new(Profile::ReproducibleStandard);
+        accounting.closure_call_mode = ClosureCallTestMode::Off;
+        let expected = accounting.run(&program).unwrap();
+        let exact_fuel = accounting.executed_instructions;
+
+        for fuel in [exact_fuel, exact_fuel - 1] {
+            let settings = VmSettings {
+                initial_fuel: Some(fuel),
+                ..VmSettings::default()
+            };
+            let mut fast = Vm::with_settings(Profile::ReproducibleStandard, settings.clone());
+            fast.closure_call_mode = ClosureCallTestMode::Force;
+            let fast_result = fast.run(&program);
+            let mut interpreted = Vm::with_settings(Profile::ReproducibleStandard, settings);
+            interpreted.closure_call_mode = ClosureCallTestMode::Off;
+            let interpreted_result = interpreted.run(&program);
+
+            match (fast_result, interpreted_result) {
+                (Ok(fast_result), Ok(interpreted_result)) => {
+                    assert_eq!(fast_result.as_number(), expected.as_number());
+                    assert_eq!(fast_result.as_number(), interpreted_result.as_number());
+                }
+                (Err(fast_error), Err(interpreted_error)) => {
+                    assert_eq!(fast_error.to_string(), interpreted_error.to_string());
+                    assert_eq!(fast_error.pc, interpreted_error.pc);
+                    assert_eq!(fast_error.location, interpreted_error.location);
+                }
+                (fast_result, interpreted_result) => {
+                    panic!("fuel policy mismatch: {fast_result:?} vs {interpreted_result:?}")
+                }
+            }
+            assert_eq!(
+                fast.executed_instructions,
+                interpreted.executed_instructions
+            );
+            assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 0);
+        }
+
+        let coverage_settings = VmSettings {
+            enable_conformance_coverage: true,
+            ..VmSettings::default()
+        };
+        let mut fast = Vm::with_settings(Profile::ReproducibleStandard, coverage_settings.clone());
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        let fast_result = fast.run(&program).unwrap();
+        let mut interpreted = Vm::with_settings(Profile::ReproducibleStandard, coverage_settings);
+        interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        let interpreted_result = interpreted.run(&program).unwrap();
+        assert_eq!(fast_result.as_number(), interpreted_result.as_number());
+        assert_eq!(fast.coverage_hits, interpreted.coverage_hits);
+        assert_eq!(
+            fast.executed_instructions,
+            interpreted.executed_instructions
+        );
+        assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 0);
+
+        let recursion_settings = VmSettings {
+            recursion_limit: 0,
+            ..VmSettings::default()
+        };
+        let mut fast = Vm::with_settings(Profile::ReproducibleStandard, recursion_settings.clone());
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        let fast_error = fast.run(&program).unwrap_err();
+        let mut interpreted = Vm::with_settings(Profile::ReproducibleStandard, recursion_settings);
+        interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        let interpreted_error = interpreted.run(&program).unwrap_err();
+        assert_eq!(fast_error.to_string(), interpreted_error.to_string());
+        assert_eq!(fast_error.pc, interpreted_error.pc);
+        assert_eq!(fast_error.location, interpreted_error.location);
+        assert_eq!(
+            fast.executed_instructions,
+            interpreted.executed_instructions
+        );
+        assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 0);
+    }
+
+    #[test]
+    fn closure_call_cache_is_polymorphic_over_handles_and_reads_direct_values() {
+        let program = closure_call_counter_program();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        vm.closure_call_mode = ClosureCallTestMode::Force;
+        vm.maybe_collect();
+        let program_id = vm.retain_dynamic_program(program).unwrap();
+        let mut closures = Vec::new();
+        let mut value_cells = Vec::new();
+        for value in 1..=8 {
+            let value_cell = vm
+                .heap
+                .alloc_upvalue(Value::number(f64::from(value)))
+                .unwrap();
+            let handle = vm
+                .heap
+                .alloc_function(
+                    Some(program_id),
+                    0,
+                    vec![
+                        FunctionCapture::from_cell(value_cell),
+                        FunctionCapture::direct(Value::number(f64::from(value))),
+                    ],
+                    vm.globals,
+                )
+                .unwrap();
+            closures.push(Value::function(handle));
+            value_cells.push(value_cell);
+        }
+
+        let instruction = Instruction::with_aux(Opcode::Call, 0, 1, 0, 0);
+        let mut fuel = None;
+        for round in 2..=3 {
+            for (index, closure) in closures.iter().copied().enumerate() {
+                let registers = [Value::nil(), closure];
+                let outcome = vm
+                    .try_closure_call_scalar(
+                        program_id,
+                        None,
+                        0,
+                        &registers,
+                        instruction,
+                        0,
+                        &mut fuel,
+                    )
+                    .unwrap()
+                    .expect("eligible closure call");
+                assert_eq!(
+                    outcome.first.as_number(),
+                    Some(f64::from(round * (index as i32 + 1)))
+                );
+            }
+        }
+
+        let loaded = &vm.dynamic_programs[program_id as usize];
+        assert_eq!(loaded.closure_call_cache_fills, 1);
+        assert_eq!(loaded.closure_call_prototype_hits, 15);
+        assert_eq!(loaded.closure_call_fast_entries, 16);
+        assert_eq!(loaded.closure_call_guard_exits, 0);
+        for (index, cell) in value_cells.iter().copied().enumerate() {
+            assert_eq!(
+                vm.heap.upvalue_get(cell).and_then(Value::as_number),
+                Some(3.0 * (index as f64 + 1.0))
+            );
+        }
+
+        let live_value = vm.heap.alloc_upvalue(Value::number(10.0)).unwrap();
+        let live_step = vm.heap.alloc_upvalue(Value::number(1.0)).unwrap();
+        let live_handle = vm
+            .heap
+            .alloc_function(
+                Some(program_id),
+                0,
+                vec![
+                    FunctionCapture::from_cell(live_value),
+                    FunctionCapture::from_cell(live_step),
+                ],
+                vm.globals,
+            )
+            .unwrap();
+        let live_registers = [Value::nil(), Value::function(live_handle)];
+        assert_eq!(
+            vm.try_closure_call_scalar(
+                program_id,
+                None,
+                0,
+                &live_registers,
+                instruction,
+                0,
+                &mut fuel,
+            )
+            .unwrap()
+            .unwrap()
+            .first
+            .as_number(),
+            Some(11.0)
+        );
+        vm.heap.upvalue_set(live_step, Value::number(5.0)).unwrap();
+        assert_eq!(
+            vm.try_closure_call_scalar(
+                program_id,
+                None,
+                0,
+                &live_registers,
+                instruction,
+                0,
+                &mut fuel,
+            )
+            .unwrap()
+            .unwrap()
+            .first
+            .as_number(),
+            Some(16.0)
+        );
+
+        let registers = [Value::nil(), closures[0]];
+        let outcome = vm
+            .try_closure_call_scalar(program_id, None, 0, &registers, instruction, 0, &mut fuel)
+            .unwrap()
+            .expect("warmed closure call");
+        let mut alias_registers = [Value::number(-1.0), Value::number(-2.0)];
+        let alias_cells = [Some(value_cells[0]), Some(value_cells[0])];
+        sync_leaf_mutation_to_registers(
+            &mut alias_registers,
+            &alias_cells,
+            outcome.mutation_cell,
+            outcome.first,
+        );
+        assert_eq!(alias_registers[0].as_number(), Some(4.0));
+        assert_eq!(alias_registers[1].as_number(), Some(4.0));
+
+        vm.closure_call_mode = ClosureCallTestMode::Off;
+        let registers = [Value::nil(), closures[0]];
+        assert!(vm
+            .try_closure_call_scalar(program_id, None, 0, &registers, instruction, 0, &mut fuel,)
+            .unwrap()
+            .is_none());
+        let captures = [
+            FunctionCapture::from_cell(value_cells[0]),
+            FunctionCapture::direct(Value::number(1.0)),
+        ];
+        assert!(vm
+            .try_leaf_bytecode_call(
+                LeafCallPlan::UpvalueCounter {
+                    value_upvalue: 0,
+                    step_upvalue: 1,
+                },
+                &captures,
+                0,
+                &mut fuel,
+            )
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn closure_call_guard_exit_is_atomic_and_policy_falls_back() {
+        let program = closure_call_counter_program();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        vm.closure_call_mode = ClosureCallTestMode::Force;
+        vm.maybe_collect();
+        let program_id = vm.retain_dynamic_program(program).unwrap();
+        let value_cell = vm.heap.alloc_upvalue(Value::number(7.0)).unwrap();
+        let handle = vm
+            .heap
+            .alloc_function(
+                Some(program_id),
+                0,
+                vec![
+                    FunctionCapture::from_cell(value_cell),
+                    FunctionCapture::direct(Value::boolean(true)),
+                ],
+                vm.globals,
+            )
+            .unwrap();
+        let registers = [Value::nil(), Value::function(handle)];
+        let instruction = Instruction::with_aux(Opcode::Call, 0, 1, 0, 0);
+        let mut fuel = None;
+        assert!(vm
+            .try_closure_call_scalar(program_id, None, 0, &registers, instruction, 0, &mut fuel,)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            vm.heap.upvalue_get(value_cell).and_then(Value::as_number),
+            Some(7.0)
+        );
+        let loaded = &vm.dynamic_programs[program_id as usize];
+        assert_eq!(loaded.closure_call_cache_fills, 1);
+        assert_eq!(loaded.closure_call_fast_entries, 0);
+        assert_eq!(loaded.closure_call_guard_exits, 1);
+
+        let mut fuelled = Vm::with_settings(
+            Profile::ReproducibleStandard,
+            VmSettings {
+                initial_fuel: Some(100),
+                ..VmSettings::default()
+            },
+        );
+        fuelled.closure_call_mode = ClosureCallTestMode::Force;
+        let fuelled_program = fuelled
+            .retain_dynamic_program(closure_call_counter_program())
+            .unwrap();
+        let cell = fuelled.heap.alloc_upvalue(Value::number(1.0)).unwrap();
+        let handle = fuelled
+            .heap
+            .alloc_function(
+                Some(fuelled_program),
+                0,
+                vec![
+                    FunctionCapture::from_cell(cell),
+                    FunctionCapture::direct(Value::number(1.0)),
+                ],
+                fuelled.globals,
+            )
+            .unwrap();
+        let mut remaining = Some(100);
+        assert!(fuelled
+            .try_closure_call_scalar(
+                fuelled_program,
+                None,
+                0,
+                &[Value::nil(), Value::function(handle)],
+                instruction,
+                0,
+                &mut remaining,
+            )
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            fuelled.dynamic_programs[fuelled_program as usize].closure_call_cache_fills,
+            0
+        );
+    }
+
+    #[test]
+    fn closure_call_cache_separates_prototypes_and_programs_at_one_site() {
+        let mut first_program = closure_call_counter_program();
+        first_program
+            .functions
+            .push(first_program.functions[0].clone());
+        let second_program = closure_call_counter_program();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        vm.closure_call_mode = ClosureCallTestMode::Force;
+        vm.maybe_collect();
+        let caller_program = vm.retain_dynamic_program(first_program).unwrap();
+        let other_program = vm.retain_dynamic_program(second_program).unwrap();
+
+        let make_closure = |vm: &mut Vm, program, prototype, start| {
+            let cell = vm.heap.alloc_upvalue(Value::number(start)).unwrap();
+            let handle = vm
+                .heap
+                .alloc_function(
+                    Some(program),
+                    prototype,
+                    vec![
+                        FunctionCapture::from_cell(cell),
+                        FunctionCapture::direct(Value::number(1.0)),
+                    ],
+                    vm.globals,
+                )
+                .unwrap();
+            Value::function(handle)
+        };
+        let closures = [
+            make_closure(&mut vm, caller_program, 0, 10.0),
+            make_closure(&mut vm, caller_program, 1, 20.0),
+            make_closure(&mut vm, other_program, 0, 30.0),
+        ];
+        let instruction = Instruction::with_aux(Opcode::Call, 0, 1, 0, 0);
+        let mut fuel = None;
+        for round in 1..=2 {
+            for (index, closure) in closures.iter().copied().enumerate() {
+                let outcome = vm
+                    .try_closure_call_scalar(
+                        caller_program,
+                        None,
+                        0,
+                        &[Value::nil(), closure],
+                        instruction,
+                        0,
+                        &mut fuel,
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    outcome.first.as_number(),
+                    Some((index as f64 + 1.0) * 10.0 + f64::from(round))
+                );
+            }
+        }
+
+        let loaded = &vm.dynamic_programs[caller_program as usize];
+        assert_eq!(loaded.closure_call_cache_fills, 3);
+        assert_eq!(loaded.closure_call_prototype_hits, 3);
+        assert_eq!(loaded.closure_call_fast_entries, 6);
+        let cache = &loaded
+            .main_inline_caches
+            .closure_call_entries
+            .as_ref()
+            .unwrap()[0];
+        assert_eq!(cache.lanes.iter().flatten().count(), 3);
+    }
+
     #[test]
     fn hot_loop_root_sync_keeps_collection_and_guest_entry_boundaries() {
         assert!(!weak_collection_due_within(0, 10_000, 1));
@@ -22972,6 +24103,7 @@ mod inline_cache_tests {
 
         assert_eq!(std::mem::size_of::<u32>(), 4);
         assert_eq!(std::mem::size_of::<TableStringInlineCache>(), 16);
+        assert_eq!(std::mem::size_of::<FunctionCapture>(), 16);
         assert_eq!(
             std::mem::size_of_val(loaded.constant_atoms.as_slice()),
             32 * std::mem::size_of::<u32>()
@@ -22987,6 +24119,7 @@ mod inline_cache_tests {
             2
         );
         assert!(loaded.main_inline_caches.table_entries.is_empty());
+        assert!(loaded.main_inline_caches.closure_call_entries.is_none());
         assert!(
             std::mem::size_of_val(loaded.main_inline_caches.entry_by_pc.as_slice())
                 < 256 * std::mem::size_of::<Option<TableStringInlineCache>>()

@@ -13,6 +13,8 @@ const TAG_USERDATA: u64 = 7;
 const TAG_BUFFER: u64 = 8;
 const TAG_VECTOR: u64 = 9;
 const TAG_SHORT_STRING: u64 = 10;
+// Private to closure metadata; this tag is never exposed as a script value.
+const TAG_CAPTURE_CELL: u64 = 11;
 const TAG_MASK: u64 = 0xff;
 const SHORT_STRING_LENGTH_SHIFT: u32 = 8;
 const SHORT_STRING_BYTES_SHIFT: u32 = 16;
@@ -178,6 +180,23 @@ impl Value {
             tag: TAG_VECTOR,
             payload: handle as u64,
         })
+    }
+
+    #[inline]
+    pub(crate) const fn capture_cell(handle: u32) -> Self {
+        Self(ValueRepr {
+            tag: TAG_CAPTURE_CELL,
+            payload: handle as u64,
+        })
+    }
+
+    #[inline]
+    pub(crate) const fn as_capture_cell(self) -> Option<u32> {
+        if self.0.tag == TAG_CAPTURE_CELL {
+            Some(self.0.payload as u32)
+        } else {
+            None
+        }
     }
 
     #[inline]
