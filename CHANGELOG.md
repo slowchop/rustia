@@ -161,8 +161,9 @@ Current unpublished workspace version: `0.0.1`.
   coverage, metamethods, coercion, mutation, recursion, and GC boundaries.
   Focused regression tests cover formatting, modulo, sorting, iterator cells,
   retained weak roots, and deterministic collection parity. A fresh local paired
-  screen now has rustia ahead of Ruau on all five tracked workloads; a clean
-  dedicated-Linux matrix remains the publication gate for that result.
+  screen put rustia ahead of the Rust-native Ruau adapter on all five tracked
+  workloads, but did not include the faster Luaur or `mlua-luau` adapters; the
+  dedicated-Linux matrix below supersedes that directional result.
 - The exact-commit `87db17542e19ae77ec92463f8a5b8e8b8a21a666`
   cross-engine Linode matrix accepted every native and wasm timed group on its
   first attempt with zero timed steal. Rustia median ns/unit improved
@@ -179,6 +180,15 @@ Current unpublished workspace version: `0.0.1`.
   0.1% allowance); every other timed group observed zero. The VM was confirmed
   deleted after 1,364 seconds and before evidence/results promotion, with a
   rounded compute-charge ceiling of $0.108.
+- The exact-commit `fa8c8571d60659c4f637940acbb84eb591b1e039`
+  cross-engine Linode matrix accepted all four timed groups on their first
+  attempts. Against the Rust-native Ruau adapter, rustia won
+  `generic_iteration` and trailed the other four workloads by 2.8%-35.0%, for a
+  1.027x geometric-mean Ruau advantage. The optimized C++ Luau adapters remain
+  the real target: Luaur and `mlua-luau` were 4.938x and 4.930x faster by
+  five-workload geometric mean, with per-workload `mlua-luau` gaps from 3.265x
+  to 6.667x. The VM was confirmed deleted after 2,227 seconds before the result
+  was promoted offline with its complete gate and raw-sample evidence.
 - An actual-bare-metal `just bench-vultr` fallback now follows rejected
   DigitalOcean shared and Linode dedicated-KVM placements without changing the
   frozen zero-steal protocol. It validates the Ubuntu 24.04 `vbm-4c-32gb` plan

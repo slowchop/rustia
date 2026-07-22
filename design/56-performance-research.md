@@ -1,21 +1,20 @@
 # rustia — SotA performance research update
 
-> **Status: [PERFORMANCE RESEARCH v1.7] (updated 2026-07-22).** This note updates
+> **Status: [PERFORMANCE RESEARCH v1.8] (updated 2026-07-22).** This note updates
 > [`55-improvements.md`](55-improvements.md) with the current performance research stack. It is not a new
 > conformance contract; it is the ordered implementation bet list for making rustia fast while keeping the public
 > workspace under `unsafe_code = "forbid"`.
 
 ## Ground truth
 
-The public cross-engine benchmark posture is still conservative: rustia remains behind the C++ Luau oracle
-through `mlua-luau` on the tracked workloads. The first 2026-07-21 exact-commit Linux matrix reduced the
-generated minimum-time comparison from a roughly 7.1x-14.1x range and 10.1x geometric-mean gap to
-5.25x-9.53x and 7.30x. Rustia's median ns/unit also fell 22.08%-34.97% across all five workloads relative to the
-previous committed Linux snapshot. The subsequent exact numeric-sort matrix improved the dense-table median a
-further 8.90% and moved that workload's gap from 9.20x to 8.54x; independent-host variance elsewhere leaves the
-latest overall range at 5.09x-10.02x and geometric mean at 7.29x. Exact same-engine Linux A/B evidence for the
-earlier dense, OOP, and string-memory slices is retained separately; none of these results turns into a blanket
-cross-engine headline. This remains a catch-up project first.
+The public cross-engine benchmark posture is still conservative: rustia remains behind the optimized C++ Luau
+adapters on every tracked workload. The exact-commit `fa8c8571d60659c4f637940acbb84eb591b1e039` Linux matrix
+places Luaur 3.709x-6.247x faster with a 4.938x five-workload geometric mean, and `mlua-luau` 3.265x-6.667x
+faster with a 4.930x geometric mean. The Rust-native Ruau adapter is much closer: rustia wins
+`generic_iteration`, trails the other four workloads by 2.8%-35.0%, and is 1.027x behind by geometric mean.
+All four timed groups passed on their first attempts and the Linode was confirmed deleted before promotion.
+Exact same-engine Linux A/B evidence for the earlier dense, OOP, and string-memory slices is retained separately;
+none of these results turns into a blanket cross-engine headline. This remains a catch-up project first.
 
 The hardened safe table/atom/cache foundation is now in-tree. VM-local byte atoms and insertion-ordered table
 hash parts at 16+ entries use deterministic open-addressed `Vec<u32>` side indices at no more than 50% load.
@@ -178,7 +177,7 @@ catch-up work.
 
 ## Measurement protocol for this slice
 
-### Current all-five candidate — local directional evidence
+### Exact `fa8c857` Linux matrix — accepted, broader target revealed
 
 The latest safe-Rust interpreter pass combines guarded common numeric and array
 opcode lanes, direct exact built-in iteration and scalar math calls, compact
@@ -188,14 +187,23 @@ by profiling. Every shortcut falls back before observable mutation when its
 guards do not hold; fuel, coverage, recursion, coercion, metamethod, and
 collection-boundary tests exercise the deopt paths.
 
-On the developer host, a fresh 15-repetition paired screen at 500 ms per
-repetition measured minimum times of 25,590.58 versus 27,209.26 ns/unit for
-`dense_tables`, 30,078.22 versus 38,954.95 for `sparse_tables`, 85.56 versus
-122.41 for `closures_upvalues`, 3,935.23 versus 6,642.56 for
-`generic_iteration`, and 436.19 versus 626.72 for `stdlib_math_table`, with
-rustia listed first and Ruau second. This is candidate-selection evidence only;
-the dedicated Linux matrix must reproduce all five wins before the public
-results or headline change.
+The earlier developer-host screen compared rustia only with the Rust-native Ruau
+adapter and therefore selected a useful candidate against the wrong headline
+reference. The accepted dedicated-Linux cohort measures all four Luau-family
+adapters together. Rustia minimum times are 175,068/159,265/590/22,076/2,271
+ns/unit for dense/sparse/closures/iteration/stdlib. Ruau is
+129,662/154,867/562/29,840/2,143, so rustia wins iteration but not the other four.
+Luaur and `mlua-luau` are substantially faster across all five, with roughly
+4.93x geometric-mean advantages.
+
+That result rules out more benchmark-shape leaf recognizers as the primary
+strategy. The next broad slice is a validated-profile quickened VM tier: move
+hot table storage out of the `gc_arena` root container into direct `VmCell`
+storage with explicit tracing, then emit guarded numeric arithmetic/loop and
+numeric-array get/set forms. Fuel, coverage, weak-GC, and error policy checks
+should move to explicit checkpoints that deopt to the semantic loop. This is the
+cross-cutting path that can reduce the repeated arena-mutation, borrow, handle,
+and dispatch tolls visible in all five workloads.
 
 The harness now creates fresh prepared engine/workload state for each calibration probe and each recorded
 repetition. Each recorded instance runs one untimed warmup followed by exactly one timed invocation, preventing

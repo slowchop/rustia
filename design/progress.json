@@ -19,16 +19,18 @@
         "pending": 0
       },
       "benchmark_adapters": {
-        "requested": 10,
-        "present": 10,
+        "requested": 12,
+        "present": 12,
         "names": [
           "rustia",
           "boa",
           "koto",
+          "luaur",
           "mlua-lua54",
           "mlua-luau",
           "rhai",
           "roto",
+          "ruau",
           "rquickjs",
           "wasmi",
           "wasmtime"
@@ -92,7 +94,7 @@
       "name": "Standalone benchmark OSS project",
       "complete": 80,
       "confidence": 80,
-      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, a standalone target-first current-results HTML report, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 10 requested adapters, exact ephemeral-Linux fixed-throughput and evidence-only memory protocols, a recurring wasm target runner for rustia+koto+rhai on Node/V8, retained cross-engine wasm evidence, a call_ref versus br_table dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle are present.",
+      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, a standalone target-first current-results HTML report, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 12 requested adapters, exact ephemeral-Linux fixed-throughput and evidence-only memory protocols, a recurring wasm target runner for rustia+koto+rhai on Node/V8, retained cross-engine wasm evidence, a call_ref versus br_table dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle are present.",
       "future_plan": "Split from workspace, expand workloads, and accumulate longer-run public history and richer tracking charts."
     },
     {
@@ -384,7 +386,7 @@
           "name": "Adapter matrix",
           "complete": 100,
           "confidence": 88,
-          "state": "All 10 requested adapters are implemented; mlua-lua54 runs as a separate binary from Luau because of mlua-sys linking constraints.",
+          "state": "All 12 requested adapters are implemented; mlua-lua54 runs as a separate binary from Luau because of mlua-sys linking constraints.",
           "future_plan": "Split adapters into standalone crates/binaries and keep baselines current."
         },
         {
@@ -398,7 +400,7 @@
           "name": "History and static report",
           "complete": 82,
           "confidence": 85,
-          "state": "A coherent Linux-only 10-adapter result snapshot, dirty-baseline guards, markdown results, current-results JSON, a standalone HTML report, claim-gate markdown, all five default workloads, and retained exact dense/OOP Linux evidence are present; the separate string-memory corpus remains evidence-only by design.",
+          "state": "A coherent Linux-only 12-adapter result snapshot, dirty-baseline guards, markdown results, current-results JSON, a standalone HTML report, claim-gate markdown, all five default workloads, and retained exact dense/OOP Linux evidence are present; the separate string-memory corpus remains evidence-only by design.",
           "future_plan": "Publish long-run history and richer charts after standalone split."
         },
         {
@@ -424,7 +426,7 @@
           "name": "Native/wasm matrix",
           "complete": 78,
           "confidence": 75,
-          "state": "A coherent 10-adapter native Linux baseline is recorded; recurring wasm target results cover rustia+koto+rhai and br_table/call_ref dispatch on Node/V8, while the accepted four-runtime matrix remains archived as historical portability evidence.",
+          "state": "A coherent 12-adapter native Linux baseline is recorded; recurring wasm target results cover rustia+koto+rhai and br_table/call_ref dispatch on Node/V8, while the accepted four-runtime matrix remains archived as historical portability evidence.",
           "future_plan": "Broaden public baselines and keep result history fresh across runtime updates."
         }
       ]

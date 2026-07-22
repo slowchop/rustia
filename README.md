@@ -72,7 +72,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
 | Public release readiness | 73% | 75% |
 
 - Current conformance runner: **692 fixtures**, **491 refs**, **0 pending**.
-- The benchmark harness has all 10 requested adapters and a non-default `string_building` workload source set
+- The benchmark harness has all 12 requested adapters and a non-default `string_building` workload source set
   across them; Lua 5.4 runs separately from Luau because `mlua-sys` cannot link both in one binary.
 - Current benchmark claim posture is generated at [`bench/CLAIMS.md`](bench/CLAIMS.md); it approves no blanket
   speed headline from the current snapshot.

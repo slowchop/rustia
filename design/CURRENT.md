@@ -21,7 +21,7 @@ headline. All 8 architecture axes are decided
 ([`55-improvements.md`](55-improvements.md)), the no-unsafe SotA performance research stack is now captured in
 [`56-performance-research.md`](56-performance-research.md), and the standalone benchmark harness has the engine/workload/history
 shell, generated current-results HTML report, 12 workload entries including cross-adapter `string_building` source coverage, and
-the `rustia`/`boa`/`koto`/`mlua-lua54`/`mlua-luau`/`rhai`/`roto`/`rquickjs`/`wasmi`/`wasmtime` native adapters in
+the `rustia`/`boa`/`koto`/`luaur`/`mlua-lua54`/`mlua-luau`/`rhai`/`roto`/`ruau`/`rquickjs`/`wasmi`/`wasmtime` native adapters in
 place.
 The benchmark artifacts now also include a first-class wasm pre-lock gate source
 (`../bench/wasm-gate.json`), production wasm target results for `rustia` and
