@@ -1,0 +1,119 @@
+{
+  "provider": "linode",
+  "linode_id": null,
+  "linode_label": "rustia-bench-a5629199-94e3d775",
+  "created_at": "2026-07-22T11:23:52",
+  "status": "running",
+  "region": "ap-southeast",
+  "size_slug": "g6-dedicated-4",
+  "image": "linode/ubuntu24.04",
+  "vcpus": 4,
+  "memory_mib": 8192,
+  "disk_gib": 160,
+  "public_ipv4": "REDACTED",
+  "backups_enabled": false,
+  "interface_generation": "legacy_config",
+  "maintenance_policy": "linode/power_off_on",
+  "catalog_plan": {
+    "schema": "rustia.linode-fixed-benchmark.v2",
+    "provider": "linode",
+    "protocol_mode": "matrix",
+    "region": {
+      "id": "ap-southeast",
+      "label": "Sydney, AU",
+      "country": "au",
+      "status": "ok"
+    },
+    "image": {
+      "id": "linode/ubuntu24.04",
+      "label": "Ubuntu 24.04 LTS",
+      "vendor": "Ubuntu",
+      "created": "2024-04-25T13:00:11",
+      "updated": "2026-07-16T14:18:54",
+      "status": "available",
+      "is_public": true
+    },
+    "size": {
+      "id": "g6-dedicated-4",
+      "description": "Dedicated 8GB",
+      "class": "dedicated",
+      "vcpus": 4,
+      "memory_mib": 8192,
+      "disk_gib": 160,
+      "price_hourly_usd": 0.108,
+      "price_monthly_usd": 72,
+      "regional_price": false
+    },
+    "billable_lifetime_limit_minutes": 55,
+    "billing_increment_minutes": 60,
+    "planned_compute_cost_ceiling_usd": 0.108,
+    "cleanup_reserve_minutes": 8,
+    "billing_caveat": "Linode usage is rounded up to a whole hour; deletion, not shutdown, stops further accrual, and an API outage can delay confirmed deletion",
+    "source": {
+      "orchestration_commit": "119fd626458ac1a6bc51c29e1b2320b20e2c6f86",
+      "config_path": "bench/cloud/linode-cross-engine-matrix-a562919.json",
+      "config_sha256": "b7ad6d2990c795272d7a944899b2195e0992ebf402c12a998bdc00f8553610b5",
+      "coordinator_sha256": "fec23bea9dc49e819883c461efe8a98d4cc46bb3defb8f35356b99443306c77e",
+      "remote_runner_path": "tools/run-linux-matrix-benchmark.js",
+      "remote_runner_sha256": "233e9fbd3b511bb517a15638e8c100fdb8c13ceb4a2ae38acd3c0e08e8da80f8",
+      "verified_source_hashes": {
+        "benchmark manifest": "eef560df025e67309bad296b4931c3743785902efe1cfa7223417914dff63ded",
+        "native harness": "ef75536972f1f8a7de01a0f7ef6f8286a207cac8223d7d21314e87c6bcf6755b",
+        "Cargo.lock": "7227d51f385e7e9c21ea2fca5e2ed17b152dfcd5c9a78aea5c95362c5c411cc2",
+        "toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
+        "wasm gate": "d51e8b5313f5f70428c569b198143fbc1cf001670fdcfe25a65209fbe8fc3846",
+        "wasm dispatch gate": "1dbf2a164797f910071131db9ac41ac8fb1746082c39a57a69deaa06a6015495",
+        "wasm adapter manifest": "e281bc4a356751ac81c23ab300eb7e2af2019cf2bfdc0bf10ed198b1adbdb0d5",
+        "wasm module measurement": "a2811a6f607ac820799a4fd877e50eea54542a6903aa9d776f91dbec3a942a04",
+        "wasm dispatch measurement": "e995d836d7bda397a4a878c6496286068e16ba6f9dd2ba0eb85440bfd886119f",
+        "benchmark commit history": "285813adb0436fccdcbaf73e4d5fdfb44e094235b596c3610db3ed0395f25f02",
+        "current history": "285813adb0436fccdcbaf73e4d5fdfb44e094235b596c3610db3ed0395f25f02"
+      }
+    },
+    "comparison": {
+      "protocol": "cross_engine_matrix_v3",
+      "benchmark_commit": "a5629199643847c0da78792644ad3656887bee21",
+      "native_target": "linux-x86_64",
+      "native_engines": [
+        "rustia",
+        "boa",
+        "koto",
+        "luaur",
+        "mlua-luau",
+        "rhai",
+        "roto",
+        "ruau",
+        "rquickjs",
+        "wasmi",
+        "wasmtime",
+        "mlua-lua54"
+      ],
+      "workloads": [
+        "dense_tables",
+        "sparse_tables",
+        "closures_upvalues",
+        "generic_iteration",
+        "stdlib_math_table"
+      ],
+      "native_repetitions": 5,
+      "wasm_runtimes": [
+        "node"
+      ],
+      "wasm_adapters": [
+        "rustia",
+        "koto",
+        "rhai"
+      ],
+      "wasm_repetitions": 5,
+      "dispatch_repetitions": 5,
+      "maximum_timed_steal_ticks": 1,
+      "maximum_timed_attempts_per_group": 3,
+      "wait_timeout_seconds": 300,
+      "result_shape": {
+        "native_rows": 60,
+        "wasm_rows": 15,
+        "dispatch_runtimes": 1
+      }
+    }
+  }
+}
