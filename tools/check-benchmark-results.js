@@ -79,6 +79,23 @@ const expectedEngineCohorts = new Map([
       ["mlua-lua54", "lua54"],
     ]),
   ],
+  [
+    "d4ec275e19bad0efcf8e96db4030e7380bd93a9b",
+    new Map([
+      ["rustia", "luau"],
+      ["boa", "javascript"],
+      ["koto", "koto"],
+      ["luaur", "luau"],
+      ["mlua-luau", "luau"],
+      ["rhai", "rhai"],
+      ["roto", "roto"],
+      ["ruau", "luau"],
+      ["rquickjs", "javascript"],
+      ["wasmi", "wasm"],
+      ["wasmtime", "wasm"],
+      ["mlua-lua54", "lua54"],
+    ]),
+  ],
 ]);
 const expectedWorkloads = [
   "dense_tables",
