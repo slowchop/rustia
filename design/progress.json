@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "date": "2026-07-20",
+    "date": "2026-07-22",
     "scope": "Public rustia project readiness, based on the current workspace and canonical design docs.",
     "excludes": [
       "Actual grabby integration work"
@@ -73,7 +73,7 @@
       "name": "Whole public rustia project",
       "complete": 81,
       "confidence": 68,
-      "state": "Design is locked and production crates are substantial. The safe-Rust baseline, pinned formatting/strict-Clippy CI gates, broadened field/method fast paths, shared/inline string representation, and exact dedicated-Linux dense/OOP/string-memory evidence are in-tree alongside the embedding, CLI, conformance, release-readiness, and benchmark work; release packaging and broader long-run performance gates remain.",
+      "state": "Design is locked and production crates are substantial. The safe-Rust baseline, pinned formatting/strict-Clippy CI gates, broadened field/method fast paths, shared/inline string representation, reusable private HotIR numeric tracelets, and exact dedicated-Linux performance evidence are in-tree alongside the embedding, CLI, conformance, release-readiness, and benchmark work; release packaging and broader long-run performance gates remain.",
       "future_plan": "Harden P1, extend realistic and long-run benchmark coverage, then move toward full public Luau parity."
     },
     {
@@ -134,7 +134,7 @@
           "name": "Current-state tracking",
           "complete": 90,
           "confidence": 85,
-          "state": "design/CURRENT.md, README, progress data, architecture notes, performance research, conformance notes, and changelog are aligned with the safe-Rust baseline, CI quality gates, landed performance slice, accepted dense/OOP throughput evidence, and committed string-memory evidence.",
+          "state": "design/CURRENT.md, progress data, architecture notes, performance research, and benchmark artifacts are aligned with the safe-Rust baseline, landed private HotIR tracelets, accepted Linux native/wasm matrix, earlier dense/OOP throughput evidence, and committed string-memory evidence.",
           "future_plan": "Keep README, progress data, and design docs aligned after each major implementation slice."
         },
         {
@@ -224,8 +224,8 @@
           "name": "Bytecode dispatch core",
           "complete": 80,
           "confidence": 65,
-          "state": "Portable interpreter exists; big-match/br-table direction is locked, and the call_ref microbench favors br_table across V8, JavaScriptCore-family, and SpiderMonkey.",
-          "future_plan": "Add hot/cold split and maintain fusion-invariant fuel."
+          "state": "Portable interpreter exists; big-match/br-table direction is locked, and the first bounded private HotIR numeric tracelets preserve interpreter authority, exact logical fuel, deterministic-GC policy, and atomic guard fallback under focused parity tests.",
+          "future_plan": "Extend verified HotIR effect/control-flow coverage, add hot/cold split, and maintain fusion-invariant fuel."
         },
         {
           "name": "Value representation",
@@ -400,7 +400,7 @@
           "name": "History and static report",
           "complete": 82,
           "confidence": 85,
-          "state": "A coherent Linux-only 12-adapter result snapshot, dirty-baseline guards, markdown results, current-results JSON, a standalone HTML report, claim-gate markdown, all five default workloads, and retained exact dense/OOP Linux evidence are present; the separate string-memory corpus remains evidence-only by design.",
+          "state": "A coherent Linux-only 12-adapter result snapshot at the HotIR commit, dirty-baseline guards, markdown results, current-results JSON, a standalone HTML report, claim-gate markdown, all five default workloads, and retained exact matrix/dense/OOP Linux evidence are present; the separate string-memory corpus remains evidence-only by design.",
           "future_plan": "Publish long-run history and richer charts after standalone split."
         },
         {

@@ -1,6 +1,6 @@
 # rustia — SotA performance research update
 
-> **Status: [PERFORMANCE RESEARCH v1.8] (updated 2026-07-22).** This note updates
+> **Status: [PERFORMANCE RESEARCH v1.9] (updated 2026-07-22).** This note updates
 > [`55-improvements.md`](55-improvements.md) with the current performance research stack. It is not a new
 > conformance contract; it is the ordered implementation bet list for making rustia fast while keeping the public
 > workspace under `unsafe_code = "forbid"`.
@@ -8,13 +8,14 @@
 ## Ground truth
 
 The public cross-engine benchmark posture is still conservative: rustia remains behind the optimized C++ Luau
-adapters on every tracked workload. The exact-commit `fa8c8571d60659c4f637940acbb84eb591b1e039` Linux matrix
-places Luaur 3.709x-6.247x faster with a 4.938x five-workload geometric mean, and `mlua-luau` 3.265x-6.667x
-faster with a 4.930x geometric mean. The Rust-native Ruau adapter is much closer: rustia wins
-`generic_iteration`, trails the other four workloads by 2.8%-35.0%, and is 1.027x behind by geometric mean.
-All four timed groups passed on their first attempts and the Linode was confirmed deleted before promotion.
-Exact same-engine Linux A/B evidence for the earlier dense, OOP, and string-memory slices is retained separately;
-none of these results turns into a blanket cross-engine headline. This remains a catch-up project first.
+adapters on every tracked workload. The current exact-commit
+`d4ec275e19bad0efcf8e96db4030e7380bd93a9b` Linux matrix places Luaur 2.722x-5.154x faster with a 3.757x
+five-workload geometric mean, and `mlua-luau` 2.688x-4.650x faster with a 3.495x geometric mean. Rustia now
+beats the Rust-native Ruau adapter on all five workloads and uses 0.761x its time by geometric mean. All four
+timed groups passed on their first attempts; the primary native group observed one steal tick (0.0095%, within
+the frozen 0.1% allowance), the other groups observed zero, and the Linode was confirmed deleted before
+promotion. Exact same-engine Linux A/B evidence for earlier slices is retained separately; none of these results
+turns into a blanket cross-engine headline. This remains a catch-up project first.
 
 The hardened safe table/atom/cache foundation is now in-tree. VM-local byte atoms and insertion-ordered table
 hash parts at 16+ entries use deterministic open-addressed `Vec<u32>` side indices at no more than 50% load.
@@ -96,8 +97,11 @@ Expected gain: 2x-20x on table-heavy workloads; likely the fastest route to clos
 Start with generic opcodes, observe stable operand types/keys/call targets, then rewrite the executing program or
 per-VM side metadata to specialized forms with guards. This is the PEP 659-style "make the interpreter learn"
 layer, adapted to rustia's deterministic fuel model.
-Current plan delta: current docs mention generic superinstructions and ICs, but not a full adaptive tier. Add a
-quickening state machine and fuel-invariant specialized opcode families.
+Current plan delta: the first private `HotIr` tracelet slice is landed for bounded numeric `for` bodies. It keeps
+public bytecode and the interpreter authoritative, lowers source-ordered typed operations, stages all fallible
+work before its single allowed table effect, and falls through to the already-fetched interpreter instruction on
+a guard miss. Next extend the same verified IR to multiple effects, branches, intrinsics, calls, and iteration;
+do not revive the rejected per-site cache shape or add another bespoke recognizer.
 Expected gain: 1.25x-2x broad speedup, larger when it removes repeated tag/key/call checks.
 
 **4. FASTCALL, GETIMPORT, and safeenv completeness.**
@@ -375,10 +379,11 @@ operand-preparation variant produced only mixed marginal results and was removed
 the accepted commit; future quickening work needs a different dispatch/state design rather than reviving that
 cache shape.
 
-### Private HotIR numeric tracelets
+### Private HotIR numeric tracelets — landed and Linux-gated
 
-The next specialization pass replaces the recursive, bespoke `NumericLoopKernel` with a private, bounded
-`HotIr`. Public bytecode and the ordinary interpreter remain the semantic authority. Complete eligible numeric
+The specialization pass at exact commit `d4ec275e19bad0efcf8e96db4030e7380bd93a9b` replaces the recursive,
+bespoke `NumericLoopKernel` with a private, bounded `HotIr`. Public bytecode and the ordinary interpreter remain
+the semantic authority. Complete eligible numeric
 `for` bodies lower to source-ordered typed operations with forward-only number IDs; the executor evaluates each
 operation once into reused unboxed `f64` scratch, stages every register and table operand, and commits only after
 all guards succeed. A guard miss resumes the already-fetched `ForLoop` directly, so completed iterations are not
@@ -401,15 +406,27 @@ repetitions per leg, and matching checksums. Pooled median `dense_tables` time m
 ns/unit (-29.31%). The same screen found -0.52% on `sparse_tables`, -3.65% on `closures_upvalues`, +0.66% on
 `generic_iteration`, and -4.69% on `stdlib_math_table`; no tracked default crossed the predeclared +3% local
 regression threshold. These macOS developer-host results are directional selection evidence, not a public Linux
-or cross-engine claim. Exact dedicated-Linode measurement remains the acceptance gate.
+or cross-engine claim.
+
+The exact dedicated-Linode matrix accepted every native and wasm group on its first timed attempt. Against the
+immediately preceding `3732b80d5200edf053e213ef931b838c003968f3` snapshot, rustia native median time changed
+-0.23% on `dense_tables`, -7.14% on `sparse_tables`, +5.74% on `closures_upvalues`, +5.12% on
+`generic_iteration`, and -0.59% on `stdlib_math_table`, for a +0.47% normalized geometric mean. The Linux result
+therefore preserves the prior native tier but does **not** reproduce the local -29.31% dense gain; the local
+number remains directional only. Current minimum-time gaps are 3.495x to `mlua-luau` and 3.757x to Luaur by
+five-workload geometric mean, while rustia beats Ruau on all five. Rustia wasm improved 5.55% by normalized
+geometric mean against the preceding snapshot, but cross-run movement is not attributed solely to HotIR. The VM
+was confirmed deleted after 1,529 seconds and before promotion, with a rounded $0.108 compute ceiling. The
+complete corpus is retained under
+[`../bench/evidence/matrix/d4ec275e19bad0efcf8e96db4030e7380bd93a9b/`](../bench/evidence/matrix/d4ec275e19bad0efcf8e96db4030e7380bd93a9b/).
 
 ## Estimate vs C++ Luau
 
 | state | likely position vs C++ Luau interpreter |
 |---|---|
-| Current public cross-engine snapshot | About 8x-20x slower on tracked workloads; roughly 13x slower geomean. Newer exact same-engine dense/OOP and string-memory evidence is retained separately and does not alter that cross-engine claim. |
+| Current public cross-engine snapshot | Optimized C++ Luau adapters are 2.688x-5.154x faster on the five tracked workloads, with 3.495x (`mlua-luau`) and 3.757x (Luaur) geometric means. Rustia beats Rust-native Ruau on all five. |
 | Full tables + shared atoms + broader ICs + FASTCALL/GETIMPORT | Could close most table/global/stdlib gaps; target 0.5x-1.0x Luau on many interpreter workloads. |
-| Add quickening + hot-loop hygiene + superinstructions + O2 optimizer | Plausible 0.8x-1.5x Luau interpreter on favorable workloads, but only measurement can bless this. |
+| Extend HotIR + hot-loop hygiene + superinstructions + O2 optimizer | Plausible 0.8x-1.5x Luau interpreter on favorable workloads, but only measurement can bless this. |
 | Add type-directed wasm/AOT tier | Hot type-stable kernels can plausibly beat the C++ Luau interpreter by multiples; this is the main better-than-Luau-interpreter route. |
 | Native copy-and-patch/JIT family | Research reference only for the no-unsafe product. Useful to study, not a public-workspace implementation plan unless the unsafe boundary policy changes. |
 

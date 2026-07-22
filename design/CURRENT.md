@@ -116,8 +116,21 @@ their first attempt and measured the focused numeric default-`table.sort` guard.
 snapshot, rustia dense-table minimum/median ns/unit improved 7.42%/8.90%, and its minimum-time `mlua-luau` gap
 fell from 9.20x to 8.54x. One primary-native steal tick was 0.0118%, within the frozen 0.1% allowance; all other
 timed groups observed zero. The VM was confirmed deleted after 1,364 seconds and before promotion, with a
-$0.108 rounded compute ceiling. Independent-host movement elsewhere leaves the current five-workload gap at a
+$0.108 rounded compute ceiling. Independent-host movement elsewhere left that snapshot's five-workload gap at a
 7.29x geometric mean over a 5.09x-10.02x range.
+The current exact-commit `d4ec275e19bad0efcf8e96db4030e7380bd93a9b` matrix gates the replacement of the
+recursive bespoke numeric-loop kernel with the reusable private `HotIr`. The IR is bounded and source-ordered,
+uses reused unboxed numeric scratch, stages every fallible operation before its single permitted table effect,
+and deopts to the already-fetched interpreter instruction without replay. Independent review found no semantic
+or safety defects; explicit Off/Force parity tests cover all numeric operators, policy gates, deterministic GC,
+atomic guard failures, and partial deopt. Against the immediately preceding `3732b80` Linux snapshot, native
+median changes were -0.23% dense, -7.14% sparse, +5.74% closures, +5.12% generic iteration, and -0.59% stdlib,
+for a +0.47% normalized geometric mean. The exact Linux result therefore preserves aggregate performance but
+does not reproduce the local -29.31% dense screen; that local result remains directional only. The current
+minimum-time gap is 3.495x to `mlua-luau` (2.688x-4.650x range) and 3.757x to Luaur
+(2.722x-5.154x), while rustia beats Ruau on all five workloads. All timed groups passed on their first attempt;
+one native steal tick was 0.0095%, all other groups observed zero. The VM was confirmed deleted after 1,529
+seconds and before promotion, with a $0.108 rounded compute ceiling.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
 ## Project pillars
@@ -151,8 +164,9 @@ API parity release-critical work.
    tests while performance work proceeds. Keep the public workspace's `unsafe_code = "forbid"` gate intact.
    For performance sequencing, use [`56-performance-research.md`](56-performance-research.md): the dense-table,
    constant field/namecall, string-representation, and first profiled hot-loop gates now have exact accepted
-   Linux evidence. Keep those protocols repeatable while pursuing cached-length refinements, adaptive
-   specialization, further profile-led hot-loop work, and type-directed wasm/AOT.
+   Linux evidence. Keep those protocols repeatable while extending the landed private `HotIr` to additional
+   verified effect/control-flow shapes, pursuing cached-length refinements, further profile-led hot-loop work,
+   and type-directed wasm/AOT.
 2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 12 workload entries including
    source-covered `string_building`, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
@@ -207,10 +221,13 @@ section below for the full list (GC tuning, benchmark publication, `LuauIntegerT
   construction tradeoffs. The first current exact cross-engine matrix reduced rustia's median ns/unit by
   22.08%-34.97% across all five tracked workloads versus the previous committed Linux snapshot. The following
   numeric-sort matrix improved dense median time another 8.90% and reduced that workload's `mlua-luau` gap from
-  9.20x to 8.54x; the current five-workload gap is a 7.29x geometric mean over a 5.09x-10.02x range.
-  These are workload- and protocol-specific results, not blanket speed or RSS claims. Next come broader long-run
-  history, a redesigned specialization/quickening approach (the first per-site cache shape regressed locally),
-  superinstructions/O2, further profile-led hot-loop work, and type-directed wasm/AOT. Native copy-and-patch/JIT
+  9.20x to 8.54x. The landed private HotIR then retained native aggregate performance on its exact Linux gate
+  (+0.47% normalized geometric mean versus the preceding snapshot) and leaves the current minimum-time gap at
+  3.495x against `mlua-luau` and 3.757x against Luaur; rustia beats Ruau on all five tracked workloads. The
+  local -29.31% dense result did not reproduce on Linux and remains directional only. These are workload- and
+  protocol-specific results, not blanket speed or RSS claims. Next come broader long-run history, Linux-specific
+  profiling of HotIR, verified multi-effect/control-flow HotIR growth, superinstructions/O2, and type-directed
+  wasm/AOT. Native copy-and-patch/JIT
   work remains a research reference unless it can satisfy the public
   `unsafe_code = "forbid"` gate.
 - **Luau target PINNED** (review C1): **Luau 0.709** (= our mlua oracle), standalone (not-Roblox) surface,
