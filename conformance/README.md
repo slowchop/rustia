@@ -16,6 +16,7 @@ before relying on unit tests in an individual crate.
 - `REFS.tsv` declares every stable conformance topic a fixture may reference.
 - `fixtures/` contains source files checked into this repo.
 - `upstream/` holds provenance notes and the import plan for upstream Luau tests.
+- `COMPETITOR-RUNS.md` records scoped exploratory runs against external Luau implementations.
 
 ## Local Runner
 
