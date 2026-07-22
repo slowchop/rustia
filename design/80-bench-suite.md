@@ -1,6 +1,6 @@
 # rustia — continuous perf-benchmark suite + CI (design)
 
-> **Status: [IMPLEMENTED — measurements ongoing] (updated 2026-07-20).** Scoped by the `bench-scoping` agent (clone+read of
+> **Status: [IMPLEMENTED — measurements ongoing; standalone split pending] (updated 2026-07-23).** Scoped by the `bench-scoping` agent (clone+read of
 > `khvzak/script-bench-rs`, the 11-workload seed in `spikes/bench-suite/`, and the 2025–26 tracker/wasm-shell
 > tooling) + dedicated ephemeral-Linux constraints + privacy lean. Operationalises principle #3 ("measure,
 > don't assert — the bench suite is a CI gate"). See [`CURRENT.md`](CURRENT.md).
@@ -26,8 +26,9 @@ Split by what's measurable; never use one for the other's job:
   wall-clock history proves insufficient; do not make either a prerequisite for honest current measurements.
 
 ## The matrix
-- **engine:** `rustia` · `boa` · `koto` · `mlua-luau` · `mlua-lua54` · `rhai` · `roto` · `rquickjs` ·
-  `wasmi` · `wasmtime`; feature gates keep adapters independently buildable and Lua 5.4 separate from Luau.
+- **engine:** `rustia` · `boa` · `koto` · `luaur` · `mlua-luau` · `mlua-lua54` · `rhai` · `roto` · `ruau` ·
+  `rquickjs` · `wasmi` · `wasmtime`; feature gates keep adapters independently buildable and Lua 5.4 separate
+  from Luau.
 - **active performance targets:** native `linux-x86_64` on a dedicated Linode; wasm32 under Node/V8 on that
   same Linux host. The accepted Deno/V8, Bun/JavaScriptCore, and SpiderMonkey matrix is historical portability
   evidence. The broader platform support matrix in
@@ -65,7 +66,7 @@ a conservative-envelope verdict that is retained with accepted evidence.
 4. Promotion requires a complete single-revision Linux matrix and confirmed Linode deletion.
 
 **Current implementation slice:** `.github/workflows/ci.yml` runs release-preflight checks on hosted Linux CI
-without fresh benchmark measurements; no benchmark-measurement workflow is present. The `bench` crate now enumerates all 10
+without fresh benchmark measurements; no benchmark-measurement workflow is present. The `bench` crate now enumerates all 12
 requested adapters, five default measured workloads, and 12 workload entries including cross-adapter source
 coverage for #15 `string_building`. It also owns `bench/wasm-gate.json`, a deterministic pre-lock gate tracker
 exposed by `script-bench --wasm-gate-json` and rendered by the generated HTML report. The wasm target bench builds
@@ -119,6 +120,13 @@ analysis, verdict, and publication protocol is unchanged. Live cloud work remain
 preflight; only dependency-free coordinator/runner self-tests are part of the
 offline benchmark artifact gate.
 
+The current coherent 12-adapter snapshot is exact commit `a562919`. Its prototype-polymorphic closure-call
+cache and direct immutable captures moved rustia `closures_upvalues` median latency from 270.427 to
+229.766 ns/call across separate, identically specified dedicated-Linux instances (15.036% lower). The generated
+five-workload minimum-time gaps are 3.494x to `mlua-luau` and 3.833x to Luaur. Non-target rustia movements in
+that cross-host comparison are stability signals, not causal regression claims; current generated artifacts and
+the retained raw evidence remain authoritative.
+
 The three-independent-run fixed-N rule in `bench/README.md` is the acceptance protocol for this small-regression
 milestone. The broader calibrated language matrix has a separate completeness gate and is not a substitute for
 the controlled milestone A/B and three-run publication evidence.
@@ -126,7 +134,7 @@ the controlled milestone A/B and three-run publication evidence.
 **Rustia's column:** the `bench` crate enumerates engines by **cargo feature**; `rustia` now runs through the
 default `rustia-engine` feature while the external adapters stay independently gated for standalone builds.
 
-## ⚠️ Remaining wasm gate
+## Closed wasm pre-lock gate; recurring evidence remains
 Production rustia wasm now runs through the bench wasm adapter runner, with koto and rhai as wasm-compatible
 comparison adapters. The recurring public benchmark uses Node/V8. Accepted V8, Bun/JavaScriptCore-family, and
 SpiderMonkey measurements show `call_ref` behind `br_table` and remain archived as portability evidence. The

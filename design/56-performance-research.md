@@ -1,21 +1,28 @@
 # rustia — SotA performance research update
 
-> **Status: [PERFORMANCE RESEARCH v1.9] (updated 2026-07-22).** This note updates
+> **Status: [PERFORMANCE RESEARCH v2.0] (updated 2026-07-23).** This note updates
 > [`55-improvements.md`](55-improvements.md) with the current performance research stack. It is not a new
 > conformance contract; it is the ordered implementation bet list for making rustia fast while keeping the public
 > workspace under `unsafe_code = "forbid"`.
 
 ## Ground truth
 
-The public cross-engine benchmark posture is still conservative: rustia remains behind the optimized C++ Luau
-adapters on every tracked workload. The current exact-commit
-`d4ec275e19bad0efcf8e96db4030e7380bd93a9b` Linux matrix places Luaur 2.722x-5.154x faster with a 3.757x
-five-workload geometric mean, and `mlua-luau` 2.688x-4.650x faster with a 3.495x geometric mean. Rustia now
-beats the Rust-native Ruau adapter on all five workloads and uses 0.761x its time by geometric mean. All four
-timed groups passed on their first attempts; the primary native group observed one steal tick (0.0095%, within
-the frozen 0.1% allowance), the other groups observed zero, and the Linode was confirmed deleted before
-promotion. Exact same-engine Linux A/B evidence for earlier slices is retained separately; none of these results
-turns into a blanket cross-engine headline. This remains a catch-up project first.
+The public cross-engine benchmark posture is still conservative: rustia remains behind `mlua-luau` and Luaur
+on every workload. `mlua-luau` wraps the reference C++ runtime; Luaur is a separate pure-Rust Luau
+implementation. The current exact-commit
+`a5629199643847c0da78792644ad3656887bee21` Linux matrix places Luaur 2.768x-6.030x faster by minimum time with a
+3.833x five-workload minimum-time geometric mean, and `mlua-luau` 2.796x-4.880x faster by minimum time with a
+3.494x geometric mean. Rustia beats the Rust-native Ruau adapter on four of five workloads by minimum time. The targeted `closures_upvalues` median moved from
+270.427 to 229.766 ns/call (15.036% lower latency; 1.177x throughput), with every new sample below every prior
+sample. The snapshots used separate but identically specified dedicated instances, so movements are follow-up
+signals rather than same-host causal attribution. All timed groups passed on their first attempts, and the
+Linode was confirmed deleted before promotion. Exact same-engine Linux A/B evidence for earlier slices is
+retained separately; none of these results turns into a blanket cross-engine headline. This remains a catch-up
+project first.
+
+Performance work now has a production prerequisite: collection scheduling and weak sweeping exist, but ordinary
+object/program stores are retained in append-only slots until VM drop. Complete reclamation/reuse, accounting,
+quotas/OOM semantics, and epoch-safe decision reset should land before final GC tuning or broad release claims.
 
 The hardened safe table/atom/cache foundation is now in-tree. VM-local byte atoms and insertion-ordered table
 hash parts at 16+ entries use deterministic open-addressed `Vec<u32>` side indices at no more than 50% load.
@@ -71,8 +78,9 @@ references unless they can be kept outside the product gate or re-expressed safe
 Emit specialized wasm for hot, type-stable functions, either ahead-of-time or after a hotness threshold. Use guards
 and deopt back to bytecode for dynamic cases. This is the best "better than C++ Luau interpreter" path because it
 turns stable numeric/table kernels into direct wasm code without native executable memory or Rust `unsafe`.
-Current plan delta: promote the validated [`65-wasmjit.md`](65-wasmjit.md) direction from spike to first-class
-performance tier after the table/IC base lands.
+Current plan delta: the table/IC base has landed. Production promotion of the validated
+[`65-wasmjit.md`](65-wasmjit.md) direction waits for bounded memory/reset, semantic parity, guard/deopt, and
+interpreter-equivalence gates rather than more one-off kernel code.
 Expected gain: 10x-100x on monomorphic kernels; on those kernels rustia can plausibly beat the C++ Luau
 interpreter by multiples. General Luau code still depends on guard quality and fallback cost.
 
@@ -89,8 +97,9 @@ cached length boundaries and profile the remaining small-table scan and dispatch
 Current plan delta: implementation and the controlled dense-table material-regression gate are complete. The
 accepted exact-commit Linode v2 comparison measured 2.42% lower corrective-candidate ns/unit, with a conservative
 nominal 95% interval of -3.35% to -1.57%, and published three actual final-binary rows plus raw evidence. That
-resolves the predeclared +5% dense regression question for this workload and host protocol; broader speed claims
-still require a multi-engine, multi-workload snapshot.
+resolves the predeclared +5% dense regression question for this workload and host protocol. A coherent
+multi-engine, multi-workload snapshot now exists; broader public claims still require longer history and the
+eventual approval of the existing generated per-workload claim gate.
 Expected gain: 2x-20x on table-heavy workloads; likely the fastest route to closing the current benchmark gap.
 
 **3. Adaptive quickening and specializing bytecode.**
@@ -111,7 +120,8 @@ observable because imports cache only guarded locations and FASTCALL dispatches 
 function handle matches; every other case uses the ordinary index/call machinery. Import fuel is `2n - 1`
 (1/3/5) on hit or miss, matching the unfused lowering's total cost and reserved atomically before the fused
 lookup starts. FASTCALL costs the same one base fuel as CALL and charges native variable-work fuel exactly once.
-Current plan delta: benchmark this combined slice, then consider safe `GETIMPORT`+`FASTCALL` fusion where it
+Current plan delta: the combined slice is covered by the exact matrices. Profile it further, then consider safe
+`GETIMPORT`+`FASTCALL` fusion where it
 preserves those guards and fuel. Constant method lookup now has the separate `NAMECALL` fast path described
 above; it does not fuse `CALL` or broaden the older dedicated math/string opcodes. The guarded mutation guarantee
 applies to sites lowered through `GETIMPORT`/`FASTCALL`; those older opcodes retain their existing source-level
@@ -123,14 +133,14 @@ Move coverage, fuel, GC debt, root maintenance, and register access checks out o
 where correctness permits. Use deterministic fuel batching at basic-block boundaries, direct register windows,
 fallible slow helpers, and hot/cold opcode layout.
 Current plan delta: the first focused pass removed repeated special-opcode comparisons from ordinary fuel
-classification and avoided string/kind decoding on the dense numeric table path. The next profiled pass adds an
-inlined zero-debt GC fast path and replaces unconditional per-instruction weak-root rescans with conservative
+classification and avoided string/kind decoding on the dense numeric table path. The subsequent profiled pass
+added an inlined zero-debt GC fast path and replaced unconditional per-instruction weak-root rescans with conservative
 collection-boundary and guest-entry synchronization. Fuel, collection boundaries, metamethod entry, and explicit
 `collectgarbage` behavior are unchanged. The exact `87db17542e19ae77ec92463f8a5b8e8b8a21a666` dedicated-Linode
 matrix accepted every native and wasm timed group on its first attempt with zero timed steal. Relative to the
 previous committed Linux snapshot, rustia's median ns/unit fell 34.97% on `dense_tables`, 27.20% on
 `sparse_tables`, 27.44% on `closures_upvalues`, 22.08% on `generic_iteration`, and 22.77% on
-`stdlib_math_table`. The generated minimum-time claim gate now places `mlua-luau` 5.25x-9.53x faster, with a
+`stdlib_math_table`. At that snapshot, the generated minimum-time claim gate placed `mlua-luau` 5.25x-9.53x faster, with a
 7.30x geometric mean instead of 10.1x. The ephemeral VM was confirmed deleted before the evidence and 50-row
 matrix were promoted. The next exact matrix at `b1cd2841fb8fc2d916047391a1d757d53a1303cd` adds the focused
 numeric default-sort guard: dense-table median time improved another 8.90% versus that snapshot and its
@@ -157,17 +167,24 @@ Expected gain: 1.1x-2x generally, with much larger wins on code that currently r
 Use short call frames, stack-resident temporaries, cheap open-upvalue representation, closure caching for
 non-capturing or constant-capture closures, and direct internal stdlib calls. Avoid host-value round trips inside
 the VM.
-Current plan delta: the borrowing internal host ABI is adopted; extend the same thinking to all VM calls and
-closures.
+Current plan delta: the borrowing internal host ABI is adopted. The compiler now discovers captured bindings
+before final lowering so immutable captures can be stored directly while mutable loop/backedge captures keep
+cell semantics; a four-lane call-site PIC is keyed by program/prototype rather than exact closure identity. The
+first dedicated-Linux closure gate landed; next profile frame/result construction, recursion/coroutine paths,
+and small-function inlining without weakening policy/fuel/GC/coverage fallback.
 Expected gain: 1.2x-4x on closure/upvalue/coroutine-shaped workloads.
 
 **9. Allocation, GC, and string model overhaul.**
-Use per-program intern pools, short-string storage, shared frozen stdlib state, and deterministic allocation-driven
-GC pacing. Keep non-moving handles friendly to inline caches, but keep the VM thread-affine and safe.
+Use per-program intern pools, short-string storage, shared frozen stdlib state, and profile-specific GC
+scheduling: allocation-debt pacing for Standard/LuauCompat, instruction-count boundaries for DeterministicSim.
+Keep non-moving handles friendly to inline caches, but keep the VM thread-affine and safe.
 Current plan delta: VM-local indexed atoms and per-loaded-program constant caches have landed. Shared cross-VM
 compiled constant storage and the 13-byte inline literal/runtime-string form have now landed too. Lookup-only short-key
-misses avoid permanent atom growth. Shared frozen stdlib state and broader allocation/GC tuning remain because
-tables, atoms, imports, and ICs compound.
+misses avoid permanent atom growth. However, table/function/upvalue/coroutine slots, rooted atomized and
+non-inline runtime strings/userdata/buffers/vectors, and loaded programs are still append-only until VM drop.
+Before tuning pacing, implement complete reachability/sweep, true public-handle roots or an ownership redesign,
+generation-safe reuse, honest live/peak accounting, aggregate quotas and atomic OOM behavior, plus epoch-safe
+reset and native/wasm plateau tests. Shared frozen stdlib state follows.
 Expected gain: 1.2x-3x speed plus large RSS/startup wins for many-VM usage.
 
 **10. Typed lanes for vectors, buffers, and deterministic extension kernels.**
@@ -200,14 +217,15 @@ ns/unit for dense/sparse/closures/iteration/stdlib. Ruau is
 Luaur and `mlua-luau` are substantially faster across all five, with roughly
 4.93x geometric-mean advantages.
 
-That result rules out more benchmark-shape leaf recognizers as the primary
-strategy. The next broad slice is a validated-profile quickened VM tier: move
+That result ruled out more benchmark-shape leaf recognizers as the primary
+strategy. At that point, the next broad slice was a validated-profile quickened VM tier: move
 hot table storage out of the `gc_arena` root container into direct `VmCell`
 storage with explicit tracing, then emit guarded numeric arithmetic/loop and
 numeric-array get/set forms. Fuel, coverage, weak-GC, and error policy checks
 should move to explicit checkpoints that deopt to the semantic loop. This is the
 cross-cutting path that can reduce the repeated arena-mutation, borrow, handle,
-and dispatch tolls visible in all five workloads.
+and dispatch tolls visible in all five workloads. The later direct `VmCell` stores and bounded private HotIR
+implemented the first part of that direction; the current action queue is the lifecycle-first sequence above.
 
 The harness now creates fresh prepared engine/workload state for each calibration probe and each recorded
 repetition. Each recorded instance runs one untimed warmup followed by exactly one timed invocation, preventing
@@ -368,7 +386,7 @@ within the frozen 0.1% allowance); all other timed groups observed zero. Relativ
 exact Linux snapshot, rustia dense-table minimum time moved from 177,347.826 to 164,192.888 ns/unit (-7.42%)
 and median time from 182,365.970 to 166,135.066 ns/unit (-8.90%). The generated dense `mlua-luau` minimum-time
 gap moved from 9.20x to 8.54x. Independent-host variation in unaffected workloads left the five-workload
-geometric mean effectively flat at 7.29x, with a current 5.09x-10.02x range; no unrelated delta is attributed to
+geometric mean effectively flat at 7.29x, with a 5.09x-10.02x range in that snapshot; no unrelated delta is attributed to
 the sort guard. The VM was confirmed deleted after 1,364 seconds, before promotion, with a rounded $0.108
 compute-charge ceiling. The complete corpus is retained under
 [`../bench/evidence/matrix/b1cd2841fb8fc2d916047391a1d757d53a1303cd/`](../bench/evidence/matrix/b1cd2841fb8fc2d916047391a1d757d53a1303cd/).
@@ -413,18 +431,37 @@ immediately preceding `3732b80d5200edf053e213ef931b838c003968f3` snapshot, rusti
 -0.23% on `dense_tables`, -7.14% on `sparse_tables`, +5.74% on `closures_upvalues`, +5.12% on
 `generic_iteration`, and -0.59% on `stdlib_math_table`, for a +0.47% normalized geometric mean. The Linux result
 therefore preserves the prior native tier but does **not** reproduce the local -29.31% dense gain; the local
-number remains directional only. Current minimum-time gaps are 3.495x to `mlua-luau` and 3.757x to Luaur by
+number remains directional only. That snapshot's minimum-time gaps are 3.495x to `mlua-luau` and 3.757x to Luaur by
 five-workload geometric mean, while rustia beats Ruau on all five. Rustia wasm improved 5.55% by normalized
 geometric mean against the preceding snapshot, but cross-run movement is not attributed solely to HotIR. The VM
 was confirmed deleted after 1,529 seconds and before promotion, with a rounded $0.108 compute ceiling. The
 complete corpus is retained under
 [`../bench/evidence/matrix/d4ec275e19bad0efcf8e96db4030e7380bd93a9b/`](../bench/evidence/matrix/d4ec275e19bad0efcf8e96db4030e7380bd93a9b/).
 
+### Prototype-polymorphic closure calls — landed and Linux-gated
+
+Exact commit `a5629199643847c0da78792644ad3656887bee21` adds direct immutable-upvalue captures and a four-lane
+call-site PIC keyed by loaded program/prototype. Mutable captures, recursion, policy, guard, fuel, coverage, and
+collection boundaries keep their ordinary cell/interpreter paths. Against the preceding exact snapshot,
+`closures_upvalues` median latency moved from 270.427 to 229.766 ns/call: 15.036% lower latency and 1.177x
+throughput. All five new raw samples (229.095-232.206 ns) beat all five prior samples
+(269.927-272.955 ns); each cohort matched its own calibrated-work checksum.
+
+The two cohorts used separate but identically specified dedicated Linode instances, so this is a strong
+same-protocol result rather than a paired-host attribution. Other rustia median movements were +2.35% on
+`dense_tables`, +12.70% on `sparse_tables`, +8.93% on `generic_iteration`, and +5.74% on
+`stdlib_math_table`, for a +2.45% normalized five-workload geometric mean; treat those as stability signals and
+recheck sparse/generic rather than assigning them to the closure change. Current minimum-time geometric-mean
+gaps are 3.494x to `mlua-luau` and 3.833x to Luaur, and rustia beats Ruau on four of five workloads by minimum
+time. The VM was
+confirmed deleted before promotion with a $0.108 rounded compute ceiling. Evidence is retained under
+[`../bench/evidence/matrix/a5629199643847c0da78792644ad3656887bee21/`](../bench/evidence/matrix/a5629199643847c0da78792644ad3656887bee21/).
+
 ## Estimate vs C++ Luau
 
 | state | likely position vs C++ Luau interpreter |
 |---|---|
-| Current public cross-engine snapshot | Optimized C++ Luau adapters are 2.688x-5.154x faster on the five tracked workloads, with 3.495x (`mlua-luau`) and 3.757x (Luaur) geometric means. Rustia beats Rust-native Ruau on all five. |
+| Current public cross-engine snapshot | The two faster Luau adapters are 2.768x-6.030x faster on the five tracked workloads, with 3.494x (`mlua-luau`, reference C++) and 3.833x (pure-Rust Luaur) geometric means. Rustia beats Rust-native Ruau on four of five by minimum time. |
 | Full tables + shared atoms + broader ICs + FASTCALL/GETIMPORT | Could close most table/global/stdlib gaps; target 0.5x-1.0x Luau on many interpreter workloads. |
 | Extend HotIR + hot-loop hygiene + superinstructions + O2 optimizer | Plausible 0.8x-1.5x Luau interpreter on favorable workloads, but only measurement can bless this. |
 | Add type-directed wasm/AOT tier | Hot type-stable kernels can plausibly beat the C++ Luau interpreter by multiples; this is the main better-than-Luau-interpreter route. |

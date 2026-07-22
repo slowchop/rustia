@@ -1,11 +1,13 @@
 # rustia
 
-A fast, low-memory, **deterministic** Luau interpreter written in Rust — built for a deterministic game runtime,
-and intended for public release as a standalone Luau 0.709-compatible Rust engine once its conformance,
-benchmark, API, and release gates are satisfied.
+A **deterministic** Luau interpreter written in Rust, designed for speed and low memory — built for a
+deterministic game runtime and intended for public release as a standalone Luau 0.709-compatible Rust engine
+once its conformance, benchmark, API, memory-lifecycle, and release gates are satisfied.
 
-> **Status: P1 engine implementation in progress.** The locked design is implemented through a substantial
-> production VM/compiler/API/conformance slice; `spikes/` are throwaway prototypes that validated the design.
+> **Status: P1 engine implementation is substantial but not release-complete.** The locked design has a broad
+> production VM/compiler/API/conformance slice; the next release-critical work is bounded object reclamation,
+> memory quotas/OOM semantics, deterministic decision reset, and the remaining host/module/value boundary.
+> `spikes/` are throwaway prototypes that validated the design.
 > Read **[`design/CURRENT.md`](design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](design/README.md) for the full doc map.
 
@@ -16,21 +18,19 @@ benchmark, API, and release gates are satisfied.
 - `DeterministicSim` is bit-reproducible by construction on the tested matrix; `ReproducibleStandard` remains
   Luau-conformant while making reproducible choices for unspecified behavior.
 - One portable engine: big-`match`→`br_table` interpreter plus a validated future wasm-emit JIT/AOT tier;
-  **gc-arena** GC,
-  **16-byte tagged** values, own hand-written Luau parser, and thread-affine safe-Rust VM execution.
+  **gc-arena-backed collection scheduling/storage scaffolding**, **16-byte tagged** values, a hand-written
+  Luau parser, and thread-affine safe-Rust VM execution. Full ordinary-object reclamation/reuse remains a gate.
 - Interpreter performance foundation: compact deterministic open-addressed `u32` side indices for VM-local
   atoms and larger insertion-ordered hash parts; compact loaded-program constant atoms; a 4-byte per-PC cache
   site map with lazily allocated 16-byte shape/key/live-slot records; constant-key
   `GETTABLEKS`/`SETTABLEKS`; two-lane live receiver/`__index`-table `NAMECALL` lookup; and mutation-safe
   `GETIMPORT` plus guarded fixed-result `FASTCALL`, all with ordinary semantic fallbacks and logical fuel
   preserved. `NAMECALL` does not fuse the subsequent `CALL` or cache a final callee.
-- Profiled hot-loop hygiene skips zero-debt GC work and synchronizes weak roots only at possible collection or
-  guest-entry boundaries. The accepted exact-commit Linux matrix improved rustia's median ns/unit by
-  22.08%-34.97% across all five tracked workloads versus the prior snapshot, while the generated minimum-time
-  `mlua-luau` geometric-mean gap fell from 10.1x to 7.30x. A subsequent numeric `table.sort` specialization
-  improved the dense-table median another 8.90% in the latest exact matrix and reduced that workload's
-  `mlua-luau` minimum-time gap from 9.20x to 8.54x; the current five-workload geometric mean is 7.29x. These
-  remain per-workload development results, not blanket speed claims.
+- Profiled hot-loop hygiene, reusable bounded private HotIR, direct immutable captures, and a four-lane
+  prototype-polymorphic closure-call cache have exact dedicated-Linux evidence. In the latest `a562919` cohort,
+  `closures_upvalues` median latency moved from 270.427 to 229.766 ns/call (15.036% lower); every new sample beat
+  every prior sample. The generated five-workload minimum-time geometric-mean gaps are 3.494x to `mlua-luau`
+  and 3.833x to Luaur. These are protocol- and workload-specific development results, not blanket speed claims.
 - Compiled constant pools are immutable and shared across program clones and VMs. Long compiled string atoms
   reuse those shared bytes, while ordinary compiled literals and runtime-produced binary strings up to 13 bytes
   can be stored directly in the sealed 16-byte `Value`; constant-key/cache paths atomize only when needed, and
@@ -44,7 +44,9 @@ benchmark, API, and release gates are satisfied.
   run/compile helpers, typed/capability-tagged host functions with fallible `rustia::Result<T>` returns and up to
   eight arguments/results, retained script functions, pre-install host signature/fuel ABI metadata,
   retained-handle freshness checks and current-generation accessors, public source-span/runtime-location error
-  accessors, owned-value/table serde, deterministic extensions, hot reload, and macro sugar.
+  accessors, owned-value/table serde, deterministic extensions, hot reload, and early macro sugar. Ordinary
+  object/program reclamation, epoch-safe decision reset, module resolution, host runtime providers/context,
+  transactional installation, rich graph values, and live zero-copy serde remain planned.
 
 ## Project Pillars
 The canonical decision filter is [`design/02-pillars.md`](design/02-pillars.md). The short version:
@@ -60,53 +62,33 @@ The canonical decision filter is [`design/02-pillars.md`](design/02-pillars.md).
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](design/progress.json) into
-[`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-22 for the
+[`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-23 for the
 public rustia project; actual grabby integration work is explicitly out of scope.
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 81% | 68% |
-| Usable embedded scripting crate | 83% | 70% |
-| Full public standalone Luau engine release | 48% | 58% |
-| Standalone benchmark OSS project | 80% | 80% |
-| Public release readiness | 73% | 75% |
+| Whole public rustia project | 78% | 78% |
+| Usable embedded scripting crate | 76% | 82% |
+| Full public standalone Luau engine release | 48% | 76% |
+| Standalone benchmark OSS project | 82% | 88% |
+| Public release readiness | 69% | 82% |
 
 - Current conformance runner: **692 fixtures**, **491 refs**, **0 pending**.
 - The benchmark harness has all 12 requested adapters and a non-default `string_building` workload source set
   across them; Lua 5.4 runs separately from Luau because `mlua-sys` cannot link both in one binary.
 - Current benchmark claim posture is generated at [`bench/CLAIMS.md`](bench/CLAIMS.md); it approves no blanket
   speed headline from the current snapshot.
-- Timed benchmark repetitions now prepare fresh engine/workload state, perform one untimed warmup, and can emit
-  execution-ordered raw samples to a separate JSON sidecar. `--fixed-n` bypasses calibration for equal-work
-  ABBA/BAAB comparisons; fixed-work history appends require the raw sidecar to be written first, and the
-  publication protocol records three independent measurements of the clean final commit, with each invocation
-  writing its sidecar before appending its actual summary. A dependency-free analyzer validates fixed-work
-  sidecars and records a deterministic conservative pooled/hierarchical bootstrap verdict with the predeclared
-  regression threshold. Static bytecode and release-codegen analysis showed that the dense workload does not
-  execute the new constant-key/method opcodes; a corrective pass removed cross-cutting fuel-classification,
-  numeric-key, and numeric-ordering tolls while preserving logical fuel, validation, key semantics, and string
-  canonicalization. Semantic fused-op costs remain deterministic, but aggregate GC checkpoints can move when
-  dead cleanup bytecode disappears. The accepted exact-commit Linode v2 run measured 2.42% lower candidate
-  ns/unit on pooled `dense_tables` samples, with a conservative nominal 95% interval of -3.35% to -1.57%; it
-  excluded the predeclared +5% material regression and published three final-binary Linux history rows. A second
-  accepted run measured 65.959% lower candidate ns/unit on `oop_metamethods`, with a conservative 95% interval
-  of -66.39% to -65.55% and three more final-binary rows; that comparison includes both the constant-field/method
-  paths and a weak-table GC-scan correction. The exact 512-VM string
-  sampler then measured per-VM candidate-minus-baseline savings of 32 KiB for unloaded short constants, 258 KiB
-  for unloaded long constants, 105.39 KiB when loading the short form, and 260.97 KiB when loading the long form;
-  the candidate's residual loaded-long increment was 7.08 KiB/VM. Those 16 paired rounds and 160 accepted
-  fresh-process samples are retained as evidence-only data rather than throughput history. Both throughput runs
-  passed their predeclared process and steal gates. The subsequent exact-commit cross-engine matrix accepted all
-  native and wasm timed groups on the first attempt with zero timed steal, improving rustia's median ns/unit by
-  22.08%-34.97% across the five tracked workloads. All four accepted-run Linode instances were confirmed deleted. Shared-CPU
-  DigitalOcean placements were rejected for timed-leg steal, two Vultr bare-metal orders never left provisioning
-  and were safely deleted, and the Scaleway physical-host lifecycle remains available as a stricter fallback.
-  Every accepted result is specific to its workload, comparison, and Linux protocol; existing results remain
-  development evidence, not a blanket release speed claim; details are in
-  [`design/56-performance-research.md`](design/56-performance-research.md).
-- Major remaining gates are engine hardening, long-run benchmark history, public benchmark publication, and release
-  packaging. Semver policy is tracked in [`design/91-semver-policy.md`](design/91-semver-policy.md), release
-  notes in [`CHANGELOG.md`](CHANGELOG.md), koto migration guidance in
+- The committed benchmark protocol keeps raw samples, fixed-work evidence, process/steal gates, exact source and
+  toolchain identity, and fail-closed promotion after VM deletion. The current clean `a562919` Linux snapshot has
+  60 rows across 12 adapters and five default workloads. Its closure slice reduced rustia median latency from
+  270.427 to 229.766 ns/call; generated minimum-time gaps are 3.494x to `mlua-luau` and 3.833x to Luaur. Earlier
+  dense/OOP/string/HotIR cohorts remain traceable historical evidence. Every result is specific to its workload,
+  target, and protocol; details are in [`design/56-performance-research.md`](design/56-performance-research.md).
+- Major remaining gates, in order, are bounded object/program reclamation and quotas, epoch-safe decision reset,
+  host services/context/module loading/rich values and transactional installation, compiler/runtime semantic-tail
+  hardening, the full cross-target correctness/golden matrix, broader benchmark history, and release packaging.
+  Semver policy is tracked in [`design/91-semver-policy.md`](design/91-semver-policy.md),
+  release notes in [`CHANGELOG.md`](CHANGELOG.md), koto migration guidance in
   [`design/76-koto-migration.md`](design/76-koto-migration.md), crate metadata audit in
   [`design/crate-metadata.json`](design/crate-metadata.json), and package file-list review in
   [`design/package-files.json`](design/package-files.json). Current publish blockers are generated at

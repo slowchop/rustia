@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-22.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-23.)
 
 ## One-paragraph state
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
@@ -24,9 +24,9 @@ shell, generated current-results HTML report, 12 workload entries including cros
 the `rustia`/`boa`/`koto`/`luaur`/`mlua-lua54`/`mlua-luau`/`rhai`/`roto`/`ruau`/`rquickjs`/`wasmi`/`wasmtime` native adapters in
 place.
 The benchmark artifacts now also include a first-class wasm pre-lock gate source
-(`../bench/wasm-gate.json`), production wasm target results for `rustia` and
-`koto` on V8 plus Bun/JavaScriptCore-family runtimes, and generated report panels
-that make the required production rustia wasm measurements explicit.
+(`../bench/wasm-gate.json`), recurring wasm target results for `rustia`, `koto`, and `rhai` under Node/V8, and
+retained historical V8, JavaScriptCore-family, and SpiderMonkey portability evidence. Generated report panels
+make the required production rustia wasm measurements explicit.
 Its generated [`../bench/CLAIMS.md`](../bench/CLAIMS.md) gate keeps public benchmark language per-workload and
 currently approves no blanket speed headline from the committed snapshot.
 The public API now has release-preflight-enforced compile-checked examples for embedding and hot reload, plus a
@@ -118,7 +118,7 @@ fell from 9.20x to 8.54x. One primary-native steal tick was 0.0118%, within the 
 timed groups observed zero. The VM was confirmed deleted after 1,364 seconds and before promotion, with a
 $0.108 rounded compute ceiling. Independent-host movement elsewhere left that snapshot's five-workload gap at a
 7.29x geometric mean over a 5.09x-10.02x range.
-The current exact-commit `d4ec275e19bad0efcf8e96db4030e7380bd93a9b` matrix gates the replacement of the
+The exact-commit `d4ec275e19bad0efcf8e96db4030e7380bd93a9b` matrix gates the replacement of the
 recursive bespoke numeric-loop kernel with the reusable private `HotIr`. The IR is bounded and source-ordered,
 uses reused unboxed numeric scratch, stages every fallible operation before its single permitted table effect,
 and deopts to the already-fetched interpreter instruction without replay. Independent review found no semantic
@@ -126,11 +126,26 @@ or safety defects; explicit Off/Force parity tests cover all numeric operators, 
 atomic guard failures, and partial deopt. Against the immediately preceding `3732b80` Linux snapshot, native
 median changes were -0.23% dense, -7.14% sparse, +5.74% closures, +5.12% generic iteration, and -0.59% stdlib,
 for a +0.47% normalized geometric mean. The exact Linux result therefore preserves aggregate performance but
-does not reproduce the local -29.31% dense screen; that local result remains directional only. The current
-minimum-time gap is 3.495x to `mlua-luau` (2.688x-4.650x range) and 3.757x to Luaur
+does not reproduce the local -29.31% dense screen; that local result remains directional only. At that snapshot,
+the minimum-time gap was 3.495x to `mlua-luau` (2.688x-4.650x range) and 3.757x to Luaur
 (2.722x-5.154x), while rustia beats Ruau on all five workloads. All timed groups passed on their first attempt;
 one native steal tick was 0.0095%, all other groups observed zero. The VM was confirmed deleted after 1,529
 seconds and before promotion, with a $0.108 rounded compute ceiling.
+The current exact-commit `a5629199643847c0da78792644ad3656887bee21` matrix gates prototype-polymorphic
+closure-call fast paths plus direct immutable-upvalue captures. The compiler preserves mutable loop/backedge
+capture semantics by discovering captured bindings before final lowering; the VM uses a four-lane call-site PIC
+keyed by program/prototype and falls back for policy, guard, recursion, fuel, coverage, and GC boundaries. In the
+committed dedicated-Linux matrix comparison, rustia `closures_upvalues` median time moved from 270.427 to
+229.766 ns/call (15.036% lower latency, 1.177x throughput); every new raw sample beat every prior sample. Those
+Linux snapshots used separate but identically specified dedicated instances, so the cross-host delta is
+corroborating rather than a paired-host attribution.
+The generated current five-workload minimum-time gaps are 3.494x to `mlua-luau` and 3.833x to Luaur; rustia
+beats Ruau on four of five by minimum time. The same cross-host snapshot comparison moved rustia median latency by +2.35% on
+`dense_tables`, +12.70% on `sparse_tables`, +8.93% on `generic_iteration`, and +5.74% on
+`stdlib_math_table` (five-workload normalized geometric mean +2.45%). Because these are separate instances,
+they are follow-up signals rather than attributed regressions; sparse and generic iteration should receive the
+next stability check. All timed groups passed on their first attempt, and the VM was confirmed deleted
+before the evidence and generated results were promoted, with a $0.108 rounded compute ceiling.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
 ## Project pillars
@@ -152,53 +167,107 @@ Important boundary: "Luau compatibility" means pinned standalone Luau runtime co
 Roblox APIs, latest-Luau churn, Lua 5.4 behavior, analyzer/typechecker parity, bytecode loading, or raw Luau C
 API parity release-critical work.
 
+## Known functionality gaps (honest release boundary)
+
+The pending-free conformance corpus proves the named 491-behavior denominator; it does **not** mean that every
+production concern or host-facing facility is finished. The highest-impact gaps are:
+
+1. **Bounded object lifetime and memory policy.** Tables, functions, upvalues, coroutine states,
+   atomized/non-inline runtime strings, userdata, buffers, vectors, and loaded programs currently occupy stable
+   append-only VM slots; unreachable entries are not reclaimed or reused independently of dropping the VM.
+   Before public release, rustia needs a safe-Rust reachability/reuse design, explicit heap/allocation limits,
+   catchable-or-host OOM policy, and representative long-lived/mixed-heap evidence. Public `Function`/`Exports`
+   copies must become real roots or use an ownership/API redesign before slots can be reused: ordinary calls
+   stay valid across hot reload outside an explicit reset epoch, while reset may invalidate every handle.
+   GC interval tuning alone is not a substitute for reclamation.
+2. **A mechanically enforced per-decision lifecycle.** The deterministic host contract says authoritative
+   cross-tick state lives in host slots and the script heap is transient, but the public facade does not yet
+   provide a decision/scratch reset primitive. Hosts can reconstruct a VM today; the roadmap requires an
+   explicit, tested reset/reuse path that cannot silently preserve globals, upvalues, coroutines, or heap state
+   across authoritative decisions.
+3. **Host-provided runtime services.** `print` is currently a placeholder no-op, no-argument `os.time`
+   and `os.date` use a fixed timestamp, `os.clock` is zero, `collectgarbage("count")` is zero, and `gcinfo` is
+   synthetic. Standard/LuauCompat need
+   capability-tagged output and clock providers plus honest internal VM memory accounting/telemetry;
+   DeterministicSim must reject nondeterministic providers or use deterministic ones. Typed callbacks also need
+   a cheap worker-local/per-call host-context seam instead of requiring captured synchronization for mutable
+   slot/effect state. Practical multi-file
+   programs also need a host-owned `require` resolver, execute-once cache, and cycle detection; resolution
+   remains host policy rather than a core filesystem API.
+4. **Complete public value interop.** `OwnedValue` intentionally starts small, but it cannot yet faithfully
+   carry binary strings, buffers, vectors, opaque userdata identity, non-scalar/identity table keys,
+   cyclic/shared table graphs, or zero-copy live values. Add the live-value serde path and identity-safe handles
+   before claiming a general rich embedding boundary; full mlua-style `UserData`/`Scope` registration and async
+   callbacks remain later, optional layers.
+5. **Semantic-tail and diagnostics hardening.** Continue differential parser/compiler testing, keep valid
+   runtime errors catchable at runtime rather than prematurely rejecting them at compile time, and finish
+   public stack traces/source diagnostics. Module/extension installation and runtime-failing hot reload also need
+   documented transactional or isolated failure semantics; generation counters alone do not roll back partial
+   global/heap changes. New gaps require focused Luau-0.709 oracle fixtures.
+
 ## 🚀 Next actions (cold-start handoff — do in this order)
 **Read order for a fresh agent:** `CLAUDE.md` (auto-loaded) → **this file** → [`02-pillars.md`](02-pillars.md)
 → [`30-architecture.md`](30-architecture.md) (the ADR)
 → the doc for your task. (A fresh Claude session in this repo also auto-loads the project memory.)
 
 **Action queue:**
-1. **Harden the production engine** against the LOCKED decisions ([`30-architecture.md`](30-architecture.md) §1–§4):
+1. **Design and implement bounded VM object lifetimes.** Add reachability-based reclamation/reuse for ordinary
+   VM objects, coroutine state, and loaded programs; true host-handle roots/epoch-safe reuse; heap/allocation
+   quotas; an explicit OOM contract; and a deterministic
+   per-decision reset/reuse API. Prove it with long-lived churn, cyclic graphs, hot reload, retained handles,
+   weak tables, native/wasm parity, and representative mixed-heap memory evidence before tuning final intervals.
+2. **Finish the host-facing runtime boundary.** Add capability-tagged output/time providers, honest internal
+   memory accounting/telemetry, a worker-local/per-call host context, a host-owned module resolver/cache,
+   complete binary/rich-value interop, zero-copy live serde, and transactional install/hot-reload/stack
+   diagnostics. Keep these layered and public-clean; do not leak grabby-specific types or a raw C API.
+3. **Harden the production engine** against the LOCKED decisions ([`30-architecture.md`](30-architecture.md) §1–§4):
    keep the 16-byte tagged `Value` firewall, portable `br_table`-friendly dispatch, instruction-count fuel,
-   deterministic f64/libm behavior, table-key `-0` normalization, and profile-specific GC behavior covered by
-   tests while performance work proceeds. Keep the public workspace's `unsafe_code = "forbid"` gate intact.
-   For performance sequencing, use [`56-performance-research.md`](56-performance-research.md): the dense-table,
-   constant field/namecall, string-representation, and first profiled hot-loop gates now have exact accepted
-   Linux evidence. Keep those protocols repeatable while extending the landed private `HotIr` to additional
-   verified effect/control-flow shapes, pursuing cached-length refinements, further profile-led hot-loop work,
-   and type-directed wasm/AOT.
-2. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
+   deterministic f64/libm behavior, table-key `-0` normalization, profile-specific GC behavior, and the public
+   workspace's `unsafe_code = "forbid"` gate. Add differential/fuzz coverage for newly discovered compiler and
+   runtime-error-phase edges, and close the full native/browser correctness-build-golden matrix without adding
+   developer-machine timings to benchmark history.
+4. **Continue measured performance work** using [`56-performance-research.md`](56-performance-research.md).
+   The dense-table, constant field/namecall, shared-string, HotIR, and closure-call slices now have accepted
+   Linux evidence. Next extend the same verified private HotIR to additional effect/control-flow shapes, pursue
+   cached-length and iterator/table refinements, add profile-led superinstructions/O2, and only then productionize
+   type-directed wasm/AOT with guards, deopt, and interpreter-equivalence tests.
+5. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 12 workload entries including
    source-covered `string_building`, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
    a standalone HTML report, an explicit closed wasm pre-lock gate artifact, a wasm target bench for rustia+koto+rhai, a `call_ref`
    versus `br_table` dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle.
-   Next work is the actual standalone-project split and longer-run public history.
-3. **Keep the Luau 0.709 conformance corpus green**. The current repo has 692 executable fixtures covering 491
+   Next work is the actual standalone-project split, the interop/serde/fuel-limit workload tranche, regression
+   alerts, and longer-run public history.
+6. **Stabilize and publish the public crates.** Settle the consumer API and semver surface, close the generated
+   release gates, flip `publish = false` in dependency order, and publish honest per-workload documentation.
+7. **Keep the Luau 0.709 conformance corpus green**. The current repo has 692 executable fixtures covering 491
    behavior refs with no pending rows; new engine work should add focused fixtures rather than re-opening
    pending inventory.
-4. **Maintain benchmark operations** — hosted CI remains validation-only; the operator-started Linode lifecycle
+8. **Maintain benchmark operations** — hosted CI remains validation-only; the operator-started Linode lifecycle
    is the sole active timing source and must keep its Linux-only completeness and cleanup gates green.
 
-**Pre-P1-LOCK gates** (finalizing the value-layout/dispatch/wasm story waits on these): see the "What's next"
-section below for the full list (GC tuning, benchmark publication, `LuauIntegerType2` watch).
+**Pre-release gates:** see the "What's next" section below. Object reclamation/limits and the deterministic
+decision-reset contract now precede final GC tuning; benchmark publication and the `LuauIntegerType2` watch
+remain ongoing gates.
 
 **Project setup facts:** dual `MIT OR Apache-2.0` (holder Gak Dev Pty Ltd); the public/private boundary +
 `private/` mount are in [`CLAUDE.md`](../CLAUDE.md); no Linear.
 
 ## Canonical claims (corrected — supersede any stronger wording elsewhere)
-- **Perf — state it PER-WORKLOAD, not as a blanket "~5× koto"** (review H2, measured on an 11-workload
-  reference-Luau baseline). Reference Luau is **~4.7–9× faster than koto** on tables/closures/coroutines/
-  stdlib-math, but **≈ parity on generic iteration** and **koto is *faster* on pcall/xpcall** — so the honest
-  public claim is "at/near reference-Luau parity, per-workload," and `generic_iteration` + `pcall` are
-  **must-match** workloads. Two distinct koto multipliers: the **float-path ~5–9×** (measured) and the
+- **Perf — state it PER-WORKLOAD, not as a blanket "~5× koto"** (review H2). The historical 11-workload seed
+  found reference Luau **~4.7–9× faster than koto** on tables/closures/coroutines/stdlib-math, approximately at
+  parity on generic iteration, and slower than koto on pcall/xpcall; those results set must-match workloads, not
+  a rustia claim. In the current five-workload Linux snapshot, rustia trails `mlua-luau` by 2.796x-4.880x by
+  minimum time with a 3.494x geometric mean, and the generated gate approves no blanket speed headline. Two distinct historical
+  koto multipliers remain useful context: the **float-path ~5–9×** (measured) and the
   **deterministic-path ~30–40×** (the sim's *real* incumbent — host fxmul/curve, per `ai_bakeoff`). The fused-op
   sub-µs (~0.2 µs) is **bespoke/private-fork, kernel-specific**. The committed benchmark crate now has five
-  default measured workloads plus a source-covered #15 `string_building` workload; rustia's public numbers still
-  need the continuous benchmark gate before claims.
+  default measured workloads plus a source-covered #15 `string_building` workload; rustia's public numbers must
+  earn approval from the existing generated gate before claims.
 - **wasm cross-engine PRE-LOCK GATE is CLOSED:** production rustia wasm is now measured on V8 (node/deno),
   Bun's JavaScriptCore-family runtime, and SpiderMonkey, and the `call_ref` versus `br_table` dispatch
-  microbench is measured on those same families. `br_table` remains the portable dispatch baseline. A Safari
-  Technology Preview / `jsc` shell run is still desirable before final public wording for Safari/iOS.
+  microbench is measured on those same families. `br_table` remains the portable dispatch baseline. Real
+  Safari/iOS JSC correctness/golden coverage remains an open public-release gate; active timings stay on Linux.
   Wasm-3.0 pass done: `br_table` dispatch stays (tail-calls/`call_ref` don't reopen it — `call_ref` is a cheap
   P1 micro-bench), **wasm-GC rejected** (determinism/layout), relaxed-SIMD stays banned.
 - **You CAN JIT in the browser — VALIDATED (spike `65-wasmjit`, verified).** Not native machine code, but you
@@ -218,44 +287,51 @@ section below for the full list (GC tuning, benchmark publication, `LuauIntegerT
   weak-table GC-scan correction, and both comparisons retain
   three final-candidate history rows. A separate exact 512-VM sampler confirms the shared/inline representation's
   per-VM constant-string savings across 16 paired rounds while exposing the small one-time program-image and
-  construction tradeoffs. The first current exact cross-engine matrix reduced rustia's median ns/unit by
+  construction tradeoffs. The first accepted exact cross-engine matrix reduced rustia's median ns/unit by
   22.08%-34.97% across all five tracked workloads versus the previous committed Linux snapshot. The following
   numeric-sort matrix improved dense median time another 8.90% and reduced that workload's `mlua-luau` gap from
   9.20x to 8.54x. The landed private HotIR then retained native aggregate performance on its exact Linux gate
-  (+0.47% normalized geometric mean versus the preceding snapshot) and leaves the current minimum-time gap at
-  3.495x against `mlua-luau` and 3.757x against Luaur; rustia beats Ruau on all five tracked workloads. The
-  local -29.31% dense result did not reproduce on Linux and remains directional only. These are workload- and
-  protocol-specific results, not blanket speed or RSS claims. Next come broader long-run history, Linux-specific
-  profiling of HotIR, verified multi-effect/control-flow HotIR growth, superinstructions/O2, and type-directed
-  wasm/AOT. Native copy-and-patch/JIT
+  (+0.47% normalized geometric mean versus the preceding snapshot). The subsequent prototype-polymorphic
+  closure-call/direct-immutable-upvalue slice reduced `closures_upvalues` Linux median latency by 15.036%
+  (270.427 to 229.766 ns/call) and leaves the current generated minimum-time geometric-mean gaps at 3.494x
+  against `mlua-luau` and 3.833x against Luaur; rustia beats Ruau on four of five tracked workloads by minimum
+  time. The local -29.31% dense result did not reproduce on Linux and remains directional only. These are workload- and
+  protocol-specific results, not blanket speed or RSS claims. Next come bounded object reclamation/quotas,
+  broader long-run history, Linux-specific profiling of HotIR, verified multi-effect/control-flow HotIR growth,
+  superinstructions/O2, and type-directed wasm/AOT. Native copy-and-patch/JIT
   work remains a research reference unless it can satisfy the public
   `unsafe_code = "forbid"` gate.
 - **Luau target PINNED** (review C1): **Luau 0.709** (= our mlua oracle), standalone (not-Roblox) surface,
   vector width 3, flags-off — see [`05-luau-target.md`](05-luau-target.md). **f64-only is VERIFIED correct**
   (`math.type==nil`; integers are default-OFF even at HEAD 0.727 behind `FFlag::LuauIntegerType2`).
 - **Conformance corpus is executable and pending-free** (review C2 follow-through): the runner reports
-  **692 fixtures**, **491 refs**, **692 Luau 0.709 oracle-backed rows**, **0 pending-oracle**, **0 pending-impl**,
-  and **0 rustia-only**. The old warning about ~703 model-generated rows is obsolete; future work is incremental
-  coverage for newly discovered gaps, not a bulk oracle re-derivation pass.
+  **692 fixtures**, **491 refs**, all 692 fixtures backed by the Luau 0.709 oracle, **0 pending-oracle**,
+  **0 pending-impl**, and **0 rustia-only**. That named executable denominator is authoritative; it does not
+  claim a one-to-one audit of every row in the older 709-row design inventory. Future work is focused oracle
+  coverage and reconciliation for newly discovered gaps, not treating old model prose as implementation truth.
 
-## Determinism model (sharpened per review M1 — three named modes)
-- **LuauCompat** — match reference Luau as closely as possible, *including* its choices on unspecified behavior
-  (for users who need maximal compatibility). May be partly config knobs rather than a full separate build.
-- **ReproducibleStandard** (the recommended public default) — fully spec-conformant Luau + our reproducible,
-  cross-platform-identical choices for unspecified behavior (insertion-order iteration, pinned PCG32, Schubfach
-  tostring, libm). *This is "reproducible-conformant," NOT byte-identical-to-reference-Luau* — the honest
-  framing the review demanded.
-- **DeterministicSim** (grabby) — ReproducibleStandard **minus** the env-dependent features (weak tables,
-  `collectgarbage`, time-based `os.*`) + GC pinned to the instruction counter. A sandboxed subset, bit-identical
-  everywhere. (M2: the Standard modes get an **incremental/paced** GC policy; only DeterministicSim uses
-  full-collect-on-instruction-count.)
+## Determinism model (one engine, three concrete runtime profiles)
+- **LuauCompat** — a real `Profile` variant that currently selects Luau-style hash iteration and exposes the
+  Standard service/capability surface. Further reference-oriented knobs require explicit implementation/tests.
+- **ReproducibleStandard** (the recommended public default) — targets the full pinned standalone Luau surface
+  and is pending-free on the current 491-ref denominator, with reproducible choices for unspecified behavior
+  (insertion-order iteration, pinned PCG32, Schubfach tostring, libm). It is not an unbounded full-conformance or
+  byte-identical-to-reference claim; semantic-tail and full-target gates remain.
+- **DeterministicSim** (grabby) — ReproducibleStandard minus the env-dependent globals `collectgarbage`,
+  `gcinfo`, and `os.*`, plus any optional host-supplied `loadstring`; it rejects external-mutable-state and
+  nondeterministic-effect host registrations. Weak tables remain supported and are swept on the deterministic
+  instruction-count schedule. A sandboxed subset designed for bit-identical replay and verified on the current
+  tested matrix. (M2: the Standard modes use an
+  **incremental/paced** collection schedule; only DeterministicSim
+  uses the full-collect-on-instruction-count trigger.) Scheduling and weak sweeping are implemented; complete
+  ordinary-object/program reclamation, reuse, accounting, limits, and tuning remain open.
 
 ## Canonical doc map (status)
 | doc | role | status |
 |---|---|---|
 | **CURRENT.md** (this) | the live canonical state | authoritative |
 | [`02-pillars.md`](02-pillars.md) | project pillars, non-goals, and the rabbit-hole decision filter | **canonical** |
-| [`30-architecture.md`](30-architecture.md) | the ADR (8 axes, decided) v3 + v3.1 refinements | authoritative for design |
+| [`30-architecture.md`](30-architecture.md) | the ADR (8 axes, decided) v3 plus v3.1-v3.3 refinements/corrections | authoritative for design |
 | [`05-luau-target.md`](05-luau-target.md) | the pinned-target spec (Luau 0.709) | **authoritative** ✅ |
 | [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 692 fixtures / 491 refs / 0 pending |
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
@@ -282,22 +358,35 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 | H1 | version drift | **FIXED** (this file + banners). |
 | H2 | "~5× koto" too narrow | **RESOLVED** — drop the blanket number; state **per-workload** (below). |
 | H3 | wasm gate + Wasm 3.0 | **RESOLVED** — Wasm-3.0 assessed (br_table stays; wasm-GC rejected; relaxed-SIMD banned); V8 + Bun/JSC-family + SpiderMonkey production wasm and `call_ref` dispatch measured. |
-| M1 | three named modes | **RESOLVED** — LuauCompat(knobs)/ReproducibleStandard(default)/DeterministicSim(real build). |
-| M2 | Standard incremental GC | **RESOLVED** — paced/incremental for Standard, full-collect-on-instruction-count for DeterministicSim. |
+| M1 | three named modes | **RESOLVED** — one engine with concrete LuauCompat/ReproducibleStandard(default)/DeterministicSim runtime profiles. |
+| M2 | Standard incremental GC | **RESOLVED as a scheduling/profile decision** — paced/incremental for Standard, full-collect-on-instruction-count for DeterministicSim; complete ordinary-object reclamation/accounting/tuning remains open. |
 | M3 | promote inline caches + hot/cold | **RESOLVED** — compact site-scoped live-slot caches plus `GETIMPORT`/`FASTCALL` and dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` landed; hot/cold remains P1. |
 
-## What's next (the genuine remaining gates before P1 lock)
-The review is actioned (all 8 folded in above + into the docs). The honest residual open items:
-1. **Tune the GC intervals** (Deterministic instruction-count interval = determinism ABI; Standard paced-debt
-   multiplier) on realistic heap sizes at P1.
-2. **Record broader production benchmark baselines** for rustia and each completed external adapter. The exact
+## What's next (the genuine remaining public-release gates)
+The review is actioned (all 8 folded in above + into the docs). The honest residual open items, in order:
+1. **Implement and validate bounded object reclamation, quotas, OOM behavior, and per-decision reset/reuse.**
+   Coroutine/program stores, true public-handle rooting, weak tables, cyclic graphs, hot reload, and native/wasm
+   behavior must remain correct; ordinary retained calls survive hot reload outside an explicit reset epoch.
+2. **Complete the host service and rich-value boundary:** capability-tagged output/time providers, honest
+   internal VM memory telemetry and quota enforcement, a worker-local/per-call host context, a host-owned
+   deterministic module resolver/cache, binary/rich/cyclic values, live-value serde, transactional
+   extension/module/hot-reload failure behavior, and stronger traceback diagnostics.
+3. **Tune the GC intervals only after reclamation exists** (Deterministic instruction-count interval =
+   determinism ABI; Standard paced-debt multiplier) on realistic long-lived and mixed heaps.
+4. **Harden compiler/runtime error-phase parity** with focused oracle fixtures plus differential/fuzz testing.
+5. **Close the full correctness/build/golden target matrix.** Linux-only timings remain intentional, but public
+   release still requires the native and browser targets in [`00-constraints.md`](00-constraints.md) to build
+   and reproduce the declared goldens; real Firefox/Safari and non-Linux native coverage is still incomplete.
+6. **Record broader production benchmark baselines** for rustia and each completed external adapter. The exact
    dense and OOP fixed-work gates, plus the string-focused 512-VM evidence gate, are committed and resolved for
    their declared Linux protocols. Continue using recorded fixed work, paired order, retained raw samples, and
    actual harness-produced final rows; extend the evidence to longer-run public history and realistic mixed heaps
    without generalizing these workload-specific results. Keep `RESULTS.md`, claims, and the static benchmark view
    consuming the same JSONL history.
-3. **Watch `FFlag::LuauIntegerType2`** upstream (the f64-only tripwire).
+7. **Stabilize and publish the crates** in the generated dependency order after release preflight is green.
+8. **Watch `FFlag::LuauIntegerType2`** upstream (the f64-only tripwire).
 
-These are P1-gated; the design itself is otherwise complete. P1 (engine build) starts with the cross-engine +
-conformance + benchmark gates prepared from day one; Linode credentials and an explicit operator start are the
-external operational prerequisites for fresh performance measurements.
+These span the remaining P1 engine hardening and P4 product/release work. The architecture decisions are
+complete, but implementation is not release-complete. The cross-engine, conformance, and benchmark gates are
+already active; Linode credentials and an explicit operator start remain the external operational prerequisites
+for fresh performance measurements.

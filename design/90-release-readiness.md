@@ -1,7 +1,35 @@
 # Release Readiness Checklist
 
 This checklist tracks what must be true before any public rustia crate flips
-from `publish = false` to publishable.
+from `publish = false` to publishable. Updated 2026-07-23; the ordered runtime
+blockers below take precedence over packaging polish.
+
+## Current Release Blockers (Ordered)
+
+1. Complete reachability-based reclamation and generation-safe reuse for the
+   append-only table/function/upvalue/coroutine, atomized and non-inline runtime
+   string, userdata, buffer/vector, and loaded-program stores. Copyable public
+   `Function`/`Exports` handles must become true roots or use an ownership
+   redesign before slots can be reused.
+2. Add honest live/peak VM memory accounting, per-VM aggregate quotas, and a
+   documented atomic OOM path with catchable-or-host-visible failure tests.
+3. Add a deterministic decision-boundary reset/reuse API with epoch-safe
+   invalidation for every retained handle and a versioned reset/replay ABI.
+4. Add capability-tagged output and clock/time providers, real internal VM
+   memory telemetry, and cheap worker-local/per-call host context; reject
+   nondeterministic providers in DeterministicSim.
+5. Add a host-owned script-visible `require` resolver/cache with deterministic
+   identity, execute-once behavior, and cycle diagnostics.
+6. Complete the release value surface for binary strings, buffers, vectors,
+   non-scalar/identity keys, opaque identity-safe userdata handles,
+   shared/cyclic table graphs, and a lifetime-safe live serde layer. Full
+   mlua-style `UserData`/`Scope` registration remains a later optional layer.
+7. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
+   transactional extension/module/hot-reload failure behavior, and
+   differential/fuzz coverage before stabilizing and publishing the API.
+8. Close the full correctness/build/golden target matrix from
+   [`00-constraints.md`](00-constraints.md); Linux remains the only active
+   timing source, but not the only correctness target.
 
 ## Current Policy
 
@@ -98,10 +126,26 @@ from `publish = false` to publishable.
   DeterministicSim.
 - Fuel accounting has versioned costs and superinstructions remain
   fuel-invariant.
-- GC pacing is tuned for Standard profiles, and DeterministicSim collection
-  intervals are treated as deterministic ABI.
-- JSC and SpiderMonkey wasm measurements are recorded before the value-layout
-  and dispatch lock.
+- Complete reachability and slot reuse reclaim unreachable ordinary VM objects
+  and loaded programs without allowing stale handles to alias reused slots.
+- Live/peak allocation accounting, aggregate quotas, and atomic OOM behavior
+  are covered under long-running native and wasm churn.
+- A decision reset defines and tests exactly which programs, globals, upvalues,
+  coroutines, RNG state, fuel, and collection counters reset or persist.
+- GC pacing is tuned for Standard profiles only after reclamation works, and
+  DeterministicSim collection intervals are treated as deterministic ABI.
+- Host-provided output/time services and internal VM memory telemetry obey each
+  profile's capability policy; placeholder print/time/collectgarbage-count/
+  gcinfo behavior is gone, and callbacks can receive cheap worker-local state.
+- Module resolution/cache, rich value interop, error-phase parity, and public
+  stack/source diagnostics satisfy their focused tests; failed extension/module
+  installation and runtime-failing reload cannot leave undocumented partial state.
+- The value-layout and dispatch wasm pre-lock gate is closed with retained V8,
+  JavaScriptCore-family, and SpiderMonkey evidence; recurring Node/V8 evidence
+  remains current.
+- Native and browser correctness/build/golden coverage reaches the full
+  `design/00-constraints.md` matrix before release, independently of the
+  dedicated-Linux-only benchmark policy.
 
 ## Benchmark And CI Gate
 
