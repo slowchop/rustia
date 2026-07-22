@@ -36,9 +36,11 @@
       "rustia",
       "boa",
       "koto",
+      "luaur",
       "mlua-luau",
       "rhai",
       "roto",
+      "ruau",
       "rquickjs",
       "wasmi",
       "wasmtime",
@@ -83,7 +85,7 @@
   },
   "publication": {
     "mode": "matrix",
-    "native_rows": 50,
+    "native_rows": 60,
     "wasm_rows": 15,
     "dispatch_runtimes": 1
   }

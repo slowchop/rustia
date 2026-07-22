@@ -192,6 +192,13 @@ const ENGINE_SLOTS: &[EngineSlot] = &[
         implemented: true,
     },
     EngineSlot {
+        id: "luaur",
+        dialect: Dialect::Luau,
+        feature: Some("luaur-engine"),
+        enabled: cfg!(feature = "luaur-engine"),
+        implemented: true,
+    },
+    EngineSlot {
         id: "mlua-lua54",
         dialect: Dialect::Lua54,
         feature: Some("mlua-lua54"),
@@ -217,6 +224,13 @@ const ENGINE_SLOTS: &[EngineSlot] = &[
         dialect: Dialect::Roto,
         feature: Some("roto"),
         enabled: cfg!(feature = "roto"),
+        implemented: true,
+    },
+    EngineSlot {
+        id: "ruau",
+        dialect: Dialect::Luau,
+        feature: Some("ruau-engine"),
+        enabled: cfg!(feature = "ruau-engine"),
         implemented: true,
     },
     EngineSlot {
@@ -850,10 +864,12 @@ fn unavailable_reason(slot: &EngineSlot) -> &'static str {
                 "rustia-engine" => "compile with --features rustia-engine",
                 "boa" => "compile with --features boa",
                 "koto" => "compile with --features koto",
+                "luaur-engine" => "compile with --features luaur-engine",
                 "mlua-lua54" => "compile with --features mlua-lua54",
                 "mlua-luau" => "compile with --features mlua-luau",
                 "rhai-engine" => "compile with --features rhai-engine",
                 "roto" => "compile with --features roto",
+                "ruau-engine" => "compile with --features ruau-engine",
                 "rquickjs-engine" => "compile with --features rquickjs-engine",
                 "wasmi-engine" => "compile with --features wasmi-engine",
                 "wasmtime-engine" => "compile with --features wasmtime-engine",
@@ -934,6 +950,8 @@ fn prepare(
         "rustia" => Ok(Box::new(RustiaPrepared::new(_workload, _source)?)),
         #[cfg(feature = "koto")]
         "koto" => Ok(Box::new(KotoPrepared::new(_workload, _source)?)),
+        #[cfg(feature = "luaur-engine")]
+        "luaur" => Ok(Box::new(LuaurPrepared::new(_workload, _source)?)),
         #[cfg(feature = "boa")]
         "boa" => Ok(Box::new(BoaPrepared::new(_workload, _source)?)),
         #[cfg(feature = "mlua-lua54")]
@@ -944,6 +962,8 @@ fn prepare(
         "rhai" => Ok(Box::new(RhaiPrepared::new(_workload, _source)?)),
         #[cfg(feature = "roto")]
         "roto" => Ok(Box::new(RotoPrepared::new(_workload, _source)?)),
+        #[cfg(feature = "ruau-engine")]
+        "ruau" => Ok(Box::new(RuauPrepared::new(_workload, _source)?)),
         #[cfg(feature = "rquickjs-engine")]
         "rquickjs" => Ok(Box::new(RquickJsPrepared::new(_workload, _source)?)),
         #[cfg(feature = "wasmi-engine")]
@@ -1129,6 +1149,136 @@ fn koto_checksum(value: &koto::prelude::KValue) -> String {
         KValue::Str(value) => format!("string:{}", value.as_str()),
         other => format!("{other:?}"),
     }
+}
+
+#[cfg(feature = "luaur-engine")]
+struct LuaurPrepared {
+    _lua: luaur_rt::Lua,
+    function: luaur_rt::Function,
+}
+
+#[cfg(feature = "luaur-engine")]
+impl LuaurPrepared {
+    fn new(workload: &Workload, source: &str) -> Result<Self> {
+        let lua = luaur_rt::Lua::new();
+        let function = lua
+            .load(source)
+            .eval::<luaur_rt::Function>()
+            .map_err(|error| Error::new(format!("initialize {} failed: {error}", workload.id)))?;
+        Ok(Self {
+            _lua: lua,
+            function,
+        })
+    }
+}
+
+#[cfg(feature = "luaur-engine")]
+impl PreparedWorkload for LuaurPrepared {
+    fn run(&mut self, n: u64) -> Result<String> {
+        let n = i64::try_from(n).map_err(|_| Error::new("luaur n exceeded i64::MAX"))?;
+        let result = self
+            .function
+            .call::<luaur_rt::Value>(n)
+            .map_err(|error| Error::new(format!("luaur workload call failed: {error}")))?;
+        Ok(luaur_checksum(&result))
+    }
+}
+
+#[cfg(feature = "luaur-engine")]
+fn luaur_checksum(value: &luaur_rt::Value) -> String {
+    match value {
+        luaur_rt::Value::Nil => "nil".to_owned(),
+        luaur_rt::Value::Boolean(value) => format!("bool:{value}"),
+        luaur_rt::Value::Integer(value) => format!("i64:{value}"),
+        luaur_rt::Value::Number(value) => format!("f64:{value:.17}"),
+        luaur_rt::Value::String(value) => match value.to_str() {
+            Ok(text) => format!("string:{text}"),
+            Err(_) => format!("bytes:{}", value.as_bytes().len()),
+        },
+        other => other.type_name().to_owned(),
+    }
+}
+
+#[cfg(feature = "ruau-engine")]
+struct RuauPrepared {
+    vm: ruau::vm::Vm,
+    function: ruau::vm::StashedClosure,
+}
+
+#[cfg(feature = "ruau-engine")]
+impl RuauPrepared {
+    fn new(workload: &Workload, source: &str) -> Result<Self> {
+        use ruau::{
+            surface::{Surface, VmConfig},
+            vm::{Ambient, Function, Limits},
+        };
+
+        let surface = Surface::new();
+        let chunk = surface
+            .compile_bytes(source.as_bytes())
+            .map_err(|error| Error::new(format!("compile {} failed: {error}", workload.id)))?;
+        let mut vm = surface
+            .vm_builder(&VmConfig::trusted_host(
+                Ambient::deterministic(0),
+                Limits::unlimited(),
+            ))
+            .build()
+            .map_err(|error| Error::new(format!("initialize {} failed: {error}", workload.id)))?;
+        let module = vm
+            .load(&chunk)
+            .map_err(|error| Error::new(format!("load {} failed: {error}", workload.id)))?;
+        let function = vm
+            .step(|scope| {
+                let main = scope.module_function(&module);
+                let function: Function<'_> = scope.call(main, ())?;
+                scope.stash_function(function)
+            })
+            .map_err(|error| Error::new(format!("initialize {} failed: {error}", workload.id)))?;
+        Ok(Self { vm, function })
+    }
+}
+
+#[cfg(feature = "ruau-engine")]
+impl PreparedWorkload for RuauPrepared {
+    fn run(&mut self, n: u64) -> Result<String> {
+        let options = ruau::vm::CallOptions::new();
+        self.vm
+            .step_with(&options, |scope| {
+                let function = scope.fetch_function(&self.function)?;
+                let protected: std::result::Result<ruau::vm::ScopedValue<'_>, _> =
+                    scope.call_protected(function, n as f64)?;
+                let value = protected.map_err(|error| {
+                    ruau::vm::RuntimeError::runtime(format!(
+                        "script error: {} ({:?})",
+                        error.message(scope),
+                        error.traceback()
+                    ))
+                })?;
+                ruau_checksum(scope, value)
+            })
+            .map_err(|error| Error::new(format!("ruau workload call failed: {error:?}")))
+    }
+}
+
+#[cfg(feature = "ruau-engine")]
+fn ruau_checksum<'scope>(
+    scope: &ruau::vm::Scope<'scope>,
+    value: ruau::vm::ScopedValue<'scope>,
+) -> std::result::Result<String, ruau::vm::RuntimeError> {
+    Ok(match value {
+        ruau::vm::ScopedValue::Nil => "nil".to_owned(),
+        ruau::vm::ScopedValue::Boolean(value) => format!("bool:{value}"),
+        ruau::vm::ScopedValue::Integer(value) => format!("i64:{value}"),
+        ruau::vm::ScopedValue::Number(value) => format!("f64:{value:.17}"),
+        ruau::vm::ScopedValue::String(value) => {
+            let bytes = scope.string_bytes(value)?;
+            match String::from_utf8(bytes) {
+                Ok(text) => format!("string:{text}"),
+                Err(error) => format!("bytes:{}", error.as_bytes().len()),
+            }
+        }
+        other => other.type_name().to_owned(),
+    })
 }
 
 #[cfg(feature = "boa")]
@@ -2168,7 +2318,7 @@ mod tests {
             .and_then(serde_json::Value::as_array)
             .expect("engines array");
 
-        assert_eq!(engines.len(), 10);
+        assert_eq!(engines.len(), 12);
         for engine in engines {
             let id = engine
                 .get("id")

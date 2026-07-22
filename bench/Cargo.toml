@@ -19,9 +19,11 @@ all-engines = [
     "rustia-engine",
     "boa",
     "koto",
+    "luaur-engine",
     "mlua-luau",
     "rhai-engine",
     "roto",
+    "ruau-engine",
     "rquickjs-engine",
     "wasmi-engine",
     "wasmtime-engine",
@@ -29,10 +31,12 @@ all-engines = [
 rustia-engine = ["dep:rustia-compiler", "dep:rustia-parser", "dep:rustia-vm"]
 boa = ["dep:boa_engine"]
 koto = ["dep:koto"]
+luaur-engine = ["dep:luaur_rt"]
 mlua-luau = ["dep:mlua_luau"]
 mlua-lua54 = ["dep:mlua_lua54"]
 rhai-engine = ["dep:rhai"]
 roto = ["dep:roto"]
+ruau-engine = ["dep:ruau"]
 rquickjs-engine = ["dep:rquickjs"]
 wasmi-engine = ["dep:wasmi"]
 wasmtime-engine = ["dep:wasmtime"]
@@ -42,11 +46,13 @@ rustia-compiler = { version = "0.0.1", path = "../crates/rustia-compiler", optio
 rustia-parser = { version = "0.0.1", path = "../crates/rustia-parser", optional = true }
 rustia-vm = { version = "0.0.1", path = "../crates/rustia-vm", optional = true }
 koto = { version = "0.16", default-features = false, features = ["arc"], optional = true }
+luaur_rt = { package = "luaur-rt", version = "0.1.8", optional = true }
 mlua_luau = { package = "mlua", version = "0.11", default-features = false, features = ["luau"], optional = true }
 mlua_lua54 = { package = "mlua", version = "0.11", default-features = false, features = ["lua54", "vendored"], optional = true }
 rhai = { version = "1.25", optional = true }
 boa_engine = { version = "0.21", optional = true }
 roto = { version = "0.11", default-features = false, optional = true }
+ruau = { version = "0.3", optional = true }
 rquickjs = { version = "0.12", optional = true }
 serde_json = "1"
 wasmi = { version = "2.0.0-beta.4", optional = true }

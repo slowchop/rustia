@@ -1025,12 +1025,14 @@ function engineColor(engine, fallbackIndex = 0) {
   const known = {
     rustia: "#2563eb",
     koto: "#0f766e",
+    luaur: "#0891b2",
     "mlua-luau": "#b45309",
     "mlua-lua54": "#7c3aed",
     rhai: "#b91c1c",
     boa: "#047857",
     rquickjs: "#be185d",
     roto: "#475569",
+    ruau: "#9333ea",
     wasmi: "#be185d",
     wasmtime: "#111827",
   };

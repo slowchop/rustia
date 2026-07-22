@@ -552,8 +552,8 @@ JavaScript runtimes:
 node tools/run-wasm-dispatch-gate.js
 ```
 
-Engine slots are tracked for `rustia`, `boa`, `koto`, `mlua-lua54`,
-`mlua-luau`, `rhai`, `roto`, `rquickjs`, `wasmi`, and `wasmtime`. Adapters are
+Engine slots are tracked for `rustia`, `boa`, `koto`, `luaur`, `mlua-lua54`,
+`mlua-luau`, `rhai`, `roto`, `ruau`, `rquickjs`, `wasmi`, and `wasmtime`. Adapters are
 feature-gated so heavyweight dependencies do not affect the normal workspace
 build.
 
@@ -575,7 +575,7 @@ The coordinator verifies the frozen source and runtime artifacts, provisions the
 declared Linux/x86_64 shape, builds the `all-engines` binary plus the separate
 Lua 5.4 binary, and measures the five common workloads. It then runs the three
 wasm adapters on Node/V8, the most widely used JavaScript runtime, on that same
-host. Promotion requires the exact 50 native rows, 15 wasm rows, one dispatch run, Linux-only
+host. Promotion requires the exact 60 native rows, 15 wasm rows, one dispatch run, Linux-only
 target identities, a single source revision, and confirmed instance deletion.
 The accepted four-runtime matrix is retained under `bench/wasm/history/` as
 historical portability evidence; it is not repeated in the recurring public
@@ -601,10 +601,11 @@ cargo run -p script-bench-harness --no-default-features --features mlua-lua54 --
 ```
 
 In this slice, `rustia` works through the default `rustia-engine` feature,
-`boa` works with `--features boa`, `koto` works with `--features koto`, Lua 5.4
-works with `--features mlua-lua54`, the Luau oracle comparison works with
-`--features mlua-luau`, Rhai works with `--features rhai-engine`, Roto works
-with `--features roto`, QuickJS works with `--features rquickjs-engine`, Wasmi
+`boa` works with `--features boa`, `koto` works with `--features koto`, Luaur
+works with `--features luaur-engine`, Lua 5.4 works with `--features mlua-lua54`,
+the reference Luau comparison works with `--features mlua-luau`, Rhai works
+with `--features rhai-engine`, Roto works with `--features roto`, Ruau works
+with `--features ruau-engine`, QuickJS works with `--features rquickjs-engine`, Wasmi
 works with `--features wasmi-engine`, and Wasmtime works with
 `--features wasmtime-engine`. The crate also builds with `--no-default-features`
 so the standalone harness shell is not tied to rustia internals.

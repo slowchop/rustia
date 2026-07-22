@@ -48,9 +48,11 @@ const MATRIX_NATIVE_ENGINES = Object.freeze([
   "rustia",
   "boa",
   "koto",
+  "luaur",
   "mlua-luau",
   "rhai",
   "roto",
+  "ruau",
   "rquickjs",
   "wasmi",
   "wasmtime",
@@ -3695,9 +3697,11 @@ function validateMatrixNativeRows(config, file, status) {
     rustia: "luau",
     boa: "javascript",
     koto: "koto",
+    luaur: "luau",
     "mlua-luau": "luau",
     rhai: "rhai",
     roto: "roto",
+    ruau: "luau",
     rquickjs: "javascript",
     wasmi: "wasm",
     wasmtime: "wasm",
@@ -4942,7 +4946,7 @@ async function selfTest(config) {
       maximum_timed_attempts_per_group: 3,
       wait_timeout_seconds: 300,
     },
-    publication: { mode: "matrix", native_rows: 50, wasm_rows: 15, dispatch_runtimes: 1 },
+    publication: { mode: "matrix", native_rows: 60, wasm_rows: 15, dispatch_runtimes: 1 },
   };
   assert.equal(validateConfig(matrixConfig), matrixConfig);
   assert.equal(expectedTerminalStatus(matrixConfig), "matrix_complete");
