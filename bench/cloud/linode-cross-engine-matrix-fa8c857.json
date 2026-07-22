@@ -15,7 +15,7 @@
     "max_runtime_minutes": 55
   },
   "source": {
-    "benchmark_commit": "6ae0cf0c5f0890f85662da417d6639d3fb0e7933",
+    "benchmark_commit": "fa8c8571d60659c4f637940acbb84eb591b1e039",
     "expected_sha256": {
       "bench_manifest": "eef560df025e67309bad296b4931c3743785902efe1cfa7223417914dff63ded",
       "native_harness": "ef75536972f1f8a7de01a0f7ef6f8286a207cac8223d7d21314e87c6bcf6755b",
