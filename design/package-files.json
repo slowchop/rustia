@@ -319,10 +319,10 @@
         "src/error.rs",
         "src/extension.rs",
         "src/heap.rs",
+        "src/hot_ir.rs",
         "src/lib.rs",
         "src/number.rs",
         "src/profile.rs",
-        "src/quickening.rs",
         "src/value.rs",
         "src/vm.rs",
         "tests/core.rs"

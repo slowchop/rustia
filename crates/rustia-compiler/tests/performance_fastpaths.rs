@@ -429,7 +429,7 @@ fn leaf_plans_preserve_fuel_and_deterministic_collection_boundaries() {
 }
 
 #[test]
-fn numeric_loop_kernels_do_not_elide_overwritten_index_metamethod_reads() {
+fn hot_ir_does_not_elide_overwritten_index_metamethod_reads() {
     let program = compile_source(
         r#"
             local hits = 0
@@ -462,7 +462,7 @@ fn numeric_loop_kernels_do_not_elide_overwritten_index_metamethod_reads() {
 }
 
 #[test]
-fn numeric_loop_kernels_do_not_elide_overwritten_arithmetic_errors() {
+fn hot_ir_does_not_elide_overwritten_arithmetic_errors() {
     let program = compile_source(
         r#"
             local function scan(n, values)

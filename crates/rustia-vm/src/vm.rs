@@ -10,11 +10,11 @@ use crate::heap::{
     FunctionKind, NativeFunction, TableIterationOrder, TableNext, TableNumericArrayWrite,
     TableStringHashSlot, TableStringHashWrite, UserdataPayload, VectorData, VmCell,
 };
+use crate::hot_ir::{recognize_hot_ir_loops, HotIr, HotIrNumber, HotIrOpKind, HotIrValue};
+#[cfg(test)]
+use crate::hot_ir::{HotIrArrayWrite, HotIrCellClear, HotIrNumberId, HotIrOp, HotIrRegisterWrite};
 use crate::number::{binary, canonicalize_number, NumericOp};
 use crate::profile::Profile;
-use crate::quickening::{
-    recognize_numeric_loop_kernels, KernelNumberExpr, KernelValueExpr, NumericLoopKernel,
-};
 use crate::value::{Value, ValueKind};
 use smallvec::SmallVec;
 use std::collections::BTreeMap;
@@ -112,6 +112,16 @@ pub struct Vm {
     next_weak_collection_instruction: u64,
     deterministic_collection_count: u64,
     coverage_hits: BTreeMap<CoverageKey, u64>,
+    #[cfg(test)]
+    hot_ir_mode: HotIrTestMode,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HotIrTestMode {
+    Off,
+    Auto,
+    Force,
 }
 
 struct LoadedProgram {
@@ -128,7 +138,11 @@ struct LoadedProgram {
     #[cfg(test)]
     native_call_inline_cache_fills: u64,
     #[cfg(test)]
-    numeric_loop_kernel_iterations: u64,
+    hot_ir_entries: u64,
+    #[cfg(test)]
+    hot_ir_iterations: u64,
+    #[cfg(test)]
+    hot_ir_guard_exits: u64,
 }
 
 impl LoadedProgram {
@@ -160,7 +174,11 @@ impl LoadedProgram {
             #[cfg(test)]
             native_call_inline_cache_fills: 0,
             #[cfg(test)]
-            numeric_loop_kernel_iterations: 0,
+            hot_ir_entries: 0,
+            #[cfg(test)]
+            hot_ir_iterations: 0,
+            #[cfg(test)]
+            hot_ir_guard_exits: 0,
         }
     }
 
@@ -253,17 +271,13 @@ impl LoadedProgram {
             .leaf_call_plan
     }
 
-    fn numeric_loop_kernel(
-        &self,
-        prototype: Option<u32>,
-        pc: usize,
-    ) -> Option<Arc<NumericLoopKernel>> {
+    fn hot_ir(&self, prototype: Option<u32>, pc: usize) -> Option<Arc<HotIr>> {
         match prototype {
             Some(prototype) => self
                 .function_inline_caches
                 .get(prototype as usize)?
-                .numeric_loop_kernel(pc),
-            None => self.main_inline_caches.numeric_loop_kernel(pc),
+                .hot_ir(pc),
+            None => self.main_inline_caches.hot_ir(pc),
         }
     }
 
@@ -284,12 +298,12 @@ struct FunctionInlineCaches {
     import_entries: Vec<[TableStringInlineCache; IMPORT_CACHE_LANES]>,
     native_call_entries: Vec<NativeCallInlineCache>,
     leaf_call_plan: Option<LeafCallPlan>,
-    numeric_loop_kernel_by_pc: Option<Box<[u32]>>,
-    numeric_loop_kernels: Vec<Arc<NumericLoopKernel>>,
+    hot_ir_by_pc: Option<Box<[u32]>>,
+    hot_irs: Vec<Arc<HotIr>>,
 }
 
 #[derive(Clone, Copy)]
-struct NumericKernelInputs {
+struct HotIrInputs {
     index_register: u8,
     visible_register: u8,
     next: f64,
@@ -307,16 +321,16 @@ impl FunctionInlineCaches {
                 _ => SITE_CACHE_INELIGIBLE,
             })
             .collect();
-        let numeric_loop_kernels = recognize_numeric_loop_kernels(program, function);
-        let numeric_loop_kernel_by_pc = if numeric_loop_kernels.is_empty() {
+        let hot_irs = recognize_hot_ir_loops(program, function);
+        let hot_ir_by_pc = if hot_irs.is_empty() {
             None
         } else {
             let mut by_pc = vec![u32::MAX; function.code.len()];
-            for (index, kernel) in numeric_loop_kernels.iter().enumerate() {
+            for (index, hot_ir) in hot_irs.iter().enumerate() {
                 let Some(index) = u32::try_from(index).ok() else {
                     break;
                 };
-                by_pc[kernel.backedge_pc] = index;
+                by_pc[hot_ir.backedge_pc] = index;
             }
             Some(by_pc.into_boxed_slice())
         };
@@ -326,14 +340,14 @@ impl FunctionInlineCaches {
             import_entries: Vec::new(),
             native_call_entries: Vec::new(),
             leaf_call_plan,
-            numeric_loop_kernel_by_pc,
-            numeric_loop_kernels,
+            hot_ir_by_pc,
+            hot_irs,
         }
     }
 
-    fn numeric_loop_kernel(&self, pc: usize) -> Option<Arc<NumericLoopKernel>> {
-        let index = *self.numeric_loop_kernel_by_pc.as_ref()?.get(pc)?;
-        (index != u32::MAX).then(|| self.numeric_loop_kernels.get(index as usize).cloned())?
+    fn hot_ir(&self, pc: usize) -> Option<Arc<HotIr>> {
+        let index = *self.hot_ir_by_pc.as_ref()?.get(pc)?;
+        (index != u32::MAX).then(|| self.hot_irs.get(index as usize).cloned())?
     }
 
     fn table_inline_cache(&self, pc: usize) -> Option<TableStringInlineCache> {
@@ -1109,6 +1123,20 @@ impl Vm {
             next_weak_collection_instruction,
             deterministic_collection_count: 0,
             coverage_hits: BTreeMap::new(),
+            #[cfg(test)]
+            hot_ir_mode: HotIrTestMode::Auto,
+        }
+    }
+
+    #[inline]
+    fn hot_ir_enabled(&self) -> bool {
+        #[cfg(test)]
+        {
+            self.hot_ir_mode != HotIrTestMode::Off
+        }
+        #[cfg(not(test))]
+        {
+            true
         }
     }
 
@@ -1557,18 +1585,18 @@ impl Vm {
                         })?;
 
                         if instruction.op == Opcode::ForLoop
+                            && self.hot_ir_enabled()
                             && fuel.is_none()
                             && !self.settings.enable_conformance_coverage
                             && !self.heap.has_allocation_debt()
                             && !self.weak_collection_due_within(1)
                         {
                             if let Some(program_id) = program_id {
-                                if let Some(kernel) =
-                                    self.numeric_loop_kernel(program_id, context.prototype, pc)
+                                if let Some(hot_ir) = self.hot_ir(program_id, context.prototype, pc)
                                 {
-                                    if let Some(next_pc) = self.try_numeric_loop_kernel(
+                                    if let Some(next_pc) = self.try_hot_ir(
                                         program_id,
-                                        &kernel,
+                                        &hot_ir,
                                         &mut registers,
                                         &mut register_cells,
                                     ) {
@@ -5829,67 +5857,113 @@ impl Vm {
         }
     }
 
-    /// Execute as many complete, policy-invisible iterations as possible. Every fallible
-    /// operand/table guard is evaluated before the loop index, registers, cells, or table are
-    /// mutated, so a failed guard resumes at the original `ForLoop` without a deopt repair pass.
-    fn try_numeric_loop_kernel(
+    /// Execute as many complete, policy-invisible HotIR iterations as possible. Every fallible
+    /// operation and effect operand is evaluated before the loop index, registers, cells, or
+    /// table are mutated, so a failed guard resumes at the original `ForLoop` without repair.
+    fn try_hot_ir(
         &mut self,
         program_id: u32,
-        kernel: &NumericLoopKernel,
+        hot_ir: &HotIr,
         registers: &mut [Value],
         register_cells: &mut [Option<u32>],
     ) -> Option<usize> {
         #[cfg(not(test))]
         let _ = program_id;
+        #[cfg(test)]
+        self.record_hot_ir_entry(program_id);
+
+        let register_count = usize::from(hot_ir.register_count);
+        if registers.len() < register_count || register_cells.len() < register_count {
+            return self.finish_hot_ir_guard_exit(program_id, 0);
+        }
+
         let mut completed_iterations = 0u64;
+        let mut scratch = SmallVec::<[f64; 16]>::with_capacity(hot_ir.operations.len());
+        let mut staged_register_writes =
+            SmallVec::<[(u8, Value); 16]>::with_capacity(hot_ir.register_writes.len());
         loop {
-            let index = registers
-                .get(usize::from(kernel.index_register))?
-                .as_number()?;
-            let limit = registers
-                .get(usize::from(kernel.limit_register))?
-                .as_number()?;
-            let step = registers
-                .get(usize::from(kernel.step_register))?
-                .as_number()?;
+            let Some((index, limit, step)) = (|| {
+                Some((
+                    registers
+                        .get(usize::from(hot_ir.index_register))?
+                        .as_number()?,
+                    registers
+                        .get(usize::from(hot_ir.limit_register))?
+                        .as_number()?,
+                    registers
+                        .get(usize::from(hot_ir.step_register))?
+                        .as_number()?,
+                ))
+            })() else {
+                return self.finish_hot_ir_guard_exit(program_id, completed_iterations);
+            };
             let next = binary(NumericOp::Add, index, step);
             let continues = numeric_for_should_continue(next, limit, step);
             let logical_steps = if continues {
-                kernel.continuing_iteration_instruction_count()
+                hot_ir.continuing_iteration_instruction_count()
             } else {
                 1
             };
             if self.weak_collection_due_within(logical_steps) {
-                break;
+                #[cfg(test)]
+                self.record_hot_ir_iterations(program_id, completed_iterations);
+                return None;
             }
 
             if !continues {
-                registers[usize::from(kernel.index_register)] = Value::number(next);
+                registers[usize::from(hot_ir.index_register)] = Value::number(next);
                 self.executed_instructions = self.executed_instructions.wrapping_add(1);
                 #[cfg(test)]
-                self.record_numeric_loop_kernel_iterations(program_id, completed_iterations);
-                return Some(kernel.backedge_pc + 1);
+                self.record_hot_ir_iterations(program_id, completed_iterations);
+                return Some(hot_ir.backedge_pc + 1);
             }
 
-            let inputs = NumericKernelInputs {
-                index_register: kernel.index_register,
-                visible_register: kernel.visible_register,
+            let inputs = HotIrInputs {
+                index_register: hot_ir.index_register,
+                visible_register: hot_ir.visible_register,
                 next,
             };
-            let mut writes = SmallVec::<[(u8, Value); 16]>::new();
-            for write in kernel.register_writes.iter() {
-                let value = self.eval_kernel_value(&write.value, registers, inputs)?;
-                writes.push((write.register, value));
-            }
-            let array_write = if let Some(write) = &kernel.array_write {
-                let table = self.eval_kernel_value(&write.table, registers, inputs)?;
-                let table = table.as_table()?;
-                let index = self.eval_kernel_number(&write.index, registers, inputs)?;
-                let index = array_iterator_index(index)?;
-                let value = self.eval_kernel_value(&write.value, registers, inputs)?;
-                Some((table, index, value))
-            } else {
-                None
+
+            let Some(array_write) = (|| -> Option<Option<(u32, usize, Value)>> {
+                scratch.clear();
+                for operation in hot_ir.operations.iter() {
+                    let output = match operation.kind {
+                        HotIrOpKind::Binary { op, lhs, rhs } => {
+                            let lhs = hot_ir_number(lhs, registers, &scratch, inputs)?;
+                            let rhs = hot_ir_number(rhs, registers, &scratch, inputs)?;
+                            binary(op, lhs, rhs)
+                        }
+                        HotIrOpKind::NumericArrayGet { table, index } => {
+                            let table =
+                                hot_ir_value(table, registers, &scratch, inputs)?.as_table()?;
+                            let index = hot_ir_number(index, registers, &scratch, inputs)?;
+                            let index = array_iterator_index(index)?;
+                            self.heap
+                                .read_numeric_array_slot(table, index)?
+                                .as_number()?
+                        }
+                    };
+                    scratch.push(output);
+                }
+
+                staged_register_writes.clear();
+                for write in hot_ir.register_writes.iter() {
+                    let value = hot_ir_value(write.value, registers, &scratch, inputs)?;
+                    staged_register_writes.push((write.register, value));
+                }
+                let array_write = if let Some(write) = &hot_ir.array_write {
+                    let table =
+                        hot_ir_value(write.table, registers, &scratch, inputs)?.as_table()?;
+                    let index = hot_ir_number(write.index, registers, &scratch, inputs)?;
+                    let index = array_iterator_index(index)?;
+                    let value = hot_ir_value(write.value, registers, &scratch, inputs)?;
+                    Some((table, index, value))
+                } else {
+                    None
+                };
+                Some(array_write)
+            })() else {
+                return self.finish_hot_ir_guard_exit(program_id, completed_iterations);
             };
 
             if let Some((table, index, value)) = array_write {
@@ -5897,69 +5971,38 @@ impl Vm {
                     self.heap.try_write_numeric_array_slot(table, index, value),
                     Some(TableNumericArrayWrite::Stored)
                 ) {
-                    break;
+                    return self.finish_hot_ir_guard_exit(program_id, completed_iterations);
                 }
             }
 
-            registers[usize::from(kernel.index_register)] = Value::number(next);
-            registers[usize::from(kernel.visible_register)] = Value::number(next);
-            register_cells[usize::from(kernel.visible_register)] = None;
-            for (register, value) in writes {
+            registers[usize::from(hot_ir.index_register)] = Value::number(next);
+            registers[usize::from(hot_ir.visible_register)] = Value::number(next);
+            register_cells[usize::from(hot_ir.visible_register)] = None;
+            for (register, value) in staged_register_writes.iter().copied() {
                 registers[usize::from(register)] = value;
             }
-            for register in kernel.cell_clears.iter().copied() {
-                register_cells[usize::from(register)] = None;
+            for clear in hot_ir.cell_clears.iter() {
+                register_cells[usize::from(clear.register)] = None;
             }
             self.executed_instructions = self.executed_instructions.wrapping_add(logical_steps);
             completed_iterations = completed_iterations.saturating_add(1);
         }
+    }
 
+    #[inline]
+    fn finish_hot_ir_guard_exit(
+        &mut self,
+        program_id: u32,
+        completed_iterations: u64,
+    ) -> Option<usize> {
         #[cfg(test)]
-        self.record_numeric_loop_kernel_iterations(program_id, completed_iterations);
-        (completed_iterations != 0).then_some(kernel.backedge_pc)
-    }
-
-    fn eval_kernel_value(
-        &mut self,
-        expression: &KernelValueExpr,
-        registers: &[Value],
-        inputs: NumericKernelInputs,
-    ) -> Option<Value> {
-        match expression {
-            KernelValueExpr::Input(register) => kernel_input_value(registers, *register, inputs),
-            KernelValueExpr::Nil => Some(Value::nil()),
-            KernelValueExpr::Boolean(value) => Some(Value::boolean(*value)),
-            KernelValueExpr::Number(expression) => self
-                .eval_kernel_number(expression, registers, inputs)
-                .map(Value::number),
+        {
+            self.record_hot_ir_iterations(program_id, completed_iterations);
+            self.record_hot_ir_guard_exit(program_id);
         }
-    }
-
-    fn eval_kernel_number(
-        &mut self,
-        expression: &KernelNumberExpr,
-        registers: &[Value],
-        inputs: NumericKernelInputs,
-    ) -> Option<f64> {
-        match expression {
-            KernelNumberExpr::Input(register) => {
-                kernel_input_value(registers, *register, inputs)?.as_number()
-            }
-            KernelNumberExpr::Constant(value) => Some(*value),
-            KernelNumberExpr::Binary { op, lhs, rhs } => Some(binary(
-                *op,
-                self.eval_kernel_number(lhs, registers, inputs)?,
-                self.eval_kernel_number(rhs, registers, inputs)?,
-            )),
-            KernelNumberExpr::NumericArrayGet { table, index } => {
-                let table = self
-                    .eval_kernel_value(table, registers, inputs)?
-                    .as_table()?;
-                let index = self.eval_kernel_number(index, registers, inputs)?;
-                let index = array_iterator_index(index)?;
-                self.heap.read_numeric_array_slot(table, index)?.as_number()
-            }
-        }
+        #[cfg(not(test))]
+        let _ = (program_id, completed_iterations);
+        None
     }
 
     fn get_index_value_with_inline_cache(
@@ -7409,15 +7452,10 @@ impl Vm {
             })
     }
 
-    fn numeric_loop_kernel(
-        &self,
-        program_id: u32,
-        prototype: Option<u32>,
-        pc: usize,
-    ) -> Option<Arc<NumericLoopKernel>> {
+    fn hot_ir(&self, program_id: u32, prototype: Option<u32>, pc: usize) -> Option<Arc<HotIr>> {
         self.dynamic_programs
             .get(program_id as usize)?
-            .numeric_loop_kernel(prototype, pc)
+            .hot_ir(prototype, pc)
     }
 
     fn table_inline_cache(
@@ -7534,13 +7572,25 @@ impl Vm {
     }
 
     #[cfg(test)]
-    fn record_numeric_loop_kernel_iterations(&mut self, program_id: u32, iterations: u64) {
+    fn record_hot_ir_entry(&mut self, program_id: u32) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+            program.hot_ir_entries = program.hot_ir_entries.saturating_add(1);
+        }
+    }
+
+    #[cfg(test)]
+    fn record_hot_ir_iterations(&mut self, program_id: u32, iterations: u64) {
         let Some(program) = self.dynamic_programs.get_mut(program_id as usize) else {
             return;
         };
-        program.numeric_loop_kernel_iterations = program
-            .numeric_loop_kernel_iterations
-            .saturating_add(iterations);
+        program.hot_ir_iterations = program.hot_ir_iterations.saturating_add(iterations);
+    }
+
+    #[cfg(test)]
+    fn record_hot_ir_guard_exit(&mut self, program_id: u32) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+            program.hot_ir_guard_exits = program.hot_ir_guard_exits.saturating_add(1);
+        }
     }
 
     fn host_function(&self, host: u32) -> Result<&HostFunctionOp> {
@@ -19098,15 +19148,44 @@ fn array_iterator_index(value: f64) -> Option<usize> {
 }
 
 #[inline(always)]
-fn kernel_input_value(
-    registers: &[Value],
-    register: u8,
-    inputs: NumericKernelInputs,
-) -> Option<Value> {
+fn hot_ir_input_value(registers: &[Value], register: u8, inputs: HotIrInputs) -> Option<Value> {
     if register == inputs.index_register || register == inputs.visible_register {
         Some(Value::number(inputs.next))
     } else {
         registers.get(usize::from(register)).copied()
+    }
+}
+
+#[inline(always)]
+fn hot_ir_value(
+    value: HotIrValue,
+    registers: &[Value],
+    scratch: &[f64],
+    inputs: HotIrInputs,
+) -> Option<Value> {
+    match value {
+        HotIrValue::Input(register) => hot_ir_input_value(registers, register, inputs),
+        HotIrValue::Nil => Some(Value::nil()),
+        HotIrValue::Boolean(value) => Some(Value::boolean(value)),
+        HotIrValue::Number(number) => {
+            hot_ir_number(number, registers, scratch, inputs).map(Value::number)
+        }
+    }
+}
+
+#[inline(always)]
+fn hot_ir_number(
+    number: HotIrNumber,
+    registers: &[Value],
+    scratch: &[f64],
+    inputs: HotIrInputs,
+) -> Option<f64> {
+    match number {
+        HotIrNumber::Input(register) => {
+            hot_ir_input_value(registers, register, inputs)?.as_number()
+        }
+        HotIrNumber::Constant(value) => Some(value),
+        HotIrNumber::Temporary(temporary) => scratch.get(temporary.index()).copied(),
     }
 }
 
@@ -22271,7 +22350,7 @@ mod inline_cache_tests {
         }
     }
 
-    fn numeric_loop_array_program() -> Program {
+    fn hot_ir_array_program() -> Program {
         Program::new(
             Function::new(
                 vec![
@@ -22302,12 +22381,67 @@ mod inline_cache_tests {
         )
     }
 
+    fn hot_ir_numeric_semantics_program() -> Program {
+        Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::NewArray, 4, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                    Instruction::new(Opcode::LoadConst, 2, 0, 0),
+                    Instruction::with_aux(Opcode::ForPrep, 0, 0, 0, 22),
+                    Instruction::new(Opcode::Move, 5, 3, 0),
+                    Instruction::new(Opcode::LoadConst, 6, 0, 2),
+                    Instruction::new(Opcode::Add, 5, 5, 6),
+                    Instruction::with_aux(Opcode::LoadConstWide, 7, 0, 0, 0),
+                    Instruction::new(Opcode::Sub, 5, 5, 7),
+                    Instruction::new(Opcode::Mul, 5, 5, 6),
+                    Instruction::new(Opcode::Div, 5, 5, 6),
+                    Instruction::new(Opcode::FloorDiv, 5, 5, 7),
+                    Instruction::new(Opcode::LoadConst, 8, 0, 3),
+                    Instruction::new(Opcode::Mod, 5, 5, 8),
+                    Instruction::new(Opcode::Pow, 5, 5, 6),
+                    Instruction::new(Opcode::LoadConst, 9, 0, 4),
+                    Instruction::new(Opcode::LoadConst, 10, 0, 5),
+                    Instruction::new(Opcode::Move, 11, 4, 0),
+                    Instruction::new(Opcode::Move, 12, 3, 0),
+                    Instruction::new(Opcode::SetIndex, 11, 12, 5),
+                    Instruction::with_aux(Opcode::ForLoop, 0, 0, 0, 5),
+                    Instruction::new(Opcode::LoadConst, 12, 0, 1),
+                    Instruction::new(Opcode::GetIndex, 5, 4, 12),
+                    Instruction::new(Opcode::Return, 5, 1, 0),
+                    Instruction::new(Opcode::Halt, 0, 0, 0),
+                ],
+                13,
+            ),
+            vec![
+                Constant::Number(1.0),
+                Constant::Number(4.0),
+                Constant::Number(2.0),
+                Constant::Number(3.0),
+                Constant::Nil,
+                Constant::Boolean(true),
+            ],
+        )
+    }
+
     #[test]
-    fn numeric_loop_kernel_executes_general_array_fill_and_preserves_policy_fallbacks() {
-        let program = numeric_loop_array_program();
+    fn hot_ir_executes_general_array_fill_and_preserves_policy_fallbacks() {
+        let program = hot_ir_array_program();
         let mut fast = Vm::new(Profile::ReproducibleStandard);
+        fast.hot_ir_mode = HotIrTestMode::Force;
         assert_eq!(fast.run(&program).unwrap().as_number(), Some(64.0));
-        assert!(fast.dynamic_programs[0].numeric_loop_kernel_iterations > 0);
+        assert!(fast.dynamic_programs[0].hot_ir_entries > 0);
+        assert!(fast.dynamic_programs[0].hot_ir_iterations > 0);
+
+        let mut interpreted = Vm::new(Profile::ReproducibleStandard);
+        interpreted.hot_ir_mode = HotIrTestMode::Off;
+        assert_eq!(interpreted.run(&program).unwrap().as_number(), Some(64.0));
+        assert_eq!(interpreted.dynamic_programs[0].hot_ir_iterations, 0);
+        assert_eq!(
+            fast.executed_instructions,
+            interpreted.executed_instructions
+        );
 
         let mut covered = Vm::with_settings(
             Profile::ReproducibleStandard,
@@ -22316,11 +22450,10 @@ mod inline_cache_tests {
                 ..VmSettings::default()
             },
         );
+        covered.hot_ir_mode = HotIrTestMode::Force;
         assert_eq!(covered.run(&program).unwrap().as_number(), Some(64.0));
-        assert_eq!(
-            covered.dynamic_programs[0].numeric_loop_kernel_iterations,
-            0
-        );
+        assert_eq!(covered.dynamic_programs[0].hot_ir_entries, 0);
+        assert_eq!(covered.dynamic_programs[0].hot_ir_iterations, 0);
 
         let mut fuelled = Vm::with_settings(
             Profile::ReproducibleStandard,
@@ -22329,89 +22462,346 @@ mod inline_cache_tests {
                 ..VmSettings::default()
             },
         );
+        fuelled.hot_ir_mode = HotIrTestMode::Force;
         assert_eq!(fuelled.run(&program).unwrap().as_number(), Some(64.0));
-        assert_eq!(
-            fuelled.dynamic_programs[0].numeric_loop_kernel_iterations,
-            0
-        );
+        assert_eq!(fuelled.dynamic_programs[0].hot_ir_entries, 0);
+        assert_eq!(fuelled.dynamic_programs[0].hot_ir_iterations, 0);
     }
 
     #[test]
-    fn numeric_loop_kernel_preserves_deterministic_collection_cadence() {
-        let program = numeric_loop_array_program();
-        let interval = NonZeroU64::new(17).unwrap();
-        let mut fast = Vm::with_settings(
-            Profile::DeterministicSim,
-            VmSettings {
-                deterministic_gc_interval: interval,
-                ..VmSettings::default()
-            },
-        );
+    fn hot_ir_matches_interpreter_for_supported_numeric_semantics() {
+        let program = hot_ir_numeric_semantics_program();
+        let mut fast = Vm::new(Profile::ReproducibleStandard);
+        fast.hot_ir_mode = HotIrTestMode::Force;
         let fast_result = fast.run(&program).unwrap();
-        let mut interpreted = Vm::with_settings(
-            Profile::DeterministicSim,
-            VmSettings {
-                deterministic_gc_interval: interval,
-                enable_conformance_coverage: true,
-                ..VmSettings::default()
-            },
-        );
+
+        let mut interpreted = Vm::new(Profile::ReproducibleStandard);
+        interpreted.hot_ir_mode = HotIrTestMode::Off;
         let interpreted_result = interpreted.run(&program).unwrap();
-        assert_eq!(fast_result.as_number(), interpreted_result.as_number());
+
         assert_eq!(
-            fast.deterministic_collection_count(),
-            interpreted.deterministic_collection_count()
+            fast_result.as_number().map(f64::to_bits),
+            interpreted_result.as_number().map(f64::to_bits)
         );
-        assert!(fast.dynamic_programs[0].numeric_loop_kernel_iterations > 0);
+        assert_eq!(fast_result.as_number(), Some(4.0));
+        assert_eq!(
+            fast.executed_instructions,
+            interpreted.executed_instructions
+        );
+        assert!(fast.dynamic_programs[0].hot_ir_entries > 0);
+        assert!(fast.dynamic_programs[0].hot_ir_iterations > 0);
+        assert_eq!(fast.dynamic_programs[0].hot_ir_guard_exits, 0);
+        assert_eq!(interpreted.dynamic_programs[0].hot_ir_entries, 0);
+
+        let plans = &fast.dynamic_programs[0].main_inline_caches.hot_irs;
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].operations.len(), 7);
+        assert!(plans[0]
+            .register_writes
+            .iter()
+            .any(|write| write.value == HotIrValue::Nil));
+        assert!(plans[0]
+            .register_writes
+            .iter()
+            .any(|write| write.value == HotIrValue::Boolean(true)));
     }
 
     #[test]
-    fn numeric_loop_kernel_guard_failure_is_atomic() {
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
-        let table = vm.heap.alloc_array_table(&[Value::number(1.0)]);
-        vm.heap.table_freeze(table).unwrap();
-        let mut registers = vec![
-            Value::number(1.0),
-            Value::number(2.0),
-            Value::number(1.0),
-            Value::number(1.0),
-            Value::table(table),
-            Value::number(99.0),
-        ];
-        let before = registers.clone();
-        let mut cells = vec![None; registers.len()];
-        cells[5] = Some(123);
-        let kernel = NumericLoopKernel {
-            backedge_pc: 10,
+    fn hot_ir_preserves_deterministic_collection_cadence() {
+        let program = hot_ir_array_program();
+        let mut saw_hot_ir_iteration = false;
+        for interval in 1..=19 {
+            let interval = NonZeroU64::new(interval).unwrap();
+            let mut fast = Vm::with_settings(
+                Profile::DeterministicSim,
+                VmSettings {
+                    deterministic_gc_interval: interval,
+                    ..VmSettings::default()
+                },
+            );
+            fast.hot_ir_mode = HotIrTestMode::Force;
+            let fast_result = fast.run(&program).unwrap();
+            let mut interpreted = Vm::with_settings(
+                Profile::DeterministicSim,
+                VmSettings {
+                    deterministic_gc_interval: interval,
+                    ..VmSettings::default()
+                },
+            );
+            interpreted.hot_ir_mode = HotIrTestMode::Off;
+            let interpreted_result = interpreted.run(&program).unwrap();
+            assert_eq!(fast_result.as_number(), interpreted_result.as_number());
+            assert_eq!(
+                fast.deterministic_collection_count(),
+                interpreted.deterministic_collection_count()
+            );
+            assert_eq!(
+                fast.next_weak_collection_instruction,
+                interpreted.next_weak_collection_instruction
+            );
+            assert_eq!(
+                fast.executed_instructions,
+                interpreted.executed_instructions
+            );
+            saw_hot_ir_iteration |= fast.dynamic_programs[0].hot_ir_iterations > 0;
+            assert_eq!(interpreted.dynamic_programs[0].hot_ir_entries, 0);
+            assert_eq!(interpreted.dynamic_programs[0].hot_ir_iterations, 0);
+        }
+        assert!(saw_hot_ir_iteration);
+    }
+
+    fn hot_ir_operation_guard_plan(kind: HotIrOpKind) -> HotIr {
+        HotIr {
+            body_start_pc: 8,
+            backedge_pc: 9,
             body_instruction_count: 1,
+            register_count: 6,
             index_register: 0,
             limit_register: 1,
             step_register: 2,
             visible_register: 3,
-            register_writes: vec![crate::quickening::KernelRegisterWrite {
+            operations: vec![HotIrOp { source_pc: 8, kind }].into_boxed_slice(),
+            register_writes: vec![HotIrRegisterWrite {
+                source_pc: 8,
                 register: 5,
-                value: KernelValueExpr::Nil,
+                value: HotIrValue::Number(HotIrNumber::Temporary(
+                    HotIrNumberId::from_index(0).unwrap(),
+                )),
             }]
             .into_boxed_slice(),
-            cell_clears: vec![5].into_boxed_slice(),
-            array_write: Some(crate::quickening::KernelArrayWrite {
-                table: KernelValueExpr::Input(4),
-                index: Arc::new(KernelNumberExpr::Input(3)),
-                value: KernelValueExpr::Number(Arc::new(KernelNumberExpr::Input(3))),
-            }),
-        };
+            cell_clears: Vec::new().into_boxed_slice(),
+            array_write: None,
+        }
+    }
 
-        assert_eq!(
-            vm.try_numeric_loop_kernel(0, &kernel, &mut registers, &mut cells),
-            None
-        );
-        for (actual, expected) in registers.iter().zip(&before) {
+    fn hot_ir_array_write_guard_plan() -> HotIr {
+        HotIr {
+            body_start_pc: 8,
+            backedge_pc: 10,
+            body_instruction_count: 2,
+            register_count: 6,
+            index_register: 0,
+            limit_register: 1,
+            step_register: 2,
+            visible_register: 3,
+            operations: Vec::new().into_boxed_slice(),
+            register_writes: vec![HotIrRegisterWrite {
+                source_pc: 9,
+                register: 5,
+                value: HotIrValue::Nil,
+            }]
+            .into_boxed_slice(),
+            cell_clears: vec![HotIrCellClear {
+                source_pc: 9,
+                register: 5,
+            }]
+            .into_boxed_slice(),
+            array_write: Some(HotIrArrayWrite {
+                source_pc: 8,
+                table: HotIrValue::Input(4),
+                index: HotIrNumber::Input(3),
+                value: HotIrValue::Number(HotIrNumber::Input(3)),
+            }),
+        }
+    }
+
+    fn assert_hot_ir_guard_is_atomic(
+        vm: &mut Vm,
+        hot_ir: &HotIr,
+        registers: &mut [Value],
+        cells: &mut [Option<u32>],
+    ) {
+        assert_eq!(hot_ir.verify(), Ok(()));
+        let before_registers = registers.to_vec();
+        let before_cells = cells.to_vec();
+        let before_instructions = vm.executed_instructions;
+
+        assert_eq!(vm.try_hot_ir(0, hot_ir, registers, cells), None);
+        for (actual, expected) in registers.iter().zip(&before_registers) {
             assert_eq!(actual.kind(), expected.kind());
-            assert_eq!(actual.as_number(), expected.as_number());
+            assert_eq!(
+                actual.as_number().map(f64::to_bits),
+                expected.as_number().map(f64::to_bits)
+            );
+            assert_eq!(actual.as_bool(), expected.as_bool());
             assert_eq!(actual.as_table(), expected.as_table());
         }
-        assert_eq!(cells[5], Some(123));
-        assert!(vm.heap.read_numeric_array_slot(table, 2).is_none());
+        assert_eq!(cells, before_cells);
+        assert_eq!(vm.executed_instructions, before_instructions);
+    }
+
+    fn guard_test_registers(value: Value, scratch: Value) -> (Vec<Value>, Vec<Option<u32>>) {
+        let registers = vec![
+            Value::number(1.0),
+            Value::number(2.0),
+            Value::number(1.0),
+            Value::number(1.0),
+            value,
+            scratch,
+        ];
+        let mut cells = vec![None; registers.len()];
+        cells[3] = Some(77);
+        cells[5] = Some(123);
+        (registers, cells)
+    }
+
+    #[test]
+    fn hot_ir_guard_failures_are_atomic() {
+        let arithmetic = hot_ir_operation_guard_plan(HotIrOpKind::Binary {
+            op: NumericOp::Add,
+            lhs: HotIrNumber::Input(4),
+            rhs: HotIrNumber::Input(3),
+        });
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let (mut registers, mut cells) =
+            guard_test_registers(Value::boolean(true), Value::number(99.0));
+        assert_hot_ir_guard_is_atomic(&mut vm, &arithmetic, &mut registers, &mut cells);
+
+        let table_read = hot_ir_operation_guard_plan(HotIrOpKind::NumericArrayGet {
+            table: HotIrValue::Input(4),
+            index: HotIrNumber::Input(3),
+        });
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let (mut registers, mut cells) =
+            guard_test_registers(Value::number(4.0), Value::number(99.0));
+        assert_hot_ir_guard_is_atomic(&mut vm, &table_read, &mut registers, &mut cells);
+
+        for invalid_index in [0.0, 1.5, f64::NAN] {
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            let table = vm.heap.alloc_array_table(&[Value::number(1.0)]);
+            let invalid_read = hot_ir_operation_guard_plan(HotIrOpKind::NumericArrayGet {
+                table: HotIrValue::Input(4),
+                index: HotIrNumber::Input(5),
+            });
+            let (mut registers, mut cells) =
+                guard_test_registers(Value::table(table), Value::number(invalid_index));
+            assert_hot_ir_guard_is_atomic(&mut vm, &invalid_read, &mut registers, &mut cells);
+        }
+
+        for contents in [
+            vec![Value::number(1.0)],
+            vec![Value::number(1.0), Value::boolean(true)],
+        ] {
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            let table = vm.heap.alloc_array_table(&contents);
+            let (mut registers, mut cells) =
+                guard_test_registers(Value::table(table), Value::number(99.0));
+            assert_hot_ir_guard_is_atomic(&mut vm, &table_read, &mut registers, &mut cells);
+        }
+
+        let array_write = hot_ir_array_write_guard_plan();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let readonly = vm.heap.alloc_array_table(&[Value::number(1.0)]);
+        vm.heap.table_freeze(readonly).unwrap();
+        let (mut registers, mut cells) =
+            guard_test_registers(Value::table(readonly), Value::number(99.0));
+        assert_hot_ir_guard_is_atomic(&mut vm, &array_write, &mut registers, &mut cells);
+        assert!(vm.heap.read_numeric_array_slot(readonly, 2).is_none());
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let metatable = vm.heap.alloc_array_table(&[]);
+        let intercepted = vm.heap.alloc_array_table(&[]);
+        vm.heap
+            .table_set_metatable(intercepted, Some(metatable))
+            .unwrap();
+        let (mut registers, mut cells) =
+            guard_test_registers(Value::table(intercepted), Value::number(99.0));
+        assert_hot_ir_guard_is_atomic(&mut vm, &array_write, &mut registers, &mut cells);
+        assert!(vm.heap.read_numeric_array_slot(intercepted, 2).is_none());
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let sparse = vm.heap.alloc_array_table(&[]);
+        let (mut registers, mut cells) =
+            guard_test_registers(Value::table(sparse), Value::number(99.0));
+        assert_hot_ir_guard_is_atomic(&mut vm, &array_write, &mut registers, &mut cells);
+        assert!(vm.heap.read_numeric_array_slot(sparse, 2).is_none());
+    }
+
+    #[test]
+    fn hot_ir_partial_guard_exit_preserves_prior_effects_and_error_site() {
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::with_aux(Opcode::GetGlobal, 4, 0, 0, 0),
+                    Instruction::with_aux(Opcode::GetGlobal, 5, 0, 0, 1),
+                    Instruction::new(Opcode::LoadConst, 0, 0, 2),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 3),
+                    Instruction::new(Opcode::LoadConst, 2, 0, 2),
+                    Instruction::with_aux(Opcode::ForPrep, 0, 0, 0, 19),
+                    Instruction::new(Opcode::Move, 6, 4, 0),
+                    Instruction::new(Opcode::Move, 7, 3, 0),
+                    Instruction::new(Opcode::GetIndex, 8, 6, 7),
+                    Instruction::new(Opcode::LoadConst, 9, 0, 2),
+                    Instruction::new(Opcode::Add, 8, 8, 9),
+                    Instruction::new(Opcode::Move, 10, 5, 0),
+                    Instruction::new(Opcode::SetIndex, 10, 7, 8),
+                    Instruction::new(Opcode::ClearLocalCell, 10, 0, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 9, 0, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 8, 0, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 7, 0, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 6, 0, 0),
+                    Instruction::with_aux(Opcode::ForLoop, 0, 0, 0, 6),
+                    Instruction::new(Opcode::Return, 0, 0, 0),
+                    Instruction::new(Opcode::Halt, 0, 0, 0),
+                ],
+                11,
+            ),
+            vec![
+                Constant::String(b"hot_ir_values".to_vec()),
+                Constant::String(b"hot_ir_output".to_vec()),
+                Constant::Number(1.0),
+                Constant::Number(3.0),
+            ],
+        );
+
+        fn execute(program: &Program, mode: HotIrTestMode) -> (Vm, u32, Error) {
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            vm.hot_ir_mode = mode;
+            let values =
+                vm.array_table(&[Value::number(1.0), Value::number(2.0), Value::boolean(true)]);
+            let output = vm.empty_table();
+            let output_handle = output.as_table().unwrap();
+            vm.set_global_value("hot_ir_values", values).unwrap();
+            vm.set_global_value("hot_ir_output", output).unwrap();
+            let error = vm.run(program).unwrap_err();
+            (vm, output_handle, error)
+        }
+
+        let (mut fast, fast_output, fast_error) = execute(&program, HotIrTestMode::Force);
+        let (mut interpreted, interpreted_output, interpreted_error) =
+            execute(&program, HotIrTestMode::Off);
+
+        assert_eq!(fast_error.to_string(), interpreted_error.to_string());
+        assert_eq!(fast_error.pc, interpreted_error.pc);
+        assert_eq!(fast_error.location, interpreted_error.location);
+        assert_eq!(
+            fast.executed_instructions,
+            interpreted.executed_instructions
+        );
+        for index in 1..=2 {
+            assert_eq!(
+                fast.heap
+                    .read_numeric_array_slot(fast_output, index)
+                    .and_then(Value::as_number)
+                    .map(f64::to_bits),
+                interpreted
+                    .heap
+                    .read_numeric_array_slot(interpreted_output, index)
+                    .and_then(Value::as_number)
+                    .map(f64::to_bits)
+            );
+        }
+        assert!(fast.heap.read_numeric_array_slot(fast_output, 3).is_none());
+        assert!(interpreted
+            .heap
+            .read_numeric_array_slot(interpreted_output, 3)
+            .is_none());
+        assert_eq!(fast.dynamic_programs[0].hot_ir_entries, 1);
+        assert_eq!(fast.dynamic_programs[0].hot_ir_iterations, 1);
+        assert_eq!(fast.dynamic_programs[0].hot_ir_guard_exits, 1);
+        assert_eq!(interpreted.dynamic_programs[0].hot_ir_entries, 0);
+        assert_eq!(interpreted.dynamic_programs[0].hot_ir_iterations, 0);
+        assert_eq!(interpreted.dynamic_programs[0].hot_ir_guard_exits, 0);
     }
 
     #[test]

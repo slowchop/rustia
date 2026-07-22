@@ -375,6 +375,34 @@ operand-preparation variant produced only mixed marginal results and was removed
 the accepted commit; future quickening work needs a different dispatch/state design rather than reviving that
 cache shape.
 
+### Private HotIR numeric tracelets
+
+The next specialization pass replaces the recursive, bespoke `NumericLoopKernel` with a private, bounded
+`HotIr`. Public bytecode and the ordinary interpreter remain the semantic authority. Complete eligible numeric
+`for` bodies lower to source-ordered typed operations with forward-only number IDs; the executor evaluates each
+operation once into reused unboxed `f64` scratch, stages every register and table operand, and commits only after
+all guards succeed. A guard miss resumes the already-fetched `ForLoop` directly, so completed iterations are not
+replayed. Fuel, coverage, allocation-debt, and deterministic-GC boundaries still prevent entry.
+
+The flat ordering deliberately retains overwritten arithmetic and indexed reads instead of dead-code-eliminating
+them. That preserves their possible type errors and metamethod calls while removing the old recursive expanded-DAG
+limit: 128 source operations require exactly 128 scratch outputs even for repeated `x = x + x` shapes. The first
+effect slice remains conservative: at most one numeric array write, after all fallible operations, followed only
+by cell cleanup. Multiple writes will require a preflight/overlay transaction before HotIR grows that capability.
+
+Profiling baseline `bd251d9eaf92e2088e8902fddad338a252e292ed` explained the redesign. Recursive expression
+evaluation occupied 17.03% of leaf samples (21.71% inclusive), while consuming the inline staged-write `SmallVec`
+triggered a 376-byte copy every accelerated iteration and occupied another 16.78%. The dense workload's two plans
+have only four final register writes, yet copied about 192,512 bytes per benchmark unit. HotIR reuses both scratch
+buffers and commits through borrowed iteration, eliminating that copy.
+
+A local fixed-work eight-leg ABBA/BAAB screen used separate release binaries, identical harness source, seven raw
+repetitions per leg, and matching checksums. Pooled median `dense_tables` time moved from 17,996.47 to 12,721.87
+ns/unit (-29.31%). The same screen found -0.52% on `sparse_tables`, -3.65% on `closures_upvalues`, +0.66% on
+`generic_iteration`, and -4.69% on `stdlib_math_table`; no tracked default crossed the predeclared +3% local
+regression threshold. These macOS developer-host results are directional selection evidence, not a public Linux
+or cross-engine claim. Exact dedicated-Linode measurement remains the acceptance gate.
+
 ## Estimate vs C++ Luau
 
 | state | likely position vs C++ Luau interpreter |
