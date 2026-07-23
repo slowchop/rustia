@@ -220,31 +220,42 @@ function readHistory() {
 
 function validateDedicatedLinuxMatrix() {
   const rows = readHistory();
-  const cohortCommit = rows[0] && rows[0].commit;
+  let previousTimestamp = 0;
+  for (const [index, row] of rows.entries()) {
+    const label = `${relative(historyPath)} line ${index + 1}`;
+    if (row == null || typeof row !== "object" || Array.isArray(row)) fail(`${label} must be an object`);
+    if (row.target !== dedicatedLinuxTarget) {
+      fail(`${label}.target must be ${JSON.stringify(dedicatedLinuxTarget)}, got ${JSON.stringify(row.target)}`);
+    }
+    if (!Number.isSafeInteger(row.timestamp_unix) || row.timestamp_unix <= 0) {
+      fail(`${label}.timestamp_unix must be a positive safe integer`);
+    }
+    if (row.timestamp_unix < previousTimestamp) {
+      fail(`${label}.timestamp_unix must not precede the prior history row`);
+    }
+    previousTimestamp = row.timestamp_unix;
+  }
+
+  const cohortCommit = rows.at(-1)?.commit;
   const expectedEngines = expectedEngineCohorts.get(cohortCommit);
   if (expectedEngines == null) {
-    fail(`${relative(historyPath)} uses an unknown frozen matrix cohort: ${JSON.stringify(cohortCommit)}`);
+    fail(`${relative(historyPath)} ends with an unknown frozen matrix cohort: ${JSON.stringify(cohortCommit)}`);
   }
+  const cohortRows = rows.filter((row) => row.commit === cohortCommit);
   const expectedRowCount = expectedEngines.size * expectedWorkloads.length;
-  if (rows.length !== expectedRowCount) {
+  if (cohortRows.length !== expectedRowCount) {
     fail(
-      `${relative(historyPath)} must contain exactly ${expectedRowCount} active dedicated-Linux rows; ` +
-      `got ${rows.length}`,
+      `latest dedicated-Linux cohort must contain exactly ${expectedRowCount} rows; ` +
+      `got ${cohortRows.length}`,
     );
   }
 
   const commits = new Set();
   const slots = new Set();
   const timestamps = [];
-  let previousTimestamp = 0;
-  for (const [index, row] of rows.entries()) {
-    const label = `${relative(historyPath)} line ${index + 1}`;
-    if (row == null || typeof row !== "object" || Array.isArray(row)) {
-      fail(`${label} must be an object`);
-    }
-    if (row.target !== dedicatedLinuxTarget) {
-      fail(`${label}.target must be ${JSON.stringify(dedicatedLinuxTarget)}, got ${JSON.stringify(row.target)}`);
-    }
+  let cohortPreviousTimestamp = 0;
+  for (const [index, row] of cohortRows.entries()) {
+    const label = `latest dedicated-Linux cohort row ${index + 1}`;
     const expectedDialect = expectedEngines.get(row.engine);
     if (expectedDialect == null) {
       fail(`${label}.engine is not in the frozen ${expectedEngines.size}-engine matrix: ${JSON.stringify(row.engine)}`);
@@ -276,10 +287,10 @@ function validateDedicatedLinuxMatrix() {
     if (!Number.isSafeInteger(row.timestamp_unix) || row.timestamp_unix <= 0) {
       fail(`${label}.timestamp_unix must be a positive safe integer`);
     }
-    if (row.timestamp_unix < previousTimestamp) {
+    if (row.timestamp_unix < cohortPreviousTimestamp) {
       fail(`${label}.timestamp_unix must not precede the prior matrix row`);
     }
-    previousTimestamp = row.timestamp_unix;
+    cohortPreviousTimestamp = row.timestamp_unix;
     timestamps.push(row.timestamp_unix);
 
     const slot = `${row.engine}\0${row.workload}`;

@@ -869,52 +869,133 @@ function claimWorkloadLabel(row) {
   return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.workload)} · ${escapeHtml(row.unit)}</span></span>`;
 }
 
-function historySection(history, cohorts) {
-  const allBounds = cohorts.flatMap((cohort) => [cohort.lower, cohort.upper, cohort.delta, 0]);
-  const axisMin = Math.min(-10, Math.floor((Math.min(...allBounds) - 2) / 10) * 10);
-  const axisMax = Math.max(10, Math.ceil((Math.max(...allBounds) + 2) / 10) * 10);
-  const axisPosition = (value) => ((value - axisMin) / (axisMax - axisMin)) * 100;
-  const zeroPosition = axisPosition(0);
-  const ticks = [axisMin, axisMin + (axisMax - axisMin) / 4, axisMin + (axisMax - axisMin) / 2, 0, axisMax]
-    .filter((value, index, values) => values.findIndex((candidate) => Math.abs(candidate - value) < 0.001) === index)
-    .sort((left, right) => left - right);
-  const fasterCount = cohorts.filter((cohort) => cohort.delta < 0).length;
+function historySection(history) {
+  const eras = rustiaHistoryEras(history.rows);
+  const snapshotCount = eras.reduce((total, era) => total + era.snapshotCount, 0);
   return `
     <section class="panel" id="history">
       <div class="section-head">
         <div>
-          <h2>Verified rustia Performance History</h2>
-          <p>${formatInteger(fasterCount)} controlled improvements recorded. The complete Linux language matrix has ${formatInteger(history.commitCount)} snapshot${history.commitCount === 1 ? "" : "s"}, so it cannot yet show a whole-engine trend.</p>
+          <h2>rustia Performance History</h2>
+          <p>${formatInteger(snapshotCount)} recorded Linux matrix runs across two eras. Each chart is normalized to its own first run, so different hosts and protocols are never blended.</p>
         </div>
       </div>
-      <p class="history-answer"><strong>What has improved:</strong> each row is a same-provider, same-workload before/after comparison. Negative runtime change means rustia got faster; these workloads are not combined into a misleading single score.</p>
-      <div class="cohort-chart" role="img" aria-label="Verified rustia performance improvements by date; lower percentages are faster">
-        <p class="cohort-chart-heading">Runtime change versus the immediately previous revision · left is faster</p>
-        <div class="cohort-axis" style="--zero: ${zeroPosition.toFixed(3)}%" aria-hidden="true">
-          ${ticks.map((tick) => `<span style="left:${axisPosition(tick).toFixed(3)}%">${tick > 0 ? "+" : ""}${formatNumber(tick)}%</span>`).join("")}
-        </div>
-        ${cohorts.map((cohort) => cohortPlotRow(cohort, axisPosition, zeroPosition)).join("")}
-      </div>
-      <p class="cohort-note">Confidence intervals are shown for each controlled comparison. After another full Linux matrix run, this section can add true per-workload trend lines. Source <code>${escapeHtml(relative(historyPath))}</code>.</p>
+      <p class="history-answer"><strong>Higher is faster.</strong> A value of 1× is the first run in that era; 2× means the workload takes half the time. This is rustia-only history, so competitor upgrades do not distort it.</p>
+      ${eras.map(rustiaHistoryEraSection).join("")}
+      <p class="cohort-note">Restored from published Linux matrix snapshots that were previously overwritten in <code>${escapeHtml(relative(historyPath))}</code>. Future accepted matrix runs now append to this ledger.</p>
     </section>
   `;
 }
 
-function cohortPlotRow(cohort, axisPosition, zeroPosition) {
-  const low = axisPosition(cohort.lower);
-  const high = axisPosition(cohort.upper);
-  const mid = axisPosition(cohort.delta);
-  const labelSide = mid < 18 ? "cohort-label-right" : "cohort-label-left";
+function rustiaHistoryEras(rows) {
+  const rustiaRows = rows
+    .filter((row) => row.target === "linux-x86_64" && row.engine === "rustia" && REQUIRED_COMMON_WORKLOAD_SET.has(row.workload))
+    .slice()
+    .sort(compareRunTime);
+  const timestamps = unique(rustiaRows.map((row) => String(row.timestamp_unix))).map(Number).sort((left, right) => left - right);
+  let splitAt = null;
+  let largestGap = 0;
+  for (let index = 1; index < timestamps.length; index += 1) {
+    const gap = timestamps[index] - timestamps[index - 1];
+    if (gap > largestGap) {
+      largestGap = gap;
+      splitAt = timestamps[index];
+    }
+  }
+  if (splitAt == null || largestGap < 24 * 60 * 60) {
+    return [rustiaHistoryEra("Comparable Linux history", "All recorded Linux runs", rustiaRows)];
+  }
+  return [
+    rustiaHistoryEra("Earlier Linux history", "Earlier host/protocol era; kept on its own scale", rustiaRows.filter((row) => row.timestamp_unix < splitAt)),
+    rustiaHistoryEra("Current dedicated Linux history", "Controlled matrix era; this is the chart to use for current progress", rustiaRows.filter((row) => row.timestamp_unix >= splitAt)),
+  ];
+}
+
+function rustiaHistoryEra(title, description, rows) {
+  const workloads = rustiaHistoryWorkloads(rows);
+  const timestamps = workloads.flatMap((workload) => workload.rows.map((row) => row.timestamp_unix));
+  return {
+    title,
+    description,
+    workloads,
+    snapshotCount: Math.max(...workloads.map((workload) => workload.rows.length)),
+    minTimestamp: Math.min(...timestamps),
+    maxTimestamp: Math.max(...timestamps),
+  };
+}
+
+function rustiaHistoryEraSection(era) {
   return `
-    <div class="cohort-plot-row">
-      <div class="cohort-plot-name"><strong>${escapeHtml(formatIsoDate(cohort.createdAt))} · ${escapeHtml(workloadLabel(cohort.workload))}</strong><span>${escapeHtml(cohort.baselineCommit?.slice(0, 7) ?? "unknown")} → ${escapeHtml(cohort.candidateCommit.slice(0, 7))}</span></div>
-      <div class="cohort-track" style="--zero: ${zeroPosition.toFixed(3)}%">
-        <span class="cohort-interval" style="left:${low.toFixed(3)}%;width:${Math.max(0.2, high - low).toFixed(3)}%"></span>
-        <span class="cohort-point" style="left:${mid.toFixed(3)}%"></span>
-        <span class="cohort-point-label ${labelSide}" style="left:${mid.toFixed(3)}%">${cohort.delta > 0 ? "+" : ""}${cohort.delta.toFixed(2)}%</span>
-      </div>
+    <section class="history-era">
+      <div class="history-era-head"><div><h3>${escapeHtml(era.title)}</h3><p>${formatInteger(era.snapshotCount)} runs · ${formatIsoDate(era.minTimestamp)} to ${formatIsoDate(era.maxTimestamp)} · ${escapeHtml(era.description)}</p></div></div>
+      ${rustiaHistoryChart(era.workloads)}
+      <div class="table-wrap history-table"><table><thead><tr><th>Workload</th><th>First run</th><th>Latest run</th><th>Improvement</th><th>Points</th></tr></thead><tbody>${era.workloads.map(rustiaHistoryRow).join("")}</tbody></table></div>
+    </section>
+  `;
+}
+
+function rustiaHistoryWorkloads(rows) {
+  return REQUIRED_COMMON_WORKLOADS.map((workload) => {
+    const workloadRows = rows
+      .filter((row) => row.target === "linux-x86_64" && row.engine === "rustia" && row.workload === workload)
+      .slice()
+      .sort(compareRunTime);
+    if (workloadRows.length === 0) fail(`history has no rustia linux-x86_64 records for ${workload}`);
+    const baseline = workloadRows[0].ns_per_unit_min;
+    return {
+      workload,
+      rows: workloadRows.map((row) => ({ ...row, speed: baseline / row.ns_per_unit_min })),
+    };
+  });
+}
+
+function rustiaHistoryChart(workloads) {
+  const width = 920;
+  const height = 300;
+  const pad = { left: 54, right: 20, top: 22, bottom: 42 };
+  const rows = workloads.flatMap((workload) => workload.rows);
+  const minX = Math.min(...rows.map((row) => row.timestamp_unix));
+  const maxX = Math.max(...rows.map((row) => row.timestamp_unix));
+  const maxSpeed = Math.max(1, ...rows.map((row) => row.speed));
+  const maxY = Math.ceil(maxSpeed * 1.08 * 2) / 2;
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const xScale = (timestamp) => maxX === minX
+    ? pad.left + plotWidth / 2
+    : pad.left + ((timestamp - minX) / (maxX - minX)) * plotWidth;
+  const yScale = (speed) => pad.top + (1 - speed / maxY) * plotHeight;
+  const ticks = [...new Set([
+    ...Array.from({ length: Math.floor(maxY) + 1 }, (_, index) => index)
+      .filter((tick) => tick === 0 || tick === 1 || tick % 2 === 0),
+    maxY,
+  ])].sort((left, right) => left - right);
+  const colors = ["#2563eb", "#0f766e", "#b45309", "#7c3aed", "#be185d"];
+  return `
+    <div class="history-chart">
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="rustia normalized Linux performance history, higher is faster">
+        <rect x="0" y="0" width="${width}" height="${height}" class="history-chart-bg" />
+        ${ticks.map((tick) => `<line x1="${pad.left}" y1="${yScale(tick).toFixed(2)}" x2="${width - pad.right}" y2="${yScale(tick).toFixed(2)}" class="history-grid-line" /><text x="8" y="${(yScale(tick) + 4).toFixed(2)}" class="history-axis-label">${tick}×</text>`).join("")}
+        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" class="history-axis" />
+        <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" class="history-axis" />
+        <text x="${pad.left}" y="${height - 10}" class="history-axis-label">${escapeHtml(formatIsoDate(minX))}</text>
+        <text x="${width - pad.right}" y="${height - 10}" text-anchor="end" class="history-axis-label">${escapeHtml(formatIsoDate(maxX))}</text>
+        ${workloads.map((workload, index) => rustiaHistorySeriesSvg(workload, colors[index], xScale, yScale)).join("")}
+      </svg>
+      <div class="history-legend">${workloads.map((workload, index) => `<span>${colorDotMarkup(colors[index])}${escapeHtml(workloadLabel(workload.workload))}</span>`).join("")}</div>
     </div>
   `;
+}
+
+function rustiaHistorySeriesSvg(workload, color, xScale, yScale) {
+  const points = workload.rows.map((row) => `${xScale(row.timestamp_unix).toFixed(2)},${yScale(row.speed).toFixed(2)}`).join(" ");
+  return `<g><polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />${workload.rows.map((row) => `<circle cx="${xScale(row.timestamp_unix).toFixed(2)}" cy="${yScale(row.speed).toFixed(2)}" r="3.4" fill="${color}"><title>${escapeHtml(`${workloadLabel(workload.workload)} · ${row.commit.slice(0, 7)} · ${formatSpeed(row.speed)} vs first`)}</title></circle>`).join("")}</g>`;
+}
+
+function rustiaHistoryRow(workload) {
+  const first = workload.rows[0];
+  const latest = workload.rows.at(-1);
+  const percent = (latest.speed - 1) * 100;
+  return `<tr><td>${escapeHtml(workloadLabel(workload.workload))}</td><td>${formatNumber(first.ns_per_unit_min)} ns · <code>${escapeHtml(first.commit.slice(0, 7))}</code></td><td>${formatNumber(latest.ns_per_unit_min)} ns · <code>${escapeHtml(latest.commit.slice(0, 7))}</code></td><td><strong>${formatSpeed(latest.speed)}</strong> · ${percent >= 0 ? "+" : ""}${formatNumber(percent)}%</td><td>${formatInteger(workload.rows.length)}</td></tr>`;
 }
 
 function workloadLabel(workload) {
@@ -930,7 +1011,8 @@ function workloadLabel(workload) {
 }
 
 function formatIsoDate(value) {
-  return new Date(value).toISOString().slice(0, 10);
+  const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  return date.toISOString().slice(0, 10);
 }
 
 function historyTargetSection(group) {
@@ -1976,6 +2058,26 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
       color: var(--text);
     }
 
+    .history-era + .history-era {
+      border-top: 1px solid var(--line);
+    }
+
+    .history-era-head {
+      padding: 16px 20px;
+      background: var(--panel-soft);
+    }
+
+    .history-era-head h3 {
+      margin-bottom: 2px;
+      font-size: 18px;
+    }
+
+    .history-era-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
     .cohort-chart-heading {
       margin: 0 0 12px 170px;
       color: var(--muted);
@@ -2519,7 +2621,7 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
     ${linuxComparisonSection(summary.linuxComparisonViews)}
     ${coldStartSection(summary.coldStartRows)}
     ${claimGateSection(claimRows)}
-    ${historySection(history, cohorts)}
+    ${historySection(history)}
 
     <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>

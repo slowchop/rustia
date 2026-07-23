@@ -535,7 +535,9 @@ function nativeArgs(config, engines, samplesFile) {
 }
 
 async function measure(config, buildInfo, evidenceDirectory) {
-  fs.writeFileSync(HISTORY, "");
+  // The benchmark harness appends accepted measurements. Seed its remote ledger
+  // from the checked-out, integrity-verified publication instead of clearing it.
+  fs.copyFileSync(path.join(SOURCE, "bench", "history", "runs.jsonl"), HISTORY);
   fs.rmSync(WASM_RESULTS, { force: true });
   fs.rmSync(DISPATCH_RESULTS, { force: true });
   const gateFile = path.join(evidenceDirectory, "gate.jsonl");
