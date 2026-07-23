@@ -916,15 +916,22 @@ function historySection(history, backfills, currentRows) {
     ? `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>); the reconstructed Rustia measurements used a separate VM of the same class.`
     : `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>).`;
   return `
-    <section class="panel" id="history">
+    <section class="panel history-axis-panel" id="history">
       <div class="section-head">
         <div>
           <h2>rustia Performance History</h2>
           <p>${summary}</p>
         </div>
+        <div class="metric-toggle" role="group" aria-label="History x-axis">
+          <button type="button" data-history-axis="date" aria-pressed="true">Date</button>
+          <button type="button" data-history-axis="commit" aria-pressed="false">Commit</button>
+        </div>
       </div>
       <p class="history-answer"><strong>Higher is faster; mlua/JIT is 1×.</strong> ${explanation}</p>
-      ${eras.map(rustiaHistoryEraSection).join("")}
+      <p class="cohort-note">The two Rustia lines share the same workloads and score, but remain separate because reconstruction and directly recorded matrix runs use different measurement protocols.</p>
+      <div data-history-axis-view="date">${rustiaHistoryChart(eras, reference, "date")}</div>
+      <div data-history-axis-view="commit" hidden>${rustiaHistoryChart(eras, reference, "commit")}</div>
+      ${rustiaOverallHistoryTable(eras)}
       <p class="cohort-note">${reconstructed.length > 0 ? `Reconstruction measurement time is retained honestly in <code>${escapeHtml(relative(historyBackfillDirectory))}</code>; the chart's x-axis uses each source commit's original date.` : `Restored from published Linux matrix snapshots that were previously overwritten in <code>${escapeHtml(relative(historyPath))}</code>. Future accepted matrix runs now append to this ledger.`}</p>
     </section>
   `;
@@ -1018,16 +1025,6 @@ function rustiaHistoryEra(title, description, rows, reference) {
   };
 }
 
-function rustiaHistoryEraSection(era) {
-  return `
-    <section class="history-era">
-      <div class="history-era-head"><div><h3>${escapeHtml(era.title)}</h3><p>${formatInteger(era.snapshotCount)} runs · ${formatIsoDate(era.minTimestamp)} to ${formatIsoDate(era.maxTimestamp)} · ${escapeHtml(era.description)}</p></div></div>
-      ${rustiaHistoryChart(era.overall, era.reference)}
-      ${rustiaOverallHistoryTable(era.overall)}
-    </section>
-  `;
-}
-
 function rustiaHistoryWorkloads(rows) {
   return REQUIRED_COMMON_WORKLOADS.map((workload) => {
     const workloadRows = rows
@@ -1097,50 +1094,86 @@ function rustiaOverallHistory(workloads, reference) {
   }));
 }
 
-function rustiaHistoryChart(points, reference) {
+function rustiaHistoryCommitOrder(eras) {
+  const commits = [];
+  for (const era of eras) {
+    const sequence = [...new Set(era.overall.map((point) => point.commit))];
+    for (let index = 0; index < sequence.length; index += 1) {
+      const commit = sequence[index];
+      if (commits.includes(commit)) continue;
+      const next = sequence.slice(index + 1).find((candidate) => commits.includes(candidate));
+      if (next == null) {
+        commits.push(commit);
+      } else {
+        commits.splice(commits.indexOf(next), 0, commit);
+      }
+    }
+  }
+  return commits;
+}
+
+function rustiaHistoryChart(eras, reference, axisMode) {
   const width = 920;
   const height = 300;
   const pad = { left: 54, right: 20, top: 22, bottom: 42 };
-  const minX = Math.min(...points.map((point) => point.timestamp_unix));
-  const maxX = Math.max(...points.map((point) => point.timestamp_unix));
-  const maxScore = Math.max(1, ...points.map((point) => point.score));
+  const allPoints = eras.flatMap((era) => era.overall);
+  const commitOrder = rustiaHistoryCommitOrder(eras);
+  const commitIndex = new Map(commitOrder.map((commit, index) => [commit, index]));
+  const minX = axisMode === "commit" ? 0 : Math.min(...allPoints.map((point) => point.timestamp_unix));
+  const maxX = axisMode === "commit" ? Math.max(1, commitOrder.length - 1) : Math.max(...allPoints.map((point) => point.timestamp_unix));
+  const maxScore = Math.max(1, ...allPoints.map((point) => point.score));
   const maxY = Math.max(1.05, Math.ceil(maxScore * 1.08 * 4) / 4);
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
-  const xScale = (timestamp) => maxX === minX
+  const xValue = (point) => axisMode === "commit" ? commitIndex.get(point.commit) : point.timestamp_unix;
+  const xScale = (point) => maxX === minX
     ? pad.left + plotWidth / 2
-    : pad.left + ((timestamp - minX) / (maxX - minX)) * plotWidth;
+    : pad.left + ((xValue(point) - minX) / (maxX - minX)) * plotWidth;
   const yScale = (score) => pad.top + (1 - score / maxY) * plotHeight;
   const ticks = [...new Set([0, 0.25, 0.5, 0.75, 1, maxY])]
     .filter((tick) => tick <= maxY)
     .sort((left, right) => left - right);
-  const rustiaColor = "#2563eb";
   const referenceColor = "#ea580c";
-  const rustiaPoints = points.map((point) => `${xScale(point.timestamp_unix).toFixed(2)},${yScale(point.score).toFixed(2)}`).join(" ");
+  const styles = [
+    { color: "#2563eb", label: "Reconstructed", dash: "" },
+    { color: "#0f766e", label: "Recorded dedicated", dash: "5 4" },
+  ];
+  const firstLabel = axisMode === "commit" ? commitOrder[0].slice(0, 7) : formatIsoDate(minX);
+  const lastLabel = axisMode === "commit" ? commitOrder.at(-1).slice(0, 7) : formatIsoDate(maxX);
   return `
     <div class="history-chart">
-      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="rustia overall Linux performance history versus mlua JIT, higher is faster">
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="rustia overall Linux performance history by ${escapeHtml(axisMode)} versus mlua JIT, higher is faster">
         <rect x="0" y="0" width="${width}" height="${height}" class="history-chart-bg" />
         ${ticks.map((tick) => `<line x1="${pad.left}" y1="${yScale(tick).toFixed(2)}" x2="${width - pad.right}" y2="${yScale(tick).toFixed(2)}" class="history-grid-line" /><text x="8" y="${(yScale(tick) + 4).toFixed(2)}" class="history-axis-label">${formatSpeed(tick)}</text>`).join("")}
         <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" class="history-axis" />
         <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" class="history-axis" />
-        <text x="${pad.left}" y="${height - 10}" class="history-axis-label">${escapeHtml(formatIsoDate(minX))}</text>
-        <text x="${width - pad.right}" y="${height - 10}" text-anchor="end" class="history-axis-label">${escapeHtml(formatIsoDate(maxX))}</text>
-        <line x1="${pad.left}" y1="${yScale(1).toFixed(2)}" x2="${width - pad.right}" y2="${yScale(1).toFixed(2)}" stroke="${referenceColor}" stroke-width="2.6" stroke-dasharray="9 7"><title>${escapeHtml(`mlua / Luau / JIT · current matrix ${reference.commit.slice(0, 7)} · 1×`)}</title></line>
-        <polyline points="${rustiaPoints}" fill="none" stroke="${rustiaColor}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-        ${points.map((point) => `<circle cx="${xScale(point.timestamp_unix).toFixed(2)}" cy="${yScale(point.score).toFixed(2)}" r="3.6" fill="${rustiaColor}"><title>${escapeHtml(`rustia · ${point.commit.slice(0, 7)} · ${formatSpeed(point.score)} mlua/JIT · ${formatSpeed(point.gain)} vs first Rustia`)}</title></circle>`).join("")}
+        <text x="${pad.left}" y="${height - 10}" class="history-axis-label">${escapeHtml(firstLabel)}</text>
+        <text x="${width - pad.right}" y="${height - 10}" text-anchor="end" class="history-axis-label">${escapeHtml(lastLabel)}</text>
+        <line x1="${pad.left}" y1="${yScale(1).toFixed(2)}" x2="${width - pad.right}" y2="${yScale(1).toFixed(2)}" stroke="${referenceColor}" stroke-width="1.4" stroke-dasharray="7 6"><title>${escapeHtml(`mlua / Luau / JIT · current matrix ${reference.commit.slice(0, 7)} · 1×`)}</title></line>
+        ${eras.map((era, index) => {
+          const style = styles[index] ?? { color: engineColor("rustia", index), label: era.title, dash: "" };
+          const points = era.overall.map((point) => `${xScale(point).toFixed(2)},${yScale(point.score).toFixed(2)}`).join(" ");
+          const dash = style.dash === "" ? "" : ` stroke-dasharray="${style.dash}"`;
+          return `<g><polyline points="${points}" fill="none" stroke="${style.color}" stroke-width="1.6"${dash} stroke-linecap="round" stroke-linejoin="round" />${era.overall.map((point) => `<circle cx="${xScale(point).toFixed(2)}" cy="${yScale(point.score).toFixed(2)}" r="2.2" fill="${style.color}"><title>${escapeHtml(`${style.label} · ${point.commit.slice(0, 7)} · ${formatSpeed(point.score)} mlua/JIT · ${formatSpeed(point.gain)} vs first in era`)}</title></circle>`).join("")}</g>`;
+        }).join("")}
       </svg>
-      <div class="history-legend"><span>${colorDotMarkup(rustiaColor)}rustia overall</span><span>${colorDotMarkup(referenceColor)}<strong>mlua</strong> / Luau / JIT · 1×</span></div>
+      <div class="history-legend">${eras.map((era, index) => {
+        const style = styles[index] ?? { color: engineColor("rustia", index), label: era.title };
+        return `<span>${colorDotMarkup(style.color)}rustia · ${escapeHtml(style.label)}</span>`;
+      }).join("")}<span>${colorDotMarkup(referenceColor)}<strong>mlua</strong> / Luau / JIT · 1×</span></div>
     </div>
   `;
 }
 
-function rustiaOverallHistoryTable(points) {
-  const first = points[0];
-  const latest = points.at(-1);
-  const percent = (latest.gain - 1) * 100;
-  const gap = 1 / latest.score;
-  return `<div class="table-wrap history-table"><table><thead><tr><th>Score</th><th>First run</th><th>Latest run</th><th>Improvement</th><th>Latest gap</th></tr></thead><tbody><tr><td><strong>Overall</strong> · geometric mean of 5 workloads</td><td>${formatSpeed(first.score)} of mlua/JIT · <code>${escapeHtml(first.commit.slice(0, 7))}</code></td><td>${formatSpeed(latest.score)} of mlua/JIT · <code>${escapeHtml(latest.commit.slice(0, 7))}</code></td><td><strong>${formatSpeed(latest.gain)}</strong> · ${percent >= 0 ? "+" : ""}${formatNumber(percent)}%</td><td>mlua/JIT is <strong>${formatSpeed(gap)}</strong> faster</td></tr></tbody></table></div>`;
+function rustiaOverallHistoryTable(eras) {
+  const rows = eras.map((era) => {
+    const first = era.overall[0];
+    const latest = era.overall.at(-1);
+    const percent = (latest.gain - 1) * 100;
+    const gap = 1 / latest.score;
+    return `<tr><td><strong>${escapeHtml(era.title === "Fixed-harness reconstructed history" ? "Reconstructed" : "Recorded dedicated")}</strong><br><small>${formatInteger(era.snapshotCount)} complete scores · geometric mean of 5 workloads</small></td><td>${formatSpeed(first.score)} of mlua/JIT · <code>${escapeHtml(first.commit.slice(0, 7))}</code></td><td>${formatSpeed(latest.score)} of mlua/JIT · <code>${escapeHtml(latest.commit.slice(0, 7))}</code></td><td><strong>${formatSpeed(latest.gain)}</strong> · ${percent >= 0 ? "+" : ""}${formatNumber(percent)}%</td><td>mlua/JIT is <strong>${formatSpeed(gap)}</strong> faster</td></tr>`;
+  }).join("");
+  return `<div class="table-wrap history-table"><table><thead><tr><th>Series</th><th>First run</th><th>Latest run</th><th>Improvement</th><th>Latest gap</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function workloadLabel(workload) {
@@ -2807,6 +2840,20 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts,
             view.hidden = view.dataset.modeView !== mode;
           });
         });
+      });
+      document.querySelectorAll(".history-axis-panel").forEach((root) => {
+        const setHistoryAxis = (axis) => {
+          root.querySelectorAll("[data-history-axis]").forEach((button) => {
+            button.setAttribute("aria-pressed", String(button.dataset.historyAxis === axis));
+          });
+          root.querySelectorAll("[data-history-axis-view]").forEach((view) => {
+            view.hidden = view.dataset.historyAxisView !== axis;
+          });
+        };
+        root.querySelectorAll("[data-history-axis]").forEach((button) => {
+          button.addEventListener("click", () => setHistoryAxis(button.dataset.historyAxis));
+        });
+        setHistoryAxis("date");
       });
     })();
   </script>
