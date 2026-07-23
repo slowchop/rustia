@@ -305,6 +305,27 @@
       text-overflow: ellipsis;
     }
 
+    .mode-badge {
+      display: inline-flex;
+      width: fit-content;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: #334155;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .mode-jit,
+    .mode-native,
+    .mode-wasm-runtime {
+      background: #ffedd5;
+      color: #9a3412;
+    }
+
     .heatmap-head {
       display: flex;
       justify-content: space-between;
@@ -942,7 +963,9 @@
     </section>
 
     <nav class="nav" aria-label="Targets">
-      <a href="#languages-by-target">Languages by Target</a>
+      <a href="#languages-by-target">Interpreters</a>
+      <a href="#best-available-modes">Best Modes</a>
+      <a href="#cold-start">Cold Start</a>
       <a href="#claim-gate">Claim Gate</a>
       <a href="#history">History</a>
       <a href="#wasm-target">Wasm Target</a>
@@ -951,11 +974,195 @@
     </nav>
 
 
-    <section class="panel" id="languages-by-target">
+    <section class="panel metric-panel" id="languages-by-target">
       <div class="section-head">
         <div>
-          <h2>Languages by Target</h2>
-          <p>2 / 2 exact targets complete · ranked headline and per-workload detail use the same five common workloads.</p>
+          <h2>Interpreter-only Languages by Target</h2>
+          <p>1 / 1 exact targets complete · ranked headline and per-workload detail use the same five common workloads; accelerated modes are excluded.</p>
+        </div>
+        <div class="metric-toggle" role="group" aria-label="Benchmark value display">
+          <button type="button" data-metric="relative" aria-pressed="true">vs rustia</button>
+          <button type="button" data-metric="absolute" aria-pressed="false">absolute</button>
+        </div>
+      </div>
+      <div class="language-targets">
+
+    <section class="language-target-summary" data-target="linux-x86_64">
+      <div class="language-target-head">
+        <div>
+          <h3>linux-x86_64</h3>
+          <p>native · exact target · 10 implementations</p>
+          <p>Measured 2026-07-22 11:41:46 UTC to 2026-07-22 11:46:20 UTC · commits <code>a5629199643847c0da78792644ad3656887bee21</code></p>
+        </div>
+        <div class="summary-statuses">
+          <span class="summary-pill summary-complete">Complete</span>
+          <span class="summary-pill summary-revision-single">Single revision</span>
+        </div>
+      </div>
+      <div class="ranked-headline">
+        <div class="rank-axis-caption metric-caption" data-relative="geometric mean speed vs rustia · higher is faster" data-absolute="geometric mean ns/unit · lower is faster">geometric mean speed vs rustia · higher is faster</div>
+        <div class="ranked-bars" role="list" aria-label="Best-first implementation ranking for linux-x86_64">
+
+    <div class="language-rank-row" role="listitem" data-language="wasm" data-implementation="wasmi">
+      <span class="rank-number">1</span>
+      <span class="implementation-language"><strong>wasmi</strong><span>WebAssembly</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="100.000" data-absolute-width="100.000" style="width:100.000%"></span></div>
+      <strong class="rank-value metric-value" data-relative="15.8x" data-absolute="441 ns">15.8x</strong>
+      <span class="rank-meta">4 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="luaur">
+      <span class="rank-number">2</span>
+      <span class="implementation-language"><strong>luaur</strong><span>Luau</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="73.626" data-absolute-width="73.626" style="width:73.626%"></span></div>
+      <strong class="rank-value metric-value" data-relative="3.833x" data-absolute="1,819 ns">3.833x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="mlua-luau">
+      <span class="rank-number">3</span>
+      <span class="implementation-language"><strong>mlua</strong><span>Luau</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="71.904" data-absolute-width="71.904" style="width:71.904%"></span></div>
+      <strong class="rank-value metric-value" data-relative="3.494x" data-absolute="1,995 ns">3.494x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="lua54" data-implementation="mlua-lua54">
+      <span class="rank-number">4</span>
+      <span class="implementation-language"><strong>mlua</strong><span>Lua 5.4</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="70.241" data-absolute-width="70.241" style="width:70.241%"></span></div>
+      <strong class="rank-value metric-value" data-relative="3.195x" data-absolute="2,182 ns">3.195x</strong>
+      <span class="rank-meta">1 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="rustia">
+      <span class="rank-number">5</span>
+      <span class="implementation-language"><strong>rustia</strong><span>Luau</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="48.620" data-absolute-width="48.620" style="width:48.620%"></span></div>
+      <strong class="rank-value metric-value" data-relative="1x" data-absolute="6,970 ns">1x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="javascript" data-implementation="rquickjs">
+      <span class="rank-number">6</span>
+      <span class="implementation-language"><strong>rquickjs</strong><span>JavaScript</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="48.090" data-absolute-width="48.090" style="width:48.090%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.972x" data-absolute="7,172 ns">0.972x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="ruau">
+      <span class="rank-number">7</span>
+      <span class="implementation-language"><strong>ruau</strong><span>Luau</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="43.672" data-absolute-width="43.672" style="width:43.672%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.767x" data-absolute="9,093 ns">0.767x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="koto" data-implementation="koto">
+      <span class="rank-number">8</span>
+      <span class="implementation-language"><strong>koto</strong><span>Koto</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="39.998" data-absolute-width="39.998" style="width:39.998%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.629x" data-absolute="11,078 ns">0.629x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="rhai" data-implementation="rhai">
+      <span class="rank-number">9</span>
+      <span class="implementation-language"><strong>rhai</strong><span>Rhai</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="27.577" data-absolute-width="27.577" style="width:27.577%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.323x" data-absolute="21,592 ns">0.323x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="javascript" data-implementation="boa">
+      <span class="rank-number">10</span>
+      <span class="implementation-language"><strong>boa</strong><span>JavaScript</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="14.000" data-absolute-width="14.000" style="width:14.000%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.156x" data-absolute="44,783 ns">0.156x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+        </div>
+      </div>
+      <div class="heatmap-detail">
+        <div class="heatmap-head">
+          <strong>Workload detail</strong>
+          <span class="metric-caption" data-relative="speed vs rustia · higher is faster" data-absolute="minimum ns/unit · lower is faster">speed vs rustia · higher is faster</span>
+        </div>
+
+    <div class="table-wrap">
+      <table class="language-heatmap">
+        <thead><tr><th>Implementation · language</th><th>Closures</th><th>Dense tables</th><th>Iteration</th><th>Sparse tables</th><th>Math / table</th></tr></thead>
+        <tbody>
+
+            <tr data-language="wasm" data-implementation="wasmi">
+              <th><span class="implementation-language"><strong>wasmi</strong><span>WebAssembly</span></span></th>
+              <td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-3" data-relative="1.256x" data-absolute="182 ns">1.256x</td><td class="heat-cell heat-4" data-heat-relative="heat-4" data-heat-absolute="heat-5" data-relative="18x" data-absolute="3,028 ns">18x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="37.1x" data-absolute="335 ns">37.1x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="28.1x" data-absolute="3,220 ns">28.1x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="42x" data-absolute="28 ns">42x</td>
+            </tr>
+
+            <tr data-language="luau" data-implementation="luaur">
+              <th><span class="implementation-language"><strong>luaur</strong><span>Luau</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-4" data-relative="3.569x" data-absolute="64.2 ns">3.569x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-2" data-relative="2.768x" data-absolute="19,675 ns">2.768x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-1" data-relative="3.2x" data-absolute="3,882 ns">3.2x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="4.336x" data-absolute="20,832 ns">4.336x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="6.03x" data-absolute="195 ns">6.03x</td>
+            </tr>
+
+            <tr data-language="luau" data-implementation="mlua-luau">
+              <th><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-4" data-relative="3.553x" data-absolute="64.5 ns">3.553x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-2" data-relative="2.805x" data-absolute="19,419 ns">2.805x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-1" data-relative="2.796x" data-absolute="4,443 ns">2.796x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="3.83x" data-absolute="23,587 ns">3.83x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="4.88x" data-absolute="241 ns">4.88x</td>
+            </tr>
+
+            <tr data-language="lua54" data-implementation="mlua-lua54">
+              <th><span class="implementation-language"><strong>mlua</strong><span>Lua 5.4</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-5" data-relative="4.951x" data-absolute="46.3 ns">4.951x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-1" data-relative="1.142x" data-absolute="47,701 ns">1.142x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="3.79x" data-absolute="3,278 ns">3.79x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="3.782x" data-absolute="23,884 ns">3.782x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-1" data-relative="4.111x" data-absolute="286 ns">4.111x</td>
+            </tr>
+
+            <tr data-language="luau" data-implementation="rustia">
+              <th><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></th>
+              <td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-2" data-relative="1x" data-absolute="229 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-1" data-relative="1x" data-absolute="54,467 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="12,423 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="90,337 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="1,175 ns">1x</td>
+            </tr>
+
+            <tr data-language="javascript" data-implementation="rquickjs">
+              <th><span class="implementation-language"><strong>rquickjs</strong><span>JavaScript</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-1" data-relative="0.492x" data-absolute="466 ns">0.492x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.467x" data-absolute="116,639 ns">0.467x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-1" data-relative="2.161x" data-absolute="5,749 ns">2.161x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="0.906x" data-absolute="99,710 ns">0.906x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-1" data-relative="1.929x" data-absolute="609 ns">1.929x</td>
+            </tr>
+
+            <tr data-language="luau" data-implementation="ruau">
+              <th><span class="implementation-language"><strong>ruau</strong><span>Luau</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-2" data-relative="0.719x" data-absolute="319 ns">0.719x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.623x" data-absolute="87,464 ns">0.623x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.634x" data-absolute="19,588 ns">0.634x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="0.917x" data-absolute="98,534 ns">0.917x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1.017x" data-absolute="1,156 ns">1.017x</td>
+            </tr>
+
+            <tr data-language="koto" data-implementation="koto">
+              <th><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-2" data-relative="0.685x" data-absolute="334 ns">0.685x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.19x" data-absolute="287,383 ns">0.19x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-1" data-relative="1.801x" data-absolute="6,897 ns">1.801x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.618x" data-absolute="146,256 ns">0.618x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.682x" data-absolute="1,722 ns">0.682x</td>
+            </tr>
+
+            <tr data-language="rhai" data-implementation="rhai">
+              <th><span class="implementation-language"><strong>rhai</strong><span>Rhai</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.156x" data-absolute="1,468 ns">0.156x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.173x" data-absolute="314,441 ns">0.173x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1.215x" data-absolute="10,222 ns">1.215x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.286x" data-absolute="315,643 ns">0.286x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.373x" data-absolute="3,152 ns">0.373x</td>
+            </tr>
+
+            <tr data-language="javascript" data-implementation="boa">
+              <th><span class="implementation-language"><strong>boa</strong><span>JavaScript</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.081x" data-absolute="2,834 ns">0.081x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.056x" data-absolute="971,444 ns">0.056x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.323x" data-absolute="38,482 ns">0.323x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.232x" data-absolute="388,626 ns">0.232x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.269x" data-absolute="4,375 ns">0.269x</td>
+            </tr>
+
+        </tbody>
+      </table>
+    </div>
+
+        <div class="heat-legend metric-caption" data-relative="Color: red below 0.75× · neutral near rustia · stronger green above 1.25×" data-absolute="Color: strongest for the fastest implementation in each workload">Color: red below 0.75× · neutral near rustia · stronger green above 1.25×</div>
+      </div>
+    </section>
+
+      </div>
+    </section>
+
+
+    <section class="panel metric-panel" id="best-available-modes">
+      <div class="section-head">
+        <div>
+          <h2>Best Available Mode</h2>
+          <p>2 / 2 exact targets complete · each engine family uses its strongest measured interpreter, JIT, native, or wasm-runtime mode.</p>
         </div>
         <div class="metric-toggle" role="group" aria-label="Benchmark value display">
           <button type="button" data-metric="relative" aria-pressed="true">vs rustia</button>
@@ -982,7 +1189,7 @@
 
     <div class="language-rank-row" role="listitem" data-language="wasm" data-implementation="wasmtime">
       <span class="rank-number">1</span>
-      <span class="implementation-language"><strong>wasmtime</strong><span>WebAssembly</span></span>
+      <span class="implementation-language"><strong>wasmtime</strong><span>WebAssembly</span><span class="mode-badge mode-native">native</span></span>
       <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="100.000" data-absolute-width="100.000" style="width:100.000%"></span></div>
       <strong class="rank-value metric-value" data-relative="72.9x" data-absolute="95.6 ns">72.9x</strong>
       <span class="rank-meta">4 wins · 5/5</span>
@@ -1022,7 +1229,7 @@
 
     <div class="language-rank-row" role="listitem" data-language="roto" data-implementation="roto">
       <span class="rank-number">6</span>
-      <span class="implementation-language"><strong>roto</strong><span>Roto</span></span>
+      <span class="implementation-language"><strong>roto</strong><span>Roto</span><span class="mode-badge mode-native">native</span></span>
       <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="50.738" data-absolute-width="50.738" style="width:50.738%"></span></div>
       <strong class="rank-value metric-value" data-relative="2.153x" data-absolute="3,238 ns">2.153x</strong>
       <span class="rank-meta">1 wins · 5/5</span>
@@ -1090,7 +1297,7 @@
         <tbody>
 
             <tr data-language="wasm" data-implementation="wasmtime">
-              <th><span class="implementation-language"><strong>wasmtime</strong><span>WebAssembly</span></span></th>
+              <th><span class="implementation-language"><strong>wasmtime</strong><span>WebAssembly</span><span class="mode-badge mode-native">native</span></span></th>
               <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="7.324x" data-absolute="31.3 ns">7.324x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="101x" data-absolute="542 ns">101x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="102x" data-absolute="122 ns">102x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="167x" data-absolute="541 ns">167x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="164x" data-absolute="7.164 ns">164x</td>
             </tr>
 
@@ -1115,7 +1322,7 @@
             </tr>
 
             <tr data-language="roto" data-implementation="roto">
-              <th><span class="implementation-language"><strong>roto</strong><span>Roto</span></span></th>
+              <th><span class="implementation-language"><strong>roto</strong><span>Roto</span><span class="mode-badge mode-native">native</span></span></th>
               <td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="38.7x" data-absolute="5.913 ns">38.7x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.03x" data-absolute="1,806,026 ns">0.03x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-1" data-relative="6.646x" data-absolute="1,869 ns">6.646x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1.131x" data-absolute="79,877 ns">1.131x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="5.263x" data-absolute="223 ns">5.263x</td>
             </tr>
 
@@ -1175,7 +1382,7 @@
 
     <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="rustia">
       <span class="rank-number">1</span>
-      <span class="implementation-language"><strong>rustia</strong><span>Luau</span></span>
+      <span class="implementation-language"><strong>rustia</strong><span>Luau</span><span class="mode-badge mode-wasm-runtime">wasm-runtime</span></span>
       <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="100.000" data-absolute-width="100.000" style="width:100.000%"></span></div>
       <strong class="rank-value metric-value" data-relative="1x" data-absolute="10,854 ns">1x</strong>
       <span class="rank-meta">4 wins · 5/5</span>
@@ -1183,7 +1390,7 @@
 
     <div class="language-rank-row" role="listitem" data-language="koto" data-implementation="koto">
       <span class="rank-number">2</span>
-      <span class="implementation-language"><strong>koto</strong><span>Koto</span></span>
+      <span class="implementation-language"><strong>koto</strong><span>Koto</span><span class="mode-badge mode-wasm-runtime">wasm-runtime</span></span>
       <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="77.762" data-absolute-width="77.762" style="width:77.762%"></span></div>
       <strong class="rank-value metric-value" data-relative="0.786x" data-absolute="13,817 ns">0.786x</strong>
       <span class="rank-meta">1 wins · 5/5</span>
@@ -1191,7 +1398,7 @@
 
     <div class="language-rank-row" role="listitem" data-language="rhai" data-implementation="rhai">
       <span class="rank-number">3</span>
-      <span class="implementation-language"><strong>rhai</strong><span>Rhai</span></span>
+      <span class="implementation-language"><strong>rhai</strong><span>Rhai</span><span class="mode-badge mode-wasm-runtime">wasm-runtime</span></span>
       <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="14.000" data-absolute-width="14.000" style="width:14.000%"></span></div>
       <strong class="rank-value metric-value" data-relative="0.393x" data-absolute="27,598 ns">0.393x</strong>
       <span class="rank-meta">0 wins · 5/5</span>
@@ -1211,17 +1418,17 @@
         <tbody>
 
             <tr data-language="luau" data-implementation="rustia">
-              <th><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></th>
+              <th><span class="implementation-language"><strong>rustia</strong><span>Luau</span><span class="mode-badge mode-wasm-runtime">wasm-runtime</span></span></th>
               <td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-5" data-relative="1x" data-absolute="286 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-5" data-relative="1x" data-absolute="174,943 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-4" data-relative="1x" data-absolute="16,517 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-5" data-relative="1x" data-absolute="124,731 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-5" data-relative="1x" data-absolute="1,462 ns">1x</td>
             </tr>
 
             <tr data-language="koto" data-implementation="koto">
-              <th><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></th>
+              <th><span class="implementation-language"><strong>koto</strong><span>Koto</span><span class="mode-badge mode-wasm-runtime">wasm-runtime</span></span></th>
               <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-4" data-relative="0.642x" data-absolute="445 ns">0.642x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-3" data-relative="0.498x" data-absolute="351,321 ns">0.498x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-5" data-relative="1.821x" data-absolute="9,069 ns">1.821x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-4" data-relative="0.7x" data-absolute="178,086 ns">0.7x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-4" data-relative="0.734x" data-absolute="1,992 ns">0.734x</td>
             </tr>
 
             <tr data-language="rhai" data-implementation="rhai">
-              <th><span class="implementation-language"><strong>rhai</strong><span>Rhai</span></span></th>
+              <th><span class="implementation-language"><strong>rhai</strong><span>Rhai</span><span class="mode-badge mode-wasm-runtime">wasm-runtime</span></span></th>
               <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-2" data-relative="0.175x" data-absolute="1,631 ns">0.175x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-3" data-relative="0.41x" data-absolute="426,324 ns">0.41x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-4" data-relative="1.207x" data-absolute="13,687 ns">1.207x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-3" data-relative="0.315x" data-absolute="395,454 ns">0.315x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-3" data-relative="0.344x" data-absolute="4,254 ns">0.344x</td>
             </tr>
 
@@ -1233,6 +1440,24 @@
       </div>
     </section>
 
+      </div>
+    </section>
+
+
+    <section class="panel" id="cold-start">
+      <div class="section-head">
+        <div>
+          <h2>Compile and First-call Cost</h2>
+          <p>Geometric means across the five common workloads. Preparation and the first invocation are measured on a fresh engine instance; steady-state timings use a separate warmed instance.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Implementation · language</th><th>Mode</th><th>Prepare</th><th>First call</th><th>Cold total</th><th>Coverage</th><th>Native proof</th></tr></thead>
+          <tbody>
+
+          </tbody>
+        </table>
       </div>
     </section>
 
@@ -1262,8 +1487,8 @@
       <td><span class="target-runtime"><strong>linux-x86_64</strong><span>closures_upvalues · one upvalue-mutating closure call</span></span></td>
       <td>229 ns</td>
       <td>3.553x</td>
-      <td>7 / 12</td>
-      <td>roto · Roto · 5.913 ns</td>
+      <td>5 / 10</td>
+      <td>mlua · Lua 5.4 · 46.3 ns</td>
       <td>
         <span class="claim-posture">
           <span class="claim-pill claim-blocked">Not ready</span>
@@ -1276,8 +1501,8 @@
       <td><span class="target-runtime"><strong>linux-x86_64</strong><span>dense_tables · build+sum+sort of 256-elem array</span></span></td>
       <td>54,467 ns</td>
       <td>2.805x</td>
-      <td>6 / 12</td>
-      <td>wasmtime · WebAssembly · 542 ns</td>
+      <td>5 / 10</td>
+      <td>wasmi · WebAssembly · 3,028 ns</td>
       <td>
         <span class="claim-posture">
           <span class="claim-pill claim-blocked">Not ready</span>
@@ -1290,8 +1515,8 @@
       <td><span class="target-runtime"><strong>linux-x86_64</strong><span>generic_iteration · __iter(32)+pairs(5)+ipairs(32) pass</span></span></td>
       <td>12,423 ns</td>
       <td>2.796x</td>
-      <td>10 / 12</td>
-      <td>wasmtime · WebAssembly · 122 ns</td>
+      <td>8 / 10</td>
+      <td>wasmi · WebAssembly · 335 ns</td>
       <td>
         <span class="claim-posture">
           <span class="claim-pill claim-blocked">Not ready</span>
@@ -1304,8 +1529,8 @@
       <td><span class="target-runtime"><strong>linux-x86_64</strong><span>sparse_tables · fill+read 128 hash entries</span></span></td>
       <td>90,337 ns</td>
       <td>3.83x</td>
-      <td>7 / 12</td>
-      <td>wasmtime · WebAssembly · 541 ns</td>
+      <td>5 / 10</td>
+      <td>wasmi · WebAssembly · 3,220 ns</td>
       <td>
         <span class="claim-posture">
           <span class="claim-pill claim-blocked">Not ready</span>
@@ -1318,8 +1543,8 @@
       <td><span class="target-runtime"><strong>linux-x86_64</strong><span>stdlib_math_table · math fastcalls + buffered push</span></span></td>
       <td>1,175 ns</td>
       <td>4.88x</td>
-      <td>9 / 12</td>
-      <td>wasmtime · WebAssembly · 7.164 ns</td>
+      <td>7 / 10</td>
+      <td>wasmi · WebAssembly · 28 ns</td>
       <td>
         <span class="claim-posture">
           <span class="claim-pill claim-blocked">Not ready</span>
@@ -2595,10 +2820,8 @@
   </main>
   <script>
     (() => {
-      const root = document.getElementById("languages-by-target");
-      if (!root) return;
       const heatClasses = ["heat-0", "heat-1", "heat-2", "heat-3", "heat-4", "heat-5"];
-      const setMetric = (metric) => {
+      const setMetric = (root, metric) => {
         root.dataset.metric = metric;
         root.querySelectorAll("[data-metric]").forEach((button) => {
           button.setAttribute("aria-pressed", String(button.dataset.metric === metric));
@@ -2615,10 +2838,12 @@
           cell.classList.add(cell.dataset[metric === "relative" ? "heatRelative" : "heatAbsolute"]);
         });
       };
-      root.querySelectorAll("[data-metric]").forEach((button) => {
-        button.addEventListener("click", () => setMetric(button.dataset.metric));
+      document.querySelectorAll(".metric-panel").forEach((root) => {
+        root.querySelectorAll("[data-metric]").forEach((button) => {
+          button.addEventListener("click", () => setMetric(root, button.dataset.metric));
+        });
+        setMetric(root, "relative");
       });
-      setMetric("relative");
     })();
   </script>
 </body>

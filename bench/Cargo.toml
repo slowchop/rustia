@@ -21,6 +21,7 @@ all-engines = [
     "koto",
     "luaur-engine",
     "mlua-luau",
+    "mlua-luau-jit",
     "rhai-engine",
     "roto",
     "ruau-engine",
@@ -33,6 +34,7 @@ boa = ["dep:boa_engine"]
 koto = ["dep:koto"]
 luaur-engine = ["dep:luaur_rt"]
 mlua-luau = ["dep:mlua_luau"]
+mlua-luau-jit = ["mlua-luau", "mlua_luau/luau-jit"]
 mlua-lua54 = ["dep:mlua_lua54"]
 rhai-engine = ["dep:rhai"]
 roto = ["dep:roto"]

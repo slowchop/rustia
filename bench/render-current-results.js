@@ -133,7 +133,22 @@ function normalizeHistoryRecord(record, lineNumber) {
     ns_per_unit_median: Number(record.ns_per_unit_median),
     units_per_sec: Number(record.units_per_sec),
     checksum: record.checksum,
+    prepare_ns_min: optionalPositive(record.prepare_ns_min),
+    prepare_ns_median: optionalPositive(record.prepare_ns_median),
+    first_call_ns_min: optionalPositive(record.first_call_ns_min),
+    first_call_ns_median: optionalPositive(record.first_call_ns_median),
+    cold_start_ns_min: optionalPositive(record.cold_start_ns_min),
+    cold_start_ns_median: optionalPositive(record.cold_start_ns_median),
+    mode_family: typeof record.mode_family === "string" ? record.mode_family : modeFamily(record.engine),
+    execution_mode: typeof record.execution_mode === "string" ? record.execution_mode : executionMode(record.engine),
+    native_verified: record.native_verified === true,
+    native_verification: typeof record.native_verification === "string" ? record.native_verification : "not-recorded",
+    native_verification_ratio: optionalPositive(record.native_verification_ratio),
   };
+}
+
+function optionalPositive(value) {
+  return Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null;
 }
 
 function readJson(filePath) {
@@ -238,6 +253,11 @@ function validateRow(row, index) {
   }
   if (row.speed_vs_rustia != null && (!Number.isFinite(row.speed_vs_rustia) || row.speed_vs_rustia <= 0)) {
     fail(`${label}.speed_vs_rustia must be null or a positive finite number`);
+  }
+  for (const key of ["prepare_ns_min", "prepare_ns_median", "first_call_ns_min", "first_call_ns_median", "cold_start_ns_min", "cold_start_ns_median"]) {
+    if (row[key] != null && (!Number.isFinite(row[key]) || row[key] <= 0)) {
+      fail(`${label}.${key} must be null or a positive finite number`);
+    }
   }
 }
 
@@ -451,8 +471,34 @@ function languageLabel(dialect) {
 }
 
 function implementationLabel(engine) {
-  if (engine === "mlua-luau" || engine === "mlua-lua54") return "mlua";
+  if (engine === "mlua-luau" || engine === "mlua-luau-jit" || engine === "mlua-lua54") return "mlua";
   return engine;
+}
+
+function modeFamily(engine) {
+  return engine === "mlua-luau-jit" ? "mlua-luau" : engine;
+}
+
+function executionMode(engine) {
+  if (engine === "mlua-luau-jit") return "jit";
+  if (engine === "roto" || engine === "wasmtime") return "native";
+  return "interpreter";
+}
+
+function bestAvailableRows(rows) {
+  const priority = { native: 3, jit: 3, "wasm-runtime": 2, interpreter: 1 };
+  const selected = new Map();
+  for (const row of rows) {
+    const key = `${row.target}\0${row.mode_family}\0${row.workload}\0${row.runtime ?? ""}`;
+    const existing = selected.get(key);
+    const rowPriority = priority[row.execution_mode] ?? 0;
+    const existingPriority = priority[existing?.execution_mode] ?? -1;
+    if (!existing || rowPriority > existingPriority ||
+        (rowPriority === existingPriority && compareRunTime(existing, row) < 0)) {
+      selected.set(key, row);
+    }
+  }
+  return [...selected.values()];
 }
 
 function compareRows(left, right) {
@@ -505,6 +551,10 @@ function summarizeLanguageTargets(summaryRows) {
             dialect,
             language: languageLabel(dialect),
             engine,
+            mode: values[0].execution_mode,
+            nativeVerified: values[0].native_verified,
+            nativeVerification: values[0].native_verification,
+            nativeVerificationRatio: values[0].native_verification_ratio,
             measuredRows,
             measuredWorkloads,
             coverage: measuredWorkloads.length,
@@ -598,6 +648,14 @@ function summarize(data, wasmRows) {
       commit: row.commit,
       ns_per_unit_min: row.ns_per_unit_min,
       speed_vs_rustia: row.speed_vs_rustia,
+      prepare_ns_median: optionalPositive(row.prepare_ns_median),
+      first_call_ns_median: optionalPositive(row.first_call_ns_median),
+      cold_start_ns_median: optionalPositive(row.cold_start_ns_median),
+      mode_family: row.mode_family ?? modeFamily(row.engine),
+      execution_mode: row.execution_mode ?? executionMode(row.engine),
+      native_verified: row.native_verified === true,
+      native_verification: row.native_verification ?? "not-recorded",
+      native_verification_ratio: optionalPositive(row.native_verification_ratio),
     })),
     ...wasmRows.map((row) => ({
       engine: row.adapter,
@@ -610,6 +668,14 @@ function summarize(data, wasmRows) {
       commit: row.commit,
       ns_per_unit_min: row.ns_per_unit_min,
       speed_vs_rustia: row.speed_vs_rustia,
+      prepare_ns_median: null,
+      first_call_ns_median: null,
+      cold_start_ns_median: null,
+      mode_family: row.adapter,
+      execution_mode: "wasm-runtime",
+      native_verified: true,
+      native_verification: `runtime-${row.runtime}`,
+      native_verification_ratio: null,
     })),
   ].sort(compareRows);
   const timestamps = rows.map((row) => row.timestamp_unix);
@@ -621,10 +687,35 @@ function summarize(data, wasmRows) {
     rows,
     summaryRows,
     targetRows,
-    languageTargetRows: summarizeLanguageTargets(summaryRows),
+    languageTargetRows: summarizeLanguageTargets(summaryRows.filter((row) => row.execution_mode === "interpreter")),
+    bestModeTargetRows: summarizeLanguageTargets(bestAvailableRows(summaryRows)),
+    coldStartRows: summarizeColdStarts(summaryRows),
     minTimestamp: Math.min(...timestamps),
     maxTimestamp: Math.max(...timestamps),
   };
+}
+
+function summarizeColdStarts(rows) {
+  return [...groupBy(
+    rows.filter((row) => row.runtime == null && REQUIRED_COMMON_WORKLOAD_SET.has(row.workload) && Number.isFinite(row.cold_start_ns_median)),
+    (row) => `${row.target}\0${row.engine}`,
+  )].map(([key, values]) => {
+    const [target, engine] = key.split("\0");
+    const latest = latestBy(values, (row) => row.workload);
+    return {
+      target,
+      engine,
+      dialect: latest[0].dialect,
+      mode: latest[0].execution_mode,
+      prepare: geometricMean(latest.map((row) => row.prepare_ns_median)),
+      firstCall: geometricMean(latest.map((row) => row.first_call_ns_median)),
+      total: geometricMean(latest.map((row) => row.cold_start_ns_median)),
+      coverage: latest.length,
+      nativeVerified: latest[0].native_verified,
+      nativeVerification: latest[0].native_verification,
+      nativeVerificationRatio: latest[0].native_verification_ratio,
+    };
+  }).sort((left, right) => left.total - right.total || left.engine.localeCompare(right.engine));
 }
 
 function summarizeHistory(records) {
@@ -682,7 +773,8 @@ function claimPosture(rustiaRow, luauRow) {
 }
 
 function summarizeClaimRows(rows) {
-  return [...groupBy(rows, (row) => `${row.target}\0${row.workload}`).entries()]
+  const interpreterRows = rows.filter((row) => (row.execution_mode ?? executionMode(row.engine)) === "interpreter");
+  return [...groupBy(interpreterRows, (row) => `${row.target}\0${row.workload}`).entries()]
     .map(([key, values]) => {
       const [target, workload] = key.split("\0");
       const sorted = values
@@ -1027,6 +1119,7 @@ function engineColor(engine, fallbackIndex = 0) {
     koto: "#0f766e",
     luaur: "#0891b2",
     "mlua-luau": "#b45309",
+    "mlua-luau-jit": "#ea580c",
     "mlua-lua54": "#7c3aed",
     rhai: "#b91c1c",
     boa: "#047857",
@@ -1040,14 +1133,18 @@ function engineColor(engine, fallbackIndex = 0) {
   return known[engine] ?? fallback[fallbackIndex % fallback.length];
 }
 
-function languagesByTargetSection(targetRows) {
+function languagesByTargetSection(targetRows, {
+  id = "languages-by-target",
+  title = "Interpreter-only Languages by Target",
+  description = "exact targets complete · ranked headline and per-workload detail use the same five common workloads; accelerated modes are excluded",
+} = {}) {
   const completeCount = targetRows.filter((row) => row.complete).length;
   return `
-    <section class="panel" id="languages-by-target">
+    <section class="panel metric-panel" id="${escapeHtml(id)}">
       <div class="section-head">
         <div>
-          <h2>Languages by Target</h2>
-          <p>${formatInteger(completeCount)} / ${formatInteger(targetRows.length)} exact targets complete · ranked headline and per-workload detail use the same five common workloads.</p>
+          <h2>${escapeHtml(title)}</h2>
+          <p>${formatInteger(completeCount)} / ${formatInteger(targetRows.length)} ${escapeHtml(description)}.</p>
         </div>
         <div class="metric-toggle" role="group" aria-label="Benchmark value display">
           <button type="button" data-metric="relative" aria-pressed="true">vs rustia</button>
@@ -1059,6 +1156,63 @@ function languagesByTargetSection(targetRows) {
       </div>
     </section>
   `;
+}
+
+function bestAvailableModesSection(targetRows) {
+  return languagesByTargetSection(targetRows, {
+    id: "best-available-modes",
+    title: "Best Available Mode",
+    description: "exact targets complete · each engine family uses its strongest measured interpreter, JIT, native, or wasm-runtime mode",
+  });
+}
+
+function coldStartSection(rows) {
+  return `
+    <section class="panel" id="cold-start">
+      <div class="section-head">
+        <div>
+          <h2>Compile and First-call Cost</h2>
+          <p>Geometric means across the five common workloads. Preparation and the first invocation are measured on a fresh engine instance; steady-state timings use a separate warmed instance.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Implementation · language</th><th>Mode</th><th>Prepare</th><th>First call</th><th>Cold total</th><th>Coverage</th><th>Native proof</th></tr></thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td>${implementationLanguage(row.engine, languageLabel(row.dialect))}</td>
+                <td>${modeBadge(row.mode)}</td>
+                <td>${formatDurationNs(row.prepare)}</td>
+                <td>${formatDurationNs(row.firstCall)}</td>
+                <td><strong>${formatDurationNs(row.total)}</strong></td>
+                <td>${formatInteger(row.coverage)}/${formatInteger(REQUIRED_COMMON_WORKLOADS.length)}</td>
+                <td>${nativeProof(row)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function formatDurationNs(value) {
+  if (!Number.isFinite(value)) return "n/a";
+  if (value >= 1e6) return `${formatNumber(value / 1e6)} ms`;
+  if (value >= 1e3) return `${formatNumber(value / 1e3)} µs`;
+  return `${formatNumber(value)} ns`;
+}
+
+function modeBadge(mode) {
+  return `<span class="mode-badge mode-${escapeHtml(mode)}">${escapeHtml(mode)}</span>`;
+}
+
+function nativeProof(row) {
+  if (row.mode === "interpreter") return '<span class="subtle">not applicable</span>';
+  if (!row.nativeVerified) return '<span class="claim-pill claim-blocked">unverified</span>';
+  const ratio = Number.isFinite(row.nativeVerificationRatio) ? ` · ${formatSpeed(row.nativeVerificationRatio)} A/B` : "";
+  return `<span class="claim-pill claim-ready">verified</span><span class="subtle"> ${escapeHtml(row.nativeVerification)}${escapeHtml(ratio)}</span>`;
 }
 
 function languageTargetSummary(targetRow) {
@@ -1107,7 +1261,7 @@ function languageRankRow(row, targetRow) {
   return `
     <div class="language-rank-row" role="listitem" data-language="${escapeHtml(row.dialect)}" data-implementation="${escapeHtml(row.engine)}">
       <span class="rank-number">${rank}</span>
-      ${implementationLanguage(row.engine, row.language)}
+      ${implementationLanguage(row.engine, row.language, row.mode)}
       <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="${width.toFixed(3)}" data-absolute-width="${width.toFixed(3)}" style="width:${width.toFixed(3)}%"></span></div>
       <strong class="rank-value metric-value" data-relative="${escapeHtml(relative)}" data-absolute="${escapeHtml(absolute)}">${escapeHtml(relative)}</strong>
       <span class="rank-meta">${escapeHtml(wins)} · ${formatInteger(row.coverage)}/${formatInteger(REQUIRED_COMMON_WORKLOADS.length)}</span>
@@ -1124,8 +1278,9 @@ function rankBarWidth(row, rows) {
   return 14 + ((Math.log(high) - Math.log(row.geoTime)) / (Math.log(high) - Math.log(low))) * 86;
 }
 
-function implementationLanguage(engine, language) {
-  return `<span class="implementation-language"><strong>${escapeHtml(implementationLabel(engine))}</strong><span>${escapeHtml(language)}</span></span>`;
+function implementationLanguage(engine, language, mode = null) {
+  const modeMarkup = mode && mode !== "interpreter" ? modeBadge(mode) : "";
+  return `<span class="implementation-language"><strong>${escapeHtml(implementationLabel(engine))}</strong><span>${escapeHtml(language)}</span>${modeMarkup}</span>`;
 }
 
 function languageHeatmap(targetRow) {
@@ -1142,7 +1297,7 @@ function languageHeatmap(targetRow) {
         <tbody>
           ${targetRow.implementationRows.map((row) => `
             <tr data-language="${escapeHtml(row.dialect)}" data-implementation="${escapeHtml(row.engine)}">
-              <th>${implementationLanguage(row.engine, row.language)}</th>
+              <th>${implementationLanguage(row.engine, row.language, row.mode)}</th>
               ${REQUIRED_COMMON_WORKLOADS.map((workload) => heatmapCell(row, workload, fastest.get(workload))).join("")}
             </tr>
           `).join("")}
@@ -1718,6 +1873,27 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
     .implementation-language span {
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+
+    .mode-badge {
+      display: inline-flex;
+      width: fit-content;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: #334155;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .mode-jit,
+    .mode-native,
+    .mode-wasm-runtime {
+      background: #ffedd5;
+      color: #9a3412;
     }
 
     .heatmap-head {
@@ -2312,7 +2488,9 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
     </section>
 
     <nav class="nav" aria-label="Targets">
-      <a href="#languages-by-target">Languages by Target</a>
+      <a href="#languages-by-target">Interpreters</a>
+      <a href="#best-available-modes">Best Modes</a>
+      <a href="#cold-start">Cold Start</a>
       <a href="#claim-gate">Claim Gate</a>
       <a href="#history">History</a>
       <a href="#wasm-target">Wasm Target</a>
@@ -2321,6 +2499,8 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
     </nav>
 
     ${languagesByTargetSection(summary.languageTargetRows)}
+    ${bestAvailableModesSection(summary.bestModeTargetRows)}
+    ${coldStartSection(summary.coldStartRows)}
     ${claimGateSection(claimRows)}
     ${historySection(history, cohorts, summary.rows, wasmRows)}
     ${wasmTargetSection(wasmResults)}
@@ -2331,10 +2511,8 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
   </main>
   <script>
     (() => {
-      const root = document.getElementById("languages-by-target");
-      if (!root) return;
       const heatClasses = ["heat-0", "heat-1", "heat-2", "heat-3", "heat-4", "heat-5"];
-      const setMetric = (metric) => {
+      const setMetric = (root, metric) => {
         root.dataset.metric = metric;
         root.querySelectorAll("[data-metric]").forEach((button) => {
           button.setAttribute("aria-pressed", String(button.dataset.metric === metric));
@@ -2351,10 +2529,12 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
           cell.classList.add(cell.dataset[metric === "relative" ? "heatRelative" : "heatAbsolute"]);
         });
       };
-      root.querySelectorAll("[data-metric]").forEach((button) => {
-        button.addEventListener("click", () => setMetric(button.dataset.metric));
+      document.querySelectorAll(".metric-panel").forEach((root) => {
+        root.querySelectorAll("[data-metric]").forEach((button) => {
+          button.addEventListener("click", () => setMetric(root, button.dataset.metric));
+        });
+        setMetric(root, "relative");
       });
-      setMetric("relative");
     })();
   </script>
 </body>
@@ -2393,6 +2573,8 @@ if (require.main === module) {
 
 module.exports = {
   REQUIRED_COMMON_WORKLOADS,
+  bestAvailableRows,
+  coldStartSection,
   implementationLabel,
   languageLabel,
   languagesByTargetSection,

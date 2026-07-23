@@ -21,13 +21,13 @@ const HISTORY = path.join(ROOT, "matrix-history.jsonl");
 const WASM_RESULTS = path.join(ROOT, "wasm-current-results.json");
 const DISPATCH_RESULTS = path.join(ROOT, "wasm-dispatch-current-results.json");
 const EVIDENCE_ROOT = path.join(ROOT, "matrix-evidence");
-const PROTOCOL = "cross_engine_matrix_v3";
+const PROTOCOL = "cross_engine_matrix_v4";
 const MAX_TIMED_ATTEMPTS_PER_GROUP = 3;
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const NATIVE_TARGET = "linux-x86_64";
 const NATIVE_ENGINES = Object.freeze([
-  "rustia", "boa", "koto", "luaur", "mlua-luau", "rhai", "roto", "ruau", "rquickjs", "wasmi", "wasmtime", "mlua-lua54",
+  "rustia", "boa", "koto", "luaur", "mlua-luau", "mlua-luau-jit", "rhai", "roto", "ruau", "rquickjs", "wasmi", "wasmtime", "mlua-lua54",
 ]);
 const ALL_ENGINES = Object.freeze(NATIVE_ENGINES.filter((engine) => engine !== "mlua-lua54"));
 const WORKLOADS = Object.freeze([
@@ -183,10 +183,10 @@ function validateConfig(value) {
   const publication = requireObject(config.publication, "publication");
   requireExactKeys(publication, ["mode", "native_rows", "wasm_rows", "dispatch_runtimes"], "publication");
   if (
-    publication.mode !== "matrix" || publication.native_rows !== 60 ||
+    publication.mode !== "matrix" || publication.native_rows !== 65 ||
     publication.wasm_rows !== 15 || publication.dispatch_runtimes !== 1
   ) {
-    fail("publication matrix dimensions are not frozen at 50/15/1");
+    fail("publication matrix dimensions are not frozen at 65/15/1");
   }
   return config;
 }
@@ -710,7 +710,7 @@ async function execute(configFile, providerFile, bundle) {
 
 async function selfTest() {
   assert.deepEqual(ALL_ENGINES, NATIVE_ENGINES.slice(0, -1));
-  assert.equal(NATIVE_ENGINES.length * WORKLOADS.length, 60);
+  assert.equal(NATIVE_ENGINES.length * WORKLOADS.length, 65);
   assert.equal(WASM_RUNTIMES.length * WASM_ADAPTERS.length * WORKLOADS.length, 15);
   assert.deepEqual(cpuDelta(
     { fields: [10, 0, 5, 100, 2, 1, 1, 0] },

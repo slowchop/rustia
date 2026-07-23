@@ -163,8 +163,16 @@ function claimPosture(rustiaRow, luauRow) {
   };
 }
 
+function executionMode(row) {
+  if (typeof row.execution_mode === "string") return row.execution_mode;
+  if (row.engine === "mlua-luau-jit") return "jit";
+  if (row.engine === "roto" || row.engine === "wasmtime") return "native";
+  return "interpreter";
+}
+
 function summarizeWorkloads(data) {
-  const groups = [...groupBy(data.rows, (row) => `${row.target}\0${row.workload}`).entries()]
+  const interpreterRows = data.rows.filter((row) => executionMode(row) === "interpreter");
+  const groups = [...groupBy(interpreterRows, (row) => `${row.target}\0${row.workload}`).entries()]
     .map(([key, rows]) => {
       const [target, workload] = key.split("\0");
       const sorted = rows.slice().sort((left, right) => left.ns_per_unit_min - right.ns_per_unit_min);
@@ -192,14 +200,15 @@ function summarizeWorkloads(data) {
 }
 
 function summarizeEngines(data) {
-  const workloadGroups = groupBy(data.rows, (row) => `${row.target}\0${row.workload}`);
+  const interpreterRows = data.rows.filter((row) => executionMode(row) === "interpreter");
+  const workloadGroups = groupBy(interpreterRows, (row) => `${row.target}\0${row.workload}`);
   const bestCounts = new Map();
   for (const rows of workloadGroups.values()) {
     const sorted = rows.slice().sort((left, right) => left.ns_per_unit_min - right.ns_per_unit_min);
     const key = `${sorted[0].engine}\0${sorted[0].target}`;
     bestCounts.set(key, (bestCounts.get(key) ?? 0) + 1);
   }
-  return [...groupBy(data.rows, (row) => `${row.engine}\0${row.target}`).entries()]
+  return [...groupBy(interpreterRows, (row) => `${row.engine}\0${row.target}`).entries()]
     .map(([key, rows]) => {
       const [engine, target] = key.split("\0");
       return {

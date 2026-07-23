@@ -1,64 +1,64 @@
 # script-bench-harness Results
 
-| target | engine | workload | ns/unit min | ns/unit median | speed vs rustia | units/sec | n | checksum |
-|---|---|---|---:|---:|---:|---:|---:|---|
-| linux-x86_64 | rustia | dense_tables | 54466.58 | 57322.44 | 1.00x | 18360 | 1981 | `number:255299531.00000000000000000` |
-| linux-x86_64 | rustia | sparse_tables | 90336.95 | 92213.11 | 1.00x | 11070 | 1282 | `number:1713264800.00000000000000000` |
-| linux-x86_64 | rustia | closures_upvalues | 229.09 | 229.77 | 1.00x | 4365006 | 523722 | `number:77145854495.00000000000000000` |
-| linux-x86_64 | rustia | generic_iteration | 12423.30 | 12916.75 | 1.00x | 80494 | 9474 | `number:216907230.00000000000000000` |
-| linux-x86_64 | rustia | stdlib_math_table | 1175.05 | 1186.40 | 1.00x | 851025 | 100388 | `number:1011767.51048911910038441` |
-| linux-x86_64 | boa | dense_tables | 971443.93 | 980458.59 | 0.06x | 1029 | 121 | `f64:609353800.00000000000000000` |
-| linux-x86_64 | boa | sparse_tables | 388626.41 | 399493.25 | 0.23x | 2573 | 287 | `f64:7585984.00000000000000000` |
-| linux-x86_64 | boa | closures_upvalues | 2834.05 | 2867.06 | 0.08x | 352852 | 41775 | `f64:817951994.00000000000000000` |
-| linux-x86_64 | boa | generic_iteration | 38481.68 | 39395.70 | 0.32x | 25986 | 3002 | `f64:168185549.00000000000000000` |
-| linux-x86_64 | boa | stdlib_math_table | 4374.94 | 4431.88 | 0.27x | 228575 | 27136 | `f64:424927510.00000000000000000` |
-| linux-x86_64 | koto | dense_tables | 287383.09 | 289985.19 | 0.19x | 3480 | 410 | `i64:52838875` |
-| linux-x86_64 | koto | sparse_tables | 146256.21 | 148165.64 | 0.62x | 6837 | 812 | `i64:686562240` |
-| linux-x86_64 | koto | closures_upvalues | 334.25 | 336.81 | 0.69x | 2991789 | 359142 | `i64:3232266` |
-| linux-x86_64 | koto | generic_iteration | 6896.84 | 6943.38 | 1.80x | 144994 | 17047 | `i64:390291065` |
-| linux-x86_64 | koto | stdlib_math_table | 1721.75 | 1724.71 | 0.68x | 580806 | 70917 | `f64:680569.43615951761603355` |
-| linux-x86_64 | luaur | dense_tables | 19675.09 | 19947.29 | 2.77x | 50826 | 5955 | `i64:767438965` |
-| linux-x86_64 | luaur | sparse_tables | 20832.49 | 21140.11 | 4.34x | 48002 | 5792 | `i64:34907225600` |
-| linux-x86_64 | luaur | closures_upvalues | 64.18 | 64.54 | 3.57x | 15580218 | 1728844 | `i64:840639373618` |
-| linux-x86_64 | luaur | generic_iteration | 3881.87 | 3922.06 | 3.20x | 257608 | 29999 | `i64:686827105` |
-| linux-x86_64 | luaur | stdlib_math_table | 194.87 | 195.68 | 6.03x | 5131711 | 601662 | `f64:10314001.79987558163702488` |
-| linux-x86_64 | mlua-lua54 | dense_tables | 47701.36 | 47901.15 | 1.14x | 20964 | 2508 | `f64:323200551.00000000000000000` |
-| linux-x86_64 | mlua-lua54 | sparse_tables | 23883.63 | 24347.51 | 3.78x | 41870 | 5032 | `i64:26349564800` |
-| linux-x86_64 | mlua-lua54 | closures_upvalues | 46.28 | 47.50 | 4.95x | 21609133 | 2590676 | `i64:1887654292748` |
-| linux-x86_64 | mlua-lua54 | generic_iteration | 3278.19 | 3315.52 | 3.79x | 305047 | 36580 | `i64:837499100` |
-| linux-x86_64 | mlua-lua54 | stdlib_math_table | 285.87 | 288.36 | 4.11x | 3498155 | 412461 | `f64:6032209.52012733370065689` |
-| linux-x86_64 | mlua-luau | dense_tables | 19419.25 | 19570.87 | 2.80x | 51495 | 6131 | `i64:790141376` |
-| linux-x86_64 | mlua-luau | sparse_tables | 23586.72 | 23794.11 | 3.83x | 42397 | 5064 | `i64:26685659520` |
-| linux-x86_64 | mlua-luau | closures_upvalues | 64.48 | 64.51 | 3.55x | 15507509 | 1860841 | `i64:973904574334` |
-| linux-x86_64 | mlua-luau | generic_iteration | 4443.21 | 4490.53 | 2.80x | 225063 | 26989 | `i64:617913155` |
-| linux-x86_64 | mlua-luau | stdlib_math_table | 240.79 | 242.81 | 4.88x | 4152935 | 489901 | `f64:7687024.90192122664302588` |
-| linux-x86_64 | rhai | dense_tables | 314440.75 | 319121.51 | 0.17x | 3180 | 377 | `i64:48583591` |
-| linux-x86_64 | rhai | sparse_tables | 315642.66 | 319766.86 | 0.29x | 3168 | 379 | `i64:149780800` |
-| linux-x86_64 | rhai | closures_upvalues | 1467.92 | 1476.48 | 0.16x | 681238 | 81904 | `i64:737136` |
-| linux-x86_64 | rhai | generic_iteration | 10221.78 | 10241.53 | 1.22x | 97830 | 11671 | `i64:267207545` |
-| linux-x86_64 | rhai | stdlib_math_table | 3151.68 | 3170.68 | 0.37x | 317291 | 37936 | `f64:343452.52257997129345313` |
-| linux-x86_64 | roto | dense_tables | 1806025.98 | 1813451.73 | 0.03x | 554 | 66 | `i64:8511547` |
-| linux-x86_64 | roto | sparse_tables | 79877.03 | 80421.67 | 1.13x | 12519 | 1485 | `i64:203338080` |
-| linux-x86_64 | roto | closures_upvalues | 5.91 | 5.93 | 38.75x | 169127077 | 20262024 | `i64:10132348509626978` |
-| linux-x86_64 | roto | generic_iteration | 1869.15 | 1879.02 | 6.65x | 535002 | 63968 | `i64:1466466400` |
-| linux-x86_64 | roto | stdlib_math_table | 223.26 | 223.94 | 5.26x | 4479042 | 537629 | `f64:30020919378081.00000000000000000` |
-| linux-x86_64 | ruau | dense_tables | 87464.42 | 88876.69 | 0.62x | 11433 | 1340 | `f64:172699020.00000000000000000` |
-| linux-x86_64 | ruau | sparse_tables | 98534.46 | 101208.92 | 0.92x | 10149 | 1184 | `f64:1461624320.00000000000000000` |
-| linux-x86_64 | ruau | closures_upvalues | 318.71 | 320.32 | 0.72x | 3137661 | 376482 | `f64:39866361350.00000000000000000` |
-| linux-x86_64 | ruau | generic_iteration | 19587.67 | 19888.03 | 0.63x | 51053 | 5965 | `f64:136568675.00000000000000000` |
-| linux-x86_64 | ruau | stdlib_math_table | 1155.69 | 1232.97 | 1.02x | 865282 | 94393 | `f64:942266.52499827870633453` |
-| linux-x86_64 | rquickjs | dense_tables | 116638.51 | 116706.41 | 0.47x | 8573 | 1036 | `f64:646140746.00000000000000000` |
-| linux-x86_64 | rquickjs | sparse_tables | 99710.42 | 100099.01 | 0.91x | 10029 | 1213 | `f64:103949248.00000000000000000` |
-| linux-x86_64 | rquickjs | closures_upvalues | 465.90 | 471.15 | 0.49x | 2146362 | 253890 | `f64:478006714.00000000000000000` |
-| linux-x86_64 | rquickjs | generic_iteration | 5748.90 | 5800.50 | 2.16x | 173946 | 20782 | `f64:124363.00000000000000000` |
-| linux-x86_64 | rquickjs | stdlib_math_table | 609.21 | 611.52 | 1.93x | 1641467 | 197433 | `f64:93054942.00000000000000000` |
-| linux-x86_64 | wasmi | dense_tables | 3027.94 | 3348.49 | 17.99x | 330258 | 31951 | `i64:765181275` |
-| linux-x86_64 | wasmi | sparse_tables | 3220.27 | 3340.45 | 28.05x | 310533 | 37157 | `i64:660762968` |
-| linux-x86_64 | wasmi | closures_upvalues | 182.38 | 182.94 | 1.26x | 5483118 | 614483 | `i64:940188248` |
-| linux-x86_64 | wasmi | generic_iteration | 334.63 | 371.80 | 37.13x | 2988383 | 364818 | `i64:383034335` |
-| linux-x86_64 | wasmi | stdlib_math_table | 28.00 | 28.16 | 41.97x | 35720004 | 4539825 | `i64:786279209` |
-| linux-x86_64 | wasmtime | dense_tables | 541.73 | 543.82 | 100.54x | 1845947 | 220324 | `i64:574671986` |
-| linux-x86_64 | wasmtime | sparse_tables | 541.44 | 549.67 | 166.84x | 1846910 | 219438 | `i64:563820467` |
-| linux-x86_64 | wasmtime | closures_upvalues | 31.28 | 31.38 | 7.32x | 31968745 | 3798943 | `i64:427128978` |
-| linux-x86_64 | wasmtime | generic_iteration | 121.58 | 123.74 | 102.18x | 8224799 | 990474 | `i64:699505538` |
-| linux-x86_64 | wasmtime | stdlib_math_table | 7.16 | 7.19 | 164.03x | 139591439 | 17129856 | `i64:382430757` |
+| target | engine | workload | mode | ns/unit min | ns/unit median | speed vs rustia | prepare median ns | first-call median ns | cold-start median ns | units/sec | n | checksum |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| linux-x86_64 | rustia | dense_tables | interpreter | 54466.58 | 57322.44 | 1.00x | n/a | n/a | n/a | 18360 | 1981 | `number:255299531.00000000000000000` |
+| linux-x86_64 | rustia | sparse_tables | interpreter | 90336.95 | 92213.11 | 1.00x | n/a | n/a | n/a | 11070 | 1282 | `number:1713264800.00000000000000000` |
+| linux-x86_64 | rustia | closures_upvalues | interpreter | 229.09 | 229.77 | 1.00x | n/a | n/a | n/a | 4365006 | 523722 | `number:77145854495.00000000000000000` |
+| linux-x86_64 | rustia | generic_iteration | interpreter | 12423.30 | 12916.75 | 1.00x | n/a | n/a | n/a | 80494 | 9474 | `number:216907230.00000000000000000` |
+| linux-x86_64 | rustia | stdlib_math_table | interpreter | 1175.05 | 1186.40 | 1.00x | n/a | n/a | n/a | 851025 | 100388 | `number:1011767.51048911910038441` |
+| linux-x86_64 | boa | dense_tables | interpreter | 971443.93 | 980458.59 | 0.06x | n/a | n/a | n/a | 1029 | 121 | `f64:609353800.00000000000000000` |
+| linux-x86_64 | boa | sparse_tables | interpreter | 388626.41 | 399493.25 | 0.23x | n/a | n/a | n/a | 2573 | 287 | `f64:7585984.00000000000000000` |
+| linux-x86_64 | boa | closures_upvalues | interpreter | 2834.05 | 2867.06 | 0.08x | n/a | n/a | n/a | 352852 | 41775 | `f64:817951994.00000000000000000` |
+| linux-x86_64 | boa | generic_iteration | interpreter | 38481.68 | 39395.70 | 0.32x | n/a | n/a | n/a | 25986 | 3002 | `f64:168185549.00000000000000000` |
+| linux-x86_64 | boa | stdlib_math_table | interpreter | 4374.94 | 4431.88 | 0.27x | n/a | n/a | n/a | 228575 | 27136 | `f64:424927510.00000000000000000` |
+| linux-x86_64 | koto | dense_tables | interpreter | 287383.09 | 289985.19 | 0.19x | n/a | n/a | n/a | 3480 | 410 | `i64:52838875` |
+| linux-x86_64 | koto | sparse_tables | interpreter | 146256.21 | 148165.64 | 0.62x | n/a | n/a | n/a | 6837 | 812 | `i64:686562240` |
+| linux-x86_64 | koto | closures_upvalues | interpreter | 334.25 | 336.81 | 0.69x | n/a | n/a | n/a | 2991789 | 359142 | `i64:3232266` |
+| linux-x86_64 | koto | generic_iteration | interpreter | 6896.84 | 6943.38 | 1.80x | n/a | n/a | n/a | 144994 | 17047 | `i64:390291065` |
+| linux-x86_64 | koto | stdlib_math_table | interpreter | 1721.75 | 1724.71 | 0.68x | n/a | n/a | n/a | 580806 | 70917 | `f64:680569.43615951761603355` |
+| linux-x86_64 | luaur | dense_tables | interpreter | 19675.09 | 19947.29 | 2.77x | n/a | n/a | n/a | 50826 | 5955 | `i64:767438965` |
+| linux-x86_64 | luaur | sparse_tables | interpreter | 20832.49 | 21140.11 | 4.34x | n/a | n/a | n/a | 48002 | 5792 | `i64:34907225600` |
+| linux-x86_64 | luaur | closures_upvalues | interpreter | 64.18 | 64.54 | 3.57x | n/a | n/a | n/a | 15580218 | 1728844 | `i64:840639373618` |
+| linux-x86_64 | luaur | generic_iteration | interpreter | 3881.87 | 3922.06 | 3.20x | n/a | n/a | n/a | 257608 | 29999 | `i64:686827105` |
+| linux-x86_64 | luaur | stdlib_math_table | interpreter | 194.87 | 195.68 | 6.03x | n/a | n/a | n/a | 5131711 | 601662 | `f64:10314001.79987558163702488` |
+| linux-x86_64 | mlua-lua54 | dense_tables | interpreter | 47701.36 | 47901.15 | 1.14x | n/a | n/a | n/a | 20964 | 2508 | `f64:323200551.00000000000000000` |
+| linux-x86_64 | mlua-lua54 | sparse_tables | interpreter | 23883.63 | 24347.51 | 3.78x | n/a | n/a | n/a | 41870 | 5032 | `i64:26349564800` |
+| linux-x86_64 | mlua-lua54 | closures_upvalues | interpreter | 46.28 | 47.50 | 4.95x | n/a | n/a | n/a | 21609133 | 2590676 | `i64:1887654292748` |
+| linux-x86_64 | mlua-lua54 | generic_iteration | interpreter | 3278.19 | 3315.52 | 3.79x | n/a | n/a | n/a | 305047 | 36580 | `i64:837499100` |
+| linux-x86_64 | mlua-lua54 | stdlib_math_table | interpreter | 285.87 | 288.36 | 4.11x | n/a | n/a | n/a | 3498155 | 412461 | `f64:6032209.52012733370065689` |
+| linux-x86_64 | mlua-luau | dense_tables | interpreter | 19419.25 | 19570.87 | 2.80x | n/a | n/a | n/a | 51495 | 6131 | `i64:790141376` |
+| linux-x86_64 | mlua-luau | sparse_tables | interpreter | 23586.72 | 23794.11 | 3.83x | n/a | n/a | n/a | 42397 | 5064 | `i64:26685659520` |
+| linux-x86_64 | mlua-luau | closures_upvalues | interpreter | 64.48 | 64.51 | 3.55x | n/a | n/a | n/a | 15507509 | 1860841 | `i64:973904574334` |
+| linux-x86_64 | mlua-luau | generic_iteration | interpreter | 4443.21 | 4490.53 | 2.80x | n/a | n/a | n/a | 225063 | 26989 | `i64:617913155` |
+| linux-x86_64 | mlua-luau | stdlib_math_table | interpreter | 240.79 | 242.81 | 4.88x | n/a | n/a | n/a | 4152935 | 489901 | `f64:7687024.90192122664302588` |
+| linux-x86_64 | rhai | dense_tables | interpreter | 314440.75 | 319121.51 | 0.17x | n/a | n/a | n/a | 3180 | 377 | `i64:48583591` |
+| linux-x86_64 | rhai | sparse_tables | interpreter | 315642.66 | 319766.86 | 0.29x | n/a | n/a | n/a | 3168 | 379 | `i64:149780800` |
+| linux-x86_64 | rhai | closures_upvalues | interpreter | 1467.92 | 1476.48 | 0.16x | n/a | n/a | n/a | 681238 | 81904 | `i64:737136` |
+| linux-x86_64 | rhai | generic_iteration | interpreter | 10221.78 | 10241.53 | 1.22x | n/a | n/a | n/a | 97830 | 11671 | `i64:267207545` |
+| linux-x86_64 | rhai | stdlib_math_table | interpreter | 3151.68 | 3170.68 | 0.37x | n/a | n/a | n/a | 317291 | 37936 | `f64:343452.52257997129345313` |
+| linux-x86_64 | roto | dense_tables | native | 1806025.98 | 1813451.73 | 0.03x | n/a | n/a | n/a | 554 | 66 | `i64:8511547` |
+| linux-x86_64 | roto | sparse_tables | native | 79877.03 | 80421.67 | 1.13x | n/a | n/a | n/a | 12519 | 1485 | `i64:203338080` |
+| linux-x86_64 | roto | closures_upvalues | native | 5.91 | 5.93 | 38.75x | n/a | n/a | n/a | 169127077 | 20262024 | `i64:10132348509626978` |
+| linux-x86_64 | roto | generic_iteration | native | 1869.15 | 1879.02 | 6.65x | n/a | n/a | n/a | 535002 | 63968 | `i64:1466466400` |
+| linux-x86_64 | roto | stdlib_math_table | native | 223.26 | 223.94 | 5.26x | n/a | n/a | n/a | 4479042 | 537629 | `f64:30020919378081.00000000000000000` |
+| linux-x86_64 | ruau | dense_tables | interpreter | 87464.42 | 88876.69 | 0.62x | n/a | n/a | n/a | 11433 | 1340 | `f64:172699020.00000000000000000` |
+| linux-x86_64 | ruau | sparse_tables | interpreter | 98534.46 | 101208.92 | 0.92x | n/a | n/a | n/a | 10149 | 1184 | `f64:1461624320.00000000000000000` |
+| linux-x86_64 | ruau | closures_upvalues | interpreter | 318.71 | 320.32 | 0.72x | n/a | n/a | n/a | 3137661 | 376482 | `f64:39866361350.00000000000000000` |
+| linux-x86_64 | ruau | generic_iteration | interpreter | 19587.67 | 19888.03 | 0.63x | n/a | n/a | n/a | 51053 | 5965 | `f64:136568675.00000000000000000` |
+| linux-x86_64 | ruau | stdlib_math_table | interpreter | 1155.69 | 1232.97 | 1.02x | n/a | n/a | n/a | 865282 | 94393 | `f64:942266.52499827870633453` |
+| linux-x86_64 | rquickjs | dense_tables | interpreter | 116638.51 | 116706.41 | 0.47x | n/a | n/a | n/a | 8573 | 1036 | `f64:646140746.00000000000000000` |
+| linux-x86_64 | rquickjs | sparse_tables | interpreter | 99710.42 | 100099.01 | 0.91x | n/a | n/a | n/a | 10029 | 1213 | `f64:103949248.00000000000000000` |
+| linux-x86_64 | rquickjs | closures_upvalues | interpreter | 465.90 | 471.15 | 0.49x | n/a | n/a | n/a | 2146362 | 253890 | `f64:478006714.00000000000000000` |
+| linux-x86_64 | rquickjs | generic_iteration | interpreter | 5748.90 | 5800.50 | 2.16x | n/a | n/a | n/a | 173946 | 20782 | `f64:124363.00000000000000000` |
+| linux-x86_64 | rquickjs | stdlib_math_table | interpreter | 609.21 | 611.52 | 1.93x | n/a | n/a | n/a | 1641467 | 197433 | `f64:93054942.00000000000000000` |
+| linux-x86_64 | wasmi | dense_tables | interpreter | 3027.94 | 3348.49 | 17.99x | n/a | n/a | n/a | 330258 | 31951 | `i64:765181275` |
+| linux-x86_64 | wasmi | sparse_tables | interpreter | 3220.27 | 3340.45 | 28.05x | n/a | n/a | n/a | 310533 | 37157 | `i64:660762968` |
+| linux-x86_64 | wasmi | closures_upvalues | interpreter | 182.38 | 182.94 | 1.26x | n/a | n/a | n/a | 5483118 | 614483 | `i64:940188248` |
+| linux-x86_64 | wasmi | generic_iteration | interpreter | 334.63 | 371.80 | 37.13x | n/a | n/a | n/a | 2988383 | 364818 | `i64:383034335` |
+| linux-x86_64 | wasmi | stdlib_math_table | interpreter | 28.00 | 28.16 | 41.97x | n/a | n/a | n/a | 35720004 | 4539825 | `i64:786279209` |
+| linux-x86_64 | wasmtime | dense_tables | native | 541.73 | 543.82 | 100.54x | n/a | n/a | n/a | 1845947 | 220324 | `i64:574671986` |
+| linux-x86_64 | wasmtime | sparse_tables | native | 541.44 | 549.67 | 166.84x | n/a | n/a | n/a | 1846910 | 219438 | `i64:563820467` |
+| linux-x86_64 | wasmtime | closures_upvalues | native | 31.28 | 31.38 | 7.32x | n/a | n/a | n/a | 31968745 | 3798943 | `i64:427128978` |
+| linux-x86_64 | wasmtime | generic_iteration | native | 121.58 | 123.74 | 102.18x | n/a | n/a | n/a | 8224799 | 990474 | `i64:699505538` |
+| linux-x86_64 | wasmtime | stdlib_math_table | native | 7.16 | 7.19 | 164.03x | n/a | n/a | n/a | 139591439 | 17129856 | `i64:382430757` |

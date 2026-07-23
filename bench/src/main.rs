@@ -213,6 +213,13 @@ const ENGINE_SLOTS: &[EngineSlot] = &[
         implemented: true,
     },
     EngineSlot {
+        id: "mlua-luau-jit",
+        dialect: Dialect::Luau,
+        feature: Some("mlua-luau-jit"),
+        enabled: cfg!(feature = "mlua-luau-jit"),
+        implemented: true,
+    },
+    EngineSlot {
         id: "rhai",
         dialect: Dialect::Rhai,
         feature: Some("rhai-engine"),
@@ -319,11 +326,25 @@ struct Measurement {
     ns_per_unit_min: f64,
     ns_per_unit_median: f64,
     samples_ns_per_unit: Vec<f64>,
+    prepare_ns_min: f64,
+    prepare_ns_median: f64,
+    first_call_ns_min: f64,
+    first_call_ns_median: f64,
+    cold_start_ns_min: f64,
+    cold_start_ns_median: f64,
+    samples_prepare_ns: Vec<f64>,
+    samples_first_call_ns: Vec<f64>,
+    samples_cold_start_ns: Vec<f64>,
     units_per_sec: f64,
     checksum: String,
     commit: String,
     timestamp_unix: u64,
     target: String,
+    mode_family: &'static str,
+    execution_mode: &'static str,
+    native_verified: bool,
+    native_verification: &'static str,
+    native_verification_ratio: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -355,6 +376,17 @@ struct ResultRow {
     ns_per_unit_median: f64,
     units_per_sec: f64,
     checksum: String,
+    prepare_ns_min: Option<f64>,
+    prepare_ns_median: Option<f64>,
+    first_call_ns_min: Option<f64>,
+    first_call_ns_median: Option<f64>,
+    cold_start_ns_min: Option<f64>,
+    cold_start_ns_median: Option<f64>,
+    mode_family: String,
+    execution_mode: String,
+    native_verified: bool,
+    native_verification: String,
+    native_verification_ratio: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -371,6 +403,24 @@ struct HistoryRecord {
     ns_per_unit_median: f64,
     units_per_sec: f64,
     checksum: String,
+    prepare_ns_min: Option<f64>,
+    prepare_ns_median: Option<f64>,
+    first_call_ns_min: Option<f64>,
+    first_call_ns_median: Option<f64>,
+    cold_start_ns_min: Option<f64>,
+    cold_start_ns_median: Option<f64>,
+    mode_family: String,
+    execution_mode: String,
+    native_verified: bool,
+    native_verification: String,
+    native_verification_ratio: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct EngineVerification {
+    verified: bool,
+    method: &'static str,
+    speedup_ratio: Option<f64>,
 }
 
 #[derive(Debug)]
@@ -398,7 +448,58 @@ impl ResultRow {
             ns_per_unit_median: record.ns_per_unit_median,
             units_per_sec: record.units_per_sec,
             checksum: record.checksum.clone(),
+            prepare_ns_min: Some(record.prepare_ns_min),
+            prepare_ns_median: Some(record.prepare_ns_median),
+            first_call_ns_min: Some(record.first_call_ns_min),
+            first_call_ns_median: Some(record.first_call_ns_median),
+            cold_start_ns_min: Some(record.cold_start_ns_min),
+            cold_start_ns_median: Some(record.cold_start_ns_median),
+            mode_family: record.mode_family.to_owned(),
+            execution_mode: record.execution_mode.to_owned(),
+            native_verified: record.native_verified,
+            native_verification: record.native_verification.to_owned(),
+            native_verification_ratio: record.native_verification_ratio,
         }
+    }
+}
+
+fn mode_family(engine: &str) -> &'static str {
+    match engine {
+        "mlua-luau-jit" => "mlua-luau",
+        _ => ENGINE_SLOTS
+            .iter()
+            .find(|slot| slot.id == engine)
+            .map_or("unknown", |slot| slot.id),
+    }
+}
+
+fn execution_mode(engine: &str) -> &'static str {
+    match engine {
+        "mlua-luau-jit" => "jit",
+        "roto" | "wasmtime" => "native",
+        _ => "interpreter",
+    }
+}
+
+fn verify_engine(engine: &EngineSlot) -> Result<EngineVerification> {
+    match engine.id {
+        #[cfg(feature = "mlua-luau-jit")]
+        "mlua-luau-jit" => verify_mlua_luau_jit(),
+        "roto" => Ok(EngineVerification {
+            verified: true,
+            method: "cranelift-function-construction",
+            speedup_ratio: None,
+        }),
+        "wasmtime" => Ok(EngineVerification {
+            verified: true,
+            method: "wasmtime-cranelift-module",
+            speedup_ratio: None,
+        }),
+        _ => Ok(EngineVerification {
+            verified: false,
+            method: "not-applicable",
+            speedup_ratio: None,
+        }),
     }
 }
 
@@ -486,6 +587,19 @@ fn run() -> Result<()> {
             println!("skip {:<12} {}", engine.id, unavailable_reason(engine));
             continue;
         }
+        let verification = verify_engine(engine)?;
+        if execution_mode(engine.id) != "interpreter" {
+            println!(
+                "verify {:<12} mode={} method={}{}",
+                engine.id,
+                execution_mode(engine.id),
+                verification.method,
+                verification
+                    .speedup_ratio
+                    .map(|ratio| format!(" speedup={ratio:.2}x"))
+                    .unwrap_or_default()
+            );
+        }
 
         for workload in &selected_workloads {
             let Some(source_path) = workload_path(&repo, engine.dialect, workload) else {
@@ -499,7 +613,7 @@ fn run() -> Result<()> {
             };
             let source =
                 fs::read_to_string(&source_path).map_err(|error| Error::io(&source_path, error))?;
-            let measurement = measure(&config, engine, workload, &source)?;
+            let measurement = measure(&config, engine, workload, &source, verification)?;
             println!(
                 "{:<12} {:<20} {:>10.2} ns/unit min {:>10.2} median n={:<8} checksum={}",
                 measurement.engine,
@@ -739,6 +853,8 @@ fn inventory_json_value() -> serde_json::Value {
                 } else {
                     unavailable_reason(slot)
                 },
+                "mode_family": mode_family(slot.id),
+                "execution_mode": execution_mode(slot.id),
             })
         })
         .collect::<Vec<_>>();
@@ -867,6 +983,7 @@ fn unavailable_reason(slot: &EngineSlot) -> &'static str {
                 "luaur-engine" => "compile with --features luaur-engine",
                 "mlua-lua54" => "compile with --features mlua-lua54",
                 "mlua-luau" => "compile with --features mlua-luau",
+                "mlua-luau-jit" => "compile with --features mlua-luau-jit",
                 "rhai-engine" => "compile with --features rhai-engine",
                 "roto" => "compile with --features roto",
                 "ruau-engine" => "compile with --features ruau-engine",
@@ -957,7 +1074,9 @@ fn prepare(
         #[cfg(feature = "mlua-lua54")]
         "mlua-lua54" => Ok(Box::new(MluaLua54Prepared::new(_workload, _source)?)),
         #[cfg(feature = "mlua-luau")]
-        "mlua-luau" => Ok(Box::new(MluaLuauPrepared::new(_workload, _source)?)),
+        "mlua-luau" => Ok(Box::new(MluaLuauPrepared::new(_workload, _source, false)?)),
+        #[cfg(feature = "mlua-luau-jit")]
+        "mlua-luau-jit" => Ok(Box::new(MluaLuauPrepared::new(_workload, _source, true)?)),
         #[cfg(feature = "rhai-engine")]
         "rhai" => Ok(Box::new(RhaiPrepared::new(_workload, _source)?)),
         #[cfg(feature = "roto")]
@@ -981,8 +1100,9 @@ fn measure(
     engine: &EngineSlot,
     workload: &Workload,
     source: &str,
+    verification: EngineVerification,
 ) -> Result<Measurement> {
-    measure_with_factory(config, engine, workload, || {
+    measure_with_factory(config, engine, workload, verification, || {
         prepare(engine, workload, source)
     })
 }
@@ -991,6 +1111,7 @@ fn measure_with_factory(
     config: &Config,
     engine: &EngineSlot,
     workload: &Workload,
+    verification: EngineVerification,
     mut factory: impl FnMut() -> Result<Box<dyn PreparedWorkload>>,
 ) -> Result<Measurement> {
     let (n, n_selection) = if let Some(n) = config.fixed_n {
@@ -1015,8 +1136,19 @@ fn measure_with_factory(
 
     let n_f64 = n as f64;
     let mut samples_ns_per_unit = Vec::with_capacity(config.reps);
+    let mut samples_prepare_ns = Vec::with_capacity(config.reps);
+    let mut samples_first_call_ns = Vec::with_capacity(config.reps);
+    let mut samples_cold_start_ns = Vec::with_capacity(config.reps);
     let mut checksum = String::new();
     for _ in 0..config.reps {
+        let prepare_started = Instant::now();
+        let mut cold = factory()?;
+        let prepare_elapsed = prepare_started.elapsed();
+        let (_, first_call_elapsed) = run_once(&mut *cold, 1)?;
+        samples_prepare_ns.push(prepare_elapsed.as_secs_f64() * 1e9);
+        samples_first_call_ns.push(first_call_elapsed.as_secs_f64() * 1e9);
+        samples_cold_start_ns.push((prepare_elapsed + first_call_elapsed).as_secs_f64() * 1e9);
+
         let mut prepared = factory()?;
         let _ = prepared.run(n)?;
         let (sample_checksum, elapsed) = run_once(&mut *prepared, n)?;
@@ -1027,6 +1159,9 @@ fn measure_with_factory(
     sorted_samples.sort_by(|lhs, rhs| lhs.total_cmp(rhs));
     let ns_per_unit_min = sorted_samples[0];
     let ns_per_unit_median = sorted_samples[sorted_samples.len() / 2];
+    let (prepare_ns_min, prepare_ns_median) = sample_min_median(&samples_prepare_ns);
+    let (first_call_ns_min, first_call_ns_median) = sample_min_median(&samples_first_call_ns);
+    let (cold_start_ns_min, cold_start_ns_median) = sample_min_median(&samples_cold_start_ns);
 
     Ok(Measurement {
         engine: engine.id.to_owned(),
@@ -1039,12 +1174,32 @@ fn measure_with_factory(
         ns_per_unit_min,
         ns_per_unit_median,
         samples_ns_per_unit,
+        prepare_ns_min,
+        prepare_ns_median,
+        first_call_ns_min,
+        first_call_ns_median,
+        cold_start_ns_min,
+        cold_start_ns_median,
+        samples_prepare_ns,
+        samples_first_call_ns,
+        samples_cold_start_ns,
         units_per_sec: 1e9 / ns_per_unit_min,
         checksum,
         commit: config.commit.clone().unwrap_or_else(git_commit),
         timestamp_unix: unix_time(),
         target: format!("{}-{}", env::consts::OS, env::consts::ARCH),
+        mode_family: mode_family(engine.id),
+        execution_mode: execution_mode(engine.id),
+        native_verified: verification.verified,
+        native_verification: verification.method,
+        native_verification_ratio: verification.speedup_ratio,
     })
+}
+
+fn sample_min_median(samples: &[f64]) -> (f64, f64) {
+    let mut sorted = samples.to_vec();
+    sorted.sort_by(|left, right| left.total_cmp(right));
+    (sorted[0], sorted[sorted.len() / 2])
 }
 
 fn run_once(prepared: &mut dyn PreparedWorkload, n: u64) -> Result<(String, Duration)> {
@@ -1395,8 +1550,16 @@ struct MluaLuauPrepared {
 
 #[cfg(feature = "mlua-luau")]
 impl MluaLuauPrepared {
-    fn new(workload: &Workload, source: &str) -> Result<Self> {
+    fn new(workload: &Workload, source: &str, jit: bool) -> Result<Self> {
         let lua = mlua_luau::Lua::new();
+        #[cfg(feature = "mlua-luau-jit")]
+        lua.enable_jit(jit);
+        #[cfg(not(feature = "mlua-luau-jit"))]
+        if jit {
+            return Err(Error::new(
+                "mlua-luau JIT requested without the mlua-luau-jit feature",
+            ));
+        }
         let function = lua
             .load(source)
             .eval::<mlua_luau::Function>()
@@ -1406,6 +1569,69 @@ impl MluaLuauPrepared {
             function,
         })
     }
+}
+
+#[cfg(feature = "mlua-luau-jit")]
+fn verify_mlua_luau_jit() -> Result<EngineVerification> {
+    const SOURCE: &str = r#"
+        return function(n)
+            local acc = 0
+            for i = 1, n do
+                acc += (i % 17) * 0.125
+            end
+            return acc
+        end
+    "#;
+    const N: i64 = 2_000_000;
+    const REPS: usize = 5;
+
+    fn samples(source: &str, jit: bool) -> Result<(u64, Vec<f64>)> {
+        let lua = mlua_luau::Lua::new();
+        lua.enable_jit(jit);
+        let function = lua
+            .load(source)
+            .eval::<mlua_luau::Function>()
+            .map_err(|error| Error::new(format!("JIT verification compile failed: {error}")))?;
+        let expected = function
+            .call::<f64>(N)
+            .map_err(|error| Error::new(format!("JIT verification warmup failed: {error}")))?;
+        let mut samples = Vec::with_capacity(REPS);
+        for _ in 0..REPS {
+            let started = Instant::now();
+            let result = function
+                .call::<f64>(N)
+                .map_err(|error| Error::new(format!("JIT verification call failed: {error}")))?;
+            let elapsed = started.elapsed().as_secs_f64();
+            if result.to_bits() != expected.to_bits() {
+                return Err(Error::new(
+                    "JIT verification checksum changed between calls",
+                ));
+            }
+            samples.push(elapsed);
+        }
+        Ok((expected.to_bits(), samples))
+    }
+
+    let (interpreter_checksum, interpreter) = samples(SOURCE, false)?;
+    let (native_checksum, native) = samples(SOURCE, true)?;
+    if native_checksum != interpreter_checksum {
+        return Err(Error::new(
+            "mlua-luau-jit native sentinel disagreed with the interpreter checksum",
+        ));
+    }
+    let (_, interpreter_median) = sample_min_median(&interpreter);
+    let (_, native_median) = sample_min_median(&native);
+    let speedup = interpreter_median / native_median;
+    if !speedup.is_finite() || speedup < 1.5 {
+        return Err(Error::new(format!(
+            "mlua-luau-jit native sentinel achieved only {speedup:.3}x; refusing a row that may have fallen back to interpretation"
+        )));
+    }
+    Ok(EngineVerification {
+        verified: true,
+        method: "ab-native-sentinel",
+        speedup_ratio: Some(speedup),
+    })
 }
 
 #[cfg(feature = "mlua-luau")]
@@ -1735,22 +1961,29 @@ fn write_results(path: &Path, history: Option<&Path>, records: &[Measurement]) -
         })
         .collect::<BTreeMap<_, _>>();
     text.push_str(
-        "| target | engine | workload | ns/unit min | ns/unit median | speed vs rustia | units/sec | n | checksum |\n",
+        "| target | engine | workload | mode | ns/unit min | ns/unit median | speed vs rustia | prepare median ns | first-call median ns | cold-start median ns | units/sec | n | checksum |\n",
     );
-    text.push_str("|---|---|---|---:|---:|---:|---:|---:|---|\n");
+    text.push_str("|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|\n");
     for row in &rows {
         let speed_vs_rustia = rustia_baselines
             .get(&(row.target.as_str(), row.workload.as_str()))
             .map(|baseline| format!("{:.2}x", baseline / row.ns_per_unit_min))
             .unwrap_or_else(|| "n/a".to_owned());
         text.push_str(&format!(
-            "| {} | {} | {} | {:.2} | {:.2} | {} | {:.0} | {} | `{}` |\n",
+            "| {} | {} | {} | {} | {:.2} | {:.2} | {} | {} | {} | {} | {:.0} | {} | `{}` |\n",
             row.target,
             row.engine,
             row.workload,
+            row.execution_mode,
             row.ns_per_unit_min,
             row.ns_per_unit_median,
             speed_vs_rustia,
+            row.prepare_ns_median
+                .map_or_else(|| "n/a".to_owned(), |value| format!("{value:.2}")),
+            row.first_call_ns_median
+                .map_or_else(|| "n/a".to_owned(), |value| format!("{value:.2}")),
+            row.cold_start_ns_median
+                .map_or_else(|| "n/a".to_owned(), |value| format!("{value:.2}")),
             row.units_per_sec,
             row.n,
             row.checksum.replace('|', "\\|")
@@ -1818,6 +2051,17 @@ fn write_latest_json(
                 "units_per_sec": row.units_per_sec,
                 "checksum": row.checksum,
                 "speed_vs_rustia": speed_vs_rustia,
+                "prepare_ns_min": row.prepare_ns_min,
+                "prepare_ns_median": row.prepare_ns_median,
+                "first_call_ns_min": row.first_call_ns_min,
+                "first_call_ns_median": row.first_call_ns_median,
+                "cold_start_ns_min": row.cold_start_ns_min,
+                "cold_start_ns_median": row.cold_start_ns_median,
+                "mode_family": row.mode_family,
+                "execution_mode": row.execution_mode,
+                "native_verified": row.native_verified,
+                "native_verification": row.native_verification,
+                "native_verification_ratio": row.native_verification_ratio,
             })
         })
         .collect::<Vec<_>>();
@@ -1873,6 +2117,20 @@ fn write_samples_json(path: &Path, records: &[Measurement]) -> Result<()> {
                 "units_per_sec": record.units_per_sec,
                 "checksum": record.checksum,
                 "samples_ns_per_unit": record.samples_ns_per_unit,
+                "prepare_ns_min": record.prepare_ns_min,
+                "prepare_ns_median": record.prepare_ns_median,
+                "first_call_ns_min": record.first_call_ns_min,
+                "first_call_ns_median": record.first_call_ns_median,
+                "cold_start_ns_min": record.cold_start_ns_min,
+                "cold_start_ns_median": record.cold_start_ns_median,
+                "samples_prepare_ns": record.samples_prepare_ns,
+                "samples_first_call_ns": record.samples_first_call_ns,
+                "samples_cold_start_ns": record.samples_cold_start_ns,
+                "mode_family": record.mode_family,
+                "execution_mode": record.execution_mode,
+                "native_verified": record.native_verified,
+                "native_verification": record.native_verification,
+                "native_verification_ratio": record.native_verification_ratio,
             })
         })
         .collect::<Vec<_>>();
@@ -1891,6 +2149,8 @@ fn write_samples_json(path: &Path, records: &[Measurement]) -> Result<()> {
             "sample_order": "execution order (unsorted)",
             "measurement_count": records.len(),
             "sample_count": sample_count,
+            "cold_sample_count": sample_count,
+            "cold_measurement": "fresh prepare followed immediately by one workload unit; prepare, first-call, and combined latency are retained separately",
         },
         "measurements": measurements,
     });
@@ -1917,6 +2177,17 @@ fn latest_result_rows(history: Option<&Path>, records: &[Measurement]) -> Result
                 ns_per_unit_median: record.ns_per_unit_median,
                 units_per_sec: record.units_per_sec,
                 checksum: record.checksum,
+                prepare_ns_min: record.prepare_ns_min,
+                prepare_ns_median: record.prepare_ns_median,
+                first_call_ns_min: record.first_call_ns_min,
+                first_call_ns_median: record.first_call_ns_median,
+                cold_start_ns_min: record.cold_start_ns_min,
+                cold_start_ns_median: record.cold_start_ns_median,
+                mode_family: record.mode_family,
+                execution_mode: record.execution_mode,
+                native_verified: record.native_verified,
+                native_verification: record.native_verification,
+                native_verification_ratio: record.native_verification_ratio,
             };
             latest.insert(
                 (row.target.clone(), row.engine.clone(), row.workload.clone()),
@@ -2036,6 +2307,17 @@ fn history_record_from_json(
     let ns_per_unit_median = json_positive_f64(path, line_number, value, "ns_per_unit_median")?;
     let units_per_sec = json_positive_f64(path, line_number, value, "units_per_sec")?;
     let checksum = json_non_empty_string(path, line_number, value, "checksum")?;
+    let prepare_ns_min = json_optional_positive_f64(path, line_number, value, "prepare_ns_min")?;
+    let prepare_ns_median =
+        json_optional_positive_f64(path, line_number, value, "prepare_ns_median")?;
+    let first_call_ns_min =
+        json_optional_positive_f64(path, line_number, value, "first_call_ns_min")?;
+    let first_call_ns_median =
+        json_optional_positive_f64(path, line_number, value, "first_call_ns_median")?;
+    let cold_start_ns_min =
+        json_optional_positive_f64(path, line_number, value, "cold_start_ns_min")?;
+    let cold_start_ns_median =
+        json_optional_positive_f64(path, line_number, value, "cold_start_ns_median")?;
 
     let engine_slot = ENGINE_SLOTS
         .iter()
@@ -2051,6 +2333,51 @@ fn history_record_from_json(
             "{} line {line_number}: engine {engine:?} uses dialect {:?}, got {dialect:?}",
             path.display(),
             engine_slot.dialect.as_str()
+        )));
+    }
+    let expected_mode_family = mode_family(&engine);
+    let mode_family = value
+        .get("mode_family")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(expected_mode_family)
+        .to_owned();
+    if mode_family != expected_mode_family {
+        return Err(Error::new(format!(
+            "{} line {line_number}: engine {engine:?} uses mode family {expected_mode_family:?}, got {mode_family:?}",
+            path.display()
+        )));
+    }
+    let expected_execution_mode = execution_mode(&engine);
+    let execution_mode = value
+        .get("execution_mode")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(expected_execution_mode)
+        .to_owned();
+    if execution_mode != expected_execution_mode {
+        return Err(Error::new(format!(
+            "{} line {line_number}: engine {engine:?} uses execution mode {expected_execution_mode:?}, got {execution_mode:?}",
+            path.display()
+        )));
+    }
+    let native_verified = value
+        .get("native_verified")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let native_verification = value
+        .get("native_verification")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("legacy-unverified")
+        .to_owned();
+    let native_verification_ratio =
+        json_optional_positive_f64(path, line_number, value, "native_verification_ratio")?;
+    if engine == "mlua-luau-jit"
+        && (!native_verified
+            || native_verification != "ab-native-sentinel"
+            || native_verification_ratio.is_none_or(|ratio| ratio < 1.5))
+    {
+        return Err(Error::new(format!(
+            "{} line {line_number}: mlua-luau-jit requires verified native execution and a >=1.5x sentinel ratio",
+            path.display()
         )));
     }
 
@@ -2090,6 +2417,17 @@ fn history_record_from_json(
         ns_per_unit_median,
         units_per_sec,
         checksum,
+        prepare_ns_min,
+        prepare_ns_median,
+        first_call_ns_min,
+        first_call_ns_median,
+        cold_start_ns_min,
+        cold_start_ns_median,
+        mode_family,
+        execution_mode,
+        native_verified,
+        native_verification,
+        native_verification_ratio,
     })
 }
 
@@ -2185,6 +2523,18 @@ fn json_positive_f64(
     Ok(number)
 }
 
+fn json_optional_positive_f64(
+    path: &Path,
+    line_number: usize,
+    value: &serde_json::Value,
+    field: &str,
+) -> Result<Option<f64>> {
+    if value.get(field).is_none_or(serde_json::Value::is_null) {
+        return Ok(None);
+    }
+    json_positive_f64(path, line_number, value, field).map(Some)
+}
+
 fn history_field_error(path: &Path, line_number: usize, field: &str, expected: &str) -> Error {
     Error::new(format!(
         "{} line {line_number}: expected {field:?} to be a {expected}",
@@ -2207,46 +2557,33 @@ fn workload_order(workload: &str) -> usize {
 }
 
 fn record_json(record: &Measurement) -> String {
-    format!(
-        "{{\"timestamp_unix\":{},\"commit\":\"{}\",\"target\":\"{}\",\"engine\":\"{}\",\"dialect\":\"{}\",\"workload\":\"{}\",\"unit\":\"{}\",\"n\":{},\"reps\":{},\"ns_per_unit_min\":{},\"ns_per_unit_median\":{},\"units_per_sec\":{},\"checksum\":\"{}\"}}",
-        record.timestamp_unix,
-        json_escape(&record.commit),
-        json_escape(&record.target),
-        json_escape(&record.engine),
-        json_escape(record.dialect),
-        json_escape(&record.workload),
-        json_escape(record.unit),
-        record.n,
-        record.reps,
-        finite_json_number(record.ns_per_unit_min),
-        finite_json_number(record.ns_per_unit_median),
-        finite_json_number(record.units_per_sec),
-        json_escape(&record.checksum)
-    )
-}
-
-fn finite_json_number(value: f64) -> String {
-    if value.is_finite() {
-        format!("{value:.6}")
-    } else {
-        "null".to_owned()
-    }
-}
-
-fn json_escape(value: &str) -> String {
-    let mut escaped = String::new();
-    for ch in value.chars() {
-        match ch {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            ch if ch.is_control() => escaped.push_str(&format!("\\u{:04x}", ch as u32)),
-            ch => escaped.push(ch),
-        }
-    }
-    escaped
+    serde_json::to_string(&serde_json::json!({
+        "timestamp_unix": record.timestamp_unix,
+        "commit": record.commit,
+        "target": record.target,
+        "engine": record.engine,
+        "dialect": record.dialect,
+        "workload": record.workload,
+        "unit": record.unit,
+        "n": record.n,
+        "reps": record.reps,
+        "ns_per_unit_min": record.ns_per_unit_min,
+        "ns_per_unit_median": record.ns_per_unit_median,
+        "units_per_sec": record.units_per_sec,
+        "checksum": record.checksum,
+        "prepare_ns_min": record.prepare_ns_min,
+        "prepare_ns_median": record.prepare_ns_median,
+        "first_call_ns_min": record.first_call_ns_min,
+        "first_call_ns_median": record.first_call_ns_median,
+        "cold_start_ns_min": record.cold_start_ns_min,
+        "cold_start_ns_median": record.cold_start_ns_median,
+        "mode_family": record.mode_family,
+        "execution_mode": record.execution_mode,
+        "native_verified": record.native_verified,
+        "native_verification": record.native_verification,
+        "native_verification_ratio": record.native_verification_ratio,
+    }))
+    .expect("measurement JSON contains only serializable values")
 }
 
 fn git_commit() -> String {
@@ -2318,7 +2655,7 @@ mod tests {
             .and_then(serde_json::Value::as_array)
             .expect("engines array");
 
-        assert_eq!(engines.len(), 12);
+        assert_eq!(engines.len(), 13);
         for engine in engines {
             let id = engine
                 .get("id")
@@ -2574,38 +2911,51 @@ mod tests {
         };
         let next_id = Rc::new(Cell::new(0_usize));
         let runs = Rc::new(RefCell::new(Vec::new()));
-        let measurement = measure_with_factory(&config, &ENGINE_SLOTS[0], &WORKLOADS[0], {
-            let next_id = Rc::clone(&next_id);
-            let runs = Rc::clone(&runs);
-            move || {
-                let id = next_id.get();
-                next_id.set(id + 1);
-                Ok(Box::new(RecordingPrepared {
-                    id,
-                    run_count: 0,
-                    runs: Rc::clone(&runs),
-                }) as Box<dyn PreparedWorkload>)
-            }
-        })
+        let measurement = measure_with_factory(
+            &config,
+            &ENGINE_SLOTS[0],
+            &WORKLOADS[0],
+            test_verification(),
+            {
+                let next_id = Rc::clone(&next_id);
+                let runs = Rc::clone(&runs);
+                move || {
+                    let id = next_id.get();
+                    next_id.set(id + 1);
+                    Ok(Box::new(RecordingPrepared {
+                        id,
+                        run_count: 0,
+                        runs: Rc::clone(&runs),
+                    }) as Box<dyn PreparedWorkload>)
+                }
+            },
+        )
         .expect("measurement");
 
-        assert_eq!(next_id.get(), 4, "one calibration plus three samples");
+        assert_eq!(
+            next_id.get(),
+            7,
+            "one calibration plus two preparations per sample"
+        );
         assert_eq!(
             runs.borrow().as_slice(),
             &[
                 (0, 1, 1),
                 (0, 2, 1),
                 (1, 1, 1),
-                (1, 2, 1),
                 (2, 1, 1),
                 (2, 2, 1),
                 (3, 1, 1),
-                (3, 2, 1),
+                (4, 1, 1),
+                (4, 2, 1),
+                (5, 1, 1),
+                (6, 1, 1),
+                (6, 2, 1),
             ]
         );
         assert_eq!(measurement.samples_ns_per_unit.len(), 3);
         assert_eq!(measurement.n_selection, NSelection::Calibrated);
-        assert_eq!(measurement.checksum, "instance:3:run:2");
+        assert_eq!(measurement.checksum, "instance:6:run:2");
     }
 
     #[test]
@@ -2619,35 +2969,44 @@ mod tests {
         };
         let next_id = Rc::new(Cell::new(0_usize));
         let runs = Rc::new(RefCell::new(Vec::new()));
-        let measurement = measure_with_factory(&config, &ENGINE_SLOTS[0], &WORKLOADS[0], {
-            let next_id = Rc::clone(&next_id);
-            let runs = Rc::clone(&runs);
-            move || {
-                let id = next_id.get();
-                next_id.set(id + 1);
-                Ok(Box::new(RecordingPrepared {
-                    id,
-                    run_count: 0,
-                    runs: Rc::clone(&runs),
-                }) as Box<dyn PreparedWorkload>)
-            }
-        })
+        let measurement = measure_with_factory(
+            &config,
+            &ENGINE_SLOTS[0],
+            &WORKLOADS[0],
+            test_verification(),
+            {
+                let next_id = Rc::clone(&next_id);
+                let runs = Rc::clone(&runs);
+                move || {
+                    let id = next_id.get();
+                    next_id.set(id + 1);
+                    Ok(Box::new(RecordingPrepared {
+                        id,
+                        run_count: 0,
+                        runs: Rc::clone(&runs),
+                    }) as Box<dyn PreparedWorkload>)
+                }
+            },
+        )
         .expect("fixed measurement");
 
         assert_eq!(
             next_id.get(),
-            3,
+            6,
             "fixed mode must not prepare calibration state"
         );
         assert_eq!(
             runs.borrow().as_slice(),
             &[
-                (0, 1, 1500),
-                (0, 2, 1500),
+                (0, 1, 1),
                 (1, 1, 1500),
                 (1, 2, 1500),
-                (2, 1, 1500),
-                (2, 2, 1500),
+                (2, 1, 1),
+                (3, 1, 1500),
+                (3, 2, 1500),
+                (4, 1, 1),
+                (5, 1, 1500),
+                (5, 2, 1500),
             ]
         );
         assert_eq!(measurement.n, 1500);
@@ -2725,11 +3084,16 @@ mod tests {
         assert_eq!(value["schema"], "rustia.bench.raw-samples.v1");
         assert_eq!(value["metadata"]["measurement_count"], 1);
         assert_eq!(value["metadata"]["sample_count"], 3);
+        assert_eq!(value["metadata"]["cold_sample_count"], 3);
         assert_eq!(value["measurements"][0]["n"], 1500);
         assert_eq!(value["measurements"][0]["n_selection"], "fixed");
         assert_eq!(
             value["measurements"][0]["samples_ns_per_unit"],
             serde_json::json!([3.0, 1.0, 2.0])
+        );
+        assert_eq!(
+            value["measurements"][0]["samples_cold_start_ns"],
+            serde_json::json!([80.0, 40.0, 60.0])
         );
         assert!(
             !record_json(&measurement).contains("samples_ns_per_unit"),
@@ -2789,11 +3153,33 @@ mod tests {
             ns_per_unit_min: 1.0,
             ns_per_unit_median: 1.5,
             samples_ns_per_unit: vec![3.0, 1.0, 2.0],
+            prepare_ns_min: 10.0,
+            prepare_ns_median: 20.0,
+            first_call_ns_min: 30.0,
+            first_call_ns_median: 40.0,
+            cold_start_ns_min: 40.0,
+            cold_start_ns_median: 60.0,
+            samples_prepare_ns: vec![30.0, 10.0, 20.0],
+            samples_first_call_ns: vec![50.0, 30.0, 40.0],
+            samples_cold_start_ns: vec![80.0, 40.0, 60.0],
             units_per_sec: 1_000_000_000.0,
             checksum: "i64:42".to_owned(),
             commit: commit.to_owned(),
             timestamp_unix,
             target: "test-target".to_owned(),
+            mode_family: engine,
+            execution_mode: "interpreter",
+            native_verified: false,
+            native_verification: "not-applicable",
+            native_verification_ratio: None,
+        }
+    }
+
+    fn test_verification() -> EngineVerification {
+        EngineVerification {
+            verified: false,
+            method: "not-applicable",
+            speedup_ratio: None,
         }
     }
 

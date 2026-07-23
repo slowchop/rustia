@@ -553,7 +553,8 @@ node tools/run-wasm-dispatch-gate.js
 ```
 
 Engine slots are tracked for `rustia`, `boa`, `koto`, `luaur`, `mlua-lua54`,
-`mlua-luau`, `rhai`, `roto`, `ruau`, `rquickjs`, `wasmi`, and `wasmtime`. Adapters are
+`mlua-luau`, `mlua-luau-jit`, `rhai`, `roto`, `ruau`, `rquickjs`, `wasmi`, and `wasmtime`. The
+two mlua/Luau slots are the same adapter in explicit interpreter and native-JIT modes. Adapters are
 feature-gated so heavyweight dependencies do not affect the normal workspace
 build.
 
@@ -575,11 +576,14 @@ The coordinator verifies the frozen source and runtime artifacts, provisions the
 declared Linux/x86_64 shape, builds the `all-engines` binary plus the separate
 Lua 5.4 binary, and measures the five common workloads. It then runs the three
 wasm adapters on Node/V8, the most widely used JavaScript runtime, on that same
-host. Promotion requires the exact 60 native rows, 15 wasm rows, one dispatch run, Linux-only
+host. Promotion requires the exact 65 native rows, 15 wasm rows, one dispatch run, Linux-only
 target identities, a single source revision, and confirmed instance deletion.
 The accepted four-runtime matrix is retained under `bench/wasm/history/` as
 historical portability evidence; it is not repeated in the recurring public
-benchmark. The matrix v3 host gate keeps every prewindow at zero steal. A timed group
+benchmark. The matrix v4 host gate keeps every prewindow at zero steal. It also retains
+per-repetition preparation, first-call, combined cold-start, and warmed steady-state timings. The
+JIT row is published only when a matched JIT-off/JIT-on sentinel has the same checksum and shows at
+least a 1.5x native execution signal. A timed group
 passes at no more than 0.1% steal or one accounting tick; otherwise it restores
 only that group's outputs and retries up to three times after a fresh quiet
 prewindow, while retaining every rejected gate record. Each group shares one
@@ -603,7 +607,8 @@ cargo run -p script-bench-harness --no-default-features --features mlua-lua54 --
 In this slice, `rustia` works through the default `rustia-engine` feature,
 `boa` works with `--features boa`, `koto` works with `--features koto`, Luaur
 works with `--features luaur-engine`, Lua 5.4 works with `--features mlua-lua54`,
-the reference Luau comparison works with `--features mlua-luau`, Rhai works
+the reference Luau interpreter comparison works with `--features mlua-luau`, its optional native
+code generator works with `--features mlua-luau-jit`, Rhai works
 with `--features rhai-engine`, Roto works with `--features roto`, Ruau works
 with `--features ruau-engine`, QuickJS works with `--features rquickjs-engine`, Wasmi
 works with `--features wasmi-engine`, and Wasmtime works with
@@ -628,7 +633,18 @@ Each line in `history/runs.jsonl` is a JSON object:
   "ns_per_unit_min": 1.0,
   "ns_per_unit_median": 1.1,
   "units_per_sec": 1000000.0,
-  "checksum": "number:123"
+  "checksum": "number:123",
+  "prepare_ns_min": 1000.0,
+  "prepare_ns_median": 1100.0,
+  "first_call_ns_min": 200.0,
+  "first_call_ns_median": 220.0,
+  "cold_start_ns_min": 1200.0,
+  "cold_start_ns_median": 1320.0,
+  "mode_family": "rustia",
+  "execution_mode": "interpreter",
+  "native_verified": false,
+  "native_verification": "not-applicable",
+  "native_verification_ratio": null
 }
 ```
 
@@ -636,8 +652,9 @@ The future website should treat the versioned JSONL snapshot as the summary
 source of truth and generate charts from `engine × target × workload`
 series.
 
-Raw repetitions are intentionally excluded from this public history schema.
-`--samples-json <path>` exports them without changing JSONL history records or
+Raw repetitions are intentionally excluded from this public history schema, while their derived
+minimums and medians are retained. `--samples-json <path>` exports the ordered steady-state,
+preparation, first-call, and combined cold-start samples without changing JSONL history records or
 generated current-results artifacts. A sidecar is optional for ordinary local
 or calibrated runs, but required when a fixed-N run appends history; accepted
 milestone evidence is retained under `history/evidence/<full-commit>/`.

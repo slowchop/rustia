@@ -30,7 +30,7 @@
     }
   },
   "measurement": {
-    "protocol": "cross_engine_matrix_v3",
+    "protocol": "cross_engine_matrix_v4",
     "native_target": "linux-x86_64",
     "native_engines": [
       "rustia",
@@ -38,6 +38,7 @@
       "koto",
       "luaur",
       "mlua-luau",
+      "mlua-luau-jit",
       "rhai",
       "roto",
       "ruau",
@@ -85,7 +86,7 @@
   },
   "publication": {
     "mode": "matrix",
-    "native_rows": 60,
+    "native_rows": 65,
     "wasm_rows": 15,
     "dispatch_runtimes": 1
   }

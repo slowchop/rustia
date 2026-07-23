@@ -20,11 +20,11 @@ snapshot.
 
 | target | workload | unit | rustia min ns/unit | rustia rank | fastest engine | fastest vs rustia | mlua-luau vs rustia | koto vs rustia | claim posture |
 |---|---|---|---:|---:|---|---:|---:|---:|---|
-| linux-x86_64 | closures_upvalues | one upvalue-mutating closure call | 229 | 7 / 12 | roto | 38.75x | 3.553x | 0.685x | not public-ready: rustia trails mlua-luau by 3.553x |
-| linux-x86_64 | dense_tables | build+sum+sort of 256-elem array | 54,467 | 6 / 12 | wasmtime | 101x | 2.805x | 0.19x | not public-ready: rustia trails mlua-luau by 2.805x |
-| linux-x86_64 | generic_iteration | __iter(32)+pairs(5)+ipairs(32) pass | 12,423 | 10 / 12 | wasmtime | 102x | 2.796x | 1.801x | not public-ready: rustia trails mlua-luau by 2.796x |
-| linux-x86_64 | sparse_tables | fill+read 128 hash entries | 90,337 | 7 / 12 | wasmtime | 167x | 3.83x | 0.618x | not public-ready: rustia trails mlua-luau by 3.83x |
-| linux-x86_64 | stdlib_math_table | math fastcalls + buffered push | 1,175 | 9 / 12 | wasmtime | 164x | 4.88x | 0.682x | not public-ready: rustia trails mlua-luau by 4.88x |
+| linux-x86_64 | closures_upvalues | one upvalue-mutating closure call | 229 | 5 / 10 | mlua-lua54 | 4.951x | 3.553x | 0.685x | not public-ready: rustia trails mlua-luau by 3.553x |
+| linux-x86_64 | dense_tables | build+sum+sort of 256-elem array | 54,467 | 5 / 10 | wasmi | 17.99x | 2.805x | 0.19x | not public-ready: rustia trails mlua-luau by 2.805x |
+| linux-x86_64 | generic_iteration | __iter(32)+pairs(5)+ipairs(32) pass | 12,423 | 8 / 10 | wasmi | 37.13x | 2.796x | 1.801x | not public-ready: rustia trails mlua-luau by 2.796x |
+| linux-x86_64 | sparse_tables | fill+read 128 hash entries | 90,337 | 5 / 10 | wasmi | 28.05x | 3.83x | 0.618x | not public-ready: rustia trails mlua-luau by 3.83x |
+| linux-x86_64 | stdlib_math_table | math fastcalls + buffered push | 1,175 | 7 / 10 | wasmi | 41.97x | 4.88x | 0.682x | not public-ready: rustia trails mlua-luau by 4.88x |
 
 ## Engineering Context Only
 
@@ -32,12 +32,10 @@ These geomeans are useful for triage, but they are not public headline claims.
 
 | engine target | geomean vs rustia | fastest workloads | target detail | coverage |
 |---|---:|---:|---|---|
-| wasmtime (x86_64) | 72.9x | 4 / 5 | linux-x86_64 | 5 workloads |
-| wasmi (x86_64) | 15.81x | 0 / 5 | linux-x86_64 | 5 workloads |
+| wasmi (x86_64) | 15.81x | 4 / 5 | linux-x86_64 | 5 workloads |
 | luaur (x86_64) | 3.833x | 0 / 5 | linux-x86_64 | 5 workloads |
 | mlua-luau (x86_64) | 3.494x | 0 / 5 | linux-x86_64 | 5 workloads |
-| mlua-lua54 (x86_64) | 3.195x | 0 / 5 | linux-x86_64 | 5 workloads |
-| roto (x86_64) | 2.153x | 1 / 5 | linux-x86_64 | 5 workloads |
+| mlua-lua54 (x86_64) | 3.195x | 1 / 5 | linux-x86_64 | 5 workloads |
 | rustia (x86_64) | 1x | 0 / 5 | linux-x86_64 | 5 workloads |
 | rquickjs (x86_64) | 0.972x | 0 / 5 | linux-x86_64 | 5 workloads |
 | ruau (x86_64) | 0.767x | 0 / 5 | linux-x86_64 | 5 workloads |

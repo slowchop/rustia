@@ -36,7 +36,7 @@ const MAX_EXPORT_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
 const MAX_EXPORT_ENTRIES = 10_000;
 const FIXED_THROUGHPUT_PROTOCOL = "fixed_throughput_v1";
 const VM_STRING_MEMORY_PROTOCOL = "vm_string_memory_v1";
-const CROSS_ENGINE_MATRIX_PROTOCOL = "cross_engine_matrix_v3";
+const CROSS_ENGINE_MATRIX_PROTOCOL = "cross_engine_matrix_v4";
 const MAX_TIMED_ATTEMPTS_PER_GROUP = 3;
 const ALLOWED_PROTOCOLS = new Set([
   FIXED_THROUGHPUT_PROTOCOL,
@@ -50,6 +50,7 @@ const MATRIX_NATIVE_ENGINES = Object.freeze([
   "koto",
   "luaur",
   "mlua-luau",
+  "mlua-luau-jit",
   "rhai",
   "roto",
   "ruau",
@@ -569,7 +570,7 @@ function validateConfig(value) {
       ["mode", "native_rows", "wasm_rows", "dispatch_runtimes"],
       "config.publication",
     );
-    if (publication.mode !== "matrix") fail("cross_engine_matrix_v3 publication.mode must be matrix");
+    if (publication.mode !== "matrix") fail("cross_engine_matrix_v4 publication.mode must be matrix");
     const expectedCounts = {
       native_rows: MATRIX_NATIVE_ENGINES.length * MATRIX_WORKLOADS.length,
       wasm_rows: MATRIX_WASM_RUNTIMES.length * MATRIX_WASM_ADAPTERS.length * MATRIX_WORKLOADS.length,
@@ -3699,6 +3700,7 @@ function validateMatrixNativeRows(config, file, status) {
     koto: "koto",
     luaur: "luau",
     "mlua-luau": "luau",
+    "mlua-luau-jit": "luau",
     rhai: "rhai",
     roto: "roto",
     ruau: "luau",
@@ -3710,6 +3712,9 @@ function validateMatrixNativeRows(config, file, status) {
   const expectedKeys = [
     "timestamp_unix", "commit", "target", "engine", "dialect", "workload", "unit", "n", "reps",
     "ns_per_unit_min", "ns_per_unit_median", "units_per_sec", "checksum",
+    "prepare_ns_min", "prepare_ns_median", "first_call_ns_min", "first_call_ns_median",
+    "cold_start_ns_min", "cold_start_ns_median", "mode_family", "execution_mode",
+    "native_verified", "native_verification", "native_verification_ratio",
   ];
   const slots = new Set();
   for (const [index, row] of rows.entries()) {
@@ -3728,6 +3733,31 @@ function validateMatrixNativeRows(config, file, status) {
       requirePositiveFinite(row[field], `matrix native row ${index + 1}.${field}`);
     }
     if (row.ns_per_unit_median < row.ns_per_unit_min) fail(`matrix native row ${index + 1} median is below min`);
+    for (const pair of [
+      ["prepare_ns_min", "prepare_ns_median"],
+      ["first_call_ns_min", "first_call_ns_median"],
+      ["cold_start_ns_min", "cold_start_ns_median"],
+    ]) {
+      requirePositiveFinite(row[pair[0]], `matrix native row ${index + 1}.${pair[0]}`);
+      requirePositiveFinite(row[pair[1]], `matrix native row ${index + 1}.${pair[1]}`);
+      if (row[pair[1]] < row[pair[0]]) fail(`matrix native row ${index + 1} ${pair[1]} is below ${pair[0]}`);
+    }
+    const expectedFamily = row.engine === "mlua-luau-jit" ? "mlua-luau" : row.engine;
+    const expectedMode = row.engine === "mlua-luau-jit" ? "jit" :
+      (row.engine === "roto" || row.engine === "wasmtime" ? "native" : "interpreter");
+    if (row.mode_family !== expectedFamily || row.execution_mode !== expectedMode) {
+      fail(`matrix native row ${index + 1} has the wrong mode identity`);
+    }
+    if (row.engine === "mlua-luau-jit") {
+      if (row.native_verified !== true || row.native_verification !== "ab-native-sentinel") {
+        fail(`matrix native row ${index + 1} lacks JIT execution proof`);
+      }
+      if (requirePositiveFinite(row.native_verification_ratio, `matrix native row ${index + 1}.native_verification_ratio`) < 1.5) {
+        fail(`matrix native row ${index + 1} JIT proof is below 1.5x`);
+      }
+    } else if (row.native_verification_ratio !== null) {
+      fail(`matrix native row ${index + 1} has an unexpected verification ratio`);
+    }
     requireString(row.unit, `matrix native row ${index + 1}.unit`);
     requireString(row.checksum, `matrix native row ${index + 1}.checksum`);
     const slot = `${row.engine}\0${row.workload}`;
@@ -3740,6 +3770,77 @@ function validateMatrixNativeRows(config, file, status) {
     }
   }
   return rows;
+}
+
+function validateMatrixRawSidecar(file, config, engines, historyRows, location) {
+  const sidecar = requireObject(loadJsonRegular(file, location), location);
+  if (sidecar.schema !== "rustia.bench.raw-samples.v1" || sidecar.schema_version !== 1 ||
+      sidecar.source !== "script-bench-harness") {
+    fail(`${location} has the wrong raw-sample identity`);
+  }
+  const expectedMeasurements = engines.length * MATRIX_WORKLOADS.length;
+  const metadata = requireObject(sidecar.metadata, `${location}.metadata`);
+  if (metadata.measurement_count !== expectedMeasurements ||
+      metadata.sample_count !== expectedMeasurements * config.measurement.native_repetitions ||
+      metadata.cold_sample_count !== metadata.sample_count ||
+      !Array.isArray(sidecar.measurements) || sidecar.measurements.length !== expectedMeasurements) {
+    fail(`${location} has the wrong steady/cold sample shape`);
+  }
+  const slots = new Set();
+  for (const [index, measurement] of sidecar.measurements.entries()) {
+    const rowLocation = `${location}.measurements[${index}]`;
+    requireObject(measurement, rowLocation);
+    if (!engines.includes(measurement.engine) || !MATRIX_WORKLOADS.includes(measurement.workload)) {
+      fail(`${rowLocation} has an unexpected engine/workload`);
+    }
+    const slot = `${measurement.engine}\0${measurement.workload}`;
+    if (slots.has(slot)) fail(`${location} duplicates ${measurement.engine}/${measurement.workload}`);
+    slots.add(slot);
+    if (measurement.commit !== config.source.benchmark_commit || measurement.target !== MATRIX_NATIVE_TARGET ||
+        measurement.n_selection !== "calibrated" || measurement.reps !== config.measurement.native_repetitions) {
+      fail(`${rowLocation} has the wrong measurement identity`);
+    }
+    requireInteger(measurement.n, `${rowLocation}.n`, 1);
+    const sampleFields = [
+      ["samples_ns_per_unit", "ns_per_unit_min", "ns_per_unit_median"],
+      ["samples_prepare_ns", "prepare_ns_min", "prepare_ns_median"],
+      ["samples_first_call_ns", "first_call_ns_min", "first_call_ns_median"],
+      ["samples_cold_start_ns", "cold_start_ns_min", "cold_start_ns_median"],
+    ];
+    for (const [samplesField, minField, medianField] of sampleFields) {
+      const samples = measurement[samplesField];
+      if (!Array.isArray(samples) || samples.length !== measurement.reps ||
+          samples.some((sample) => typeof sample !== "number" || !Number.isFinite(sample) || sample <= 0)) {
+        fail(`${rowLocation}.${samplesField} has invalid samples`);
+      }
+      const ordered = samples.slice().sort((left, right) => left - right);
+      if (!numbersClose(measurement[minField], ordered[0]) ||
+          !numbersClose(measurement[medianField], ordered[Math.floor(ordered.length / 2)])) {
+        fail(`${rowLocation} ${minField}/${medianField} do not derive from ${samplesField}`);
+      }
+    }
+    for (let sampleIndex = 0; sampleIndex < measurement.reps; sampleIndex += 1) {
+      const combined = measurement.samples_prepare_ns[sampleIndex] + measurement.samples_first_call_ns[sampleIndex];
+      if (!numbersClose(measurement.samples_cold_start_ns[sampleIndex], combined)) {
+        fail(`${rowLocation} cold sample ${sampleIndex + 1} is not prepare + first call`);
+      }
+    }
+    if (!numbersClose(measurement.units_per_sec, 1e9 / measurement.ns_per_unit_min)) {
+      fail(`${rowLocation}.units_per_sec does not derive from the minimum`);
+    }
+    const history = historyRows.find((row) => row.engine === measurement.engine && row.workload === measurement.workload);
+    if (!history) fail(`${rowLocation} has no matching history row`);
+    for (const field of [
+      "ns_per_unit_min", "ns_per_unit_median", "prepare_ns_min", "prepare_ns_median",
+      "first_call_ns_min", "first_call_ns_median", "cold_start_ns_min", "cold_start_ns_median",
+    ]) {
+      if (!numbersClose(measurement[field], history[field])) fail(`${rowLocation}.${field} disagrees with history`);
+    }
+    for (const field of ["mode_family", "execution_mode", "native_verified", "native_verification", "native_verification_ratio"]) {
+      if (measurement[field] !== history[field]) fail(`${rowLocation}.${field} disagrees with history`);
+    }
+  }
+  if (slots.size !== expectedMeasurements) fail(`${location} is missing matrix slots`);
 }
 
 function requireLinuxWasmTarget(target, location, dispatch = false) {
@@ -3881,7 +3982,7 @@ function validateMatrixDispatch(config, file, status) {
   return value;
 }
 
-function validateMatrixEvidence(config, state, evidenceDirectory, publications, status) {
+function validateMatrixEvidence(config, state, evidenceDirectory, publications, status, nativeRows) {
   const expectedFiles = [
     "gate.jsonl",
     "host.json",
@@ -3921,6 +4022,20 @@ function validateMatrixEvidence(config, state, evidenceDirectory, publications, 
     fail("matrix manifest host hash is wrong");
   }
   validateMatrixGateLog(config, path.join(evidenceDirectory, "gate.jsonl"), status);
+  validateMatrixRawSidecar(
+    path.join(evidenceDirectory, "native-all-samples.json"),
+    config,
+    MATRIX_NATIVE_ENGINES.filter((engine) => engine !== "mlua-lua54"),
+    nativeRows,
+    "matrix all-engine raw samples",
+  );
+  validateMatrixRawSidecar(
+    path.join(evidenceDirectory, "native-lua54-samples.json"),
+    config,
+    ["mlua-lua54"],
+    nativeRows,
+    "matrix Lua 5.4 raw samples",
+  );
   const publicationHashes = {
     history: sha256File(publications.history),
     wasm: sha256File(publications.wasm),
@@ -3981,10 +4096,10 @@ async function promoteMatrixResult(config, state, downloadDirectory, verifyCheck
   if (sha256File(historyDestination) !== config.source.expected_sha256.history_before) {
     fail("local benchmark history changed while the Linode matrix was in flight");
   }
-  validateMatrixNativeRows(config, publications.history, status);
+  const nativeRows = validateMatrixNativeRows(config, publications.history, status);
   validateMatrixWasm(config, publications.wasm, status);
   validateMatrixDispatch(config, publications.dispatch, status);
-  validateMatrixEvidence(config, state, evidenceSource, publications, status);
+  validateMatrixEvidence(config, state, evidenceSource, publications, status, nativeRows);
 
   const destinations = {
     history: historyDestination,
@@ -4946,7 +5061,7 @@ async function selfTest(config) {
       maximum_timed_attempts_per_group: 3,
       wait_timeout_seconds: 300,
     },
-    publication: { mode: "matrix", native_rows: 60, wasm_rows: 15, dispatch_runtimes: 1 },
+    publication: { mode: "matrix", native_rows: 65, wasm_rows: 15, dispatch_runtimes: 1 },
   };
   assert.equal(validateConfig(matrixConfig), matrixConfig);
   assert.equal(expectedTerminalStatus(matrixConfig), "matrix_complete");

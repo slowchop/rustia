@@ -184,13 +184,17 @@ function checkBenchmark(progress, readme, current) {
   }
   const implementedEngines = inventory.engines
     .filter((engine) => engine.implemented)
-    .map((engine) => engine.id);
-  const currentEngines = currentResults.metadata.engines;
+    .map((engine) => engine.mode_family || engine.id);
+  const currentEngines = currentResults.rows.map((row) => row.mode_family || row.engine);
 
   assertEqual(facts.requested, facts.names.length, "requested benchmark adapter count");
   assertEqual(facts.present, facts.names.length, "present benchmark adapter count");
-  assertArraySetEqual(implementedEngines, facts.names, "implemented benchmark adapters");
-  assertArraySetEqual(currentEngines, facts.names, "current-result benchmark adapters");
+  assertArraySetEqual(new Set(implementedEngines), facts.names, "implemented benchmark adapter families");
+  assertArraySetEqual(new Set(currentEngines), facts.names, "current-result benchmark adapter families");
+  const jitSlot = inventory.engines.find((engine) => engine.id === "mlua-luau-jit");
+  if (!jitSlot || jitSlot.mode_family !== "mlua-luau" || jitSlot.execution_mode !== "jit") {
+    fail("benchmark inventory must expose mlua-luau-jit as the mlua-luau adapter family's JIT mode");
+  }
   assertEqual(inventory.workloads.length, workloadFacts.present, "benchmark inventory workload count");
   assertEqual(
     inventory.workloads.filter((workload) => workload.default).length,

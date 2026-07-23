@@ -4,6 +4,8 @@
 const assert = require("assert/strict");
 const {
   REQUIRED_COMMON_WORKLOADS,
+  bestAvailableRows,
+  coldStartSection,
   implementationLabel,
   languageLabel,
   languagesByTargetSection,
@@ -45,8 +47,8 @@ function main() {
     ["JavaScript", "Koto", "Lua 5.4", "Luau", "Rhai", "Roto", "WebAssembly"],
   );
   assert.deepEqual(
-    ["rustia", "mlua-luau", "mlua-lua54", "rquickjs"].map(implementationLabel),
-    ["rustia", "mlua", "mlua", "rquickjs"],
+    ["rustia", "mlua-luau", "mlua-luau-jit", "mlua-lua54", "rquickjs"].map(implementationLabel),
+    ["rustia", "mlua", "mlua", "mlua", "rquickjs"],
   );
 
   const rows = [];
@@ -143,7 +145,7 @@ function main() {
   assert.equal(count(html, 'class="language-target-summary"'), 2);
   assert.equal(count(html, 'data-target="linux-complete"'), 1);
   assert.equal(count(html, 'data-target="linux-partial"'), 1);
-  assert.match(html, /<h2>Languages by Target<\/h2>/);
+  assert.match(html, /<h2>Interpreter-only Languages by Target<\/h2>/);
   assert.match(html, />Complete<\/span>/);
   assert.match(html, />Partial<\/span>/);
   assert.match(html, />Single revision<\/span>/);
@@ -158,6 +160,29 @@ function main() {
   assert.match(html, /data-relative="2x" data-absolute="50 ns"/);
   assert.ok(html.indexOf('data-implementation="koto"') < html.indexOf('data-implementation="rustia"'));
   assert.doesNotMatch(html, /oop_metamethods|excluded-revision/);
+
+  const modeRows = [
+    { ...rows[0], engine: "mlua-luau", mode_family: "mlua-luau", execution_mode: "interpreter" },
+    { ...rows[0], engine: "mlua-luau-jit", mode_family: "mlua-luau", execution_mode: "jit" },
+    { ...rows[0], engine: "rustia", mode_family: "rustia", execution_mode: "interpreter" },
+  ];
+  assert.deepEqual(bestAvailableRows(modeRows).map((row) => row.engine).sort(), ["mlua-luau-jit", "rustia"]);
+
+  const coldHtml = coldStartSection([{
+    target: "linux-complete",
+    engine: "mlua-luau-jit",
+    dialect: "luau",
+    mode: "jit",
+    prepare: 2_000_000,
+    firstCall: 500_000,
+    total: 2_500_000,
+    coverage: 5,
+    nativeVerified: true,
+    nativeVerification: "ab-native-sentinel",
+    nativeVerificationRatio: 3.95,
+  }]);
+  assert.match(coldHtml, /Compile and First-call Cost/);
+  assert.match(coldHtml, /3\.95x A\/B/);
 
   const wasmRows = wasmTargetRows({
     runs: [
