@@ -436,7 +436,6 @@ function buildTargets(config) {
     const cargoArgs = [
         "+1.95.0",
         "build",
-        ...(index === 0 ? [] : ["--offline"]),
         "--manifest-path",
         path.join(source, "bench/Cargo.toml"),
         "--bin",
