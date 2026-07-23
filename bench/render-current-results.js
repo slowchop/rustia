@@ -682,13 +682,25 @@ function summarize(data, wasmRows) {
   const targetRows = [...groupBy(rows, (row) => row.target)]
     .map(([target, values]) => ({ target, values }))
     .sort((left, right) => left.target.localeCompare(right.target));
+  const linuxComparisonRows = summaryRows.filter((row) => row.targetKind !== "wasm32");
 
   return {
     rows,
     summaryRows,
     targetRows,
-    languageTargetRows: summarizeLanguageTargets(summaryRows.filter((row) => row.execution_mode === "interpreter")),
-    bestModeTargetRows: summarizeLanguageTargets(bestAvailableRows(summaryRows)),
+    linuxComparisonViews: {
+      all: summarizeLanguageTargets(linuxComparisonRows),
+      interpreter: summarizeLanguageTargets(
+        linuxComparisonRows.filter((row) => row.execution_mode === "interpreter"),
+      ),
+      accelerated: summarizeLanguageTargets(
+        linuxComparisonRows.filter((row) =>
+          row.execution_mode === "jit" ||
+          row.execution_mode === "native" ||
+          row.engine === "rustia"
+        ),
+      ),
+    },
     coldStartRows: summarizeColdStarts(summaryRows),
     minTimestamp: Math.min(...timestamps),
     maxTimestamp: Math.max(...timestamps),
@@ -1158,12 +1170,40 @@ function languagesByTargetSection(targetRows, {
   `;
 }
 
-function bestAvailableModesSection(targetRows) {
-  return languagesByTargetSection(targetRows, {
-    id: "best-available-modes",
-    title: "Best Available Mode",
-    description: "exact targets complete · each engine family uses its accelerated JIT/native/wasm mode when available, otherwise its interpreter; modes are not cherry-picked per workload",
-  });
+function linuxComparisonSection(views) {
+  const allRows = views.all ?? [];
+  const completeCount = allRows.filter((row) => row.complete).length;
+  const renderView = (name, rows, hidden = false) => `
+    <div class="comparison-mode-view" data-mode-view="${escapeHtml(name)}"${hidden ? " hidden" : ""}>
+      <div class="language-targets">
+        ${rows.map(languageTargetSummary).join("")}
+      </div>
+    </div>
+  `;
+  return `
+    <section class="panel metric-panel" id="linux-comparison">
+      <div class="section-head">
+        <div>
+          <h2>Linux Language Comparison</h2>
+          <p>${formatInteger(completeCount)} / ${formatInteger(allRows.length)} exact Linux targets complete · switch between every measured mode, interpreters only, or verified JIT/native modes plus the rustia baseline.</p>
+        </div>
+        <div class="comparison-controls">
+          <div class="metric-toggle mode-toggle" role="group" aria-label="Execution mode filter">
+            <button type="button" data-mode-filter="all" aria-pressed="true">All</button>
+            <button type="button" data-mode-filter="interpreter" aria-pressed="false">Interpreter</button>
+            <button type="button" data-mode-filter="accelerated" aria-pressed="false">JIT/native</button>
+          </div>
+          <div class="metric-toggle" role="group" aria-label="Benchmark value display">
+            <button type="button" data-metric="relative" aria-pressed="true">vs rustia</button>
+            <button type="button" data-metric="absolute" aria-pressed="false">absolute</button>
+          </div>
+        </div>
+      </div>
+      ${renderView("all", views.all)}
+      ${renderView("interpreter", views.interpreter, true)}
+      ${renderView("accelerated", views.accelerated, true)}
+    </section>
+  `;
 }
 
 function coldStartSection(rows) {
@@ -1788,6 +1828,14 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
     .metric-toggle button[aria-pressed="true"] {
       background: var(--text);
       color: var(--panel);
+    }
+
+    .comparison-controls {
+      display: flex;
+      flex: 0 0 auto;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
     }
 
     .ranked-headline,
@@ -2422,8 +2470,12 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
         flex-direction: column;
       }
 
-      #languages-by-target > .section-head {
+      #linux-comparison > .section-head {
         flex-direction: column;
+      }
+
+      .comparison-controls {
+        justify-content: flex-start;
       }
 
       .language-rank-row {
@@ -2488,8 +2540,7 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
     </section>
 
     <nav class="nav" aria-label="Targets">
-      <a href="#languages-by-target">Interpreters</a>
-      <a href="#best-available-modes">Best Modes</a>
+      <a href="#linux-comparison">Linux Comparison</a>
       <a href="#cold-start">Cold Start</a>
       <a href="#claim-gate">Claim Gate</a>
       <a href="#history">History</a>
@@ -2498,8 +2549,7 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
       ${summary.targetRows.map((group) => `<a href="#${escapeHtml(slug(group.target))}">${escapeHtml(group.target)}</a>`).join("")}
     </nav>
 
-    ${languagesByTargetSection(summary.languageTargetRows)}
-    ${bestAvailableModesSection(summary.bestModeTargetRows)}
+    ${linuxComparisonSection(summary.linuxComparisonViews)}
     ${coldStartSection(summary.coldStartRows)}
     ${claimGateSection(claimRows)}
     ${historySection(history, cohorts, summary.rows, wasmRows)}
@@ -2507,7 +2557,7 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
     ${wasmDispatchSection(wasmDispatchResults)}
     ${summary.targetRows.map(targetSection).join("")}
 
-    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses one inline presentation toggle. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
   <script>
     (() => {
@@ -2534,6 +2584,18 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
           button.addEventListener("click", () => setMetric(root, button.dataset.metric));
         });
         setMetric(root, "relative");
+      });
+      document.querySelectorAll("[data-mode-filter]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const root = button.closest(".metric-panel");
+          const mode = button.dataset.modeFilter;
+          root.querySelectorAll("[data-mode-filter]").forEach((candidate) => {
+            candidate.setAttribute("aria-pressed", String(candidate.dataset.modeFilter === mode));
+          });
+          root.querySelectorAll("[data-mode-view]").forEach((view) => {
+            view.hidden = view.dataset.modeView !== mode;
+          });
+        });
       });
     })();
   </script>
@@ -2577,6 +2639,7 @@ module.exports = {
   coldStartSection,
   implementationLabel,
   languageLabel,
+  linuxComparisonSection,
   languagesByTargetSection,
   summarizeLanguageTargets,
   wasmTargetRows,

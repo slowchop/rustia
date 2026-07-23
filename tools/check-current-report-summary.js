@@ -8,6 +8,7 @@ const {
   coldStartSection,
   implementationLabel,
   languageLabel,
+  linuxComparisonSection,
   languagesByTargetSection,
   summarizeLanguageTargets,
   wasmTargetRows,
@@ -160,6 +161,19 @@ function main() {
   assert.match(html, /data-relative="2x" data-absolute="50 ns"/);
   assert.ok(html.indexOf('data-implementation="koto"') < html.indexOf('data-implementation="rustia"'));
   assert.doesNotMatch(html, /oop_metamethods|excluded-revision/);
+
+  const comparisonHtml = linuxComparisonSection({
+    all: summaries,
+    interpreter: summaries,
+    accelerated: [complete],
+  });
+  assert.match(comparisonHtml, /<h2>Linux Language Comparison<\/h2>/);
+  assert.match(comparisonHtml, /data-mode-filter="all" aria-pressed="true"/);
+  assert.match(comparisonHtml, /data-mode-filter="interpreter" aria-pressed="false"/);
+  assert.match(comparisonHtml, /data-mode-filter="accelerated" aria-pressed="false"/);
+  assert.match(comparisonHtml, /data-mode-view="all"/);
+  assert.match(comparisonHtml, /data-mode-view="interpreter" hidden/);
+  assert.match(comparisonHtml, /data-mode-view="accelerated" hidden/);
 
   const modeRows = [
     { ...rows[0], engine: "mlua-luau", mode_family: "mlua-luau", execution_mode: "interpreter" },
