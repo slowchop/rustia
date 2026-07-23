@@ -489,7 +489,7 @@
       <div class="meta-line">
         <span class="chip high">88% confidence</span>
       </div>
-      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, a standalone target-first current-results HTML report, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 12 requested adapters, exact ephemeral-Linux fixed-throughput and evidence-only memory protocols, a recurring wasm target runner for rustia+koto+rhai on Node/V8, retained cross-engine wasm evidence, a call_ref versus br_table dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle are present.</p>
+      <p>Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, a standalone target-first current-results HTML report with interpreter-only and best-mode rankings plus cold-start costs, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 12 requested adapters plus a verified mlua/Luau JIT mode, exact ephemeral-Linux fixed-throughput and evidence-only memory protocols, a recurring wasm target runner for rustia+koto+rhai on Node/V8, retained cross-engine wasm evidence, a call_ref versus br_table dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle are present.</p>
       <p class="plan"><strong>Next:</strong> Split from the workspace, add the interop/serde/fuel-limit tranche and regression alerts, and accumulate longer-run public history.</p>
     </article>
 
@@ -1387,7 +1387,7 @@
       <div class="entry-top">
         <div>
           <h4>History and static report</h4>
-          <p>A coherent Linux-only 12-adapter result snapshot at a562919 includes the closure-call PIC/direct-immutable-capture slice. Dirty-baseline guards, markdown and JSON results, a standalone HTML report, claim gating, five default workloads, and exact matrix/dense/OOP/string/HotIR evidence are retained; the string-memory corpus remains evidence-only by design.</p>
+          <p>A coherent Linux-only result snapshot at 83bc2f3 covers 12 adapter families plus a separately verified mlua/Luau JIT mode. Dirty-baseline guards, markdown and JSON results, interpreter-only and best-mode dashboard rankings, cold-start costs, claim gating, five default workloads, and exact matrix/dense/OOP/string/HotIR evidence are retained; the string-memory corpus remains evidence-only by design.</p>
         </div>
         <div class="entry-score">
           <strong>85%</strong>
@@ -1460,7 +1460,7 @@
       <div class="entry-top">
         <div>
           <h4>Native/wasm matrix</h4>
-          <p>A coherent 12-adapter native Linux baseline is recorded; recurring wasm target results cover rustia+koto+rhai and br_table/call_ref dispatch on Node/V8, while the accepted four-runtime matrix remains archived as historical portability evidence.</p>
+          <p>A coherent 12-adapter-family native Linux baseline plus a verified mlua/Luau JIT mode is recorded; recurring wasm target results cover rustia+koto+rhai and br_table/call_ref dispatch on Node/V8, while the accepted four-runtime matrix remains archived as historical portability evidence.</p>
         </div>
         <div class="entry-score">
           <strong>78%</strong>
@@ -1591,7 +1591,7 @@
       <h2>Scope Notes</h2>
       <ul>
         <li>Excluded: Actual grabby integration work.</li>
-        <li>mlua-lua54 runs separately from mlua-luau because both mlua-sys builds use links = &quot;lua&quot;.</li>
+        <li>mlua-lua54 runs separately from mlua-luau because both mlua-sys builds use links = &quot;lua&quot;; mlua-luau-jit is an explicit execution mode in the mlua-luau adapter family.</li>
         <li>Percentages are rough engineering estimates, not automated metrics.</li>
         <li>The scope tracks public rustia crates, conformance, benchmarks, docs, tooling, and release readiness.</li>
         <li>Project pillars and non-goals are canonical in design/02-pillars.md.</li>

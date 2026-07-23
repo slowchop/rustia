@@ -1162,7 +1162,7 @@ function bestAvailableModesSection(targetRows) {
   return languagesByTargetSection(targetRows, {
     id: "best-available-modes",
     title: "Best Available Mode",
-    description: "exact targets complete · each engine family uses its strongest measured interpreter, JIT, native, or wasm-runtime mode",
+    description: "exact targets complete · each engine family uses its accelerated JIT/native/wasm mode when available, otherwise its interpreter; modes are not cherry-picked per workload",
   });
 }
 

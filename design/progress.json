@@ -35,7 +35,7 @@
           "wasmi",
           "wasmtime"
         ],
-        "note": "mlua-lua54 runs separately from mlua-luau because both mlua-sys builds use links = \"lua\"."
+        "note": "mlua-lua54 runs separately from mlua-luau because both mlua-sys builds use links = \"lua\"; mlua-luau-jit is an explicit execution mode in the mlua-luau adapter family."
       },
       "benchmark_workloads": {
         "present": 12,
@@ -94,7 +94,7 @@
       "name": "Standalone benchmark OSS project",
       "complete": 82,
       "confidence": 88,
-      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, a standalone target-first current-results HTML report, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 12 requested adapters, exact ephemeral-Linux fixed-throughput and evidence-only memory protocols, a recurring wasm target runner for rustia+koto+rhai on Node/V8, retained cross-engine wasm evidence, a call_ref versus br_table dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle are present.",
+      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, a standalone target-first current-results HTML report with interpreter-only and best-mode rankings plus cold-start costs, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 12 requested adapters plus a verified mlua/Luau JIT mode, exact ephemeral-Linux fixed-throughput and evidence-only memory protocols, a recurring wasm target runner for rustia+koto+rhai on Node/V8, retained cross-engine wasm evidence, a call_ref versus br_table dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle are present.",
       "future_plan": "Split from the workspace, add the interop/serde/fuel-limit tranche and regression alerts, and accumulate longer-run public history."
     },
     {
@@ -421,7 +421,7 @@
           "name": "History and static report",
           "complete": 85,
           "confidence": 90,
-          "state": "A coherent Linux-only 12-adapter result snapshot at a562919 includes the closure-call PIC/direct-immutable-capture slice. Dirty-baseline guards, markdown and JSON results, a standalone HTML report, claim gating, five default workloads, and exact matrix/dense/OOP/string/HotIR evidence are retained; the string-memory corpus remains evidence-only by design.",
+          "state": "A coherent Linux-only result snapshot at 83bc2f3 covers 12 adapter families plus a separately verified mlua/Luau JIT mode. Dirty-baseline guards, markdown and JSON results, interpreter-only and best-mode dashboard rankings, cold-start costs, claim gating, five default workloads, and exact matrix/dense/OOP/string/HotIR evidence are retained; the string-memory corpus remains evidence-only by design.",
           "future_plan": "Publish long-run history and richer charts after standalone split."
         },
         {
@@ -447,7 +447,7 @@
           "name": "Native/wasm matrix",
           "complete": 78,
           "confidence": 75,
-          "state": "A coherent 12-adapter native Linux baseline is recorded; recurring wasm target results cover rustia+koto+rhai and br_table/call_ref dispatch on Node/V8, while the accepted four-runtime matrix remains archived as historical portability evidence.",
+          "state": "A coherent 12-adapter-family native Linux baseline plus a verified mlua/Luau JIT mode is recorded; recurring wasm target results cover rustia+koto+rhai and br_table/call_ref dispatch on Node/V8, while the accepted four-runtime matrix remains archived as historical portability evidence.",
           "future_plan": "Broaden public baselines and keep result history fresh across runtime updates."
         }
       ]

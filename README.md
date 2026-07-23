@@ -74,14 +74,16 @@ public rustia project; actual grabby integration work is explicitly out of scope
 | Public release readiness | 69% | 82% |
 
 - Current conformance runner: **692 fixtures**, **491 refs**, **0 pending**.
-- The benchmark harness has all 12 requested adapters and a non-default `string_building` workload source set
-  across them; Lua 5.4 runs separately from Luau because `mlua-sys` cannot link both in one binary.
+- The benchmark harness has all 12 requested adapters, an explicit verified `mlua-luau-jit` mode, and a
+  non-default `string_building` workload source set across them; Lua 5.4 runs separately from Luau because
+  `mlua-sys` cannot link both in one binary.
 - Current benchmark claim posture is generated at [`bench/CLAIMS.md`](bench/CLAIMS.md); it approves no blanket
   speed headline from the current snapshot.
 - The committed benchmark protocol keeps raw samples, fixed-work evidence, process/steal gates, exact source and
-  toolchain identity, and fail-closed promotion after VM deletion. The current clean `a562919` Linux snapshot has
-  60 rows across 12 adapters and five default workloads. Its closure slice reduced rustia median latency from
-  270.427 to 229.766 ns/call; generated minimum-time gaps are 3.494x to `mlua-luau` and 3.833x to Luaur. Earlier
+  toolchain identity, and fail-closed promotion after VM deletion. The current clean `83bc2f3` Linux snapshot has
+  65 rows across 12 adapter families plus the separate mlua/Luau JIT mode and five default workloads. The
+  interpreter-only minimum-time gaps are 3.483x to `mlua-luau` and 3.833x to Luaur; verified JIT mode is 4.283x
+  rustia overall and 8.036x on closures, with its compile/first-call costs reported separately. Earlier
   dense/OOP/string/HotIR cohorts remain traceable historical evidence. Every result is specific to its workload,
   target, and protocol; details are in [`design/56-performance-research.md`](design/56-performance-research.md).
 - Major remaining gates, in order, are bounded object/program reclamation and quotas, epoch-safe decision reset,

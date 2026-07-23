@@ -131,7 +131,7 @@ the minimum-time gap was 3.495x to `mlua-luau` (2.688x-4.650x range) and 3.757x 
 (2.722x-5.154x), while rustia beats Ruau on all five workloads. All timed groups passed on their first attempt;
 one native steal tick was 0.0095%, all other groups observed zero. The VM was confirmed deleted after 1,529
 seconds and before promotion, with a $0.108 rounded compute ceiling.
-The current exact-commit `a5629199643847c0da78792644ad3656887bee21` matrix gates prototype-polymorphic
+The prior exact-commit `a5629199643847c0da78792644ad3656887bee21` matrix gates prototype-polymorphic
 closure-call fast paths plus direct immutable-upvalue captures. The compiler preserves mutable loop/backedge
 capture semantics by discovering captured bindings before final lowering; the VM uses a four-lane call-site PIC
 keyed by program/prototype and falls back for policy, guard, recursion, fuel, coverage, and GC boundaries. In the
@@ -146,6 +146,15 @@ beats Ruau on four of five by minimum time. The same cross-host snapshot compari
 they are follow-up signals rather than attributed regressions; sparse and generic iteration should receive the
 next stability check. All timed groups passed on their first attempt, and the VM was confirmed deleted
 before the evidence and generated results were promoted, with a $0.108 rounded compute ceiling.
+The current exact-commit `83bc2f370ee4149b6fa6e11eca951b41b4cccbd2` matrix adds an explicit
+`mlua-luau-jit` mode without changing the interpreter-only headline. A matched JIT-off/JIT-on numeric sentinel
+produced the same checksum and a 3.843x native-execution signal before any JIT row was admitted. Across the five
+common workloads the reference interpreter is 3.483x rustia by geometric mean and the JIT mode is 4.283x;
+closures improve from 64.67 to 28.52 ns/call under JIT, while dense tables remain essentially flat. Preparation,
+first-call, combined cold-start, and warmed steady-state samples are all retained; the JIT mode's geometric-mean
+cold cost is 677.26 microseconds versus 385.10 microseconds for the reference interpreter. All four timed groups
+passed on their first attempt, the primary group observed one steal tick (0.00867%), and the VM was confirmed
+deleted after 1,558 seconds before the 65 native rows, 15 wasm rows, and evidence were promoted.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
 ## Project pillars
