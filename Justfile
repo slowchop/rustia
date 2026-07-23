@@ -129,6 +129,18 @@ bench-linode-matrix config:
 bench-linode config="":
     node tools/run-linode-benchmark.js bench {{ if config == "" { "" } else { quote(config) } }}
 
+# Freeze one fixed-harness history reconstruction over source-changing Rustia commits.
+bench-linode-backfill-freeze start output:
+    node tools/freeze-history-backfill.js "{{ start }}" "{{ output }}"
+
+# Validate a frozen fixed-harness history backfill without creating a Linode.
+bench-linode-backfill-plan config:
+    node tools/run-linode-benchmark.js plan "{{ config }}"
+
+# Build and measure the frozen historical Rustia revisions on one ephemeral Linode.
+bench-linode-backfill config:
+    node tools/run-linode-benchmark.js bench "{{ config }}"
+
 # Inspect locally owned run state and its corresponding Linode instance.
 bench-linode-status:
     node tools/run-linode-benchmark.js status

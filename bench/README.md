@@ -592,6 +592,39 @@ five-minute quiet-acquisition deadline across its retries, and the existing
 The generic `just benchmarks` local-publication path is retired so a macOS or
 Windows developer machine cannot repopulate active results.
 
+### Fixed-harness history reconstruction
+
+Historical Rustia performance is reconstructed with
+`rustia_history_backfill_v1`, not with each old commit's changing benchmark
+code. The freezer selects first-parent commits that changed compiler, lexer,
+parser, or VM source, pins the current harness and five Linux workloads by
+SHA-256, and freezes one fixed `N` plus checksum per workload. The remote runner
+overlays that exact harness onto every selected Rustia revision, builds all
+binaries before timing, and measures the complete sequence inside one
+quiet-host gate on the same dedicated Linode placement.
+
+This skips documentation-, dashboard-, and orchestration-only commits: they
+have the same engine binary and would add cost and visual noise rather than
+historical information. Build failures or checksum changes fail the whole run
+instead of silently changing the workload. Accepted output is immutable at
+`bench/history/backfills/<harness-commit>.json`, with raw samples and provider,
+host, build, protocol, and gate evidence under
+`bench/evidence/history-backfill/<harness-commit>/`.
+
+Freeze only from a clean committed checkout, commit the generated config, plan
+without billing, then run the complete reconstruction on one ephemeral Linode:
+
+```sh
+just bench-linode-backfill-freeze aee7749 bench/cloud/linode-history-backfill.json
+just bench-linode-backfill-plan bench/cloud/linode-history-backfill.json
+just bench-linode-backfill bench/cloud/linode-history-backfill.json
+```
+
+The dedicated shape is capped at 55 minutes and one rounded Linode billing
+hour. Historical source commit time is retained separately from honest
+measurement time; renderers order the reconstructed trend by the frozen target
+list rather than pretending the measurements happened in the past.
+
 Hosted CI only validates the committed artifacts. `tools/check-workflows.js`
 forbids fresh native or wasm measurement commands in GitHub Actions; starting a
 billed Linode remains an explicit operator action.

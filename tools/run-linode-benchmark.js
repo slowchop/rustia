@@ -16,6 +16,7 @@ const REPO = path.resolve(__dirname, "..");
 const DEFAULT_CONFIG = path.join(REPO, "bench/cloud/linode-dense-ed65077.json");
 const REMOTE_RUNNER = path.join(REPO, "tools/run-linux-fixed-benchmark.js");
 const MATRIX_REMOTE_RUNNER = path.join(REPO, "tools/run-linux-matrix-benchmark.js");
+const HISTORY_BACKFILL_REMOTE_RUNNER = path.join(REPO, "tools/run-linux-history-backfill.js");
 const STATE_ROOT = path.join(REPO, ".rustia-benchmark-state/linode");
 const RUNS_ROOT = path.join(STATE_ROOT, "runs");
 const TOKEN_FILE = path.join(STATE_ROOT, "token");
@@ -37,11 +38,13 @@ const MAX_EXPORT_ENTRIES = 10_000;
 const FIXED_THROUGHPUT_PROTOCOL = "fixed_throughput_v1";
 const VM_STRING_MEMORY_PROTOCOL = "vm_string_memory_v1";
 const CROSS_ENGINE_MATRIX_PROTOCOL = "cross_engine_matrix_v4";
+const HISTORY_BACKFILL_PROTOCOL = "rustia_history_backfill_v1";
 const MAX_TIMED_ATTEMPTS_PER_GROUP = 3;
 const ALLOWED_PROTOCOLS = new Set([
   FIXED_THROUGHPUT_PROTOCOL,
   VM_STRING_MEMORY_PROTOCOL,
   CROSS_ENGINE_MATRIX_PROTOCOL,
+  HISTORY_BACKFILL_PROTOCOL,
 ]);
 const MATRIX_NATIVE_TARGET = "linux-x86_64";
 const MATRIX_NATIVE_ENGINES = Object.freeze([
@@ -201,14 +204,20 @@ function isCrossEngineMatrix(config) {
   return protocolKind(config) === CROSS_ENGINE_MATRIX_PROTOCOL;
 }
 
+function isHistoryBackfill(config) {
+  return protocolKind(config) === HISTORY_BACKFILL_PROTOCOL;
+}
+
 function benchmarkCommit(config) {
-  return isCrossEngineMatrix(config)
-    ? config.source.benchmark_commit
-    : config.source.candidate_commit;
+  if (isCrossEngineMatrix(config)) return config.source.benchmark_commit;
+  if (isHistoryBackfill(config)) return config.source.harness_commit;
+  return config.source.candidate_commit;
 }
 
 function remoteRunnerForConfig(config) {
-  return isCrossEngineMatrix(config) ? MATRIX_REMOTE_RUNNER : REMOTE_RUNNER;
+  if (isCrossEngineMatrix(config)) return MATRIX_REMOTE_RUNNER;
+  if (isHistoryBackfill(config)) return HISTORY_BACKFILL_REMOTE_RUNNER;
+  return REMOTE_RUNNER;
 }
 
 function requireFrozenArray(value, frozen, location) {
@@ -257,7 +266,9 @@ function validateConfig(value) {
   const kind = protocolKind(root);
   requireExactKeys(
     root,
-    kind === VM_STRING_MEMORY_PROTOCOL || kind === CROSS_ENGINE_MATRIX_PROTOCOL
+    kind === VM_STRING_MEMORY_PROTOCOL ||
+      kind === CROSS_ENGINE_MATRIX_PROTOCOL ||
+      kind === HISTORY_BACKFILL_PROTOCOL
       ? ["schema", "provider", "source", "measurement", "host_gate", "publication"]
       : ["schema", "provider", "source", "measurement", "qualification", "host_gate", "publication"],
     "config",
@@ -297,12 +308,33 @@ function validateConfig(value) {
     source,
     kind === CROSS_ENGINE_MATRIX_PROTOCOL
       ? ["benchmark_commit", "expected_sha256"]
+      : kind === HISTORY_BACKFILL_PROTOCOL
+      ? ["harness_commit", "target_commits", "expected_sha256"]
       : ["baseline_commit", "candidate_commit", "harness_commit", "expected_sha256"],
     "config.source",
   );
   if (kind === CROSS_ENGINE_MATRIX_PROTOCOL) {
     if (!FULL_COMMIT.test(requireString(source.benchmark_commit, "config.source.benchmark_commit"))) {
       fail("config.source.benchmark_commit must be a lowercase full commit");
+    }
+  } else if (kind === HISTORY_BACKFILL_PROTOCOL) {
+    if (!FULL_COMMIT.test(requireString(source.harness_commit, "config.source.harness_commit"))) {
+      fail("config.source.harness_commit must be a lowercase full commit");
+    }
+    if (
+      !Array.isArray(source.target_commits) ||
+      source.target_commits.length === 0 ||
+      source.target_commits.length > 64
+    ) {
+      fail("config.source.target_commits must contain 1..64 commits");
+    }
+    const seenTargetCommits = new Set();
+    for (const [index, commit] of source.target_commits.entries()) {
+      if (!FULL_COMMIT.test(commit)) {
+        fail(`config.source.target_commits[${index}] must be a lowercase full commit`);
+      }
+      if (seenTargetCommits.has(commit)) fail(`config.source.target_commits duplicates ${commit}`);
+      seenTargetCommits.add(commit);
     }
   } else {
     for (const field of ["baseline_commit", "candidate_commit", "harness_commit"]) {
@@ -329,6 +361,18 @@ function validateConfig(value) {
           "wasm_measure_module",
           "wasm_dispatch_measure",
           "history_before",
+        ]
+      : kind === HISTORY_BACKFILL_PROTOCOL
+      ? [
+          "bench_manifest",
+          "native_harness",
+          "cargo_lock",
+          "toolchain",
+          "workload_dense_tables",
+          "workload_sparse_tables",
+          "workload_closures_upvalues",
+          "workload_generic_iteration",
+          "workload_stdlib_math_table",
         ]
       : kind === VM_STRING_MEMORY_PROTOCOL
       ? [
@@ -393,6 +437,33 @@ function validateConfig(value) {
       }
     }
     validateRuntimeArtifacts(measurement.runtime_artifacts, "config.measurement.runtime_artifacts");
+  } else if (kind === HISTORY_BACKFILL_PROTOCOL) {
+    requireExactKeys(
+      measurement,
+      ["protocol", "native_target", "workloads", "fixed_n", "repetitions", "expected_checksums"],
+      "config.measurement",
+    );
+    if (measurement.native_target !== MATRIX_NATIVE_TARGET) {
+      fail(`config.measurement.native_target must be ${MATRIX_NATIVE_TARGET}`);
+    }
+    requireFrozenArray(measurement.workloads, MATRIX_WORKLOADS, "config.measurement.workloads");
+    if (requireInteger(measurement.repetitions, "config.measurement.repetitions", 1) !== 5) {
+      fail("config.measurement.repetitions must remain frozen at 5");
+    }
+    const fixedN = requireObject(measurement.fixed_n, "config.measurement.fixed_n");
+    const expectedChecksums = requireObject(
+      measurement.expected_checksums,
+      "config.measurement.expected_checksums",
+    );
+    requireExactKeys(fixedN, MATRIX_WORKLOADS, "config.measurement.fixed_n");
+    requireExactKeys(expectedChecksums, MATRIX_WORKLOADS, "config.measurement.expected_checksums");
+    for (const workload of MATRIX_WORKLOADS) {
+      requireInteger(fixedN[workload], `config.measurement.fixed_n.${workload}`, 1);
+      requireString(
+        expectedChecksums[workload],
+        `config.measurement.expected_checksums.${workload}`,
+      );
+    }
   } else if (kind === VM_STRING_MEMORY_PROTOCOL) {
     requireExactKeys(
       measurement,
@@ -515,7 +586,7 @@ function validateConfig(value) {
       "maximum_load_1m",
       "maximum_steal_ticks",
       "maximum_timed_steal_percent",
-      ...(kind === CROSS_ENGINE_MATRIX_PROTOCOL
+      ...(kind === CROSS_ENGINE_MATRIX_PROTOCOL || kind === HISTORY_BACKFILL_PROTOCOL
         ? ["maximum_timed_steal_ticks", "maximum_timed_attempts_per_group"]
         : []),
       "wait_timeout_seconds",
@@ -533,7 +604,7 @@ function validateConfig(value) {
   if (gate.maximum_steal_ticks !== 0 || gate.maximum_timed_steal_percent !== 0.1) {
     fail("Linode v2 steal budget must remain zero while idle and 0.1% during a timed leg");
   }
-  if (kind === CROSS_ENGINE_MATRIX_PROTOCOL) {
+  if (kind === CROSS_ENGINE_MATRIX_PROTOCOL || kind === HISTORY_BACKFILL_PROTOCOL) {
     if (
       requireInteger(
         gate.maximum_timed_steal_ticks,
@@ -541,7 +612,7 @@ function validateConfig(value) {
         0,
       ) !== 1
     ) {
-      fail("config.host_gate.maximum_timed_steal_ticks must be one for the matrix protocol");
+      fail("config.host_gate.maximum_timed_steal_ticks must be one for the matrix/backfill protocol");
     }
     const maximumTimedAttempts = requireInteger(
       gate.maximum_timed_attempts_per_group,
@@ -559,8 +630,11 @@ function validateConfig(value) {
     "config.host_gate.wait_timeout_seconds",
     1,
   );
-  if (kind === CROSS_ENGINE_MATRIX_PROTOCOL && waitTimeout !== 300) {
-    fail("config.host_gate.wait_timeout_seconds must be 300 for the matrix protocol");
+  if (
+    (kind === CROSS_ENGINE_MATRIX_PROTOCOL || kind === HISTORY_BACKFILL_PROTOCOL) &&
+    waitTimeout !== 300
+  ) {
+    fail("config.host_gate.wait_timeout_seconds must be 300 for the matrix/backfill protocol");
   }
 
   const publication = requireObject(root.publication, "config.publication");
@@ -580,6 +654,15 @@ function validateConfig(value) {
       if (requireInteger(publication[field], `config.publication.${field}`, 1) !== wanted) {
         fail(`config.publication.${field} must remain frozen at ${wanted}`);
       }
+    }
+  } else if (kind === HISTORY_BACKFILL_PROTOCOL) {
+    requireExactKeys(publication, ["mode", "rows"], "config.publication");
+    if (publication.mode !== "history_backfill") {
+      fail("rustia_history_backfill_v1 publication.mode must be history_backfill");
+    }
+    const expectedRows = source.target_commits.length * MATRIX_WORKLOADS.length;
+    if (requireInteger(publication.rows, "config.publication.rows", 1) !== expectedRows) {
+      fail(`config.publication.rows must remain frozen at ${expectedRows}`);
     }
   } else if (kind === VM_STRING_MEMORY_PROTOCOL) {
     requireExactKeys(publication, ["mode"], "config.publication");
@@ -1220,8 +1303,32 @@ async function verifySource(config, configFile = DEFAULT_CONFIG) {
   if (trackedStatus.length > 0) fail("tracked worktree changes must be committed before a cloud benchmark");
   const sourceCommits = isCrossEngineMatrix(config)
     ? [config.source.benchmark_commit]
+    : isHistoryBackfill(config)
+    ? [config.source.harness_commit, ...config.source.target_commits]
     : [config.source.baseline_commit, config.source.candidate_commit, config.source.harness_commit];
   for (const commit of sourceCommits) await run("git", ["cat-file", "-e", `${commit}^{commit}`]);
+  if (isHistoryBackfill(config)) {
+    let previous = null;
+    for (const commit of config.source.target_commits) {
+      const harnessAncestor = await run(
+        "git",
+        ["merge-base", "--is-ancestor", commit, config.source.harness_commit],
+        { allowFailure: true },
+      );
+      if (harnessAncestor.status !== 0) {
+        fail(`history backfill target ${commit} is not an ancestor of the harness commit`);
+      }
+      if (previous) {
+        const ordered = await run("git", ["merge-base", "--is-ancestor", previous, commit], {
+          allowFailure: true,
+        });
+        if (ordered.status !== 0) {
+          fail(`history backfill targets are not in first-parent order at ${previous} -> ${commit}`);
+        }
+      }
+      previous = commit;
+    }
+  }
   const selectedRemoteRunner = remoteRunnerForConfig(config);
   for (const file of [
     "tools/run-linode-benchmark.js",
@@ -1265,6 +1372,36 @@ async function verifySource(config, configFile = DEFAULT_CONFIG) {
       expected.history_before,
     ],
     ["current history", sha256File(path.join(REPO, "bench/history/runs.jsonl")), expected.history_before],
+  ] : isHistoryBackfill(config) ? [
+    ["backfill bench manifest", sha256(await gitBlob(source.harness_commit, "bench/Cargo.toml")), expected.bench_manifest],
+    ["backfill native harness", sha256(await gitBlob(source.harness_commit, "bench/src/main.rs")), expected.native_harness],
+    ["backfill Cargo.lock", sha256(await gitBlob(source.harness_commit, "Cargo.lock")), expected.cargo_lock],
+    ["backfill toolchain", sha256(await gitBlob(source.harness_commit, "rust-toolchain.toml")), expected.toolchain],
+    [
+      "backfill dense workload",
+      sha256(await gitBlob(source.harness_commit, "bench/workloads/luau/01_dense_tables.luau")),
+      expected.workload_dense_tables,
+    ],
+    [
+      "backfill sparse workload",
+      sha256(await gitBlob(source.harness_commit, "bench/workloads/luau/02_sparse_tables.luau")),
+      expected.workload_sparse_tables,
+    ],
+    [
+      "backfill closure workload",
+      sha256(await gitBlob(source.harness_commit, "bench/workloads/luau/04_closures_upvalues.luau")),
+      expected.workload_closures_upvalues,
+    ],
+    [
+      "backfill iteration workload",
+      sha256(await gitBlob(source.harness_commit, "bench/workloads/luau/09_generic_iteration.luau")),
+      expected.workload_generic_iteration,
+    ],
+    [
+      "backfill math/table workload",
+      sha256(await gitBlob(source.harness_commit, "bench/workloads/luau/10_stdlib_math_table.luau")),
+      expected.workload_stdlib_math_table,
+    ],
   ] : isVmStringMemory(config) ? [
     [
       "baseline original bench manifest",
@@ -1346,7 +1483,7 @@ async function verifySource(config, configFile = DEFAULT_CONFIG) {
     config_path: relativeConfig,
     config_sha256: sha256File(configFile),
     coordinator_sha256: sha256File(__filename),
-    ...(isCrossEngineMatrix(config)
+    ...(isCrossEngineMatrix(config) || isHistoryBackfill(config)
       ? { remote_runner_path: path.relative(REPO, selectedRemoteRunner) }
       : {}),
     remote_runner_sha256: sha256File(selectedRemoteRunner),
@@ -1416,6 +1553,19 @@ function sanitizedProviderPlan(config, provider, source) {
             wasm_rows: config.publication.wasm_rows,
             dispatch_runtimes: config.publication.dispatch_runtimes,
           },
+        }
+      : isHistoryBackfill(config)
+      ? {
+          protocol: HISTORY_BACKFILL_PROTOCOL,
+          harness_commit: config.source.harness_commit,
+          target_commits: config.source.target_commits,
+          native_target: config.measurement.native_target,
+          workloads: config.measurement.workloads,
+          fixed_n: config.measurement.fixed_n,
+          repetitions: config.measurement.repetitions,
+          maximum_timed_steal_ticks: config.host_gate.maximum_timed_steal_ticks,
+          maximum_timed_attempts_per_group: config.host_gate.maximum_timed_attempts_per_group,
+          result_shape: { rows: config.publication.rows },
         }
       : isVmStringMemory(config)
       ? {
@@ -2231,6 +2381,7 @@ function validateMemoryEvidenceStatus(status) {
 
 function expectedTerminalStatus(config) {
   if (isCrossEngineMatrix(config)) return "matrix_complete";
+  if (isHistoryBackfill(config)) return "backfill_complete";
   return isVmStringMemory(config) ? "evidence_complete" : "accepted_and_published";
 }
 
@@ -4178,6 +4329,295 @@ async function promoteMatrixResult(config, state, downloadDirectory, verifyCheck
   return true;
 }
 
+function validateHistoryBackfillPublication(config, status, publication) {
+  requireObject(publication, "history backfill publication");
+  if (
+    publication.schema !== "rustia.bench.history-backfill.v1" ||
+    publication.harness_commit !== config.source.harness_commit ||
+    publication.native_target !== MATRIX_NATIVE_TARGET
+  ) {
+    fail("history backfill publication has the wrong schema or fixed-harness identity");
+  }
+  requireJsonEqual(publication.workloads, MATRIX_WORKLOADS, "history backfill workloads");
+  requireJsonEqual(publication.fixed_n, config.measurement.fixed_n, "history backfill fixed N");
+  if (publication.repetitions !== config.measurement.repetitions) {
+    fail("history backfill publication has the wrong repetition count");
+  }
+  const measuredAt = requireInteger(
+    publication.measured_at_unix,
+    "history backfill publication.measured_at_unix",
+    1,
+  );
+  const started = requireIsoTimestamp(status.started_at, "history backfill status.started_at");
+  const finished = requireIsoTimestamp(status.finished_at, "history backfill status.finished_at");
+  if (measuredAt * 1000 < started || measuredAt * 1000 > finished + 1000) {
+    fail("history backfill publication timestamp falls outside the run");
+  }
+  if (!Array.isArray(publication.targets) || publication.targets.length !== config.source.target_commits.length) {
+    fail("history backfill publication has the wrong target count");
+  }
+  const targetPositions = new Map();
+  for (const [index, target] of publication.targets.entries()) {
+    requireObject(target, `history backfill target ${index + 1}`);
+    const expectedCommit = config.source.target_commits[index];
+    if (target.commit !== expectedCommit) {
+      fail(`history backfill target ${index + 1} is not ${expectedCommit}`);
+    }
+    requireInteger(target.committed_at_unix, `history backfill target ${index + 1}.committed_at_unix`, 1);
+    requireString(target.subject, `history backfill target ${index + 1}.subject`);
+    if (!SHA256.test(requireString(target.binary_sha256, `history backfill target ${index + 1}.binary_sha256`))) {
+      fail(`history backfill target ${index + 1} has an invalid binary SHA-256`);
+    }
+    if (!SHA256.test(requireString(target.resolved_lock_sha256, `history backfill target ${index + 1}.resolved_lock_sha256`))) {
+      fail(`history backfill target ${index + 1} has an invalid lock SHA-256`);
+    }
+    const coreTrees = requireObject(target.core_trees, `history backfill target ${index + 1}.core_trees`);
+    requireExactKeys(
+      coreTrees,
+      ["crates/rustia-compiler", "crates/rustia-lexer", "crates/rustia-parser", "crates/rustia-vm"],
+      `history backfill target ${index + 1}.core_trees`,
+    );
+    for (const [tree, objectId] of Object.entries(coreTrees)) {
+      if (!FULL_COMMIT.test(requireString(objectId, `history backfill ${tree} tree id`))) {
+        fail(`history backfill ${tree} tree id must be a 40-character object id`);
+      }
+    }
+    targetPositions.set(expectedCommit, index);
+  }
+  if (!Array.isArray(publication.rows) || publication.rows.length !== config.publication.rows) {
+    fail(`history backfill publication must contain ${config.publication.rows} rows`);
+  }
+  const slots = new Set();
+  for (const [index, row] of publication.rows.entries()) {
+    requireObject(row, `history backfill row ${index + 1}`);
+    if (!targetPositions.has(row.commit)) fail(`history backfill row ${index + 1} has an unknown commit`);
+    if (
+      row.engine !== "rustia" ||
+      row.dialect !== "luau" ||
+      row.target !== MATRIX_NATIVE_TARGET ||
+      !MATRIX_WORKLOADS.includes(row.workload)
+    ) {
+      fail(`history backfill row ${index + 1} has the wrong benchmark identity`);
+    }
+    if (
+      row.n !== config.measurement.fixed_n[row.workload] ||
+      row.reps !== config.measurement.repetitions ||
+      row.checksum !== config.measurement.expected_checksums[row.workload]
+    ) {
+      fail(`history backfill row ${index + 1} violates its fixed-work contract`);
+    }
+    for (const field of ["ns_per_unit_min", "ns_per_unit_median", "units_per_sec"]) {
+      requirePositiveFinite(row[field], `history backfill row ${index + 1}.${field}`);
+    }
+    const slot = `${row.commit}\0${row.workload}`;
+    if (slots.has(slot)) fail(`history backfill duplicates ${row.commit}/${row.workload}`);
+    slots.add(slot);
+  }
+  for (const commit of config.source.target_commits) {
+    for (const workload of MATRIX_WORKLOADS) {
+      if (!slots.has(`${commit}\0${workload}`)) {
+        fail(`history backfill is missing ${commit}/${workload}`);
+      }
+    }
+  }
+}
+
+function validateHistoryBackfillGate(config, status, gateFile) {
+  const records = parseCanonicalJsonl(gateFile, "history backfill gate");
+  if (records.length < 2) fail("history backfill gate must contain quiet and timed records");
+  let timedCount = 0;
+  let acceptedTimedCount = 0;
+  for (const [index, record] of records.entries()) {
+    requireObject(record, `history backfill gate record ${index + 1}`);
+    if (record.label !== "rustia-history-backfill") {
+      fail(`history backfill gate record ${index + 1} has the wrong label`);
+    }
+    if (record.phase === "pre") {
+      requireInteger(record.timed_attempt, `history backfill gate record ${index + 1}.timed_attempt`, 1);
+      requireInteger(record.quiet_attempt, `history backfill gate record ${index + 1}.quiet_attempt`, 1);
+      requireIsoTimestamp(record.captured_at, `history backfill gate record ${index + 1}.captured_at`);
+    } else if (record.phase === "timed") {
+      timedCount += 1;
+      if (record.accepted === true) acceptedTimedCount += 1;
+      requireIsoTimestamp(record.started_at, `history backfill gate record ${index + 1}.started_at`);
+      requireIsoTimestamp(record.finished_at, `history backfill gate record ${index + 1}.finished_at`);
+      requireInteger(record.total_ticks, `history backfill gate record ${index + 1}.total_ticks`, 1);
+      requireInteger(record.steal_ticks, `history backfill gate record ${index + 1}.steal_ticks`, 0);
+      requireNumber(record.steal_percent, `history backfill gate record ${index + 1}.steal_percent`, 0);
+      const recomputed =
+        record.steal_percent <= config.host_gate.maximum_timed_steal_percent ||
+        record.steal_ticks <= config.host_gate.maximum_timed_steal_ticks;
+      if (record.accepted !== recomputed) {
+        fail(`history backfill gate record ${index + 1} has a false timed verdict`);
+      }
+    } else {
+      fail(`history backfill gate record ${index + 1} has an unknown phase`);
+    }
+  }
+  if (timedCount < 1 || timedCount > config.host_gate.maximum_timed_attempts_per_group) {
+    fail("history backfill gate has the wrong timed-attempt count");
+  }
+  if (acceptedTimedCount !== 1 || records.at(-1).phase !== "timed" || records.at(-1).accepted !== true) {
+    fail("history backfill gate must end with exactly one accepted timed attempt");
+  }
+  validateBackfillStatus(status);
+}
+
+function validateBackfillStatus(status) {
+  requireObject(status, "history backfill status");
+  if (
+    status.schema !== "rustia.bench.cloud-run-status.v1" ||
+    status.status !== "backfill_complete" ||
+    status.detail !== "fixed-harness Rustia history backfill completed"
+  ) {
+    fail("history backfill status has the wrong terminal state");
+  }
+  const started = requireIsoTimestamp(status.started_at, "history backfill status.started_at");
+  const finished = requireIsoTimestamp(status.finished_at, "history backfill status.finished_at");
+  if (finished < started) fail("history backfill status finishes before it starts");
+}
+
+async function promoteHistoryBackfill(
+  config,
+  state,
+  downloadDirectory,
+  verifyCheckout = verifyPromotionCheckout,
+) {
+  if (!state.linode_destroyed_at) fail("refusing history backfill publication before confirmed deletion");
+  const status = loadJsonRegular(path.join(downloadDirectory, "status.json"), "history backfill status");
+  state.remote_status = status.status;
+  state.remote_status_detail = status.detail || null;
+  saveState(state);
+  if (status.status !== "backfill_complete") {
+    process.stdout.write(
+      `Linode history backfill was retained as diagnostics at ${path.relative(REPO, downloadDirectory)} ` +
+        `(${status.status}${status.detail ? `: ${status.detail}` : ""}).\n`,
+    );
+    return false;
+  }
+  validateBackfillStatus(status);
+  await verifyCheckout(config, state);
+
+  const publicationSource = path.join(
+    downloadDirectory,
+    "publication/bench/history/backfill.json",
+  );
+  const evidenceSource = path.join(downloadDirectory, "evidence/history-backfill");
+  const publication = loadJsonRegular(publicationSource, "history backfill publication");
+  validateHistoryBackfillPublication(config, status, publication);
+  const manifest = requireObject(
+    loadJsonRegular(path.join(evidenceSource, "manifest.json"), "history backfill manifest"),
+    "history backfill manifest",
+  );
+  if (
+    manifest.schema !== "rustia.bench.history-backfill-evidence.v1" ||
+    manifest.harness_commit !== config.source.harness_commit
+  ) {
+    fail("history backfill evidence manifest has the wrong identity");
+  }
+  requireJsonEqual(manifest.target_commits, config.source.target_commits, "history backfill manifest targets");
+  if (
+    manifest.protocol_sha256 !== state.plan.source.config_sha256 ||
+    manifest.publication_sha256 !== sha256File(publicationSource)
+  ) {
+    fail("history backfill evidence hashes do not match the frozen protocol/publication");
+  }
+  const localProvider = path.join(state.__directory, "provider.json");
+  if (
+    manifest.provider_sha256 !== sha256File(localProvider) ||
+    sha256File(path.join(evidenceSource, "provider.json")) !== sha256File(localProvider)
+  ) {
+    fail("history backfill provider evidence differs from the journaled Linode");
+  }
+  const actualEvidenceFiles = evidenceFiles(evidenceSource).filter((file) => file !== "manifest.json");
+  requireJsonEqual(manifest.evidence_files, actualEvidenceFiles, "history backfill evidence inventory");
+  validateHistoryBackfillGate(config, status, path.join(evidenceSource, "gate.jsonl"));
+  const builds = loadJsonRegular(path.join(evidenceSource, "builds.json"), "history backfill builds");
+  requireJsonEqual(builds, publication.targets, "history backfill build identities");
+  for (const commit of config.source.target_commits) {
+    const rawRows = loadStrictJsonLines(
+      path.join(evidenceSource, "raw", `${commit}.jsonl`),
+      `history backfill ${commit} raw rows`,
+    );
+    if (rawRows.length !== MATRIX_WORKLOADS.length) {
+      fail(`history backfill ${commit} raw rows have the wrong shape`);
+    }
+    loadJsonRegular(
+      path.join(evidenceSource, "raw", `${commit}-samples.json`),
+      `history backfill ${commit} raw samples`,
+    );
+  }
+
+  const historyDirectory = path.join(REPO, "bench/history/backfills");
+  const historyDestination = path.join(historyDirectory, `${config.source.harness_commit}.json`);
+  const evidenceDestination = path.join(
+    REPO,
+    "bench/evidence/history-backfill",
+    config.source.harness_commit,
+  );
+  if (fs.existsSync(historyDestination) || fs.existsSync(evidenceDestination)) {
+    fail("refusing to overwrite an existing immutable history backfill");
+  }
+  const nonce = crypto.randomBytes(6).toString("hex");
+  const historyStage = `${historyDestination}.incoming-${state.run_id}-${nonce}`;
+  const evidenceStage = `${evidenceDestination}.incoming-${state.run_id}-${nonce}`;
+  const generatedFiles = [
+    path.join(REPO, "bench/RESULTS.md"),
+    path.join(REPO, "bench/current-results.json"),
+    path.join(REPO, "bench/current-results.html"),
+    path.join(REPO, "bench/CLAIMS.md"),
+  ];
+  const snapshots = generatedFiles.map((file) => ({
+    file,
+    existed: fs.existsSync(file),
+    bytes: fs.existsSync(file) ? fs.readFileSync(file) : null,
+    mode: fs.existsSync(file) ? fs.statSync(file).mode & 0o777 : null,
+  }));
+  let historyCommitted = false;
+  let evidenceCommitted = false;
+  try {
+    fs.mkdirSync(historyDirectory, { recursive: true });
+    fs.mkdirSync(path.dirname(evidenceDestination), { recursive: true });
+    fs.copyFileSync(publicationSource, historyStage, fs.constants.COPYFILE_EXCL);
+    fs.cpSync(evidenceSource, evidenceStage, { recursive: true, errorOnExist: true, force: false });
+    if (sha256File(historyStage) !== sha256File(publicationSource)) {
+      fail("staged history backfill bytes changed");
+    }
+    fs.renameSync(historyStage, historyDestination);
+    historyCommitted = true;
+    fs.renameSync(evidenceStage, evidenceDestination);
+    evidenceCommitted = true;
+    await run("env", ["-u", "RUSTC_WRAPPER", "just", "gen-current-results"], {
+      capture: false,
+      announce: true,
+    });
+    await run("env", ["-u", "RUSTC_WRAPPER", "just", "check-benchmark-results"], {
+      capture: false,
+      announce: true,
+    });
+  } catch (error) {
+    fs.rmSync(historyStage, { force: true });
+    fs.rmSync(evidenceStage, { recursive: true, force: true });
+    if (historyCommitted) fs.rmSync(historyDestination, { force: true });
+    if (evidenceCommitted) fs.rmSync(evidenceDestination, { recursive: true, force: true });
+    for (const snapshot of snapshots) {
+      if (snapshot.existed) writeBytesAtomic(snapshot.file, snapshot.bytes, snapshot.mode);
+      else fs.rmSync(snapshot.file, { force: true });
+    }
+    state.promotion_rolled_back_at = new Date().toISOString();
+    state.promotion_rollback_reason = error.message;
+    saveState(state);
+    throw error;
+  }
+  state.promoted_at = new Date().toISOString();
+  saveState(state);
+  process.stdout.write(
+    `History backfill promoted to ${path.relative(REPO, historyDestination)} with ` +
+      `${config.publication.rows} fixed-harness rows.\n`,
+  );
+  return true;
+}
+
 async function promoteAcceptedResult(
   config,
   state,
@@ -4186,6 +4626,9 @@ async function promoteAcceptedResult(
 ) {
   if (isCrossEngineMatrix(config)) {
     return promoteMatrixResult(config, state, downloadDirectory, verifyCheckout);
+  }
+  if (isHistoryBackfill(config)) {
+    return promoteHistoryBackfill(config, state, downloadDirectory, verifyCheckout);
   }
   if (isVmStringMemory(config)) {
     return promoteMemoryEvidence(config, state, downloadDirectory, verifyCheckout);
@@ -5067,6 +5510,47 @@ async function selfTest(config) {
   assert.equal(expectedTerminalStatus(matrixConfig), "matrix_complete");
   assert.equal(benchmarkCommit(matrixConfig), matrixConfig.source.benchmark_commit);
   assert.equal(remoteRunnerForConfig(matrixConfig), MATRIX_REMOTE_RUNNER);
+  const historyBackfillConfig = {
+    schema: "rustia.linode-fixed-benchmark.v2",
+    provider: config.provider,
+    source: {
+      harness_commit: config.source.harness_commit,
+      target_commits: [config.source.baseline_commit, config.source.candidate_commit],
+      expected_sha256: {
+        bench_manifest: memoryHash,
+        native_harness: memoryHash,
+        cargo_lock: memoryHash,
+        toolchain: memoryHash,
+        workload_dense_tables: memoryHash,
+        workload_sparse_tables: memoryHash,
+        workload_closures_upvalues: memoryHash,
+        workload_generic_iteration: memoryHash,
+        workload_stdlib_math_table: memoryHash,
+      },
+    },
+    measurement: {
+      protocol: HISTORY_BACKFILL_PROTOCOL,
+      native_target: MATRIX_NATIVE_TARGET,
+      workloads: [...MATRIX_WORKLOADS],
+      fixed_n: Object.fromEntries(MATRIX_WORKLOADS.map((workload) => [workload, 10])),
+      repetitions: 5,
+      expected_checksums: Object.fromEntries(
+        MATRIX_WORKLOADS.map((workload) => [workload, `number:${workload.length}`]),
+      ),
+    },
+    host_gate: matrixConfig.host_gate,
+    publication: { mode: "history_backfill", rows: 10 },
+  };
+  assert.equal(validateConfig(historyBackfillConfig), historyBackfillConfig);
+  assert.equal(expectedTerminalStatus(historyBackfillConfig), "backfill_complete");
+  assert.equal(benchmarkCommit(historyBackfillConfig), historyBackfillConfig.source.harness_commit);
+  assert.equal(remoteRunnerForConfig(historyBackfillConfig), HISTORY_BACKFILL_REMOTE_RUNNER);
+  assert.throws(() =>
+    validateConfig({
+      ...historyBackfillConfig,
+      publication: { mode: "history_backfill", rows: 9 },
+    }),
+  );
   const matrixStatus = {
     schema: "rustia.bench.cloud-run-status.v1",
     status: "matrix_complete",
@@ -5333,6 +5817,8 @@ async function selfTest(config) {
   assert.match(outputText(runner), /self-test passed/);
   const matrixRunner = await run("node", [MATRIX_REMOTE_RUNNER, "self-test"]);
   assert.match(outputText(matrixRunner), /self-test passed/);
+  const historyBackfillRunner = await run("node", [HISTORY_BACKFILL_REMOTE_RUNNER, "self-test"]);
+  assert.match(outputText(historyBackfillRunner), /self-test passed/);
   process.stdout.write("linode benchmark coordinator offline self-test passed\n");
 }
 

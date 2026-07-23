@@ -7,6 +7,7 @@ const path = require("path");
 const root = path.resolve(__dirname, "..");
 const sourcePath = path.join(__dirname, "current-results.json");
 const historyPath = path.join(__dirname, "history", "runs.jsonl");
+const historyBackfillDirectory = path.join(__dirname, "history", "backfills");
 const wasmResultsPath = path.join(__dirname, "wasm", "current-results.json");
 const wasmDispatchPath = path.join(__dirname, "wasm", "dispatch-current-results.json");
 const cohortEvidencePath = path.join(__dirname, "history", "evidence");
@@ -105,6 +106,36 @@ function readHistory() {
     fail(`${relative(historyPath)} must contain at least one benchmark record`);
   }
   return records.sort(compareRunTime);
+}
+
+function readHistoryBackfills() {
+  if (!fs.existsSync(historyBackfillDirectory)) {
+    return [];
+  }
+  const files = fs
+    .readdirSync(historyBackfillDirectory)
+    .filter((file) => file.endsWith(".json"))
+    .sort();
+  return files.map((file) => {
+    const absolute = path.join(historyBackfillDirectory, file);
+    let value;
+    try {
+      value = JSON.parse(fs.readFileSync(absolute, "utf8"));
+    } catch (error) {
+      fail(`could not parse ${relative(absolute)}: ${error.message}`);
+    }
+    if (
+      value == null ||
+      typeof value !== "object" ||
+      Array.isArray(value) ||
+      value.schema !== "rustia.bench.history-backfill.v1" ||
+      !Array.isArray(value.targets) ||
+      !Array.isArray(value.rows)
+    ) {
+      fail(`${relative(absolute)} is not a fixed-harness history backfill`);
+    }
+    return value;
+  });
 }
 
 function normalizeHistoryRecord(record, lineNumber) {
@@ -869,22 +900,62 @@ function claimWorkloadLabel(row) {
   return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.workload)} · ${escapeHtml(row.unit)}</span></span>`;
 }
 
-function historySection(history) {
-  const eras = rustiaHistoryEras(history.rows);
+function historySection(history, backfills) {
+  const reconstructed = rustiaBackfillEras(backfills);
+  const recorded = rustiaHistoryEras(history.rows);
+  const visibleRecorded = reconstructed.length > 0
+    ? recorded.filter((era) => era.title === "Current dedicated Linux history")
+    : recorded;
+  const eras = [...reconstructed, ...visibleRecorded];
   const snapshotCount = eras.reduce((total, era) => total + era.snapshotCount, 0);
+  const summary = reconstructed.length > 0
+    ? `${formatInteger(reconstructed.reduce((total, era) => total + era.snapshotCount, 0))} historical Rustia revisions reconstructed with a single fixed harness, followed by the directly recorded dedicated-VM series.`
+    : `${formatInteger(snapshotCount)} recorded Linux matrix runs across two eras. Each chart is normalized to its own first run, so different hosts and protocols are never blended.`;
+  const explanation = reconstructed.length > 0
+    ? "Fixed-harness reconstruction uses the same workloads, fixed work counts, repetitions, host, and harness for every historical source revision."
+    : "This is rustia-only history, so competitor upgrades do not distort it.";
   return `
     <section class="panel" id="history">
       <div class="section-head">
         <div>
           <h2>rustia Performance History</h2>
-          <p>${formatInteger(snapshotCount)} recorded Linux matrix runs across two eras. Each chart is normalized to its own first run, so different hosts and protocols are never blended.</p>
+          <p>${summary}</p>
         </div>
       </div>
-      <p class="history-answer"><strong>Higher is faster.</strong> A value of 1× is the first run in that era; 2× means the workload takes half the time. This is rustia-only history, so competitor upgrades do not distort it.</p>
+      <p class="history-answer"><strong>Higher is faster.</strong> A value of 1× is the first run in that era; 2× means the workload takes half the time. ${explanation}</p>
       ${eras.map(rustiaHistoryEraSection).join("")}
-      <p class="cohort-note">Restored from published Linux matrix snapshots that were previously overwritten in <code>${escapeHtml(relative(historyPath))}</code>. Future accepted matrix runs now append to this ledger.</p>
+      <p class="cohort-note">${reconstructed.length > 0 ? `Reconstruction measurement time is retained honestly in <code>${escapeHtml(relative(historyBackfillDirectory))}</code>; the chart's x-axis uses each source commit's original date.` : `Restored from published Linux matrix snapshots that were previously overwritten in <code>${escapeHtml(relative(historyPath))}</code>. Future accepted matrix runs now append to this ledger.`}</p>
     </section>
   `;
+}
+
+function rustiaBackfillEras(backfills) {
+  return backfills.map((backfill) => {
+    const targets = new Map(
+      backfill.targets.map((target, index) => [
+        target.commit,
+        { committedAt: target.committed_at_unix, index },
+      ]),
+    );
+    const rows = backfill.rows
+      .filter(
+        (row) =>
+          row.target === "linux-x86_64" &&
+          row.engine === "rustia" &&
+          REQUIRED_COMMON_WORKLOAD_SET.has(row.workload) &&
+          targets.has(row.commit),
+      )
+      .map((row) => ({
+        ...row,
+        timestamp_unix: targets.get(row.commit).committedAt,
+        backfill_order: targets.get(row.commit).index,
+      }));
+    return rustiaHistoryEra(
+      "Fixed-harness reconstructed history",
+      `Harness ${backfill.harness_commit.slice(0, 7)} · measured together on one dedicated Linux VM`,
+      rows,
+    );
+  });
 }
 
 function rustiaHistoryEras(rows) {
@@ -1655,7 +1726,7 @@ function targetRuntimeLabel(row) {
   return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.runtime)}</span></span>`;
 }
 
-function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts) {
+function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts, historyBackfills = []) {
   const wasmRows = wasmTargetRows(wasmResults);
   const summary = summarize(data, wasmRows);
   const history = summarizeHistory(historyRecords);
@@ -2621,7 +2692,7 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
     ${linuxComparisonSection(summary.linuxComparisonViews)}
     ${coldStartSection(summary.coldStartRows)}
     ${claimGateSection(claimRows)}
-    ${historySection(history)}
+      ${historySection(history, historyBackfills)}
 
     <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
@@ -2673,10 +2744,11 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
 function main() {
   const data = readData();
   const historyRecords = readHistory();
+  const historyBackfills = readHistoryBackfills();
   const wasmResults = readWasmResults();
   const wasmDispatchResults = readWasmDispatchResults();
   const cohorts = readCohortEvidence();
-  const html = render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
+  const html = render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts, historyBackfills).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
   const output = `${html}\n`;
   if (checkOnly) {
     let current;
