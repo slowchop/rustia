@@ -183,7 +183,7 @@ function main() {
   assert.match(comparisonHtml, /data-mode-view="all"/);
   assert.match(comparisonHtml, /data-mode-view="interpreter" hidden/);
   assert.match(comparisonHtml, /data-mode-view="accelerated" hidden/);
-  assert.match(comparisonHtml, /<strong>mlua<\/strong><span> Luau \/ JIT<\/span>/);
+  assert.match(comparisonHtml, /<strong>mlua<\/strong><span>Luau \/ JIT<\/span>/);
 
   const modeRows = [
     { ...rows[0], engine: "mlua-luau", mode_family: "mlua-luau", execution_mode: "interpreter" },

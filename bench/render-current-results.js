@@ -1328,7 +1328,7 @@ function implementationLanguage(engine, language, mode = null) {
     native: "Native",
     "wasm-runtime": "Wasm runtime",
   };
-  return `<span class="implementation-language comparison-label"><strong>${escapeHtml(implementationLabel(engine))}</strong><span>${escapeHtml(` ${language} / ${modeLabels[mode] ?? mode}`)}</span></span>`;
+  return `<span class="implementation-language comparison-label"><strong>${escapeHtml(implementationLabel(engine))}</strong><span>${escapeHtml(`${language} / ${modeLabels[mode] ?? mode}`)}</span></span>`;
 }
 
 function languageHeatmap(targetRow) {
@@ -1927,7 +1927,7 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
 
     .implementation-language.comparison-label {
       display: flex;
-      gap: 0;
+      gap: 0.35em;
       align-items: baseline;
       white-space: nowrap;
     }
