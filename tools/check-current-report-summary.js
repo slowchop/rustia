@@ -162,10 +162,19 @@ function main() {
   assert.ok(html.indexOf('data-implementation="koto"') < html.indexOf('data-implementation="rustia"'));
   assert.doesNotMatch(html, /oop_metamethods|excluded-revision/);
 
+  const jitSummary = {
+    ...complete,
+    implementationRows: [{
+      ...completeKoto,
+      engine: "mlua-luau-jit",
+      language: "Luau",
+      mode: "jit",
+    }],
+  };
   const comparisonHtml = linuxComparisonSection({
-    all: summaries,
+    all: [jitSummary],
     interpreter: summaries,
-    accelerated: [complete],
+    accelerated: [jitSummary],
   });
   assert.match(comparisonHtml, /<h2>Linux Language Comparison<\/h2>/);
   assert.match(comparisonHtml, /data-mode-filter="all" aria-pressed="true"/);
@@ -174,6 +183,7 @@ function main() {
   assert.match(comparisonHtml, /data-mode-view="all"/);
   assert.match(comparisonHtml, /data-mode-view="interpreter" hidden/);
   assert.match(comparisonHtml, /data-mode-view="accelerated" hidden/);
+  assert.match(comparisonHtml, /<strong>mlua<\/strong><span> \/ Luau \/ JIT<\/span>/);
 
   const modeRows = [
     { ...rows[0], engine: "mlua-luau", mode_family: "mlua-luau", execution_mode: "interpreter" },

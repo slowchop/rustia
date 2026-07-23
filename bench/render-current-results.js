@@ -1319,8 +1319,16 @@ function rankBarWidth(row, rows) {
 }
 
 function implementationLanguage(engine, language, mode = null) {
-  const modeMarkup = mode && mode !== "interpreter" ? modeBadge(mode) : "";
-  return `<span class="implementation-language"><strong>${escapeHtml(implementationLabel(engine))}</strong><span>${escapeHtml(language)}</span>${modeMarkup}</span>`;
+  if (mode == null) {
+    return `<span class="implementation-language"><strong>${escapeHtml(implementationLabel(engine))}</strong><span>${escapeHtml(language)}</span></span>`;
+  }
+  const modeLabels = {
+    interpreter: "Interpreter",
+    jit: "JIT",
+    native: "Native",
+    "wasm-runtime": "Wasm runtime",
+  };
+  return `<span class="implementation-language comparison-label"><strong>${escapeHtml(implementationLabel(engine))}</strong><span>${escapeHtml(` / ${language} / ${modeLabels[mode] ?? mode}`)}</span></span>`;
 }
 
 function languageHeatmap(targetRow) {
@@ -1915,6 +1923,13 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
       display: grid;
       gap: 1px;
       min-width: 0;
+    }
+
+    .implementation-language.comparison-label {
+      display: flex;
+      gap: 0;
+      align-items: baseline;
+      white-space: nowrap;
     }
 
     .implementation-language strong,
