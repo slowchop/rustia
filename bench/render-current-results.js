@@ -228,6 +228,7 @@ function normalizeCohortEvidence(data, filePath) {
   return {
     workload,
     createdAt: data.created_at,
+    baselineCommit: data.source?.baseline_commit,
     candidateCommit: data.source?.candidate_commit,
     delta: data.comparison.candidate_delta_percent,
     lower: interval.lower,
@@ -868,7 +869,7 @@ function claimWorkloadLabel(row) {
   return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.workload)} · ${escapeHtml(row.unit)}</span></span>`;
 }
 
-function historySection(history, cohorts, currentRows, wasmRows) {
+function historySection(history, cohorts) {
   const allBounds = cohorts.flatMap((cohort) => [cohort.lower, cohort.upper, cohort.delta, 0]);
   const axisMin = Math.min(-10, Math.floor((Math.min(...allBounds) - 2) / 10) * 10);
   const axisMax = Math.max(10, Math.ceil((Math.max(...allBounds) + 2) / 10) * 10);
@@ -877,37 +878,24 @@ function historySection(history, cohorts, currentRows, wasmRows) {
   const ticks = [axisMin, axisMin + (axisMax - axisMin) / 4, axisMin + (axisMax - axisMin) / 2, 0, axisMax]
     .filter((value, index, values) => values.findIndex((candidate) => Math.abs(candidate - value) < 0.001) === index)
     .sort((left, right) => left - right);
-  const currentCommit = unique(currentRows.map((row) => row.commit)).join(", ");
-  const latestTimestamp = Math.max(...currentRows.map((row) => row.timestamp_unix));
+  const fasterCount = cohorts.filter((cohort) => cohort.delta < 0).length;
   return `
     <section class="panel" id="history">
       <div class="section-head">
         <div>
-          <h2>Benchmark History</h2>
-          <p>Controlled deltas stay separate from the full language-matrix baseline.</p>
+          <h2>Verified rustia Performance History</h2>
+          <p>${formatInteger(fasterCount)} controlled improvements recorded. The complete Linux language matrix has ${formatInteger(history.commitCount)} snapshot${history.commitCount === 1 ? "" : "s"}, so it cannot yet show a whole-engine trend.</p>
         </div>
       </div>
-      <div class="cohort-chart" role="img" aria-label="Accepted controlled benchmark cohort deltas; lower percentages are faster">
+      <p class="history-answer"><strong>What has improved:</strong> each row is a same-provider, same-workload before/after comparison. Negative runtime change means rustia got faster; these workloads are not combined into a misleading single score.</p>
+      <div class="cohort-chart" role="img" aria-label="Verified rustia performance improvements by date; lower percentages are faster">
+        <p class="cohort-chart-heading">Runtime change versus the immediately previous revision · left is faster</p>
         <div class="cohort-axis" style="--zero: ${zeroPosition.toFixed(3)}%" aria-hidden="true">
           ${ticks.map((tick) => `<span style="left:${axisPosition(tick).toFixed(3)}%">${tick > 0 ? "+" : ""}${formatNumber(tick)}%</span>`).join("")}
         </div>
         ${cohorts.map((cohort) => cohortPlotRow(cohort, axisPosition, zeroPosition)).join("")}
       </div>
-      <div class="table-wrap cohort-table-wrap">
-        <table class="cohort-table">
-          <thead><tr><th>Accepted cohort</th><th>Coverage</th><th>Comparable result</th><th>Status</th></tr></thead>
-          <tbody>
-            ${cohorts.map(cohortTableRow).join("")}
-            <tr>
-              <td><span class="implementation-language"><strong>Language matrix</strong><span>${escapeHtml(currentCommit.slice(0, 7))} · ${formatTime(latestTimestamp)}</span></span></td>
-              <td>${formatInteger(currentRows.length)} native · ${formatInteger(wasmRows.length)} Wasm rows</td>
-              <td>Implementations within one exact target</td>
-              <td><span class="cohort-status">current baseline</span></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="cohort-note">Lower is faster. Confidence intervals appear only for same-protocol candidate/baseline cohorts; the language matrix remains a baseline until another complete cohort exists. Source <code>${escapeHtml(relative(historyPath))}</code>.</p>
+      <p class="cohort-note">Confidence intervals are shown for each controlled comparison. After another full Linux matrix run, this section can add true per-workload trend lines. Source <code>${escapeHtml(relative(historyPath))}</code>.</p>
     </section>
   `;
 }
@@ -919,24 +907,13 @@ function cohortPlotRow(cohort, axisPosition, zeroPosition) {
   const labelSide = mid < 18 ? "cohort-label-right" : "cohort-label-left";
   return `
     <div class="cohort-plot-row">
-      <div class="cohort-plot-name"><strong>${escapeHtml(workloadLabel(cohort.workload))}</strong><span>${escapeHtml(cohort.candidateCommit.slice(0, 7))} · ${escapeHtml(formatIsoDate(cohort.createdAt))}</span></div>
+      <div class="cohort-plot-name"><strong>${escapeHtml(formatIsoDate(cohort.createdAt))} · ${escapeHtml(workloadLabel(cohort.workload))}</strong><span>${escapeHtml(cohort.baselineCommit?.slice(0, 7) ?? "unknown")} → ${escapeHtml(cohort.candidateCommit.slice(0, 7))}</span></div>
       <div class="cohort-track" style="--zero: ${zeroPosition.toFixed(3)}%">
         <span class="cohort-interval" style="left:${low.toFixed(3)}%;width:${Math.max(0.2, high - low).toFixed(3)}%"></span>
         <span class="cohort-point" style="left:${mid.toFixed(3)}%"></span>
         <span class="cohort-point-label ${labelSide}" style="left:${mid.toFixed(3)}%">${cohort.delta > 0 ? "+" : ""}${cohort.delta.toFixed(2)}%</span>
       </div>
     </div>
-  `;
-}
-
-function cohortTableRow(cohort) {
-  return `
-    <tr>
-      <td><span class="implementation-language"><strong>${escapeHtml(workloadLabel(cohort.workload))}</strong><span>${escapeHtml(cohort.candidateCommit.slice(0, 7))} · ${escapeHtml(formatIsoDate(cohort.createdAt))}</span></span></td>
-      <td>${formatInteger(cohort.legCount)} legs · ${formatInteger(cohort.sampleCount)} samples</td>
-      <td>${cohort.delta.toFixed(2)}% · 95% CI ${cohort.lower.toFixed(2)}% to ${cohort.upper.toFixed(2)}%</td>
-      <td><span class="cohort-status">published</span></td>
-    </tr>
   `;
 }
 
@@ -1987,6 +1964,25 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
       padding: 20px;
     }
 
+    .history-answer {
+      margin: 0;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+    }
+
+    .history-answer strong {
+      color: var(--text);
+    }
+
+    .cohort-chart-heading {
+      margin: 0 0 12px 170px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
     .cohort-axis {
       position: relative;
       height: 28px;
@@ -2482,6 +2478,10 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
         margin-left: 0;
       }
 
+      .cohort-chart-heading {
+        margin-left: 0;
+      }
+
       .cohort-plot-row {
         grid-template-columns: 1fr;
         gap: 4px;
@@ -2514,18 +2514,12 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts)
       <a href="#cold-start">Cold Start</a>
       <a href="#claim-gate">Claim Gate</a>
       <a href="#history">History</a>
-      <a href="#wasm-target">Wasm Target</a>
-      <a href="#wasm-dispatch">Wasm Dispatch</a>
-      ${summary.targetRows.map((group) => `<a href="#${escapeHtml(slug(group.target))}">${escapeHtml(group.target)}</a>`).join("")}
     </nav>
 
     ${linuxComparisonSection(summary.linuxComparisonViews)}
     ${coldStartSection(summary.coldStartRows)}
     ${claimGateSection(claimRows)}
-    ${historySection(history, cohorts, summary.rows, wasmRows)}
-    ${wasmTargetSection(wasmResults)}
-    ${wasmDispatchSection(wasmDispatchResults)}
-    ${summary.targetRows.map(targetSection).join("")}
+    ${historySection(history, cohorts)}
 
     <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
