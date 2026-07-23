@@ -900,9 +900,10 @@ function claimWorkloadLabel(row) {
   return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.workload)} · ${escapeHtml(row.unit)}</span></span>`;
 }
 
-function historySection(history, backfills) {
-  const reconstructed = rustiaBackfillEras(backfills);
-  const recorded = rustiaHistoryEras(history.rows);
+function historySection(history, backfills, currentRows) {
+  const reference = mluaJitHistoryReference(currentRows);
+  const reconstructed = rustiaBackfillEras(backfills, reference);
+  const recorded = rustiaHistoryEras(history.rows, reference);
   const visibleRecorded = reconstructed.length > 0
     ? recorded.filter((era) => era.title === "Current dedicated Linux history")
     : recorded;
@@ -912,8 +913,8 @@ function historySection(history, backfills) {
     ? `${formatInteger(reconstructed.reduce((total, era) => total + era.snapshotCount, 0))} historical Rustia revisions reconstructed with a single fixed harness, followed by the directly recorded dedicated-VM series.`
     : `${formatInteger(snapshotCount)} recorded Linux matrix runs across two eras. Each chart is normalized to its own first run, so different hosts and protocols are never blended.`;
   const explanation = reconstructed.length > 0
-    ? "Fixed-harness reconstruction uses the same workloads, fixed work counts, repetitions, host, and harness for every historical source revision."
-    : "This is rustia-only history, so competitor upgrades do not distort it.";
+    ? `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>); the reconstructed Rustia measurements used a separate VM of the same class.`
+    : `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>).`;
   return `
     <section class="panel" id="history">
       <div class="section-head">
@@ -922,14 +923,33 @@ function historySection(history, backfills) {
           <p>${summary}</p>
         </div>
       </div>
-      <p class="history-answer"><strong>Higher is faster.</strong> A value of 1× is the first run in that era; 2× means the workload takes half the time. ${explanation}</p>
+      <p class="history-answer"><strong>Higher is faster; mlua/JIT is 1×.</strong> ${explanation}</p>
       ${eras.map(rustiaHistoryEraSection).join("")}
       <p class="cohort-note">${reconstructed.length > 0 ? `Reconstruction measurement time is retained honestly in <code>${escapeHtml(relative(historyBackfillDirectory))}</code>; the chart's x-axis uses each source commit's original date.` : `Restored from published Linux matrix snapshots that were previously overwritten in <code>${escapeHtml(relative(historyPath))}</code>. Future accepted matrix runs now append to this ledger.`}</p>
     </section>
   `;
 }
 
-function rustiaBackfillEras(backfills) {
+function mluaJitHistoryReference(rows) {
+  const referenceRows = rows.filter(
+    (row) =>
+      row.target === "linux-x86_64" &&
+      row.engine === "mlua-luau-jit" &&
+      REQUIRED_COMMON_WORKLOAD_SET.has(row.workload),
+  );
+  const byWorkload = new Map(referenceRows.map((row) => [row.workload, row]));
+  for (const workload of REQUIRED_COMMON_WORKLOADS) {
+    if (!byWorkload.has(workload)) {
+      fail(`history reference has no mlua-luau-jit linux-x86_64 result for ${workload}`);
+    }
+  }
+  return {
+    commit: referenceRows[0].commit,
+    byWorkload,
+  };
+}
+
+function rustiaBackfillEras(backfills, reference) {
   return backfills.map((backfill) => {
     const targets = new Map(
       backfill.targets.map((target, index) => [
@@ -954,11 +974,12 @@ function rustiaBackfillEras(backfills) {
       "Fixed-harness reconstructed history",
       `Harness ${backfill.harness_commit.slice(0, 7)} · measured together on one dedicated Linux VM`,
       rows,
+      reference,
     );
   });
 }
 
-function rustiaHistoryEras(rows) {
+function rustiaHistoryEras(rows, reference) {
   const rustiaRows = rows
     .filter((row) => row.target === "linux-x86_64" && row.engine === "rustia" && REQUIRED_COMMON_WORKLOAD_SET.has(row.workload))
     .slice()
@@ -974,21 +995,23 @@ function rustiaHistoryEras(rows) {
     }
   }
   if (splitAt == null || largestGap < 24 * 60 * 60) {
-    return [rustiaHistoryEra("Comparable Linux history", "All recorded Linux runs", rustiaRows)];
+    return [rustiaHistoryEra("Comparable Linux history", "All recorded Linux runs", rustiaRows, reference)];
   }
   return [
-    rustiaHistoryEra("Earlier Linux history", "Earlier host/protocol era; kept on its own scale", rustiaRows.filter((row) => row.timestamp_unix < splitAt)),
-    rustiaHistoryEra("Current dedicated Linux history", "Controlled matrix era; this is the chart to use for current progress", rustiaRows.filter((row) => row.timestamp_unix >= splitAt)),
+    rustiaHistoryEra("Earlier Linux history", "Earlier host/protocol era; kept on its own scale", rustiaRows.filter((row) => row.timestamp_unix < splitAt), reference),
+    rustiaHistoryEra("Current dedicated Linux history", "Controlled matrix era; this is the chart to use for current progress", rustiaRows.filter((row) => row.timestamp_unix >= splitAt), reference),
   ];
 }
 
-function rustiaHistoryEra(title, description, rows) {
+function rustiaHistoryEra(title, description, rows, reference) {
   const workloads = rustiaHistoryWorkloads(rows);
   const timestamps = workloads.flatMap((workload) => workload.rows.map((row) => row.timestamp_unix));
   return {
     title,
     description,
     workloads,
+    overall: rustiaOverallHistory(workloads, reference),
+    reference,
     snapshotCount: Math.max(...workloads.map((workload) => workload.rows.length)),
     minTimestamp: Math.min(...timestamps),
     maxTimestamp: Math.max(...timestamps),
@@ -999,8 +1022,8 @@ function rustiaHistoryEraSection(era) {
   return `
     <section class="history-era">
       <div class="history-era-head"><div><h3>${escapeHtml(era.title)}</h3><p>${formatInteger(era.snapshotCount)} runs · ${formatIsoDate(era.minTimestamp)} to ${formatIsoDate(era.maxTimestamp)} · ${escapeHtml(era.description)}</p></div></div>
-      ${rustiaHistoryChart(era.workloads)}
-      <div class="table-wrap history-table"><table><thead><tr><th>Workload</th><th>First run</th><th>Latest run</th><th>Improvement</th><th>Points</th></tr></thead><tbody>${era.workloads.map(rustiaHistoryRow).join("")}</tbody></table></div>
+      ${rustiaHistoryChart(era.overall, era.reference)}
+      ${rustiaOverallHistoryTable(era.overall)}
     </section>
   `;
 }
@@ -1020,53 +1043,104 @@ function rustiaHistoryWorkloads(rows) {
   });
 }
 
-function rustiaHistoryChart(workloads) {
+function rustiaOverallHistory(workloads, reference) {
+  const rows = workloads
+    .flatMap((workload) => workload.rows)
+    .slice()
+    .sort(compareRunTime);
+  const snapshots = [];
+  let active = null;
+  for (const row of rows) {
+    const snapshotKey = Number.isInteger(row.backfill_order) ? `backfill:${row.backfill_order}` : null;
+    const needsSnapshot =
+      active == null ||
+      (snapshotKey != null && active.key !== snapshotKey) ||
+      (snapshotKey == null && (
+        active.key != null ||
+        row.timestamp_unix - active.timestamp_unix > 120 ||
+        active.ratios.has(row.workload)
+      ));
+    if (needsSnapshot) {
+      active = {
+        key: snapshotKey,
+        commit: row.commit,
+        timestamp_unix: row.timestamp_unix,
+        ratios: new Map(),
+      };
+      snapshots.push(active);
+    }
+    active.ratios.set(
+      row.workload,
+      reference.byWorkload.get(row.workload).ns_per_unit_min / row.ns_per_unit_min,
+    );
+  }
+  const points = snapshots
+    .flatMap((snapshot) => {
+      const ratios = REQUIRED_COMMON_WORKLOADS.map((workload) => snapshot.ratios.get(workload));
+      if (ratios.some((ratio) => !Number.isFinite(ratio) || ratio <= 0)) {
+        return [];
+      }
+      return [{
+        commit: snapshot.commit,
+        timestamp_unix: snapshot.timestamp_unix,
+        score: geometricMean(ratios),
+      }];
+    })
+    .sort(compareRunTime);
+  if (points.length === 0) {
+    fail("history has no complete five-workload snapshots");
+  }
+  const baseline = points[0].score;
+  return points.map((point) => ({
+    ...point,
+    gain: point.score / baseline,
+  }));
+}
+
+function rustiaHistoryChart(points, reference) {
   const width = 920;
   const height = 300;
   const pad = { left: 54, right: 20, top: 22, bottom: 42 };
-  const rows = workloads.flatMap((workload) => workload.rows);
-  const minX = Math.min(...rows.map((row) => row.timestamp_unix));
-  const maxX = Math.max(...rows.map((row) => row.timestamp_unix));
-  const maxSpeed = Math.max(1, ...rows.map((row) => row.speed));
-  const maxY = Math.ceil(maxSpeed * 1.08 * 2) / 2;
+  const minX = Math.min(...points.map((point) => point.timestamp_unix));
+  const maxX = Math.max(...points.map((point) => point.timestamp_unix));
+  const maxScore = Math.max(1, ...points.map((point) => point.score));
+  const maxY = Math.max(1.05, Math.ceil(maxScore * 1.08 * 4) / 4);
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
   const xScale = (timestamp) => maxX === minX
     ? pad.left + plotWidth / 2
     : pad.left + ((timestamp - minX) / (maxX - minX)) * plotWidth;
-  const yScale = (speed) => pad.top + (1 - speed / maxY) * plotHeight;
-  const ticks = [...new Set([
-    ...Array.from({ length: Math.floor(maxY) + 1 }, (_, index) => index)
-      .filter((tick) => tick === 0 || tick === 1 || tick % 2 === 0),
-    maxY,
-  ])].sort((left, right) => left - right);
-  const colors = ["#2563eb", "#0f766e", "#b45309", "#7c3aed", "#be185d"];
+  const yScale = (score) => pad.top + (1 - score / maxY) * plotHeight;
+  const ticks = [...new Set([0, 0.25, 0.5, 0.75, 1, maxY])]
+    .filter((tick) => tick <= maxY)
+    .sort((left, right) => left - right);
+  const rustiaColor = "#2563eb";
+  const referenceColor = "#ea580c";
+  const rustiaPoints = points.map((point) => `${xScale(point.timestamp_unix).toFixed(2)},${yScale(point.score).toFixed(2)}`).join(" ");
   return `
     <div class="history-chart">
-      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="rustia normalized Linux performance history, higher is faster">
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="rustia overall Linux performance history versus mlua JIT, higher is faster">
         <rect x="0" y="0" width="${width}" height="${height}" class="history-chart-bg" />
-        ${ticks.map((tick) => `<line x1="${pad.left}" y1="${yScale(tick).toFixed(2)}" x2="${width - pad.right}" y2="${yScale(tick).toFixed(2)}" class="history-grid-line" /><text x="8" y="${(yScale(tick) + 4).toFixed(2)}" class="history-axis-label">${tick}×</text>`).join("")}
+        ${ticks.map((tick) => `<line x1="${pad.left}" y1="${yScale(tick).toFixed(2)}" x2="${width - pad.right}" y2="${yScale(tick).toFixed(2)}" class="history-grid-line" /><text x="8" y="${(yScale(tick) + 4).toFixed(2)}" class="history-axis-label">${formatSpeed(tick)}</text>`).join("")}
         <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" class="history-axis" />
         <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" class="history-axis" />
         <text x="${pad.left}" y="${height - 10}" class="history-axis-label">${escapeHtml(formatIsoDate(minX))}</text>
         <text x="${width - pad.right}" y="${height - 10}" text-anchor="end" class="history-axis-label">${escapeHtml(formatIsoDate(maxX))}</text>
-        ${workloads.map((workload, index) => rustiaHistorySeriesSvg(workload, colors[index], xScale, yScale)).join("")}
+        <line x1="${pad.left}" y1="${yScale(1).toFixed(2)}" x2="${width - pad.right}" y2="${yScale(1).toFixed(2)}" stroke="${referenceColor}" stroke-width="2.6" stroke-dasharray="9 7"><title>${escapeHtml(`mlua / Luau / JIT · current matrix ${reference.commit.slice(0, 7)} · 1×`)}</title></line>
+        <polyline points="${rustiaPoints}" fill="none" stroke="${rustiaColor}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+        ${points.map((point) => `<circle cx="${xScale(point.timestamp_unix).toFixed(2)}" cy="${yScale(point.score).toFixed(2)}" r="3.6" fill="${rustiaColor}"><title>${escapeHtml(`rustia · ${point.commit.slice(0, 7)} · ${formatSpeed(point.score)} mlua/JIT · ${formatSpeed(point.gain)} vs first Rustia`)}</title></circle>`).join("")}
       </svg>
-      <div class="history-legend">${workloads.map((workload, index) => `<span>${colorDotMarkup(colors[index])}${escapeHtml(workloadLabel(workload.workload))}</span>`).join("")}</div>
+      <div class="history-legend"><span>${colorDotMarkup(rustiaColor)}rustia overall</span><span>${colorDotMarkup(referenceColor)}<strong>mlua</strong> / Luau / JIT · 1×</span></div>
     </div>
   `;
 }
 
-function rustiaHistorySeriesSvg(workload, color, xScale, yScale) {
-  const points = workload.rows.map((row) => `${xScale(row.timestamp_unix).toFixed(2)},${yScale(row.speed).toFixed(2)}`).join(" ");
-  return `<g><polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />${workload.rows.map((row) => `<circle cx="${xScale(row.timestamp_unix).toFixed(2)}" cy="${yScale(row.speed).toFixed(2)}" r="3.4" fill="${color}"><title>${escapeHtml(`${workloadLabel(workload.workload)} · ${row.commit.slice(0, 7)} · ${formatSpeed(row.speed)} vs first`)}</title></circle>`).join("")}</g>`;
-}
-
-function rustiaHistoryRow(workload) {
-  const first = workload.rows[0];
-  const latest = workload.rows.at(-1);
-  const percent = (latest.speed - 1) * 100;
-  return `<tr><td>${escapeHtml(workloadLabel(workload.workload))}</td><td>${formatNumber(first.ns_per_unit_min)} ns · <code>${escapeHtml(first.commit.slice(0, 7))}</code></td><td>${formatNumber(latest.ns_per_unit_min)} ns · <code>${escapeHtml(latest.commit.slice(0, 7))}</code></td><td><strong>${formatSpeed(latest.speed)}</strong> · ${percent >= 0 ? "+" : ""}${formatNumber(percent)}%</td><td>${formatInteger(workload.rows.length)}</td></tr>`;
+function rustiaOverallHistoryTable(points) {
+  const first = points[0];
+  const latest = points.at(-1);
+  const percent = (latest.gain - 1) * 100;
+  const gap = 1 / latest.score;
+  return `<div class="table-wrap history-table"><table><thead><tr><th>Score</th><th>First run</th><th>Latest run</th><th>Improvement</th><th>Latest gap</th></tr></thead><tbody><tr><td><strong>Overall</strong> · geometric mean of 5 workloads</td><td>${formatSpeed(first.score)} of mlua/JIT · <code>${escapeHtml(first.commit.slice(0, 7))}</code></td><td>${formatSpeed(latest.score)} of mlua/JIT · <code>${escapeHtml(latest.commit.slice(0, 7))}</code></td><td><strong>${formatSpeed(latest.gain)}</strong> · ${percent >= 0 ? "+" : ""}${formatNumber(percent)}%</td><td>mlua/JIT is <strong>${formatSpeed(gap)}</strong> faster</td></tr></tbody></table></div>`;
 }
 
 function workloadLabel(workload) {
@@ -2692,7 +2766,7 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts,
     ${linuxComparisonSection(summary.linuxComparisonViews)}
     ${coldStartSection(summary.coldStartRows)}
     ${claimGateSection(claimRows)}
-      ${historySection(history, historyBackfills)}
+      ${historySection(history, historyBackfills, data.rows)}
 
     <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
