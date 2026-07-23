@@ -14,6 +14,24 @@ const expectedClaims = path.join(root, "bench", "CLAIMS.md");
 const dedicatedLinuxTarget = "linux-x86_64";
 const expectedEngineCohorts = new Map([
   [
+    "83bc2f370ee4149b6fa6e11eca951b41b4cccbd2",
+    new Map([
+      ["rustia", "luau"],
+      ["boa", "javascript"],
+      ["koto", "koto"],
+      ["luaur", "luau"],
+      ["mlua-luau", "luau"],
+      ["mlua-luau-jit", "luau"],
+      ["rhai", "rhai"],
+      ["roto", "roto"],
+      ["ruau", "luau"],
+      ["rquickjs", "javascript"],
+      ["wasmi", "wasm"],
+      ["wasmtime", "wasm"],
+      ["mlua-lua54", "lua54"],
+    ]),
+  ],
+  [
     "b1cd2841fb8fc2d916047391a1d757d53a1303cd",
     new Map([
       ["rustia", "luau"],
@@ -233,6 +251,20 @@ function validateDedicatedLinuxMatrix() {
     }
     if (row.dialect !== expectedDialect) {
       fail(`${label}.dialect must be ${JSON.stringify(expectedDialect)} for ${row.engine}`);
+    }
+    if (cohortCommit === "83bc2f370ee4149b6fa6e11eca951b41b4cccbd2") {
+      for (const field of [
+        "prepare_ns_min", "prepare_ns_median", "first_call_ns_min", "first_call_ns_median",
+        "cold_start_ns_min", "cold_start_ns_median",
+      ]) {
+        if (!Number.isFinite(row[field]) || row[field] <= 0) fail(`${label}.${field} must be positive and finite`);
+      }
+      if (row.engine === "mlua-luau-jit" &&
+          (row.execution_mode !== "jit" || row.mode_family !== "mlua-luau" ||
+           row.native_verified !== true || row.native_verification !== "ab-native-sentinel" ||
+           !Number.isFinite(row.native_verification_ratio) || row.native_verification_ratio < 1.5)) {
+        fail(`${label} must retain verified mlua-luau native-JIT provenance`);
+      }
     }
     if (!expectedWorkloads.includes(row.workload)) {
       fail(`${label}.workload is not in the frozen five-workload matrix: ${JSON.stringify(row.workload)}`);
