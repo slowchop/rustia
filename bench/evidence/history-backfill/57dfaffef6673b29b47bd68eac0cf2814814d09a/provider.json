@@ -1,0 +1,124 @@
+{
+  "provider": "linode",
+  "linode_id": null,
+  "linode_label": "rustia-bench-57dfaffe-ac09c71a",
+  "created_at": "2026-07-23T06:32:58",
+  "status": "running",
+  "region": "ap-southeast",
+  "size_slug": "g6-dedicated-4",
+  "image": "linode/ubuntu24.04",
+  "vcpus": 4,
+  "memory_mib": 8192,
+  "disk_gib": 160,
+  "public_ipv4": "REDACTED",
+  "backups_enabled": false,
+  "interface_generation": "legacy_config",
+  "maintenance_policy": "linode/power_off_on",
+  "catalog_plan": {
+    "schema": "rustia.linode-fixed-benchmark.v2",
+    "provider": "linode",
+    "protocol_mode": "history_backfill",
+    "region": {
+      "id": "ap-southeast",
+      "label": "Sydney, AU",
+      "country": "au",
+      "status": "ok"
+    },
+    "image": {
+      "id": "linode/ubuntu24.04",
+      "label": "Ubuntu 24.04 LTS",
+      "vendor": "Ubuntu",
+      "created": "2024-04-25T13:00:11",
+      "updated": "2026-07-16T14:18:54",
+      "status": "available",
+      "is_public": true
+    },
+    "size": {
+      "id": "g6-dedicated-4",
+      "description": "Dedicated 8GB",
+      "class": "dedicated",
+      "vcpus": 4,
+      "memory_mib": 8192,
+      "disk_gib": 160,
+      "price_hourly_usd": 0.108,
+      "price_monthly_usd": 72,
+      "regional_price": false
+    },
+    "billable_lifetime_limit_minutes": 55,
+    "billing_increment_minutes": 60,
+    "planned_compute_cost_ceiling_usd": 0.108,
+    "cleanup_reserve_minutes": 8,
+    "billing_caveat": "Linode usage is rounded up to a whole hour; deletion, not shutdown, stops further accrual, and an API outage can delay confirmed deletion",
+    "source": {
+      "orchestration_commit": "14538bc21d6b043469c2e8ab35318643d66c4724",
+      "config_path": "bench/cloud/linode-history-backfill-57dfaff.json",
+      "config_sha256": "e7be7d77ad8496eb3815f77277e06c7d5185906a7b150429ae174fe3a2f252bd",
+      "coordinator_sha256": "01e8c221224b4e8414f5f1e49fde323a0d2595b89a51e109087ededfc9af7c50",
+      "remote_runner_path": "tools/run-linux-history-backfill.js",
+      "remote_runner_sha256": "7de73c506e79d3618f498fa06a36596b1affd6ab7ceca7167da2d3e2518661b7",
+      "verified_source_hashes": {
+        "backfill bench manifest": "e8303805267eacc831e1bb356ef0ebff80f3da25a22655eae08862a5babe0498",
+        "backfill native harness": "8c6f867fcb09d695adbcbf8f932b85aea5023a272f8d1961c70f8d275f7ae776",
+        "backfill Cargo.lock": "7227d51f385e7e9c21ea2fca5e2ed17b152dfcd5c9a78aea5c95362c5c411cc2",
+        "backfill toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
+        "backfill dense workload": "b0c048b9fb17582fa409ae46b977cc73da635c145df39ea6f8fd756e9e17118d",
+        "backfill sparse workload": "6a13ccd4353e4a4450e26facf2c84d070e1a751365f9442e608628d68a2563d6",
+        "backfill closure workload": "bc5062a4b53432ceba6c1f73bde64addede5e3ce2726eabd60876a648f8d2cee",
+        "backfill iteration workload": "c1a796e02ce8ded0f6a407b8f73b69bd326e58e2ddfa45ee20200f48503e7d05",
+        "backfill math/table workload": "d530b33602394fa87a7254a65e71ad75c6b271b849c76d1050cc859b70fa8154"
+      }
+    },
+    "comparison": {
+      "protocol": "rustia_history_backfill_v1",
+      "harness_commit": "57dfaffef6673b29b47bd68eac0cf2814814d09a",
+      "target_commits": [
+        "aee7749d2d95ba7c480a03a35d7827a31db265f6",
+        "c99a731624b7be8b914a293aa57d8a5e8685dc90",
+        "d2279ca0a94da8a9968f59b3dd30d6915b0d39f7",
+        "2e7dea9d0da127497ac17f8ae167ee7f185cd919",
+        "8d2f097b2b7dc80e16eae243913f6ef58b180fdd",
+        "b7f02f319c7230db61fabbfa7e309f2e382437e2",
+        "10bc57afa94a40d38c7f5fde5efdbd86a6691b43",
+        "9979c3e3f362c364520b8a3ae2fec135310e06e7",
+        "645c76ee46e6ba533d078a26f06fec0c4d438b66",
+        "ad82d3990f6d9646645a88bd8d9a701f6a1def2f",
+        "ea37fec795759ab2199357da04a22f4f24e47f6a",
+        "9f85d010a284a57a5a8ca39b7afbab10379dd9f0",
+        "a559a6af80dea3cd4005dc10af68a5da31fda03f",
+        "4a28afa7700caacda53df95c87b14d5932fdf856",
+        "dac4ec2295f77587c79f04e4ff0a09cb99912f96",
+        "ae3beae2025feb21d0e37c70168204ae154ae125",
+        "1370d6ccefba7a1956441247c3139af2a2cf31fa",
+        "ed65077c2e779ec6a641b8ca2f8c8258b2508a2d",
+        "f208c12d0ce266117743569d736346fae9a35db2",
+        "87db17542e19ae77ec92463f8a5b8e8b8a21a666",
+        "b1cd2841fb8fc2d916047391a1d757d53a1303cd",
+        "6ae0cf0c5f0890f85662da417d6639d3fb0e7933",
+        "3732b80d5200edf053e213ef931b838c003968f3",
+        "d4ec275e19bad0efcf8e96db4030e7380bd93a9b",
+        "a5629199643847c0da78792644ad3656887bee21"
+      ],
+      "native_target": "linux-x86_64",
+      "workloads": [
+        "dense_tables",
+        "sparse_tables",
+        "closures_upvalues",
+        "generic_iteration",
+        "stdlib_math_table"
+      ],
+      "fixed_n": {
+        "dense_tables": 1995,
+        "sparse_tables": 1304,
+        "closures_upvalues": 502815,
+        "generic_iteration": 9396,
+        "stdlib_math_table": 98776
+      },
+      "repetitions": 5,
+      "maximum_timed_steal_ticks": 1,
+      "maximum_timed_attempts_per_group": 3,
+      "result_shape": {
+        "rows": 125
+      }
+    }
+  }
+}
