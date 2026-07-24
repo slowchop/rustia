@@ -20,6 +20,7 @@ const wasmPath = path.join(
 const measureScript = path.join(root, "bench", "wasm", "measure-rustia-wasm.mjs");
 const measureScriptSpiderMonkey = path.join(root, "bench", "wasm", "measure-rustia-wasm-sm.js");
 const outputPath = path.join(root, "bench", "wasm", "current-results.json");
+const fullCommit = /^[0-9a-f]{40}$/;
 
 function fail(message) {
   console.error(`run-wasm-gate: ${message}`);
@@ -128,8 +129,32 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
-function gitCommit() {
-  return run("git", ["rev-parse", "--short", "HEAD"]).trim();
+function gitCommit(runCommand = run) {
+  const commit = runCommand("git", ["rev-parse", "HEAD"]).trim();
+  if (!fullCommit.test(commit)) {
+    fail(`git rev-parse HEAD must return a full 40-character lowercase commit, got ${JSON.stringify(commit)}`);
+  }
+  return commit;
+}
+
+function selfTest() {
+  const expected = "a".repeat(40);
+  let invocation = null;
+  const actual = gitCommit((command, args) => {
+    invocation = { command, args };
+    return `${expected}\n`;
+  });
+  if (
+    actual !== expected ||
+    invocation?.command !== "git" ||
+    invocation.args.length !== 2 ||
+    invocation.args[0] !== "rev-parse" ||
+    invocation.args[1] !== "HEAD" ||
+    fullCommit.test("a".repeat(39))
+  ) {
+    fail("full-commit provenance self-test failed");
+  }
+  console.log("run-wasm-gate full-commit provenance self-test passed");
 }
 
 function buildWasm() {
@@ -211,6 +236,7 @@ function measureRuntime(runtime, options, commit) {
   }
   if (runtime === "spidermonkey") {
     runtimeSpec.args.push("--runtime-version", commandOutput(runtimeSpec.command, ["--version"]));
+    runtimeSpec.args.push("--host", `${process.platform}-${process.arch}`);
   }
   const { command, args } = runtimeSpec;
   const text = run(command, args);
@@ -221,7 +247,7 @@ function measureRuntime(runtime, options, commit) {
   }
 }
 
-function validateRuntimeBatch(batch) {
+function validateRuntimeBatch(batch, commit) {
   if (batch.schema !== "rustia.bench.wasm-runtime-results-batch.v1") {
     fail(`unexpected measurement schema ${JSON.stringify(batch.schema)}`);
   }
@@ -229,11 +255,11 @@ function validateRuntimeBatch(batch) {
     fail(`${batch.runtime?.name ?? "runtime"} measurement must contain adapter runs`);
   }
   for (const runResult of batch.runs) {
-    validateAdapterRun(runResult);
+    validateAdapterRun(runResult, commit);
   }
 }
 
-function validateAdapterRun(runResult) {
+function validateAdapterRun(runResult, commit) {
   if (runResult.schema !== "rustia.bench.wasm-runtime-results.v1") {
     fail(`unexpected adapter measurement schema ${JSON.stringify(runResult.schema)}`);
   }
@@ -242,6 +268,9 @@ function validateAdapterRun(runResult) {
   }
   if (typeof runResult.adapter.id !== "string" || runResult.adapter.id.trim() === "") {
     fail(`${runResult.runtime?.name ?? "runtime"} adapter id must be a non-empty string`);
+  }
+  if (runResult.commit !== commit) {
+    fail(`${runResult.runtime?.name ?? "runtime"}/${runResult.adapter.id} commit must match the full HEAD commit`);
   }
   if (!Array.isArray(runResult.rows) || runResult.rows.length === 0) {
     fail(`${runResult.runtime?.name ?? "runtime"} ${runResult.adapter.id} measurement must contain rows`);
@@ -279,6 +308,11 @@ function summarizeRequirements(runs) {
   };
 }
 
+if (process.argv.length === 3 && process.argv[2] === "self-test") {
+  selfTest();
+  process.exit(0);
+}
+
 const options = parseArgs(process.argv.slice(2));
 if (options.build) {
   buildWasm();
@@ -304,7 +338,7 @@ for (const runtime of options.runtimes) {
     continue;
   }
   const batch = measured;
-  validateRuntimeBatch(batch);
+  validateRuntimeBatch(batch, commit);
   runs.push(...batch.runs);
 }
 

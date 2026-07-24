@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>rustia Current Benchmark Results</title>
+  <title>rustia Benchmark Results and History</title>
   <style>
     :root {
       color-scheme: light;
@@ -37,14 +37,10 @@
     h1, h2, h3, p { margin-top: 0; }
 
     .hero {
-      display: grid;
-      grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.8fr);
-      gap: 18px;
       margin-bottom: 18px;
     }
 
     .hero-panel,
-    .metric,
     .panel,
     .target {
       background: var(--panel);
@@ -96,25 +92,10 @@
       color: var(--text);
     }
 
-    .metrics {
-      display: grid;
-      gap: 12px;
-    }
-
-    .metric {
-      padding: 16px;
-    }
-
-    .metric strong {
-      display: block;
-      margin-bottom: 2px;
-      font-size: 25px;
-      line-height: 1.1;
-    }
-
-    .metric span,
     .section-head p,
     .target-head p,
+    .history-target-head p,
+    .history-workload-head p,
     .workload-head p,
     .result-label span {
       color: var(--muted);
@@ -127,18 +108,427 @@
       font-weight: 600;
     }
 
-    .engine-target {
-      display: inline-flex;
-      align-items: baseline;
+    .language-targets {
+      display: grid;
+    }
+
+    .language-target-summary {
+      border-bottom: 1px solid var(--line);
+    }
+
+    .language-target-summary:last-child {
+      border-bottom: 0;
+    }
+
+    .language-target-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .language-target-head h3 {
+      margin-bottom: 2px;
+      font-size: 19px;
+    }
+
+    .language-target-head p {
+      margin-bottom: 2px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .language-target-head p:last-child {
+      margin-bottom: 0;
+    }
+
+    .summary-statuses {
+      display: flex;
       flex-wrap: wrap;
+      justify-content: flex-end;
       gap: 6px;
+    }
+
+    .summary-pill {
+      display: inline-flex;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .summary-complete,
+    .summary-revision-single {
+      background: #dff7ed;
+      color: #047857;
+    }
+
+    .summary-partial,
+    .summary-revision-mixed {
+      background: #fff1d6;
+      color: #92400e;
+    }
+
+    .metric-toggle {
+      display: inline-flex;
+      flex: 0 0 auto;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+    }
+
+    .metric-toggle button {
+      padding: 6px 11px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .metric-toggle button[aria-pressed="true"] {
+      background: var(--text);
+      color: var(--panel);
+    }
+
+    .comparison-controls {
+      display: flex;
+      flex: 0 0 auto;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .ranked-headline,
+    .heatmap-detail {
+      padding: 18px 20px;
+    }
+
+    .heatmap-detail {
+      border-top: 1px solid var(--line);
+      background: var(--panel-soft);
+    }
+
+    .rank-axis-caption,
+    .heatmap-head,
+    .heat-legend {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .rank-axis-caption {
+      margin: 0 0 8px min(290px, 35%);
+      text-align: right;
+    }
+
+    .ranked-bars {
+      display: grid;
+      gap: 4px;
+    }
+
+    .language-rank-row {
+      display: grid;
+      grid-template-columns: 28px minmax(180px, 240px) minmax(140px, 1fr) 90px 96px;
+      gap: 12px;
+      align-items: center;
+      min-height: 38px;
+    }
+
+    .rank-number,
+    .rank-meta,
+    .implementation-language span,
+    .metric-caption {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .rank-number,
+    .rank-value,
+    .heat-cell {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .rank-track {
+      height: 11px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e2e8ef;
+    }
+
+    .rank-fill {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width 180ms ease;
+    }
+
+    .rank-value {
+      text-align: right;
+    }
+
+    .rank-meta {
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .implementation-language {
+      display: grid;
+      gap: 1px;
       min-width: 0;
     }
 
-    .engine-target span {
+    .implementation-language.comparison-label {
+      display: flex;
+      gap: 0.35em;
+      align-items: baseline;
+      white-space: nowrap;
+    }
+
+    .implementation-language strong,
+    .implementation-language span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .mode-badge {
+      display: inline-flex;
+      width: fit-content;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: #334155;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .mode-jit,
+    .mode-native,
+    .mode-wasm-runtime {
+      background: #ffedd5;
+      color: #9a3412;
+    }
+
+    .heatmap-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+
+    .heatmap-head strong {
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .language-heatmap {
+      min-width: 790px;
+      table-layout: fixed;
+      background: var(--panel);
+    }
+
+    .language-heatmap th:first-child {
+      width: 190px;
+    }
+
+    .language-heatmap th:not(:first-child),
+    .language-heatmap td {
+      text-align: center;
+    }
+
+    .language-heatmap tbody th {
+      color: var(--text);
+      font-size: 14px;
+      text-transform: none;
+    }
+
+    .heat-cell {
+      transition: background 180ms ease;
+    }
+
+    .heat-0 { background: #fee2e2; }
+    .heat-1 { background: #f1f5f9; }
+    .heat-2 { background: #dff7ed; }
+    .heat-3 { background: #b7ead7; }
+    .heat-4 { background: #86d8bf; }
+    .heat-5 { background: #58c3a3; }
+
+    .heat-baseline {
+      box-shadow: inset 0 0 0 1px var(--text);
+    }
+
+    .heat-missing {
+      color: var(--muted);
+      background: var(--panel-soft);
+    }
+
+    .heat-legend {
+      margin-top: 8px;
+    }
+
+    .cohort-chart {
+      padding: 20px;
+    }
+
+    .history-answer {
+      margin: 0;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+    }
+
+    .history-answer strong {
+      color: var(--text);
+    }
+
+    .history-era + .history-era {
+      border-top: 1px solid var(--line);
+    }
+
+    .history-era-head {
+      padding: 16px 20px;
+      background: var(--panel-soft);
+    }
+
+    .history-era-head h3 {
+      margin-bottom: 2px;
+      font-size: 18px;
+    }
+
+    .history-era-head p {
+      margin: 0;
       color: var(--muted);
       font-size: 13px;
+    }
+
+    .cohort-chart-heading {
+      margin: 0 0 12px 170px;
+      color: var(--muted);
+      font-size: 12px;
       font-weight: 700;
+    }
+
+    .cohort-axis {
+      position: relative;
+      height: 28px;
+      margin-left: 170px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .cohort-axis::after,
+    .cohort-track::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: var(--zero);
+      width: 1px;
+      background: var(--text);
+      opacity: .6;
+    }
+
+    .cohort-axis span {
+      position: absolute;
+      bottom: 5px;
+      transform: translateX(-50%);
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .cohort-plot-row {
+      display: grid;
+      grid-template-columns: 158px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      min-height: 54px;
+    }
+
+    .cohort-plot-name strong,
+    .cohort-plot-name span {
+      display: block;
+    }
+
+    .cohort-plot-name span,
+    .cohort-point-label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .cohort-track {
+      position: relative;
+      height: 28px;
+      background: var(--panel-soft);
+    }
+
+    .cohort-interval {
+      position: absolute;
+      top: 13px;
+      height: 3px;
+      background: var(--accent-2);
+    }
+
+    .cohort-point {
+      position: absolute;
+      top: 9px;
+      width: 11px;
+      height: 11px;
+      transform: translateX(-50%);
+      border: 2px solid var(--panel);
+      border-radius: 999px;
+      background: var(--accent-2);
+    }
+
+    .cohort-point-label {
+      position: absolute;
+      top: -2px;
+      white-space: nowrap;
+    }
+
+    .cohort-label-left { transform: translateX(calc(-100% - 9px)); }
+    .cohort-label-right { transform: translateX(9px); }
+
+    .cohort-table {
+      min-width: 760px;
+    }
+
+    .cohort-table-wrap {
+      border-top: 1px solid var(--line);
+    }
+
+    .cohort-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 700;
+    }
+
+    .cohort-status::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .cohort-note {
+      margin: 0;
+      padding: 12px 20px 16px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
     }
 
     .target-runtime {
@@ -157,6 +547,50 @@
       color: var(--muted);
       font-size: 12px;
       font-weight: 600;
+    }
+
+    .claim-posture {
+      display: grid;
+      gap: 4px;
+      min-width: 220px;
+      white-space: normal;
+    }
+
+    .claim-posture small {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
+    .claim-pill {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .claim-ready {
+      background: #dff7ed;
+      color: #047857;
+    }
+
+    .claim-blocked {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .swatch {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      margin-right: 8px;
+      border-radius: 999px;
+      background: currentColor;
+      vertical-align: -1px;
     }
 
     .nav {
@@ -190,6 +624,8 @@
 
     .section-head,
     .target-head,
+    .history-target-head,
+    .history-workload-head,
     .workload-head {
       display: flex;
       justify-content: space-between;
@@ -202,9 +638,107 @@
 
     .section-head h2,
     .target-head h2,
+    .history-target-head h3,
+    .history-workload-head h4,
     .workload-head h3 {
       margin-bottom: 2px;
       font-size: 22px;
+    }
+
+    .history-body {
+      display: grid;
+      min-width: 0;
+    }
+
+    .history-target {
+      min-width: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .history-target:last-child {
+      border-bottom: 0;
+    }
+
+    .history-workload {
+      min-width: 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .history-workload-head {
+      background: #fff;
+    }
+
+    .history-workload-head h4 {
+      font-size: 18px;
+    }
+
+    .history-chart {
+      padding: 16px 20px 8px;
+    }
+
+    .history-chart svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .history-chart-bg {
+      fill: #fff;
+    }
+
+    .history-axis,
+    .history-grid-line {
+      stroke: var(--line);
+      stroke-width: 1;
+    }
+
+    .history-grid-line {
+      stroke: #edf1f5;
+    }
+
+    .history-axis-label {
+      fill: var(--muted);
+      font-size: 11px;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .history-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      padding-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .history-table table {
+      min-width: 860px;
+    }
+
+    .history-engine {
+      display: inline-flex;
+      align-items: center;
+      gap: 0;
+    }
+
+    .trend {
+      font-weight: 800;
+    }
+
+    .trend-good {
+      color: #047857;
+    }
+
+    .trend-bad {
+      color: #b91c1c;
+    }
+
+    .trend-flat {
+      color: var(--muted);
     }
 
     .table-wrap {
@@ -346,6 +880,55 @@
         grid-template-columns: 1fr;
         gap: 8px;
       }
+
+      .language-target-head {
+        flex-direction: column;
+      }
+
+      #linux-comparison > .section-head {
+        flex-direction: column;
+      }
+
+      .comparison-controls {
+        justify-content: flex-start;
+      }
+
+      .language-rank-row {
+        grid-template-columns: 24px minmax(120px, 1fr) 68px;
+        gap: 8px;
+        padding: 4px 0;
+      }
+
+      .language-rank-row .rank-track {
+        grid-column: 2 / 4;
+        grid-row: 2;
+      }
+
+      .rank-meta {
+        display: none;
+      }
+
+      .rank-axis-caption {
+        margin-left: 0;
+      }
+
+      .cohort-axis {
+        margin-left: 0;
+      }
+
+      .cohort-chart-heading {
+        margin-left: 0;
+      }
+
+      .cohort-plot-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
+        margin-top: 12px;
+      }
+
+      .summary-statuses {
+        justify-content: flex-start;
+      }
     }
   </style>
 </head>
@@ -354,999 +937,668 @@
     <section class="hero">
       <div class="hero-panel">
         <p class="eyebrow">script-bench current snapshot</p>
-        <h1>rustia Current Benchmark Results</h1>
-        <p class="lead">Static HTML generated from the committed current benchmark JSON. Bars are rough relative comparisons: lower time bars compare each row to the fastest engine in that workload, while speed bars use the harness speed-vs-rustia ratio.</p>
+        <h1>rustia Benchmark Results and History</h1>
+        <p class="lead">Committed Linux results with a best-first language headline, workload-level detail, and protocol-aware benchmark history.</p>
         <p class="source-line">
           <span>Source <code>bench/current-results.json</code></span>
           <span>History <code>bench/history/runs.jsonl</code></span>
           <span>Generated by <code>bench/render-current-results.js</code></span>
         </p>
       </div>
-      <div class="metrics">
-
-    <div class="metric">
-      <strong>50</strong>
-      <span>current result rows</span>
-    </div>
-
-
-    <div class="metric">
-      <strong>10</strong>
-      <span>engines</span>
-    </div>
-
-
-    <div class="metric">
-      <strong>5</strong>
-      <span>workloads</span>
-    </div>
-
-
-    <div class="metric">
-      <strong>60</strong>
-      <span>wasm target rows</span>
-    </div>
-
-
-    <div class="metric">
-      <strong>8</strong>
-      <span>wasm dispatch rows</span>
-    </div>
-
-
-    <div class="metric">
-      <strong>9f3b0d1</strong>
-      <span>latest commit in snapshot</span>
-    </div>
-
-
-    <div class="metric">
-      <strong>2026-07-03 01:53:44 UTC to 2026-07-03 02:27:20 UTC</strong>
-      <span>measurement window</span>
-    </div>
-
-      </div>
     </section>
 
     <nav class="nav" aria-label="Targets">
-      <a href="#wasm-target">Wasm Target</a>
-      <a href="#wasm-dispatch">Wasm Dispatch</a>
-      <a href="#macos-aarch64">macos-aarch64</a>
+      <a href="#linux-comparison">Linux Comparison</a>
+      <a href="#cold-start">Cold Start</a>
+      <a href="#claim-gate">Claim Gate</a>
+      <a href="#history">History</a>
     </nav>
 
 
-    <section class="panel">
+    <section class="panel metric-panel" id="linux-comparison">
       <div class="section-head">
         <div>
-          <h2>Engine Summary</h2>
-          <p>One row per engine/target pair. Geomean uses available speed-vs-rustia ratios from the current snapshot.</p>
+          <h2>Linux Language Comparison</h2>
+          <p>1 / 1 exact Linux targets complete · switch between every measured mode, interpreters only, or verified JIT/native modes plus the rustia baseline.</p>
+        </div>
+        <div class="comparison-controls">
+          <div class="metric-toggle mode-toggle" role="group" aria-label="Execution mode filter">
+            <button type="button" data-mode-filter="all" aria-pressed="true">All</button>
+            <button type="button" data-mode-filter="interpreter" aria-pressed="false">Interpreter</button>
+            <button type="button" data-mode-filter="accelerated" aria-pressed="false">JIT/native</button>
+          </div>
+          <div class="metric-toggle" role="group" aria-label="Benchmark value display">
+            <button type="button" data-metric="relative" aria-pressed="true">vs rustia</button>
+            <button type="button" data-metric="absolute" aria-pressed="false">absolute</button>
+          </div>
         </div>
       </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Engine (target)</th>
-              <th>Geomean vs rustia</th>
-              <th>Best results</th>
-              <th>Median min ns/unit</th>
-              <th>Coverage</th>
+
+    <div class="comparison-mode-view" data-mode-view="all">
+      <div class="language-targets">
+
+    <section class="language-target-summary" data-target="linux-x86_64">
+      <div class="language-target-head">
+        <div>
+          <h3>linux-x86_64</h3>
+          <p>native · exact target · 13 implementations</p>
+          <p>Measured 2026-07-23 03:40:25 UTC to 2026-07-23 03:45:09 UTC · commits <code>83bc2f370ee4149b6fa6e11eca951b41b4cccbd2</code></p>
+        </div>
+        <div class="summary-statuses">
+          <span class="summary-pill summary-complete">Complete</span>
+          <span class="summary-pill summary-revision-single">Single revision</span>
+        </div>
+      </div>
+      <div class="ranked-headline">
+        <div class="rank-axis-caption metric-caption" data-relative="geometric mean speed vs rustia · higher is faster" data-absolute="geometric mean ns/unit · lower is faster">geometric mean speed vs rustia · higher is faster</div>
+        <div class="ranked-bars" role="list" aria-label="Best-first implementation ranking for linux-x86_64">
+
+    <div class="language-rank-row" role="listitem" data-language="wasm" data-implementation="wasmtime">
+      <span class="rank-number">1</span>
+      <span class="implementation-language comparison-label"><strong>wasmtime</strong><span>WebAssembly / Native</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="100.000" data-absolute-width="100.000" style="width:100.000%"></span></div>
+      <strong class="rank-value metric-value" data-relative="72.6x" data-absolute="95.9 ns">72.6x</strong>
+      <span class="rank-meta">4 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="wasm" data-implementation="wasmi">
+      <span class="rank-number">2</span>
+      <span class="implementation-language comparison-label"><strong>wasmi</strong><span>WebAssembly / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="78.176" data-absolute-width="78.176" style="width:78.176%"></span></div>
+      <strong class="rank-value metric-value" data-relative="15.2x" data-absolute="457 ns">15.2x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="mlua-luau-jit">
+      <span class="rank-number">3</span>
+      <span class="implementation-language comparison-label"><strong>mlua</strong><span>Luau / JIT</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="60.451" data-absolute-width="60.451" style="width:60.451%"></span></div>
+      <strong class="rank-value metric-value" data-relative="4.283x" data-absolute="1,626 ns">4.283x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="luaur">
+      <span class="rank-number">4</span>
+      <span class="implementation-language comparison-label"><strong>luaur</strong><span>Luau / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="58.902" data-absolute-width="58.902" style="width:58.902%"></span></div>
+      <strong class="rank-value metric-value" data-relative="3.833x" data-absolute="1,817 ns">3.833x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="mlua-luau">
+      <span class="rank-number">5</span>
+      <span class="implementation-language comparison-label"><strong>mlua</strong><span>Luau / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="57.565" data-absolute-width="57.565" style="width:57.565%"></span></div>
+      <strong class="rank-value metric-value" data-relative="3.483x" data-absolute="1,999 ns">3.483x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="lua54" data-implementation="mlua-lua54">
+      <span class="rank-number">6</span>
+      <span class="implementation-language comparison-label"><strong>mlua</strong><span>Lua 5.4 / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="56.288" data-absolute-width="56.288" style="width:56.288%"></span></div>
+      <strong class="rank-value metric-value" data-relative="3.179x" data-absolute="2,191 ns">3.179x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="roto" data-implementation="roto">
+      <span class="rank-number">7</span>
+      <span class="implementation-language comparison-label"><strong>roto</strong><span>Roto / Native</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="50.602" data-absolute-width="50.602" style="width:50.602%"></span></div>
+      <strong class="rank-value metric-value" data-relative="2.116x" data-absolute="3,291 ns">2.116x</strong>
+      <span class="rank-meta">1 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="rustia">
+      <span class="rank-number">8</span>
+      <span class="implementation-language comparison-label"><strong>rustia</strong><span>Luau / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="40.131" data-absolute-width="40.131" style="width:40.131%"></span></div>
+      <strong class="rank-value metric-value" data-relative="1x" data-absolute="6,965 ns">1x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="javascript" data-implementation="rquickjs">
+      <span class="rank-number">9</span>
+      <span class="implementation-language comparison-label"><strong>rquickjs</strong><span>JavaScript / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="39.089" data-absolute-width="39.089" style="width:39.089%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.928x" data-absolute="7,504 ns">0.928x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="ruau">
+      <span class="rank-number">10</span>
+      <span class="implementation-language comparison-label"><strong>ruau</strong><span>Luau / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="35.956" data-absolute-width="35.956" style="width:35.956%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.742x" data-absolute="9,391 ns">0.742x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="koto" data-implementation="koto">
+      <span class="rank-number">11</span>
+      <span class="implementation-language comparison-label"><strong>koto</strong><span>Koto / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="33.727" data-absolute-width="33.727" style="width:33.727%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.632x" data-absolute="11,015 ns">0.632x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="rhai" data-implementation="rhai">
+      <span class="rank-number">12</span>
+      <span class="implementation-language comparison-label"><strong>rhai</strong><span>Rhai / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="23.617" data-absolute-width="23.617" style="width:23.617%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.307x" data-absolute="22,712 ns">0.307x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="javascript" data-implementation="boa">
+      <span class="rank-number">13</span>
+      <span class="implementation-language comparison-label"><strong>boa</strong><span>JavaScript / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="14.000" data-absolute-width="14.000" style="width:14.000%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.154x" data-absolute="45,210 ns">0.154x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+        </div>
+      </div>
+      <div class="heatmap-detail">
+        <div class="heatmap-head">
+          <strong>Workload detail</strong>
+          <span class="metric-caption" data-relative="speed vs rustia · higher is faster" data-absolute="minimum ns/unit · lower is faster">speed vs rustia · higher is faster</span>
+        </div>
+
+    <div class="table-wrap">
+      <table class="language-heatmap">
+        <thead><tr><th>Implementation · language</th><th>Closures</th><th>Dense tables</th><th>Iteration</th><th>Sparse tables</th><th>Math / table</th></tr></thead>
+        <tbody>
+
+            <tr data-language="wasm" data-implementation="wasmtime">
+              <th><span class="implementation-language comparison-label"><strong>wasmtime</strong><span>WebAssembly / Native</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="7.307x" data-absolute="31.4 ns">7.307x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="97.7x" data-absolute="569 ns">97.7x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="99.8x" data-absolute="121 ns">99.8x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="169x" data-absolute="535 ns">169x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="168x" data-absolute="6.995 ns">168x</td>
             </tr>
-          </thead>
-          <tbody>
 
-                <tr>
-                  <td><span class="engine-target"><strong>wasmtime</strong><span>(macos-aarch64)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>235x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 100.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>4 / 5</td>
-                  <td>78.8</td>
-                  <td>5 workloads</td>
-                </tr>
+            <tr data-language="wasm" data-implementation="wasmi">
+              <th><span class="implementation-language comparison-label"><strong>wasmi</strong><span>WebAssembly / Interpreter</span></span></th>
+              <td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1.128x" data-absolute="203 ns">1.128x</td><td class="heat-cell heat-4" data-heat-relative="heat-4" data-heat-absolute="heat-2" data-relative="16.7x" data-absolute="3,334 ns">16.7x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-3" data-relative="32.9x" data-absolute="368 ns">32.9x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-2" data-relative="29.1x" data-absolute="3,107 ns">29.1x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-3" data-relative="45.6x" data-absolute="25.8 ns">45.6x</td>
+            </tr>
 
-                <tr>
-                  <td><span class="engine-target"><strong>wasmi</strong><span>(macos-aarch64)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>61.6x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 26.262%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>162</td>
-                  <td>5 workloads</td>
-                </tr>
+            <tr data-language="luau" data-implementation="mlua-luau-jit">
+              <th><span class="implementation-language comparison-label"><strong>mlua</strong><span>Luau / JIT</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="8.036x" data-absolute="28.5 ns">8.036x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="2.759x" data-absolute="20,131 ns">2.759x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="2.957x" data-absolute="4,094 ns">2.957x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="4.48x" data-absolute="20,169 ns">4.48x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="4.905x" data-absolute="240 ns">4.905x</td>
+            </tr>
 
-                <tr>
-                  <td><span class="engine-target"><strong>mlua-luau</strong><span>(macos-aarch64)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>13x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 5.524%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>2,126</td>
-                  <td>5 workloads</td>
-                </tr>
+            <tr data-language="luau" data-implementation="luaur">
+              <th><span class="implementation-language comparison-label"><strong>luaur</strong><span>Luau / Interpreter</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-1" data-relative="3.557x" data-absolute="64.4 ns">3.557x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="2.843x" data-absolute="19,540 ns">2.843x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="3.135x" data-absolute="3,861 ns">3.135x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="4.317x" data-absolute="20,929 ns">4.317x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="6.045x" data-absolute="195 ns">6.045x</td>
+            </tr>
 
-                <tr>
-                  <td><span class="engine-target"><strong>mlua-lua54</strong><span>(macos-aarch64)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>10.6x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 4.502%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>1,429</td>
-                  <td>5 workloads</td>
-                </tr>
+            <tr data-language="luau" data-implementation="mlua-luau">
+              <th><span class="implementation-language comparison-label"><strong>mlua</strong><span>Luau / Interpreter</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-1" data-relative="3.544x" data-absolute="64.7 ns">3.544x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="2.789x" data-absolute="19,916 ns">2.789x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="2.698x" data-absolute="4,487 ns">2.698x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="3.945x" data-absolute="22,906 ns">3.945x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="4.874x" data-absolute="241 ns">4.874x</td>
+            </tr>
 
-                <tr>
-                  <td><span class="engine-target"><strong>roto</strong><span>(macos-aarch64)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>5.111x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.179%"></span></div>
-                    </div>
-                  </td>
-                  <td>1 / 5</td>
-                  <td>1,152</td>
-                  <td>5 workloads</td>
-                </tr>
+            <tr data-language="lua54" data-implementation="mlua-lua54">
+              <th><span class="implementation-language comparison-label"><strong>mlua</strong><span>Lua 5.4 / Interpreter</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="4.945x" data-absolute="46.4 ns">4.945x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1.166x" data-absolute="47,643 ns">1.166x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="3.753x" data-absolute="3,225 ns">3.753x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="3.523x" data-absolute="25,648 ns">3.523x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="4.258x" data-absolute="276 ns">4.258x</td>
+            </tr>
 
-                <tr>
-                  <td><span class="engine-target"><strong>rquickjs</strong><span>(macos-aarch64)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>3.098x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>2,914</td>
-                  <td>5 workloads</td>
-                </tr>
+            <tr data-language="roto" data-implementation="roto">
+              <th><span class="implementation-language comparison-label"><strong>roto</strong><span>Roto / Native</span></span></th>
+              <td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="38.9x" data-absolute="5.889 ns">38.9x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.028x" data-absolute="1,979,587 ns">0.028x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-1" data-relative="6.723x" data-absolute="1,801 ns">6.723x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1.061x" data-absolute="85,200 ns">1.061x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="5.448x" data-absolute="216 ns">5.448x</td>
+            </tr>
 
-                <tr>
-                  <td><span class="engine-target"><strong>koto</strong><span>(macos-aarch64)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>2.696x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>2,319</td>
-                  <td>5 workloads</td>
-                </tr>
+            <tr data-language="luau" data-implementation="rustia">
+              <th><span class="implementation-language comparison-label"><strong>rustia</strong><span>Luau / Interpreter</span></span></th>
+              <td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="229 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="55,552 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="12,105 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="90,355 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="1,177 ns">1x</td>
+            </tr>
 
-                <tr>
-                  <td><span class="engine-target"><strong>koto</strong><span>(wasm32 / SpiderMonkey/spidermonkey)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>2.63x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>5 / 5</td>
-                  <td>4,146</td>
-                  <td>5 workloads</td>
-                </tr>
+            <tr data-language="javascript" data-implementation="rquickjs">
+              <th><span class="implementation-language comparison-label"><strong>rquickjs</strong><span>JavaScript / Interpreter</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.405x" data-absolute="567 ns">0.405x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.479x" data-absolute="115,985 ns">0.479x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="2.055x" data-absolute="5,891 ns">2.055x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="0.896x" data-absolute="100,808 ns">0.896x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="1.93x" data-absolute="610 ns">1.93x</td>
+            </tr>
 
-                <tr>
-                  <td><span class="engine-target"><strong>koto</strong><span>(wasm32 / JavaScriptCore/bun)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>2.563x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>5 / 5</td>
-                  <td>3,764</td>
-                  <td>5 workloads</td>
-                </tr>
+            <tr data-language="luau" data-implementation="ruau">
+              <th><span class="implementation-language comparison-label"><strong>ruau</strong><span>Luau / Interpreter</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.704x" data-absolute="325 ns">0.704x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.617x" data-absolute="90,029 ns">0.617x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.595x" data-absolute="20,353 ns">0.595x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="0.888x" data-absolute="101,721 ns">0.888x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="0.978x" data-absolute="1,204 ns">0.978x</td>
+            </tr>
 
-                <tr>
-                  <td><span class="engine-target"><strong>koto</strong><span>(wasm32 / V8/node)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>2.373x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>5 / 5</td>
-                  <td>3,992</td>
-                  <td>5 workloads</td>
-                </tr>
+            <tr data-language="koto" data-implementation="koto">
+              <th><span class="implementation-language comparison-label"><strong>koto</strong><span>Koto / Interpreter</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.682x" data-absolute="336 ns">0.682x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.194x" data-absolute="286,871 ns">0.194x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="1.755x" data-absolute="6,898 ns">1.755x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.616x" data-absolute="146,748 ns">0.616x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.708x" data-absolute="1,662 ns">0.708x</td>
+            </tr>
 
-                <tr>
-                  <td><span class="engine-target"><strong>koto</strong><span>(wasm32 / V8/deno)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>2.329x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>5 / 5</td>
-                  <td>3,869</td>
-                  <td>5 workloads</td>
-                </tr>
+            <tr data-language="rhai" data-implementation="rhai">
+              <th><span class="implementation-language comparison-label"><strong>rhai</strong><span>Rhai / Interpreter</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.151x" data-absolute="1,515 ns">0.151x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.17x" data-absolute="327,281 ns">0.17x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1.142x" data-absolute="10,601 ns">1.142x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.263x" data-absolute="343,480 ns">0.263x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.351x" data-absolute="3,348 ns">0.351x</td>
+            </tr>
 
-                <tr>
-                  <td><span class="engine-target"><strong>rhai</strong><span>(macos-aarch64)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>1.418x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>3,463</td>
-                  <td>5 workloads</td>
-                </tr>
+            <tr data-language="javascript" data-implementation="boa">
+              <th><span class="implementation-language comparison-label"><strong>boa</strong><span>JavaScript / Interpreter</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.081x" data-absolute="2,821 ns">0.081x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.055x" data-absolute="1,001,279 ns">0.055x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.315x" data-absolute="38,483 ns">0.315x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.23x" data-absolute="393,675 ns">0.23x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.267x" data-absolute="4,414 ns">0.267x</td>
+            </tr>
 
-                <tr>
-                  <td><span class="engine-target"><strong>rhai</strong><span>(wasm32 / JavaScriptCore/bun)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>1.34x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>5,300</td>
-                  <td>5 workloads</td>
-                </tr>
+        </tbody>
+      </table>
+    </div>
 
-                <tr>
-                  <td><span class="engine-target"><strong>rhai</strong><span>(wasm32 / SpiderMonkey/spidermonkey)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>1.291x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>6,428</td>
-                  <td>5 workloads</td>
-                </tr>
-
-                <tr>
-                  <td><span class="engine-target"><strong>rhai</strong><span>(wasm32 / V8/node)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>1.252x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>5,710</td>
-                  <td>5 workloads</td>
-                </tr>
-
-                <tr>
-                  <td><span class="engine-target"><strong>rhai</strong><span>(wasm32 / V8/deno)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>1.24x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>5,294</td>
-                  <td>5 workloads</td>
-                </tr>
-
-                <tr>
-                  <td><span class="engine-target"><strong>rustia</strong><span>(macos-aarch64)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>1x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>17,533</td>
-                  <td>5 workloads</td>
-                </tr>
-
-                <tr>
-                  <td><span class="engine-target"><strong>rustia</strong><span>(wasm32 / JavaScriptCore/bun)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>1x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>27,922</td>
-                  <td>5 workloads</td>
-                </tr>
-
-                <tr>
-                  <td><span class="engine-target"><strong>rustia</strong><span>(wasm32 / SpiderMonkey/spidermonkey)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>1x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>32,707</td>
-                  <td>5 workloads</td>
-                </tr>
-
-                <tr>
-                  <td><span class="engine-target"><strong>rustia</strong><span>(wasm32 / V8/deno)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>1x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>23,979</td>
-                  <td>5 workloads</td>
-                </tr>
-
-                <tr>
-                  <td><span class="engine-target"><strong>rustia</strong><span>(wasm32 / V8/node)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>1x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>24,943</td>
-                  <td>5 workloads</td>
-                </tr>
-
-                <tr>
-                  <td><span class="engine-target"><strong>boa</strong><span>(macos-aarch64)</span></span></td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>0.629x</span>
-                      <div class="bar" aria-hidden="true"><span style="width: 2.000%"></span></div>
-                    </div>
-                  </td>
-                  <td>0 / 5</td>
-                  <td>14,206</td>
-                  <td>5 workloads</td>
-                </tr>
-
-          </tbody>
-        </table>
+        <div class="heat-legend metric-caption" data-relative="Color: red below 0.75× · neutral near rustia · stronger green above 1.25×" data-absolute="Color: strongest for the fastest implementation in each workload">Color: red below 0.75× · neutral near rustia · stronger green above 1.25×</div>
       </div>
     </section>
 
+      </div>
+    </div>
 
-    <section class="panel" id="wasm-target">
+
+    <div class="comparison-mode-view" data-mode-view="interpreter" hidden>
+      <div class="language-targets">
+
+    <section class="language-target-summary" data-target="linux-x86_64">
+      <div class="language-target-head">
+        <div>
+          <h3>linux-x86_64</h3>
+          <p>native · exact target · 10 implementations</p>
+          <p>Measured 2026-07-23 03:40:25 UTC to 2026-07-23 03:45:09 UTC · commits <code>83bc2f370ee4149b6fa6e11eca951b41b4cccbd2</code></p>
+        </div>
+        <div class="summary-statuses">
+          <span class="summary-pill summary-complete">Complete</span>
+          <span class="summary-pill summary-revision-single">Single revision</span>
+        </div>
+      </div>
+      <div class="ranked-headline">
+        <div class="rank-axis-caption metric-caption" data-relative="geometric mean speed vs rustia · higher is faster" data-absolute="geometric mean ns/unit · lower is faster">geometric mean speed vs rustia · higher is faster</div>
+        <div class="ranked-bars" role="list" aria-label="Best-first implementation ranking for linux-x86_64">
+
+    <div class="language-rank-row" role="listitem" data-language="wasm" data-implementation="wasmi">
+      <span class="rank-number">1</span>
+      <span class="implementation-language comparison-label"><strong>wasmi</strong><span>WebAssembly / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="100.000" data-absolute-width="100.000" style="width:100.000%"></span></div>
+      <strong class="rank-value metric-value" data-relative="15.2x" data-absolute="457 ns">15.2x</strong>
+      <span class="rank-meta">4 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="luaur">
+      <span class="rank-number">2</span>
+      <span class="implementation-language comparison-label"><strong>luaur</strong><span>Luau / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="74.172" data-absolute-width="74.172" style="width:74.172%"></span></div>
+      <strong class="rank-value metric-value" data-relative="3.833x" data-absolute="1,817 ns">3.833x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="mlua-luau">
+      <span class="rank-number">3</span>
+      <span class="implementation-language comparison-label"><strong>mlua</strong><span>Luau / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="72.380" data-absolute-width="72.380" style="width:72.380%"></span></div>
+      <strong class="rank-value metric-value" data-relative="3.483x" data-absolute="1,999 ns">3.483x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="lua54" data-implementation="mlua-lua54">
+      <span class="rank-number">4</span>
+      <span class="implementation-language comparison-label"><strong>mlua</strong><span>Lua 5.4 / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="70.668" data-absolute-width="70.668" style="width:70.668%"></span></div>
+      <strong class="rank-value metric-value" data-relative="3.179x" data-absolute="2,191 ns">3.179x</strong>
+      <span class="rank-meta">1 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="rustia">
+      <span class="rank-number">5</span>
+      <span class="implementation-language comparison-label"><strong>rustia</strong><span>Luau / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="49.017" data-absolute-width="49.017" style="width:49.017%"></span></div>
+      <strong class="rank-value metric-value" data-relative="1x" data-absolute="6,965 ns">1x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="javascript" data-implementation="rquickjs">
+      <span class="rank-number">6</span>
+      <span class="implementation-language comparison-label"><strong>rquickjs</strong><span>JavaScript / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="47.621" data-absolute-width="47.621" style="width:47.621%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.928x" data-absolute="7,504 ns">0.928x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="ruau">
+      <span class="rank-number">7</span>
+      <span class="implementation-language comparison-label"><strong>ruau</strong><span>Luau / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="43.422" data-absolute-width="43.422" style="width:43.422%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.742x" data-absolute="9,391 ns">0.742x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="koto" data-implementation="koto">
+      <span class="rank-number">8</span>
+      <span class="implementation-language comparison-label"><strong>koto</strong><span>Koto / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="40.436" data-absolute-width="40.436" style="width:40.436%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.632x" data-absolute="11,015 ns">0.632x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="rhai" data-implementation="rhai">
+      <span class="rank-number">9</span>
+      <span class="implementation-language comparison-label"><strong>rhai</strong><span>Rhai / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="26.888" data-absolute-width="26.888" style="width:26.888%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.307x" data-absolute="22,712 ns">0.307x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="javascript" data-implementation="boa">
+      <span class="rank-number">10</span>
+      <span class="implementation-language comparison-label"><strong>boa</strong><span>JavaScript / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="14.000" data-absolute-width="14.000" style="width:14.000%"></span></div>
+      <strong class="rank-value metric-value" data-relative="0.154x" data-absolute="45,210 ns">0.154x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+        </div>
+      </div>
+      <div class="heatmap-detail">
+        <div class="heatmap-head">
+          <strong>Workload detail</strong>
+          <span class="metric-caption" data-relative="speed vs rustia · higher is faster" data-absolute="minimum ns/unit · lower is faster">speed vs rustia · higher is faster</span>
+        </div>
+
+    <div class="table-wrap">
+      <table class="language-heatmap">
+        <thead><tr><th>Implementation · language</th><th>Closures</th><th>Dense tables</th><th>Iteration</th><th>Sparse tables</th><th>Math / table</th></tr></thead>
+        <tbody>
+
+            <tr data-language="wasm" data-implementation="wasmi">
+              <th><span class="implementation-language comparison-label"><strong>wasmi</strong><span>WebAssembly / Interpreter</span></span></th>
+              <td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-2" data-relative="1.128x" data-absolute="203 ns">1.128x</td><td class="heat-cell heat-4" data-heat-relative="heat-4" data-heat-absolute="heat-5" data-relative="16.7x" data-absolute="3,334 ns">16.7x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="32.9x" data-absolute="368 ns">32.9x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="29.1x" data-absolute="3,107 ns">29.1x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="45.6x" data-absolute="25.8 ns">45.6x</td>
+            </tr>
+
+            <tr data-language="luau" data-implementation="luaur">
+              <th><span class="implementation-language comparison-label"><strong>luaur</strong><span>Luau / Interpreter</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-4" data-relative="3.557x" data-absolute="64.4 ns">3.557x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-2" data-relative="2.843x" data-absolute="19,540 ns">2.843x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-1" data-relative="3.135x" data-absolute="3,861 ns">3.135x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="4.317x" data-absolute="20,929 ns">4.317x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="6.045x" data-absolute="195 ns">6.045x</td>
+            </tr>
+
+            <tr data-language="luau" data-implementation="mlua-luau">
+              <th><span class="implementation-language comparison-label"><strong>mlua</strong><span>Luau / Interpreter</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-4" data-relative="3.544x" data-absolute="64.7 ns">3.544x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-2" data-relative="2.789x" data-absolute="19,916 ns">2.789x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-1" data-relative="2.698x" data-absolute="4,487 ns">2.698x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="3.945x" data-absolute="22,906 ns">3.945x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="4.874x" data-absolute="241 ns">4.874x</td>
+            </tr>
+
+            <tr data-language="lua54" data-implementation="mlua-lua54">
+              <th><span class="implementation-language comparison-label"><strong>mlua</strong><span>Lua 5.4 / Interpreter</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-5" data-relative="4.945x" data-absolute="46.4 ns">4.945x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-1" data-relative="1.166x" data-absolute="47,643 ns">1.166x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="3.753x" data-absolute="3,225 ns">3.753x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="3.523x" data-absolute="25,648 ns">3.523x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-1" data-relative="4.258x" data-absolute="276 ns">4.258x</td>
+            </tr>
+
+            <tr data-language="luau" data-implementation="rustia">
+              <th><span class="implementation-language comparison-label"><strong>rustia</strong><span>Luau / Interpreter</span></span></th>
+              <td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-2" data-relative="1x" data-absolute="229 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-1" data-relative="1x" data-absolute="55,552 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="12,105 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="90,355 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="1,177 ns">1x</td>
+            </tr>
+
+            <tr data-language="javascript" data-implementation="rquickjs">
+              <th><span class="implementation-language comparison-label"><strong>rquickjs</strong><span>JavaScript / Interpreter</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-1" data-relative="0.405x" data-absolute="567 ns">0.405x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.479x" data-absolute="115,985 ns">0.479x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-1" data-relative="2.055x" data-absolute="5,891 ns">2.055x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="0.896x" data-absolute="100,808 ns">0.896x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-1" data-relative="1.93x" data-absolute="610 ns">1.93x</td>
+            </tr>
+
+            <tr data-language="luau" data-implementation="ruau">
+              <th><span class="implementation-language comparison-label"><strong>ruau</strong><span>Luau / Interpreter</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-2" data-relative="0.704x" data-absolute="325 ns">0.704x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.617x" data-absolute="90,029 ns">0.617x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.595x" data-absolute="20,353 ns">0.595x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="0.888x" data-absolute="101,721 ns">0.888x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="0.978x" data-absolute="1,204 ns">0.978x</td>
+            </tr>
+
+            <tr data-language="koto" data-implementation="koto">
+              <th><span class="implementation-language comparison-label"><strong>koto</strong><span>Koto / Interpreter</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-2" data-relative="0.682x" data-absolute="336 ns">0.682x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.194x" data-absolute="286,871 ns">0.194x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-1" data-relative="1.755x" data-absolute="6,898 ns">1.755x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.616x" data-absolute="146,748 ns">0.616x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.708x" data-absolute="1,662 ns">0.708x</td>
+            </tr>
+
+            <tr data-language="rhai" data-implementation="rhai">
+              <th><span class="implementation-language comparison-label"><strong>rhai</strong><span>Rhai / Interpreter</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.151x" data-absolute="1,515 ns">0.151x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.17x" data-absolute="327,281 ns">0.17x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1.142x" data-absolute="10,601 ns">1.142x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.263x" data-absolute="343,480 ns">0.263x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.351x" data-absolute="3,348 ns">0.351x</td>
+            </tr>
+
+            <tr data-language="javascript" data-implementation="boa">
+              <th><span class="implementation-language comparison-label"><strong>boa</strong><span>JavaScript / Interpreter</span></span></th>
+              <td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.081x" data-absolute="2,821 ns">0.081x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.055x" data-absolute="1,001,279 ns">0.055x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.315x" data-absolute="38,483 ns">0.315x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.23x" data-absolute="393,675 ns">0.23x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.267x" data-absolute="4,414 ns">0.267x</td>
+            </tr>
+
+        </tbody>
+      </table>
+    </div>
+
+        <div class="heat-legend metric-caption" data-relative="Color: red below 0.75× · neutral near rustia · stronger green above 1.25×" data-absolute="Color: strongest for the fastest implementation in each workload">Color: red below 0.75× · neutral near rustia · stronger green above 1.25×</div>
+      </div>
+    </section>
+
+      </div>
+    </div>
+
+
+    <div class="comparison-mode-view" data-mode-view="accelerated" hidden>
+      <div class="language-targets">
+
+    <section class="language-target-summary" data-target="linux-x86_64">
+      <div class="language-target-head">
+        <div>
+          <h3>linux-x86_64</h3>
+          <p>native · exact target · 4 implementations</p>
+          <p>Measured 2026-07-23 03:40:25 UTC to 2026-07-23 03:42:19 UTC · commits <code>83bc2f370ee4149b6fa6e11eca951b41b4cccbd2</code></p>
+        </div>
+        <div class="summary-statuses">
+          <span class="summary-pill summary-complete">Complete</span>
+          <span class="summary-pill summary-revision-single">Single revision</span>
+        </div>
+      </div>
+      <div class="ranked-headline">
+        <div class="rank-axis-caption metric-caption" data-relative="geometric mean speed vs rustia · higher is faster" data-absolute="geometric mean ns/unit · lower is faster">geometric mean speed vs rustia · higher is faster</div>
+        <div class="ranked-bars" role="list" aria-label="Best-first implementation ranking for linux-x86_64">
+
+    <div class="language-rank-row" role="listitem" data-language="wasm" data-implementation="wasmtime">
+      <span class="rank-number">1</span>
+      <span class="implementation-language comparison-label"><strong>wasmtime</strong><span>WebAssembly / Native</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="100.000" data-absolute-width="100.000" style="width:100.000%"></span></div>
+      <strong class="rank-value metric-value" data-relative="72.6x" data-absolute="95.9 ns">72.6x</strong>
+      <span class="rank-meta">4 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="mlua-luau-jit">
+      <span class="rank-number">2</span>
+      <span class="implementation-language comparison-label"><strong>mlua</strong><span>Luau / JIT</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="43.190" data-absolute-width="43.190" style="width:43.190%"></span></div>
+      <strong class="rank-value metric-value" data-relative="4.283x" data-absolute="1,626 ns">4.283x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="roto" data-implementation="roto">
+      <span class="rank-number">3</span>
+      <span class="implementation-language comparison-label"><strong>roto</strong><span>Roto / Native</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="29.041" data-absolute-width="29.041" style="width:29.041%"></span></div>
+      <strong class="rank-value metric-value" data-relative="2.116x" data-absolute="3,291 ns">2.116x</strong>
+      <span class="rank-meta">1 wins · 5/5</span>
+    </div>
+
+    <div class="language-rank-row" role="listitem" data-language="luau" data-implementation="rustia">
+      <span class="rank-number">4</span>
+      <span class="implementation-language comparison-label"><strong>rustia</strong><span>Luau / Interpreter</span></span>
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="14.000" data-absolute-width="14.000" style="width:14.000%"></span></div>
+      <strong class="rank-value metric-value" data-relative="1x" data-absolute="6,965 ns">1x</strong>
+      <span class="rank-meta">0 wins · 5/5</span>
+    </div>
+
+        </div>
+      </div>
+      <div class="heatmap-detail">
+        <div class="heatmap-head">
+          <strong>Workload detail</strong>
+          <span class="metric-caption" data-relative="speed vs rustia · higher is faster" data-absolute="minimum ns/unit · lower is faster">speed vs rustia · higher is faster</span>
+        </div>
+
+    <div class="table-wrap">
+      <table class="language-heatmap">
+        <thead><tr><th>Implementation · language</th><th>Closures</th><th>Dense tables</th><th>Iteration</th><th>Sparse tables</th><th>Math / table</th></tr></thead>
+        <tbody>
+
+            <tr data-language="wasm" data-implementation="wasmtime">
+              <th><span class="implementation-language comparison-label"><strong>wasmtime</strong><span>WebAssembly / Native</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="7.307x" data-absolute="31.4 ns">7.307x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="97.7x" data-absolute="569 ns">97.7x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="99.8x" data-absolute="121 ns">99.8x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="169x" data-absolute="535 ns">169x</td><td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="168x" data-absolute="6.995 ns">168x</td>
+            </tr>
+
+            <tr data-language="luau" data-implementation="mlua-luau-jit">
+              <th><span class="implementation-language comparison-label"><strong>mlua</strong><span>Luau / JIT</span></span></th>
+              <td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-2" data-relative="8.036x" data-absolute="28.5 ns">8.036x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="2.759x" data-absolute="20,131 ns">2.759x</td><td class="heat-cell heat-2" data-heat-relative="heat-2" data-heat-absolute="heat-0" data-relative="2.957x" data-absolute="4,094 ns">2.957x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="4.48x" data-absolute="20,169 ns">4.48x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="4.905x" data-absolute="240 ns">4.905x</td>
+            </tr>
+
+            <tr data-language="roto" data-implementation="roto">
+              <th><span class="implementation-language comparison-label"><strong>roto</strong><span>Roto / Native</span></span></th>
+              <td class="heat-cell heat-5" data-heat-relative="heat-5" data-heat-absolute="heat-5" data-relative="38.9x" data-absolute="5.889 ns">38.9x</td><td class="heat-cell heat-0" data-heat-relative="heat-0" data-heat-absolute="heat-0" data-relative="0.028x" data-absolute="1,979,587 ns">0.028x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-1" data-relative="6.723x" data-absolute="1,801 ns">6.723x</td><td class="heat-cell heat-1" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1.061x" data-absolute="85,200 ns">1.061x</td><td class="heat-cell heat-3" data-heat-relative="heat-3" data-heat-absolute="heat-0" data-relative="5.448x" data-absolute="216 ns">5.448x</td>
+            </tr>
+
+            <tr data-language="luau" data-implementation="rustia">
+              <th><span class="implementation-language comparison-label"><strong>rustia</strong><span>Luau / Interpreter</span></span></th>
+              <td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="229 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="55,552 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="12,105 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="90,355 ns">1x</td><td class="heat-cell heat-1 heat-baseline" data-heat-relative="heat-1" data-heat-absolute="heat-0" data-relative="1x" data-absolute="1,177 ns">1x</td>
+            </tr>
+
+        </tbody>
+      </table>
+    </div>
+
+        <div class="heat-legend metric-caption" data-relative="Color: red below 0.75× · neutral near rustia · stronger green above 1.25×" data-absolute="Color: strongest for the fastest implementation in each workload">Color: red below 0.75× · neutral near rustia · stronger green above 1.25×</div>
+      </div>
+    </section>
+
+      </div>
+    </div>
+
+    </section>
+
+
+    <section class="panel" id="cold-start">
       <div class="section-head">
         <div>
-          <h2>Wasm Target Bench</h2>
-          <p>60 rows · 3 adapters · 4 targets · 4 runtimes · source <code>bench/wasm/current-results.json</code></p>
+          <h2>Compile and First-call Cost</h2>
+          <p>Geometric means across the five common workloads. Preparation and the first invocation are measured on a fresh engine instance; steady-state timings use a separate warmed instance.</p>
         </div>
       </div>
       <div class="table-wrap">
         <table>
-          <thead>
-            <tr>
-              <th>Target / runtime</th>
-              <th>Adapter</th>
-              <th>Workload</th>
-              <th>Min ns/unit</th>
-              <th>Median</th>
-              <th>vs rustia</th>
-              <th>Commit</th>
-            </tr>
-          </thead>
+          <thead><tr><th>Implementation · language</th><th>Mode</th><th>Prepare</th><th>First call</th><th>Cold total</th><th>Coverage</th><th>Native proof</th></tr></thead>
           <tbody>
 
               <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>closures_upvalues</td>
-                <td>189</td>
-                <td>191</td>
-                <td>3.459x</td>
-                <td>a167350</td>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Lua 5.4</span></span></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>137 µs</td>
+                <td>10.7 µs</td>
+                <td><strong>158 µs</strong></td>
+                <td>5/5</td>
+                <td><span class="subtle">not applicable</span></td>
               </tr>
 
               <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>closures_upvalues</td>
-                <td>736</td>
-                <td>742</td>
-                <td>0.891x</td>
-                <td>a167350</td>
+                <td><span class="implementation-language"><strong>luaur</strong><span>Luau</span></span></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>175 µs</td>
+                <td>10.5 µs</td>
+                <td><strong>192 µs</strong></td>
+                <td>5/5</td>
+                <td><span class="subtle">not applicable</span></td>
               </tr>
 
               <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>closures_upvalues</td>
-                <td>655</td>
-                <td>664</td>
-                <td>1x</td>
-                <td>a167350</td>
+                <td><span class="implementation-language"><strong>wasmi</strong><span>WebAssembly</span></span></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>180 µs</td>
+                <td>35.2 µs</td>
+                <td><strong>221 µs</strong></td>
+                <td>5/5</td>
+                <td><span class="subtle">not applicable</span></td>
               </tr>
 
               <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>dense_tables</td>
-                <td>136,941</td>
-                <td>139,224</td>
-                <td>1.359x</td>
-                <td>a167350</td>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>195 µs</td>
+                <td>27.4 µs</td>
+                <td><strong>236 µs</strong></td>
+                <td>5/5</td>
+                <td><span class="subtle">not applicable</span></td>
               </tr>
 
               <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>dense_tables</td>
-                <td>173,666</td>
-                <td>176,552</td>
-                <td>1.071x</td>
-                <td>a167350</td>
+                <td><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>154 µs</td>
+                <td>42.4 µs</td>
+                <td><strong>236 µs</strong></td>
+                <td>5/5</td>
+                <td><span class="subtle">not applicable</span></td>
               </tr>
 
               <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>dense_tables</td>
-                <td>186,048</td>
-                <td>189,452</td>
-                <td>1x</td>
-                <td>a167350</td>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>367 µs</td>
+                <td>12.4 µs</td>
+                <td><strong>385 µs</strong></td>
+                <td>5/5</td>
+                <td><span class="subtle">not applicable</span></td>
               </tr>
 
               <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>generic_iteration</td>
-                <td>3,764</td>
-                <td>3,818</td>
-                <td>7.419x</td>
-                <td>a167350</td>
+                <td><span class="implementation-language"><strong>rquickjs</strong><span>JavaScript</span></span></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>326 µs</td>
+                <td>25.7 µs</td>
+                <td><strong>393 µs</strong></td>
+                <td>5/5</td>
+                <td><span class="subtle">not applicable</span></td>
               </tr>
 
               <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>generic_iteration</td>
-                <td>5,300</td>
-                <td>5,312</td>
-                <td>5.268x</td>
-                <td>a167350</td>
+                <td><span class="implementation-language"><strong>rhai</strong><span>Rhai</span></span></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>344 µs</td>
+                <td>62 µs</td>
+                <td><strong>495 µs</strong></td>
+                <td>5/5</td>
+                <td><span class="subtle">not applicable</span></td>
               </tr>
 
               <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>generic_iteration</td>
-                <td>27,922</td>
-                <td>28,305</td>
-                <td>1x</td>
-                <td>a167350</td>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><span class="mode-badge mode-jit">jit</span></td>
+                <td>649 µs</td>
+                <td>13.6 µs</td>
+                <td><strong>677 µs</strong></td>
+                <td>5/5</td>
+                <td><span class="claim-pill claim-ready">verified</span><span class="subtle"> ab-native-sentinel · 3.843x A/B</span></td>
               </tr>
 
               <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>sparse_tables</td>
-                <td>76,888</td>
-                <td>77,610</td>
-                <td>1.675x</td>
-                <td>a167350</td>
+                <td><span class="implementation-language"><strong>boa</strong><span>JavaScript</span></span></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>628 µs</td>
+                <td>100 µs</td>
+                <td><strong>901 µs</strong></td>
+                <td>5/5</td>
+                <td><span class="subtle">not applicable</span></td>
               </tr>
 
               <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>sparse_tables</td>
-                <td>148,810</td>
-                <td>149,621</td>
-                <td>0.865x</td>
-                <td>a167350</td>
+                <td><span class="implementation-language"><strong>wasmtime</strong><span>WebAssembly</span></span></td>
+                <td><span class="mode-badge mode-native">native</span></td>
+                <td>1.22 ms</td>
+                <td>3.954 µs</td>
+                <td><strong>1.227 ms</strong></td>
+                <td>5/5</td>
+                <td><span class="claim-pill claim-ready">verified</span><span class="subtle"> wasmtime-cranelift-module</span></td>
               </tr>
 
               <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>sparse_tables</td>
-                <td>128,792</td>
-                <td>130,258</td>
-                <td>1x</td>
-                <td>a167350</td>
+                <td><span class="implementation-language"><strong>roto</strong><span>Roto</span></span></td>
+                <td><span class="mode-badge mode-native">native</span></td>
+                <td>2.605 ms</td>
+                <td>22.3 µs</td>
+                <td><strong>2.941 ms</strong></td>
+                <td>5/5</td>
+                <td><span class="claim-pill claim-ready">verified</span><span class="subtle"> cranelift-function-construction</span></td>
               </tr>
 
               <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>stdlib_math_table</td>
-                <td>852</td>
-                <td>866</td>
-                <td>1.892x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>stdlib_math_table</td>
-                <td>1,623</td>
-                <td>1,682</td>
-                <td>0.993x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>stdlib_math_table</td>
-                <td>1,612</td>
-                <td>1,621</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>closures_upvalues</td>
-                <td>212</td>
-                <td>213</td>
-                <td>3.634x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>closures_upvalues</td>
-                <td>905</td>
-                <td>911</td>
-                <td>0.853x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>closures_upvalues</td>
-                <td>772</td>
-                <td>786</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>dense_tables</td>
-                <td>168,011</td>
-                <td>169,766</td>
-                <td>1.38x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>dense_tables</td>
-                <td>217,781</td>
-                <td>224,482</td>
-                <td>1.065x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>dense_tables</td>
-                <td>231,901</td>
-                <td>235,624</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>generic_iteration</td>
-                <td>4,146</td>
-                <td>4,179</td>
-                <td>7.889x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>generic_iteration</td>
-                <td>6,428</td>
-                <td>6,492</td>
-                <td>5.088x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>generic_iteration</td>
-                <td>32,707</td>
-                <td>33,106</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>sparse_tables</td>
-                <td>91,789</td>
-                <td>92,995</td>
-                <td>1.722x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>sparse_tables</td>
-                <td>184,056</td>
-                <td>184,816</td>
-                <td>0.859x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>sparse_tables</td>
-                <td>158,044</td>
-                <td>158,367</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>stdlib_math_table</td>
-                <td>998</td>
-                <td>1,038</td>
-                <td>1.846x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>stdlib_math_table</td>
-                <td>2,039</td>
-                <td>2,049</td>
-                <td>0.903x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-spidermonkey-spidermonkey-darwin-arm64</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>stdlib_math_table</td>
-                <td>1,842</td>
-                <td>1,864</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>closures_upvalues</td>
-                <td>194</td>
-                <td>195</td>
-                <td>2.999x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>closures_upvalues</td>
-                <td>717</td>
-                <td>740</td>
-                <td>0.812x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>closures_upvalues</td>
-                <td>582</td>
-                <td>593</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>dense_tables</td>
-                <td>147,311</td>
-                <td>148,003</td>
-                <td>1.247x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>dense_tables</td>
-                <td>174,868</td>
-                <td>175,696</td>
-                <td>1.051x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>dense_tables</td>
-                <td>183,752</td>
-                <td>186,279</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>generic_iteration</td>
-                <td>3,869</td>
-                <td>3,894</td>
-                <td>6.198x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>generic_iteration</td>
-                <td>5,294</td>
-                <td>5,353</td>
-                <td>4.529x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>generic_iteration</td>
-                <td>23,979</td>
-                <td>24,327</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>sparse_tables</td>
-                <td>78,259</td>
-                <td>78,717</td>
-                <td>1.746x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>sparse_tables</td>
-                <td>154,167</td>
-                <td>155,836</td>
-                <td>0.886x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>sparse_tables</td>
-                <td>136,649</td>
-                <td>137,650</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>stdlib_math_table</td>
-                <td>878</td>
-                <td>882</td>
-                <td>1.692x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>stdlib_math_table</td>
-                <td>1,735</td>
-                <td>1,760</td>
-                <td>0.856x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>stdlib_math_table</td>
-                <td>1,485</td>
-                <td>1,502</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>closures_upvalues</td>
-                <td>200</td>
-                <td>203</td>
-                <td>3.042x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>closures_upvalues</td>
-                <td>729</td>
-                <td>737</td>
-                <td>0.834x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>closures_upvalues</td>
-                <td>608</td>
-                <td>615</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>dense_tables</td>
-                <td>148,689</td>
-                <td>149,870</td>
-                <td>1.286x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>dense_tables</td>
-                <td>182,574</td>
-                <td>183,069</td>
-                <td>1.047x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>dense_tables</td>
-                <td>191,218</td>
-                <td>194,124</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>generic_iteration</td>
-                <td>3,992</td>
-                <td>4,030</td>
-                <td>6.249x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>generic_iteration</td>
-                <td>5,710</td>
-                <td>5,764</td>
-                <td>4.369x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>generic_iteration</td>
-                <td>24,943</td>
-                <td>26,348</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>sparse_tables</td>
-                <td>75,072</td>
-                <td>75,356</td>
-                <td>1.821x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>sparse_tables</td>
-                <td>153,833</td>
-                <td>154,912</td>
-                <td>0.889x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>sparse_tables</td>
-                <td>136,740</td>
-                <td>143,643</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>koto</strong> <span class="subtle">koto</span></td>
-                <td>stdlib_math_table</td>
-                <td>907</td>
-                <td>946</td>
-                <td>1.69x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>rhai</strong> <span class="subtle">rhai</span></td>
-                <td>stdlib_math_table</td>
-                <td>1,690</td>
-                <td>1,702</td>
-                <td>0.907x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>rustia</strong> <span class="subtle">luau</span></td>
-                <td>stdlib_math_table</td>
-                <td>1,533</td>
-                <td>1,582</td>
-                <td>1x</td>
-                <td>a167350</td>
+                <td><span class="implementation-language"><strong>ruau</strong><span>Luau</span></span></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>12.2 ms</td>
+                <td>65.6 µs</td>
+                <td><strong>12.4 ms</strong></td>
+                <td>5/5</td>
+                <td><span class="subtle">not applicable</span></td>
               </tr>
 
           </tbody>
@@ -1355,98 +1607,96 @@
     </section>
 
 
-    <section class="panel" id="wasm-dispatch">
+    <section class="panel" id="claim-gate">
       <div class="section-head">
         <div>
-          <h2>Wasm Dispatch Bench</h2>
-          <p>8 rows · 4 targets · 4 runtimes · source <code>bench/wasm/dispatch-current-results.json</code></p>
+          <h2>Claim Gate</h2>
+          <p>0 / 5 eligible · 5 current workload claims are not public-ready against mlua-luau.</p>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Target / runtime</th>
-              <th>Style</th>
-              <th>Min ns/dispatch</th>
-              <th>Median</th>
-              <th>vs br_table</th>
-              <th>Commit</th>
+              <th>Target / workload</th>
+              <th>rustia min</th>
+              <th>mlua-luau vs rustia</th>
+              <th>rustia rank</th>
+              <th>Fastest</th>
+              <th>Posture</th>
             </tr>
           </thead>
           <tbody>
 
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-dispatch-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>br_table</strong> <span class="subtle">core br_table dispatch</span></td>
-                <td>0.667</td>
-                <td>0.679</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
+    <tr>
+      <td><span class="target-runtime"><strong>linux-x86_64</strong><span>closures_upvalues · one upvalue-mutating closure call</span></span></td>
+      <td>229 ns</td>
+      <td>3.544x</td>
+      <td>5 / 10</td>
+      <td>mlua · Lua 5.4 · 46.4 ns</td>
+      <td>
+        <span class="claim-posture">
+          <span class="claim-pill claim-blocked">Not ready</span>
+          <small>rustia trails mlua-luau by 3.544x</small>
+        </span>
+      </td>
+    </tr>
 
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-dispatch-javascriptcore-bun-darwin-arm64</strong><span>JavaScriptCore/bun</span></span></td>
-                <td><strong>call_ref</strong> <span class="subtle">typed function reference dispatch</span></td>
-                <td>2.626</td>
-                <td>2.785</td>
-                <td>3.939x</td>
-                <td>a167350</td>
-              </tr>
+    <tr>
+      <td><span class="target-runtime"><strong>linux-x86_64</strong><span>dense_tables · build+sum+sort of 256-elem array</span></span></td>
+      <td>55,552 ns</td>
+      <td>2.789x</td>
+      <td>5 / 10</td>
+      <td>wasmi · WebAssembly · 3,334 ns</td>
+      <td>
+        <span class="claim-posture">
+          <span class="claim-pill claim-blocked">Not ready</span>
+          <small>rustia trails mlua-luau by 2.789x</small>
+        </span>
+      </td>
+    </tr>
 
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-dispatch-spidermonkey-spidermonkey-unknown-host</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>br_table</strong> <span class="subtle">core br_table dispatch</span></td>
-                <td>0.45</td>
-                <td>0.454</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
+    <tr>
+      <td><span class="target-runtime"><strong>linux-x86_64</strong><span>generic_iteration · __iter(32)+pairs(5)+ipairs(32) pass</span></span></td>
+      <td>12,105 ns</td>
+      <td>2.698x</td>
+      <td>8 / 10</td>
+      <td>wasmi · WebAssembly · 368 ns</td>
+      <td>
+        <span class="claim-posture">
+          <span class="claim-pill claim-blocked">Not ready</span>
+          <small>rustia trails mlua-luau by 2.698x</small>
+        </span>
+      </td>
+    </tr>
 
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-dispatch-spidermonkey-spidermonkey-unknown-host</strong><span>SpiderMonkey/spidermonkey</span></span></td>
-                <td><strong>call_ref</strong> <span class="subtle">typed function reference dispatch</span></td>
-                <td>8.828</td>
-                <td>8.985</td>
-                <td>19.6x</td>
-                <td>a167350</td>
-              </tr>
+    <tr>
+      <td><span class="target-runtime"><strong>linux-x86_64</strong><span>sparse_tables · fill+read 128 hash entries</span></span></td>
+      <td>90,355 ns</td>
+      <td>3.945x</td>
+      <td>5 / 10</td>
+      <td>wasmi · WebAssembly · 3,107 ns</td>
+      <td>
+        <span class="claim-posture">
+          <span class="claim-pill claim-blocked">Not ready</span>
+          <small>rustia trails mlua-luau by 3.945x</small>
+        </span>
+      </td>
+    </tr>
 
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-dispatch-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>br_table</strong> <span class="subtle">core br_table dispatch</span></td>
-                <td>0.334</td>
-                <td>0.35</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-dispatch-v8-deno-darwin-aarch64</strong><span>V8/deno</span></span></td>
-                <td><strong>call_ref</strong> <span class="subtle">typed function reference dispatch</span></td>
-                <td>0.921</td>
-                <td>0.967</td>
-                <td>2.757x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-dispatch-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>br_table</strong> <span class="subtle">core br_table dispatch</span></td>
-                <td>0.333</td>
-                <td>0.341</td>
-                <td>1x</td>
-                <td>a167350</td>
-              </tr>
-
-              <tr>
-                <td><span class="target-runtime"><strong>wasm32-dispatch-v8-node-darwin-arm64</strong><span>V8/node</span></span></td>
-                <td><strong>call_ref</strong> <span class="subtle">typed function reference dispatch</span></td>
-                <td>0.909</td>
-                <td>0.93</td>
-                <td>2.728x</td>
-                <td>a167350</td>
-              </tr>
+    <tr>
+      <td><span class="target-runtime"><strong>linux-x86_64</strong><span>stdlib_math_table · math fastcalls + buffered push</span></span></td>
+      <td>1,177 ns</td>
+      <td>4.874x</td>
+      <td>6 / 10</td>
+      <td>wasmi · WebAssembly · 25.8 ns</td>
+      <td>
+        <span class="claim-posture">
+          <span class="claim-pill claim-blocked">Not ready</span>
+          <small>rustia trails mlua-luau by 4.874x</small>
+        </span>
+      </td>
+    </tr>
 
           </tbody>
         </table>
@@ -1454,828 +1704,109 @@
     </section>
 
 
-    <section class="target" id="macos-aarch64">
-      <div class="target-head">
+    <section class="panel history-axis-panel" id="history">
+      <div class="section-head">
         <div>
-          <h2>macos-aarch64</h2>
-          <p>50 rows across 5 workloads</p>
+          <h2>rustia Performance History</h2>
+          <p>25 historical Rustia revisions reconstructed with a single fixed harness, followed by the directly recorded dedicated-VM series.</p>
+        </div>
+        <div class="metric-toggle" role="group" aria-label="History x-axis">
+          <button type="button" data-history-axis="date" aria-pressed="true">Date</button>
+          <button type="button" data-history-axis="commit" aria-pressed="false">Commit</button>
         </div>
       </div>
-
-    <section class="workload" id="macos-aarch64-closures-upvalues">
-      <div class="workload-head">
-        <div>
-          <h3>closures_upvalues</h3>
-          <p>one upvalue-mutating closure call · fastest 3.805 ns/unit · slowest 1,004 ns/unit</p>
-        </div>
-      </div>
-      <div class="bars">
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>roto</strong>
-        <span>roto · 9f3b0d1 · 2026-07-03 02:27:14 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>3.805 ns min</span>
-        <span>111x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 100.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 100.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>wasmtime</strong>
-        <span>wasm · e48285b · 2026-07-03 01:55:45 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>16.1 ns min</span>
-        <span>26.2x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 23.644%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 23.644%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>mlua-lua54</strong>
-        <span>lua54 · d4bb1ed · 2026-07-03 02:12:50 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>16.9 ns min</span>
-        <span>24.9x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 22.498%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 22.498%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>mlua-luau</strong>
-        <span>luau · e48285b · 2026-07-03 01:54:39 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>21.1 ns min</span>
-        <span>19.9x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 17.999%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 17.999%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>wasmi</strong>
-        <span>wasm · e48285b · 2026-07-03 01:55:29 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>87.7 ns min</span>
-        <span>4.801x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 4.341%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 4.341%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>koto</strong>
-        <span>koto · e48285b · 2026-07-03 01:54:23 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>121 ns min</span>
-        <span>3.48x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 3.146%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 3.146%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rquickjs</strong>
-        <span>javascript · e48285b · 2026-07-03 01:55:12 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>249 ns min</span>
-        <span>1.689x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rustia</strong>
-        <span>luau · e48285b · 2026-07-03 01:53:51 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>421 ns min</span>
-        <span>1x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rhai</strong>
-        <span>rhai · e48285b · 2026-07-03 01:54:56 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>521 ns min</span>
-        <span>0.807x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>boa</strong>
-        <span>javascript · e48285b · 2026-07-03 01:54:07 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>1,004 ns min</span>
-        <span>0.419x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-      </div>
-    </section>
-
-    <section class="workload" id="macos-aarch64-dense-tables">
-      <div class="workload-head">
-        <div>
-          <h3>dense_tables</h3>
-          <p>build+sum+sort of 256-elem array · fastest 193 ns/unit · slowest 1,212,500 ns/unit</p>
-        </div>
-      </div>
-      <div class="bars">
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>wasmtime</strong>
-        <span>wasm · e48285b · 2026-07-03 01:55:39 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>193 ns min</span>
-        <span>685x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 100.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 100.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>wasmi</strong>
-        <span>wasm · e48285b · 2026-07-03 01:55:22 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>1,269 ns min</span>
-        <span>104x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 15.207%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 15.207%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>mlua-luau</strong>
-        <span>luau · e48285b · 2026-07-03 01:54:33 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>9,757 ns min</span>
-        <span>13.5x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>mlua-lua54</strong>
-        <span>lua54 · d4bb1ed · 2026-07-03 02:12:46 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>25,106 ns min</span>
-        <span>5.263x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rquickjs</strong>
-        <span>javascript · e48285b · 2026-07-03 01:55:06 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>57,415 ns min</span>
-        <span>2.301x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>koto</strong>
-        <span>koto · e48285b · 2026-07-03 01:54:17 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>98,906 ns min</span>
-        <span>1.336x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rhai</strong>
-        <span>rhai · e48285b · 2026-07-03 01:54:49 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>107,846 ns min</span>
-        <span>1.225x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rustia</strong>
-        <span>luau · e48285b · 2026-07-03 01:53:44 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>132,121 ns min</span>
-        <span>1x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>boa</strong>
-        <span>javascript · e48285b · 2026-07-03 01:54:01 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>379,688 ns min</span>
-        <span>0.348x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>roto</strong>
-        <span>roto · 9f3b0d1 · 2026-07-03 02:27:07 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>1,212,500 ns min</span>
-        <span>0.109x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-      </div>
-    </section>
-
-    <section class="workload" id="macos-aarch64-generic-iteration">
-      <div class="workload-head">
-        <div>
-          <h3>generic_iteration</h3>
-          <p>__iter(32)+pairs(5)+ipairs(32) pass · fastest 78.8 ns/unit · slowest 17,533 ns/unit</p>
-        </div>
-      </div>
-      <div class="bars">
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>wasmtime</strong>
-        <span>wasm · e48285b · 2026-07-03 01:55:48 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>78.8 ns min</span>
-        <span>222x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 100.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 100.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>wasmi</strong>
-        <span>wasm · e48285b · 2026-07-03 01:55:32 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>162 ns min</span>
-        <span>108x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 48.727%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 48.727%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>roto</strong>
-        <span>roto · 9f3b0d1 · 2026-07-03 02:27:17 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>1,152 ns min</span>
-        <span>15.2x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 6.844%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 6.844%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>mlua-lua54</strong>
-        <span>lua54 · d4bb1ed · 2026-07-03 02:12:54 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>1,429 ns min</span>
-        <span>12.3x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 5.516%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 5.516%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>mlua-luau</strong>
-        <span>luau · e48285b · 2026-07-03 01:54:42 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>2,126 ns min</span>
-        <span>8.247x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 3.707%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 3.707%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>koto</strong>
-        <span>koto · e48285b · 2026-07-03 01:54:27 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>2,319 ns min</span>
-        <span>7.56x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 3.398%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 3.398%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rquickjs</strong>
-        <span>javascript · e48285b · 2026-07-03 01:55:15 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>2,914 ns min</span>
-        <span>6.017x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.705%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.705%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rhai</strong>
-        <span>rhai · e48285b · 2026-07-03 01:54:59 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>3,463 ns min</span>
-        <span>5.063x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.276%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.276%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>boa</strong>
-        <span>javascript · e48285b · 2026-07-03 01:54:10 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>14,206 ns min</span>
-        <span>1.234x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rustia</strong>
-        <span>luau · e48285b · 2026-07-03 01:53:54 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>17,533 ns min</span>
-        <span>1x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-      </div>
-    </section>
-
-    <section class="workload" id="macos-aarch64-sparse-tables">
-      <div class="workload-head">
-        <div>
-          <h3>sparse_tables</h3>
-          <p>fill+read 128 hash entries · fastest 304 ns/unit · slowest 140,451 ns/unit</p>
-        </div>
-      </div>
-      <div class="bars">
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>wasmtime</strong>
-        <span>wasm · e48285b · 2026-07-03 01:55:42 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>304 ns min</span>
-        <span>373x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 100.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 100.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>wasmi</strong>
-        <span>wasm · e48285b · 2026-07-03 01:55:25 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>1,316 ns min</span>
-        <span>86.2x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 23.071%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 23.071%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>mlua-luau</strong>
-        <span>luau · e48285b · 2026-07-03 01:54:36 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>9,268 ns min</span>
-        <span>12.2x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 3.277%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 3.277%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>mlua-lua54</strong>
-        <span>lua54 · d4bb1ed · 2026-07-03 02:12:48 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>12,221 ns min</span>
-        <span>9.281x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.485%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.485%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rquickjs</strong>
-        <span>javascript · e48285b · 2026-07-03 01:55:09 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>48,597 ns min</span>
-        <span>2.334x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>roto</strong>
-        <span>roto · 9f3b0d1 · 2026-07-03 02:27:10 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>51,291 ns min</span>
-        <span>2.211x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>koto</strong>
-        <span>koto · e48285b · 2026-07-03 01:54:20 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>54,427 ns min</span>
-        <span>2.084x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rustia</strong>
-        <span>luau · e48285b · 2026-07-03 01:53:47 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>113,418 ns min</span>
-        <span>1x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rhai</strong>
-        <span>rhai · e48285b · 2026-07-03 01:54:53 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>114,296 ns min</span>
-        <span>0.992x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>boa</strong>
-        <span>javascript · e48285b · 2026-07-03 01:54:04 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>140,451 ns min</span>
-        <span>0.808x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-      </div>
-    </section>
-
-    <section class="workload" id="macos-aarch64-stdlib-math-table">
-      <div class="workload-head">
-        <div>
-          <h3>stdlib_math_table</h3>
-          <p>math fastcalls + buffered push · fastest 2.519 ns/unit · slowest 1,772 ns/unit</p>
-        </div>
-      </div>
-      <div class="bars">
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>wasmtime</strong>
-        <span>wasm · e48285b · 2026-07-03 01:55:51 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>2.519 ns min</span>
-        <span>478x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 100.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 100.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>wasmi</strong>
-        <span>wasm · e48285b · 2026-07-03 01:55:35 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>6.328 ns min</span>
-        <span>190x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 39.807%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 39.807%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>mlua-luau</strong>
-        <span>luau · e48285b · 2026-07-03 01:54:46 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>89.6 ns min</span>
-        <span>13.4x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.813%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.813%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>mlua-lua54</strong>
-        <span>lua54 · d4bb1ed · 2026-07-03 02:12:57 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>137 ns min</span>
-        <span>8.811x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>roto</strong>
-        <span>roto · 9f3b0d1 · 2026-07-03 02:27:20 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>140 ns min</span>
-        <span>8.6x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rquickjs</strong>
-        <span>javascript · e48285b · 2026-07-03 01:55:19 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>230 ns min</span>
-        <span>5.226x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>koto</strong>
-        <span>koto · e48285b · 2026-07-03 01:54:30 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>619 ns min</span>
-        <span>1.943x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rhai</strong>
-        <span>rhai · e48285b · 2026-07-03 01:55:02 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>1,043 ns min</span>
-        <span>1.154x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>rustia</strong>
-        <span>luau · e48285b · 2026-07-03 01:53:57 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>1,203 ns min</span>
-        <span>1x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-    <article class="result-row">
-      <div class="result-label">
-        <strong>boa</strong>
-        <span>javascript · e48285b · 2026-07-03 01:54:14 UTC</span>
-      </div>
-      <div class="result-values">
-        <span>1,772 ns min</span>
-        <span>0.679x vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: 2.000%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: 2.000%"></span></div>
-      </div>
-    </article>
-
-      </div>
-    </section>
-
+      <p class="history-answer"><strong>Higher is faster; mlua/JIT is 1×.</strong> The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>83bc2f3</code>); the reconstructed Rustia measurements used a separate VM of the same class.</p>
+      <p class="cohort-note">The two Rustia lines share the same workloads and score, but remain separate because reconstruction and directly recorded matrix runs use different measurement protocols.</p>
+      <div data-history-axis-view="date">
+    <div class="history-chart">
+      <svg viewBox="0 0 920 300" role="img" aria-label="rustia overall Linux performance history by date versus mlua JIT, higher is faster">
+        <rect x="0" y="0" width="920" height="300" class="history-chart-bg" />
+        <line x1="54" y1="258.00" x2="900" y2="258.00" class="history-grid-line" /><text x="8" y="262.00" class="history-axis-label">0x</text><line x1="54" y1="210.80" x2="900" y2="210.80" class="history-grid-line" /><text x="8" y="214.80" class="history-axis-label">0.25x</text><line x1="54" y1="163.60" x2="900" y2="163.60" class="history-grid-line" /><text x="8" y="167.60" class="history-axis-label">0.5x</text><line x1="54" y1="116.40" x2="900" y2="116.40" class="history-grid-line" /><text x="8" y="120.40" class="history-axis-label">0.75x</text><line x1="54" y1="69.20" x2="900" y2="69.20" class="history-grid-line" /><text x="8" y="73.20" class="history-axis-label">1x</text><line x1="54" y1="22.00" x2="900" y2="22.00" class="history-grid-line" /><text x="8" y="26.00" class="history-axis-label">1.25x</text>
+        <line x1="54" y1="22" x2="54" y2="258" class="history-axis" />
+        <line x1="54" y1="258" x2="900" y2="258" class="history-axis" />
+        <text x="54" y="290" class="history-axis-label">2026-07-02</text>
+        <text x="900" y="290" text-anchor="end" class="history-axis-label">2026-07-23</text>
+        <line x1="54" y1="69.20" x2="900" y2="69.20" stroke="#ea580c" stroke-width="1.4" stroke-dasharray="7 6"><title>mlua / Luau / JIT · current matrix 83bc2f3 · 1×</title></line>
+        <g><polyline points="54.00,244.93 54.97,244.85 56.47,244.99 62.42,245.01 63.88,245.05 67.17,244.57 68.00,245.11 68.40,244.50 96.92,244.41 97.26,245.08 97.53,245.59 97.96,244.82 98.62,245.22 614.42,245.48 618.07,244.02 653.06,243.70 658.75,244.15 660.45,243.95 774.54,242.92 848.47,236.81 850.36,236.50 857.85,217.81 860.22,214.64 867.44,210.57 871.59,209.36" fill="none" stroke="#2563eb" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /><circle cx="54.00" cy="244.93" r="2.2" fill="#2563eb"><title>Reconstructed · aee7749 · 0.069x mlua/JIT · 1x vs first in era</title></circle><circle cx="54.97" cy="244.85" r="2.2" fill="#2563eb"><title>Reconstructed · c99a731 · 0.07x mlua/JIT · 1.006x vs first in era</title></circle><circle cx="56.47" cy="244.99" r="2.2" fill="#2563eb"><title>Reconstructed · d2279ca · 0.069x mlua/JIT · 0.995x vs first in era</title></circle><circle cx="62.42" cy="245.01" r="2.2" fill="#2563eb"><title>Reconstructed · 2e7dea9 · 0.069x mlua/JIT · 0.994x vs first in era</title></circle><circle cx="63.88" cy="245.05" r="2.2" fill="#2563eb"><title>Reconstructed · 8d2f097 · 0.069x mlua/JIT · 0.991x vs first in era</title></circle><circle cx="67.17" cy="244.57" r="2.2" fill="#2563eb"><title>Reconstructed · b7f02f3 · 0.071x mlua/JIT · 1.028x vs first in era</title></circle><circle cx="68.00" cy="245.11" r="2.2" fill="#2563eb"><title>Reconstructed · 10bc57a · 0.068x mlua/JIT · 0.986x vs first in era</title></circle><circle cx="68.40" cy="244.50" r="2.2" fill="#2563eb"><title>Reconstructed · 9979c3e · 0.071x mlua/JIT · 1.033x vs first in era</title></circle><circle cx="96.92" cy="244.41" r="2.2" fill="#2563eb"><title>Reconstructed · 645c76e · 0.072x mlua/JIT · 1.04x vs first in era</title></circle><circle cx="97.26" cy="245.08" r="2.2" fill="#2563eb"><title>Reconstructed · ad82d39 · 0.068x mlua/JIT · 0.989x vs first in era</title></circle><circle cx="97.53" cy="245.59" r="2.2" fill="#2563eb"><title>Reconstructed · ea37fec · 0.066x mlua/JIT · 0.949x vs first in era</title></circle><circle cx="97.96" cy="244.82" r="2.2" fill="#2563eb"><title>Reconstructed · 9f85d01 · 0.07x mlua/JIT · 1.008x vs first in era</title></circle><circle cx="98.62" cy="245.22" r="2.2" fill="#2563eb"><title>Reconstructed · a559a6a · 0.068x mlua/JIT · 0.978x vs first in era</title></circle><circle cx="614.42" cy="245.48" r="2.2" fill="#2563eb"><title>Reconstructed · 4a28afa · 0.066x mlua/JIT · 0.958x vs first in era</title></circle><circle cx="618.07" cy="244.02" r="2.2" fill="#2563eb"><title>Reconstructed · dac4ec2 · 0.074x mlua/JIT · 1.07x vs first in era</title></circle><circle cx="653.06" cy="243.70" r="2.2" fill="#2563eb"><title>Reconstructed · ae3beae · 0.076x mlua/JIT · 1.094x vs first in era</title></circle><circle cx="658.75" cy="244.15" r="2.2" fill="#2563eb"><title>Reconstructed · 1370d6c · 0.073x mlua/JIT · 1.059x vs first in era</title></circle><circle cx="660.45" cy="243.95" r="2.2" fill="#2563eb"><title>Reconstructed · ed65077 · 0.074x mlua/JIT · 1.075x vs first in era</title></circle><circle cx="774.54" cy="242.92" r="2.2" fill="#2563eb"><title>Reconstructed · f208c12 · 0.08x mlua/JIT · 1.154x vs first in era</title></circle><circle cx="848.47" cy="236.81" r="2.2" fill="#2563eb"><title>Reconstructed · 87db175 · 0.112x mlua/JIT · 1.622x vs first in era</title></circle><circle cx="850.36" cy="236.50" r="2.2" fill="#2563eb"><title>Reconstructed · b1cd284 · 0.114x mlua/JIT · 1.645x vs first in era</title></circle><circle cx="857.85" cy="217.81" r="2.2" fill="#2563eb"><title>Reconstructed · 6ae0cf0 · 0.213x mlua/JIT · 3.075x vs first in era</title></circle><circle cx="860.22" cy="214.64" r="2.2" fill="#2563eb"><title>Reconstructed · 3732b80 · 0.23x mlua/JIT · 3.318x vs first in era</title></circle><circle cx="867.44" cy="210.57" r="2.2" fill="#2563eb"><title>Reconstructed · d4ec275 · 0.251x mlua/JIT · 3.629x vs first in era</title></circle><circle cx="871.59" cy="209.36" r="2.2" fill="#2563eb"><title>Reconstructed · a562919 · 0.258x mlua/JIT · 3.722x vs first in era</title></circle></g><g><polyline points="785.81,242.60 785.99,242.50 848.97,236.54 850.88,236.51 852.96,236.20 858.96,237.87 860.80,212.69 868.00,213.31 872.14,213.95 900.00,213.92" fill="none" stroke="#0f766e" stroke-width="1.6" stroke-dasharray="5 4" stroke-linecap="round" stroke-linejoin="round" /><circle cx="785.81" cy="242.60" r="2.2" fill="#0f766e"><title>Recorded dedicated · e780bf4 · 0.082x mlua/JIT · 1x vs first in era</title></circle><circle cx="785.99" cy="242.50" r="2.2" fill="#0f766e"><title>Recorded dedicated · e780bf4 · 0.082x mlua/JIT · 1.007x vs first in era</title></circle><circle cx="848.97" cy="236.54" r="2.2" fill="#0f766e"><title>Recorded dedicated · 87db175 · 0.114x mlua/JIT · 1.393x vs first in era</title></circle><circle cx="850.88" cy="236.51" r="2.2" fill="#0f766e"><title>Recorded dedicated · b1cd284 · 0.114x mlua/JIT · 1.396x vs first in era</title></circle><circle cx="852.96" cy="236.20" r="2.2" fill="#0f766e"><title>Recorded dedicated · e53cbcf · 0.115x mlua/JIT · 1.416x vs first in era</title></circle><circle cx="858.96" cy="237.87" r="2.2" fill="#0f766e"><title>Recorded dedicated · fa8c857 · 0.107x mlua/JIT · 1.307x vs first in era</title></circle><circle cx="860.80" cy="212.69" r="2.2" fill="#0f766e"><title>Recorded dedicated · 3732b80 · 0.24x mlua/JIT · 2.943x vs first in era</title></circle><circle cx="868.00" cy="213.31" r="2.2" fill="#0f766e"><title>Recorded dedicated · d4ec275 · 0.237x mlua/JIT · 2.902x vs first in era</title></circle><circle cx="872.14" cy="213.95" r="2.2" fill="#0f766e"><title>Recorded dedicated · a562919 · 0.233x mlua/JIT · 2.861x vs first in era</title></circle><circle cx="900.00" cy="213.92" r="2.2" fill="#0f766e"><title>Recorded dedicated · 83bc2f3 · 0.233x mlua/JIT · 2.863x vs first in era</title></circle></g>
+      </svg>
+      <div class="history-legend"><span><span class="swatch" style="color: #2563eb"></span>rustia · Reconstructed</span><span><span class="swatch" style="color: #0f766e"></span>rustia · Recorded dedicated</span><span><span class="swatch" style="color: #ea580c"></span><strong>mlua</strong> / Luau / JIT · 1×</span></div>
+    </div>
+  </div>
+      <div data-history-axis-view="commit" hidden>
+    <div class="history-chart">
+      <svg viewBox="0 0 920 300" role="img" aria-label="rustia overall Linux performance history by commit versus mlua JIT, higher is faster">
+        <rect x="0" y="0" width="920" height="300" class="history-chart-bg" />
+        <line x1="54" y1="258.00" x2="900" y2="258.00" class="history-grid-line" /><text x="8" y="262.00" class="history-axis-label">0x</text><line x1="54" y1="210.80" x2="900" y2="210.80" class="history-grid-line" /><text x="8" y="214.80" class="history-axis-label">0.25x</text><line x1="54" y1="163.60" x2="900" y2="163.60" class="history-grid-line" /><text x="8" y="167.60" class="history-axis-label">0.5x</text><line x1="54" y1="116.40" x2="900" y2="116.40" class="history-grid-line" /><text x="8" y="120.40" class="history-axis-label">0.75x</text><line x1="54" y1="69.20" x2="900" y2="69.20" class="history-grid-line" /><text x="8" y="73.20" class="history-axis-label">1x</text><line x1="54" y1="22.00" x2="900" y2="22.00" class="history-grid-line" /><text x="8" y="26.00" class="history-axis-label">1.25x</text>
+        <line x1="54" y1="22" x2="54" y2="258" class="history-axis" />
+        <line x1="54" y1="258" x2="900" y2="258" class="history-axis" />
+        <text x="54" y="290" class="history-axis-label">aee7749</text>
+        <text x="900" y="290" text-anchor="end" class="history-axis-label">83bc2f3</text>
+        <line x1="54" y1="69.20" x2="900" y2="69.20" stroke="#ea580c" stroke-width="1.4" stroke-dasharray="7 6"><title>mlua / Luau / JIT · current matrix 83bc2f3 · 1×</title></line>
+        <g><polyline points="54.00,244.93 84.21,244.85 114.43,244.99 144.64,245.01 174.86,245.05 205.07,244.57 235.29,245.11 265.50,244.50 295.71,244.41 325.93,245.08 356.14,245.59 386.36,244.82 416.57,245.22 446.79,245.48 477.00,244.02 507.21,243.70 537.43,244.15 567.64,243.95 597.86,242.92 658.29,236.81 688.50,236.50 718.71,217.81 809.36,214.64 839.57,210.57 869.79,209.36" fill="none" stroke="#2563eb" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /><circle cx="54.00" cy="244.93" r="2.2" fill="#2563eb"><title>Reconstructed · aee7749 · 0.069x mlua/JIT · 1x vs first in era</title></circle><circle cx="84.21" cy="244.85" r="2.2" fill="#2563eb"><title>Reconstructed · c99a731 · 0.07x mlua/JIT · 1.006x vs first in era</title></circle><circle cx="114.43" cy="244.99" r="2.2" fill="#2563eb"><title>Reconstructed · d2279ca · 0.069x mlua/JIT · 0.995x vs first in era</title></circle><circle cx="144.64" cy="245.01" r="2.2" fill="#2563eb"><title>Reconstructed · 2e7dea9 · 0.069x mlua/JIT · 0.994x vs first in era</title></circle><circle cx="174.86" cy="245.05" r="2.2" fill="#2563eb"><title>Reconstructed · 8d2f097 · 0.069x mlua/JIT · 0.991x vs first in era</title></circle><circle cx="205.07" cy="244.57" r="2.2" fill="#2563eb"><title>Reconstructed · b7f02f3 · 0.071x mlua/JIT · 1.028x vs first in era</title></circle><circle cx="235.29" cy="245.11" r="2.2" fill="#2563eb"><title>Reconstructed · 10bc57a · 0.068x mlua/JIT · 0.986x vs first in era</title></circle><circle cx="265.50" cy="244.50" r="2.2" fill="#2563eb"><title>Reconstructed · 9979c3e · 0.071x mlua/JIT · 1.033x vs first in era</title></circle><circle cx="295.71" cy="244.41" r="2.2" fill="#2563eb"><title>Reconstructed · 645c76e · 0.072x mlua/JIT · 1.04x vs first in era</title></circle><circle cx="325.93" cy="245.08" r="2.2" fill="#2563eb"><title>Reconstructed · ad82d39 · 0.068x mlua/JIT · 0.989x vs first in era</title></circle><circle cx="356.14" cy="245.59" r="2.2" fill="#2563eb"><title>Reconstructed · ea37fec · 0.066x mlua/JIT · 0.949x vs first in era</title></circle><circle cx="386.36" cy="244.82" r="2.2" fill="#2563eb"><title>Reconstructed · 9f85d01 · 0.07x mlua/JIT · 1.008x vs first in era</title></circle><circle cx="416.57" cy="245.22" r="2.2" fill="#2563eb"><title>Reconstructed · a559a6a · 0.068x mlua/JIT · 0.978x vs first in era</title></circle><circle cx="446.79" cy="245.48" r="2.2" fill="#2563eb"><title>Reconstructed · 4a28afa · 0.066x mlua/JIT · 0.958x vs first in era</title></circle><circle cx="477.00" cy="244.02" r="2.2" fill="#2563eb"><title>Reconstructed · dac4ec2 · 0.074x mlua/JIT · 1.07x vs first in era</title></circle><circle cx="507.21" cy="243.70" r="2.2" fill="#2563eb"><title>Reconstructed · ae3beae · 0.076x mlua/JIT · 1.094x vs first in era</title></circle><circle cx="537.43" cy="244.15" r="2.2" fill="#2563eb"><title>Reconstructed · 1370d6c · 0.073x mlua/JIT · 1.059x vs first in era</title></circle><circle cx="567.64" cy="243.95" r="2.2" fill="#2563eb"><title>Reconstructed · ed65077 · 0.074x mlua/JIT · 1.075x vs first in era</title></circle><circle cx="597.86" cy="242.92" r="2.2" fill="#2563eb"><title>Reconstructed · f208c12 · 0.08x mlua/JIT · 1.154x vs first in era</title></circle><circle cx="658.29" cy="236.81" r="2.2" fill="#2563eb"><title>Reconstructed · 87db175 · 0.112x mlua/JIT · 1.622x vs first in era</title></circle><circle cx="688.50" cy="236.50" r="2.2" fill="#2563eb"><title>Reconstructed · b1cd284 · 0.114x mlua/JIT · 1.645x vs first in era</title></circle><circle cx="718.71" cy="217.81" r="2.2" fill="#2563eb"><title>Reconstructed · 6ae0cf0 · 0.213x mlua/JIT · 3.075x vs first in era</title></circle><circle cx="809.36" cy="214.64" r="2.2" fill="#2563eb"><title>Reconstructed · 3732b80 · 0.23x mlua/JIT · 3.318x vs first in era</title></circle><circle cx="839.57" cy="210.57" r="2.2" fill="#2563eb"><title>Reconstructed · d4ec275 · 0.251x mlua/JIT · 3.629x vs first in era</title></circle><circle cx="869.79" cy="209.36" r="2.2" fill="#2563eb"><title>Reconstructed · a562919 · 0.258x mlua/JIT · 3.722x vs first in era</title></circle></g><g><polyline points="628.07,242.60 628.07,242.50 658.29,236.54 688.50,236.51 748.93,236.20 779.14,237.87 809.36,212.69 839.57,213.31 869.79,213.95 900.00,213.92" fill="none" stroke="#0f766e" stroke-width="1.6" stroke-dasharray="5 4" stroke-linecap="round" stroke-linejoin="round" /><circle cx="628.07" cy="242.60" r="2.2" fill="#0f766e"><title>Recorded dedicated · e780bf4 · 0.082x mlua/JIT · 1x vs first in era</title></circle><circle cx="628.07" cy="242.50" r="2.2" fill="#0f766e"><title>Recorded dedicated · e780bf4 · 0.082x mlua/JIT · 1.007x vs first in era</title></circle><circle cx="658.29" cy="236.54" r="2.2" fill="#0f766e"><title>Recorded dedicated · 87db175 · 0.114x mlua/JIT · 1.393x vs first in era</title></circle><circle cx="688.50" cy="236.51" r="2.2" fill="#0f766e"><title>Recorded dedicated · b1cd284 · 0.114x mlua/JIT · 1.396x vs first in era</title></circle><circle cx="748.93" cy="236.20" r="2.2" fill="#0f766e"><title>Recorded dedicated · e53cbcf · 0.115x mlua/JIT · 1.416x vs first in era</title></circle><circle cx="779.14" cy="237.87" r="2.2" fill="#0f766e"><title>Recorded dedicated · fa8c857 · 0.107x mlua/JIT · 1.307x vs first in era</title></circle><circle cx="809.36" cy="212.69" r="2.2" fill="#0f766e"><title>Recorded dedicated · 3732b80 · 0.24x mlua/JIT · 2.943x vs first in era</title></circle><circle cx="839.57" cy="213.31" r="2.2" fill="#0f766e"><title>Recorded dedicated · d4ec275 · 0.237x mlua/JIT · 2.902x vs first in era</title></circle><circle cx="869.79" cy="213.95" r="2.2" fill="#0f766e"><title>Recorded dedicated · a562919 · 0.233x mlua/JIT · 2.861x vs first in era</title></circle><circle cx="900.00" cy="213.92" r="2.2" fill="#0f766e"><title>Recorded dedicated · 83bc2f3 · 0.233x mlua/JIT · 2.863x vs first in era</title></circle></g>
+      </svg>
+      <div class="history-legend"><span><span class="swatch" style="color: #2563eb"></span>rustia · Reconstructed</span><span><span class="swatch" style="color: #0f766e"></span>rustia · Recorded dedicated</span><span><span class="swatch" style="color: #ea580c"></span><strong>mlua</strong> / Luau / JIT · 1×</span></div>
+    </div>
+  </div>
+      <div class="table-wrap history-table"><table><thead><tr><th>Series</th><th>First run</th><th>Latest run</th><th>Improvement</th><th>Latest gap</th></tr></thead><tbody><tr><td><strong>Reconstructed</strong><br><small>25 complete scores · geometric mean of 5 workloads</small></td><td>0.069x of mlua/JIT · <code>aee7749</code></td><td>0.258x of mlua/JIT · <code>a562919</code></td><td><strong>3.722x</strong> · +272%</td><td>mlua/JIT is <strong>3.881x</strong> faster</td></tr><tr><td><strong>Recorded dedicated</strong><br><small>10 complete scores · geometric mean of 5 workloads</small></td><td>0.082x of mlua/JIT · <code>e780bf4</code></td><td>0.233x of mlua/JIT · <code>83bc2f3</code></td><td><strong>2.863x</strong> · +186%</td><td>mlua/JIT is <strong>4.283x</strong> faster</td></tr></tbody></table></div>
+      <p class="cohort-note">Reconstruction measurement time is retained honestly in <code>bench/history/backfills</code>; the chart's x-axis uses each source commit's original date.</p>
     </section>
 
 
-    <p class="footnote">Schema <code>rustia.bench.current-results.v1</code>. Wasm sources <code>bench/wasm/current-results.json</code> and <code>bench/wasm/dispatch-current-results.json</code>. History <code>bench/history/runs.jsonl</code> (jsonl-v1). The dashboard is deterministic and contains no external assets or runtime JavaScript. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>rustia.bench.current-results.v1</code>. Wasm sources <code>bench/wasm/current-results.json</code> and <code>bench/wasm/dispatch-current-results.json</code>. History <code>bench/history/runs.jsonl</code> (jsonl-v1). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
+  <script>
+    (() => {
+      const heatClasses = ["heat-0", "heat-1", "heat-2", "heat-3", "heat-4", "heat-5"];
+      const setMetric = (root, metric) => {
+        root.dataset.metric = metric;
+        root.querySelectorAll("[data-metric]").forEach((button) => {
+          button.setAttribute("aria-pressed", String(button.dataset.metric === metric));
+        });
+        root.querySelectorAll(".metric-value, .metric-caption").forEach((element) => {
+          element.textContent = element.dataset[metric];
+        });
+        root.querySelectorAll(".metric-bar").forEach((bar) => {
+          bar.style.width = bar.dataset[metric + "Width"] + "%";
+        });
+        root.querySelectorAll(".heat-cell[data-heat-relative]").forEach((cell) => {
+          cell.textContent = cell.dataset[metric];
+          cell.classList.remove(...heatClasses);
+          cell.classList.add(cell.dataset[metric === "relative" ? "heatRelative" : "heatAbsolute"]);
+        });
+      };
+      document.querySelectorAll(".metric-panel").forEach((root) => {
+        root.querySelectorAll("[data-metric]").forEach((button) => {
+          button.addEventListener("click", () => setMetric(root, button.dataset.metric));
+        });
+        setMetric(root, "relative");
+      });
+      document.querySelectorAll("[data-mode-filter]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const root = button.closest(".metric-panel");
+          const mode = button.dataset.modeFilter;
+          root.querySelectorAll("[data-mode-filter]").forEach((candidate) => {
+            candidate.setAttribute("aria-pressed", String(candidate.dataset.modeFilter === mode));
+          });
+          root.querySelectorAll("[data-mode-view]").forEach((view) => {
+            view.hidden = view.dataset.modeView !== mode;
+          });
+        });
+      });
+      document.querySelectorAll(".history-axis-panel").forEach((root) => {
+        const setHistoryAxis = (axis) => {
+          root.querySelectorAll("[data-history-axis]").forEach((button) => {
+            button.setAttribute("aria-pressed", String(button.dataset.historyAxis === axis));
+          });
+          root.querySelectorAll("[data-history-axis-view]").forEach((view) => {
+            view.hidden = view.dataset.historyAxisView !== axis;
+          });
+        };
+        root.querySelectorAll("[data-history-axis]").forEach((button) => {
+          button.addEventListener("click", () => setHistoryAxis(button.dataset.historyAxis));
+        });
+        setHistoryAxis("date");
+      });
+    })();
+  </script>
 </body>
 </html>

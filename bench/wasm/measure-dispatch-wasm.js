@@ -125,6 +125,7 @@ function parseArgs(argv) {
     targetMs: 80,
     reps: 5,
     maxN: 1_000_000_000,
+    host: null,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -136,6 +137,8 @@ function parseArgs(argv) {
       options.reps = positiveInteger(requiredValue(argv, ++index, arg), arg);
     } else if (arg === "--max-n") {
       options.maxN = positiveInteger(requiredValue(argv, ++index, arg), arg);
+    } else if (arg === "--host") {
+      options.host = requiredValue(argv, ++index, arg);
     } else {
       fail(`unknown argument ${JSON.stringify(arg)}`);
     }
@@ -166,8 +169,8 @@ function positiveInteger(value, label) {
   return number;
 }
 
-function runtimeInfo() {
-  const host = hostInfo();
+function runtimeInfo(options) {
+  const host = hostInfo(options.host);
   if (typeof Deno !== "undefined") {
     return {
       name: "deno",
@@ -225,7 +228,8 @@ function spiderMonkeyVersion() {
   return "unknown";
 }
 
-function hostInfo() {
+function hostInfo(override) {
+  if (override) return override;
   if (typeof Deno !== "undefined") {
     return `${Deno.build.os}-${Deno.build.arch}`;
   }
@@ -372,7 +376,7 @@ function comparison(rows) {
 }
 
 const options = parseArgs(argsForRuntime());
-const runtime = runtimeInfo();
+const runtime = runtimeInfo(options);
 const compiled = MODULES.map(compileModule);
 const skipped = compiled
   .filter((moduleResult) => moduleResult.unsupported)

@@ -1,4 +1,4 @@
-use crate::number::{canonicalize_number, table_key_number_bits};
+use crate::number::canonicalize_number;
 use gc_arena::Collect;
 use std::fmt;
 
@@ -12,6 +12,42 @@ const TAG_FUNCTION: u64 = 6;
 const TAG_USERDATA: u64 = 7;
 const TAG_BUFFER: u64 = 8;
 const TAG_VECTOR: u64 = 9;
+const TAG_SHORT_STRING: u64 = 10;
+// Private to closure metadata; this tag is never exposed as a script value.
+const TAG_CAPTURE_CELL: u64 = 11;
+const TAG_MASK: u64 = 0xff;
+const SHORT_STRING_LENGTH_SHIFT: u32 = 8;
+const SHORT_STRING_BYTES_SHIFT: u32 = 16;
+// Keep the top payload byte reserved so the packed form has a canonical zero byte available for
+// future value-representation evolution.
+pub(crate) const SHORT_STRING_CAPACITY: usize = 13;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Collect)]
+#[collect(no_drop)]
+pub(crate) struct ShortString {
+    bytes: [u8; SHORT_STRING_CAPACITY],
+    len: u8,
+}
+
+impl ShortString {
+    #[inline]
+    pub(crate) fn new(value: &[u8]) -> Option<Self> {
+        if value.len() > SHORT_STRING_CAPACITY {
+            return None;
+        }
+        let mut bytes = [0_u8; SHORT_STRING_CAPACITY];
+        bytes[..value.len()].copy_from_slice(value);
+        Some(Self {
+            bytes,
+            len: value.len() as u8,
+        })
+    }
+
+    #[inline]
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..usize::from(self.len)]
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Eq, PartialEq, Collect)]
@@ -84,6 +120,28 @@ impl Value {
         })
     }
 
+    /// Stores a short binary string directly in the sealed 16-byte value representation.
+    ///
+    /// The low tag byte remains the discriminator, the next byte stores the length, and the
+    /// remaining fourteen bytes are split across the tag and payload words; thirteen carry
+    /// string bytes and the final payload byte stays zero. Explicit shifts keep the representation
+    /// independent of host endianness.
+    #[inline]
+    pub(crate) fn short_string(value: &[u8]) -> Option<Self> {
+        let short = ShortString::new(value)?;
+        let value = short.as_bytes();
+        let mut tag = TAG_SHORT_STRING | ((value.len() as u64) << SHORT_STRING_LENGTH_SHIFT);
+        let mut payload = 0_u64;
+        for (index, byte) in value.iter().copied().enumerate() {
+            if index < 6 {
+                tag |= u64::from(byte) << (SHORT_STRING_BYTES_SHIFT + index as u32 * 8);
+            } else {
+                payload |= u64::from(byte) << ((index as u32 - 6) * 8);
+            }
+        }
+        Some(Self(ValueRepr { tag, payload }))
+    }
+
     #[inline]
     pub(crate) const fn table(handle: u32) -> Self {
         Self(ValueRepr {
@@ -125,12 +183,29 @@ impl Value {
     }
 
     #[inline]
+    pub(crate) const fn capture_cell(handle: u32) -> Self {
+        Self(ValueRepr {
+            tag: TAG_CAPTURE_CELL,
+            payload: handle as u64,
+        })
+    }
+
+    #[inline]
+    pub(crate) const fn as_capture_cell(self) -> Option<u32> {
+        if self.0.tag == TAG_CAPTURE_CELL {
+            Some(self.0.payload as u32)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
     pub const fn kind(self) -> ValueKind {
-        match self.0.tag {
+        match self.0.tag & TAG_MASK {
             TAG_NIL => ValueKind::Nil,
             TAG_FALSE | TAG_TRUE => ValueKind::Boolean,
             TAG_NUMBER => ValueKind::Number,
-            TAG_STRING_ATOM => ValueKind::String,
+            TAG_STRING_ATOM | TAG_SHORT_STRING => ValueKind::String,
             TAG_TABLE => ValueKind::Table,
             TAG_FUNCTION => ValueKind::Function,
             TAG_USERDATA => ValueKind::Userdata,
@@ -161,6 +236,26 @@ impl Value {
         } else {
             None
         }
+    }
+
+    #[inline]
+    pub(crate) fn as_short_string(self) -> Option<ShortString> {
+        if self.0.tag & TAG_MASK != TAG_SHORT_STRING {
+            return None;
+        }
+        let len = ((self.0.tag >> SHORT_STRING_LENGTH_SHIFT) & 0xff) as u8;
+        if usize::from(len) > SHORT_STRING_CAPACITY {
+            return None;
+        }
+        let mut bytes = [0_u8; SHORT_STRING_CAPACITY];
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = if index < 6 {
+                (self.0.tag >> (SHORT_STRING_BYTES_SHIFT + index as u32 * 8)) as u8
+            } else {
+                (self.0.payload >> ((index as u32 - 6) * 8)) as u8
+            };
+        }
+        Some(ShortString { bytes, len })
     }
 
     #[inline]
@@ -214,8 +309,8 @@ impl Value {
     }
 
     #[inline]
-    pub(crate) fn table_key_number_bits(self) -> Option<u64> {
-        self.as_number().map(table_key_number_bits)
+    pub(crate) const fn is_nil(self) -> bool {
+        self.0.tag == TAG_NIL
     }
 
     pub(crate) fn luau_equals(self, other: Self) -> bool {
@@ -224,7 +319,11 @@ impl Value {
             (ValueKind::Boolean, ValueKind::Boolean) => self.as_bool() == other.as_bool(),
             (ValueKind::Number, ValueKind::Number) => self.as_number() == other.as_number(),
             (ValueKind::String, ValueKind::String) => {
-                self.as_string_atom() == other.as_string_atom()
+                match (self.as_short_string(), other.as_short_string()) {
+                    (Some(lhs), Some(rhs)) => lhs == rhs,
+                    (None, None) => self.as_string_atom() == other.as_string_atom(),
+                    _ => false,
+                }
             }
             (ValueKind::Table, ValueKind::Table) => self.as_table() == other.as_table(),
             (ValueKind::Function, ValueKind::Function) => self.as_function() == other.as_function(),
@@ -268,3 +367,51 @@ const _: () = {
     assert!(std::mem::size_of::<Value>() == 16);
     assert!(std::mem::align_of::<Value>() == 8);
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_strings_round_trip_binary_bytes_in_the_locked_value_layout() {
+        for len in 0..=SHORT_STRING_CAPACITY {
+            let bytes = (0..len)
+                .map(|index| (index as u8).wrapping_mul(37).wrapping_add(0x80))
+                .collect::<Vec<_>>();
+            let value = Value::short_string(&bytes).expect("short string should fit");
+            assert_eq!(value.kind(), ValueKind::String);
+            assert_eq!(
+                value
+                    .as_short_string()
+                    .map(|value| value.as_bytes().to_vec()),
+                Some(bytes)
+            );
+            assert_eq!(
+                value.0.payload >> 56,
+                0,
+                "reserved payload byte must be zero"
+            );
+        }
+        assert!(Value::short_string(&[0xff; SHORT_STRING_CAPACITY + 1]).is_none());
+    }
+
+    #[test]
+    fn short_string_equality_uses_canonical_packed_bytes() {
+        let lhs = Value::short_string(b"field\0name").expect("short string");
+        let rhs = Value::short_string(b"field\0name").expect("short string");
+        let other = Value::short_string(b"field\0names").expect("short string");
+        assert!(lhs.luau_equals(rhs));
+        assert!(!lhs.luau_equals(other));
+        assert!(!lhs.luau_equals(Value::string_atom(0)));
+    }
+
+    #[test]
+    fn exact_nil_tag_check_only_accepts_nil() {
+        assert!(Value::nil().is_nil());
+        assert!(!Value::boolean(false).is_nil());
+        assert!(!Value::number(0.0).is_nil());
+        assert!(!Value::short_string(b"")
+            .expect("empty short string")
+            .is_nil());
+    }
+}

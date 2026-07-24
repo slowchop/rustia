@@ -1,0 +1,1032 @@
+{
+  "schema_version": 1,
+  "schema": "rustia.bench.vm-string-memory-evidence.v1",
+  "created_at": "2026-07-20T05:13:42.254Z",
+  "provider": {
+    "provider": "linode",
+    "linode_id": null,
+    "linode_label": "rustia-bench-1370d6cc-39b5b679",
+    "created_at": "2026-07-20T04:45:28",
+    "status": "running",
+    "region": "ap-southeast",
+    "size_slug": "g6-dedicated-2",
+    "image": "linode/ubuntu24.04",
+    "vcpus": 2,
+    "memory_mib": 4096,
+    "disk_gib": 80,
+    "public_ipv4": "REDACTED",
+    "backups_enabled": false,
+    "interface_generation": "legacy_config",
+    "maintenance_policy": "linode/power_off_on",
+    "catalog_plan": {
+      "schema": "rustia.linode-fixed-benchmark.v2",
+      "provider": "linode",
+      "protocol_mode": "evidence_only",
+      "region": {
+        "id": "ap-southeast",
+        "label": "Sydney, AU",
+        "country": "au",
+        "status": "ok"
+      },
+      "image": {
+        "id": "linode/ubuntu24.04",
+        "label": "Ubuntu 24.04 LTS",
+        "vendor": "Ubuntu",
+        "created": "2024-04-25T13:00:11",
+        "updated": "2026-07-16T14:18:54",
+        "status": "available",
+        "is_public": true
+      },
+      "size": {
+        "id": "g6-dedicated-2",
+        "description": "Dedicated 4GB",
+        "class": "dedicated",
+        "vcpus": 2,
+        "memory_mib": 4096,
+        "disk_gib": 80,
+        "price_hourly_usd": 0.054,
+        "price_monthly_usd": 36,
+        "regional_price": false
+      },
+      "billable_lifetime_limit_minutes": 55,
+      "billing_increment_minutes": 60,
+      "planned_compute_cost_ceiling_usd": 0.054,
+      "cleanup_reserve_minutes": 8,
+      "billing_caveat": "Linode usage is rounded up to a whole hour; deletion, not shutdown, stops further accrual, and an API outage can delay confirmed deletion",
+      "source": {
+        "orchestration_commit": "00e7c7a2eb12e06f9ef3a61d6b04d2c1258bc278",
+        "config_path": "bench/cloud/linode-vm-string-memory-1370d6c.json",
+        "config_sha256": "031a016af605697445d404b1669dfede5b00cec9a4a2c080a44947f95dcbcc82",
+        "coordinator_sha256": "c210bd093fccdb23474b6ab2160f3382938cfceb02c701ff1aa930d0a2376ed6",
+        "remote_runner_sha256": "db821f5488b06417519523f4c380748648024fd0a46b18176e966c765d485186",
+        "verified_source_hashes": {
+          "baseline original bench manifest": "0e0a2418ff3db4c37dbb24d7a2ba6e380653d2e1a8f026f7361b4dbf4681ca42",
+          "candidate original bench manifest": "0e0a2418ff3db4c37dbb24d7a2ba6e380653d2e1a8f026f7361b4dbf4681ca42",
+          "overlay bench manifest": "2ba2eda992c5ae8bbeb78343c21b5a07361e0b7678b25dafd1a26ed3c668c3bf",
+          "vm string memory sampler": "477e565695baf86168b4199c0aaf3da3d24f59e21f713c5028807c38f573b104",
+          "vm string memory analyzer": "adc5dc8d49587509cb27e4ed27cf240bc74d412fd120be12f4371cedb1baf7c1",
+          "source 1 Cargo.lock": "f7f511013247d0eb2036380ed428f1e17c81059bdfd647f9183af5b9839d2414",
+          "source 1 toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
+          "source 2 Cargo.lock": "f7f511013247d0eb2036380ed428f1e17c81059bdfd647f9183af5b9839d2414",
+          "source 2 toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
+          "source 3 Cargo.lock": "f7f511013247d0eb2036380ed428f1e17c81059bdfd647f9183af5b9839d2414",
+          "source 3 toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1"
+        }
+      },
+      "comparison": {
+        "protocol": "vm_string_memory_v1",
+        "baseline_commit": "ae3beae2025feb21d0e37c70168204ae154ae125",
+        "candidate_commit": "1370d6ccefba7a1956441247c3139af2a2cf31fa",
+        "harness_overlay_commit": "af3442eb5ed97ccb4145a5b767b449dd952788c0",
+        "vm_count": 512,
+        "warmup_rounds": 1,
+        "accepted_rounds": 16,
+        "scenarios": [
+          "empty",
+          "short_unloaded",
+          "short_loaded",
+          "long_unloaded",
+          "long_loaded"
+        ]
+      }
+    }
+  },
+  "source": {
+    "baseline_commit": "ae3beae2025feb21d0e37c70168204ae154ae125",
+    "candidate_commit": "1370d6ccefba7a1956441247c3139af2a2cf31fa",
+    "harness_commit": "af3442eb5ed97ccb4145a5b767b449dd952788c0",
+    "baseline_original_bench_manifest_sha256": "0e0a2418ff3db4c37dbb24d7a2ba6e380653d2e1a8f026f7361b4dbf4681ca42",
+    "candidate_original_bench_manifest_sha256": "0e0a2418ff3db4c37dbb24d7a2ba6e380653d2e1a8f026f7361b4dbf4681ca42",
+    "overlay_bench_manifest_sha256": "2ba2eda992c5ae8bbeb78343c21b5a07361e0b7678b25dafd1a26ed3c668c3bf",
+    "sampler_sha256": "477e565695baf86168b4199c0aaf3da3d24f59e21f713c5028807c38f573b104",
+    "analyzer_sha256": "adc5dc8d49587509cb27e4ed27cf240bc74d412fd120be12f4371cedb1baf7c1",
+    "overlay_disclosure": "bench/Cargo.toml and bench/src/bin/vm-string-memory.rs from the harness commit were copied byte-for-byte over both source trees before compilation",
+    "cargo_lock_sha256": "f7f511013247d0eb2036380ed428f1e17c81059bdfd647f9183af5b9839d2414",
+    "toolchain_sha256": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
+    "git_bundle_sha256": "1c8c8f096fb9b49a331f2662a50ab0285d4a2bf4988ebb0bb26c571b9f1021ba",
+    "protocol_config_sha256": "031a016af605697445d404b1669dfede5b00cec9a4a2c080a44947f95dcbcc82",
+    "provider_metadata_sha256": "b5a287d0d606bdd5732767421c1d94f5f5797af6009347875a96edfdb05558f8"
+  },
+  "build": {
+    "rustc_vv": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.95.0\nLLVM version: 22.1.2",
+    "cargo_version": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+    "baseline_binary_sha256": "60540eb65db22baa6093512c4b117583395b92a981dfbd1cb919fb6033445e87",
+    "baseline_binary_bytes": 1497296,
+    "candidate_binary_sha256": "10f2284d19ffa044c866d19b5ea5384d0f78df70e23329d3c2ab452710237ecf",
+    "candidate_binary_bytes": 1547976,
+    "baseline_command": [
+      "/root/.cargo/bin/cargo",
+      "+1.95.0",
+      "build",
+      "--locked",
+      "--offline",
+      "--manifest-path",
+      "/opt/rustia/src-a/Cargo.toml",
+      "-p",
+      "script-bench-harness",
+      "--bin",
+      "vm-string-memory",
+      "--release"
+    ],
+    "candidate_command": [
+      "/root/.cargo/bin/cargo",
+      "+1.95.0",
+      "build",
+      "--locked",
+      "--offline",
+      "--manifest-path",
+      "/opt/rustia/src-b/Cargo.toml",
+      "-p",
+      "script-bench-harness",
+      "--bin",
+      "vm-string-memory",
+      "--release"
+    ],
+    "binary": "vm-string-memory",
+    "cargo_incremental": "0",
+    "rustc_wrapper": "unset",
+    "locked": true,
+    "offline_build_after_fetch": true,
+    "source_paths_retained_through_all_measurements": [
+      "/opt/rustia/src-a",
+      "/opt/rustia/src-b",
+      "/opt/rustia/src-harness"
+    ]
+  },
+  "host": {
+    "file": "host.json",
+    "sha256": "196ac05a5254c5e341ea1dabcccea65ec43461f0b1e57b2e45d366bade42483f",
+    "cpu_model": "AMD EPYC 7713 64-Core Processor",
+    "microcode": "0xa0011de",
+    "clocksource": "kvm-clock",
+    "scaling_governors": {
+      "cpu0": "not_exposed",
+      "cpu1": "not_exposed"
+    },
+    "benchmark_cpu": 1
+  },
+  "protocol": {
+    "kind": "vm_string_memory_v1",
+    "vm_count": 512,
+    "scenarios": [
+      "empty",
+      "short_unloaded",
+      "short_loaded",
+      "long_unloaded",
+      "long_loaded"
+    ],
+    "warmup_rounds": 1,
+    "accepted_rounds": 16,
+    "round_retry_limit": 3,
+    "warmup_sample_count": 10,
+    "accepted_sample_count": 160,
+    "accepted_attempts": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      2,
+      1,
+      1
+    ],
+    "warmup_attempts": [
+      1
+    ],
+    "warmup_order": [
+      {
+        "role": "baseline",
+        "scenario": "empty"
+      },
+      {
+        "role": "baseline",
+        "scenario": "short_unloaded"
+      },
+      {
+        "role": "baseline",
+        "scenario": "short_loaded"
+      },
+      {
+        "role": "baseline",
+        "scenario": "long_unloaded"
+      },
+      {
+        "role": "baseline",
+        "scenario": "long_loaded"
+      },
+      {
+        "role": "candidate",
+        "scenario": "long_loaded"
+      },
+      {
+        "role": "candidate",
+        "scenario": "long_unloaded"
+      },
+      {
+        "role": "candidate",
+        "scenario": "short_loaded"
+      },
+      {
+        "role": "candidate",
+        "scenario": "short_unloaded"
+      },
+      {
+        "role": "candidate",
+        "scenario": "empty"
+      }
+    ],
+    "accepted_orders": [
+      [
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        }
+      ],
+      [
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        }
+      ],
+      [
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        },
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        }
+      ],
+      [
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        },
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        }
+      ],
+      [
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        }
+      ],
+      [
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        }
+      ],
+      [
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        }
+      ],
+      [
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        }
+      ],
+      [
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        }
+      ],
+      [
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        }
+      ],
+      [
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        }
+      ],
+      [
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        }
+      ],
+      [
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        },
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        }
+      ],
+      [
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        },
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        }
+      ],
+      [
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        }
+      ],
+      [
+        {
+          "role": "candidate",
+          "scenario": "short_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "candidate",
+          "scenario": "empty"
+        },
+        {
+          "role": "candidate",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "empty"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_loaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "long_unloaded"
+        },
+        {
+          "role": "baseline",
+          "scenario": "short_loaded"
+        }
+      ]
+    ],
+    "order_rule": "ABBA/BAAB build-block alternation in consecutive opposite-role pairs; each pair shares one rotated first-block scenario order and the second block reverses it; every sample is a fresh process",
+    "bootstrap_repetitions": 100000,
+    "bootstrap_seed": 1381323604,
+    "analyzer_command": [
+      "node",
+      "bench/analyze-vm-string-memory.js",
+      "--input",
+      "samples.jsonl",
+      "--baseline",
+      "ae3beae2025feb21d0e37c70168204ae154ae125",
+      "--candidate",
+      "1370d6ccefba7a1956441247c3139af2a2cf31fa",
+      "--rounds",
+      "16",
+      "--bootstrap-reps",
+      "100000",
+      "--seed",
+      "1381323604"
+    ],
+    "host_gate": {
+      "benchmark_cpu": 1,
+      "cooldown_seconds": 60,
+      "idle_window_seconds": 10,
+      "minimum_idle_percent": 99,
+      "maximum_load_1m": 0.1,
+      "maximum_steal_ticks": 0,
+      "maximum_timed_steal_percent": 0.1,
+      "wait_timeout_seconds": 900
+    },
+    "contaminating_process_comm_regex": "^(apt|apt-get|as|cargo|cc|cc1|cc1plus|clang|clang\\+\\+|curl|dpkg|g\\+\\+|gcc|git|ld|ld\\.lld|make|ninja|node|rustc|rustup|sccache|script-bench|unattended-upgr|vm-string-memor|vm-string-memory)$",
+    "exclusion_rule": "a host-gate violation discards all ten samples in the round; retries are capped before execution and never selected by measurement outcome",
+    "gate_log": {
+      "file": "gate.jsonl",
+      "sha256": "945e3ed7c98eb489ee27f94be5f5313b02aa5376de74d700381b74d74f881a0a",
+      "records": 45
+    }
+  },
+  "analysis": {
+    "file": "analysis.json",
+    "sha256": "103ee3c59a5827b8c21ef07a39e693de695e1b96a5ad89632a49ea6c7a76f0d8",
+    "schema": "rustia.bench.vm-string-memory-analysis.v1",
+    "identity": {
+      "sample_schema": "rustia.bench.vm-string-sample.v1",
+      "baseline_commit": "ae3beae2025feb21d0e37c70168204ae154ae125",
+      "candidate_commit": "1370d6ccefba7a1956441247c3139af2a2cf31fa",
+      "accepted_rounds": 16,
+      "accepted_round_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+      ],
+      "sample_count": 160,
+      "protocol_sha256": "031a016af605697445d404b1669dfede5b00cec9a4a2c080a44947f95dcbcc82",
+      "input_sha256": "bc4f27ee4a20900277b42d021e794b84be582a810836bce484f1caa83daa5c2a",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64"
+      },
+      "vm_count": 512,
+      "constant_slots": 1024,
+      "instruction_slots": 1025,
+      "scenarios": [
+        "empty",
+        "short_unloaded",
+        "short_loaded",
+        "long_unloaded",
+        "long_loaded"
+      ],
+      "layout_bytes_by_build": {
+        "baseline": {
+          "value": 16,
+          "instruction": 8,
+          "constant": 32,
+          "vm": 480
+        },
+        "candidate": {
+          "value": 16,
+          "instruction": 8,
+          "constant": 32,
+          "vm": 480
+        }
+      }
+    }
+  },
+  "publication": {
+    "mode": "evidence_only",
+    "throughput_history_modified": false,
+    "imported_path": "bench/evidence/vm-string-memory/1370d6ccefba7a1956441247c3139af2a2cf31fa"
+  },
+  "evidence_sha256": {
+    "analysis.json": "103ee3c59a5827b8c21ef07a39e693de695e1b96a5ad89632a49ea6c7a76f0d8",
+    "gate.jsonl": "945e3ed7c98eb489ee27f94be5f5313b02aa5376de74d700381b74d74f881a0a",
+    "host.json": "196ac05a5254c5e341ea1dabcccea65ec43461f0b1e57b2e45d366bade42483f",
+    "protocol.json": "031a016af605697445d404b1669dfede5b00cec9a4a2c080a44947f95dcbcc82",
+    "provider.json": "b5a287d0d606bdd5732767421c1d94f5f5797af6009347875a96edfdb05558f8",
+    "remote-run.log": "fc8720a5113e1fa6eeab18b7a63535ef877eef1a9519cbe774b70f0325407bcd",
+    "samples.jsonl": "bc4f27ee4a20900277b42d021e794b84be582a810836bce484f1caa83daa5c2a",
+    "warmup-samples.jsonl": "27236d3b2d3b6c772cc38d5b3faa359ea5c26f0215101324133ab40e936266e1"
+  }
+}

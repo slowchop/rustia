@@ -1,0 +1,1543 @@
+{
+  "schema_version": 1,
+  "schema": "rustia.bench.vm-string-memory-analysis.v1",
+  "identity": {
+    "sample_schema": "rustia.bench.vm-string-sample.v1",
+    "baseline_commit": "ae3beae2025feb21d0e37c70168204ae154ae125",
+    "candidate_commit": "1370d6ccefba7a1956441247c3139af2a2cf31fa",
+    "accepted_rounds": 16,
+    "accepted_round_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "sample_count": 160,
+    "protocol_sha256": "031a016af605697445d404b1669dfede5b00cec9a4a2c080a44947f95dcbcc82",
+    "input_sha256": "bc4f27ee4a20900277b42d021e794b84be582a810836bce484f1caa83daa5c2a",
+    "platform": {
+      "os": "linux",
+      "arch": "x86_64"
+    },
+    "vm_count": 512,
+    "constant_slots": 1024,
+    "instruction_slots": 1025,
+    "scenarios": [
+      "empty",
+      "short_unloaded",
+      "short_loaded",
+      "long_unloaded",
+      "long_loaded"
+    ],
+    "layout_bytes_by_build": {
+      "baseline": {
+        "value": 16,
+        "instruction": 8,
+        "constant": 32,
+        "vm": 480
+      },
+      "candidate": {
+        "value": 16,
+        "instruction": 8,
+        "constant": 32,
+        "vm": 480
+      }
+    }
+  },
+  "method": {
+    "pairing": "candidate and baseline samples matched by accepted round and scenario",
+    "primary_memory_source": "memory_kib.*.smaps_rollup.anonymous",
+    "corroborating_memory_sources": [
+      "memory_kib.*.smaps_rollup.private_dirty",
+      "memory_kib.*.smaps_rollup.rss",
+      "memory_kib.*.status.rss_anon"
+    ],
+    "primary_sample_growth": "after_run - program_ready",
+    "primary_contrasts": {
+      "short_unloaded_minus_empty": "short_unloaded - empty",
+      "long_unloaded_minus_empty": "long_unloaded - empty",
+      "short_loaded_minus_short_unloaded": "short_loaded - short_unloaded",
+      "long_loaded_minus_long_unloaded": "long_loaded - long_unloaded"
+    },
+    "comparison": "per-round candidate contrast - paired baseline contrast",
+    "memory_unit": "KiB per VM",
+    "one_time_program_memory": "program_ready - clean, KiB (not divided by VM count)",
+    "diagnostic_whole_process_memory": "after_run - clean, KiB per VM",
+    "one_time_timing": "program_build, nanoseconds (not divided by VM count)",
+    "per_vm_timing": "vm_create, program_run, their combined cost, and explicitly amortized total; nanoseconds per VM",
+    "summary_quantiles": "Hyndman/Fan type 7 linear interpolation",
+    "point_estimator": "median of paired round-level candidate-minus-baseline differences",
+    "confidence_interval": "seeded paired round-level percentile bootstrap",
+    "confidence_interval_scope": "primary smaps_rollup.anonymous matched contrasts only; corroborating fields are descriptive cross-checks",
+    "nominal_confidence_level": 0.95,
+    "bootstrap_repetitions": 100000,
+    "bootstrap_seed_uint32": 1381323604,
+    "bootstrap_rng": "mulberry32",
+    "bootstrap_resampling_unit": "accepted paired rounds with replacement; the seed is reset per contrast so all contrasts use identical round-index resamples",
+    "coverage_caveat": "95% is nominal and describes the observed host/run protocol; it cannot cover unobserved host states or systematic process-order effects"
+  },
+  "baseline": {
+    "commit": "ae3beae2025feb21d0e37c70168204ae154ae125",
+    "memory": {
+      "primary_after_run_minus_program_ready_kib_per_vm": {
+        "empty": {
+          "sample_count": 16,
+          "median": 114.328125,
+          "q1": 114.328125,
+          "q3": 114.328125,
+          "min": 114.328125,
+          "max": 114.3359375
+        },
+        "short_unloaded": {
+          "sample_count": 16,
+          "median": 146.328125,
+          "q1": 146.328125,
+          "q3": 146.3359375,
+          "min": 146.328125,
+          "max": 146.3359375
+        },
+        "short_loaded": {
+          "sample_count": 16,
+          "median": 251.7265625,
+          "q1": 251.7265625,
+          "q3": 251.7265625,
+          "min": 251.7265625,
+          "max": 251.734375
+        },
+        "long_unloaded": {
+          "sample_count": 16,
+          "median": 372.328125,
+          "q1": 372.328125,
+          "q3": 372.3359375,
+          "min": 372.328125,
+          "max": 372.3359375
+        },
+        "long_loaded": {
+          "sample_count": 16,
+          "median": 640.375,
+          "q1": 640.375,
+          "q3": 640.376953125,
+          "min": 640.375,
+          "max": 640.3828125
+        }
+      },
+      "one_time_program_ready_minus_clean_kib": {
+        "empty": {
+          "sample_count": 16,
+          "median": 48,
+          "q1": 48,
+          "q3": 48,
+          "min": 48,
+          "max": 48
+        },
+        "short_unloaded": {
+          "sample_count": 16,
+          "median": 76,
+          "q1": 76,
+          "q3": 76,
+          "min": 76,
+          "max": 76
+        },
+        "short_loaded": {
+          "sample_count": 16,
+          "median": 76,
+          "q1": 76,
+          "q3": 76,
+          "min": 76,
+          "max": 76
+        },
+        "long_unloaded": {
+          "sample_count": 16,
+          "median": 304,
+          "q1": 304,
+          "q3": 304,
+          "min": 304,
+          "max": 304
+        },
+        "long_loaded": {
+          "sample_count": 16,
+          "median": 304,
+          "q1": 304,
+          "q3": 304,
+          "min": 304,
+          "max": 304
+        }
+      },
+      "diagnostic_after_run_minus_clean_kib_per_vm": {
+        "empty": {
+          "sample_count": 16,
+          "median": 114.421875,
+          "q1": 114.421875,
+          "q3": 114.421875,
+          "min": 114.421875,
+          "max": 114.4296875
+        },
+        "short_unloaded": {
+          "sample_count": 16,
+          "median": 146.4765625,
+          "q1": 146.4765625,
+          "q3": 146.484375,
+          "min": 146.4765625,
+          "max": 146.484375
+        },
+        "short_loaded": {
+          "sample_count": 16,
+          "median": 251.875,
+          "q1": 251.875,
+          "q3": 251.875,
+          "min": 251.875,
+          "max": 251.8828125
+        },
+        "long_unloaded": {
+          "sample_count": 16,
+          "median": 372.921875,
+          "q1": 372.921875,
+          "q3": 372.9296875,
+          "min": 372.921875,
+          "max": 372.9296875
+        },
+        "long_loaded": {
+          "sample_count": 16,
+          "median": 640.96875,
+          "q1": 640.96875,
+          "q3": 640.970703125,
+          "min": 640.96875,
+          "max": 640.9765625
+        }
+      },
+      "matched_primary_contrasts_kib_per_vm": {
+        "short_unloaded_minus_empty": {
+          "sample_count": 16,
+          "median": 32,
+          "q1": 32,
+          "q3": 32.0078125,
+          "min": 31.9921875,
+          "max": 32.0078125
+        },
+        "long_unloaded_minus_empty": {
+          "sample_count": 16,
+          "median": 258,
+          "q1": 258,
+          "q3": 258,
+          "min": 258,
+          "max": 258.0078125
+        },
+        "short_loaded_minus_short_unloaded": {
+          "sample_count": 16,
+          "median": 105.3984375,
+          "q1": 105.396484375,
+          "q3": 105.3984375,
+          "min": 105.390625,
+          "max": 105.40625
+        },
+        "long_loaded_minus_long_unloaded": {
+          "sample_count": 16,
+          "median": 268.046875,
+          "q1": 268.044921875,
+          "q3": 268.046875,
+          "min": 268.0390625,
+          "max": 268.0546875
+        }
+      },
+      "corroborating_matched_contrasts_kib_per_vm": {
+        "smaps_rollup_private_dirty": {
+          "short_unloaded_minus_empty": {
+            "sample_count": 16,
+            "median": 32,
+            "q1": 32,
+            "q3": 32.0078125,
+            "min": 31.9921875,
+            "max": 32.0078125
+          },
+          "long_unloaded_minus_empty": {
+            "sample_count": 16,
+            "median": 258,
+            "q1": 258,
+            "q3": 258,
+            "min": 258,
+            "max": 258.0078125
+          },
+          "short_loaded_minus_short_unloaded": {
+            "sample_count": 16,
+            "median": 105.3984375,
+            "q1": 105.396484375,
+            "q3": 105.3984375,
+            "min": 105.390625,
+            "max": 105.40625
+          },
+          "long_loaded_minus_long_unloaded": {
+            "sample_count": 16,
+            "median": 268.046875,
+            "q1": 268.044921875,
+            "q3": 268.046875,
+            "min": 268.0390625,
+            "max": 268.0546875
+          }
+        },
+        "smaps_rollup_rss": {
+          "short_unloaded_minus_empty": {
+            "sample_count": 16,
+            "median": 32,
+            "q1": 31.873046875,
+            "q3": 32.125,
+            "min": 31.75,
+            "max": 32.2578125
+          },
+          "long_unloaded_minus_empty": {
+            "sample_count": 16,
+            "median": 258,
+            "q1": 258,
+            "q3": 258.125,
+            "min": 257.75,
+            "max": 258.2578125
+          },
+          "short_loaded_minus_short_unloaded": {
+            "sample_count": 16,
+            "median": 105.3984375,
+            "q1": 105.361328125,
+            "q3": 105.4296875,
+            "min": 105.265625,
+            "max": 105.6484375
+          },
+          "long_loaded_minus_long_unloaded": {
+            "sample_count": 16,
+            "median": 268.046875,
+            "q1": 267.921875,
+            "q3": 268.0546875,
+            "min": 267.7890625,
+            "max": 268.296875
+          }
+        },
+        "status_rss_anon": {
+          "short_unloaded_minus_empty": {
+            "sample_count": 16,
+            "median": 32.0078125,
+            "q1": 32.0078125,
+            "q3": 32.015625,
+            "min": 32,
+            "max": 32.015625
+          },
+          "long_unloaded_minus_empty": {
+            "sample_count": 16,
+            "median": 258,
+            "q1": 258,
+            "q3": 258,
+            "min": 258,
+            "max": 258.0078125
+          },
+          "short_loaded_minus_short_unloaded": {
+            "sample_count": 16,
+            "median": 105.3984375,
+            "q1": 105.396484375,
+            "q3": 105.3984375,
+            "min": 105.390625,
+            "max": 105.40625
+          },
+          "long_loaded_minus_long_unloaded": {
+            "sample_count": 16,
+            "median": 268.046875,
+            "q1": 268.044921875,
+            "q3": 268.046875,
+            "min": 268.0390625,
+            "max": 268.0546875
+          }
+        }
+      }
+    },
+    "one_time_program_build_ns": {
+      "empty": {
+        "sample_count": 16,
+        "median": 42922,
+        "q1": 37918.5,
+        "q3": 51616.75,
+        "min": 36692,
+        "max": 69815
+      },
+      "short_unloaded": {
+        "sample_count": 16,
+        "median": 85661.5,
+        "q1": 82923,
+        "q3": 96065,
+        "min": 74719,
+        "max": 115321
+      },
+      "short_loaded": {
+        "sample_count": 16,
+        "median": 82535,
+        "q1": 78493.75,
+        "q3": 84668.75,
+        "min": 74646,
+        "max": 128956
+      },
+      "long_unloaded": {
+        "sample_count": 16,
+        "median": 252022,
+        "q1": 250190.5,
+        "q3": 259980.75,
+        "min": 244600,
+        "max": 485046
+      },
+      "long_loaded": {
+        "sample_count": 16,
+        "median": 284933,
+        "q1": 251716,
+        "q3": 337486,
+        "min": 245983,
+        "max": 443005
+      }
+    },
+    "timing_ns_per_vm": {
+      "empty": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": 104640.834960938,
+          "q1": 101550.172851563,
+          "q3": 107252.485351563,
+          "min": 99568.97265625,
+          "max": 133917.982421875
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": 50357.70703125,
+          "q1": 48899.0595703125,
+          "q3": 55323.6962890625,
+          "min": 46525.599609375,
+          "max": 70996.583984375
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": 155234.005859375,
+          "q1": 151683.328125,
+          "q3": 161349.834960938,
+          "min": 148438.76171875,
+          "max": 204914.56640625
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": 155311.51953125,
+          "q1": 151772.489257813,
+          "q3": 161431.17578125,
+          "min": 148513.080078125,
+          "max": 205050.923828125
+        }
+      },
+      "short_unloaded": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": 105355.607421875,
+          "q1": 101729.724121094,
+          "q3": 108839.634765625,
+          "min": 97809.40234375,
+          "max": 117177.001953125
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": 102222.16015625,
+          "q1": 98548.1772460938,
+          "q3": 106529.958007813,
+          "min": 93306.42578125,
+          "max": 124583.83203125
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": 209522.638671875,
+          "q1": 203498.026855469,
+          "q3": 214911.27734375,
+          "min": 191196.162109375,
+          "max": 227632.669921875
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": 209685.01171875,
+          "q1": 203706.099121094,
+          "q3": 215073.236328125,
+          "min": 191348.27734375,
+          "max": 227826.015625
+        }
+      },
+      "short_loaded": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": 104655.645507813,
+          "q1": 101202.566894531,
+          "q3": 107153.907714844,
+          "min": 97513.650390625,
+          "max": 110339.853515625
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": 411422.208007813,
+          "q1": 400500.05078125,
+          "q3": 431340.249511719,
+          "min": 380959.830078125,
+          "max": 458117.974609375
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": 519630.553710938,
+          "q1": 506521.478515625,
+          "q3": 532763.464355469,
+          "min": 478473.48046875,
+          "max": 561230.7578125
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": 519793.998046875,
+          "q1": 506679.912597656,
+          "q3": 532918.231445313,
+          "min": 478634.65625,
+          "max": 561395.1796875
+        }
+      },
+      "long_unloaded": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": 105793.602539063,
+          "q1": 104299.016601563,
+          "q3": 111018.793945313,
+          "min": 97815.615234375,
+          "max": 135885.0390625
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": 278011.033203125,
+          "q1": 273225.212890625,
+          "q3": 291535.886230469,
+          "min": 259401.068359375,
+          "max": 358945.056640625
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": 387848.787109375,
+          "q1": 378702.31640625,
+          "q3": 395515.203613281,
+          "min": 364328.775390625,
+          "max": 494830.095703125
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": 388332.817382813,
+          "q1": 379203.478515625,
+          "q3": 396002.350585938,
+          "min": 364819.291015625,
+          "max": 495695.486328125
+        }
+      },
+      "long_loaded": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": 106369.66796875,
+          "q1": 102883.286132813,
+          "q3": 107593.177246094,
+          "min": 99070.71875,
+          "max": 154545.640625
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": 1597952.85839844,
+          "q1": 1555469.47558594,
+          "q3": 1748211.32666016,
+          "min": 1527207.15039063,
+          "max": 1871537.66992188
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": 1702169.25878906,
+          "q1": 1667433.0234375,
+          "q3": 1865614.30175781,
+          "min": 1637985.95898438,
+          "max": 1978396.12890625
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": 1702839.12207031,
+          "q1": 1667989.94873047,
+          "q3": 1866123.24072266,
+          "min": 1638522.43945313,
+          "max": 1979261.37304688
+        }
+      }
+    }
+  },
+  "candidate": {
+    "commit": "1370d6ccefba7a1956441247c3139af2a2cf31fa",
+    "memory": {
+      "primary_after_run_minus_program_ready_kib_per_vm": {
+        "empty": {
+          "sample_count": 16,
+          "median": 73,
+          "q1": 72.998046875,
+          "q3": 73,
+          "min": 72.9921875,
+          "max": 73
+        },
+        "short_unloaded": {
+          "sample_count": 16,
+          "median": 72.9921875,
+          "q1": 72.984375,
+          "q3": 72.9921875,
+          "min": 72.984375,
+          "max": 72.9921875
+        },
+        "short_loaded": {
+          "sample_count": 16,
+          "median": 72.9921875,
+          "q1": 72.9921875,
+          "q3": 72.9921875,
+          "min": 72.984375,
+          "max": 72.9921875
+        },
+        "long_unloaded": {
+          "sample_count": 16,
+          "median": 73,
+          "q1": 73,
+          "q3": 73,
+          "min": 72.9921875,
+          "max": 73
+        },
+        "long_loaded": {
+          "sample_count": 16,
+          "median": 80.078125,
+          "q1": 80.078125,
+          "q3": 80.078125,
+          "min": 80.0703125,
+          "max": 80.078125
+        }
+      },
+      "one_time_program_ready_minus_clean_kib": {
+        "empty": {
+          "sample_count": 16,
+          "median": 48,
+          "q1": 48,
+          "q3": 48,
+          "min": 48,
+          "max": 48
+        },
+        "short_unloaded": {
+          "sample_count": 16,
+          "median": 80,
+          "q1": 80,
+          "q3": 80,
+          "min": 80,
+          "max": 80
+        },
+        "short_loaded": {
+          "sample_count": 16,
+          "median": 80,
+          "q1": 80,
+          "q3": 80,
+          "min": 80,
+          "max": 80
+        },
+        "long_unloaded": {
+          "sample_count": 16,
+          "median": 304,
+          "q1": 304,
+          "q3": 304,
+          "min": 304,
+          "max": 304
+        },
+        "long_loaded": {
+          "sample_count": 16,
+          "median": 304,
+          "q1": 304,
+          "q3": 304,
+          "min": 304,
+          "max": 304
+        }
+      },
+      "diagnostic_after_run_minus_clean_kib_per_vm": {
+        "empty": {
+          "sample_count": 16,
+          "median": 73.09375,
+          "q1": 73.091796875,
+          "q3": 73.09375,
+          "min": 73.0859375,
+          "max": 73.09375
+        },
+        "short_unloaded": {
+          "sample_count": 16,
+          "median": 73.1484375,
+          "q1": 73.140625,
+          "q3": 73.1484375,
+          "min": 73.140625,
+          "max": 73.1484375
+        },
+        "short_loaded": {
+          "sample_count": 16,
+          "median": 73.1484375,
+          "q1": 73.1484375,
+          "q3": 73.1484375,
+          "min": 73.140625,
+          "max": 73.1484375
+        },
+        "long_unloaded": {
+          "sample_count": 16,
+          "median": 73.59375,
+          "q1": 73.59375,
+          "q3": 73.59375,
+          "min": 73.5859375,
+          "max": 73.59375
+        },
+        "long_loaded": {
+          "sample_count": 16,
+          "median": 80.671875,
+          "q1": 80.671875,
+          "q3": 80.671875,
+          "min": 80.6640625,
+          "max": 80.671875
+        }
+      },
+      "matched_primary_contrasts_kib_per_vm": {
+        "short_unloaded_minus_empty": {
+          "sample_count": 16,
+          "median": -0.0078125,
+          "q1": -0.015625,
+          "q3": -0.0078125,
+          "min": -0.015625,
+          "max": 0
+        },
+        "long_unloaded_minus_empty": {
+          "sample_count": 16,
+          "median": 0,
+          "q1": 0,
+          "q3": 0,
+          "min": -0.0078125,
+          "max": 0.0078125
+        },
+        "short_loaded_minus_short_unloaded": {
+          "sample_count": 16,
+          "median": 0,
+          "q1": 0,
+          "q3": 0.0078125,
+          "min": -0.0078125,
+          "max": 0.0078125
+        },
+        "long_loaded_minus_long_unloaded": {
+          "sample_count": 16,
+          "median": 7.078125,
+          "q1": 7.078125,
+          "q3": 7.078125,
+          "min": 7.0703125,
+          "max": 7.0859375
+        }
+      },
+      "corroborating_matched_contrasts_kib_per_vm": {
+        "smaps_rollup_private_dirty": {
+          "short_unloaded_minus_empty": {
+            "sample_count": 16,
+            "median": -0.0078125,
+            "q1": -0.015625,
+            "q3": -0.0078125,
+            "min": -0.015625,
+            "max": 0
+          },
+          "long_unloaded_minus_empty": {
+            "sample_count": 16,
+            "median": 0,
+            "q1": 0,
+            "q3": 0,
+            "min": -0.0078125,
+            "max": 0.0078125
+          },
+          "short_loaded_minus_short_unloaded": {
+            "sample_count": 16,
+            "median": 0,
+            "q1": 0,
+            "q3": 0.0078125,
+            "min": -0.0078125,
+            "max": 0.0078125
+          },
+          "long_loaded_minus_long_unloaded": {
+            "sample_count": 16,
+            "median": 7.078125,
+            "q1": 7.078125,
+            "q3": 7.078125,
+            "min": 7.0703125,
+            "max": 7.0859375
+          }
+        },
+        "smaps_rollup_rss": {
+          "short_unloaded_minus_empty": {
+            "sample_count": 16,
+            "median": -0.00390625,
+            "q1": -0.009765625,
+            "q3": 0.1171875,
+            "min": -0.140625,
+            "max": 0.234375
+          },
+          "long_unloaded_minus_empty": {
+            "sample_count": 16,
+            "median": 0,
+            "q1": 0,
+            "q3": 0.0078125,
+            "min": -0.25,
+            "max": 0.25
+          },
+          "short_loaded_minus_short_unloaded": {
+            "sample_count": 16,
+            "median": 0,
+            "q1": -0.119140625,
+            "q3": 0.0078125,
+            "min": -0.125,
+            "max": 0.1328125
+          },
+          "long_loaded_minus_long_unloaded": {
+            "sample_count": 16,
+            "median": 7.078125,
+            "q1": 7.04296875,
+            "q3": 7.203125,
+            "min": 6.953125,
+            "max": 7.328125
+          }
+        },
+        "status_rss_anon": {
+          "short_unloaded_minus_empty": {
+            "sample_count": 16,
+            "median": 0.0078125,
+            "q1": 0,
+            "q3": 0.0078125,
+            "min": 0,
+            "max": 0.015625
+          },
+          "long_unloaded_minus_empty": {
+            "sample_count": 16,
+            "median": 0,
+            "q1": 0,
+            "q3": 0,
+            "min": -0.0078125,
+            "max": 0.0078125
+          },
+          "short_loaded_minus_short_unloaded": {
+            "sample_count": 16,
+            "median": 0,
+            "q1": 0,
+            "q3": 0.0078125,
+            "min": -0.0078125,
+            "max": 0.0078125
+          },
+          "long_loaded_minus_long_unloaded": {
+            "sample_count": 16,
+            "median": 7.0859375,
+            "q1": 7.0859375,
+            "q3": 7.0859375,
+            "min": 7.078125,
+            "max": 7.09375
+          }
+        }
+      }
+    },
+    "one_time_program_build_ns": {
+      "empty": {
+        "sample_count": 16,
+        "median": 50771,
+        "q1": 48374,
+        "q3": 64569.75,
+        "min": 47031,
+        "max": 89159
+      },
+      "short_unloaded": {
+        "sample_count": 16,
+        "median": 122989.5,
+        "q1": 101035,
+        "q3": 135179,
+        "min": 95051,
+        "max": 290566
+      },
+      "short_loaded": {
+        "sample_count": 16,
+        "median": 102577,
+        "q1": 98338.25,
+        "q3": 105619.75,
+        "min": 93999,
+        "max": 172815
+      },
+      "long_unloaded": {
+        "sample_count": 16,
+        "median": 618849,
+        "q1": 596619,
+        "q3": 711123.5,
+        "min": 589602,
+        "max": 891969
+      },
+      "long_loaded": {
+        "sample_count": 16,
+        "median": 630235.5,
+        "q1": 608566,
+        "q3": 709061.75,
+        "min": 591933,
+        "max": 815872
+      }
+    },
+    "timing_ns_per_vm": {
+      "empty": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": 92290.5986328125,
+          "q1": 90344.0751953125,
+          "q3": 93244.4174804688,
+          "min": 84001.28125,
+          "max": 124743.94921875
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": 18964.830078125,
+          "q1": 18319.8154296875,
+          "q3": 19501.2553710938,
+          "min": 17396.392578125,
+          "max": 26184.08984375
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": 111313.052734375,
+          "q1": 109443.019042969,
+          "q3": 112286.760742188,
+          "min": 101397.673828125,
+          "max": 150928.0390625
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": 111407.337890625,
+          "q1": 109537.351074219,
+          "q3": 112381.539550781,
+          "min": 101490.08203125,
+          "max": 151102.177734375
+        }
+      },
+      "short_unloaded": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": 91012.412109375,
+          "q1": 88000.8032226563,
+          "q3": 92888.1489257813,
+          "min": 86297.138671875,
+          "max": 117517.4765625
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": 18748.40234375,
+          "q1": 18298.3061523438,
+          "q3": 19399.2778320313,
+          "min": 17488.505859375,
+          "max": 23771.77734375
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": 109730.16796875,
+          "q1": 106533.631347656,
+          "q3": 111433.591796875,
+          "min": 104808.8828125,
+          "max": 141289.25390625
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": 110064.763671875,
+          "q1": 106777.533203125,
+          "q3": 111640.201660156,
+          "min": 105011.751953125,
+          "max": 141577.24609375
+        }
+      },
+      "short_loaded": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": 91892.3916015625,
+          "q1": 89828.6645507813,
+          "q3": 94163.7221679688,
+          "min": 85443.29296875,
+          "max": 102146.59765625
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": 50922.439453125,
+          "q1": 49615.9458007813,
+          "q3": 53208.4404296875,
+          "min": 47176.4765625,
+          "max": 57917.5
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": 142408.450195313,
+          "q1": 139599.633789063,
+          "q3": 146390.565429688,
+          "min": 132769.94140625,
+          "max": 160064.09765625
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": 142602.4140625,
+          "q1": 139798.005371094,
+          "q3": 146693.776855469,
+          "min": 132990.671875,
+          "max": 160294.02734375
+        }
+      },
+      "long_unloaded": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": 90186.65234375,
+          "q1": 88796.35546875,
+          "q3": 91286.6748046875,
+          "min": 84946.189453125,
+          "max": 107496.53515625
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": 19175.6259765625,
+          "q1": 18436.2758789063,
+          "q3": 19503.77734375,
+          "min": 17717.916015625,
+          "max": 21917.65234375
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": 109650.991210938,
+          "q1": 107035.988769531,
+          "q3": 110974.53125,
+          "min": 102732.578125,
+          "max": 128975.89453125
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": 111054.749023438,
+          "q1": 108254.295410156,
+          "q3": 112180.51953125,
+          "min": 103922.212890625,
+          "max": 130419.16796875
+        }
+      },
+      "long_loaded": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": 91925.658203125,
+          "q1": 90517.3471679688,
+          "q3": 93668.0122070313,
+          "min": 86042.962890625,
+          "max": 107927.958984375
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": 53168.5771484375,
+          "q1": 51022.4809570313,
+          "q3": 57494.2749023438,
+          "min": 50436.3046875,
+          "max": 58614.626953125
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": 146228.916015625,
+          "q1": 142760.338378906,
+          "q3": 149862.072753906,
+          "min": 136479.267578125,
+          "max": 162897.30859375
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": 147674.405273438,
+          "q1": 144034.587402344,
+          "q3": 151019.829589844,
+          "min": 137681.888671875,
+          "max": 164181.8984375
+        }
+      }
+    }
+  },
+  "comparison": {
+    "matched_primary_contrast_candidate_minus_baseline_kib_per_vm": {
+      "short_unloaded_minus_empty": {
+        "paired_round_difference": {
+          "sample_count": 16,
+          "median": -32.0078125,
+          "q1": -32.015625,
+          "q3": -32.0078125,
+          "min": -32.0234375,
+          "max": -32
+        },
+        "paired_percentile_bootstrap_ci_95": {
+          "lower": -32.015625,
+          "upper": -32.0078125
+        }
+      },
+      "long_unloaded_minus_empty": {
+        "paired_round_difference": {
+          "sample_count": 16,
+          "median": -258,
+          "q1": -258,
+          "q3": -258,
+          "min": -258.0078125,
+          "max": -257.9921875
+        },
+        "paired_percentile_bootstrap_ci_95": {
+          "lower": -258,
+          "upper": -258
+        }
+      },
+      "short_loaded_minus_short_unloaded": {
+        "paired_round_difference": {
+          "sample_count": 16,
+          "median": -105.390625,
+          "q1": -105.3984375,
+          "q3": -105.390625,
+          "min": -105.40625,
+          "max": -105.3828125
+        },
+        "paired_percentile_bootstrap_ci_95": {
+          "lower": -105.3984375,
+          "upper": -105.390625
+        }
+      },
+      "long_loaded_minus_long_unloaded": {
+        "paired_round_difference": {
+          "sample_count": 16,
+          "median": -260.96875,
+          "q1": -260.9765625,
+          "q3": -260.9609375,
+          "min": -260.9765625,
+          "max": -260.9609375
+        },
+        "paired_percentile_bootstrap_ci_95": {
+          "lower": -260.9765625,
+          "upper": -260.9609375
+        }
+      }
+    },
+    "corroborating_matched_contrast_candidate_minus_baseline_kib_per_vm": {
+      "smaps_rollup_private_dirty": {
+        "short_unloaded_minus_empty": {
+          "paired_round_difference": {
+            "sample_count": 16,
+            "median": -32.0078125,
+            "q1": -32.015625,
+            "q3": -32.0078125,
+            "min": -32.0234375,
+            "max": -32
+          }
+        },
+        "long_unloaded_minus_empty": {
+          "paired_round_difference": {
+            "sample_count": 16,
+            "median": -258,
+            "q1": -258,
+            "q3": -258,
+            "min": -258.0078125,
+            "max": -257.9921875
+          }
+        },
+        "short_loaded_minus_short_unloaded": {
+          "paired_round_difference": {
+            "sample_count": 16,
+            "median": -105.390625,
+            "q1": -105.3984375,
+            "q3": -105.390625,
+            "min": -105.40625,
+            "max": -105.3828125
+          }
+        },
+        "long_loaded_minus_long_unloaded": {
+          "paired_round_difference": {
+            "sample_count": 16,
+            "median": -260.96875,
+            "q1": -260.9765625,
+            "q3": -260.9609375,
+            "min": -260.9765625,
+            "max": -260.9609375
+          }
+        }
+      },
+      "smaps_rollup_rss": {
+        "short_unloaded_minus_empty": {
+          "paired_round_difference": {
+            "sample_count": 16,
+            "median": -31.890625,
+            "q1": -32.1328125,
+            "q3": -31.853515625,
+            "min": -32.3984375,
+            "max": -31.6328125
+          }
+        },
+        "long_unloaded_minus_empty": {
+          "paired_round_difference": {
+            "sample_count": 16,
+            "median": -258,
+            "q1": -258.125,
+            "q3": -257.875,
+            "min": -258.5078125,
+            "max": -257.7421875
+          }
+        },
+        "short_loaded_minus_short_unloaded": {
+          "paired_round_difference": {
+            "sample_count": 16,
+            "median": -105.39453125,
+            "q1": -105.517578125,
+            "q3": -105.361328125,
+            "min": -105.765625,
+            "max": -105.1328125
+          }
+        },
+        "long_loaded_minus_long_unloaded": {
+          "paired_round_difference": {
+            "sample_count": 16,
+            "median": -260.91015625,
+            "q1": -261.08984375,
+            "q3": -260.841796875,
+            "min": -261.21875,
+            "max": -260.4609375
+          }
+        }
+      },
+      "status_rss_anon": {
+        "short_unloaded_minus_empty": {
+          "paired_round_difference": {
+            "sample_count": 16,
+            "median": -32,
+            "q1": -32.0078125,
+            "q3": -32,
+            "min": -32.015625,
+            "max": -31.9921875
+          }
+        },
+        "long_unloaded_minus_empty": {
+          "paired_round_difference": {
+            "sample_count": 16,
+            "median": -258,
+            "q1": -258,
+            "q3": -258,
+            "min": -258.0078125,
+            "max": -257.9921875
+          }
+        },
+        "short_loaded_minus_short_unloaded": {
+          "paired_round_difference": {
+            "sample_count": 16,
+            "median": -105.390625,
+            "q1": -105.3984375,
+            "q3": -105.390625,
+            "min": -105.40625,
+            "max": -105.3828125
+          }
+        },
+        "long_loaded_minus_long_unloaded": {
+          "paired_round_difference": {
+            "sample_count": 16,
+            "median": -260.9609375,
+            "q1": -260.96875,
+            "q3": -260.953125,
+            "min": -260.96875,
+            "max": -260.953125
+          }
+        }
+      }
+    },
+    "one_time_program_candidate_minus_baseline_kib": {
+      "empty": {
+        "sample_count": 16,
+        "median": 0,
+        "q1": 0,
+        "q3": 0,
+        "min": 0,
+        "max": 0
+      },
+      "short_unloaded": {
+        "sample_count": 16,
+        "median": 4,
+        "q1": 4,
+        "q3": 4,
+        "min": 4,
+        "max": 4
+      },
+      "short_loaded": {
+        "sample_count": 16,
+        "median": 4,
+        "q1": 4,
+        "q3": 4,
+        "min": 4,
+        "max": 4
+      },
+      "long_unloaded": {
+        "sample_count": 16,
+        "median": 0,
+        "q1": 0,
+        "q3": 0,
+        "min": 0,
+        "max": 0
+      },
+      "long_loaded": {
+        "sample_count": 16,
+        "median": 0,
+        "q1": 0,
+        "q3": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "diagnostic_whole_process_candidate_minus_baseline_kib_per_vm": {
+      "empty": {
+        "sample_count": 16,
+        "median": -41.328125,
+        "q1": -41.3359375,
+        "q3": -41.328125,
+        "min": -41.3359375,
+        "max": -41.328125
+      },
+      "short_unloaded": {
+        "sample_count": 16,
+        "median": -73.3359375,
+        "q1": -73.3359375,
+        "q3": -73.328125,
+        "min": -73.34375,
+        "max": -73.328125
+      },
+      "short_loaded": {
+        "sample_count": 16,
+        "median": -178.7265625,
+        "q1": -178.7265625,
+        "q3": -178.7265625,
+        "min": -178.734375,
+        "max": -178.7265625
+      },
+      "long_unloaded": {
+        "sample_count": 16,
+        "median": -299.328125,
+        "q1": -299.3359375,
+        "q3": -299.328125,
+        "min": -299.3359375,
+        "max": -299.328125
+      },
+      "long_loaded": {
+        "sample_count": 16,
+        "median": -560.296875,
+        "q1": -560.3046875,
+        "q3": -560.296875,
+        "min": -560.3046875,
+        "max": -560.296875
+      }
+    },
+    "one_time_program_build_candidate_minus_baseline_ns": {
+      "empty": {
+        "sample_count": 16,
+        "median": 7819.5,
+        "q1": 3087,
+        "q3": 17703.25,
+        "min": -17790,
+        "max": 52389
+      },
+      "short_unloaded": {
+        "sample_count": 16,
+        "median": 22916,
+        "q1": 18260.25,
+        "q3": 49053.75,
+        "min": -18891,
+        "max": 204431
+      },
+      "short_loaded": {
+        "sample_count": 16,
+        "median": 19760,
+        "q1": 17375,
+        "q3": 26568.5,
+        "min": -9790,
+        "max": 43859
+      },
+      "long_unloaded": {
+        "sample_count": 16,
+        "median": 356224.5,
+        "q1": 345052.75,
+        "q3": 446867.5,
+        "min": 182027,
+        "max": 642209
+      },
+      "long_loaded": {
+        "sample_count": 16,
+        "median": 365261,
+        "q1": 306574.75,
+        "q3": 391417.5,
+        "min": 148928,
+        "max": 545595
+      }
+    },
+    "timing_candidate_minus_baseline_ns_per_vm": {
+      "empty": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": -11889.4755859375,
+          "q1": -15526.8276367188,
+          "q3": -9548.80615234375,
+          "min": -40466.43359375,
+          "max": 21970.96484375
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": -30825.640625,
+          "q1": -33108.9877929688,
+          "q3": -29592.75,
+          "min": -52708.705078125,
+          "max": -27568.412109375
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": -43659.09765625,
+          "q1": -51612.1547851563,
+          "q3": -40343.587890625,
+          "min": -93175.138671875,
+          "max": -8399.740234375
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": -43609.1943359375,
+          "q1": -51601.4428710938,
+          "q3": -40334.16015625,
+          "min": -93209.884765625,
+          "max": -8333.2109375
+        }
+      },
+      "short_unloaded": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": -14986.380859375,
+          "q1": -16533.4560546875,
+          "q3": -10837.373046875,
+          "min": -27018.640625,
+          "max": 13092.310546875
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": -83360.0439453125,
+          "q1": -88100.43359375,
+          "q3": -78664.4833984375,
+          "min": -106068.27734375,
+          "max": -75817.919921875
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": -97517.98046875,
+          "q1": -107247.58203125,
+          "q3": -93185.4697265625,
+          "min": -117851.337890625,
+          "max": -63810.71484375
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": -97522.5712890625,
+          "q1": -107197.721679688,
+          "q3": -93052.5004882813,
+          "min": -117813.408203125,
+          "max": -63747.958984375
+        }
+      },
+      "short_loaded": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": -13876.1787109375,
+          "q1": -16613.849609375,
+          "q3": -8413.4208984375,
+          "min": -20857.568359375,
+          "max": -1254.3359375
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": -359666.8984375,
+          "q1": -380633.153808594,
+          "q3": -347916.152832031,
+          "min": -402570.408203125,
+          "max": -330196.994140625
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": -375293.09375,
+          "q1": -392549.3828125,
+          "q3": -361787.061035156,
+          "min": -411054.734375,
+          "max": -331451.330078125
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": -375285.056640625,
+          "q1": -392521.064941406,
+          "q3": -361745.249023438,
+          "min": -411017.681640625,
+          "max": -331412.248046875
+        }
+      },
+      "long_unloaded": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": -15864.056640625,
+          "q1": -18145.53125,
+          "q3": -12983.37890625,
+          "min": -44492.0078125,
+          "max": 146.69140625
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": -258498.522460938,
+          "q1": -273429.685546875,
+          "q3": -254343.173828125,
+          "min": -339674.79296875,
+          "max": -240610.630859375
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": -277464.23046875,
+          "q1": -289476.807128906,
+          "q3": -266313.348632813,
+          "min": -384166.80078125,
+          "max": -249997.25
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": -276499.883789063,
+          "q1": -288756.688476563,
+          "q3": -265624.144042969,
+          "min": -383811.279296875,
+          "max": -249059.21484375
+        }
+      },
+      "long_loaded": {
+        "vm_create": {
+          "sample_count": 16,
+          "median": -13025.1181640625,
+          "q1": -15719.3872070313,
+          "q3": -10425.6254882813,
+          "min": -64027.15625,
+          "max": -686.76171875
+        },
+        "program_run": {
+          "sample_count": 16,
+          "median": -1541183.125,
+          "q1": -1696953.87255859,
+          "q3": -1501951.29345703,
+          "min": -1812923.04296875,
+          "max": -1476259.12304688
+        },
+        "vm_create_plus_program_run": {
+          "sample_count": 16,
+          "median": -1549378.23730469,
+          "q1": -1720874.13134766,
+          "q3": -1527376.4765625,
+          "min": -1828690.203125,
+          "max": -1479109.97265625
+        },
+        "amortized_total_including_program_build": {
+          "sample_count": 16,
+          "median": -1548637.59375,
+          "q1": -1720216.52880859,
+          "q3": -1526785.6875,
+          "min": -1828399.328125,
+          "max": -1478286.92382813
+        }
+      }
+    }
+  }
+}

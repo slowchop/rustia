@@ -1,6 +1,6 @@
 # rustia — design constraints (the contract every decision must satisfy)
 
-> **Status: [FOUNDATION] (2026-06-30).** Grounded directly in `../grabby-aliens` source + design docs
+> **Status: [FOUNDATION, implementation status reconciled 2026-07-23].** Grounded directly in `../grabby-aliens` source + design docs
 > and gak's stated goal. This is the fixed target the design-exploration phase is scored against. It does
 > NOT depend on the in-flight research workflow; the landscape/technique findings land in `10-landscape.md`.
 
@@ -31,21 +31,23 @@ These come from reading `ai_bakeoff/`, `scenario/src/lib.rs`, `view/src/console.
 `design/console-scripting-plan.md`. They are ADR-locked in grabby (determinism is ADR-001).
 
 ### C0 — Target & test matrix (gak, 2026-06-30: "Mac, Intel, arm, etc." + Firefox)
-Determinism + correctness must hold across this FULL matrix (the cross-arch golden runs on all of it in CI):
+Determinism + correctness must ultimately hold across this FULL matrix. Hosted CI is currently Linux-only and
+does not yet run the whole cross-target golden; macOS/Windows remain correctness/build targets, not timing
+sources, until dedicated measurement hosts exist.
 
 | native (OS × arch) | browser/wasm engine |
 |---|---|
 | macOS **arm64** (Apple Silicon — dev machine) ✅ | **V8** — Chrome/Edge/Node/Deno ✅ measured |
-| macOS **x86_64** (Intel Mac) — TODO | **SpiderMonkey** — **Firefox** — TODO (gak-requested) |
-| Linux **x86_64** ✅ (Spike C, via docker) | **JavaScriptCore** — Safari + iOS/Android WKWebView — TODO |
+| macOS **x86_64** (Intel Mac) — TODO | **SpiderMonkey** — Firefox-family shell ✅ measured; browser golden still TODO |
+| Linux **x86_64** ✅ (Spike C + dedicated matrices) | **JavaScriptCore family** — Bun ✅ measured; real Safari/iOS JSC golden still TODO |
 | Linux **arm64** — TODO | |
 | Windows **x86_64** (msvc) — TODO | |
 | iOS **arm64** (native) + Android **arm64** (native) — TODO | |
 
-Measured so far: the triple x86_64-linux + aarch64-mac + wasm32-in-V8 is bit-identical. The remaining native
-arches (Intel Mac, Windows, ARM-Linux) and the two other browser engines (Firefox/SpiderMonkey, Safari/JSC)
-are the validation gate at P1 — they could in principle re-open the value-layout choice (axis B), though the
-libm + canonicalization discipline is arch-portable by construction.
+Measured so far: the triple x86_64-linux + aarch64-mac + wasm32-in-V8 is bit-identical, and retained wasm
+portability evidence covers V8, JavaScriptCore-family, and SpiderMonkey shells. The remaining native arches,
+real Firefox/Safari browser goldens, and iOS/Android targets are public-release correctness gates. They could in
+principle expose a value-layout or platform assumption despite the portable libm/canonicalization discipline.
 
 ### C1 — Determinism, bit-for-bit, across the full matrix above
 - Same script + same seed/inputs → **identical bytes** on every native arch AND every browser engine in C0.
@@ -60,8 +62,11 @@ libm + canonicalization discipline is arch-portable by construction.
   subtype" is now a **tripwire**, not a tension: revisit only if upstream `FFlag::LuauIntegerType2` flips
   default-true in a version we adopt.
 
-### C2 — `Send + Sync`
-- Values and the VM must be `Send + Sync` (koto's non-default `arc` feature; grabby builds with it).
+### C2 — thread model
+- The production VM stays safe Rust and thread-affine while it owns its hybrid heap (`gc-arena` component plus
+  VM side stores). Parallel hosts should
+  create one VM per worker, or move shared immutable compiled artifacts/configuration between workers, instead
+  of moving a live VM across threads.
 - Execution model is **N independent VMs across a thread pool**, NOT one shared VM. Per-borrow tax of the
   Arc path was ~5–10% in koto — budget for, and try to beat, that.
 
@@ -85,12 +90,12 @@ The equivalent rustia API must cover at least:
 | `koto.prelude().add_fn("name", \|ctx\| { match ctx.args() { … } })` | register a native Rust fn; arg pattern-match | native-fn registration with ergonomic arg extraction |
 | `koto.prelude().insert("name", value)` | inject a host value/constant | inject host values into the global env |
 | `koto.compile_and_run(script)` -> `Result` | compile + execute a chunk | compile + run, with a useful error type |
-| `koto.exports().get("name")` / `.clone()` | read a script-exported binding | read exported globals (`export {…}` ⇒ exports map) |
+| `koto.exports().get("name")` / `.clone()` | read a script-exported binding | read fields from the table returned by the Luau chunk |
 | call an exported function with `&[KValue]` args | invoke script fn from Rust | call a script function from Rust with native args |
 | `KValue::Number(KNumber::I64 \| F64)`, maps, lists, strings | the value type | a `Value` type with the same shape (mind T1 re: numbers) |
 | `koto::serde::from_koto_value(…)` | serde deserialize | serde bridge (see C4) |
 
-Insertion-ordered map literals via `export { k: v, … }` must round-trip through serde deterministically.
+Insertion-ordered table literals returned as `return { k = v, … }` must round-trip through serde deterministically.
 
 ## Performance bar / the prize
 
@@ -115,6 +120,7 @@ Insertion-ordered map literals via `export { k: v, … }` must round-trip throug
 
 Each candidate direction at each axis is scored against:
 **(1) native speed · (2) wasm32 speed · (3) memory · (4) determinism (incl. cross-arch + T1) ·
-(5) Luau compatibility · (6) Send+Sync fit · (7) embedding-API/DX · (8) implementation complexity/risk.**
+(5) Luau compatibility · (6) thread-affine VM / shareable immutable-artifact fit · (7) embedding-API/DX ·
+(8) implementation complexity/risk.**
 Speed dominates ties, then determinism (it's ADR-locked — a fast-but-nondeterministic option is
 disqualified for the sim path), then wasm, then the rest.

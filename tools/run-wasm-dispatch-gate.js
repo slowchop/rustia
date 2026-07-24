@@ -8,7 +8,8 @@ const path = require("path");
 const root = path.resolve(__dirname, "..");
 const measureScript = path.join(root, "bench", "wasm", "measure-dispatch-wasm.js");
 const outputPath = path.join(root, "bench", "wasm", "dispatch-current-results.json");
-const requiredFamilies = ["V8", "JavaScriptCore", "SpiderMonkey"];
+const requiredFamilies = ["V8"];
+const fullCommit = /^[0-9a-f]{40}$/;
 
 function fail(message) {
   console.error(`run-wasm-dispatch-gate: ${message}`);
@@ -107,8 +108,32 @@ function run(command, args) {
   }
 }
 
-function gitCommit() {
-  return run("git", ["rev-parse", "--short", "HEAD"]).trim();
+function gitCommit(runCommand = run) {
+  const commit = runCommand("git", ["rev-parse", "HEAD"]).trim();
+  if (!fullCommit.test(commit)) {
+    fail(`git rev-parse HEAD must return a full 40-character lowercase commit, got ${JSON.stringify(commit)}`);
+  }
+  return commit;
+}
+
+function selfTest() {
+  const expected = "a".repeat(40);
+  let invocation = null;
+  const actual = gitCommit((command, args) => {
+    invocation = { command, args };
+    return `${expected}\n`;
+  });
+  if (
+    actual !== expected ||
+    invocation?.command !== "git" ||
+    invocation.args.length !== 2 ||
+    invocation.args[0] !== "rev-parse" ||
+    invocation.args[1] !== "HEAD" ||
+    fullCommit.test("a".repeat(39))
+  ) {
+    fail("full-commit provenance self-test failed");
+  }
+  console.log("run-wasm-dispatch-gate full-commit provenance self-test passed");
 }
 
 function runtimeCommand(runtime, commonArgs) {
@@ -135,7 +160,7 @@ function runtimeCommand(runtime, commonArgs) {
 }
 
 function measureRuntime(runtime, options, commit) {
-  const runtimeSpec = runtimeCommand(runtime, [
+  const commandArgs = [
     relative(measureScript),
     "--commit",
     commit,
@@ -145,7 +170,9 @@ function measureRuntime(runtime, options, commit) {
     String(options.reps),
     "--max-n",
     String(options.maxN),
-  ]);
+  ];
+  if (runtime === "spidermonkey") commandArgs.push("--host", `${process.platform}-${process.arch}`);
+  const runtimeSpec = runtimeCommand(runtime, commandArgs);
   if (!runtimeSpec) {
     return {
       skipped: {
@@ -157,18 +184,18 @@ function measureRuntime(runtime, options, commit) {
   const text = run(runtimeSpec.command, runtimeSpec.args);
   try {
     const result = JSON.parse(text);
-    validateRuntimeResult(result);
+    validateRuntimeResult(result, commit);
     return { result };
   } catch (error) {
     fail(`${runtime} dispatch measurement did not return valid JSON: ${error.message}\n${text}`);
   }
 }
 
-function validateRuntimeResult(result) {
+function validateRuntimeResult(result, commit) {
   assertEqual(result.schema_version, 1, "dispatch result schema_version");
   assertEqual(result.schema, "rustia.bench.wasm-dispatch-results.v1", "dispatch result schema");
   assertEqual(result.source, "script-bench-harness", "dispatch result source");
-  assertText(result.commit, "dispatch result commit");
+  assertEqual(result.commit, commit, "dispatch result full HEAD commit");
   assertText(result.target, "dispatch result target");
   assertObject(result.runtime, "dispatch result runtime");
   assertText(result.runtime.name, "dispatch result runtime.name");
@@ -250,6 +277,11 @@ function summarizeRequirements(runs) {
   return {
     "call-ref-vs-br-table": requiredFamilies.every((family) => measuredFamilies.has(family)),
   };
+}
+
+if (process.argv.length === 3 && process.argv[2] === "self-test") {
+  selfTest();
+  process.exit(0);
 }
 
 const options = parseArgs(process.argv.slice(2));

@@ -1,0 +1,327 @@
+[
+  {
+    "commit": "aee7749d2d95ba7c480a03a35d7827a31db265f6",
+    "committed_at_unix": 1783031144,
+    "subject": "Add standalone script benchmark harness",
+    "core_trees": {
+      "crates/rustia-compiler": "3d7f84e556655b4e6442125e4fa7f01ead8b474e",
+      "crates/rustia-lexer": "1cc3f153793464769b92a5af52b02277894dfd8d",
+      "crates/rustia-parser": "11d992f7aafed9fa173fbba943727f68668b347a",
+      "crates/rustia-vm": "128c7a7ab8db98e3703b789810973fb8eaa5ee72"
+    },
+    "binary_sha256": "b95232dc56878d68aa40d179343ff9775fea16ed9ebba6da4f6fb05208d45155",
+    "resolved_lock_sha256": "4219362e3f135755f25a0d9041d854f074f8c57db943f936094697b1680dd6b3"
+  },
+  {
+    "commit": "c99a731624b7be8b914a293aa57d8a5e8685dc90",
+    "committed_at_unix": 1783033141,
+    "subject": "Promote upstream conformance harnesses",
+    "core_trees": {
+      "crates/rustia-compiler": "9f6f05c0a48dbb7ca3bac9bd5bfc450aed059e33",
+      "crates/rustia-lexer": "1cc3f153793464769b92a5af52b02277894dfd8d",
+      "crates/rustia-parser": "11d992f7aafed9fa173fbba943727f68668b347a",
+      "crates/rustia-vm": "12bbfb3f7725323e43854f5a70eea4ff0caaee36"
+    },
+    "binary_sha256": "512a89be65845b357f06e81ba31b57685c2f7c80d917abe0e11049649d790993",
+    "resolved_lock_sha256": "4219362e3f135755f25a0d9041d854f074f8c57db943f936094697b1680dd6b3"
+  },
+  {
+    "commit": "d2279ca0a94da8a9968f59b3dd30d6915b0d39f7",
+    "committed_at_unix": 1783036240,
+    "subject": "Implement embedded API facade",
+    "core_trees": {
+      "crates/rustia-compiler": "9f6f05c0a48dbb7ca3bac9bd5bfc450aed059e33",
+      "crates/rustia-lexer": "1cc3f153793464769b92a5af52b02277894dfd8d",
+      "crates/rustia-parser": "11d992f7aafed9fa173fbba943727f68668b347a",
+      "crates/rustia-vm": "b6cb4e25f1d2eb55dd885a11db0aa1e584d540aa"
+    },
+    "binary_sha256": "03442f03de7ff08f54f5c0f643ec6eebee7150042c7ed62dd4a6ffc6d62a49c0",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "2e7dea9d0da127497ac17f8ae167ee7f185cd919",
+    "committed_at_unix": 1783048528,
+    "subject": "Cover folded number equality semantics",
+    "core_trees": {
+      "crates/rustia-compiler": "c1a15d6a58b7f4ea19bc2fad9209dfa953d8aa12",
+      "crates/rustia-lexer": "1cc3f153793464769b92a5af52b02277894dfd8d",
+      "crates/rustia-parser": "11d992f7aafed9fa173fbba943727f68668b347a",
+      "crates/rustia-vm": "92147b8113256b03a9bafb88af8d7630e06c4261"
+    },
+    "binary_sha256": "8555612fdb8eb0467026211d0a8f1945c96ad9bf0dc062265f2d5fbc926f85d9",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "8d2f097b2b7dc80e16eae243913f6ef58b180fdd",
+    "committed_at_unix": 1783051553,
+    "subject": "Add rustia release readiness metadata",
+    "core_trees": {
+      "crates/rustia-compiler": "0d790b5e124ee7e34a827f24c25498e0bacc78df",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "8289ce1702c08225346cba6c3b1cfe1faefc00d9"
+    },
+    "binary_sha256": "d4bccc3aa76ddfd440b4603a4dbfbe9e21eaf85133f12341be103f0f162dc64e",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "b7f02f319c7230db61fabbfa7e309f2e382437e2",
+    "committed_at_unix": 1783058335,
+    "subject": "Expose host function metadata",
+    "core_trees": {
+      "crates/rustia-compiler": "0d790b5e124ee7e34a827f24c25498e0bacc78df",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "434d46b0e761177e497394092830c74af48327fe"
+    },
+    "binary_sha256": "28411657991984a1e4c05b80263836bbbd538aafeb4b78a83b8aa27e65643768",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "10bc57afa94a40d38c7f5fde5efdbd86a6691b43",
+    "committed_at_unix": 1783060054,
+    "subject": "Expose host function signature metadata",
+    "core_trees": {
+      "crates/rustia-compiler": "0d790b5e124ee7e34a827f24c25498e0bacc78df",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "639b7e261338d938431c5cde3a847fb33cf05569"
+    },
+    "binary_sha256": "1ef8023457278ad96fa905a9ec6975c30d865ca215f6e94bd304ecdbf1b84813",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "9979c3e3f362c364520b8a3ae2fec135310e06e7",
+    "committed_at_unix": 1783060872,
+    "subject": "Support fallible typed host callbacks",
+    "core_trees": {
+      "crates/rustia-compiler": "0d790b5e124ee7e34a827f24c25498e0bacc78df",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "d03d2566d2b7c77d025104be245febeaa1863abf"
+    },
+    "binary_sha256": "95d637f6df71e0d244e8390db300e38498656e52a362efd1010d098bc2791fa2",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "645c76ee46e6ba533d078a26f06fec0c4d438b66",
+    "committed_at_unix": 1783119776,
+    "subject": "Match Luau explicit-base tonumber parsing",
+    "core_trees": {
+      "crates/rustia-compiler": "0d790b5e124ee7e34a827f24c25498e0bacc78df",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "0a0a2b824e938a3e94cca89749437819fd1895b8"
+    },
+    "binary_sha256": "cc7a8bb7e22bf62e6710e61324ac61fff81b9763e5aab84f6df25a3f9bd5599e",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "ad82d3990f6d9646645a88bd8d9a701f6a1def2f",
+    "committed_at_unix": 1783120469,
+    "subject": "Match Luau hex-float tonumber parsing",
+    "core_trees": {
+      "crates/rustia-compiler": "0d790b5e124ee7e34a827f24c25498e0bacc78df",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "68537c2a988a91a70d1c26795f095c257bab744b"
+    },
+    "binary_sha256": "2b3fdcd4513ff51a0abc3e99bfb434345a8cfa984e62891dce7ec708f31eaf46",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "ea37fec795759ab2199357da04a22f4f24e47f6a",
+    "committed_at_unix": 1783121034,
+    "subject": "Pin Luau special tonumber strings",
+    "core_trees": {
+      "crates/rustia-compiler": "0d790b5e124ee7e34a827f24c25498e0bacc78df",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "56021b1ab3f0caab1eb5d777b663d81bb01b9ff4"
+    },
+    "binary_sha256": "8c09138a5c4479123a6d536151c03edd9dda55bef9de1ddac67725f48de89896",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "9f85d010a284a57a5a8ca39b7afbab10379dd9f0",
+    "committed_at_unix": 1783121918,
+    "subject": "Match Luau assert message conversion",
+    "core_trees": {
+      "crates/rustia-compiler": "0d790b5e124ee7e34a827f24c25498e0bacc78df",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "f64f4324f6c17b6808fde4de92451ecc5ebb506b"
+    },
+    "binary_sha256": "5fb858866c0d0637ed8282a82ece0cae41e356c72eed9f62ee42fe4d586c8ae7",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "a559a6af80dea3cd4005dc10af68a5da31fda03f",
+    "committed_at_unix": 1783123279,
+    "subject": "Match Luau newproxy argument semantics",
+    "core_trees": {
+      "crates/rustia-compiler": "0d790b5e124ee7e34a827f24c25498e0bacc78df",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "8703fcd4e5d3f8b2f0f2de19b97328d85472591a"
+    },
+    "binary_sha256": "316be74972433b8de4f204f0a712662ebbe48c514bb9f3a27d31d7bf06b325f0",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "4a28afa7700caacda53df95c87b14d5932fdf856",
+    "committed_at_unix": 1784188340,
+    "subject": "Land reconciled safe-Rust project baseline",
+    "core_trees": {
+      "crates/rustia-compiler": "0d790b5e124ee7e34a827f24c25498e0bacc78df",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "8ce6c8f2648e982df70a6ed42ba2c0b4bbe57e7d"
+    },
+    "binary_sha256": "0a7e60c0a445324c114cb4785f405459781f21cdd8ed832789aaf11ff828f7fb",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "dac4ec2295f77587c79f04e4ff0a09cb99912f96",
+    "committed_at_unix": 1784195878,
+    "subject": "Build table atom and inline-cache foundation",
+    "core_trees": {
+      "crates/rustia-compiler": "0d790b5e124ee7e34a827f24c25498e0bacc78df",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "e92c63f87eecfd39936c482c3f78266538df442c"
+    },
+    "binary_sha256": "a7d758473fb895fd3d9cb96d51a109e5a5026bb5263c7adcaa2d47aaddfbfa56",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "ae3beae2025feb21d0e37c70168204ae154ae125",
+    "committed_at_unix": 1784268125,
+    "subject": "Harden VM caches and add GETIMPORT/FASTCALL",
+    "core_trees": {
+      "crates/rustia-compiler": "fe034a5c027a0a08b076b913cc66fd5a31923e66",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "27c08bb55de6c2cd1a116a4df5422732ef3c01d9"
+    },
+    "binary_sha256": "e26e82a3ff7e1efeabfaf6dcde469f47473c94fe907d6a0c0bebbdbab97bce11",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "1370d6ccefba7a1956441247c3139af2a2cf31fa",
+    "committed_at_unix": 1784279881,
+    "subject": "Broaden table fast paths and share compiled strings",
+    "core_trees": {
+      "crates/rustia-compiler": "e3b8d73b9a5e97551bf8ee0707e94740b855db78",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "87467e90ca8af086599e67f292961bfe79b8c5c7"
+    },
+    "binary_sha256": "a3f601bb2544eb9a3354bfd2e2922bdf72e791b6c4e2c42cdea5f729a7d04831",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "ed65077c2e779ec6a641b8ca2f8c8258b2508a2d",
+    "committed_at_unix": 1784283392,
+    "subject": "Optimize dense numeric table hot paths",
+    "core_trees": {
+      "crates/rustia-compiler": "e3b8d73b9a5e97551bf8ee0707e94740b855db78",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "8bbfe4c2d8e939efc04f2abf9259ec14b812e634"
+    },
+    "binary_sha256": "977b3e30d9a027b95500d791a09b10fb5c592a9972ffdd80f54fd34500caef8d",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "f208c12d0ce266117743569d736346fae9a35db2",
+    "committed_at_unix": 1784518961,
+    "subject": "Remove constant-key GC fast-path tolls",
+    "core_trees": {
+      "crates/rustia-compiler": "e3b8d73b9a5e97551bf8ee0707e94740b855db78",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "e44b5a369dd8be0cfb14fb341faebfb2a6a73c4a"
+    },
+    "binary_sha256": "5b30df0a30a03074d4f31d6c56c15f8f063f78babd9084696a1486e0ef38ff0b",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "87db17542e19ae77ec92463f8a5b8e8b8a21a666",
+    "committed_at_unix": 1784671619,
+    "subject": "Reduce idle GC work in the VM hot loop",
+    "core_trees": {
+      "crates/rustia-compiler": "508c77212c21d03b6a395b902c084d24978ba5f6",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "0aa22d31d1cf90cbd2553d862ecfdd339358a9a6"
+    },
+    "binary_sha256": "007d470869302d7640b094d06b075fbecfa44e245b9d3b0bdbfb4b3196e329ec",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "b1cd2841fb8fc2d916047391a1d757d53a1303cd",
+    "committed_at_unix": 1784675531,
+    "subject": "Specialize numeric table sort comparisons",
+    "core_trees": {
+      "crates/rustia-compiler": "508c77212c21d03b6a395b902c084d24978ba5f6",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "375886c9eb842db64328001aae6be700e62fff67"
+    },
+    "binary_sha256": "fb821ab82eabb716619e990374ef00d1ad98a982dd877ca6433d701af8c1355c",
+    "resolved_lock_sha256": "cf1feb8471aaa38732b86859a9ecaa9555bfe20005d0d599d55f52c6acf6a4ec"
+  },
+  {
+    "commit": "6ae0cf0c5f0890f85662da417d6639d3fb0e7933",
+    "committed_at_unix": 1784690988,
+    "subject": "Optimize hot Luau benchmark paths",
+    "core_trees": {
+      "crates/rustia-compiler": "fbdfa53cbf50c0229be71c05bad96681913e1b19",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "399eed077c7bb8dd9a78fe99d441e697a8a966fd"
+    },
+    "binary_sha256": "b4d5241de8b5ef0b73fef2b29566f1884efd5d0bd3088cafdb20bc88239dd362",
+    "resolved_lock_sha256": "7227d51f385e7e9c21ea2fca5e2ed17b152dfcd5c9a78aea5c95362c5c411cc2"
+  },
+  {
+    "commit": "3732b80d5200edf053e213ef931b838c003968f3",
+    "committed_at_unix": 1784695886,
+    "subject": "Add guarded numeric table loop quickening",
+    "core_trees": {
+      "crates/rustia-compiler": "3fee20c025e6519c4619ad092f2597a3541bf65d",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "be61fe5fc06ce425ebcedf395e5447e3d6b6c418"
+    },
+    "binary_sha256": "67116a7ee3af7f1b021101c41185f5e7682ff174bf9db489f1bc51dc691768f1",
+    "resolved_lock_sha256": "7227d51f385e7e9c21ea2fca5e2ed17b152dfcd5c9a78aea5c95362c5c411cc2"
+  },
+  {
+    "commit": "d4ec275e19bad0efcf8e96db4030e7380bd93a9b",
+    "committed_at_unix": 1784710801,
+    "subject": "Replace numeric kernel with private HotIR",
+    "core_trees": {
+      "crates/rustia-compiler": "b45b4981e869fd2481cd9ee812df9eb55d3f2752",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "6d9a805d5fb1a9e0485c08b2c1bf64ed6d5b206c"
+    },
+    "binary_sha256": "a41f7c6f741f59b31674d2caaaead1dc256dd6d35df99f0d693fe1c01ebdabe1",
+    "resolved_lock_sha256": "7227d51f385e7e9c21ea2fca5e2ed17b152dfcd5c9a78aea5c95362c5c411cc2"
+  },
+  {
+    "commit": "a5629199643847c0da78792644ad3656887bee21",
+    "committed_at_unix": 1784719354,
+    "subject": "Optimize prototype-polymorphic closure calls",
+    "core_trees": {
+      "crates/rustia-compiler": "debd220c3caf46ed1c1d7473b4f9bb09c3b689b7",
+      "crates/rustia-lexer": "f17de11a69d35e0de674530decac61e0140639ef",
+      "crates/rustia-parser": "4f9777662365746d566d8d0a30a071cf3818d736",
+      "crates/rustia-vm": "f5a6528ed1275792634f887804aef4d383362d27"
+    },
+    "binary_sha256": "a1e25e544a2f0770f7d0a7ac7bcc01c1971f889aa2b33f67975fc065caa3b635",
+    "resolved_lock_sha256": "7227d51f385e7e9c21ea2fca5e2ed17b152dfcd5c9a78aea5c95362c5c411cc2"
+  }
+]

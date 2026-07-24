@@ -6,10 +6,21 @@ const path = require("path");
 
 const root = path.resolve(__dirname, "..");
 const sourcePath = path.join(__dirname, "current-results.json");
+const historyPath = path.join(__dirname, "history", "runs.jsonl");
+const historyBackfillDirectory = path.join(__dirname, "history", "backfills");
 const wasmResultsPath = path.join(__dirname, "wasm", "current-results.json");
 const wasmDispatchPath = path.join(__dirname, "wasm", "dispatch-current-results.json");
+const cohortEvidencePath = path.join(__dirname, "history", "evidence");
 const outputPath = path.join(__dirname, "current-results.html");
 const checkOnly = process.argv.includes("--check");
+const REQUIRED_COMMON_WORKLOADS = Object.freeze([
+  "closures_upvalues",
+  "dense_tables",
+  "generic_iteration",
+  "sparse_tables",
+  "stdlib_math_table",
+]);
+const REQUIRED_COMMON_WORKLOAD_SET = new Set(REQUIRED_COMMON_WORKLOADS);
 
 function fail(message) {
   console.error(`render-current-results: ${message}`);
@@ -69,6 +80,108 @@ function readData() {
   return data;
 }
 
+function readHistory() {
+  let text;
+  try {
+    text = fs.readFileSync(historyPath, "utf8");
+  } catch (error) {
+    fail(`could not read ${relative(historyPath)}: ${error.message}`);
+  }
+
+  const records = [];
+  for (const [index, rawLine] of text.split(/\r?\n/).entries()) {
+    const line = rawLine.trim();
+    if (line === "") {
+      continue;
+    }
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch (error) {
+      fail(`${relative(historyPath)} line ${index + 1} is not JSON: ${error.message}`);
+    }
+    records.push(normalizeHistoryRecord(record, index + 1));
+  }
+  if (records.length === 0) {
+    fail(`${relative(historyPath)} must contain at least one benchmark record`);
+  }
+  return records.sort(compareRunTime);
+}
+
+function readHistoryBackfills() {
+  if (!fs.existsSync(historyBackfillDirectory)) {
+    return [];
+  }
+  const files = fs
+    .readdirSync(historyBackfillDirectory)
+    .filter((file) => file.endsWith(".json"))
+    .sort();
+  return files.map((file) => {
+    const absolute = path.join(historyBackfillDirectory, file);
+    let value;
+    try {
+      value = JSON.parse(fs.readFileSync(absolute, "utf8"));
+    } catch (error) {
+      fail(`could not parse ${relative(absolute)}: ${error.message}`);
+    }
+    if (
+      value == null ||
+      typeof value !== "object" ||
+      Array.isArray(value) ||
+      value.schema !== "rustia.bench.history-backfill.v1" ||
+      !Array.isArray(value.targets) ||
+      !Array.isArray(value.rows)
+    ) {
+      fail(`${relative(absolute)} is not a fixed-harness history backfill`);
+    }
+    return value;
+  });
+}
+
+function normalizeHistoryRecord(record, lineNumber) {
+  const label = `${relative(historyPath)} line ${lineNumber}`;
+  for (const key of ["commit", "target", "engine", "dialect", "workload", "unit", "checksum"]) {
+    if (typeof record[key] !== "string" || record[key].trim() === "") {
+      fail(`${label}.${key} must be a non-empty string`);
+    }
+  }
+  for (const key of ["timestamp_unix", "n", "reps", "ns_per_unit_min", "ns_per_unit_median", "units_per_sec"]) {
+    if (!Number.isFinite(Number(record[key])) || Number(record[key]) <= 0) {
+      fail(`${label}.${key} must be a positive finite number`);
+    }
+  }
+  return {
+    timestamp_unix: Number(record.timestamp_unix),
+    commit: record.commit,
+    target: record.target,
+    engine: record.engine,
+    dialect: record.dialect,
+    workload: record.workload,
+    unit: record.unit,
+    n: Number(record.n),
+    reps: Number(record.reps),
+    ns_per_unit_min: Number(record.ns_per_unit_min),
+    ns_per_unit_median: Number(record.ns_per_unit_median),
+    units_per_sec: Number(record.units_per_sec),
+    checksum: record.checksum,
+    prepare_ns_min: optionalPositive(record.prepare_ns_min),
+    prepare_ns_median: optionalPositive(record.prepare_ns_median),
+    first_call_ns_min: optionalPositive(record.first_call_ns_min),
+    first_call_ns_median: optionalPositive(record.first_call_ns_median),
+    cold_start_ns_min: optionalPositive(record.cold_start_ns_min),
+    cold_start_ns_median: optionalPositive(record.cold_start_ns_median),
+    mode_family: typeof record.mode_family === "string" ? record.mode_family : modeFamily(record.engine),
+    execution_mode: typeof record.execution_mode === "string" ? record.execution_mode : executionMode(record.engine),
+    native_verified: record.native_verified === true,
+    native_verification: typeof record.native_verification === "string" ? record.native_verification : "not-recorded",
+    native_verification_ratio: optionalPositive(record.native_verification_ratio),
+  };
+}
+
+function optionalPositive(value) {
+  return Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null;
+}
+
 function readJson(filePath) {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -107,6 +220,57 @@ function readWasmDispatchResults() {
   return data;
 }
 
+function readCohortEvidence() {
+  let entries;
+  try {
+    entries = fs.readdirSync(cohortEvidencePath, { withFileTypes: true });
+  } catch (error) {
+    fail(`could not read ${relative(cohortEvidencePath)}: ${error.message}`);
+  }
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(cohortEvidencePath, entry.name, "manifest.json"))
+    .filter((filePath) => fs.existsSync(filePath))
+    .map((filePath) => normalizeCohortEvidence(readJson(filePath), filePath))
+    .filter((cohort) => cohort.published)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+function normalizeCohortEvidence(data, filePath) {
+  const label = relative(filePath);
+  if (data.schema !== "rustia.bench.cloud-evidence.v1") {
+    fail(`${label}.schema must be rustia.bench.cloud-evidence.v1`);
+  }
+  if (!data.comparison || !Array.isArray(data.comparison.legs) || data.comparison.legs.length === 0) {
+    fail(`${label}.comparison.legs must be a non-empty array`);
+  }
+  const interval = data.comparison.conservative_bootstrap_ci_95_percent;
+  for (const [key, value] of Object.entries({
+    delta: data.comparison.candidate_delta_percent,
+    lower: interval?.lower,
+    upper: interval?.upper,
+  })) {
+    if (!Number.isFinite(value)) fail(`${label} ${key} must be finite`);
+  }
+  const workload = data.comparison.legs[0].workload;
+  if (typeof workload !== "string" || workload === "") fail(`${label} workload must be present`);
+  const sampleCount = data.comparison.legs.reduce((sum, leg) => sum + Number(leg.sample_count ?? 0), 0);
+  if (!Number.isSafeInteger(sampleCount) || sampleCount <= 0) fail(`${label} sample count must be positive`);
+  return {
+    workload,
+    createdAt: data.created_at,
+    baselineCommit: data.source?.baseline_commit,
+    candidateCommit: data.source?.candidate_commit,
+    delta: data.comparison.candidate_delta_percent,
+    lower: interval.lower,
+    upper: interval.upper,
+    legCount: data.comparison.legs.length,
+    sampleCount,
+    verdict: data.comparison.verdict?.status,
+    published: data.publication?.performed === true,
+  };
+}
+
 function validateRow(row, index) {
   const label = `rows[${index}]`;
   for (const key of ["commit", "target", "engine", "dialect", "workload", "unit", "checksum"]) {
@@ -122,6 +286,11 @@ function validateRow(row, index) {
   if (row.speed_vs_rustia != null && (!Number.isFinite(row.speed_vs_rustia) || row.speed_vs_rustia <= 0)) {
     fail(`${label}.speed_vs_rustia must be null or a positive finite number`);
   }
+  for (const key of ["prepare_ns_min", "prepare_ns_median", "first_call_ns_min", "first_call_ns_median", "cold_start_ns_min", "cold_start_ns_median"]) {
+    if (row[key] != null && (!Number.isFinite(row[key]) || row[key] <= 0)) {
+      fail(`${label}.${key} must be null or a positive finite number`);
+    }
+  }
 }
 
 function validateWasmRun(run, index) {
@@ -133,6 +302,9 @@ function validateWasmRun(run, index) {
     if (typeof run[key] !== "string" || run[key].trim() === "") {
       fail(`${label}.${key} must be a non-empty string`);
     }
+  }
+  if (!Number.isFinite(run.timestamp_unix) || run.timestamp_unix <= 0) {
+    fail(`${label}.timestamp_unix must be a positive finite number`);
   }
   if (run.runtime == null || typeof run.runtime !== "object" || Array.isArray(run.runtime)) {
     fail(`${label}.runtime must be an object`);
@@ -270,6 +442,20 @@ function runtimeLabel(runtime) {
   return `${runtime.family}/${runtime.name}`;
 }
 
+function targetKind(target) {
+  const value = String(target);
+  if (value.startsWith("wasm32")) {
+    return "wasm32";
+  }
+  for (const candidate of ["aarch64", "arm64", "x86_64", "x86", "arm32", "armv7"]) {
+    if (value.includes(candidate)) {
+      return candidate;
+    }
+  }
+  const parts = value.split("-").filter(Boolean);
+  return parts.length === 0 ? value : parts[parts.length - 1];
+}
+
 function slug(value) {
   return String(value)
     .toLowerCase()
@@ -299,6 +485,54 @@ function geometricMean(values) {
   return Math.exp(finite.reduce((sum, value) => sum + Math.log(value), 0) / finite.length);
 }
 
+function languageLabel(dialect) {
+  const labels = {
+    javascript: "JavaScript",
+    koto: "Koto",
+    lua54: "Lua 5.4",
+    luau: "Luau",
+    rhai: "Rhai",
+    roto: "Roto",
+    wasm: "WebAssembly",
+  };
+  return labels[dialect] ?? String(dialect)
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function implementationLabel(engine) {
+  if (engine === "mlua-luau" || engine === "mlua-luau-jit" || engine === "mlua-lua54") return "mlua";
+  return engine;
+}
+
+function modeFamily(engine) {
+  return engine === "mlua-luau-jit" ? "mlua-luau" : engine;
+}
+
+function executionMode(engine) {
+  if (engine === "mlua-luau-jit") return "jit";
+  if (engine === "roto" || engine === "wasmtime") return "native";
+  return "interpreter";
+}
+
+function bestAvailableRows(rows) {
+  const priority = { native: 3, jit: 3, "wasm-runtime": 2, interpreter: 1 };
+  const selected = new Map();
+  for (const row of rows) {
+    const key = `${row.target}\0${row.mode_family}\0${row.workload}\0${row.runtime ?? ""}`;
+    const existing = selected.get(key);
+    const rowPriority = priority[row.execution_mode] ?? 0;
+    const existingPriority = priority[existing?.execution_mode] ?? -1;
+    if (!existing || rowPriority > existingPriority ||
+        (rowPriority === existingPriority && compareRunTime(existing, row) < 0)) {
+      selected.set(key, row);
+    }
+  }
+  return [...selected.values()];
+}
+
 function compareRows(left, right) {
   return (
     left.target.localeCompare(right.target) ||
@@ -308,132 +542,326 @@ function compareRows(left, right) {
   );
 }
 
+function compareRunTime(left, right) {
+  return (
+    left.timestamp_unix - right.timestamp_unix ||
+    left.commit.localeCompare(right.commit) ||
+    left.engine.localeCompare(right.engine) ||
+    left.workload.localeCompare(right.workload)
+  );
+}
+
+function latestBy(values, keyFn) {
+  const latest = new Map();
+  for (const value of values) {
+    const key = keyFn(value);
+    const existing = latest.get(key);
+    if (!existing || compareRunTime(existing, value) < 0) {
+      latest.set(key, value);
+    }
+  }
+  return [...latest.values()];
+}
+
+function summarizeLanguageTargets(summaryRows) {
+  const commonRows = summaryRows
+    .filter((row) => REQUIRED_COMMON_WORKLOAD_SET.has(row.workload))
+    .sort(compareRows);
+
+  return [...groupBy(commonRows, (row) => row.target)]
+    .map(([target, targetValues]) => {
+      const implementationRows = [...groupBy(
+        targetValues,
+        (row) => `${row.dialect}\0${row.engine}`,
+      )]
+        .map(([key, values]) => {
+          const [dialect, engine] = key.split("\0");
+          const measuredRows = latestBy(values, (row) => row.workload)
+            .sort((left, right) => left.workload.localeCompare(right.workload));
+          const measuredWorkloads = unique(measuredRows.map((row) => row.workload));
+          return {
+            dialect,
+            language: languageLabel(dialect),
+            engine,
+            mode: values[0].execution_mode,
+            nativeVerified: values[0].native_verified,
+            nativeVerification: values[0].native_verification,
+            nativeVerificationRatio: values[0].native_verification_ratio,
+            measuredRows,
+            measuredWorkloads,
+            coverage: measuredWorkloads.length,
+            geoSpeed: null,
+            geoTime: null,
+            bestCount: null,
+            rank: null,
+          };
+        })
+        .sort((left, right) =>
+          left.language.localeCompare(right.language) ||
+          left.engine.localeCompare(right.engine)
+        );
+      const rustia = implementationRows.find((row) => row.engine === "rustia") ?? null;
+      const baselineComplete = rustia != null &&
+        rustia.coverage === REQUIRED_COMMON_WORKLOADS.length &&
+        rustia.measuredRows.every((row) => Number.isFinite(row.speed_vs_rustia));
+      const complete = implementationRows.length > 1 &&
+        baselineComplete &&
+        implementationRows.every((row) =>
+          row.coverage === REQUIRED_COMMON_WORKLOADS.length &&
+          row.measuredRows.every((measurement) => Number.isFinite(measurement.speed_vs_rustia))
+        );
+
+      if (complete) {
+        for (const row of implementationRows) {
+          row.geoSpeed = geometricMean(row.measuredRows.map((measurement) => measurement.speed_vs_rustia));
+          row.geoTime = geometricMean(row.measuredRows.map((measurement) => measurement.ns_per_unit_min));
+          row.bestCount = 0;
+        }
+        for (const workload of REQUIRED_COMMON_WORKLOADS) {
+          const candidates = implementationRows.map((row) => ({
+            row,
+            measurement: row.measuredRows.find((measurement) => measurement.workload === workload),
+          }));
+          const minimum = Math.min(...candidates.map((candidate) => candidate.measurement.ns_per_unit_min));
+          for (const candidate of candidates) {
+            if (candidate.measurement.ns_per_unit_min === minimum) {
+              candidate.row.bestCount += 1;
+            }
+          }
+        }
+        implementationRows
+          .slice()
+          .sort((left, right) =>
+            right.geoSpeed - left.geoSpeed ||
+            left.language.localeCompare(right.language) ||
+            left.engine.localeCompare(right.engine)
+          )
+          .forEach((row, index) => {
+            row.rank = index + 1;
+          });
+      }
+
+      implementationRows.sort((left, right) =>
+        (left.rank ?? Number.POSITIVE_INFINITY) - (right.rank ?? Number.POSITIVE_INFINITY) ||
+        left.language.localeCompare(right.language) ||
+        left.engine.localeCompare(right.engine)
+      );
+
+      const timestamps = targetValues.map((row) => row.timestamp_unix);
+      const commits = unique(targetValues.map((row) => row.commit));
+      const runtimes = unique(targetValues.map((row) => row.runtime).filter(Boolean));
+      return {
+        target,
+        targetKind: targetValues[0].targetKind,
+        runtimes,
+        complete,
+        status: complete ? "Complete" : "Partial",
+        revisionStatus: commits.length === 1 ? "Single revision" : "Mixed revisions",
+        commits,
+        minTimestamp: Math.min(...timestamps),
+        maxTimestamp: Math.max(...timestamps),
+        implementationRows,
+      };
+    })
+    .sort((left, right) => left.target.localeCompare(right.target));
+}
+
 function summarize(data, wasmRows) {
   const rows = data.rows.slice().sort(compareRows);
   const summaryRows = [
     ...rows.map((row) => ({
       engine: row.engine,
+      dialect: row.dialect,
       target: row.target,
-      targetLabel: row.target,
+      targetKind: targetKind(row.target),
+      runtime: null,
       workload: row.workload,
+      timestamp_unix: row.timestamp_unix,
+      commit: row.commit,
       ns_per_unit_min: row.ns_per_unit_min,
       speed_vs_rustia: row.speed_vs_rustia,
+      prepare_ns_median: optionalPositive(row.prepare_ns_median),
+      first_call_ns_median: optionalPositive(row.first_call_ns_median),
+      cold_start_ns_median: optionalPositive(row.cold_start_ns_median),
+      mode_family: row.mode_family ?? modeFamily(row.engine),
+      execution_mode: row.execution_mode ?? executionMode(row.engine),
+      native_verified: row.native_verified === true,
+      native_verification: row.native_verification ?? "not-recorded",
+      native_verification_ratio: optionalPositive(row.native_verification_ratio),
     })),
     ...wasmRows.map((row) => ({
       engine: row.adapter,
+      dialect: row.dialect,
       target: row.target,
-      targetLabel: `wasm32 / ${row.runtime}`,
+      targetKind: targetKind(row.target),
+      runtime: row.runtime,
       workload: row.workload,
+      timestamp_unix: row.timestamp_unix,
+      commit: row.commit,
       ns_per_unit_min: row.ns_per_unit_min,
       speed_vs_rustia: row.speed_vs_rustia,
+      prepare_ns_median: null,
+      first_call_ns_median: null,
+      cold_start_ns_median: null,
+      mode_family: row.adapter,
+      execution_mode: "wasm-runtime",
+      native_verified: true,
+      native_verification: `runtime-${row.runtime}`,
+      native_verification_ratio: null,
     })),
   ].sort(compareRows);
   const timestamps = rows.map((row) => row.timestamp_unix);
   const targetRows = [...groupBy(rows, (row) => row.target)]
     .map(([target, values]) => ({ target, values }))
     .sort((left, right) => left.target.localeCompare(right.target));
-  const engineRows = [...groupBy(summaryRows, (row) => `${row.engine}\0${row.target}`)]
-    .map(([key, values]) => {
-      const [engine, target] = key.split("\0");
-      return {
-        engine,
-        target,
-        targetLabel: values[0].targetLabel,
-        workloadCount: unique(values.map((row) => row.workload)).length,
-        bestCount: 0,
-        geoSpeed: geometricMean(values.map((row) => row.speed_vs_rustia)),
-        medianNs: median(values.map((row) => row.ns_per_unit_min)),
-      };
-    })
-    .sort((left, right) => {
-      const leftSpeed = left.geoSpeed ?? -Infinity;
-      const rightSpeed = right.geoSpeed ?? -Infinity;
-      return (
-        rightSpeed - leftSpeed ||
-        left.engine.localeCompare(right.engine) ||
-        left.target.localeCompare(right.target)
-      );
-    });
-
-  for (const group of groupBy(summaryRows, (row) => `${row.target}\0${row.workload}`).values()) {
-    group.sort((left, right) => left.ns_per_unit_min - right.ns_per_unit_min);
-    const winner = engineRows.find((engine) => engine.engine === group[0].engine && engine.target === group[0].target);
-    if (winner) {
-      winner.bestCount += 1;
-    }
-  }
+  const linuxComparisonRows = summaryRows.filter((row) => row.targetKind !== "wasm32");
 
   return {
     rows,
     summaryRows,
     targetRows,
-    engineRows,
+    linuxComparisonViews: {
+      all: summarizeLanguageTargets(linuxComparisonRows),
+      interpreter: summarizeLanguageTargets(
+        linuxComparisonRows.filter((row) => row.execution_mode === "interpreter"),
+      ),
+      accelerated: summarizeLanguageTargets(
+        linuxComparisonRows.filter((row) =>
+          row.execution_mode === "jit" ||
+          row.execution_mode === "native" ||
+          row.engine === "rustia"
+        ),
+      ),
+    },
+    coldStartRows: summarizeColdStarts(summaryRows),
     minTimestamp: Math.min(...timestamps),
     maxTimestamp: Math.max(...timestamps),
   };
 }
 
-function median(values) {
-  const sorted = values
-    .filter((value) => Number.isFinite(value))
-    .sort((left, right) => left - right);
-  if (sorted.length === 0) {
-    return null;
+function summarizeColdStarts(rows) {
+  return [...groupBy(
+    rows.filter((row) => row.runtime == null && REQUIRED_COMMON_WORKLOAD_SET.has(row.workload) && Number.isFinite(row.cold_start_ns_median)),
+    (row) => `${row.target}\0${row.engine}`,
+  )].map(([key, values]) => {
+    const [target, engine] = key.split("\0");
+    const latest = latestBy(values, (row) => row.workload);
+    return {
+      target,
+      engine,
+      dialect: latest[0].dialect,
+      mode: latest[0].execution_mode,
+      prepare: geometricMean(latest.map((row) => row.prepare_ns_median)),
+      firstCall: geometricMean(latest.map((row) => row.first_call_ns_median)),
+      total: geometricMean(latest.map((row) => row.cold_start_ns_median)),
+      coverage: latest.length,
+      nativeVerified: latest[0].native_verified,
+      nativeVerification: latest[0].native_verification,
+      nativeVerificationRatio: latest[0].native_verification_ratio,
+    };
+  }).sort((left, right) => left.total - right.total || left.engine.localeCompare(right.engine));
+}
+
+function summarizeHistory(records) {
+  const rows = records.slice().sort(compareRunTime);
+  const timestamps = rows.map((row) => row.timestamp_unix);
+  const targetRows = [...groupBy(rows, (row) => row.target)]
+    .map(([target, values]) => ({ target, values }))
+    .sort((left, right) => left.target.localeCompare(right.target));
+  return {
+    rows,
+    targetRows,
+    engineCount: unique(rows.map((row) => row.engine)).length,
+    workloadCount: unique(rows.map((row) => row.workload)).length,
+    commitCount: unique(rows.map((row) => row.commit)).length,
+    minTimestamp: Math.min(...timestamps),
+    maxTimestamp: Math.max(...timestamps),
+  };
+}
+
+function claimPosture(rustiaRow, luauRow) {
+  if (!rustiaRow) {
+    return { ready: false, label: "Blocked", text: "missing rustia baseline" };
   }
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1
-    ? sorted[middle]
-    : (sorted[middle - 1] + sorted[middle]) / 2;
+  if (!luauRow || !Number.isFinite(luauRow.speed_vs_rustia)) {
+    return { ready: false, label: "Blocked", text: "missing mlua-luau baseline" };
+  }
+  if (luauRow.speed_vs_rustia > 1.05) {
+    return {
+      ready: false,
+      label: "Not ready",
+      text: `rustia trails mlua-luau by ${formatSpeed(luauRow.speed_vs_rustia)}`,
+    };
+  }
+  if (luauRow.speed_vs_rustia >= 0.95) {
+    return {
+      ready: true,
+      label: "Eligible",
+      text: "rustia is near mlua-luau for this workload",
+    };
+  }
+  return {
+    ready: true,
+    label: "Eligible",
+    text: `rustia leads mlua-luau by ${formatSpeed(1 / luauRow.speed_vs_rustia)}`,
+  };
 }
 
-function metric(value, label) {
-  return `
-    <div class="metric">
-      <strong>${escapeHtml(value)}</strong>
-      <span>${escapeHtml(label)}</span>
-    </div>
-  `;
+function summarizeClaimRows(rows) {
+  const interpreterRows = rows.filter((row) => (row.execution_mode ?? executionMode(row.engine)) === "interpreter");
+  return [...groupBy(interpreterRows, (row) => `${row.target}\0${row.workload}`).entries()]
+    .map(([key, values]) => {
+      const [target, workload] = key.split("\0");
+      const sorted = values
+        .slice()
+        .sort((left, right) => left.ns_per_unit_min - right.ns_per_unit_min || left.engine.localeCompare(right.engine));
+      const rustiaRow = values.find((row) => row.engine === "rustia") ?? null;
+      const luauRow = values.find((row) => row.engine === "mlua-luau") ?? null;
+      return {
+        target,
+        workload,
+        unit: rustiaRow?.unit ?? sorted[0]?.unit ?? "",
+        rustiaRow,
+        luauRow,
+        fastest: sorted[0] ?? null,
+        rustiaRank: rustiaRow ? sorted.findIndex((row) => row.engine === "rustia") + 1 : null,
+        engineCount: sorted.length,
+        posture: claimPosture(rustiaRow, luauRow),
+      };
+    })
+    .sort((left, right) =>
+      left.target.localeCompare(right.target) ||
+      left.workload.localeCompare(right.workload)
+    );
 }
 
-function engineSummaryTable(engineRows) {
-  const maxSpeed = Math.max(...engineRows.map((row) => row.geoSpeed ?? 0), 1);
+function claimGateSection(claimRows) {
+  const readyCount = claimRows.filter((row) => row.posture.ready).length;
+  const headline = readyCount === claimRows.length
+    ? "All current workload claims are eligible, but keep wording per-workload."
+    : `${formatInteger(claimRows.length - readyCount)} current workload claims are not public-ready against mlua-luau.`;
   return `
-    <section class="panel">
+    <section class="panel" id="claim-gate">
       <div class="section-head">
         <div>
-          <h2>Engine Summary</h2>
-          <p>One row per engine/target pair. Geomean uses available speed-vs-rustia ratios from the current snapshot.</p>
+          <h2>Claim Gate</h2>
+          <p>${formatInteger(readyCount)} / ${formatInteger(claimRows.length)} eligible · ${escapeHtml(headline)}</p>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Engine (target)</th>
-              <th>Geomean vs rustia</th>
-              <th>Best results</th>
-              <th>Median min ns/unit</th>
-              <th>Coverage</th>
+              <th>Target / workload</th>
+              <th>rustia min</th>
+              <th>mlua-luau vs rustia</th>
+              <th>rustia rank</th>
+              <th>Fastest</th>
+              <th>Posture</th>
             </tr>
           </thead>
           <tbody>
-            ${engineRows.map((row) => {
-              const width = row.geoSpeed ? Math.max(2, (row.geoSpeed / maxSpeed) * 100) : 0;
-              return `
-                <tr>
-                  <td>${engineTargetLabel(row.engine, row.targetLabel)}</td>
-                  <td>
-                    <div class="bar-cell">
-                      <span>${formatSpeed(row.geoSpeed)}</span>
-                      <div class="bar" aria-hidden="true"><span style="width: ${width.toFixed(3)}%"></span></div>
-                    </div>
-                  </td>
-                  <td>${formatInteger(row.bestCount)} / ${formatInteger(row.workloadCount)}</td>
-                  <td>${formatNumber(row.medianNs)}</td>
-                  <td>${formatInteger(row.workloadCount)} workloads</td>
-                </tr>
-              `;
-            }).join("")}
+            ${claimRows.map(claimGateTableRow).join("")}
           </tbody>
         </table>
       </div>
@@ -441,8 +869,746 @@ function engineSummaryTable(engineRows) {
   `;
 }
 
-function engineTargetLabel(engine, targetLabel) {
-  return `<span class="engine-target"><strong>${escapeHtml(engine)}</strong><span>(${escapeHtml(targetLabel)})</span></span>`;
+function claimGateTableRow(row) {
+  const rustiaMin = row.rustiaRow ? `${formatNumber(row.rustiaRow.ns_per_unit_min)} ns` : "n/a";
+  const luauSpeed = row.luauRow ? formatSpeed(row.luauRow.speed_vs_rustia) : "n/a";
+  const rank = row.rustiaRank == null
+    ? "n/a"
+    : `${formatInteger(row.rustiaRank)} / ${formatInteger(row.engineCount)}`;
+  const fastest = row.fastest
+    ? `${implementationLabel(row.fastest.engine)} · ${languageLabel(row.fastest.dialect)} · ${formatNumber(row.fastest.ns_per_unit_min)} ns`
+    : "n/a";
+  const postureClass = row.posture.ready ? "claim-ready" : "claim-blocked";
+  return `
+    <tr>
+      <td>${claimWorkloadLabel(row)}</td>
+      <td>${escapeHtml(rustiaMin)}</td>
+      <td>${escapeHtml(luauSpeed)}</td>
+      <td>${escapeHtml(rank)}</td>
+      <td>${escapeHtml(fastest)}</td>
+      <td>
+        <span class="claim-posture">
+          <span class="claim-pill ${postureClass}">${escapeHtml(row.posture.label)}</span>
+          <small>${escapeHtml(row.posture.text)}</small>
+        </span>
+      </td>
+    </tr>
+  `;
+}
+
+function claimWorkloadLabel(row) {
+  return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.workload)} · ${escapeHtml(row.unit)}</span></span>`;
+}
+
+function historySection(history, backfills, currentRows) {
+  const reference = mluaJitHistoryReference(currentRows);
+  const reconstructed = rustiaBackfillEras(backfills, reference);
+  const recorded = rustiaHistoryEras(history.rows, reference);
+  const visibleRecorded = reconstructed.length > 0
+    ? recorded.filter((era) => era.title === "Current dedicated Linux history")
+    : recorded;
+  const eras = [...reconstructed, ...visibleRecorded];
+  const snapshotCount = eras.reduce((total, era) => total + era.snapshotCount, 0);
+  const summary = reconstructed.length > 0
+    ? `${formatInteger(reconstructed.reduce((total, era) => total + era.snapshotCount, 0))} historical Rustia revisions reconstructed with a single fixed harness, followed by the directly recorded dedicated-VM series.`
+    : `${formatInteger(snapshotCount)} recorded Linux matrix runs across two eras. Each chart is normalized to its own first run, so different hosts and protocols are never blended.`;
+  const explanation = reconstructed.length > 0
+    ? `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>); the reconstructed Rustia measurements used a separate VM of the same class.`
+    : `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>).`;
+  return `
+    <section class="panel history-axis-panel" id="history">
+      <div class="section-head">
+        <div>
+          <h2>rustia Performance History</h2>
+          <p>${summary}</p>
+        </div>
+        <div class="metric-toggle" role="group" aria-label="History x-axis">
+          <button type="button" data-history-axis="date" aria-pressed="true">Date</button>
+          <button type="button" data-history-axis="commit" aria-pressed="false">Commit</button>
+        </div>
+      </div>
+      <p class="history-answer"><strong>Higher is faster; mlua/JIT is 1×.</strong> ${explanation}</p>
+      <p class="cohort-note">The two Rustia lines share the same workloads and score, but remain separate because reconstruction and directly recorded matrix runs use different measurement protocols.</p>
+      <div data-history-axis-view="date">${rustiaHistoryChart(eras, reference, "date")}</div>
+      <div data-history-axis-view="commit" hidden>${rustiaHistoryChart(eras, reference, "commit")}</div>
+      ${rustiaOverallHistoryTable(eras)}
+      <p class="cohort-note">${reconstructed.length > 0 ? `Reconstruction measurement time is retained honestly in <code>${escapeHtml(relative(historyBackfillDirectory))}</code>; the chart's x-axis uses each source commit's original date.` : `Restored from published Linux matrix snapshots that were previously overwritten in <code>${escapeHtml(relative(historyPath))}</code>. Future accepted matrix runs now append to this ledger.`}</p>
+    </section>
+  `;
+}
+
+function mluaJitHistoryReference(rows) {
+  const referenceRows = rows.filter(
+    (row) =>
+      row.target === "linux-x86_64" &&
+      row.engine === "mlua-luau-jit" &&
+      REQUIRED_COMMON_WORKLOAD_SET.has(row.workload),
+  );
+  const byWorkload = new Map(referenceRows.map((row) => [row.workload, row]));
+  for (const workload of REQUIRED_COMMON_WORKLOADS) {
+    if (!byWorkload.has(workload)) {
+      fail(`history reference has no mlua-luau-jit linux-x86_64 result for ${workload}`);
+    }
+  }
+  return {
+    commit: referenceRows[0].commit,
+    byWorkload,
+  };
+}
+
+function rustiaBackfillEras(backfills, reference) {
+  return backfills.map((backfill) => {
+    const targets = new Map(
+      backfill.targets.map((target, index) => [
+        target.commit,
+        { committedAt: target.committed_at_unix, index },
+      ]),
+    );
+    const rows = backfill.rows
+      .filter(
+        (row) =>
+          row.target === "linux-x86_64" &&
+          row.engine === "rustia" &&
+          REQUIRED_COMMON_WORKLOAD_SET.has(row.workload) &&
+          targets.has(row.commit),
+      )
+      .map((row) => ({
+        ...row,
+        timestamp_unix: targets.get(row.commit).committedAt,
+        backfill_order: targets.get(row.commit).index,
+      }));
+    return rustiaHistoryEra(
+      "Fixed-harness reconstructed history",
+      `Harness ${backfill.harness_commit.slice(0, 7)} · measured together on one dedicated Linux VM`,
+      rows,
+      reference,
+    );
+  });
+}
+
+function rustiaHistoryEras(rows, reference) {
+  const rustiaRows = rows
+    .filter((row) => row.target === "linux-x86_64" && row.engine === "rustia" && REQUIRED_COMMON_WORKLOAD_SET.has(row.workload))
+    .slice()
+    .sort(compareRunTime);
+  const timestamps = unique(rustiaRows.map((row) => String(row.timestamp_unix))).map(Number).sort((left, right) => left - right);
+  let splitAt = null;
+  let largestGap = 0;
+  for (let index = 1; index < timestamps.length; index += 1) {
+    const gap = timestamps[index] - timestamps[index - 1];
+    if (gap > largestGap) {
+      largestGap = gap;
+      splitAt = timestamps[index];
+    }
+  }
+  if (splitAt == null || largestGap < 24 * 60 * 60) {
+    return [rustiaHistoryEra("Comparable Linux history", "All recorded Linux runs", rustiaRows, reference)];
+  }
+  return [
+    rustiaHistoryEra("Earlier Linux history", "Earlier host/protocol era; kept on its own scale", rustiaRows.filter((row) => row.timestamp_unix < splitAt), reference),
+    rustiaHistoryEra("Current dedicated Linux history", "Controlled matrix era; this is the chart to use for current progress", rustiaRows.filter((row) => row.timestamp_unix >= splitAt), reference),
+  ];
+}
+
+function rustiaHistoryEra(title, description, rows, reference) {
+  const workloads = rustiaHistoryWorkloads(rows);
+  const timestamps = workloads.flatMap((workload) => workload.rows.map((row) => row.timestamp_unix));
+  return {
+    title,
+    description,
+    workloads,
+    overall: rustiaOverallHistory(workloads, reference),
+    reference,
+    snapshotCount: Math.max(...workloads.map((workload) => workload.rows.length)),
+    minTimestamp: Math.min(...timestamps),
+    maxTimestamp: Math.max(...timestamps),
+  };
+}
+
+function rustiaHistoryWorkloads(rows) {
+  return REQUIRED_COMMON_WORKLOADS.map((workload) => {
+    const workloadRows = rows
+      .filter((row) => row.target === "linux-x86_64" && row.engine === "rustia" && row.workload === workload)
+      .slice()
+      .sort(compareRunTime);
+    if (workloadRows.length === 0) fail(`history has no rustia linux-x86_64 records for ${workload}`);
+    const baseline = workloadRows[0].ns_per_unit_min;
+    return {
+      workload,
+      rows: workloadRows.map((row) => ({ ...row, speed: baseline / row.ns_per_unit_min })),
+    };
+  });
+}
+
+function rustiaOverallHistory(workloads, reference) {
+  const rows = workloads
+    .flatMap((workload) => workload.rows)
+    .slice()
+    .sort(compareRunTime);
+  const snapshots = [];
+  let active = null;
+  for (const row of rows) {
+    const snapshotKey = Number.isInteger(row.backfill_order) ? `backfill:${row.backfill_order}` : null;
+    const needsSnapshot =
+      active == null ||
+      (snapshotKey != null && active.key !== snapshotKey) ||
+      (snapshotKey == null && (
+        active.key != null ||
+        row.timestamp_unix - active.timestamp_unix > 120 ||
+        active.ratios.has(row.workload)
+      ));
+    if (needsSnapshot) {
+      active = {
+        key: snapshotKey,
+        commit: row.commit,
+        timestamp_unix: row.timestamp_unix,
+        ratios: new Map(),
+      };
+      snapshots.push(active);
+    }
+    active.ratios.set(
+      row.workload,
+      reference.byWorkload.get(row.workload).ns_per_unit_min / row.ns_per_unit_min,
+    );
+  }
+  const points = snapshots
+    .flatMap((snapshot) => {
+      const ratios = REQUIRED_COMMON_WORKLOADS.map((workload) => snapshot.ratios.get(workload));
+      if (ratios.some((ratio) => !Number.isFinite(ratio) || ratio <= 0)) {
+        return [];
+      }
+      return [{
+        commit: snapshot.commit,
+        timestamp_unix: snapshot.timestamp_unix,
+        score: geometricMean(ratios),
+      }];
+    })
+    .sort(compareRunTime);
+  if (points.length === 0) {
+    fail("history has no complete five-workload snapshots");
+  }
+  const baseline = points[0].score;
+  return points.map((point) => ({
+    ...point,
+    gain: point.score / baseline,
+  }));
+}
+
+function rustiaHistoryCommitOrder(eras) {
+  const commits = [];
+  for (const era of eras) {
+    const sequence = [...new Set(era.overall.map((point) => point.commit))];
+    for (let index = 0; index < sequence.length; index += 1) {
+      const commit = sequence[index];
+      if (commits.includes(commit)) continue;
+      const next = sequence.slice(index + 1).find((candidate) => commits.includes(candidate));
+      if (next == null) {
+        commits.push(commit);
+      } else {
+        commits.splice(commits.indexOf(next), 0, commit);
+      }
+    }
+  }
+  return commits;
+}
+
+function rustiaHistoryChart(eras, reference, axisMode) {
+  const width = 920;
+  const height = 300;
+  const pad = { left: 54, right: 20, top: 22, bottom: 42 };
+  const allPoints = eras.flatMap((era) => era.overall);
+  const commitOrder = rustiaHistoryCommitOrder(eras);
+  const commitIndex = new Map(commitOrder.map((commit, index) => [commit, index]));
+  const minX = axisMode === "commit" ? 0 : Math.min(...allPoints.map((point) => point.timestamp_unix));
+  const maxX = axisMode === "commit" ? Math.max(1, commitOrder.length - 1) : Math.max(...allPoints.map((point) => point.timestamp_unix));
+  const maxScore = Math.max(1, ...allPoints.map((point) => point.score));
+  const maxY = Math.max(1.05, Math.ceil(maxScore * 1.08 * 4) / 4);
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const xValue = (point) => axisMode === "commit" ? commitIndex.get(point.commit) : point.timestamp_unix;
+  const xScale = (point) => maxX === minX
+    ? pad.left + plotWidth / 2
+    : pad.left + ((xValue(point) - minX) / (maxX - minX)) * plotWidth;
+  const yScale = (score) => pad.top + (1 - score / maxY) * plotHeight;
+  const ticks = [...new Set([0, 0.25, 0.5, 0.75, 1, maxY])]
+    .filter((tick) => tick <= maxY)
+    .sort((left, right) => left - right);
+  const referenceColor = "#ea580c";
+  const styles = [
+    { color: "#2563eb", label: "Reconstructed", dash: "" },
+    { color: "#0f766e", label: "Recorded dedicated", dash: "5 4" },
+  ];
+  const firstLabel = axisMode === "commit" ? commitOrder[0].slice(0, 7) : formatIsoDate(minX);
+  const lastLabel = axisMode === "commit" ? commitOrder.at(-1).slice(0, 7) : formatIsoDate(maxX);
+  return `
+    <div class="history-chart">
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="rustia overall Linux performance history by ${escapeHtml(axisMode)} versus mlua JIT, higher is faster">
+        <rect x="0" y="0" width="${width}" height="${height}" class="history-chart-bg" />
+        ${ticks.map((tick) => `<line x1="${pad.left}" y1="${yScale(tick).toFixed(2)}" x2="${width - pad.right}" y2="${yScale(tick).toFixed(2)}" class="history-grid-line" /><text x="8" y="${(yScale(tick) + 4).toFixed(2)}" class="history-axis-label">${formatSpeed(tick)}</text>`).join("")}
+        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" class="history-axis" />
+        <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" class="history-axis" />
+        <text x="${pad.left}" y="${height - 10}" class="history-axis-label">${escapeHtml(firstLabel)}</text>
+        <text x="${width - pad.right}" y="${height - 10}" text-anchor="end" class="history-axis-label">${escapeHtml(lastLabel)}</text>
+        <line x1="${pad.left}" y1="${yScale(1).toFixed(2)}" x2="${width - pad.right}" y2="${yScale(1).toFixed(2)}" stroke="${referenceColor}" stroke-width="1.4" stroke-dasharray="7 6"><title>${escapeHtml(`mlua / Luau / JIT · current matrix ${reference.commit.slice(0, 7)} · 1×`)}</title></line>
+        ${eras.map((era, index) => {
+          const style = styles[index] ?? { color: engineColor("rustia", index), label: era.title, dash: "" };
+          const points = era.overall.map((point) => `${xScale(point).toFixed(2)},${yScale(point.score).toFixed(2)}`).join(" ");
+          const dash = style.dash === "" ? "" : ` stroke-dasharray="${style.dash}"`;
+          return `<g><polyline points="${points}" fill="none" stroke="${style.color}" stroke-width="1.6"${dash} stroke-linecap="round" stroke-linejoin="round" />${era.overall.map((point) => `<circle cx="${xScale(point).toFixed(2)}" cy="${yScale(point.score).toFixed(2)}" r="2.2" fill="${style.color}"><title>${escapeHtml(`${style.label} · ${point.commit.slice(0, 7)} · ${formatSpeed(point.score)} mlua/JIT · ${formatSpeed(point.gain)} vs first in era`)}</title></circle>`).join("")}</g>`;
+        }).join("")}
+      </svg>
+      <div class="history-legend">${eras.map((era, index) => {
+        const style = styles[index] ?? { color: engineColor("rustia", index), label: era.title };
+        return `<span>${colorDotMarkup(style.color)}rustia · ${escapeHtml(style.label)}</span>`;
+      }).join("")}<span>${colorDotMarkup(referenceColor)}<strong>mlua</strong> / Luau / JIT · 1×</span></div>
+    </div>
+  `;
+}
+
+function rustiaOverallHistoryTable(eras) {
+  const rows = eras.map((era) => {
+    const first = era.overall[0];
+    const latest = era.overall.at(-1);
+    const percent = (latest.gain - 1) * 100;
+    const gap = 1 / latest.score;
+    return `<tr><td><strong>${escapeHtml(era.title === "Fixed-harness reconstructed history" ? "Reconstructed" : "Recorded dedicated")}</strong><br><small>${formatInteger(era.snapshotCount)} complete scores · geometric mean of 5 workloads</small></td><td>${formatSpeed(first.score)} of mlua/JIT · <code>${escapeHtml(first.commit.slice(0, 7))}</code></td><td>${formatSpeed(latest.score)} of mlua/JIT · <code>${escapeHtml(latest.commit.slice(0, 7))}</code></td><td><strong>${formatSpeed(latest.gain)}</strong> · ${percent >= 0 ? "+" : ""}${formatNumber(percent)}%</td><td>mlua/JIT is <strong>${formatSpeed(gap)}</strong> faster</td></tr>`;
+  }).join("");
+  return `<div class="table-wrap history-table"><table><thead><tr><th>Series</th><th>First run</th><th>Latest run</th><th>Improvement</th><th>Latest gap</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function workloadLabel(workload) {
+  const labels = {
+    dense_tables: "Dense tables",
+    sparse_tables: "Sparse tables",
+    closures_upvalues: "Closures",
+    generic_iteration: "Iteration",
+    stdlib_math_table: "Math / table",
+    oop_metamethods: "OOP metamethods",
+  };
+  return labels[workload] ?? languageLabel(workload);
+}
+
+function formatIsoDate(value) {
+  const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  return date.toISOString().slice(0, 10);
+}
+
+function historyTargetSection(group) {
+  const workloads = [...groupBy(group.values, (row) => row.workload)]
+    .map(([workload, rows]) => ({ workload, rows }))
+    .sort((left, right) => left.workload.localeCompare(right.workload));
+  return `
+    <section class="history-target">
+      <div class="history-target-head">
+        <h3>${escapeHtml(group.target)}</h3>
+        <p>${formatInteger(group.values.length)} records across ${formatInteger(workloads.length)} workloads</p>
+      </div>
+      ${workloads.map((entry) => historyWorkloadSection(group.target, entry.workload, entry.rows)).join("")}
+    </section>
+  `;
+}
+
+function historyWorkloadSection(target, workload, rows) {
+  const latestRows = latestBy(rows, (row) => row.engine)
+    .sort((left, right) => left.ns_per_unit_min - right.ns_per_unit_min || left.engine.localeCompare(right.engine));
+  const unit = latestRows[0]?.unit ?? rows[0]?.unit ?? "";
+  return `
+    <section class="history-workload" id="${escapeHtml(slug(`history-${target}-${workload}`))}">
+      <div class="history-workload-head">
+        <div>
+          <h4>${escapeHtml(workload)}</h4>
+          <p>${escapeHtml(unit)} · ${formatInteger(rows.length)} records · ${formatInteger(latestRows.length)} engines</p>
+        </div>
+      </div>
+      ${historyChart(rows)}
+      <div class="table-wrap history-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Engine</th>
+              <th>Latest min ns/unit</th>
+              <th>Median</th>
+              <th>Trend vs previous</th>
+              <th>Commit</th>
+              <th>Measured</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${latestRows.map((row) => historyLatestRow(row, rows)).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function historyLatestRow(row, rows) {
+  const previous = previousHistoryRecord(row, rows);
+  const trend = previous ? (row.ns_per_unit_min / previous.ns_per_unit_min - 1) * 100 : null;
+  return `
+    <tr>
+      <td>${historyEngineLabel(row.engine)}</td>
+      <td>${formatNumber(row.ns_per_unit_min)}</td>
+      <td>${formatNumber(row.ns_per_unit_median)}</td>
+      <td>${historyTrend(trend)}</td>
+      <td>${escapeHtml(row.commit)}</td>
+      <td>${formatTime(row.timestamp_unix)}</td>
+    </tr>
+  `;
+}
+
+function previousHistoryRecord(row, rows) {
+  return rows
+    .filter((record) =>
+      record.engine === row.engine &&
+      record.target === row.target &&
+      record.workload === row.workload &&
+      record.timestamp_unix < row.timestamp_unix
+    )
+    .sort(compareRunTime)
+    .at(-1) ?? null;
+}
+
+function historyTrend(value) {
+  if (!Number.isFinite(value)) {
+    return '<span class="trend trend-flat">n/a</span>';
+  }
+  const className = value <= 0 ? "trend trend-good" : "trend trend-bad";
+  return `<span class="${className}">${value > 0 ? "+" : ""}${value.toFixed(1)}%</span>`;
+}
+
+function historyChart(rows) {
+  const width = 920;
+  const height = 260;
+  const pad = { left: 62, right: 20, top: 20, bottom: 42 };
+  const values = rows.map((row) => row.ns_per_unit_min).filter((value) => Number.isFinite(value) && value > 0);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const minY = Math.log10(minValue * 0.85);
+  const maxY = Math.log10(maxValue * 1.15);
+  const minX = Math.min(...rows.map((row) => row.timestamp_unix));
+  const maxX = Math.max(...rows.map((row) => row.timestamp_unix));
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const xScale = (timestamp) => maxX === minX
+    ? pad.left + plotWidth / 2
+    : pad.left + ((timestamp - minX) / (maxX - minX)) * plotWidth;
+  const yScale = (value) => {
+    const span = maxY - minY || 1;
+    return pad.top + (1 - (Math.log10(value) - minY) / span) * plotHeight;
+  };
+  const series = [...groupBy(rows, (row) => row.engine)]
+    .map(([engine, engineRows], index) => ({
+      engine,
+      color: engineColor(engine, index),
+      rows: engineRows.slice().sort(compareRunTime),
+    }))
+    .sort((left, right) => left.engine.localeCompare(right.engine));
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((tick) => {
+    const y = pad.top + tick * plotHeight;
+    const value = 10 ** (maxY - tick * (maxY - minY));
+    return `
+      <line x1="${pad.left}" y1="${y.toFixed(2)}" x2="${width - pad.right}" y2="${y.toFixed(2)}" class="history-grid-line" />
+      <text x="8" y="${(y + 4).toFixed(2)}" class="history-axis-label">${escapeHtml(formatNumber(value))}</text>
+    `;
+  }).join("");
+  return `
+    <div class="history-chart">
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(rows[0].workload)} timing history">
+        <rect x="0" y="0" width="${width}" height="${height}" class="history-chart-bg" />
+        ${yTicks}
+        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" class="history-axis" />
+        <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" class="history-axis" />
+        <text x="${pad.left}" y="${height - 10}" class="history-axis-label">${escapeHtml(formatTime(minX))}</text>
+        <text x="${width - pad.right}" y="${height - 10}" text-anchor="end" class="history-axis-label">${escapeHtml(formatTime(maxX))}</text>
+        ${series.map((item) => historySeriesSvg(item, xScale, yScale)).join("")}
+      </svg>
+      <div class="history-legend">
+        ${series.map((item) => `<span>${colorDotMarkup(item.color)}${escapeHtml(item.engine)}</span>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function historySeriesSvg(series, xScale, yScale) {
+  const points = series.rows
+    .map((row) => `${xScale(row.timestamp_unix).toFixed(2)},${yScale(row.ns_per_unit_min).toFixed(2)}`)
+    .join(" ");
+  const circles = series.rows.map((row) => `
+    <circle cx="${xScale(row.timestamp_unix).toFixed(2)}" cy="${yScale(row.ns_per_unit_min).toFixed(2)}" r="3.2" fill="${series.color}">
+      <title>${escapeHtml(`${series.engine} ${row.commit}: ${formatNumber(row.ns_per_unit_min)} ns/unit`)}</title>
+    </circle>
+  `).join("");
+  const line = series.rows.length > 1
+    ? `<polyline points="${points}" fill="none" stroke="${series.color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />`
+    : "";
+  return `<g>${line}${circles}</g>`;
+}
+
+function historyEngineLabel(engine) {
+  return `<span class="history-engine">${colorDotMarkup(engineColor(engine))}<strong>${escapeHtml(engine)}</strong></span>`;
+}
+
+function colorDotMarkup(color) {
+  return `<span class="swatch" style="color: ${escapeHtml(color)}"></span>`;
+}
+
+function engineColor(engine, fallbackIndex = 0) {
+  const known = {
+    rustia: "#2563eb",
+    koto: "#0f766e",
+    luaur: "#0891b2",
+    "mlua-luau": "#b45309",
+    "mlua-luau-jit": "#ea580c",
+    "mlua-lua54": "#7c3aed",
+    rhai: "#b91c1c",
+    boa: "#047857",
+    rquickjs: "#be185d",
+    roto: "#475569",
+    ruau: "#9333ea",
+    wasmi: "#be185d",
+    wasmtime: "#111827",
+  };
+  const fallback = ["#2563eb", "#0f766e", "#b45309", "#b91c1c", "#7c3aed", "#047857", "#be185d", "#475569"];
+  return known[engine] ?? fallback[fallbackIndex % fallback.length];
+}
+
+function languagesByTargetSection(targetRows, {
+  id = "languages-by-target",
+  title = "Interpreter-only Languages by Target",
+  description = "exact targets complete · ranked headline and per-workload detail use the same five common workloads; accelerated modes are excluded",
+} = {}) {
+  const completeCount = targetRows.filter((row) => row.complete).length;
+  return `
+    <section class="panel metric-panel" id="${escapeHtml(id)}">
+      <div class="section-head">
+        <div>
+          <h2>${escapeHtml(title)}</h2>
+          <p>${formatInteger(completeCount)} / ${formatInteger(targetRows.length)} ${escapeHtml(description)}.</p>
+        </div>
+        <div class="metric-toggle" role="group" aria-label="Benchmark value display">
+          <button type="button" data-metric="relative" aria-pressed="true">vs rustia</button>
+          <button type="button" data-metric="absolute" aria-pressed="false">absolute</button>
+        </div>
+      </div>
+      <div class="language-targets">
+        ${targetRows.map(languageTargetSummary).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function linuxComparisonSection(views) {
+  const allRows = views.all ?? [];
+  const completeCount = allRows.filter((row) => row.complete).length;
+  const renderView = (name, rows, hidden = false) => `
+    <div class="comparison-mode-view" data-mode-view="${escapeHtml(name)}"${hidden ? " hidden" : ""}>
+      <div class="language-targets">
+        ${rows.map(languageTargetSummary).join("")}
+      </div>
+    </div>
+  `;
+  return `
+    <section class="panel metric-panel" id="linux-comparison">
+      <div class="section-head">
+        <div>
+          <h2>Linux Language Comparison</h2>
+          <p>${formatInteger(completeCount)} / ${formatInteger(allRows.length)} exact Linux targets complete · switch between every measured mode, interpreters only, or verified JIT/native modes plus the rustia baseline.</p>
+        </div>
+        <div class="comparison-controls">
+          <div class="metric-toggle mode-toggle" role="group" aria-label="Execution mode filter">
+            <button type="button" data-mode-filter="all" aria-pressed="true">All</button>
+            <button type="button" data-mode-filter="interpreter" aria-pressed="false">Interpreter</button>
+            <button type="button" data-mode-filter="accelerated" aria-pressed="false">JIT/native</button>
+          </div>
+          <div class="metric-toggle" role="group" aria-label="Benchmark value display">
+            <button type="button" data-metric="relative" aria-pressed="true">vs rustia</button>
+            <button type="button" data-metric="absolute" aria-pressed="false">absolute</button>
+          </div>
+        </div>
+      </div>
+      ${renderView("all", views.all)}
+      ${renderView("interpreter", views.interpreter, true)}
+      ${renderView("accelerated", views.accelerated, true)}
+    </section>
+  `;
+}
+
+function coldStartSection(rows) {
+  return `
+    <section class="panel" id="cold-start">
+      <div class="section-head">
+        <div>
+          <h2>Compile and First-call Cost</h2>
+          <p>Geometric means across the five common workloads. Preparation and the first invocation are measured on a fresh engine instance; steady-state timings use a separate warmed instance.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Implementation · language</th><th>Mode</th><th>Prepare</th><th>First call</th><th>Cold total</th><th>Coverage</th><th>Native proof</th></tr></thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td>${implementationLanguage(row.engine, languageLabel(row.dialect))}</td>
+                <td>${modeBadge(row.mode)}</td>
+                <td>${formatDurationNs(row.prepare)}</td>
+                <td>${formatDurationNs(row.firstCall)}</td>
+                <td><strong>${formatDurationNs(row.total)}</strong></td>
+                <td>${formatInteger(row.coverage)}/${formatInteger(REQUIRED_COMMON_WORKLOADS.length)}</td>
+                <td>${nativeProof(row)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function formatDurationNs(value) {
+  if (!Number.isFinite(value)) return "n/a";
+  if (value >= 1e6) return `${formatNumber(value / 1e6)} ms`;
+  if (value >= 1e3) return `${formatNumber(value / 1e3)} µs`;
+  return `${formatNumber(value)} ns`;
+}
+
+function modeBadge(mode) {
+  return `<span class="mode-badge mode-${escapeHtml(mode)}">${escapeHtml(mode)}</span>`;
+}
+
+function nativeProof(row) {
+  if (row.mode === "interpreter") return '<span class="subtle">not applicable</span>';
+  if (!row.nativeVerified) return '<span class="claim-pill claim-blocked">unverified</span>';
+  const ratio = Number.isFinite(row.nativeVerificationRatio) ? ` · ${formatSpeed(row.nativeVerificationRatio)} A/B` : "";
+  return `<span class="claim-pill claim-ready">verified</span><span class="subtle"> ${escapeHtml(row.nativeVerification)}${escapeHtml(ratio)}</span>`;
+}
+
+function languageTargetSummary(targetRow) {
+  const runtimeDetail = targetRow.runtimes.length === 0
+    ? "native"
+    : `wasm · ${targetRow.runtimes.join(", ")}`;
+  const implementationLabel = targetRow.implementationRows.length === 1 ? "implementation" : "implementations";
+  const revisionClass = targetRow.commits.length === 1 ? "summary-revision-single" : "summary-revision-mixed";
+  return `
+    <section class="language-target-summary" data-target="${escapeHtml(targetRow.target)}">
+      <div class="language-target-head">
+        <div>
+          <h3>${escapeHtml(targetRow.target)}</h3>
+          <p>${escapeHtml(runtimeDetail)} · exact target · ${formatInteger(targetRow.implementationRows.length)} ${implementationLabel}</p>
+          <p>Measured ${formatTime(targetRow.minTimestamp)} to ${formatTime(targetRow.maxTimestamp)} · commits ${targetRow.commits.map((commit) => `<code>${escapeHtml(commit)}</code>`).join(", ")}</p>
+        </div>
+        <div class="summary-statuses">
+          <span class="summary-pill ${targetRow.complete ? "summary-complete" : "summary-partial"}">${escapeHtml(targetRow.status)}</span>
+          <span class="summary-pill ${revisionClass}">${escapeHtml(targetRow.revisionStatus)}</span>
+        </div>
+      </div>
+      <div class="ranked-headline">
+        <div class="rank-axis-caption metric-caption" data-relative="geometric mean speed vs rustia · higher is faster" data-absolute="geometric mean ns/unit · lower is faster">geometric mean speed vs rustia · higher is faster</div>
+        <div class="ranked-bars" role="list" aria-label="Best-first implementation ranking for ${escapeHtml(targetRow.target)}">
+          ${targetRow.implementationRows.map((row) => languageRankRow(row, targetRow)).join("")}
+        </div>
+      </div>
+      <div class="heatmap-detail">
+        <div class="heatmap-head">
+          <strong>Workload detail</strong>
+          <span class="metric-caption" data-relative="speed vs rustia · higher is faster" data-absolute="minimum ns/unit · lower is faster">speed vs rustia · higher is faster</span>
+        </div>
+        ${languageHeatmap(targetRow)}
+        <div class="heat-legend metric-caption" data-relative="Color: red below 0.75× · neutral near rustia · stronger green above 1.25×" data-absolute="Color: strongest for the fastest implementation in each workload">Color: red below 0.75× · neutral near rustia · stronger green above 1.25×</div>
+      </div>
+    </section>
+  `;
+}
+
+function languageRankRow(row, targetRow) {
+  const rank = row.rank == null ? "–" : formatInteger(row.rank);
+  const width = rankBarWidth(row, targetRow.implementationRows);
+  const wins = row.bestCount == null ? "n/a" : `${formatInteger(row.bestCount)} wins`;
+  const relative = formatSpeed(row.geoSpeed);
+  const absolute = row.geoTime == null ? "n/a" : `${formatNumber(row.geoTime)} ns`;
+  return `
+    <div class="language-rank-row" role="listitem" data-language="${escapeHtml(row.dialect)}" data-implementation="${escapeHtml(row.engine)}">
+      <span class="rank-number">${rank}</span>
+      ${implementationLanguage(row.engine, row.language, row.mode)}
+      <div class="rank-track" aria-hidden="true"><span class="rank-fill metric-bar" data-relative-width="${width.toFixed(3)}" data-absolute-width="${width.toFixed(3)}" style="width:${width.toFixed(3)}%"></span></div>
+      <strong class="rank-value metric-value" data-relative="${escapeHtml(relative)}" data-absolute="${escapeHtml(absolute)}">${escapeHtml(relative)}</strong>
+      <span class="rank-meta">${escapeHtml(wins)} · ${formatInteger(row.coverage)}/${formatInteger(REQUIRED_COMMON_WORKLOADS.length)}</span>
+    </div>
+  `;
+}
+
+function rankBarWidth(row, rows) {
+  if (!Number.isFinite(row.geoTime) || row.geoTime <= 0) return 0;
+  const values = rows.map((candidate) => candidate.geoTime).filter((value) => Number.isFinite(value) && value > 0);
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  if (low === high) return 100;
+  return 14 + ((Math.log(high) - Math.log(row.geoTime)) / (Math.log(high) - Math.log(low))) * 86;
+}
+
+function implementationLanguage(engine, language, mode = null) {
+  if (mode == null) {
+    return `<span class="implementation-language"><strong>${escapeHtml(implementationLabel(engine))}</strong><span>${escapeHtml(language)}</span></span>`;
+  }
+  const modeLabels = {
+    interpreter: "Interpreter",
+    jit: "JIT",
+    native: "Native",
+    "wasm-runtime": "Wasm runtime",
+  };
+  return `<span class="implementation-language comparison-label"><strong>${escapeHtml(implementationLabel(engine))}</strong><span>${escapeHtml(`${language} / ${modeLabels[mode] ?? mode}`)}</span></span>`;
+}
+
+function languageHeatmap(targetRow) {
+  const fastest = new Map(REQUIRED_COMMON_WORKLOADS.map((workload) => {
+    const values = targetRow.implementationRows
+      .map((row) => row.measuredRows.find((measurement) => measurement.workload === workload)?.ns_per_unit_min)
+      .filter((value) => Number.isFinite(value) && value > 0);
+    return [workload, values.length === 0 ? null : Math.min(...values)];
+  }));
+  return `
+    <div class="table-wrap">
+      <table class="language-heatmap">
+        <thead><tr><th>Implementation · language</th>${REQUIRED_COMMON_WORKLOADS.map((workload) => `<th>${escapeHtml(workloadLabel(workload))}</th>`).join("")}</tr></thead>
+        <tbody>
+          ${targetRow.implementationRows.map((row) => `
+            <tr data-language="${escapeHtml(row.dialect)}" data-implementation="${escapeHtml(row.engine)}">
+              <th>${implementationLanguage(row.engine, row.language, row.mode)}</th>
+              ${REQUIRED_COMMON_WORKLOADS.map((workload) => heatmapCell(row, workload, fastest.get(workload))).join("")}
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function heatmapCell(row, workload, fastest) {
+  const measurement = row.measuredRows.find((candidate) => candidate.workload === workload);
+  if (!measurement) return '<td class="heat-cell heat-missing">–</td>';
+  const relativeClass = relativeHeatClass(measurement.speed_vs_rustia);
+  const absoluteScore = fastest / measurement.ns_per_unit_min;
+  const absoluteClass = absoluteHeatClass(absoluteScore);
+  const baselineClass = row.engine === "rustia" ? " heat-baseline" : "";
+  return `<td class="heat-cell ${relativeClass}${baselineClass}" data-heat-relative="${relativeClass}" data-heat-absolute="${absoluteClass}" data-relative="${escapeHtml(formatSpeed(measurement.speed_vs_rustia))}" data-absolute="${escapeHtml(`${formatNumber(measurement.ns_per_unit_min)} ns`)}">${escapeHtml(formatSpeed(measurement.speed_vs_rustia))}</td>`;
+}
+
+function relativeHeatClass(value) {
+  if (value >= 25) return "heat-5";
+  if (value >= 10) return "heat-4";
+  if (value >= 3) return "heat-3";
+  if (value >= 1.25) return "heat-2";
+  if (value >= 0.75) return "heat-1";
+  return "heat-0";
+}
+
+function absoluteHeatClass(value) {
+  if (value >= 0.9) return "heat-5";
+  if (value >= 0.5) return "heat-4";
+  if (value >= 0.25) return "heat-3";
+  if (value >= 0.1) return "heat-2";
+  if (value >= 0.04) return "heat-1";
+  return "heat-0";
 }
 
 function workloadSection(target, workload, rows) {
@@ -472,8 +1638,8 @@ function resultBar(row, fastest, maxSpeed) {
   return `
     <article class="result-row">
       <div class="result-label">
-        <strong>${escapeHtml(row.engine)}</strong>
-        <span>${escapeHtml(row.dialect)} · ${escapeHtml(row.commit)} · ${formatTime(row.timestamp_unix)}</span>
+        <strong>${escapeHtml(implementationLabel(row.engine))}</strong>
+        <span>${escapeHtml(languageLabel(row.dialect))} · ${escapeHtml(row.commit)} · ${formatTime(row.timestamp_unix)}</span>
       </div>
       <div class="result-values">
         <span>${formatNumber(row.ns_per_unit_min)} ns min</span>
@@ -518,20 +1684,21 @@ function wasmTargetRows(data) {
         ns_per_unit_min: row.ns_per_unit_min,
         ns_per_unit_median: row.ns_per_unit_median,
         commit: run.commit,
+        timestamp_unix: run.timestamp_unix,
       });
     }
   }
   const rustiaBaselines = new Map(
     rows
       .filter((row) => row.adapter === "rustia")
-      .map((row) => [`${row.runtime}\0${row.workload}`, row.ns_per_unit_min]),
+      .map((row) => [`${row.target}\0${row.runtime}\0${row.workload}`, row.ns_per_unit_min]),
   );
   return rows
     .map((row) => ({
       ...row,
-      speed_vs_rustia: rustiaBaselines.get(`${row.runtime}\0${row.workload}`) == null
+      speed_vs_rustia: rustiaBaselines.get(`${row.target}\0${row.runtime}\0${row.workload}`) == null
         ? null
-        : rustiaBaselines.get(`${row.runtime}\0${row.workload}`) / row.ns_per_unit_min,
+        : rustiaBaselines.get(`${row.target}\0${row.runtime}\0${row.workload}`) / row.ns_per_unit_min,
     }))
     .sort((left, right) =>
       left.target.localeCompare(right.target) ||
@@ -605,7 +1772,7 @@ function wasmTargetSection(data) {
             ${rows.map((row) => `
               <tr>
                 <td>${targetRuntimeLabel(row)}</td>
-                <td><strong>${escapeHtml(row.adapter)}</strong> <span class="subtle">${escapeHtml(row.dialect)}</span></td>
+                <td><strong>${escapeHtml(implementationLabel(row.adapter))}</strong> <span class="subtle">${escapeHtml(languageLabel(row.dialect))}</span></td>
                 <td>${escapeHtml(row.workload)}</td>
                 <td>${formatNumber(row.ns_per_unit_min)}</td>
                 <td>${formatNumber(row.ns_per_unit_median)}</td>
@@ -666,20 +1833,19 @@ function targetRuntimeLabel(row) {
   return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.runtime)}</span></span>`;
 }
 
-function render(data, wasmResults, wasmDispatchResults) {
+function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts, historyBackfills = []) {
   const wasmRows = wasmTargetRows(wasmResults);
   const summary = summarize(data, wasmRows);
+  const history = summarizeHistory(historyRecords);
+  const claimRows = summarizeClaimRows(summary.rows);
   const dispatchRows = wasmDispatchRows(wasmDispatchResults);
-  const latestCommit = summary.rows
-    .slice()
-    .sort((left, right) => right.timestamp_unix - left.timestamp_unix || right.commit.localeCompare(left.commit))[0].commit;
 
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>rustia Current Benchmark Results</title>
+  <title>rustia Benchmark Results and History</title>
   <style>
     :root {
       color-scheme: light;
@@ -713,14 +1879,10 @@ function render(data, wasmResults, wasmDispatchResults) {
     h1, h2, h3, p { margin-top: 0; }
 
     .hero {
-      display: grid;
-      grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.8fr);
-      gap: 18px;
       margin-bottom: 18px;
     }
 
     .hero-panel,
-    .metric,
     .panel,
     .target {
       background: var(--panel);
@@ -772,25 +1934,10 @@ function render(data, wasmResults, wasmDispatchResults) {
       color: var(--text);
     }
 
-    .metrics {
-      display: grid;
-      gap: 12px;
-    }
-
-    .metric {
-      padding: 16px;
-    }
-
-    .metric strong {
-      display: block;
-      margin-bottom: 2px;
-      font-size: 25px;
-      line-height: 1.1;
-    }
-
-    .metric span,
     .section-head p,
     .target-head p,
+    .history-target-head p,
+    .history-workload-head p,
     .workload-head p,
     .result-label span {
       color: var(--muted);
@@ -803,18 +1950,427 @@ function render(data, wasmResults, wasmDispatchResults) {
       font-weight: 600;
     }
 
-    .engine-target {
-      display: inline-flex;
-      align-items: baseline;
+    .language-targets {
+      display: grid;
+    }
+
+    .language-target-summary {
+      border-bottom: 1px solid var(--line);
+    }
+
+    .language-target-summary:last-child {
+      border-bottom: 0;
+    }
+
+    .language-target-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .language-target-head h3 {
+      margin-bottom: 2px;
+      font-size: 19px;
+    }
+
+    .language-target-head p {
+      margin-bottom: 2px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .language-target-head p:last-child {
+      margin-bottom: 0;
+    }
+
+    .summary-statuses {
+      display: flex;
       flex-wrap: wrap;
+      justify-content: flex-end;
       gap: 6px;
+    }
+
+    .summary-pill {
+      display: inline-flex;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .summary-complete,
+    .summary-revision-single {
+      background: #dff7ed;
+      color: #047857;
+    }
+
+    .summary-partial,
+    .summary-revision-mixed {
+      background: #fff1d6;
+      color: #92400e;
+    }
+
+    .metric-toggle {
+      display: inline-flex;
+      flex: 0 0 auto;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+    }
+
+    .metric-toggle button {
+      padding: 6px 11px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .metric-toggle button[aria-pressed="true"] {
+      background: var(--text);
+      color: var(--panel);
+    }
+
+    .comparison-controls {
+      display: flex;
+      flex: 0 0 auto;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .ranked-headline,
+    .heatmap-detail {
+      padding: 18px 20px;
+    }
+
+    .heatmap-detail {
+      border-top: 1px solid var(--line);
+      background: var(--panel-soft);
+    }
+
+    .rank-axis-caption,
+    .heatmap-head,
+    .heat-legend {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .rank-axis-caption {
+      margin: 0 0 8px min(290px, 35%);
+      text-align: right;
+    }
+
+    .ranked-bars {
+      display: grid;
+      gap: 4px;
+    }
+
+    .language-rank-row {
+      display: grid;
+      grid-template-columns: 28px minmax(180px, 240px) minmax(140px, 1fr) 90px 96px;
+      gap: 12px;
+      align-items: center;
+      min-height: 38px;
+    }
+
+    .rank-number,
+    .rank-meta,
+    .implementation-language span,
+    .metric-caption {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .rank-number,
+    .rank-value,
+    .heat-cell {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .rank-track {
+      height: 11px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e2e8ef;
+    }
+
+    .rank-fill {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width 180ms ease;
+    }
+
+    .rank-value {
+      text-align: right;
+    }
+
+    .rank-meta {
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .implementation-language {
+      display: grid;
+      gap: 1px;
       min-width: 0;
     }
 
-    .engine-target span {
+    .implementation-language.comparison-label {
+      display: flex;
+      gap: 0.35em;
+      align-items: baseline;
+      white-space: nowrap;
+    }
+
+    .implementation-language strong,
+    .implementation-language span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .mode-badge {
+      display: inline-flex;
+      width: fit-content;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: #334155;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .mode-jit,
+    .mode-native,
+    .mode-wasm-runtime {
+      background: #ffedd5;
+      color: #9a3412;
+    }
+
+    .heatmap-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+
+    .heatmap-head strong {
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .language-heatmap {
+      min-width: 790px;
+      table-layout: fixed;
+      background: var(--panel);
+    }
+
+    .language-heatmap th:first-child {
+      width: 190px;
+    }
+
+    .language-heatmap th:not(:first-child),
+    .language-heatmap td {
+      text-align: center;
+    }
+
+    .language-heatmap tbody th {
+      color: var(--text);
+      font-size: 14px;
+      text-transform: none;
+    }
+
+    .heat-cell {
+      transition: background 180ms ease;
+    }
+
+    .heat-0 { background: #fee2e2; }
+    .heat-1 { background: #f1f5f9; }
+    .heat-2 { background: #dff7ed; }
+    .heat-3 { background: #b7ead7; }
+    .heat-4 { background: #86d8bf; }
+    .heat-5 { background: #58c3a3; }
+
+    .heat-baseline {
+      box-shadow: inset 0 0 0 1px var(--text);
+    }
+
+    .heat-missing {
+      color: var(--muted);
+      background: var(--panel-soft);
+    }
+
+    .heat-legend {
+      margin-top: 8px;
+    }
+
+    .cohort-chart {
+      padding: 20px;
+    }
+
+    .history-answer {
+      margin: 0;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+    }
+
+    .history-answer strong {
+      color: var(--text);
+    }
+
+    .history-era + .history-era {
+      border-top: 1px solid var(--line);
+    }
+
+    .history-era-head {
+      padding: 16px 20px;
+      background: var(--panel-soft);
+    }
+
+    .history-era-head h3 {
+      margin-bottom: 2px;
+      font-size: 18px;
+    }
+
+    .history-era-head p {
+      margin: 0;
       color: var(--muted);
       font-size: 13px;
+    }
+
+    .cohort-chart-heading {
+      margin: 0 0 12px 170px;
+      color: var(--muted);
+      font-size: 12px;
       font-weight: 700;
+    }
+
+    .cohort-axis {
+      position: relative;
+      height: 28px;
+      margin-left: 170px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .cohort-axis::after,
+    .cohort-track::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: var(--zero);
+      width: 1px;
+      background: var(--text);
+      opacity: .6;
+    }
+
+    .cohort-axis span {
+      position: absolute;
+      bottom: 5px;
+      transform: translateX(-50%);
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .cohort-plot-row {
+      display: grid;
+      grid-template-columns: 158px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      min-height: 54px;
+    }
+
+    .cohort-plot-name strong,
+    .cohort-plot-name span {
+      display: block;
+    }
+
+    .cohort-plot-name span,
+    .cohort-point-label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .cohort-track {
+      position: relative;
+      height: 28px;
+      background: var(--panel-soft);
+    }
+
+    .cohort-interval {
+      position: absolute;
+      top: 13px;
+      height: 3px;
+      background: var(--accent-2);
+    }
+
+    .cohort-point {
+      position: absolute;
+      top: 9px;
+      width: 11px;
+      height: 11px;
+      transform: translateX(-50%);
+      border: 2px solid var(--panel);
+      border-radius: 999px;
+      background: var(--accent-2);
+    }
+
+    .cohort-point-label {
+      position: absolute;
+      top: -2px;
+      white-space: nowrap;
+    }
+
+    .cohort-label-left { transform: translateX(calc(-100% - 9px)); }
+    .cohort-label-right { transform: translateX(9px); }
+
+    .cohort-table {
+      min-width: 760px;
+    }
+
+    .cohort-table-wrap {
+      border-top: 1px solid var(--line);
+    }
+
+    .cohort-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 700;
+    }
+
+    .cohort-status::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .cohort-note {
+      margin: 0;
+      padding: 12px 20px 16px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
     }
 
     .target-runtime {
@@ -833,6 +2389,50 @@ function render(data, wasmResults, wasmDispatchResults) {
       color: var(--muted);
       font-size: 12px;
       font-weight: 600;
+    }
+
+    .claim-posture {
+      display: grid;
+      gap: 4px;
+      min-width: 220px;
+      white-space: normal;
+    }
+
+    .claim-posture small {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
+    .claim-pill {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .claim-ready {
+      background: #dff7ed;
+      color: #047857;
+    }
+
+    .claim-blocked {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .swatch {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      margin-right: 8px;
+      border-radius: 999px;
+      background: currentColor;
+      vertical-align: -1px;
     }
 
     .nav {
@@ -866,6 +2466,8 @@ function render(data, wasmResults, wasmDispatchResults) {
 
     .section-head,
     .target-head,
+    .history-target-head,
+    .history-workload-head,
     .workload-head {
       display: flex;
       justify-content: space-between;
@@ -878,9 +2480,107 @@ function render(data, wasmResults, wasmDispatchResults) {
 
     .section-head h2,
     .target-head h2,
+    .history-target-head h3,
+    .history-workload-head h4,
     .workload-head h3 {
       margin-bottom: 2px;
       font-size: 22px;
+    }
+
+    .history-body {
+      display: grid;
+      min-width: 0;
+    }
+
+    .history-target {
+      min-width: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .history-target:last-child {
+      border-bottom: 0;
+    }
+
+    .history-workload {
+      min-width: 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .history-workload-head {
+      background: #fff;
+    }
+
+    .history-workload-head h4 {
+      font-size: 18px;
+    }
+
+    .history-chart {
+      padding: 16px 20px 8px;
+    }
+
+    .history-chart svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .history-chart-bg {
+      fill: #fff;
+    }
+
+    .history-axis,
+    .history-grid-line {
+      stroke: var(--line);
+      stroke-width: 1;
+    }
+
+    .history-grid-line {
+      stroke: #edf1f5;
+    }
+
+    .history-axis-label {
+      fill: var(--muted);
+      font-size: 11px;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .history-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      padding-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .history-table table {
+      min-width: 860px;
+    }
+
+    .history-engine {
+      display: inline-flex;
+      align-items: center;
+      gap: 0;
+    }
+
+    .trend {
+      font-weight: 800;
+    }
+
+    .trend-good {
+      color: #047857;
+    }
+
+    .trend-bad {
+      color: #b91c1c;
+    }
+
+    .trend-flat {
+      color: var(--muted);
     }
 
     .table-wrap {
@@ -1022,6 +2722,55 @@ function render(data, wasmResults, wasmDispatchResults) {
         grid-template-columns: 1fr;
         gap: 8px;
       }
+
+      .language-target-head {
+        flex-direction: column;
+      }
+
+      #linux-comparison > .section-head {
+        flex-direction: column;
+      }
+
+      .comparison-controls {
+        justify-content: flex-start;
+      }
+
+      .language-rank-row {
+        grid-template-columns: 24px minmax(120px, 1fr) 68px;
+        gap: 8px;
+        padding: 4px 0;
+      }
+
+      .language-rank-row .rank-track {
+        grid-column: 2 / 4;
+        grid-row: 2;
+      }
+
+      .rank-meta {
+        display: none;
+      }
+
+      .rank-axis-caption {
+        margin-left: 0;
+      }
+
+      .cohort-axis {
+        margin-left: 0;
+      }
+
+      .cohort-chart-heading {
+        margin-left: 0;
+      }
+
+      .cohort-plot-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
+        margin-top: 12px;
+      }
+
+      .summary-statuses {
+        justify-content: flex-start;
+      }
     }
   </style>
 </head>
@@ -1030,38 +2779,84 @@ function render(data, wasmResults, wasmDispatchResults) {
     <section class="hero">
       <div class="hero-panel">
         <p class="eyebrow">script-bench current snapshot</p>
-        <h1>rustia Current Benchmark Results</h1>
-        <p class="lead">Static HTML generated from the committed current benchmark JSON. Bars are rough relative comparisons: lower time bars compare each row to the fastest engine in that workload, while speed bars use the harness speed-vs-rustia ratio.</p>
+        <h1>rustia Benchmark Results and History</h1>
+        <p class="lead">Committed Linux results with a best-first language headline, workload-level detail, and protocol-aware benchmark history.</p>
         <p class="source-line">
           <span>Source <code>${escapeHtml(relative(sourcePath))}</code></span>
-          <span>History <code>${escapeHtml(data.metadata.history)}</code></span>
+          <span>History <code>${escapeHtml(relative(historyPath))}</code></span>
           <span>Generated by <code>${escapeHtml(relative(__filename))}</code></span>
         </p>
-      </div>
-      <div class="metrics">
-        ${metric(formatInteger(data.metadata.row_count), "current result rows")}
-        ${metric(formatInteger(data.metadata.engines.length), "engines")}
-        ${metric(formatInteger(data.metadata.workloads.length), "workloads")}
-        ${metric(formatInteger(wasmRows.length), "wasm target rows")}
-        ${metric(formatInteger(dispatchRows.length), "wasm dispatch rows")}
-        ${metric(escapeHtml(latestCommit), "latest commit in snapshot")}
-        ${metric(`${formatTime(summary.minTimestamp)} to ${formatTime(summary.maxTimestamp)}`, "measurement window")}
       </div>
     </section>
 
     <nav class="nav" aria-label="Targets">
-      <a href="#wasm-target">Wasm Target</a>
-      <a href="#wasm-dispatch">Wasm Dispatch</a>
-      ${summary.targetRows.map((group) => `<a href="#${escapeHtml(slug(group.target))}">${escapeHtml(group.target)}</a>`).join("")}
+      <a href="#linux-comparison">Linux Comparison</a>
+      <a href="#cold-start">Cold Start</a>
+      <a href="#claim-gate">Claim Gate</a>
+      <a href="#history">History</a>
     </nav>
 
-    ${engineSummaryTable(summary.engineRows)}
-    ${wasmTargetSection(wasmResults)}
-    ${wasmDispatchSection(wasmDispatchResults)}
-    ${summary.targetRows.map(targetSection).join("")}
+    ${linuxComparisonSection(summary.linuxComparisonViews)}
+    ${coldStartSection(summary.coldStartRows)}
+    ${claimGateSection(claimRows)}
+      ${historySection(history, historyBackfills, data.rows)}
 
-    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(data.metadata.history)}</code> (${escapeHtml(data.metadata.history_schema)}). The dashboard is deterministic and contains no external assets or runtime JavaScript. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
+  <script>
+    (() => {
+      const heatClasses = ["heat-0", "heat-1", "heat-2", "heat-3", "heat-4", "heat-5"];
+      const setMetric = (root, metric) => {
+        root.dataset.metric = metric;
+        root.querySelectorAll("[data-metric]").forEach((button) => {
+          button.setAttribute("aria-pressed", String(button.dataset.metric === metric));
+        });
+        root.querySelectorAll(".metric-value, .metric-caption").forEach((element) => {
+          element.textContent = element.dataset[metric];
+        });
+        root.querySelectorAll(".metric-bar").forEach((bar) => {
+          bar.style.width = bar.dataset[metric + "Width"] + "%";
+        });
+        root.querySelectorAll(".heat-cell[data-heat-relative]").forEach((cell) => {
+          cell.textContent = cell.dataset[metric];
+          cell.classList.remove(...heatClasses);
+          cell.classList.add(cell.dataset[metric === "relative" ? "heatRelative" : "heatAbsolute"]);
+        });
+      };
+      document.querySelectorAll(".metric-panel").forEach((root) => {
+        root.querySelectorAll("[data-metric]").forEach((button) => {
+          button.addEventListener("click", () => setMetric(root, button.dataset.metric));
+        });
+        setMetric(root, "relative");
+      });
+      document.querySelectorAll("[data-mode-filter]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const root = button.closest(".metric-panel");
+          const mode = button.dataset.modeFilter;
+          root.querySelectorAll("[data-mode-filter]").forEach((candidate) => {
+            candidate.setAttribute("aria-pressed", String(candidate.dataset.modeFilter === mode));
+          });
+          root.querySelectorAll("[data-mode-view]").forEach((view) => {
+            view.hidden = view.dataset.modeView !== mode;
+          });
+        });
+      });
+      document.querySelectorAll(".history-axis-panel").forEach((root) => {
+        const setHistoryAxis = (axis) => {
+          root.querySelectorAll("[data-history-axis]").forEach((button) => {
+            button.setAttribute("aria-pressed", String(button.dataset.historyAxis === axis));
+          });
+          root.querySelectorAll("[data-history-axis-view]").forEach((view) => {
+            view.hidden = view.dataset.historyAxisView !== axis;
+          });
+        };
+        root.querySelectorAll("[data-history-axis]").forEach((button) => {
+          button.addEventListener("click", () => setHistoryAxis(button.dataset.historyAxis));
+        });
+        setHistoryAxis("date");
+      });
+    })();
+  </script>
 </body>
 </html>
 `;
@@ -1069,9 +2864,12 @@ function render(data, wasmResults, wasmDispatchResults) {
 
 function main() {
   const data = readData();
+  const historyRecords = readHistory();
+  const historyBackfills = readHistoryBackfills();
   const wasmResults = readWasmResults();
   const wasmDispatchResults = readWasmDispatchResults();
-  const html = render(data, wasmResults, wasmDispatchResults).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
+  const cohorts = readCohortEvidence();
+  const html = render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts, historyBackfills).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
   const output = `${html}\n`;
   if (checkOnly) {
     let current;
@@ -1086,8 +2884,22 @@ function main() {
     console.log(`${relative(outputPath)} is current`);
   } else {
     fs.writeFileSync(outputPath, output);
-    console.log(`wrote ${relative(outputPath)} from ${relative(sourcePath)}`);
+    console.log(`wrote ${relative(outputPath)} from ${relative(sourcePath)} and ${relative(historyPath)}`);
   }
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  REQUIRED_COMMON_WORKLOADS,
+  bestAvailableRows,
+  coldStartSection,
+  implementationLabel,
+  languageLabel,
+  linuxComparisonSection,
+  languagesByTargetSection,
+  summarizeLanguageTargets,
+  wasmTargetRows,
+};

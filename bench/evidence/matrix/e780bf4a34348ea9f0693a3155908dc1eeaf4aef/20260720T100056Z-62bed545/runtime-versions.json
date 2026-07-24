@@ -1,0 +1,27 @@
+{
+  "node": {
+    "configured_version": "22.23.1",
+    "archive_sha256": "9749e988f437343b7fa832c69ded82a312e41a03116d766797ac14f6f9eee578",
+    "command": "/usr/local/bin/node",
+    "reported_version": "v22.23.1"
+  },
+  "deno": {
+    "configured_version": "2.8.1",
+    "archive_sha256": "2d7bb6195226ac832e0bf7109a115f0af65ee69ac797a4bbde5b27a06cc242d9",
+    "command": "/usr/local/bin/deno",
+    "reported_version": "deno 2.8.1 (stable, release, x86_64-unknown-linux-gnu)"
+  },
+  "bun": {
+    "configured_version": "1.3.14",
+    "archive_sha256": "951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f",
+    "command": "/usr/local/bin/bun",
+    "reported_version": "1.3.14"
+  },
+  "spidermonkey": {
+    "configured_version": "Firefox 152.0.6",
+    "archive_sha256": "1b3d1d808e75b1019a3ba3985e5c6e42fe1fe3f6d37c5e275fcdd740005b824c",
+    "command": "/usr/local/bin/js",
+    "reported_version": "JavaScript-C152.0.6",
+    "library_path": "/opt/rustia/runtimes/spidermonkey"
+  }
+}

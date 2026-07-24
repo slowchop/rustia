@@ -68,14 +68,14 @@ both fixed by canonicalization. **T1 is solved without a fixed-point primitive i
   library-only / not wired to operators — a deferrable opt-in, not a compat requirement. *Evidence: Spike C
   bit-identity; Luau arith opcodes fast-path on f64+vector only; grabby's script-visible ints are <2⁵³
   (exact in f64).*
-- **Send vs Sync — RESOLVED: only `Send` is required.** grabby never shares a `&VM` across threads (sim App
+- **Thread model — UPDATED: live rustia VMs are thread-affine safe Rust.** grabby never shares a `&VM` across threads (sim App
   is `!Send` Bevy `NonSend`, pinned per-tick; console VM is `NonSend`; real threads run *separate* worlds via
   mpsc). `Sync` only for shared **immutable** artifacts (bytecode, LUTs, interner) behind `Arc`. *This
   dissolves the gc-arena objection — you move whole arenas, never share `Gc` across threads.*
 - **gc-arena — CONDITIONALLY VIABLE, now the leading GC direction.** Adopt its architecture (incremental
   tracing + mutate-XOR-collect, which *forces* the stackless steppable VM we need); collect at deterministic
   fuel boundaries; keep per-agent AI/rollback state OUT of the GC heap in host columnar arrays. *Evidence:
-  Send-only requirement removes the blocker; Spike D's ~20% Arc tax favors tracing over Rc/Arc; Luau has **no
+  safe-only thread-affine VM policy removes the unsafe Send marker; Spike D's ~20% Arc tax favors tracing over Rc/Arc; Luau has **no
   `__gc` finalizers** — one fewer determinism hazard.* **Gated on a 1-day micro-spike** (verify `Arena: Send`
   + serde bridge + steppable ergonomics under the branded `'gc` lifetime).
 - **Embed Luau-C++-to-wasm — KILLED, validates from-scratch.** Reproduced locally: mlua+Luau builds/runs
@@ -104,7 +104,7 @@ both fixed by canonicalization. **T1 is solved without a fixed-point primitive i
 | 1 | **Execution/dispatch** | One portable big-`match`→`br_table` core **everywhere** + superinstruction fusion. (Spike B parity; Spike D's 29% decode cost.) JIT = native-only stretch. |
 | 2 | **Value representation** | NaN-boxed **or** compact tagged union with **Copy scalars + traced `Gc` heap pointer** — no Arc on the hot path. (Spike D's 20% Arc tax.) *Empirical native-vs-wasm comparison in the skeleton spike.* |
 | 3 | **Number/determinism** | f64 + pure-Rust libm + NaN/`-0.0` canon + no-FMA; `buffer` as exact-int channel. (Spike C.) |
-| 4 | **GC/memory** | Tracing GC, collect at deterministic fuel boundaries (gc-arena architecture); AI state host-side columnar. (Spike D + Send-only.) Gated on gc-arena micro-spike. |
+| 4 | **GC/memory** | Tracing GC, collect at deterministic fuel boundaries (gc-arena architecture); AI state host-side columnar. Live VMs stay thread-affine safe Rust. Gated on gc-arena micro-spike. |
 | 5 | **WASM/JIT tiering** | Interpreter-primary one-core everywhere; native-only JIT stretch; AOT-script→wasm a research option; embed-Luau killed. |
 | 6 | **Parser/frontend** | Own hand-written recursive-descent → rustia's own bytecode (enables superinstructions); `full_moon` as a differential **compat oracle**. |
 | 7 | **Steppability/fuel** | Stackless trampoline VM + **per-instruction** deterministic fuel + recursion cap; coroutines as resumable contexts. |

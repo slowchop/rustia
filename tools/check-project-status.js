@@ -184,13 +184,17 @@ function checkBenchmark(progress, readme, current) {
   }
   const implementedEngines = inventory.engines
     .filter((engine) => engine.implemented)
-    .map((engine) => engine.id);
-  const currentEngines = currentResults.metadata.engines;
+    .map((engine) => engine.mode_family || engine.id);
+  const currentEngines = currentResults.rows.map((row) => row.mode_family || row.engine);
 
   assertEqual(facts.requested, facts.names.length, "requested benchmark adapter count");
   assertEqual(facts.present, facts.names.length, "present benchmark adapter count");
-  assertArraySetEqual(implementedEngines, facts.names, "implemented benchmark adapters");
-  assertArraySetEqual(currentEngines, facts.names, "current-result benchmark adapters");
+  assertArraySetEqual(new Set(implementedEngines), facts.names, "implemented benchmark adapter families");
+  assertArraySetEqual(new Set(currentEngines), facts.names, "current-result benchmark adapter families");
+  const jitSlot = inventory.engines.find((engine) => engine.id === "mlua-luau-jit");
+  if (!jitSlot || jitSlot.mode_family !== "mlua-luau" || jitSlot.execution_mode !== "jit") {
+    fail("benchmark inventory must expose mlua-luau-jit as the mlua-luau adapter family's JIT mode");
+  }
   assertEqual(inventory.workloads.length, workloadFacts.present, "benchmark inventory workload count");
   assertEqual(
     inventory.workloads.filter((workload) => workload.default).length,
@@ -207,10 +211,28 @@ function checkBenchmark(progress, readme, current) {
   const currentWorkloadCount = currentResults.metadata.workloads.length;
   assertEqual(currentWorkloadCount, workloadFacts.current_results, "current-results workload count");
   assertEqual(currentResults.metadata.row_count, currentResults.rows.length, "current-results row count");
+  const resultKeys = currentResults.rows.map(
+    (row) => `${row.target}\0${row.engine}\0${row.workload}`,
+  );
   assertEqual(
-    currentResults.rows.length,
-    currentEngines.length * currentWorkloadCount * currentResults.metadata.targets.length,
-    "current-results target/engine/workload coverage",
+    new Set(resultKeys).size,
+    resultKeys.length,
+    "current-results unique target/engine/workload rows",
+  );
+  assertArraySetEqual(
+    new Set(currentResults.rows.map((row) => row.target)),
+    currentResults.metadata.targets,
+    "current-results target metadata coverage",
+  );
+  assertArraySetEqual(
+    new Set(currentResults.rows.map((row) => row.engine)),
+    currentResults.metadata.engines,
+    "current-results engine metadata coverage",
+  );
+  assertArraySetEqual(
+    new Set(currentResults.rows.map((row) => row.workload)),
+    currentResults.metadata.workloads,
+    "current-results workload metadata coverage",
   );
 
   requireIncludes(

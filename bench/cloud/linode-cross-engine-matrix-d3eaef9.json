@@ -1,0 +1,96 @@
+{
+  "schema": "rustia.linode-fixed-benchmark.v2",
+  "provider": {
+    "region": "ap-southeast",
+    "image": "linode/ubuntu24.04",
+    "size": {
+      "id": "g6-dedicated-4",
+      "description": "Dedicated 8GB",
+      "class": "dedicated",
+      "vcpus": 4,
+      "memory_mib": 8192,
+      "disk_gib": 160,
+      "max_hourly_price_usd": 0.108
+    },
+    "max_runtime_minutes": 55
+  },
+  "source": {
+    "benchmark_commit": "d3eaef9ee6459ee6c3133e95064323ca62f645d4",
+    "expected_sha256": {
+      "bench_manifest": "8b74878fadaf3f0548d4a565413579b1b4b0524270b75cf7ebbba75d54fafeb5",
+      "native_harness": "c3e3f283d74cbe89526a71bebc9d86ba9a8617895726c82062dc5f25b47a8087",
+      "cargo_lock": "f7f511013247d0eb2036380ed428f1e17c81059bdfd647f9183af5b9839d2414",
+      "toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
+      "wasm_gate": "d51e8b5313f5f70428c569b198143fbc1cf001670fdcfe25a65209fbe8fc3846",
+      "wasm_dispatch_gate": "1dbf2a164797f910071131db9ac41ac8fb1746082c39a57a69deaa06a6015495",
+      "wasm_adapter_manifest": "e281bc4a356751ac81c23ab300eb7e2af2019cf2bfdc0bf10ed198b1adbdb0d5",
+      "wasm_measure_module": "a2811a6f607ac820799a4fd877e50eea54542a6903aa9d776f91dbec3a942a04",
+      "wasm_dispatch_measure": "e995d836d7bda397a4a878c6496286068e16ba6f9dd2ba0eb85440bfd886119f",
+      "history_before": "9f8bd3c2c82193cdd47497d06e50087a867705e5249ba43f616451876584422e"
+    }
+  },
+  "measurement": {
+    "protocol": "cross_engine_matrix_v3",
+    "native_target": "linux-x86_64",
+    "native_engines": [
+      "rustia",
+      "boa",
+      "koto",
+      "mlua-luau",
+      "rhai",
+      "roto",
+      "rquickjs",
+      "wasmi",
+      "wasmtime",
+      "mlua-lua54"
+    ],
+    "workloads": [
+      "dense_tables",
+      "sparse_tables",
+      "closures_upvalues",
+      "generic_iteration",
+      "stdlib_math_table"
+    ],
+    "native_target_ms": 120,
+    "native_repetitions": 5,
+    "wasm_runtimes": [
+      "node"
+    ],
+    "wasm_adapters": [
+      "rustia",
+      "koto",
+      "rhai"
+    ],
+    "wasm_target_ms": 80,
+    "wasm_repetitions": 5,
+    "dispatch_target_ms": 80,
+    "dispatch_repetitions": 5,
+    "runtime_artifacts": {
+      "node": {
+        "version": "22.23.1",
+        "url": "https://nodejs.org/download/release/v22.23.1/node-v22.23.1-linux-x64.tar.xz",
+        "sha256": "9749e988f437343b7fa832c69ded82a312e41a03116d766797ac14f6f9eee578",
+        "archive": "tar",
+        "binary_relative_path": "node-v22.23.1-linux-x64/bin/node"
+      }
+    }
+  },
+  "host_gate": {
+    "benchmark_cpu": 3,
+    "cooldown_seconds": 30,
+    "idle_window_seconds": 10,
+    "minimum_idle_percent": 99,
+    "maximum_load_1m": 0.1,
+    "maximum_steal_ticks": 0,
+    "maximum_timed_steal_percent": 0.1,
+    "maximum_timed_steal_ticks": 1,
+    "maximum_timed_attempts_per_group": 3,
+    "wait_timeout_seconds": 300
+  },
+  "publication": {
+    "mode": "matrix",
+    "native_rows": 50,
+    "wasm_rows": 15,
+    "dispatch_runtimes": 1
+  }
+}

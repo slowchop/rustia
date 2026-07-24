@@ -8,6 +8,7 @@ pub mod bytecode;
 pub mod error;
 pub mod extension;
 mod heap;
+mod hot_ir;
 pub mod number;
 pub mod profile;
 mod value;

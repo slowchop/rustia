@@ -1,6 +1,6 @@
 # rustia — host-bridge / effect-queue contract (grabby integration)
 
-> **Status: [CONTRACT — build against this] (2026-06-30).** The deterministic seam between rustia scripts and
+> **Status: [CONTRACT — implementation incomplete] (updated 2026-07-23).** The deterministic seam between rustia scripts and
 > grabby's (parallel, rollback) sim, agreed with the grabby parallelism agent. grabby's threading is
 > design-stage/parked, so the **envelope is stable** (grounded in grabby's existing `ControlInput`/`host_discrete`/
 > `SimId` model); only the `Effect` variant set grows. See [`CURRENT.md`](CURRENT.md) + the integration memory.
@@ -41,14 +41,25 @@ provides the **generic seam**:
    (host-bridge owns `emitter` — it knows which agent's VM is running — and counts `seq` per decision).
 3. **Host-provided typed-slot accessors** = the `SetSlot` mechanism.
 
+Current implementation boundary: capability-labelled registration helpers exist, but typed callbacks do not
+yet receive a per-VM/per-call host context. Mutable worker-local slot/effect state currently needs captured
+synchronization or interior mutability. A cheap context-rebinding seam is therefore part of completing this
+contract, alongside the decision-reset gate below.
+
 grabby's host-bridge maps rustia host-fn calls → `EffectRecord`/`Effect` and performs the `(emitter, seq)`
 commit + `SetSlot`↔columnar writeback.
 
 ## Mechanical enforcement of the cross-tick invariant
-In **`DeterministicSim`**, per-agent leaves run on a **scratch heap reset between decisions** (cheap with
-gc-arena / a per-decision arena) — so a global/upvalue **physically cannot survive** to influence a future tick;
-the ONLY cross-tick channel is `SetSlot`↔host columnar slots. The invariant holds by construction, not by
-convention. (Scenario run-once + console use are separate paths, not this hot loop.)
+**Required, not yet implemented:** in `DeterministicSim`, per-agent leaves must run on a **scratch heap reset
+between decisions** so a global/upvalue physically cannot survive to influence a future tick; the only
+cross-tick channel is `SetSlot`↔host columnar slots. The current public facade has install-generation freshness
+checks, but no decision-reset API, and the VM's object/program stores are retained until VM drop. The production
+gate is therefore an explicit reset/reuse operation with epoch-safe invalidation of every retained handle, a
+versioned definition of which RNG/fuel/GC/global state resets, and a many-decision memory-plateau test. Until
+that lands, reconstructing the VM per decision is the only mechanically safe implementation of this contract.
+(Outside an explicit reset epoch, ordinary retained function calls must keep their documented survival across
+successful hot reload; reclamation therefore also needs true host-handle roots or an ownership redesign.)
+(Scenario run-once + console use are separate paths, not this hot loop.)
 
 ## Illustrative catalog (grows on grabby's side)
 `SetNavGoal{target:FixedVec2}` · `Move{dir:FixedVec2}` · `Fire{weapon:u8, aim:i32}` ·

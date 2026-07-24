@@ -119,6 +119,20 @@ function formatSpeed(value) {
   return Number.isFinite(value) ? `${formatNumber(value)}x` : "n/a";
 }
 
+function targetKind(target) {
+  const value = String(target);
+  if (value.startsWith("wasm32")) {
+    return "wasm32";
+  }
+  for (const candidate of ["aarch64", "arm64", "x86_64", "x86", "arm32", "armv7"]) {
+    if (value.includes(candidate)) {
+      return candidate;
+    }
+  }
+  const parts = value.split("-").filter(Boolean);
+  return parts.length === 0 ? value : parts[parts.length - 1];
+}
+
 function formatTime(timestampUnix) {
   return new Date(timestampUnix * 1000).toISOString().replace("T", " ").replace(".000Z", " UTC");
 }
@@ -149,8 +163,16 @@ function claimPosture(rustiaRow, luauRow) {
   };
 }
 
+function executionMode(row) {
+  if (typeof row.execution_mode === "string") return row.execution_mode;
+  if (row.engine === "mlua-luau-jit") return "jit";
+  if (row.engine === "roto" || row.engine === "wasmtime") return "native";
+  return "interpreter";
+}
+
 function summarizeWorkloads(data) {
-  const groups = [...groupBy(data.rows, (row) => `${row.target}\0${row.workload}`).entries()]
+  const interpreterRows = data.rows.filter((row) => executionMode(row) === "interpreter");
+  const groups = [...groupBy(interpreterRows, (row) => `${row.target}\0${row.workload}`).entries()]
     .map(([key, rows]) => {
       const [target, workload] = key.split("\0");
       const sorted = rows.slice().sort((left, right) => left.ns_per_unit_min - right.ns_per_unit_min);
@@ -178,24 +200,34 @@ function summarizeWorkloads(data) {
 }
 
 function summarizeEngines(data) {
-  const workloadGroups = groupBy(data.rows, (row) => `${row.target}\0${row.workload}`);
+  const interpreterRows = data.rows.filter((row) => executionMode(row) === "interpreter");
+  const workloadGroups = groupBy(interpreterRows, (row) => `${row.target}\0${row.workload}`);
   const bestCounts = new Map();
   for (const rows of workloadGroups.values()) {
     const sorted = rows.slice().sort((left, right) => left.ns_per_unit_min - right.ns_per_unit_min);
-    bestCounts.set(sorted[0].engine, (bestCounts.get(sorted[0].engine) ?? 0) + 1);
+    const key = `${sorted[0].engine}\0${sorted[0].target}`;
+    bestCounts.set(key, (bestCounts.get(key) ?? 0) + 1);
   }
-  return [...groupBy(data.rows, (row) => row.engine).entries()]
-    .map(([engine, rows]) => ({
-      engine,
-      geomeanVsRustia: geometricMean(rows.map((row) => row.speed_vs_rustia)),
-      bestCount: bestCounts.get(engine) ?? 0,
-      workloadCount: unique(rows.map((row) => row.workload)).length,
-      targetCount: unique(rows.map((row) => row.target)).length,
-    }))
+  return [...groupBy(interpreterRows, (row) => `${row.engine}\0${row.target}`).entries()]
+    .map(([key, rows]) => {
+      const [engine, target] = key.split("\0");
+      return {
+        engine,
+        target,
+        targetKind: targetKind(target),
+        geomeanVsRustia: geometricMean(rows.map((row) => row.speed_vs_rustia)),
+        bestCount: bestCounts.get(key) ?? 0,
+        workloadCount: unique(rows.map((row) => row.workload)).length,
+      };
+    })
     .sort((left, right) => {
       const leftSpeed = left.geomeanVsRustia ?? -Infinity;
       const rightSpeed = right.geomeanVsRustia ?? -Infinity;
-      return rightSpeed - leftSpeed || left.engine.localeCompare(right.engine);
+      return (
+        rightSpeed - leftSpeed ||
+        left.engine.localeCompare(right.engine) ||
+        left.target.localeCompare(right.target)
+      );
     });
 }
 
@@ -229,10 +261,11 @@ function render(data) {
   ]);
 
   const engineRows = engines.map((engine) => [
-    engine.engine,
+    `${engine.engine} (${engine.targetKind})`,
     formatSpeed(engine.geomeanVsRustia),
-    `${engine.bestCount} / ${claims.length}`,
-    `${engine.targetCount} targets, ${engine.workloadCount} workloads`,
+    `${engine.bestCount} / ${engine.workloadCount}`,
+    engine.target,
+    `${engine.workloadCount} workloads`,
   ]);
 
   return `# script-bench-harness Benchmark Claims
@@ -263,8 +296,8 @@ ${workloadRows.map((row) => `| ${row.map(markdownCell).join(" | ")} |`).join("\n
 
 These geomeans are useful for triage, but they are not public headline claims.
 
-| engine | geomean vs rustia | fastest workloads | coverage |
-|---|---:|---:|---|
+| engine target | geomean vs rustia | fastest workloads | target detail | coverage |
+|---|---:|---:|---|---|
 ${engineRows.map((row) => `| ${row.map(markdownCell).join(" | ")} |`).join("\n")}
 `;
 }

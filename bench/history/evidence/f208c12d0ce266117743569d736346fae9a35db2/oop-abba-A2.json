@@ -1,0 +1,48 @@
+{
+  "measurements": [
+    {
+      "checksum": "number:7024767535.35616016387939453",
+      "commit": "ae3beae2025feb21d0e37c70168204ae154ae125",
+      "dialect": "luau",
+      "engine": "rustia",
+      "n": 24000,
+      "n_selection": "fixed",
+      "ns_per_unit_median": 21577.371916666667,
+      "ns_per_unit_min": 21035.124791666665,
+      "reps": 15,
+      "samples_ns_per_unit": [
+        22948.509458333334,
+        22225.763208333334,
+        21627.808999999997,
+        21771.56920833333,
+        21546.057833333336,
+        21340.998874999997,
+        21784.448166666665,
+        21720.123708333336,
+        21048.34833333333,
+        21387.015708333332,
+        21508.47925,
+        21289.153249999996,
+        21035.124791666665,
+        21577.371916666667,
+        21638.219958333335
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1784521989,
+      "unit": "(p+v)*s + :dot + :len2 step",
+      "units_per_sec": 47539.53256299021,
+      "workload": "oop_metamethods"
+    }
+  ],
+  "metadata": {
+    "description": "Raw per-repetition timings in execution order. This sidecar is separate from the append-only public history schema.",
+    "measurement_count": 1,
+    "measurement_isolation": "fresh prepared workload per repetition",
+    "sample_count": 15,
+    "sample_order": "execution order (unsorted)",
+    "warmup": "one untimed invocation immediately before each recorded sample"
+  },
+  "schema": "rustia.bench.raw-samples.v1",
+  "schema_version": 1,
+  "source": "script-bench-harness"
+}

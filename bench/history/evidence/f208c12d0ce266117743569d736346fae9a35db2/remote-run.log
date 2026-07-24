@@ -1,0 +1,88 @@
+[2026-07-20T04:21:00.574Z] preparing exact source trees and frozen release binaries
+[2026-07-20T04:21:00.576Z] disabling periodic package activity before the quiet measurement phase
+[2026-07-20T04:21:00.576Z] + systemctl stop apt-daily.service
+[2026-07-20T04:21:00.588Z] + systemctl mask apt-daily.service
+[2026-07-20T04:21:00.910Z] + systemctl stop apt-daily-upgrade.service
+[2026-07-20T04:21:00.922Z] + systemctl mask apt-daily-upgrade.service
+[2026-07-20T04:21:01.216Z] + systemctl stop apt-daily.timer
+[2026-07-20T04:21:01.227Z] + systemctl mask apt-daily.timer
+[2026-07-20T04:21:01.529Z] + systemctl stop apt-daily-upgrade.timer
+[2026-07-20T04:21:01.539Z] + systemctl mask apt-daily-upgrade.timer
+[2026-07-20T04:21:01.833Z] + systemctl stop unattended-upgrades.service
+[2026-07-20T04:21:01.866Z] + systemctl mask unattended-upgrades.service
+[2026-07-20T04:21:02.166Z] + systemctl stop packagekit.service
+[2026-07-20T04:21:02.188Z] + systemctl mask packagekit.service
+[2026-07-20T04:21:02.486Z] + curl --proto =https --tlsv1.2 -sSf https://sh.rustup.rs -o /opt/rustia/rustup-init.sh
+[2026-07-20T04:21:03.086Z] + sh /opt/rustia/rustup-init.sh -y --profile minimal --default-toolchain none
+[2026-07-20T04:21:03.893Z] + /root/.cargo/bin/rustup toolchain install 1.95.0 --profile minimal
+[2026-07-20T04:21:21.647Z] + git clone --bare /opt/rustia/incoming/rustia.bundle /opt/rustia/repo.git
+[2026-07-20T04:21:21.892Z] + git --git-dir /opt/rustia/repo.git bundle verify /opt/rustia/incoming/rustia.bundle
+[2026-07-20T04:21:21.900Z] + git --git-dir /opt/rustia/repo.git worktree add --detach /opt/rustia/src-a ae3beae2025feb21d0e37c70168204ae154ae125
+[2026-07-20T04:21:22.007Z] + git --git-dir /opt/rustia/repo.git worktree add --detach /opt/rustia/src-b f208c12d0ce266117743569d736346fae9a35db2
+[2026-07-20T04:21:22.265Z] + git -C /opt/rustia/src-a rev-parse HEAD
+[2026-07-20T04:21:22.271Z] + git -C /opt/rustia/src-b rev-parse HEAD
+[2026-07-20T04:21:22.283Z] + /root/.cargo/bin/cargo +1.95.0 fetch --locked --manifest-path /opt/rustia/src-b/Cargo.toml
+[2026-07-20T04:21:30.117Z] + /root/.cargo/bin/cargo +1.95.0 build --locked --offline --manifest-path /opt/rustia/src-a/Cargo.toml -p script-bench-harness --bin script-bench --release
+[2026-07-20T04:22:04.474Z] + /root/.cargo/bin/cargo +1.95.0 build --locked --offline --manifest-path /opt/rustia/src-b/Cargo.toml -p script-bench-harness --bin script-bench --release
+[2026-07-20T04:22:36.825Z] + uname -a
+[2026-07-20T04:22:36.830Z] + lscpu --json
+[2026-07-20T04:22:36.840Z] + systemd-detect-virt
+[2026-07-20T04:22:36.851Z] + /root/.cargo/bin/rustc +1.95.0 -vV
+[2026-07-20T04:22:36.884Z] + /root/.cargo/bin/cargo +1.95.0 --version
+[2026-07-20T04:22:36.903Z] + taskset --version
+[2026-07-20T04:22:36.908Z] + systemctl list-timers --all --no-pager
+[2026-07-20T04:22:36.934Z] + taskset -apc 0 2279
+[2026-07-20T04:22:36.957Z] verified stable set of 10 controller threads on CPU 0
+[2026-07-20T04:22:36.957Z] running predeclared candidate-only host stability qualification
+[2026-07-20T04:22:36.958Z] qualification-1: fixed 60s cooldown
+[2026-07-20T04:23:47.042Z] qualification-1: idle gate not ready (load1=0.46, idle=100%, steal=0, contaminants=0); retrying
+[2026-07-20T04:24:02.072Z] qualification-1: idle gate not ready (load1=0.36, idle=100%, steal=0, contaminants=0); retrying
+[2026-07-20T04:24:17.099Z] qualification-1: idle gate not ready (load1=0.28, idle=99.9002%, steal=0, contaminants=0); retrying
+[2026-07-20T04:24:32.131Z] qualification-1: idle gate not ready (load1=0.22, idle=99.9%, steal=0, contaminants=0); retrying
+[2026-07-20T04:24:47.164Z] qualification-1: idle gate not ready (load1=0.17, idle=100%, steal=0, contaminants=0); retrying
+[2026-07-20T04:25:02.192Z] qualification-1: idle gate not ready (load1=0.13, idle=100%, steal=0, contaminants=0); retrying
+[2026-07-20T04:25:17.220Z] qualification-1: idle gate passed (load1=0.1, cpu1 idle=99.9002%, steal=0)
+[2026-07-20T04:25:17.220Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads oop_metamethods --fixed-n 24000 --reps 15 --no-history --no-results --no-latest-json --commit f208c12d0ce266117743569d736346fae9a35db2 --samples-json /opt/rustia/qualification/candidate-pilot-1.json
+[2026-07-20T04:25:22.616Z] qualification-2: fixed 60s cooldown
+[2026-07-20T04:26:32.698Z] qualification-2: idle gate passed (load1=0.05, cpu1 idle=99.9002%, steal=0)
+[2026-07-20T04:26:32.699Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads oop_metamethods --fixed-n 24000 --reps 15 --no-history --no-results --no-latest-json --commit f208c12d0ce266117743569d736346fae9a35db2 --samples-json /opt/rustia/qualification/candidate-pilot-2.json
+[2026-07-20T04:26:38.090Z] qualification-3: fixed 60s cooldown
+[2026-07-20T04:27:48.132Z] qualification-3: idle gate passed (load1=0.06, cpu1 idle=100%, steal=0)
+[2026-07-20T04:27:48.132Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads oop_metamethods --fixed-n 24000 --reps 15 --no-history --no-results --no-latest-json --commit f208c12d0ce266117743569d736346fae9a35db2 --samples-json /opt/rustia/qualification/candidate-pilot-3.json
+[2026-07-20T04:27:53.504Z] running frozen eight-leg A/B comparison
+[2026-07-20T04:27:53.504Z] accepted-1-oop-abba-A1.json: fixed 60s cooldown
+[2026-07-20T04:29:03.583Z] accepted-1-oop-abba-A1.json: idle gate passed (load1=0.04, cpu1 idle=100%, steal=0)
+[2026-07-20T04:29:03.584Z] + taskset -c 1 /opt/rustia/target-a/release/script-bench --engines rustia --workloads oop_metamethods --fixed-n 24000 --reps 15 --no-history --no-results --no-latest-json --commit ae3beae2025feb21d0e37c70168204ae154ae125 --samples-json bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-abba-A1.json
+[2026-07-20T04:29:15.897Z] accepted-2-oop-abba-B1.json: fixed 60s cooldown
+[2026-07-20T04:30:25.966Z] accepted-2-oop-abba-B1.json: idle gate passed (load1=0.06, cpu1 idle=100%, steal=0)
+[2026-07-20T04:30:25.966Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads oop_metamethods --fixed-n 24000 --reps 15 --no-history --no-results --no-latest-json --commit f208c12d0ce266117743569d736346fae9a35db2 --samples-json bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-abba-B1.json
+[2026-07-20T04:30:31.350Z] accepted-3-oop-abba-B2.json: fixed 60s cooldown
+[2026-07-20T04:31:41.435Z] accepted-3-oop-abba-B2.json: idle gate passed (load1=0.04, cpu1 idle=100%, steal=0)
+[2026-07-20T04:31:41.436Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads oop_metamethods --fixed-n 24000 --reps 15 --no-history --no-results --no-latest-json --commit f208c12d0ce266117743569d736346fae9a35db2 --samples-json bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-abba-B2.json
+[2026-07-20T04:31:46.813Z] accepted-4-oop-abba-A2.json: fixed 60s cooldown
+[2026-07-20T04:32:56.894Z] accepted-4-oop-abba-A2.json: idle gate passed (load1=0.03, cpu1 idle=100%, steal=0)
+[2026-07-20T04:32:56.894Z] + taskset -c 1 /opt/rustia/target-a/release/script-bench --engines rustia --workloads oop_metamethods --fixed-n 24000 --reps 15 --no-history --no-results --no-latest-json --commit ae3beae2025feb21d0e37c70168204ae154ae125 --samples-json bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-abba-A2.json
+[2026-07-20T04:33:09.117Z] accepted-5-oop-baab-B3.json: fixed 60s cooldown
+[2026-07-20T04:34:19.197Z] accepted-5-oop-baab-B3.json: idle gate passed (load1=0.08, cpu1 idle=100%, steal=0)
+[2026-07-20T04:34:19.197Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads oop_metamethods --fixed-n 24000 --reps 15 --no-history --no-results --no-latest-json --commit f208c12d0ce266117743569d736346fae9a35db2 --samples-json bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-baab-B3.json
+[2026-07-20T04:34:24.509Z] accepted-6-oop-baab-A3.json: fixed 60s cooldown
+[2026-07-20T04:35:34.587Z] accepted-6-oop-baab-A3.json: idle gate passed (load1=0.04, cpu1 idle=100%, steal=0)
+[2026-07-20T04:35:34.587Z] + taskset -c 1 /opt/rustia/target-a/release/script-bench --engines rustia --workloads oop_metamethods --fixed-n 24000 --reps 15 --no-history --no-results --no-latest-json --commit ae3beae2025feb21d0e37c70168204ae154ae125 --samples-json bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-baab-A3.json
+[2026-07-20T04:35:46.748Z] accepted-7-oop-baab-A4.json: fixed 60s cooldown
+[2026-07-20T04:36:56.803Z] accepted-7-oop-baab-A4.json: idle gate passed (load1=0.06, cpu1 idle=100%, steal=0)
+[2026-07-20T04:36:56.803Z] + taskset -c 1 /opt/rustia/target-a/release/script-bench --engines rustia --workloads oop_metamethods --fixed-n 24000 --reps 15 --no-history --no-results --no-latest-json --commit ae3beae2025feb21d0e37c70168204ae154ae125 --samples-json bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-baab-A4.json
+[2026-07-20T04:37:09.120Z] accepted-8-oop-baab-B4.json: fixed 60s cooldown
+[2026-07-20T04:38:19.212Z] accepted-8-oop-baab-B4.json: idle gate passed (load1=0.08, cpu1 idle=100%, steal=0)
+[2026-07-20T04:38:19.213Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads oop_metamethods --fixed-n 24000 --reps 15 --no-history --no-results --no-latest-json --commit f208c12d0ce266117743569d736346fae9a35db2 --samples-json bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-baab-B4.json
+[2026-07-20T04:38:24.490Z] + node bench/analyze-fixed-samples.js --baseline bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-abba-A1.json --baseline bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-abba-A2.json --baseline bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-baab-A3.json --baseline bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-baab-A4.json --candidate bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-abba-B1.json --candidate bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-abba-B2.json --candidate bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-baab-B3.json --candidate bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/oop-baab-B4.json --bootstrap-reps 20000 --seed 1381323604 --material-threshold 0 --expected-legs 4 --require-full-commits
+[2026-07-20T04:38:25.485Z] comparison accepted; appending three actual final-binary history measurements
+[2026-07-20T04:38:25.496Z] publication-1: fixed 60s cooldown
+[2026-07-20T04:39:35.579Z] publication-1: idle gate passed (load1=0.05, cpu1 idle=100%, steal=0)
+[2026-07-20T04:39:35.579Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads oop_metamethods --fixed-n 24000 --reps 15 --history bench/history/runs.jsonl --no-results --no-latest-json --commit f208c12d0ce266117743569d736346fae9a35db2 --samples-json bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/final-oop_metamethods-1.json
+[2026-07-20T04:39:40.906Z] publication-2: fixed 60s cooldown
+[2026-07-20T04:40:50.988Z] publication-2: idle gate passed (load1=0.04, cpu1 idle=100%, steal=0)
+[2026-07-20T04:40:50.989Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads oop_metamethods --fixed-n 24000 --reps 15 --history bench/history/runs.jsonl --no-results --no-latest-json --commit f208c12d0ce266117743569d736346fae9a35db2 --samples-json bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/final-oop_metamethods-2.json
+[2026-07-20T04:40:56.316Z] publication-3: fixed 60s cooldown
+[2026-07-20T04:42:06.407Z] publication-3: idle gate passed (load1=0.03, cpu1 idle=99.9002%, steal=0)
+[2026-07-20T04:42:06.407Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads oop_metamethods --fixed-n 24000 --reps 15 --history bench/history/runs.jsonl --no-results --no-latest-json --commit f208c12d0ce266117743569d736346fae9a35db2 --samples-json bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/final-oop_metamethods-3.json
+[2026-07-20T04:42:11.693Z] + /opt/rustia/target-b/release/script-bench --check-history --history bench/history/runs.jsonl

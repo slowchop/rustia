@@ -291,6 +291,11 @@ impl Default for Rustia {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Compiled artifact that can be cloned and installed into multiple VMs.
+///
+/// Constant and string storage is shared across clones; function and debug metadata is currently
+/// cloned with the module.
+#[derive(Clone)]
 pub struct CompiledModule {
     source_name: String,
     program: Program,
@@ -386,6 +391,20 @@ mod tests {
             .run_owned("local x: number = 6 * 7; return x")
             .unwrap();
         assert_eq!(f64::from_rustia(result).unwrap(), 42.0);
+    }
+
+    #[test]
+    fn compiled_modules_can_be_cloned_across_vms() {
+        let module = Rustia::compile(
+            "shared.luau",
+            "local greeting = 'compiled string shared across VMs'; return { greeting = greeting }",
+        )
+        .unwrap();
+        let mut first = Rustia::new(Profile::ReproducibleStandard);
+        let mut second = Rustia::new(Profile::ReproducibleStandard);
+
+        first.install(module.clone()).unwrap();
+        second.install(module).unwrap();
     }
 
     #[test]

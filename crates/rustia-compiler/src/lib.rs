@@ -62,7 +62,24 @@ pub fn compile(chunk: &Chunk) -> Result<Program> {
 }
 
 pub fn compile_with_options(chunk: &Chunk, options: CompileOptions) -> Result<Program> {
-    Compiler::new(options).compile_chunk(chunk)
+    // Capture discovery is intentionally a complete compiler pass. Nested functions can make a
+    // source-earlier assignment target captured (including when that assignment executes again at
+    // a loop backedge), so a single source-order pass cannot safely decide whether that write must
+    // update a shared cell. The second deterministic pass starts with the complete captured-register
+    // sets and therefore emits cell write-throughs at every assignment site.
+    let capture_hints = Compiler::new(options.clone()).discover_capture_hints(chunk)?;
+    Compiler::with_capture_hints(options, capture_hints).compile_chunk(chunk)
+}
+
+fn collect_capture_hints(main: &BTreeSet<u8>, functions: &[Function]) -> Vec<Vec<u8>> {
+    let mut capture_hints = Vec::with_capacity(functions.len().saturating_add(1));
+    capture_hints.push(main.iter().copied().collect());
+    capture_hints.extend(
+        functions
+            .iter()
+            .map(|function| function.captured_registers.clone()),
+    );
+    capture_hints
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -155,11 +172,13 @@ struct Compiler {
     locals: BTreeMap<String, Binding>,
     assigned_globals: BTreeSet<String>,
     assigned_stdlib_fields: BTreeSet<(String, String)>,
+    fastcall_candidate_names: BTreeSet<String>,
     stdlib_tables_may_be_mutated: bool,
     global_environment_escaped: bool,
     disable_builtin_fastpaths: bool,
     upvalues: Vec<UpvalueDescriptor>,
     captured_registers: BTreeSet<u8>,
+    capture_hints: Vec<Vec<u8>>,
     capture_stack: Vec<CaptureScope>,
     source_map: Vec<InstructionSource>,
     current_function_is_vararg: bool,
@@ -173,6 +192,16 @@ struct Compiler {
 
 impl Compiler {
     fn new(options: CompileOptions) -> Self {
+        Self::with_capture_hints(options, Vec::new())
+    }
+
+    fn with_capture_hints(options: CompileOptions, capture_hints: Vec<Vec<u8>>) -> Self {
+        let captured_registers = capture_hints
+            .first()
+            .into_iter()
+            .flatten()
+            .copied()
+            .collect();
         Self {
             options,
             constants: Vec::new(),
@@ -181,11 +210,13 @@ impl Compiler {
             locals: BTreeMap::new(),
             assigned_globals: BTreeSet::new(),
             assigned_stdlib_fields: BTreeSet::new(),
+            fastcall_candidate_names: BTreeSet::new(),
             stdlib_tables_may_be_mutated: false,
             global_environment_escaped: false,
             disable_builtin_fastpaths: false,
             upvalues: Vec::new(),
-            captured_registers: BTreeSet::new(),
+            captured_registers,
+            capture_hints,
             capture_stack: Vec::new(),
             source_map: Vec::new(),
             current_function_is_vararg: true,
@@ -198,18 +229,38 @@ impl Compiler {
         }
     }
 
+    fn discover_capture_hints(mut self, chunk: &Chunk) -> Result<Vec<Vec<u8>>> {
+        // Compile every statement and nested prototype so the normal lexical
+        // resolver—not a second shadow implementation—discovers captures.
+        // Final bytecode packaging and immutable-origin rewriting are skipped.
+        self.compile_block(&chunk.statements)?;
+        Ok(collect_capture_hints(
+            &self.captured_registers,
+            &self.functions,
+        ))
+    }
+
     fn compile_chunk(mut self, chunk: &Chunk) -> Result<Program> {
         self.compile_block(&chunk.statements)?;
         self.code.push(Instruction::new(Opcode::Halt, 0, 0, 0));
+        if !self.capture_hints.is_empty()
+            && self.capture_hints.len() != self.functions.len().saturating_add(1)
+        {
+            return Err(CompileError::new(
+                "capture discovery changed the function prototype graph",
+            ));
+        }
         let max_registers = usize::from(self.max_registers.max(1));
+        let main_captured_registers = self.captured_registers.iter().copied().collect();
         let main_source_map = self.source_map;
-        Ok(Program::with_functions(
-            Function::with_params_and_vararg(self.code, max_registers, 0, true)
-                .with_source_map(main_source_map),
-            self.constants,
-            self.functions,
+        let mut main = Function::with_params_and_vararg(self.code, max_registers, 0, true)
+            .with_source_map(main_source_map);
+        main.captured_registers = main_captured_registers;
+        mark_immutable_capture_descriptors(&mut main, &mut self.functions);
+        Ok(
+            Program::with_functions(main, self.constants, self.functions)
+                .with_source_name(self.options.source_name),
         )
-        .with_source_name(self.options.source_name))
     }
 
     fn compile_block(&mut self, statements: &[Stmt]) -> Result<()> {
@@ -221,6 +272,7 @@ impl Compiler {
 
     fn compile_scoped_block(&mut self, statements: &[Stmt]) -> Result<()> {
         let locals = self.locals.clone();
+        let fastcall_candidate_names = self.fastcall_candidate_names.clone();
         let next_register = self.next_register;
         self.scope_register_starts.push(next_register);
         self.compile_block(statements)?;
@@ -229,6 +281,7 @@ impl Compiler {
             .pop()
             .expect("scope register stack should be balanced");
         self.locals = locals;
+        self.fastcall_candidate_names = fastcall_candidate_names;
         self.next_register = next_register;
         Ok(())
     }
@@ -414,6 +467,16 @@ impl Compiler {
                 self.free_register(register);
             }
         }
+        for (index, binding) in bindings.iter().enumerate() {
+            if init
+                .get(index)
+                .is_some_and(|expr| self.expr_is_fastcall_candidate(expr))
+            {
+                self.fastcall_candidate_names.insert(binding.name.clone());
+            } else {
+                self.fastcall_candidate_names.remove(&binding.name);
+            }
+        }
         for (binding, register) in bindings.iter().zip(registers) {
             self.locals
                 .insert(binding.name.clone(), Binding::Register(register));
@@ -431,6 +494,7 @@ impl Compiler {
     ) -> Result<()> {
         let register = self.alloc_register_at(span)?;
         self.clear_local_cell(register);
+        self.fastcall_candidate_names.remove(name);
         self.locals
             .insert(name.to_owned(), Binding::Register(register));
         let prototype = self.compile_function_prototype(
@@ -449,7 +513,15 @@ impl Compiler {
             i32::try_from(prototype)
                 .map_err(|_| CompileError::at("too many function prototypes", span))?,
         ));
-        if self.local_register_is_captured(register) {
+        // A nested closure compiled as part of this initializer can already capture the local
+        // function (for example, `f` returns a closure that refers to `f`). In that case
+        // LoadFunction must publish the just-created value into the cell it captured. A capture
+        // hinted only by a source-later sibling remains an immutable initialization and is
+        // captured lazily when that sibling is created.
+        if matches!(
+            self.locals.get(name),
+            Some(Binding::CapturedLocal(captured)) if *captured == register
+        ) {
             self.code.push(Instruction::new(
                 Opcode::SetLocalCell,
                 register,
@@ -508,7 +580,7 @@ impl Compiler {
         let prototype = i32::try_from(prototype)
             .map_err(|_| CompileError::at("too many function prototypes", span))?;
 
-        let target = self.compile_assignment_target(target)?;
+        let target = self.compile_assignment_target(target, true)?;
         match target {
             CompiledAssignmentTarget::Local(register) => {
                 self.code.push(Instruction::with_aux(
@@ -518,6 +590,14 @@ impl Compiler {
                     0,
                     prototype,
                 ));
+                if self.local_register_is_captured(register) {
+                    self.code.push(Instruction::new(
+                        Opcode::SetLocalCell,
+                        register,
+                        register,
+                        0,
+                    ));
+                }
             }
             CompiledAssignmentTarget::CapturedLocal(register) => {
                 self.code.push(Instruction::with_aux(
@@ -567,7 +647,7 @@ impl Compiler {
                     prototype,
                 ));
                 self.emit_source_mapped_instruction(
-                    Instruction::new(Opcode::SetIndex, table, key, function_register),
+                    table_set_instruction(table, key, function_register),
                     span,
                 );
                 if let Some(name) = global_field {
@@ -577,7 +657,9 @@ impl Compiler {
                     self.assigned_stdlib_fields.insert((table_name, field_name));
                 }
                 self.free_register(function_register);
-                self.free_register(key);
+                if let Some(key) = key.register() {
+                    self.free_register(key);
+                }
                 self.free_register(table);
             }
             CompiledAssignmentTarget::Global { key, name } => {
@@ -621,12 +703,32 @@ impl Compiler {
                     span,
                 ));
             }
-            let target = self.compile_assignment_target(&targets[0])?;
+            let target = self.compile_assignment_target(&targets[0], false)?;
+            let reusable_string_key = match &target {
+                CompiledAssignmentTarget::Table {
+                    key: CompiledTableKey::StringConstant { .. },
+                    ..
+                } => {
+                    let register = self.alloc_register_at(span)?;
+                    debug_assert_ne!(register, 0, "register zero is the no-key-output sentinel");
+                    Some(register)
+                }
+                _ => None,
+            };
             let result = self.alloc_register_at(span)?;
             match &target {
                 CompiledAssignmentTarget::Local(register) => {
-                    self.code
-                        .push(Instruction::new(Opcode::Move, result, *register, 0));
+                    if self.local_register_is_captured(*register) {
+                        self.code.push(Instruction::new(
+                            Opcode::GetLocalCell,
+                            result,
+                            *register,
+                            0,
+                        ));
+                    } else {
+                        self.code
+                            .push(Instruction::new(Opcode::Move, result, *register, 0));
+                    }
                 }
                 CompiledAssignmentTarget::CapturedLocal(register) => {
                     self.code
@@ -642,8 +744,24 @@ impl Compiler {
                     ));
                 }
                 CompiledAssignmentTarget::Table { table, key, .. } => {
-                    self.code
-                        .push(Instruction::new(Opcode::GetIndex, result, *table, *key));
+                    let instruction = match (*key, reusable_string_key) {
+                        (
+                            CompiledTableKey::StringConstant { index: key, .. },
+                            Some(key_register),
+                        ) => {
+                            // Compound assignment reuses the loaded key for the later SETINDEX,
+                            // matching the unfused LoadConst + GetIndex + SetIndex fuel schedule.
+                            Instruction::with_aux(
+                                Opcode::GetTableKs,
+                                result,
+                                *table,
+                                key_register,
+                                key,
+                            )
+                        }
+                        _ => table_get_instruction(result, *table, *key),
+                    };
+                    self.code.push(instruction);
                 }
                 CompiledAssignmentTarget::Global { key, .. } => {
                     self.code
@@ -691,8 +809,16 @@ impl Compiler {
                     ));
                 }
                 CompiledAssignmentTarget::Table { table, key, .. } => {
-                    self.code
-                        .push(Instruction::new(Opcode::SetIndex, *table, *key, result));
+                    if let Some(key_register) = reusable_string_key {
+                        self.code.push(Instruction::new(
+                            Opcode::SetIndex,
+                            *table,
+                            key_register,
+                            result,
+                        ));
+                    } else {
+                        self.code.push(table_set_instruction(*table, *key, result));
+                    }
                 }
                 CompiledAssignmentTarget::Global { key, .. } => {
                     self.code
@@ -702,12 +828,17 @@ impl Compiler {
             self.mark_assignment_target_mutations(&target);
             self.free_register(rhs_register);
             self.free_register(result);
+            if let Some(key_register) = reusable_string_key {
+                self.free_register(key_register);
+            }
             match target {
                 CompiledAssignmentTarget::Local(_) => {}
                 CompiledAssignmentTarget::CapturedLocal(_) => {}
                 CompiledAssignmentTarget::Upvalue(_) => {}
                 CompiledAssignmentTarget::Table { table, key, .. } => {
-                    self.free_register(key);
+                    if let Some(key) = key.register() {
+                        self.free_register(key);
+                    }
                     self.free_register(table);
                 }
                 CompiledAssignmentTarget::Global { .. } => {}
@@ -717,7 +848,7 @@ impl Compiler {
 
         let mut compiled_targets = Vec::with_capacity(targets.len());
         for target in targets {
-            compiled_targets.push(self.compile_assignment_target(target)?);
+            compiled_targets.push(self.compile_assignment_target(target, true)?);
         }
         for target in &compiled_targets {
             self.mark_assignment_target_mutations(target);
@@ -794,6 +925,7 @@ impl Compiler {
     fn compile_assignment_target(
         &mut self,
         target: &AssignmentTarget,
+        preload_constant_key: bool,
     ) -> Result<CompiledAssignmentTarget> {
         match target {
             AssignmentTarget::Local { name, span } => {
@@ -827,12 +959,16 @@ impl Compiler {
             AssignmentTarget::Field {
                 object,
                 field,
-                field_span: _,
+                field_span,
                 ..
             } => {
                 let global_field = self.global_table_field_assignment(object, field);
                 let table = self.compile_expr(object)?;
-                let key = self.load_constant(Constant::String(field.as_bytes().to_vec()))?;
+                let key = self.compiled_string_table_key(
+                    field.as_bytes(),
+                    *field_span,
+                    preload_constant_key,
+                )?;
                 Ok(CompiledAssignmentTarget::Table {
                     table,
                     key,
@@ -844,7 +980,11 @@ impl Compiler {
                 let global_field = self.global_table_index_assignment(object, index);
                 let stdlib_field = self.stdlib_table_index_assignment(object, index);
                 let table = self.compile_expr(object)?;
-                let key = self.compile_expr(index)?;
+                let key = if let Some(Constant::String(bytes)) = const_eval(index) {
+                    self.compiled_string_table_key(&bytes, index.span(), preload_constant_key)?
+                } else {
+                    CompiledTableKey::Register(self.compile_expr(index)?)
+                };
                 Ok(CompiledAssignmentTarget::Table {
                     table,
                     key,
@@ -935,6 +1075,7 @@ impl Compiler {
         span: Span,
     ) -> Result<()> {
         let locals = self.locals.clone();
+        let fastcall_candidate_names = self.fastcall_candidate_names.clone();
         let next_register = self.next_register;
 
         let index_register = self.alloc_register_at(span)?;
@@ -962,6 +1103,7 @@ impl Compiler {
             step.map_or(span, Expr::span),
         );
 
+        self.fastcall_candidate_names.remove(variable);
         self.locals
             .insert(variable.to_owned(), Binding::Register(visible_register));
 
@@ -989,12 +1131,14 @@ impl Compiler {
         self.patch_jump_to(prep_jump, clear_start, span)?;
         self.patch_loop_breaks_to(clear_start, span)?;
         self.locals = locals;
+        self.fastcall_candidate_names = fastcall_candidate_names;
         self.next_register = next_register;
         Ok(())
     }
 
     fn compile_repeat(&mut self, body: &[Stmt], condition: &Expr, span: Span) -> Result<()> {
         let locals = self.locals.clone();
+        let fastcall_candidate_names = self.fastcall_candidate_names.clone();
         let next_register = self.next_register;
         let loop_start = self.code.len();
 
@@ -1020,6 +1164,7 @@ impl Compiler {
         self.clear_local_cells_from(next_register)?;
         self.patch_loop_breaks_to(clear_start, span)?;
         self.locals = locals;
+        self.fastcall_candidate_names = fastcall_candidate_names;
         self.next_register = next_register;
         Ok(())
     }
@@ -1151,7 +1296,14 @@ impl Compiler {
                 if let Some(binding) = self.locals.get(name).copied() {
                     match binding {
                         Binding::Register(source) => {
-                            if source != target {
+                            if self.local_register_is_captured(source) {
+                                self.code.push(Instruction::new(
+                                    Opcode::GetLocalCell,
+                                    target,
+                                    source,
+                                    0,
+                                ));
+                            } else if source != target {
                                 self.code
                                     .push(Instruction::new(Opcode::Move, target, source, 0));
                             }
@@ -1257,14 +1409,22 @@ impl Compiler {
             } => self.compile_field_to(object, field, *field_span, target),
             Expr::Index { object, index, .. } => {
                 self.compile_expr_to(object, target)?;
-                let index_register = self.compile_expr(index)?;
-                self.code.push(Instruction::new(
-                    Opcode::GetIndex,
-                    target,
-                    target,
-                    index_register,
-                ));
-                self.free_register(index_register);
+                if let Some(Constant::String(bytes)) = const_eval(index) {
+                    let key = self.string_constant_index(&bytes, index.span())?;
+                    self.emit_source_mapped_instruction(
+                        Instruction::with_aux(Opcode::GetTableKs, target, target, 0, key),
+                        index.span(),
+                    );
+                } else {
+                    let index_register = self.compile_expr(index)?;
+                    self.code.push(Instruction::new(
+                        Opcode::GetIndex,
+                        target,
+                        target,
+                        index_register,
+                    ));
+                    self.free_register(index_register);
+                }
                 Ok(())
             }
             Expr::Table { fields, .. } => self.compile_table_to(fields, target),
@@ -1376,6 +1536,7 @@ impl Compiler {
         let parent_source_map = std::mem::take(&mut self.source_map);
         let parent_scope = CaptureScope {
             locals: std::mem::take(&mut self.locals),
+            fastcall_candidate_names: std::mem::take(&mut self.fastcall_candidate_names),
             upvalues: std::mem::take(&mut self.upvalues),
             captured_registers: std::mem::take(&mut self.captured_registers),
         };
@@ -1395,6 +1556,16 @@ impl Compiler {
 
         self.next_register = 0;
         self.max_registers = 0;
+        self.captured_registers = match self.capture_hints.get(prototype.saturating_add(1)) {
+            Some(hints) => hints.iter().copied().collect(),
+            None if self.capture_hints.is_empty() => BTreeSet::new(),
+            None => {
+                return Err(CompileError::at(
+                    "capture discovery changed the function prototype graph",
+                    span,
+                ));
+            }
+        };
         self.current_function_is_vararg = is_vararg;
         self.disable_builtin_fastpaths = true;
         if let Some(name) = self_name {
@@ -1443,6 +1614,7 @@ impl Compiler {
         self.code = parent_code;
         self.source_map = parent_source_map;
         self.locals = parent_scope.locals;
+        self.fastcall_candidate_names = parent_scope.fastcall_candidate_names;
         self.upvalues = parent_scope.upvalues;
         self.captured_registers = parent_scope.captured_registers;
         self.assigned_globals = parent_assigned_globals;
@@ -1528,25 +1700,49 @@ impl Compiler {
         field_span: Span,
         target: u8,
     ) -> Result<()> {
-        if matches!(object, Expr::Name(name, _) if name == "math")
-            && self.builtin_table_field_is_unmodified("math", field)
-        {
-            match field {
-                "huge" => return self.load_constant_to(target, Constant::Number(f64::INFINITY)),
-                "pi" => self.load_constant_to(
-                    target,
-                    Constant::Number(f64::from_bits(0x4009_21fb_5444_2d18)),
-                )?,
-                _ => {}
+        if let Some(path) = dotted_import_path(object, field) {
+            if (2..=3).contains(&path.len()) && !self.name_is_lexically_bound(&path[0]) {
+                return self.compile_import_path_to(&path, target, field_span);
             }
         }
         self.compile_expr_to(object, target)?;
-        let key_register = self.load_constant(Constant::String(field.as_bytes().to_vec()))?;
+        let key = self.string_constant_index(field.as_bytes(), field_span)?;
         self.emit_source_mapped_instruction(
-            Instruction::new(Opcode::GetIndex, target, target, key_register),
+            Instruction::with_aux(Opcode::GetTableKs, target, target, 0, key),
             field_span,
         );
-        self.free_register(key_register);
+        Ok(())
+    }
+
+    fn compile_import_path_to(&mut self, path: &[String], target: u8, span: Span) -> Result<()> {
+        if !(1..=3).contains(&path.len()) {
+            return Err(CompileError::at(
+                "import path must contain between one and three components",
+                span,
+            ));
+        }
+        let mut components = Vec::with_capacity(path.len());
+        for component in path {
+            let index = self.constant_index(Constant::String(component.as_bytes().to_vec()))?;
+            components.push(
+                u32::try_from(index)
+                    .map_err(|_| CompileError::at("import component index overflow", span))?,
+            );
+        }
+        let descriptor = self.constant_index(Constant::Import(components))?;
+        let descriptor = i32::try_from(descriptor)
+            .map_err(|_| CompileError::at("import descriptor index overflow", span))?;
+        self.emit_source_mapped_instruction(
+            Instruction::with_aux(
+                Opcode::GetImport,
+                target,
+                u8::try_from(path.len())
+                    .map_err(|_| CompileError::at("import path length overflow", span))?,
+                0,
+                descriptor,
+            ),
+            span,
+        );
         Ok(())
     }
 
@@ -1610,30 +1806,39 @@ impl Compiler {
                     array_index += 1.0;
                 }
                 TableField::Named { name, value, .. } => {
-                    let key_register =
-                        self.load_constant(Constant::String(name.as_bytes().to_vec()))?;
+                    let key =
+                        self.compiled_string_table_key(name.as_bytes(), value.span(), true)?;
                     let value_register =
                         self.compile_expr_with_debug_name(value, Some(name.clone()))?;
-                    self.code.push(Instruction::new(
-                        Opcode::SetIndex,
-                        target,
-                        key_register,
-                        value_register,
-                    ));
+                    self.code
+                        .push(table_set_instruction(target, key, value_register));
                     self.free_register(value_register);
-                    self.free_register(key_register);
+                    if let Some(key) = key.register() {
+                        self.free_register(key);
+                    }
                 }
                 TableField::Keyed { key, value, .. } => {
-                    let key_register = self.compile_expr(key)?;
-                    let value_register = self.compile_expr(value)?;
-                    self.code.push(Instruction::new(
-                        Opcode::SetIndex,
-                        target,
-                        key_register,
-                        value_register,
-                    ));
-                    self.free_register(value_register);
-                    self.free_register(key_register);
+                    if let Some(Constant::String(bytes)) = const_eval(key) {
+                        let key = self.compiled_string_table_key(&bytes, key.span(), true)?;
+                        let value_register = self.compile_expr(value)?;
+                        self.code
+                            .push(table_set_instruction(target, key, value_register));
+                        self.free_register(value_register);
+                        if let Some(key) = key.register() {
+                            self.free_register(key);
+                        }
+                    } else {
+                        let key_register = self.compile_expr(key)?;
+                        let value_register = self.compile_expr(value)?;
+                        self.code.push(Instruction::new(
+                            Opcode::SetIndex,
+                            target,
+                            key_register,
+                            value_register,
+                        ));
+                        self.free_register(value_register);
+                        self.free_register(key_register);
+                    }
                 }
             }
         }
@@ -1805,15 +2010,13 @@ impl Compiler {
                 )?;
                 let self_register = checked_register_offset(callee_register, 1, expr.span())?;
                 self.compile_expr_to(object, self_register)?;
-                let key_register =
-                    self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-                self.code.push(Instruction::new(
-                    Opcode::GetIndex,
+                self.emit_namecall_lookup(
                     callee_register,
                     self_register,
-                    key_register,
-                ));
-                self.free_register(key_register);
+                    method,
+                    false,
+                    expr.span(),
+                )?;
                 if self.method_call_has_expandable_trailing_arg(args) {
                     let trailing_index = args.len().checked_sub(1).ok_or_else(|| {
                         CompileError::at(
@@ -1992,14 +2195,7 @@ impl Compiler {
         let callee_register = self.alloc_register_window_at(window_len, span)?;
         let self_register = checked_register_offset(callee_register, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            callee_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_namecall_lookup(callee_register, self_register, method, false, span)?;
         for (index, arg) in args[..trailing_index].iter().enumerate() {
             let register = checked_register_offset(callee_register, index + 2, span)?;
             self.compile_expr_to(arg, register)?;
@@ -2044,6 +2240,7 @@ impl Compiler {
         };
 
         let locals = self.locals.clone();
+        let fastcall_candidate_names = self.fastcall_candidate_names.clone();
         let next_register = self.next_register;
 
         let table_register = self.alloc_register_at(span)?;
@@ -2056,6 +2253,9 @@ impl Compiler {
         }
 
         self.compile_expr_to(table_expr, table_register)?;
+        for variable in variables {
+            self.fastcall_candidate_names.remove(&variable.name);
+        }
         self.locals
             .insert(variables[0].name.clone(), Binding::Register(key_register));
         if let Some(value_binding) = variables.get(1) {
@@ -2107,6 +2307,7 @@ impl Compiler {
         self.patch_jump_to(prep_jump, clear_start, span)?;
         self.patch_loop_breaks_to(clear_start, span)?;
         self.locals = locals;
+        self.fastcall_candidate_names = fastcall_candidate_names;
         self.next_register = next_register;
         Ok(())
     }
@@ -2129,6 +2330,7 @@ impl Compiler {
         }
 
         let locals = self.locals.clone();
+        let fastcall_candidate_names = self.fastcall_candidate_names.clone();
         let next_register = self.next_register;
         let window_len = 3usize
             .checked_add(variables.len())
@@ -2137,6 +2339,9 @@ impl Compiler {
         let first_visible = checked_register_offset(iterator_register, 3, span)?;
 
         self.compile_generic_iterator_values(iter, iterator_register, span)?;
+        for variable in variables {
+            self.fastcall_candidate_names.remove(&variable.name);
+        }
         for (index, binding) in variables.iter().enumerate() {
             let register = checked_register_offset(first_visible, index, span)?;
             self.locals
@@ -2175,6 +2380,7 @@ impl Compiler {
         self.patch_jump_to(prep_jump, clear_start, span)?;
         self.patch_loop_breaks_to(clear_start, span)?;
         self.locals = locals;
+        self.fastcall_candidate_names = fastcall_candidate_names;
         self.next_register = next_register;
         Ok(())
     }
@@ -2194,6 +2400,7 @@ impl Compiler {
         }
 
         let locals = self.locals.clone();
+        let fastcall_candidate_names = self.fastcall_candidate_names.clone();
         let next_register = self.next_register;
         let window_len = 4usize
             .checked_add(variables.len())
@@ -2202,6 +2409,9 @@ impl Compiler {
         let first_visible = checked_register_offset(iterator_register, 4, span)?;
 
         self.compile_expr_to(expr, iterator_register)?;
+        for variable in variables {
+            self.fastcall_candidate_names.remove(&variable.name);
+        }
         for (index, binding) in variables.iter().enumerate() {
             let register = checked_register_offset(first_visible, index, span)?;
             self.locals
@@ -2240,6 +2450,7 @@ impl Compiler {
         self.patch_jump_to(prep_jump, clear_start, span)?;
         self.patch_loop_breaks_to(clear_start, span)?;
         self.locals = locals;
+        self.fastcall_candidate_names = fastcall_candidate_names;
         self.next_register = next_register;
         Ok(())
     }
@@ -2438,6 +2649,9 @@ impl Compiler {
                 && self.builtin_global_is_unmodified("math")
             {
                 if !self.builtin_table_field_is_unmodified("math", field) {
+                    return self.compile_value_call_to(callee, args, target, span);
+                }
+                if math_specialized_min_arity(field).is_some_and(|minimum| args.len() < minimum) {
                     return self.compile_value_call_to(callee, args, target, span);
                 }
                 match field.as_str() {
@@ -2909,7 +3123,11 @@ impl Compiler {
         }
         self.emit_source_mapped_instruction(
             Instruction::with_aux(
-                Opcode::Call,
+                if self.expr_is_fastcall_candidate(callee) {
+                    Opcode::FastCall
+                } else {
+                    Opcode::Call
+                },
                 target,
                 target,
                 arg_registers.first().copied().unwrap_or(0),
@@ -2957,6 +3175,7 @@ impl Compiler {
         let parent_source_map = std::mem::take(&mut self.source_map);
         let parent_source_line_starts = std::mem::take(&mut self.options.source_line_starts);
         let parent_locals = std::mem::take(&mut self.locals);
+        let parent_fastcall_candidate_names = std::mem::take(&mut self.fastcall_candidate_names);
         let parent_upvalues = std::mem::take(&mut self.upvalues);
         let parent_captured_registers = std::mem::take(&mut self.captured_registers);
         let parent_capture_stack = std::mem::take(&mut self.capture_stack);
@@ -2975,6 +3194,16 @@ impl Compiler {
 
         self.next_register = 0;
         self.max_registers = 0;
+        self.captured_registers = match self.capture_hints.get(prototype.saturating_add(1)) {
+            Some(hints) => hints.iter().copied().collect(),
+            None if self.capture_hints.is_empty() => BTreeSet::new(),
+            None => {
+                return Err(CompileError::at(
+                    "capture discovery changed the function prototype graph",
+                    span,
+                ));
+            }
+        };
         self.current_function_is_vararg = true;
         self.disable_builtin_fastpaths = true;
         self.compile_block(&chunk.statements)?;
@@ -2983,13 +3212,14 @@ impl Compiler {
         let function_code = std::mem::take(&mut self.code);
         let function_source_map = std::mem::take(&mut self.source_map);
         let function_max_registers = usize::from(self.max_registers.max(1));
+        let function_captured_registers = self.captured_registers.iter().copied().collect();
         self.functions[prototype] = Function::with_params_vararg_and_upvalues(
             function_code,
             function_max_registers,
             0,
             true,
             Vec::new(),
-            Vec::new(),
+            function_captured_registers,
         )
         .with_source_map(function_source_map);
 
@@ -2997,6 +3227,7 @@ impl Compiler {
         self.source_map = parent_source_map;
         self.options.source_line_starts = parent_source_line_starts;
         self.locals = parent_locals;
+        self.fastcall_candidate_names = parent_fastcall_candidate_names;
         self.upvalues = parent_upvalues;
         self.captured_registers = parent_captured_registers;
         self.capture_stack = parent_capture_stack;
@@ -3422,14 +3653,7 @@ impl Compiler {
         let callee_register = self.alloc_register_at(span)?;
         let self_register = self.alloc_register_at(span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            callee_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_namecall_lookup(callee_register, self_register, method, false, span)?;
 
         for arg in args {
             self.compile_expr(arg)?;
@@ -3480,14 +3704,7 @@ impl Compiler {
         let call_base = self.alloc_register_window_at(window_len, span)?;
         let self_register = checked_register_offset(call_base, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            call_base,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_namecall_lookup(call_base, self_register, method, false, span)?;
         for (index, arg) in args[..trailing_index].iter().enumerate() {
             let register = checked_register_offset(call_base, index + 2, span)?;
             self.compile_expr_to(arg, register)?;
@@ -3540,14 +3757,7 @@ impl Compiler {
         let callee_register = self.alloc_register_at(span)?;
         let self_register = self.alloc_register_at(span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            callee_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_namecall_lookup(callee_register, self_register, method, false, span)?;
 
         for arg in &args[..trailing_index] {
             self.compile_expr(arg)?;
@@ -3966,15 +4176,7 @@ impl Compiler {
             } => {
                 let self_register = checked_register_offset(callee_register, 1, span)?;
                 self.compile_expr_to(object, self_register)?;
-                let key_register =
-                    self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-                self.code.push(Instruction::new(
-                    Opcode::GetIndex,
-                    callee_register,
-                    self_register,
-                    key_register,
-                ));
-                self.free_register(key_register);
+                self.emit_namecall_lookup(callee_register, self_register, method, false, span)?;
                 for (index, arg) in args.iter().enumerate() {
                     let register = checked_register_offset(callee_register, index + 2, span)?;
                     self.compile_expr_to(arg, register)?;
@@ -4009,15 +4211,7 @@ impl Compiler {
             } => {
                 let self_register = checked_register_offset(callee_register, 1, span)?;
                 self.compile_expr_to(object, self_register)?;
-                let key_register =
-                    self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-                self.code.push(Instruction::new(
-                    Opcode::GetIndex,
-                    callee_register,
-                    self_register,
-                    key_register,
-                ));
-                self.free_register(key_register);
+                self.emit_namecall_lookup(callee_register, self_register, method, false, span)?;
                 for (index, arg) in args[..shape.scalar_arg_count].iter().enumerate() {
                     let register = checked_register_offset(callee_register, index + 2, span)?;
                     self.compile_expr_to(arg, register)?;
@@ -4068,14 +4262,7 @@ impl Compiler {
 
         let self_register = checked_register_offset(first_register, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            first_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_namecall_lookup(first_register, self_register, method, false, span)?;
 
         for (index, arg) in args.iter().enumerate() {
             let register = checked_register_offset(first_register, index + 2, span)?;
@@ -4124,18 +4311,7 @@ impl Compiler {
 
         let self_register = self.alloc_register_at(span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            target,
-            self_register,
-            key_register,
-        ));
-        self.emit_source_mapped_instruction(
-            Instruction::new(Opcode::CheckMethod, target, self_register, key_register),
-            span,
-        );
-        self.free_register(key_register);
+        self.emit_namecall_lookup(target, self_register, method, true, span)?;
 
         let mut arg_registers = Vec::with_capacity(args.len());
         for arg in args {
@@ -4191,14 +4367,7 @@ impl Compiler {
 
         let self_register = checked_register_offset(first_register, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            first_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_namecall_lookup(first_register, self_register, method, false, span)?;
         for (index, arg) in args[..trailing_index].iter().enumerate() {
             let register = checked_register_offset(first_register, index + 2, span)?;
             self.compile_expr_to(arg, register)?;
@@ -4251,14 +4420,7 @@ impl Compiler {
 
         let self_register = checked_register_offset(first_register, 1, span)?;
         self.compile_expr_to(object, self_register)?;
-        let key_register = self.load_constant(Constant::String(method.as_bytes().to_vec()))?;
-        self.code.push(Instruction::new(
-            Opcode::GetIndex,
-            first_register,
-            self_register,
-            key_register,
-        ));
-        self.free_register(key_register);
+        self.emit_namecall_lookup(first_register, self_register, method, false, span)?;
 
         for (index, arg) in args[..trailing_index].iter().enumerate() {
             let register = checked_register_offset(first_register, index + 2, span)?;
@@ -4786,6 +4948,10 @@ impl Compiler {
 
     fn load_constant_to(&mut self, register: u8, constant: Constant) -> Result<()> {
         let constant = self.constant_index(constant)?;
+        self.emit_constant_index_to(register, constant)
+    }
+
+    fn emit_constant_index_to(&mut self, register: u8, constant: usize) -> Result<()> {
         if let Ok(constant) = u8::try_from(constant) {
             self.code
                 .push(Instruction::new(Opcode::LoadConst, register, 0, constant));
@@ -4800,6 +4966,53 @@ impl Compiler {
                 constant,
             ));
         }
+        Ok(())
+    }
+
+    fn string_constant_index(&mut self, bytes: &[u8], span: Span) -> Result<i32> {
+        let index = self.constant_index(Constant::String(bytes.to_vec()))?;
+        i32::try_from(index).map_err(|_| CompileError::at("string constant index overflow", span))
+    }
+
+    fn compiled_string_table_key(
+        &mut self,
+        bytes: &[u8],
+        span: Span,
+        preload: bool,
+    ) -> Result<CompiledTableKey> {
+        let index = self.string_constant_index(bytes, span)?;
+        let preloaded = if preload {
+            let register = self.alloc_register_at(span)?;
+            debug_assert_ne!(register, 0, "register zero is the fused-key sentinel");
+            let constant = usize::try_from(index)
+                .map_err(|_| CompileError::at("negative string constant index", span))?;
+            self.emit_constant_index_to(register, constant)?;
+            Some(register)
+        } else {
+            None
+        };
+        Ok(CompiledTableKey::StringConstant { index, preloaded })
+    }
+
+    fn emit_namecall_lookup(
+        &mut self,
+        callee: u8,
+        receiver: u8,
+        method: &str,
+        checked: bool,
+        span: Span,
+    ) -> Result<()> {
+        let method = self.string_constant_index(method.as_bytes(), span)?;
+        self.emit_source_mapped_instruction(
+            Instruction::with_aux(
+                Opcode::NameCall,
+                callee,
+                receiver,
+                u8::from(checked),
+                method,
+            ),
+            span,
+        );
         Ok(())
     }
 
@@ -4827,6 +5040,56 @@ impl Compiler {
             && !self.global_environment_escaped
             && !self.locals.contains_key(name)
             && !self.assigned_globals.contains(name)
+    }
+
+    fn name_is_lexically_bound(&self, name: &str) -> bool {
+        self.locals.contains_key(name)
+            || self
+                .capture_stack
+                .iter()
+                .rev()
+                .any(|scope| scope.locals.contains_key(name))
+    }
+
+    fn expr_is_fastcall_candidate(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Name(name, _) => self.name_is_fastcall_candidate(name),
+            Expr::Field { object, .. } => dotted_import_root(object).is_some_and(|root| {
+                matches!(
+                    root,
+                    "bit32"
+                        | "buffer"
+                        | "coroutine"
+                        | "debug"
+                        | "math"
+                        | "os"
+                        | "string"
+                        | "table"
+                        | "utf8"
+                        | "vector"
+                ) && !self.name_is_lexically_bound(root)
+            }),
+            Expr::Paren { expr, .. } => self.expr_is_fastcall_candidate(expr),
+            _ => false,
+        }
+    }
+
+    fn name_is_fastcall_candidate(&self, name: &str) -> bool {
+        match self.locals.get(name) {
+            Some(Binding::Register(_) | Binding::CapturedLocal(_) | Binding::CurrentFunction) => {
+                return self.fastcall_candidate_names.contains(name);
+            }
+            Some(Binding::Upvalue(_)) | None => {}
+        }
+        for scope in self.capture_stack.iter().rev() {
+            match scope.locals.get(name) {
+                Some(
+                    Binding::Register(_) | Binding::CapturedLocal(_) | Binding::CurrentFunction,
+                ) => return scope.fastcall_candidate_names.contains(name),
+                Some(Binding::Upvalue(_)) | None => {}
+            }
+        }
+        false
     }
 
     fn mark_global_environment_escape_for_call(&mut self, callee: &Expr) {
@@ -5080,8 +5343,7 @@ impl Compiler {
                 ));
             }
             CompiledAssignmentTarget::Table { table, key, .. } => {
-                self.code
-                    .push(Instruction::new(Opcode::SetIndex, *table, *key, source));
+                self.code.push(table_set_instruction(*table, *key, source));
             }
             CompiledAssignmentTarget::Global { key, .. } => {
                 self.code
@@ -5096,7 +5358,9 @@ impl Compiler {
             CompiledAssignmentTarget::CapturedLocal(_) => {}
             CompiledAssignmentTarget::Upvalue(_) => {}
             CompiledAssignmentTarget::Table { table, key, .. } => {
-                self.free_register(key);
+                if let Some(key) = key.register() {
+                    self.free_register(key);
+                }
                 self.free_register(table);
             }
             CompiledAssignmentTarget::Global { .. } => {}
@@ -5629,6 +5893,175 @@ fn expr_is_call(expr: &Expr) -> bool {
     matches!(expr, Expr::Call { .. } | Expr::MethodCall { .. })
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct CaptureOrigin {
+    scope: usize,
+    register: u8,
+}
+
+#[derive(Clone, Copy)]
+enum CaptureParent {
+    Missing,
+    One(usize),
+    Ambiguous,
+}
+
+#[derive(Clone, Copy)]
+enum CaptureOriginState {
+    Unresolved,
+    Resolving,
+    Resolved(Option<CaptureOrigin>),
+}
+
+/// Rewrites only captures whose lexical source is provably never assigned.
+/// Existing cell descriptors are the conservative bytecode contract; the two
+/// value variants are an optimization emitted after the complete nested
+/// function graph and all writes are visible.
+fn mark_immutable_capture_descriptors(main: &mut Function, functions: &mut [Function]) {
+    let scope_count = functions.len().saturating_add(1);
+    let mut parents = vec![CaptureParent::Missing; scope_count];
+
+    for scope in 0..scope_count {
+        let function = if scope == 0 {
+            &*main
+        } else {
+            &functions[scope - 1]
+        };
+        for instruction in &function.code {
+            if instruction.op != Opcode::LoadFunction || instruction.aux < 0 {
+                continue;
+            }
+            let Some(child_scope) = usize::try_from(instruction.aux)
+                .ok()
+                .and_then(|prototype| prototype.checked_add(1))
+                .filter(|child| *child < scope_count)
+            else {
+                continue;
+            };
+            parents[child_scope] = match parents[child_scope] {
+                CaptureParent::Missing => CaptureParent::One(scope),
+                CaptureParent::One(existing) if existing == scope => CaptureParent::One(scope),
+                CaptureParent::One(_) | CaptureParent::Ambiguous => CaptureParent::Ambiguous,
+            };
+        }
+    }
+
+    let mut origins = functions
+        .iter()
+        .map(|function| vec![CaptureOriginState::Unresolved; function.upvalues.len()])
+        .collect::<Vec<_>>();
+    for prototype in 0..functions.len() {
+        for upvalue in 0..functions[prototype].upvalues.len() {
+            let _ = resolve_capture_origin(prototype, upvalue, functions, &parents, &mut origins);
+        }
+    }
+
+    let mut mutated = BTreeSet::new();
+    for scope in 0..scope_count {
+        let function = if scope == 0 {
+            &*main
+        } else {
+            &functions[scope - 1]
+        };
+        for instruction in &function.code {
+            match instruction.op {
+                Opcode::SetLocalCell => {
+                    mutated.insert(CaptureOrigin {
+                        scope,
+                        register: instruction.b,
+                    });
+                }
+                Opcode::SetUpvalue if scope != 0 && instruction.aux >= 0 => {
+                    if let Some(origin) = usize::try_from(instruction.aux)
+                        .ok()
+                        .and_then(|index| origins[scope - 1].get(index))
+                        .and_then(|state| match state {
+                            CaptureOriginState::Resolved(origin) => *origin,
+                            CaptureOriginState::Unresolved | CaptureOriginState::Resolving => None,
+                        })
+                    {
+                        mutated.insert(origin);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    for (prototype, function) in functions.iter_mut().enumerate() {
+        for (index, descriptor) in function.upvalues.iter_mut().enumerate() {
+            let immutable = matches!(
+                origins[prototype].get(index),
+                Some(CaptureOriginState::Resolved(Some(origin))) if !mutated.contains(origin)
+            );
+            *descriptor = match (*descriptor, immutable) {
+                (UpvalueDescriptor::ParentLocal(register), true)
+                | (UpvalueDescriptor::ParentLocalValue(register), true) => {
+                    UpvalueDescriptor::ParentLocalValue(register)
+                }
+                (UpvalueDescriptor::ParentUpvalue(index), true)
+                | (UpvalueDescriptor::ParentUpvalueValue(index), true) => {
+                    UpvalueDescriptor::ParentUpvalueValue(index)
+                }
+                (UpvalueDescriptor::ParentLocal(register), false)
+                | (UpvalueDescriptor::ParentLocalValue(register), false) => {
+                    UpvalueDescriptor::ParentLocal(register)
+                }
+                (UpvalueDescriptor::ParentUpvalue(index), false)
+                | (UpvalueDescriptor::ParentUpvalueValue(index), false) => {
+                    UpvalueDescriptor::ParentUpvalue(index)
+                }
+            };
+        }
+    }
+}
+
+fn resolve_capture_origin(
+    prototype: usize,
+    upvalue: usize,
+    functions: &[Function],
+    parents: &[CaptureParent],
+    states: &mut [Vec<CaptureOriginState>],
+) -> Option<CaptureOrigin> {
+    match *states.get(prototype)?.get(upvalue)? {
+        CaptureOriginState::Resolved(origin) => return origin,
+        CaptureOriginState::Resolving => return None,
+        CaptureOriginState::Unresolved => {}
+    }
+    states[prototype][upvalue] = CaptureOriginState::Resolving;
+
+    let child_scope = prototype.checked_add(1)?;
+    let parent_scope = match *parents.get(child_scope)? {
+        CaptureParent::One(parent) => parent,
+        CaptureParent::Missing | CaptureParent::Ambiguous => {
+            states[prototype][upvalue] = CaptureOriginState::Resolved(None);
+            return None;
+        }
+    };
+    let descriptor = *functions.get(prototype)?.upvalues.get(upvalue)?;
+    let origin = match descriptor {
+        UpvalueDescriptor::ParentLocal(register)
+        | UpvalueDescriptor::ParentLocalValue(register) => Some(CaptureOrigin {
+            scope: parent_scope,
+            register,
+        }),
+        UpvalueDescriptor::ParentUpvalue(parent_upvalue)
+        | UpvalueDescriptor::ParentUpvalueValue(parent_upvalue) => {
+            parent_scope.checked_sub(1).and_then(|parent| {
+                resolve_capture_origin(
+                    parent,
+                    usize::from(parent_upvalue),
+                    functions,
+                    parents,
+                    states,
+                )
+            })
+        }
+    };
+    states[prototype][upvalue] = CaptureOriginState::Resolved(origin);
+    origin
+}
+
 #[derive(Clone, Copy)]
 enum Binding {
     Register(u8),
@@ -5640,6 +6073,7 @@ enum Binding {
 #[derive(Clone)]
 struct CaptureScope {
     locals: BTreeMap<String, Binding>,
+    fastcall_candidate_names: BTreeSet<String>,
     upvalues: Vec<UpvalueDescriptor>,
     captured_registers: BTreeSet<u8>,
 }
@@ -5651,7 +6085,7 @@ enum CompiledAssignmentTarget {
     Upvalue(u8),
     Table {
         table: u8,
-        key: u8,
+        key: CompiledTableKey,
         global_field: Option<String>,
         stdlib_field: Option<(String, String)>,
     },
@@ -5659,6 +6093,53 @@ enum CompiledAssignmentTarget {
         key: i32,
         name: String,
     },
+}
+
+#[derive(Clone, Copy)]
+enum CompiledTableKey {
+    Register(u8),
+    StringConstant {
+        index: i32,
+        /// Register holding the original logical constant load when evaluation must remain
+        /// before an intervening right-hand side. `None` means the load is fused here.
+        preloaded: Option<u8>,
+    },
+}
+
+impl CompiledTableKey {
+    fn register(self) -> Option<u8> {
+        match self {
+            Self::Register(register) => Some(register),
+            Self::StringConstant { preloaded, .. } => preloaded,
+        }
+    }
+}
+
+fn table_get_instruction(result: u8, table: u8, key: CompiledTableKey) -> Instruction {
+    match key {
+        CompiledTableKey::Register(key) => Instruction::new(Opcode::GetIndex, result, table, key),
+        CompiledTableKey::StringConstant {
+            index,
+            preloaded: None,
+        } => Instruction::with_aux(Opcode::GetTableKs, result, table, 0, index),
+        CompiledTableKey::StringConstant {
+            preloaded: Some(key),
+            ..
+        } => Instruction::new(Opcode::GetIndex, result, table, key),
+    }
+}
+
+fn table_set_instruction(table: u8, key: CompiledTableKey, value: u8) -> Instruction {
+    match key {
+        CompiledTableKey::Register(key) => Instruction::new(Opcode::SetIndex, table, key, value),
+        CompiledTableKey::StringConstant { index, preloaded } => Instruction::with_aux(
+            Opcode::SetTableKs,
+            table,
+            value,
+            preloaded.unwrap_or(0),
+            index,
+        ),
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -5699,6 +6180,41 @@ impl GenericArrayIterator {
             Self::Ipairs => Opcode::IpairsLoop,
             Self::Pairs => Opcode::PairsLoop,
         }
+    }
+}
+
+fn dotted_import_path(object: &Expr, field: &str) -> Option<Vec<String>> {
+    fn collect(expr: &Expr, path: &mut Vec<String>) -> bool {
+        match expr {
+            Expr::Name(name, _) => {
+                path.push(name.clone());
+                true
+            }
+            Expr::Field { object, field, .. } => {
+                if !collect(object, path) {
+                    return false;
+                }
+                path.push(field.clone());
+                true
+            }
+            Expr::Paren { expr, .. } => collect(expr, path),
+            _ => false,
+        }
+    }
+
+    let mut path = Vec::with_capacity(3);
+    if !collect(object, &mut path) {
+        return None;
+    }
+    path.push(field.to_owned());
+    Some(path)
+}
+
+fn dotted_import_root(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Name(name, _) => Some(name),
+        Expr::Field { object, .. } | Expr::Paren { expr: object, .. } => dotted_import_root(object),
+        _ => None,
     }
 }
 
@@ -5752,6 +6268,18 @@ fn math_abs_needs_native_error_path(args: &[Expr]) -> bool {
         const_eval(first),
         Some(Constant::Nil | Constant::Boolean(_))
     )
+}
+
+fn math_specialized_min_arity(field: &str) -> Option<usize> {
+    match field {
+        "abs" | "floor" | "ceil" | "round" | "sign" | "sqrt" | "deg" | "rad" | "isnan"
+        | "isinf" | "isfinite" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh"
+        | "cosh" | "tanh" | "exp" | "log" | "log10" | "min" | "max" => Some(1),
+        "fmod" | "pow" | "atan2" | "ldexp" => Some(2),
+        "clamp" | "lerp" => Some(3),
+        "map" => Some(5),
+        _ => None,
+    }
 }
 
 fn const_eval_binary(op: BinaryOp, lhs: &Expr, rhs: &Expr) -> Option<Constant> {
@@ -5873,6 +6401,7 @@ fn constants_equal(lhs: &Constant, rhs: &Constant) -> bool {
         (Constant::Boolean(lhs), Constant::Boolean(rhs)) => lhs == rhs,
         (Constant::Number(lhs), Constant::Number(rhs)) => lhs.to_bits() == rhs.to_bits(),
         (Constant::String(lhs), Constant::String(rhs)) => lhs == rhs,
+        (Constant::Import(lhs), Constant::Import(rhs)) => lhs == rhs,
         _ => false,
     }
 }
@@ -5910,8 +6439,9 @@ fn compare_ordered_constants(op: BinaryOp, lhs: &Constant, rhs: &Constant) -> Op
 mod tests {
     use super::{compile, compile_with_options, BuiltinEnvironment, CompileOptions};
     use rustia_parser::{parse_source, parse_source_bytes};
-    use rustia_vm::bytecode::{Constant, Opcode, Program};
-    use rustia_vm::{ErrorKind, Profile, Vm, VmSettings};
+    use rustia_vm::bytecode::{Constant, Opcode, Program, UpvalueDescriptor};
+    use rustia_vm::{ErrorKind, HostFunctionOp, OpCapability, Profile, Vm, VmSettings};
+    use std::sync::Arc;
 
     #[test]
     fn compiles_and_runs_typed_numeric_subset() {
@@ -5921,6 +6451,28 @@ mod tests {
         let mut vm = Vm::new(Profile::DeterministicSim);
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(42.0));
+    }
+
+    #[test]
+    fn guest_call_root_snapshot_preserves_newly_weak_outer_values() {
+        let chunk = parse_source(
+            r#"
+                local holder = {}
+                local outerOnly = {}
+                holder[1] = outerOnly
+                local function activateWeakValues()
+                    setmetatable(holder, { __mode = "v" })
+                    collectgarbage()
+                end
+                activateWeakValues()
+                return holder[1] == outerOnly
+            "#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_bool(), Some(true));
     }
 
     #[test]
@@ -5951,7 +6503,7 @@ mod tests {
         let chunk = parse_source("return tostring(-0) .. '|' .. tostring(0)").unwrap();
         let program = compile(&chunk).unwrap();
         let zero_bits = program
-            .constants
+            .constants()
             .iter()
             .filter_map(|constant| match constant {
                 Constant::Number(value) if *value == 0.0 => Some(value.to_bits()),
@@ -8480,6 +9032,29 @@ return `x {s}`"#,
     }
 
     #[test]
+    fn mixed_string_representations_preserve_compatible_eq_metamethods() {
+        let chunk = parse_source(
+            r#"
+                local atom = next({same = true})
+                local inline = "same"
+                local left = setmetatable({}, {__eq = atom})
+                local right = setmetatable({}, {__eq = inline})
+                return left == right
+            "#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        let error = Vm::new(Profile::ReproducibleStandard)
+            .run(&program)
+            .expect_err("equal mixed-representation metamethod values must be invoked");
+        assert!(matches!(
+            error.kind,
+            ErrorKind::RuntimeError { ref message }
+                if message == "attempt to call a string value"
+        ));
+    }
+
+    #[test]
     fn compiles_relational_operators() {
         let chunk = parse_source("local x = 1; return assert(x <= 2)").unwrap();
         let program = compile(&chunk).unwrap();
@@ -8815,6 +9390,185 @@ return #s * 1000 + string.byte(s, 256)
     }
 
     #[test]
+    fn immutable_capture_analysis_tracks_sibling_and_transitive_mutation() {
+        let counter = compile(
+            &parse_source(
+                "local function make(start, step) local c = start return function() c += step return c end end return make(1, 2)()",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let counter_leaf = counter
+            .functions
+            .iter()
+            .find(|function| function.upvalues.len() == 2)
+            .expect("counter leaf");
+        assert!(matches!(
+            counter_leaf.upvalues[0],
+            UpvalueDescriptor::ParentLocal(_)
+        ));
+        assert!(matches!(
+            counter_leaf.upvalues[1],
+            UpvalueDescriptor::ParentLocalValue(_)
+        ));
+
+        let siblings = compile(
+            &parse_source(
+                "local x = 1 local function get() return x end local function set(v) x = v end set(4) return get()",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(siblings.functions.len(), 2);
+        for function in &siblings.functions {
+            assert!(matches!(
+                function.upvalues.as_slice(),
+                [UpvalueDescriptor::ParentLocal(_)]
+            ));
+        }
+
+        let transitive = compile(
+            &parse_source(
+                "local x = 7 local function outer() return function() return x end end return outer()()",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            transitive.functions[0].upvalues.as_slice(),
+            [UpvalueDescriptor::ParentLocalValue(_)]
+        ));
+        assert!(matches!(
+            transitive.functions[1].upvalues.as_slice(),
+            [UpvalueDescriptor::ParentUpvalueValue(_)]
+        ));
+
+        let transitive_mutation = compile(
+            &parse_source(
+                "local x=1 local function outer() local function get() return x end local function set(v) x=v end set(9) return get() end return outer()",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            transitive_mutation.functions[0].upvalues.as_slice(),
+            [UpvalueDescriptor::ParentLocal(_)]
+        ));
+        for function in &transitive_mutation.functions[1..=2] {
+            assert!(matches!(
+                function.upvalues.as_slice(),
+                [UpvalueDescriptor::ParentUpvalue(_)]
+            ));
+        }
+
+        let immutable_function = compile(
+            &parse_source(
+                "local function f() return 7 end local function get() return f end return get()()",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            immutable_function.functions[1].upvalues.as_slice(),
+            [UpvalueDescriptor::ParentLocalValue(_)]
+        ));
+
+        let nested_self = compile(
+            &parse_source(
+                "local function f() return function() return f end end return f()()==f and 1 or 0",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            nested_self.functions[0].upvalues.as_slice(),
+            [UpvalueDescriptor::ParentLocal(_)]
+        ));
+        assert!(matches!(
+            nested_self.functions[1].upvalues.as_slice(),
+            [UpvalueDescriptor::ParentUpvalue(_)]
+        ));
+
+        for (program, expected) in [
+            (counter, 3.0),
+            (siblings, 4.0),
+            (transitive, 7.0),
+            (transitive_mutation, 9.0),
+            (immutable_function, 7.0),
+            (nested_self, 1.0),
+        ] {
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            assert_eq!(vm.run(&program).unwrap().as_number(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn capture_discovery_precedes_every_loop_write_form() {
+        let cases = [
+            (
+                "local x=0 local fs={} for i=1,3 do x += 1 fs[i]=function() return x end end return fs[1]()*100+fs[2]()*10+fs[3]()",
+                333.0,
+            ),
+            (
+                "local x=0 local fs={} for i=1,3 do x=i fs[i]=function() return x end end return fs[1]()*100+fs[2]()*10+fs[3]()",
+                333.0,
+            ),
+            (
+                "local x=0 local f for i=1,3 do x += 1 if i==1 then f=function() return x end end if i==3 then break end end return f()",
+                3.0,
+            ),
+            (
+                "local x=0 local f for i=1,3 do x += 1 if i==1 then local function middle() return function() return x end end f=middle() end end return f()",
+                3.0,
+            ),
+            (
+                "local x,y=0,0 local fs={} for i=1,3 do x,y=i,i*2 fs[i]=function() return x*10+y end end return fs[1]()*10000+fs[2]()*100+fs[3]()",
+                363_636.0,
+            ),
+            (
+                "local function pair(i) return i,i*2 end local x,y=0,0 local fs={} for i=1,3 do x,y=pair(i) fs[i]=function() return x*10+y end end return fs[1]()*10000+fs[2]()*100+fs[3]()",
+                363_636.0,
+            ),
+            (
+                "local function outer() local x=0 local fs={} for i=1,3 do x += 1 fs[i]=function() return x end end return fs[1]()*100+fs[2]()*10+fs[3]() end return outer()",
+                333.0,
+            ),
+            (
+                "local x=0 local f for outer=1,3 do for i=1,16 do x += 1 end if outer==1 then f=function() return x end end end return f()",
+                48.0,
+            ),
+            (
+                "local x=0 local proxy local ys={} for i=1,3 do if proxy then local z=proxy+1 end ys[i]=x proxy=setmetatable({}, {__add=function() x += 1 return 0 end}) end return ys[1]*100+ys[2]*10+ys[3]",
+                12.0,
+            ),
+            (
+                "local f=function() return 0 end local fs={} for i=1,3 do function f() return i end fs[i]=function() return f end end local a,b,c=fs[1](),fs[2](),fs[3]() return (a()==3 and b()==3 and c()==3) and 1 or 0",
+                1.0,
+            ),
+            (
+                "local fs={} for i=1,3 do local x=i fs[i]=function() return x end end return fs[1]()*100+fs[2]()*10+fs[3]()",
+                123.0,
+            ),
+        ];
+
+        for (source, expected) in cases {
+            let program = compile(&parse_source(source).unwrap()).unwrap();
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            assert_eq!(
+                vm.run(&program).unwrap().as_number(),
+                Some(expected),
+                "{source}"
+            );
+        }
+
+        let source = "local f=(loadstring('local x=0 local fs={} for i=1,3 do x += 1 fs[i]=function() return x end end return fs[1]()*100+fs[2]()*10+fs[3]()')) return f()";
+        let program =
+            compile_with_options(&parse_source(source).unwrap(), conformance_options()).unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(333.0));
+    }
+
+    #[test]
     fn captured_loop_variables_use_fresh_cells_per_iteration() {
         let cases = [
             (
@@ -9019,6 +9773,529 @@ return #s * 1000 + string.byte(s, 256)
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let error = vm.run(&program).unwrap_err();
         assert_assertion_message(error.kind, "assertion failed!");
+    }
+
+    #[test]
+    fn lowers_live_dotted_imports_and_keeps_fourth_component_generic() {
+        let chunk =
+            parse_source("foo = {bar = {baz = {qux = 42}}}; return foo.bar.baz.qux").unwrap();
+        let program = compile(&chunk).unwrap();
+        let import = program
+            .main
+            .code
+            .iter()
+            .find(|instruction| instruction.op == Opcode::GetImport)
+            .copied()
+            .expect("three-component prefix should use GETIMPORT");
+        assert_eq!(import.b, 3);
+        assert!(program
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::GetTableKs));
+        let Constant::Import(path) = &program.constants()[import.aux as usize] else {
+            panic!("GETIMPORT must reference an import descriptor");
+        };
+        let names = path
+            .iter()
+            .map(|index| match &program.constants()[*index as usize] {
+                Constant::String(name) => String::from_utf8(name.clone()).unwrap(),
+                _ => panic!("import component must reference a string"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["foo", "bar", "baz"]);
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(42.0));
+    }
+
+    #[test]
+    fn lowers_constant_string_table_and_namecall_fastpaths() {
+        let program = compile(
+            &parse_source(
+                r#"
+                    local t = {
+                        value = 1,
+                        ["other"] = 2,
+                        add = function(self, x) return self.value + x end,
+                    }
+                    t.value += 1
+                    t["other"] = t.value
+                    local key = "other"
+                    t[key] = 3
+                    local dynamic = t[key]
+                    return t:add(dynamic) + 0
+                "#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let code = program
+            .main
+            .code
+            .iter()
+            .chain(program.functions.iter().flat_map(|function| &function.code))
+            .collect::<Vec<_>>();
+        assert!(code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::GetTableKs));
+        assert!(code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::SetTableKs));
+        assert!(code
+            .iter()
+            .filter(|instruction| instruction.op == Opcode::SetTableKs)
+            .all(|instruction| instruction.c != 0));
+        let compound_get = code
+            .iter()
+            .find(|instruction| instruction.op == Opcode::GetTableKs && instruction.c != 0)
+            .expect("compound constant-field read should retain its loaded key");
+        assert!(code.iter().any(|instruction| {
+            instruction.op == Opcode::SetIndex && instruction.b == compound_get.c
+        }));
+        assert!(code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::NameCall && instruction.c == 1));
+        assert!(code
+            .iter()
+            .all(|instruction| instruction.op != Opcode::CheckMethod));
+        assert!(code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::GetIndex));
+        assert!(code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::SetIndex));
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(5.0));
+
+        let tail = compile(
+            &parse_source("local t = {m = function(self) return 42 end}; return t:m()").unwrap(),
+        )
+        .unwrap();
+        assert!(tail
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::NameCall && instruction.c == 0));
+
+        let indexed_class = compile(
+            &parse_source(
+                r#"
+                    local Class = {}
+                    Class.__index = Class
+                    function Class:add(x) return self.value + x end
+                    local object = setmetatable({value = 40}, Class)
+                    local result = 0
+                    for i = 1, 2 do result = object:add(i) end
+                    return result
+                "#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&indexed_class).unwrap().as_number(), Some(42.0));
+
+        let missing =
+            compile(&parse_source("local t = {}; return t:missing() + 0").unwrap()).unwrap();
+        let error = Vm::new(Profile::ReproducibleStandard)
+            .run(&missing)
+            .expect_err("checked NAMECALL must retain the missing-method diagnostic");
+        assert!(matches!(
+            error.kind,
+            ErrorKind::RuntimeError { ref message }
+                if message == "attempt to call missing method 'missing' of table"
+        ));
+    }
+
+    #[test]
+    fn settableks_preloads_its_logical_key_before_an_intervening_rhs_call() {
+        let program = compile(
+            &parse_source(
+                r#"
+                    local t = {}
+                    local function rhs() return 42 end
+                    t.field = rhs()
+                    return t.field
+                "#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let code = &program.main.code;
+        let (set_index, set) = code
+            .iter()
+            .enumerate()
+            .find(|(_, instruction)| instruction.op == Opcode::SetTableKs)
+            .expect("constant field write should use SETTABLEKS");
+        assert_ne!(set.c, 0, "compiler writes must use preloaded-key mode");
+        let key_load = code[..set_index]
+            .iter()
+            .rposition(|instruction| {
+                instruction.a == set.c
+                    && matches!(instruction.op, Opcode::LoadConst | Opcode::LoadConstWide)
+            })
+            .expect("SETTABLEKS key register should have a logical constant load");
+        let rhs_call = code[..set_index]
+            .iter()
+            .rposition(|instruction| matches!(instruction.op, Opcode::Call | Opcode::CallMulti))
+            .expect("the RHS should contain the ordinary function call");
+        assert!(
+            key_load < rhs_call && rhs_call < set_index,
+            "the key step must remain before RHS side effects and the write after them"
+        );
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(42.0));
+    }
+
+    #[test]
+    fn every_source_write_preloads_the_matching_settableks_key() {
+        let program = compile(
+            &parse_source(
+                r#"
+                    local a, b = {}, {}
+                    local function rhs(value) return value end
+                    a.one, b.two = rhs(1), rhs(2)
+                    local c = { three = rhs(3), ["four"] = rhs(4) }
+                    function a.five() return 5 end
+                    return a.one + b.two + c.three + c.four + a.five()
+                "#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let code = &program.main.code;
+        let sets = code
+            .iter()
+            .enumerate()
+            .filter(|(_, instruction)| instruction.op == Opcode::SetTableKs)
+            .collect::<Vec<_>>();
+        assert_eq!(sets.len(), 5);
+        for (set_index, set) in sets {
+            assert_ne!(set.c, 0, "source writes must use preloaded-key mode");
+            let load = code[..set_index]
+                .iter()
+                .rfind(|instruction| {
+                    instruction.a == set.c
+                        && matches!(instruction.op, Opcode::LoadConst | Opcode::LoadConstWide)
+                })
+                .expect("preloaded key must have a preceding constant load");
+            let loaded_constant = match load.op {
+                Opcode::LoadConst => i32::from(load.c),
+                Opcode::LoadConstWide => load.aux,
+                _ => unreachable!(),
+            };
+            assert_eq!(loaded_constant, set.aux);
+        }
+
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(15.0));
+    }
+
+    #[test]
+    fn import_lowering_respects_current_and_outer_lexical_bindings() {
+        let cases = [
+            "local math = {pi = 9}; return math.pi",
+            "local function read(math) return math.pi end; return read({pi = 8})",
+            "local math = {pi = 7}; local function read() return math.pi end; return read()",
+        ];
+        for (source, expected) in cases.into_iter().zip([9.0, 8.0, 7.0]) {
+            let program = compile(&parse_source(source).unwrap()).unwrap();
+            assert!(program
+                .main
+                .code
+                .iter()
+                .chain(program.functions.iter().flat_map(|function| &function.code))
+                .all(|instruction| instruction.op != Opcode::GetImport));
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            assert_eq!(vm.run(&program).unwrap().as_number(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn import_cache_observes_live_field_mutation() {
+        let chunk = parse_source(
+            "local result = 0; for i = 1, 2 do result = math.pi; math.pi = 7 end; return result",
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(program
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::GetImport));
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(7.0));
+    }
+
+    #[test]
+    fn getimport_roots_intermediate_values_across_fused_gc_steps() {
+        let source = r#"
+            local weak = setmetatable({}, {__mode = "k"})
+            local object_meta = {
+                __index = function(self, key)
+                    return weak[self]
+                end,
+            }
+            foo = setmetatable({}, {
+                __index = function(_, key)
+                    local object = setmetatable({}, object_meta)
+                    weak[object] = 123
+                    return object
+                end,
+            })
+            return foo.missing.bar
+        "#;
+        let program = compile(&parse_source(source).unwrap()).unwrap();
+        assert!(program
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::GetImport && instruction.b == 3));
+        let settings = VmSettings {
+            deterministic_gc_interval: std::num::NonZeroU64::new(1).unwrap(),
+            ..VmSettings::default()
+        };
+        let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(123.0));
+    }
+
+    #[test]
+    fn generic_fastcall_covers_local_aliases_and_deopts_on_reassignment() {
+        let chunk = parse_source(
+            "local f = math.floor; local result = 0; for i = 1, 2 do result = f(1.5) + 0; f = function() return 77 end end; return result",
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(program
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::FastCall));
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(77.0));
+
+        let nested = compile(
+            &parse_source(
+                "local f = math.floor; local function call(x) return f(x) + 0 end; return call(1.5)",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(nested.functions.iter().any(|function| function
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::FastCall)));
+
+        let ordinary =
+            compile(&parse_source("local function c() return 1 end; return c() + 0").unwrap())
+                .unwrap();
+        assert!(ordinary
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::Call));
+        assert!(ordinary
+            .main
+            .code
+            .iter()
+            .all(|instruction| instruction.op != Opcode::FastCall));
+
+        let shadowed_parameter = compile(
+            &parse_source(
+                "local f = math.floor; local function use(f) return f() + 0 end; return use(function() return 1 end)",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(shadowed_parameter
+            .functions
+            .iter()
+            .flat_map(|function| &function.code)
+            .all(|instruction| instruction.op != Opcode::FastCall));
+
+        let child_only = compile(
+            &parse_source(
+                "local function seed() local g = math.floor end; local function g() return 1 end; return g() + 0",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(child_only
+            .main
+            .code
+            .iter()
+            .chain(
+                child_only
+                    .functions
+                    .iter()
+                    .flat_map(|function| &function.code)
+            )
+            .all(|instruction| instruction.op != Opcode::FastCall));
+    }
+
+    #[test]
+    fn fastcall_falls_back_to_callable_table_metamethods() {
+        let program = compile(
+            &parse_source(
+                "local f = math.floor; f = setmetatable({}, {__call = function(_, x) return x + 40 end}); return f(2) + 0",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(program
+            .main
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::FastCall));
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(42.0));
+    }
+
+    #[test]
+    fn fastcall_cold_and_hot_hits_preserve_native_variable_work_fuel() {
+        let fast = compile(
+            &parse_source(
+                r#"
+                    local concat = table.concat
+                    local values = {"abcdefgh", "ijklmnop"}
+                    local result = ""
+                    for i = 1, 2 do
+                        result = (concat(values))
+                    end
+                    return result
+                "#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            fast.main
+                .code
+                .iter()
+                .filter(|instruction| instruction.op == Opcode::FastCall)
+                .count(),
+            1
+        );
+
+        let mut ordinary = fast.clone();
+        for instruction in &mut ordinary.main.code {
+            if instruction.op == Opcode::FastCall {
+                instruction.op = Opcode::Call;
+            }
+        }
+
+        let minimum_fuel = |program: &Program| {
+            let succeeds = |limit| {
+                let settings = VmSettings {
+                    initial_fuel: Some(limit),
+                    ..VmSettings::default()
+                };
+                match Vm::with_settings(Profile::ReproducibleStandard, settings).run(program) {
+                    Ok(_) => true,
+                    Err(error) if matches!(error.kind, ErrorKind::FuelExhausted { .. }) => false,
+                    Err(error) => panic!("unexpected runtime error: {error}"),
+                }
+            };
+            let mut low = 0_u64;
+            let mut high = 1_000_u64;
+            assert!(succeeds(high), "fuel search upper bound is too small");
+            while low < high {
+                let middle = low + (high - low) / 2;
+                if succeeds(middle) {
+                    high = middle;
+                } else {
+                    low = middle + 1;
+                }
+            }
+            low
+        };
+        let fast_fuel = minimum_fuel(&fast);
+        let ordinary_fuel = minimum_fuel(&ordinary);
+        assert_eq!(fast_fuel, ordinary_fuel);
+        assert!(fast_fuel > 0);
+
+        let settings = VmSettings {
+            initial_fuel: Some(fast_fuel - 1),
+            ..VmSettings::default()
+        };
+        let error = Vm::with_settings(Profile::ReproducibleStandard, settings)
+            .run(&fast)
+            .expect_err("one unit below the exact CALL fuel must also starve FASTCALL");
+        assert!(matches!(error.kind, ErrorKind::FuelExhausted { .. }));
+    }
+
+    #[test]
+    fn fastcall_preserves_yield_and_write_first_continuation() {
+        let chunk = parse_source(
+            r#"
+                local yield_alias = coroutine.yield
+                local function worker()
+                    local resumed = yield_alias(5) + 0
+                    return resumed
+                end
+                local thread = coroutine.create(worker)
+                local ok, first = coroutine.resume(thread)
+                local ok2, second = coroutine.resume(thread, 9)
+                assert(ok and first == 5 and ok2)
+                return second
+            "#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        assert!(program.functions.iter().any(|function| function
+            .code
+            .iter()
+            .any(|instruction| instruction.op == Opcode::FastCall)));
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(9.0));
+    }
+
+    #[test]
+    fn getimport_and_fastcall_observe_host_time_builtin_replacement() {
+        let program =
+            compile(&parse_source("local f = math.floor; return f(1.5)").unwrap()).unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let replacement = vm
+            .register_host_function(HostFunctionOp::new(
+                "replacement_floor",
+                1,
+                OpCapability::Pure,
+                Arc::new(|_, _| Ok(vec![rustia_vm::Value::number(77.0)])),
+            ))
+            .unwrap();
+        let math = vm.get_global_value("math").unwrap();
+        let floor = vm.string("floor");
+        vm.raw_table_set_value(math, floor, replacement).unwrap();
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(77.0));
+    }
+
+    #[test]
+    fn invalid_specialized_arities_compile_and_fail_through_native_fallback() {
+        for source in [
+            "return math.floor()",
+            "return math.fmod(1)",
+            "return math.log()",
+            "return math.min()",
+            "return math.clamp(1, 2)",
+        ] {
+            let program = compile(&parse_source(source).unwrap())
+                .unwrap_or_else(|error| panic!("{source} should compile: {error}"));
+            assert!(program
+                .main
+                .code
+                .iter()
+                .any(|instruction| instruction.op == Opcode::FastCall));
+            let error = Vm::new(Profile::ReproducibleStandard)
+                .run(&program)
+                .expect_err("invalid native arity should fail at runtime");
+            assert!(matches!(
+                error.kind,
+                ErrorKind::TypeError { .. } | ErrorKind::RuntimeError { .. }
+            ));
+        }
     }
 
     fn conformance_options() -> CompileOptions {

@@ -1,7 +1,8 @@
 # rustia - embedded API goal and plan
 
-> **Status: [PLAN - build against this] (2026-07-03).** This records the public Rust embedding API direction
-> after comparing rustia's constraints with current Rust scripting/runtime APIs. It refines the locked
+> **Status: [IMPLEMENTED FIRST SLICE - stabilization and advanced interop pending] (updated 2026-07-23).**
+> This records the public Rust embedding API direction and its honest implementation boundary after comparing
+> rustia's constraints with current Rust scripting/runtime APIs. It refines the locked
 > architecture axis H in [`30-architecture.md`](30-architecture.md) and the grabby bridge contract in
 > [`70-host-bridge-contract.md`](70-host-bridge-contract.md).
 
@@ -12,6 +13,15 @@
 This is the API goal, not just a feature label. It means rustia must provide a general-purpose, public Rust
 embedding surface that is pleasant outside grabby, while also being strong enough for grabby's deterministic
 per-agent AI loop without leaking grabby-specific types into public rustia.
+
+## Current boundary
+
+Typed run/compile helpers, owned scalar and table values, typed host functions, extension metadata/capabilities,
+retained `Function`/`Exports` handles with install-generation checks, owned serde, hot reload, diagnostics, and
+early declarative macro sugar are implemented. The next release-critical slice is not more facade decoration:
+it is complete object/program reclamation and quotas, epoch-safe decision reset, output/time providers and real
+VM memory telemetry, a cheap worker-local/per-call host context, a host-owned module resolver/cache,
+transactional installation/reload failures, rich graph-preserving values, and live zero-copy serde.
 
 ## Non-Negotiable Requirements
 
@@ -55,15 +65,15 @@ This is the primary public API.
 let mut vm = Rustia::builder()
     .profile(Profile::DeterministicSim)
     .fuel(50_000)
-    .build();
+    .build()?;
 
 vm.add_fn("clamp", |x: f64, lo: f64, hi: f64| x.clamp(lo, hi))?;
 vm.insert_global("difficulty", 3)?;
 
 let quick: f64 = vm.run("return clamp(difficulty + 9, 0, 10)")?;
-let exports = vm.compile_and_run("return { decide = function(x) return clamp(x, 0, 10) end }")?;
-let decide = exports.function("decide")?;
-let y: f64 = decide.call((12.0,))?;
+let exports = vm.compile_and_run_exports("return { decide = function(x) return clamp(x, 0, 10) end }")?;
+let decide = exports.function(&mut vm, "decide")?;
+let y: f64 = decide.call(&mut vm, (12.0,))?;
 ```
 
 Core pieces:
@@ -78,7 +88,7 @@ Core pieces:
   values, typed `OwnedTable` helper constructors/getters, and nested table/array access.
 - typed host functions support fallible `rustia::Result<T>` returns.
 - typed host functions and retained script calls support tuple-shaped arguments/results through arity 8.
-- retained handles for functions/tables with generation freshness checks.
+- retained `Function` and `Exports` handles with generation freshness checks.
 - internal gc-arena `Value` remains behind the facade.
 
 Reason: best fit for koto migration, grabby ergonomics, and public API clarity.
@@ -93,13 +103,12 @@ let bridge = RustiaExtension::new("grabby")
     .fn_slot_read("slot", read_slot)
     .fn_slot_write("set_slot", enqueue_set_slot)
     .fn_effect("move", enqueue_move)
-    .fn_effect("fire", enqueue_fire)
-    .build();
+    .fn_effect("fire", enqueue_fire);
 
 let mut vm = Rustia::builder()
     .profile(Profile::DeterministicSim)
     .extension(bridge)
-    .build();
+    .build()?;
 ```
 
 Each registration carries:
@@ -107,10 +116,9 @@ Each registration carries:
 - name and optional module namespace.
 - typed signature / arity metadata.
 - fuel cost.
-- capability.
-- profile policy.
+- capability, from which the VM derives profile policy.
 
-The current coarse VM capability set should become more precise:
+The current VM capability set is:
 
 - `Pure`
 - `ReadsDeterministicInput`
@@ -120,16 +128,21 @@ The current coarse VM capability set should become more precise:
 - `ReadsExternalMutableState`
 - `NondeterministicEffect`
 
-`DeterministicSim` allows the first five and rejects the last two.
+`DeterministicSim` allows the first five and rejects the last two; the Standard profiles allow all seven.
 
 Current implementation slice: `Rustia::add_pure_fn`, `add_input_fn`, `add_slot_read_fn`, `add_slot_write_fn`,
 `add_effect_fn`, `add_external_state_fn`, and `add_nondeterministic_fn` expose the same capability vocabulary on
-the global facade. `RustiaExtension::fn_external_state` fills the remaining named extension helper. Deterministic
-profiles reject external mutable-state reads and nondeterministic effects at registration time.
+the global facade. `RustiaExtension::fn_external_state` fills the remaining named extension helper.
+`DeterministicSim` rejects external mutable-state reads and nondeterministic effects at registration time.
 `RustiaExtension::namespace()` and `functions()` expose pre-install metadata for namespace, function name, fuel
 ABI version, fuel cost, capability, parameter count, parameter Rust type names, return Rust type names, and
 whether the callback is fallible. `RustiaExtension::fuel_policy()` exposes the host-function fuel ABI version,
 default helper cost, and minimum accepted cost so hosts can snapshot their extension cost schedule.
+
+Current limitation: callbacks are `Fn + Send + Sync + 'static` and receive typed script arguments but no
+per-VM/per-call host context. Mutable worker-local slot/effect state therefore requires captured synchronization
+or interior mutability today. Add an explicit context/state seam before treating the conceptual grabby sketch as
+a cheap production bridge.
 
 ### 3. Serde-first data bridge
 
@@ -142,7 +155,7 @@ struct ScenarioSpec {
 }
 
 let exports = vm.compile_and_run(script)?;
-let spec: ScenarioSpec = exports.deserialize()?;
+let spec: ScenarioSpec = exports.deserialize(&mut vm)?;
 ```
 
 Also support the reverse direction:
@@ -192,10 +205,15 @@ install generation. `is_current()` / `ensure_current()` let hosts check retained
 `Function::call_current()` and `Exports::{value,deserialize,get,function}_current()` give hosts fail-closed
 access paths for stale handles. Failed hot reloads do not advance the generation, and old retained function
 handles remain callable through `Function::call()` because the VM retains prior dynamic programs.
+That is not yet transactional hot reload: a new module that starts executing and then fails can leave partial
+global/heap effects even though the generation does not advance, and extension installation can partially
+register earlier functions before a later validation failure. Public release needs prevalidation plus
+transactional/isolated failure semantics, or an explicit narrower contract with host-visible recovery.
 
 ### 5. Optional macro/codegen sugar
 
-Macros come after the lower-level API is stable.
+An early `rustia_extension!` declarative macro is implemented. The attribute-macro/codegen shape below is a
+future concept and should wait until the lower-level API is stable.
 
 ```rust
 #[rustia_module]
@@ -217,13 +235,16 @@ model and Deno's extension/op system. Do not start here; macros freeze mistakes.
 
 ## Grabby Fit
 
-The public API works for grabby if grabby uses the extension/linker layer as the integration point.
+The public API works for grabby if grabby uses the extension/linker layer as the integration point. This is a
+conceptual host-side sketch: `agent_input`, `slot_snapshot`, and effect-buffer ownership are grabby-side types,
+not compile-checked public rustia API.
 
 ```rust
-let ai = vm.compile("alien_ai.luau", source)?;
-let decide = ai.exports().function("decide")?;
+let ai = Rustia::compile("alien_ai.luau", source)?;
+let exports = vm.install(ai)?;
+let decide = exports.function(&mut vm, "decide")?;
 
-decide.call((agent_input, slot_snapshot))?;
+decide.call(&mut vm, (agent_input, slot_snapshot))?;
 let effects = bridge.take_effects();
 ```
 
@@ -241,8 +262,9 @@ rustia owns:
 - deterministic execution and fuel.
 - typed argument/result conversion.
 - capability enforcement.
-- scratch-heap reset hooks for per-decision DeterministicSim leaves.
-- function handle and hot-reload safety.
+- a future scratch-heap reset operation for per-decision DeterministicSim leaves; reconstruct the VM per
+  decision until that operation and epoch-safe retained-handle invalidation land.
+- current generation/freshness checks, plus planned true-root handle ownership and transactional hot reload.
 
 The hot AI leaf remains a per-decision pure function. Coroutines are still valid inside one decision and in
 scenario/console paths, but a coroutine must not persist across ticks in DeterministicSim because that would
@@ -250,13 +272,15 @@ store authoritative state on the GC heap instead of in captured host slots.
 
 ## Build Order
 
-1. `OwnedValue` plus `FromRustia` / `IntoRustia` and typed/nested `OwnedTable` helpers.
-2. typed `add_fn` and `Function::call`.
-3. returned-table `Exports` facade.
-4. serde deserialize/serialize.
-5. extension/linker with capability and fuel metadata.
-6. hot reload and diagnostics.
-7. macro sugar.
+1. ✅ `OwnedValue` plus `FromRustia` / `IntoRustia` and typed/nested `OwnedTable` helpers — first slice landed.
+2. ✅ typed `add_fn` and `Function::call` — landed through tuple arity 8.
+3. ✅ returned-table `Exports` facade — landed with generation-aware accessors.
+4. ✅ owned serde deserialize/serialize — landed; rich graphs and live zero-copy values remain.
+5. ✅ extension/linker with capability and fuel metadata — first slice landed.
+6. ✅ hot reload and diagnostics — first slice landed; reclamation and stack traces remain.
+7. ✅ early declarative macro sugar — landed; broader attribute/codegen expansion is deferred.
+8. ⏳ bounded memory, true-root/epoch-safe reset, runtime services, per-call host context, modules,
+   transactional install/reload, and rich/live values — next.
 
 Defer mlua-style `UserData`/`Scope` until the above is stable. The first useful embedding target is typed
 owned values, retained script function handles, serde, and deterministic extension registration.

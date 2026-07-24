@@ -408,7 +408,7 @@ function render(data, historyCount, wasmData) {
     renderComparisonSections(
       lines,
       "Wasm adapter comparison",
-      "These rows are wasm adapter runs grouped by runtime target. They are intentionally separate from native targets, so `koto` here is not mixed with `koto` on `macos-aarch64`.",
+      "These rows are wasm adapter runs grouped by runtime target. They are intentionally separate from native targets, so an adapter's wasm result is never mixed with its native-host result.",
       wasm,
       wasm.targetLabels,
     );
@@ -421,7 +421,7 @@ function render(data, historyCount, wasmData) {
 
   lines.push("## Files");
   lines.push("");
-  lines.push("- [`bench/history/runs.jsonl`](bench/history/runs.jsonl): append-only measurement history");
+  lines.push("- [`bench/history/runs.jsonl`](bench/history/runs.jsonl): active coherent native measurement snapshot");
   lines.push("- [`bench/current-results.json`](bench/current-results.json): latest rows by target, engine, and workload");
   lines.push("- [`bench/RESULTS.md`](bench/RESULTS.md): generated detailed result table");
   lines.push("- [`bench/current-results.html`](bench/current-results.html): standalone rendered report");

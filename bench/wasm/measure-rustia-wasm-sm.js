@@ -81,6 +81,7 @@ function parseArgs(argv) {
     wasm: "bench/wasm/adapter-runner/target/wasm32-unknown-unknown/release/script_bench_wasm_adapter.wasm",
     commit: "unknown",
     runtimeVersion: "unknown",
+    host: null,
     targetMs: 80,
     reps: 5,
     maxN: 1_000_000_000,
@@ -95,6 +96,8 @@ function parseArgs(argv) {
       options.commit = requiredValue(argv, ++index, arg);
     } else if (arg === "--runtime-version") {
       options.runtimeVersion = requiredValue(argv, ++index, arg);
+    } else if (arg === "--host") {
+      options.host = requiredValue(argv, ++index, arg);
     } else if (arg === "--target-ms") {
       options.targetMs = positiveNumber(requiredValue(argv, ++index, arg), arg);
     } else if (arg === "--reps") {
@@ -157,14 +160,15 @@ function runtimeInfo(options) {
     family: "SpiderMonkey",
     version: options.runtimeVersion,
     engine_version: options.runtimeVersion,
-    host: hostInfo(),
+    host: hostInfo(options.host),
   };
 }
 
-function hostInfo() {
+function hostInfo(override) {
+  if (override) return override;
   if (typeof getBuildConfiguration === "function") {
     const config = getBuildConfiguration();
-    const os = config.osx ? "darwin" : config.windows ? "windows" : config.android ? "android" : "unknown-os";
+    const os = config.linux ? "linux" : config.osx ? "darwin" : config.windows ? "windows" : config.android ? "android" : "unknown-os";
     const arch = config.arm64 ? "arm64" : config.x64 ? "x64" : config.x86 ? "x86" : "unknown-arch";
     return `${os}-${arch}`;
   }

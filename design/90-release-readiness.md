@@ -1,7 +1,35 @@
 # Release Readiness Checklist
 
 This checklist tracks what must be true before any public rustia crate flips
-from `publish = false` to publishable.
+from `publish = false` to publishable. Updated 2026-07-23; the ordered runtime
+blockers below take precedence over packaging polish.
+
+## Current Release Blockers (Ordered)
+
+1. Complete reachability-based reclamation and generation-safe reuse for the
+   append-only table/function/upvalue/coroutine, atomized and non-inline runtime
+   string, userdata, buffer/vector, and loaded-program stores. Copyable public
+   `Function`/`Exports` handles must become true roots or use an ownership
+   redesign before slots can be reused.
+2. Add honest live/peak VM memory accounting, per-VM aggregate quotas, and a
+   documented atomic OOM path with catchable-or-host-visible failure tests.
+3. Add a deterministic decision-boundary reset/reuse API with epoch-safe
+   invalidation for every retained handle and a versioned reset/replay ABI.
+4. Add capability-tagged output and clock/time providers, real internal VM
+   memory telemetry, and cheap worker-local/per-call host context; reject
+   nondeterministic providers in DeterministicSim.
+5. Add a host-owned script-visible `require` resolver/cache with deterministic
+   identity, execute-once behavior, and cycle diagnostics.
+6. Complete the release value surface for binary strings, buffers, vectors,
+   non-scalar/identity keys, opaque identity-safe userdata handles,
+   shared/cyclic table graphs, and a lifetime-safe live serde layer. Full
+   mlua-style `UserData`/`Scope` registration remains a later optional layer.
+7. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
+   transactional extension/module/hot-reload failure behavior, and
+   differential/fuzz coverage before stabilizing and publishing the API.
+8. Close the full correctness/build/golden target matrix from
+   [`00-constraints.md`](00-constraints.md); Linux remains the only active
+   timing source, but not the only correctness target.
 
 ## Current Policy
 
@@ -16,6 +44,10 @@ from `publish = false` to publishable.
   effect catalogs, or integration code from this repository.
 - Treat Luau 0.709 conformance as the compatibility contract until the target is
   deliberately re-pinned.
+- Treat no unsafe code as a public-workspace feature: every workspace package
+  must inherit the workspace `unsafe_code = "forbid"` lint. Experimental
+  spikes and standalone wasm FFI demos are not part of the publishable product
+  gate.
 
 ## Crate Metadata Gate
 
@@ -94,42 +126,60 @@ from `publish = false` to publishable.
   DeterministicSim.
 - Fuel accounting has versioned costs and superinstructions remain
   fuel-invariant.
-- GC pacing is tuned for Standard profiles, and DeterministicSim collection
-  intervals are treated as deterministic ABI.
-- JSC and SpiderMonkey wasm measurements are recorded before the value-layout
-  and dispatch lock.
+- Complete reachability and slot reuse reclaim unreachable ordinary VM objects
+  and loaded programs without allowing stale handles to alias reused slots.
+- Live/peak allocation accounting, aggregate quotas, and atomic OOM behavior
+  are covered under long-running native and wasm churn.
+- A decision reset defines and tests exactly which programs, globals, upvalues,
+  coroutines, RNG state, fuel, and collection counters reset or persist.
+- GC pacing is tuned for Standard profiles only after reclamation works, and
+  DeterministicSim collection intervals are treated as deterministic ABI.
+- Host-provided output/time services and internal VM memory telemetry obey each
+  profile's capability policy; placeholder print/time/collectgarbage-count/
+  gcinfo behavior is gone, and callbacks can receive cheap worker-local state.
+- Module resolution/cache, rich value interop, error-phase parity, and public
+  stack/source diagnostics satisfy their focused tests; failed extension/module
+  installation and runtime-failing reload cannot leave undocumented partial state.
+- The value-layout and dispatch wasm pre-lock gate is closed with retained V8,
+  JavaScriptCore-family, and SpiderMonkey evidence; recurring Node/V8 evidence
+  remains current.
+- Native and browser correctness/build/golden coverage reaches the full
+  `design/00-constraints.md` matrix before release, independently of the
+  dedicated-Linux-only benchmark policy.
 
 ## Benchmark And CI Gate
 
 - `bench/history/runs.jsonl`, `bench/RESULTS.md`,
   `bench/current-results.json`, `bench/current-results.html`, and
   `bench/CLAIMS.md` are generated from the same committed benchmark history.
-- The dependency-free `bench/site/` dashboard has a checked static asset,
-  DOM-binding, JSONL-history, and current-results contract.
+- `bench/current-results.html` is the single checked benchmark report artifact.
 - Native baseline history covers the completed adapter matrix on a clean commit.
 - Public benchmark claims are stated per workload in `bench/CLAIMS.md`, not as
   a single blanket multiplier. The current generated claim gate approves no
   global speed headline.
-- Public benchmark workflows use only the generic `[self-hosted, bench]` runner
-  label after owner setup is confirmed.
+- Fresh performance data comes only from the explicit ephemeral Linode
+  Linux/x86_64 lifecycle. macOS and Windows remain build targets, not active
+  benchmark targets, until dedicated hosts exist.
 
 ## Release Process Gate
 
 - `just release-preflight` passes before any publishability flip. It checks
-  release notes, package file lists, generated progress HTML, benchmark result
-  freshness, crate metadata, workflow policy, example compilation, and the
-  workspace test suite.
+  formatting, strict workspace Clippy, release notes, package file lists,
+  generated progress HTML, benchmark result freshness, crate metadata, workflow
+  policy, example compilation, and the workspace test suite.
+- Hosted CI installs the exact channel from `rust-toolchain.toml` and runs
+  `cargo fmt --all -- --check` plus
+  `cargo clippy --workspace --all-targets -- -D warnings`.
 - `just check-crate-metadata` passes and `design/crate-metadata.json` is
   current.
-- `just check-workflows` passes and keeps the hosted CI workflow, manual
-  benchmark workflow, action pins, permissions, and generic runner labels in
-  their expected public-safe shape.
+- `just check-workflows` passes and keeps hosted CI validation-only: it pins the
+  Rust toolchain and actions and forbids workflow-based fresh timing runs.
 - `.github/workflows/ci.yml` mirrors the release-preflight gate on hosted Linux
   CI, including example compilation, without running fresh benchmark
   measurements.
-- `.github/workflows/benchmarks.yml` provides manual current-matrix measurement
-  on the generic `[self-hosted, bench]` runner label and uploads generated
-  benchmark artifacts.
+- The explicit Linode matrix command provisions, measures, validates, deletes,
+  and only then promotes a coherent native-plus-wasm Linux result set. Hosted
+  workflows do not provision billed resources or publish timings.
 - `cargo test --workspace` passes on the release toolchain.
 - `just check-examples` passes and compiles the public `rustia` examples.
 - `just check-package-files` passes and `design/package-files.json` is current.
@@ -141,7 +191,8 @@ from `publish = false` to publishable.
   workspace version plus public-facing unreleased changes.
 - `just check-progress`, `just check-project-status`, and
   `just check-benchmark-results` pass without rewriting committed generated
-  artifacts or letting README/current-progress facts drift.
+  artifacts, skipping the fixed-sample analyzer self-test or wasm gate verifier,
+  or letting README/current-progress facts drift.
 - `rustia-cli` supports file, stdin, `--eval`, and `--repl` execution, plus
   profile, fuel, source-name options, line-oriented REPL evaluation, and
   source-aware compile/runtime diagnostics.
