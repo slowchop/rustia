@@ -36,6 +36,7 @@ enum Scenario {
 }
 
 impl Scenario {
+    #[cfg(test)]
     const ALL: [Self; 5] = [
         Self::Empty,
         Self::ShortUnloaded,
