@@ -81,3 +81,10 @@ successful hot reload; reclamation therefore also needs true host-handle roots o
   per-decision reset). The restriction is *only* the `DeterministicSim` per-agent AI leaf. (This supersedes
   grabby's old `console-scripting-plan.md` §3/§6 `yield wait_ticks(n)` model *for the hot AI leaf* — that
   coroutine model belongs to scenario/console.)
+- **Time crosses the hot leaf as a decision input, never as an ambient service.** The per-decision AI leaf
+  receives time as a Q16.16 argument (tick index, fixed dt) through its typed host fns, alongside the other
+  decision inputs. The ambient wall/monotonic clock providers from
+  [`72-host-services.md`](72-host-services.md) (the `os.time`/`os.clock`/`os.date` sockets) are for
+  Standard/console paths, not the hot `DeterministicSim` leaf: even though Sim now admits deterministic
+  clock providers, plugging one into the hot leaf would let a decision depend on provider state outside the
+  captured slot ring and the `(emitter, seq)` envelope.

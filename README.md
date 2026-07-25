@@ -45,8 +45,38 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   eight arguments/results, retained script functions, pre-install host signature/fuel ABI metadata,
   retained-handle freshness checks and current-generation accessors, public source-span/runtime-location error
   accessors, owned-value/table serde, deterministic extensions, hot reload, and early macro sugar. Ordinary
-  object/program reclamation, epoch-safe decision reset, module resolution, host runtime providers/context,
+  object/program reclamation, epoch-safe decision reset, module resolution, a per-call host context,
   transactional installation, rich graph values, and live zero-copy serde remain planned.
+- Host services are host-pluggable through the facade: `RustiaBuilder::standard()`/`deterministic()`/`live()`
+  environment presets, a `.stdout(...)` print sink with the real Luau composition (`tostring` honoring
+  `__tostring`, tab-joined, trailing newline), and `.wall_clock(...)`/`.monotonic_clock(...)` sockets taking a
+  determinism-labeled `ServiceClock` (`system()`/`fixed(t)`/`from_fn(f)`). Provider-less defaults stay
+  deterministic: no-argument `os.time`/`os.date` read a pinned epoch, and `os.clock()` returns a logical clock
+  (executed instructions / 1_000_000); `DeterministicSim` registers `os` only when a deterministic clock
+  provider is plugged and rejects a nondeterministic one at `build()`.
+
+## Embedding presets
+
+The facade picks an environment in one word; `Rustia::builder()` delegates to `standard()`, and
+`Rustia::new`/`with_settings` stay service-free.
+
+| | `deterministic()` | `standard()` (default) | `live()` |
+|---|---|---|---|
+| Profile | `DeterministicSim` | `ReproducibleStandard` | `ReproducibleStandard` |
+| `print` | registered; no-op unless a host sink is attached | real stdout on native; no-op on wasm | real stdout on native; no-op on wasm |
+| `os.time()` / `os.date()` | `os` absent unless a deterministic clock provider is plugged | pinned epoch 1_700_000_000 unless a wall-clock provider is plugged | system wall clock |
+| `os.clock()` | follows the `os` registration rule | logical clock (executed instructions / 1_000_000) unless a monotonic provider is plugged | system monotonic clock |
+| Pure `os` fns (`os.time(t)`, `os.date(f, t)`, `os.difftime`) | follow the `os` registration rule | always available | always available |
+| `collectgarbage("count")` / `gcinfo` | not registered | registered; canned values until honest memory accounting lands | registered; same canned values |
+| `loadstring` | opt-in host compiler only | opt-in host compiler only | enabled with the stock compiler |
+| Host-fn capabilities | the five deterministic capabilities; external-state/nondeterministic registrations and nondeterministic clock providers rejected | all seven capabilities | all seven |
+| GC | full collection on the deterministic instruction-count schedule | incremental/paced | incremental/paced |
+| Reproducibility | bit-identical replay on the tested matrix | replay-stable defaults; real time only by explicit provider choice | not reproducible (live IO) |
+| wasm32 | supported | supported (same script-visible values; print no-op) | `build()` fails loudly — plug providers instead |
+
+`math.random` stays pinned in every profile. Clock providers carry a determinism label
+(`ServiceClock::system()` is nondeterministic; `fixed(t)`/`from_fn(f)` are host-asserted deterministic), and
+the facade `build()` rejects a nondeterministic clock on `deterministic()`.
 
 ## Project Pillars
 The canonical decision filter is [`design/02-pillars.md`](design/02-pillars.md). The short version:
@@ -62,16 +92,16 @@ The canonical decision filter is [`design/02-pillars.md`](design/02-pillars.md).
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](design/progress.json) into
-[`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-23 for the
+[`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-25 for the
 public rustia project; actual grabby integration work is explicitly out of scope.
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 78% | 78% |
-| Usable embedded scripting crate | 76% | 82% |
-| Full public standalone Luau engine release | 48% | 76% |
+| Whole public rustia project | 79% | 78% |
+| Usable embedded scripting crate | 78% | 82% |
+| Full public standalone Luau engine release | 49% | 76% |
 | Standalone benchmark OSS project | 82% | 88% |
-| Public release readiness | 69% | 82% |
+| Public release readiness | 70% | 82% |
 
 - Current conformance runner: **692 fixtures**, **491 refs**, **0 pending**.
 - The benchmark harness has all 12 requested adapters, an explicit verified `mlua-luau-jit` mode, and a
@@ -87,7 +117,8 @@ public rustia project; actual grabby integration work is explicitly out of scope
   dense/OOP/string/HotIR cohorts remain traceable historical evidence. Every result is specific to its workload,
   target, and protocol; details are in [`design/56-performance-research.md`](design/56-performance-research.md).
 - Major remaining gates, in order, are bounded object/program reclamation and quotas, epoch-safe decision reset,
-  host services/context/module loading/rich values and transactional installation, compiler/runtime semantic-tail
+  honest memory telemetry, a per-call host context, module loading, rich values, and transactional installation,
+  compiler/runtime semantic-tail
   hardening, the full cross-target correctness/golden matrix, broader benchmark history, and release packaging.
   Semver policy is tracked in [`design/91-semver-policy.md`](design/91-semver-policy.md),
   release notes in [`CHANGELOG.md`](CHANGELOG.md), koto migration guidance in

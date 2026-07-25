@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "date": "2026-07-23",
+    "date": "2026-07-25",
     "scope": "Public rustia project readiness, based on the current workspace and canonical design docs.",
     "excludes": [
       "Actual grabby integration work"
@@ -71,23 +71,23 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 78,
+      "complete": 79,
       "confidence": 78,
-      "state": "The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, first embedding facade, CLI, benchmark matrix, private HotIR, closure-call PIC, and exact dedicated-Linux evidence are in-tree. The audit now explicitly separates that broad language coverage from the still-missing bounded object lifecycle, decision reset, complete host services/value bridge, and release packaging.",
+      "state": "The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, first embedding facade with host-pluggable output/time services, CLI, benchmark matrix, private HotIR, closure-call PIC, and exact dedicated-Linux evidence are in-tree. The audit now explicitly separates that broad language coverage from the still-missing bounded object lifecycle, decision reset, the remaining host memory-telemetry/context/module/value bridge, and release packaging.",
       "future_plan": "Implement reclamation, quotas, OOM and reset semantics first; finish the host/module/value boundary and semantic-tail hardening; then continue measured optimization and public release work."
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 76,
+      "complete": 78,
       "confidence": 82,
-      "state": "A useful first facade exists: typed run/compile, owned scalar/table conversions, typed host functions, retained functions/exports with generation checks, owned-value serde, extensions, hot reload, examples, diagnostics, and migration guidance. It is not yet a complete rich embedding boundary: ordinary VM objects and loaded programs are retained until VM drop, there is no public decision reset, module resolver/cache, injectable output/time services, honest VM memory telemetry, graph-preserving rich values, or live zero-copy serde path.",
-      "future_plan": "Land epoch-safe reset and bounded memory semantics, then complete output/time providers, internal memory telemetry, module loading, rich/live values, diagnostics, and API stabilization."
+      "state": "A useful first facade exists: typed run/compile, owned scalar/table conversions, typed host functions, retained functions/exports with generation checks, owned-value serde, extensions, hot reload, examples, diagnostics, migration guidance, and environment presets with host-pluggable stdout/clock services. It is not yet a complete rich embedding boundary: ordinary VM objects and loaded programs are retained until VM drop, there is no public decision reset, module resolver/cache, honest VM memory telemetry, graph-preserving rich values, or live zero-copy serde path.",
+      "future_plan": "Land epoch-safe reset and bounded memory semantics, then complete internal memory telemetry, module loading, rich/live values, diagnostics, and API stabilization."
     },
     {
       "name": "Full public standalone Luau engine release",
-      "complete": 48,
+      "complete": 49,
       "confidence": 76,
-      "state": "The Luau 0.709 standalone target and 491-ref conformance denominator are strong. Release still requires bounded object/program lifetimes, aggregate memory limits and OOM behavior, deterministic lifecycle/reset semantics, real host-provided services/context, module loading, richer value interop, transactional installation, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.",
+      "state": "The Luau 0.709 standalone target and 491-ref conformance denominator are strong. Release still requires bounded object/program lifetimes, aggregate memory limits and OOM behavior, deterministic lifecycle/reset semantics, a per-call host-context seam and honest memory telemetry, module loading, richer value interop, transactional installation, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.",
       "future_plan": "Close the runtime lifecycle and host-boundary gates, harden the semantic tail and cross-target goldens, then package and publish against the pinned target."
     },
     {
@@ -99,9 +99,9 @@
     },
     {
       "name": "Public release readiness",
-      "complete": 69,
+      "complete": 70,
       "confidence": 82,
-      "state": "License, generated crate metadata audit, explicit internal dependency versions, release-preflight-enforced example compilation, first migration guide, CLI ergonomics including a line-oriented REPL, source-aware CLI diagnostics, public source-span/runtime-location error accessors, source-named facade diagnostics, typed/nested owned-table helpers, fallible host callback diagnostics, retained-handle freshness checks and current-generation accessors, host signature/fuel ABI metadata, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, generated leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
+      "state": "License, generated crate metadata audit, explicit internal dependency versions, release-preflight-enforced example compilation, first migration guide, CLI ergonomics including a line-oriented REPL, source-aware CLI diagnostics, public source-span/runtime-location error accessors, source-named facade diagnostics, typed/nested owned-table helpers, fallible host callback diagnostics, retained-handle freshness checks and current-generation accessors, host signature/fuel ABI metadata, host service presets with determinism-labeled provider sockets, release-readiness checklist, semver policy, changelog validation, release preflight, hosted CI, workflow policy checks, generated benchmark claim gating, package file-list audit, generated leaf package dry-run checks, and publishability blocker audit are present; crates are still workspace-private and release polish is incomplete.",
       "future_plan": "Close the bounded-memory, reset, host-service, module, value-interop, and semantic-tail runtime gates before removing publish blockers in topological order."
     }
   ],
@@ -257,10 +257,10 @@
         },
         {
           "name": "Base/math/string/bit32/vector/utf8 stdlib",
-          "complete": 78,
+          "complete": 82,
           "confidence": 78,
-          "state": "Major pinned Luau stdlib surfaces, including buffer, vector, utf8, and string pack/unpack behavior, are fixture-covered. Host-environment services remain placeholders: print discards output, clock/time defaults are fixed, collectgarbage('count') is zero, and gcinfo memory reporting is synthetic.",
-          "future_plan": "Keep the language-library corpus green while adding capability-tagged output and clock/time providers plus honest internal VM memory statistics with deterministic-profile policy."
+          "state": "Major pinned Luau stdlib surfaces, including buffer, vector, utf8, and string pack/unpack behavior, are fixture-covered. Host-environment output/time services are now provider-backed: print composes tostring/__tostring into a host stdout sink (no-op without one), no-arg os.time/os.date read a wall-clock provider with a pinned-epoch fallback, and os.clock reads a monotonic provider with a deterministic logical-clock fallback. collectgarbage('count') remains zero and gcinfo memory reporting synthetic.",
+          "future_plan": "Keep the language-library corpus green while adding honest internal VM memory statistics with deterministic-profile policy."
         },
         {
           "name": "Error/debug behavior",
@@ -283,10 +283,10 @@
         },
         {
           "name": "Runtime profiles",
-          "complete": 74,
+          "complete": 77,
           "confidence": 82,
-          "state": "LuauCompat, ReproducibleStandard, and DeterministicSim are concrete runtime profiles. LuauCompat selects Luau-style hash iteration; DeterministicSim omits collectgarbage/gcinfo/os and optional loadstring, deterministically sweeps weak tables, and rejects external-mutable-state/nondeterministic-effect host registrations. Service-provider and reset behavior are not yet a complete replay ABI.",
-          "future_plan": "Specify provider policy plus exactly which globals, RNG, fuel, counters, programs, and heap objects reset at a deterministic decision boundary."
+          "state": "LuauCompat, ReproducibleStandard, and DeterministicSim are concrete runtime profiles. LuauCompat selects Luau-style hash iteration; DeterministicSim omits collectgarbage/gcinfo and optional loadstring, registers the os table iff a deterministic clock provider is plugged, admits a stdout sink on any profile, rejects nondeterministic clock providers, deterministically sweeps weak tables, and rejects external-mutable-state/nondeterministic-effect host registrations. Decision-reset behavior is not yet a complete replay ABI.",
+          "future_plan": "Specify exactly which globals, RNG, fuel, counters, programs, and heap objects reset at a deterministic decision boundary."
         },
         {
           "name": "Fuel and limits",
@@ -316,10 +316,10 @@
       "entries": [
         {
           "name": "Koto-shaped facade",
-          "complete": 78,
+          "complete": 80,
           "confidence": 82,
-          "state": "Builder, typed run<T>, source-named compile/run helpers, public error diagnostic accessors, globals, exports, retained functions, examples, and a first koto-to-rustia migration guide exist.",
-          "future_plan": "Add lifecycle/limit/service/module controls, stabilize names and error types, and expand migration guidance as the production gates land."
+          "state": "Builder, typed run<T>, source-named compile/run helpers, public error diagnostic accessors, globals, exports, retained functions, environment presets (standard/deterministic/live) with stdout and determinism-labeled clock service sockets, examples, and a first koto-to-rustia migration guide exist.",
+          "future_plan": "Add lifecycle/limit/module controls, stabilize names and error types, and expand migration guidance as the production gates land."
         },
         {
           "name": "Owned value firewall",
@@ -344,10 +344,10 @@
         },
         {
           "name": "Public host-bridge seam",
-          "complete": 55,
+          "complete": 60,
           "confidence": 88,
-          "state": "The generic seam for deterministic host functions, typed slots, capability names, and effect ordering is documented without public grabby types. The facade does not yet mechanically enforce scratch-heap reset or aggregate memory limits, and it lacks injectable output/time providers, honest internal VM memory telemetry, and a cheap worker-local/per-call host context for mutable slot/effect state.",
-          "future_plan": "Add a decision-boundary reset contract, capability-enforced output/time providers, internal memory telemetry, per-call host context, and long-run lifecycle tests while keeping public rustia generic."
+          "state": "The generic seam for deterministic host functions, typed slots, capability names, and effect ordering is documented without public grabby types. Injectable output/time providers are now implemented (environment presets plus determinism-labeled ServiceClock sockets, with DeterministicSim rejecting nondeterministic providers), but the facade does not yet mechanically enforce scratch-heap reset or aggregate memory limits, and it still lacks honest internal VM memory telemetry and a cheap worker-local/per-call host context for mutable slot/effect state.",
+          "future_plan": "Add a decision-boundary reset contract, internal memory telemetry, per-call host context, and long-run lifecycle tests while keeping public rustia generic."
         },
         {
           "name": "Module loading and resolution",

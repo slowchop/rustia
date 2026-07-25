@@ -1,9 +1,11 @@
 use rustia_vm::number::{binary, NumericOp, CANON_NAN_BITS};
 use rustia_vm::{
-    Constant, ExtensionOp, Function, Instruction, OpCapability, Opcode, Profile, Program, Value,
-    ValueKind, Vm, VmSettings, MAX_RECURSION_LIMIT,
+    ClockProvider, Constant, ExtensionOp, Function, Instruction, OpCapability, Opcode, Profile,
+    Program, StdoutSink, Value, ValueKind, Vm, VmServices, VmSettings, MAX_RECURSION_LIMIT,
 };
+use std::cell::RefCell;
 use std::num::NonZeroU64;
+use std::rc::Rc;
 
 fn first_arg(args: &[Value]) -> rustia_vm::Result<Value> {
     Ok(args.first().copied().unwrap_or_else(Value::nil))
@@ -33,6 +35,10 @@ fn loadstring_compiler_should_not_run(
 }
 
 fn global_kind(profile: Profile, name: &[u8]) -> ValueKind {
+    global_kind_in(&mut Vm::new(profile), name)
+}
+
+fn global_kind_in(vm: &mut Vm, name: &[u8]) -> ValueKind {
     let program = Program::new(
         Function::new(
             vec![
@@ -43,7 +49,83 @@ fn global_kind(profile: Profile, name: &[u8]) -> ValueKind {
         ),
         vec![Constant::String(name.to_vec())],
     );
-    Vm::new(profile).run(&program).unwrap().kind()
+    vm.run(&program).unwrap().kind()
+}
+
+/// Reads `os.<member>` without calling it.
+fn os_member_program(member: &[u8]) -> Program {
+    Program::new(
+        Function::new(
+            vec![
+                Instruction::with_aux(Opcode::GetGlobal, 0, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                Instruction::new(Opcode::GetIndex, 0, 0, 1),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+            ],
+            2,
+        ),
+        vec![
+            Constant::String(b"os".to_vec()),
+            Constant::String(member.to_vec()),
+        ],
+    )
+}
+
+/// Calls `os.<member>()` with no arguments and returns the result.
+fn os_member_call_program(member: &[u8]) -> Program {
+    Program::new(
+        Function::new(
+            vec![
+                Instruction::with_aux(Opcode::GetGlobal, 0, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                Instruction::new(Opcode::GetIndex, 0, 0, 1),
+                Instruction::with_aux(Opcode::Call, 0, 0, 1, 0),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+            ],
+            2,
+        ),
+        vec![
+            Constant::String(b"os".to_vec()),
+            Constant::String(member.to_vec()),
+        ],
+    )
+}
+
+/// Calls `print(...)` with the given constants as arguments.
+fn print_call_program(args: &[Constant]) -> Program {
+    let mut code = vec![Instruction::with_aux(Opcode::GetGlobal, 0, 0, 0, 0)];
+    let mut constants = vec![Constant::String(b"print".to_vec())];
+    for (index, argument) in args.iter().enumerate() {
+        constants.push(argument.clone());
+        code.push(Instruction::new(
+            Opcode::LoadConst,
+            index as u8 + 1,
+            0,
+            index as u8 + 1,
+        ));
+    }
+    code.push(Instruction::with_aux(
+        Opcode::Call,
+        0,
+        0,
+        1,
+        args.len() as i32,
+    ));
+    code.push(Instruction::new(Opcode::Return, 0, 1, 0));
+    Program::new(Function::new(code, args.len() + 1), constants)
+}
+
+fn settings_with_stdout(captured: &Rc<RefCell<String>>) -> VmSettings {
+    let sink = Rc::clone(captured);
+    VmSettings {
+        services: VmServices {
+            stdout: Some(StdoutSink::new(move |text| {
+                sink.borrow_mut().push_str(text);
+            })),
+            ..VmServices::default()
+        },
+        ..VmSettings::default()
+    }
 }
 
 fn import_program(path: &[&[u8]]) -> Program {
@@ -1403,4 +1485,301 @@ fn deterministic_gc_instruction_count_persists_across_runs_and_is_profile_specif
     standard.run(&program).unwrap();
     standard.run(&program).unwrap();
     assert_eq!(standard.deterministic_collection_count(), 0);
+}
+
+#[test]
+fn clock_providers_feed_exact_os_time_and_os_clock_values() {
+    let settings = VmSettings {
+        services: VmServices {
+            wall_clock: Some(ClockProvider::new(|| 1_234_567.5, true)),
+            monotonic_clock: Some(ClockProvider::new(|| 42.25, true)),
+            ..VmServices::default()
+        },
+        ..VmSettings::default()
+    };
+    let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+
+    let time = vm.run(&os_member_call_program(b"time")).unwrap();
+    assert_eq!(time.as_number(), Some(1_234_567.5));
+    let clock = vm.run(&os_member_call_program(b"clock")).unwrap();
+    assert_eq!(clock.as_number(), Some(42.25));
+}
+
+#[test]
+fn clock_provider_nan_is_canonicalized_and_negative_zero_passes_through() {
+    let noncanonical_nan = f64::from_bits(0x7ff0_0000_0000_0001);
+    assert!(noncanonical_nan.is_nan());
+    let settings = VmSettings {
+        services: VmServices {
+            wall_clock: Some(ClockProvider::new(move || noncanonical_nan, true)),
+            monotonic_clock: Some(ClockProvider::new(move || noncanonical_nan, true)),
+            ..VmServices::default()
+        },
+        ..VmSettings::default()
+    };
+    let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+    for member in [b"time".as_slice(), b"clock"] {
+        let value = vm.run(&os_member_call_program(member)).unwrap();
+        assert_eq!(value.as_number().unwrap().to_bits(), CANON_NAN_BITS);
+    }
+
+    let settings = VmSettings {
+        services: VmServices {
+            wall_clock: Some(ClockProvider::new(|| -0.0, true)),
+            monotonic_clock: Some(ClockProvider::new(|| -0.0, true)),
+            ..VmServices::default()
+        },
+        ..VmSettings::default()
+    };
+    let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+    for member in [b"time".as_slice(), b"clock"] {
+        let value = vm
+            .run(&os_member_call_program(member))
+            .unwrap()
+            .as_number()
+            .unwrap();
+        assert_eq!(value.to_bits(), (-0.0f64).to_bits());
+        assert_eq!(1.0 / value, f64::NEG_INFINITY);
+    }
+}
+
+#[test]
+fn print_composes_tab_joined_arguments_with_a_trailing_newline() {
+    let captured = Rc::new(RefCell::new(String::new()));
+    let mut vm = Vm::with_settings(
+        Profile::ReproducibleStandard,
+        settings_with_stdout(&captured),
+    );
+
+    let result = vm
+        .run(&print_call_program(&[
+            Constant::String(b"a".to_vec()),
+            Constant::String(b"b".to_vec()),
+            Constant::Number(3.0),
+        ]))
+        .unwrap();
+    assert_eq!(result.kind(), ValueKind::Nil);
+    assert_eq!(captured.borrow().as_str(), "a\tb\t3\n");
+}
+
+#[test]
+fn print_with_no_arguments_emits_a_lone_newline() {
+    let captured = Rc::new(RefCell::new(String::new()));
+    let mut vm = Vm::with_settings(
+        Profile::ReproducibleStandard,
+        settings_with_stdout(&captured),
+    );
+
+    vm.run(&print_call_program(&[])).unwrap();
+    assert_eq!(captured.borrow().as_str(), "\n");
+}
+
+#[test]
+fn print_honors_the_tostring_metamethod() {
+    let metamethod = Function::new(
+        vec![
+            Instruction::new(Opcode::LoadConst, 0, 0, 3),
+            Instruction::new(Opcode::Return, 0, 1, 0),
+        ],
+        1,
+    );
+    let program = Program::with_functions(
+        Function::new(
+            vec![
+                Instruction::with_aux(Opcode::GetGlobal, 0, 0, 0, 1),
+                Instruction::new(Opcode::NewArray, 1, 0, 0),
+                Instruction::new(Opcode::NewArray, 2, 0, 0),
+                Instruction::with_aux(Opcode::LoadFunction, 3, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 4, 0, 0),
+                Instruction::with_aux(Opcode::SetTableKs, 2, 3, 4, 0),
+                Instruction::with_aux(Opcode::Call, 0, 0, 1, 2),
+                Instruction::with_aux(Opcode::GetGlobal, 0, 0, 0, 2),
+                Instruction::with_aux(Opcode::Call, 0, 0, 1, 1),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+            ],
+            5,
+        ),
+        vec![
+            Constant::String(b"__tostring".to_vec()),
+            Constant::String(b"setmetatable".to_vec()),
+            Constant::String(b"print".to_vec()),
+            Constant::String(b"custom".to_vec()),
+        ],
+        vec![metamethod],
+    );
+    let captured = Rc::new(RefCell::new(String::new()));
+    let mut vm = Vm::with_settings(
+        Profile::ReproducibleStandard,
+        settings_with_stdout(&captured),
+    );
+
+    vm.run(&program).unwrap();
+    assert_eq!(captured.borrow().as_str(), "custom\n");
+}
+
+#[test]
+fn print_without_a_sink_is_swallowed_and_returns_nil() {
+    let mut vm = Vm::new(Profile::ReproducibleStandard);
+    let result = vm
+        .run(&print_call_program(&[Constant::String(
+            b"ignored".to_vec(),
+        )]))
+        .unwrap();
+    assert_eq!(result.kind(), ValueKind::Nil);
+}
+
+#[test]
+fn deterministic_sim_silently_drops_nondeterministic_clock_providers() {
+    let settings = VmSettings {
+        services: VmServices {
+            wall_clock: Some(ClockProvider::new(
+                || panic!("dropped wall clock must not be read"),
+                false,
+            )),
+            monotonic_clock: Some(ClockProvider::new(
+                || panic!("dropped monotonic clock must not be read"),
+                false,
+            )),
+            ..VmServices::default()
+        },
+        ..VmSettings::default()
+    };
+    let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
+
+    assert_eq!(global_kind_in(&mut vm, b"os"), ValueKind::Nil);
+}
+
+#[test]
+fn deterministic_sim_registers_os_iff_a_clock_provider_is_plugged() {
+    let mut sealed = Vm::new(Profile::DeterministicSim);
+    assert_eq!(global_kind_in(&mut sealed, b"os"), ValueKind::Nil);
+
+    let settings = VmSettings {
+        services: VmServices {
+            wall_clock: Some(ClockProvider::new(|| 1_700_000_042.0, true)),
+            ..VmServices::default()
+        },
+        ..VmSettings::default()
+    };
+    let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
+    assert_eq!(global_kind_in(&mut vm, b"os"), ValueKind::Table);
+    for member in [b"time".as_slice(), b"clock", b"date", b"difftime"] {
+        assert_eq!(
+            vm.run(&os_member_program(member)).unwrap().kind(),
+            ValueKind::Function,
+            "os member {} should be registered",
+            String::from_utf8_lossy(member)
+        );
+    }
+    assert_eq!(global_kind_in(&mut vm, b"collectgarbage"), ValueKind::Nil);
+    assert_eq!(global_kind_in(&mut vm, b"gcinfo"), ValueKind::Nil);
+}
+
+#[test]
+fn cloned_settings_share_stdout_sinks_and_clock_providers() {
+    let writes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    let reads = Rc::new(RefCell::new(0_u64));
+    let settings = VmSettings {
+        services: VmServices {
+            stdout: Some(StdoutSink::new({
+                let writes = Rc::clone(&writes);
+                move |text| writes.borrow_mut().push(text.to_owned())
+            })),
+            wall_clock: Some(ClockProvider::new(
+                {
+                    let reads = Rc::clone(&reads);
+                    move || {
+                        *reads.borrow_mut() += 1;
+                        1.5
+                    }
+                },
+                true,
+            )),
+            ..VmServices::default()
+        },
+        ..VmSettings::default()
+    };
+    let cloned = settings.clone();
+
+    let mut first = Vm::with_settings(Profile::ReproducibleStandard, settings);
+    let mut second = Vm::with_settings(Profile::ReproducibleStandard, cloned);
+    first
+        .run(&print_call_program(&[Constant::String(b"one".to_vec())]))
+        .unwrap();
+    second
+        .run(&print_call_program(&[Constant::String(b"two".to_vec())]))
+        .unwrap();
+    first.run(&os_member_call_program(b"time")).unwrap();
+    second.run(&os_member_call_program(b"time")).unwrap();
+
+    assert_eq!(
+        writes.borrow().as_slice(),
+        ["one\n".to_owned(), "two\n".to_owned()]
+    );
+    assert_eq!(*reads.borrow(), 2);
+}
+
+#[test]
+fn logical_os_clock_reads_identically_across_fresh_vms() {
+    let program = os_member_call_program(b"clock");
+    let first = Vm::new(Profile::ReproducibleStandard)
+        .run(&program)
+        .unwrap()
+        .as_number()
+        .unwrap();
+    let second = Vm::new(Profile::ReproducibleStandard)
+        .run(&program)
+        .unwrap()
+        .as_number()
+        .unwrap();
+
+    assert!(
+        first > 0.0,
+        "the logical clock measures executed instructions"
+    );
+    assert_eq!(first.to_bits(), second.to_bits());
+}
+
+#[test]
+fn logical_os_clock_is_non_decreasing_within_a_run() {
+    let program = Program::new(
+        Function::new(
+            vec![
+                Instruction::with_aux(Opcode::GetGlobal, 0, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                Instruction::new(Opcode::GetIndex, 0, 0, 1),
+                Instruction::with_aux(Opcode::Call, 0, 0, 1, 0),
+                Instruction::with_aux(Opcode::GetGlobal, 1, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 2, 0, 1),
+                Instruction::new(Opcode::GetIndex, 1, 1, 2),
+                Instruction::with_aux(Opcode::Call, 1, 1, 2, 0),
+                Instruction::new(Opcode::LessEqual, 2, 0, 1),
+                Instruction::new(Opcode::Return, 2, 1, 0),
+            ],
+            3,
+        ),
+        vec![
+            Constant::String(b"os".to_vec()),
+            Constant::String(b"clock".to_vec()),
+        ],
+    );
+    let mut vm = Vm::new(Profile::ReproducibleStandard);
+    assert_eq!(vm.run(&program).unwrap().as_bool(), Some(true));
+}
+
+#[test]
+fn plugged_monotonic_clock_overrides_the_logical_default() {
+    let settings = VmSettings {
+        services: VmServices {
+            monotonic_clock: Some(ClockProvider::new(|| 7.5, true)),
+            ..VmServices::default()
+        },
+        ..VmSettings::default()
+    };
+    let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+
+    let clock = vm.run(&os_member_call_program(b"clock")).unwrap();
+    assert_eq!(clock.as_number(), Some(7.5));
+    let time = vm.run(&os_member_call_program(b"time")).unwrap();
+    assert_eq!(time.as_number(), Some(1_700_000_000.0));
 }
