@@ -1,6 +1,6 @@
 # rustia - embedded API goal and plan
 
-> **Status: [IMPLEMENTED FIRST SLICE - stabilization and advanced interop pending] (updated 2026-07-23).**
+> **Status: [IMPLEMENTED FIRST SLICE - stabilization and advanced interop pending] (updated 2026-07-25).**
 > This records the public Rust embedding API direction and its honest implementation boundary after comparing
 > rustia's constraints with current Rust scripting/runtime APIs. It refines the locked
 > architecture axis H in [`30-architecture.md`](30-architecture.md) and the grabby bridge contract in
@@ -17,9 +17,11 @@ per-agent AI loop without leaking grabby-specific types into public rustia.
 ## Current boundary
 
 Typed run/compile helpers, owned scalar and table values, typed host functions, extension metadata/capabilities,
-retained `Function`/`Exports` handles with install-generation checks, owned serde, hot reload, diagnostics, and
-early declarative macro sugar are implemented. The next release-critical slice is not more facade decoration:
-it is complete object/program reclamation and quotas, epoch-safe decision reset, output/time providers and real
+retained `Function`/`Exports` handles with install-generation checks, owned serde, hot reload, diagnostics,
+early declarative macro sugar, and the runtime output/time services slice (environment presets, a stdout sink,
+and determinism-labeled clock providers per [`72-host-services.md`](72-host-services.md)) are implemented.
+The next release-critical slice is not more facade decoration:
+it is complete object/program reclamation and quotas, epoch-safe decision reset, real
 VM memory telemetry, a cheap worker-local/per-call host context, a host-owned module resolver/cache,
 transactional installation/reload failures, rich graph-preserving values, and live zero-copy serde.
 
@@ -90,6 +92,16 @@ Core pieces:
 - typed host functions and retained script calls support tuple-shaped arguments/results through arity 8.
 - retained `Function` and `Exports` handles with generation freshness checks.
 - internal gc-arena `Value` remains behind the facade.
+
+Runtime services are part of the same builder (implemented per [`72-host-services.md`](72-host-services.md)):
+`RustiaBuilder::standard()` (= `Rustia::builder()`) adds a real stdout print sink on native targets while
+keeping deterministic clock defaults; `deterministic()` is the bare `DeterministicSim` world; `live()` is
+"normal Luau" with system clocks and the stock `loadstring` compiler, and fails loudly on wasm32. The
+`.stdout(...)`/`.wall_clock(...)`/`.monotonic_clock(...)` sockets take a sink closure or a `ServiceClock`
+(`system()` is nondeterministic, `fixed(t)` deterministic, `from_fn(f)` host-asserted); with no provider
+plugged, no-argument `os.time`/`os.date` read a pinned epoch and `os.clock()` reads a deterministic logical
+clock (executed instructions / 1_000_000). On `DeterministicSim` the `os` table is registered iff a
+deterministic clock provider is plugged, and `build()` rejects a nondeterministic one.
 
 Reason: best fit for koto migration, grabby ergonomics, and public API clarity.
 
@@ -279,7 +291,10 @@ store authoritative state on the GC heap instead of in captured host slots.
 5. ✅ extension/linker with capability and fuel metadata — first slice landed.
 6. ✅ hot reload and diagnostics — first slice landed; reclamation and stack traces remain.
 7. ✅ early declarative macro sugar — landed; broader attribute/codegen expansion is deferred.
-8. ⏳ bounded memory, true-root/epoch-safe reset, runtime services, per-call host context, modules,
+8. ✅ runtime output/time services — landed per [`72-host-services.md`](72-host-services.md): environment
+   presets, `ServiceClock` provider sockets, real `print` composition, pinned-epoch and logical-clock
+   fallbacks; honest memory telemetry (`collectgarbage("count")`/`gcinfo`) remains.
+9. ⏳ bounded memory, true-root/epoch-safe reset, per-call host context, modules,
    transactional install/reload, and rich/live values — next.
 
 Defer mlua-style `UserData`/`Scope` until the above is stable. The first useful embedding target is typed

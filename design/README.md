@@ -2,8 +2,9 @@
 
 > ⚠️ **Read [`CURRENT.md`](CURRENT.md) first — it is the single canonical state.** This index and the dated
 > docs are staged snapshots and can lag; `CURRENT.md` wins on any disagreement. (Drift fixed per review H1.)
-> **Status note (2026-07-23):** the broad production VM/compiler/API slice, pending-free pinned conformance
-> corpus, 12-adapter Linux benchmark snapshot, and cross-engine wasm pre-lock gate are in-tree. Historical spike
+> **Status note (2026-07-25):** the broad production VM/compiler/API slice, pending-free pinned conformance
+> corpus, 12-adapter Linux benchmark snapshot, cross-engine wasm pre-lock gate, and host output/time services
+> slice are in-tree. Historical spike
 > multipliers are not current product claims. The next release gates are bounded object/program lifetimes,
 > quotas/OOM, deterministic reset, and the remaining host/module/value boundary — see `CURRENT.md`.
 
@@ -32,6 +33,7 @@ docs are design intent.
 | [`56-performance-research.md`](56-performance-research.md) | safe-Rust performance sequence, landed HotIR/closure fast paths, current Linux evidence, and measurement protocol | **[PERFORMANCE RESEARCH v2.0]** |
 | [`65-wasmjit.md`](65-wasmjit.md) | **wasm-emit JIT / AOT-to-wasm spike** (verified) — ~176× the interpreter in V8, crossover ≈ 6 calls; the in-browser near-native path | **[SPIKE]** ✅ |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | deterministic effect/slot contract and the still-pending mechanically enforced decision reset | **[CONTRACT]** |
+| [`72-host-services.md`](72-host-services.md) | **host services bus** — stdout sink, determinism-labeled `ServiceClock` providers, `standard()`/`deterministic()`/`live()` presets, logical `os.clock` | **[IMPLEMENTED v1]** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | **Grabby-Compatible Embedded API** — public koto-shaped facade, typed conversion, serde, hot reload, deterministic extension/linker plan | **[IMPLEMENTED FIRST SLICE]** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public koto-to-rustia migration guide for the implemented embedding facade | **[GUIDE]** |
 | [`80-bench-suite.md`](80-bench-suite.md) | 12-adapter Linux/wasm benchmark product, evidence protocol, generated report, and standalone split plan | **[IMPLEMENTED; SPLIT PENDING]** |
@@ -42,12 +44,13 @@ docs are design intent.
 | [`publishability.json`](publishability.json) | generated publishability blocker audit for every workspace package | **[GENERATED]** |
 
 **TL;DR of where we are:** the architecture is decided and a substantial safe-Rust Luau 0.709 engine exists:
-692 fixtures / 491 refs / 0 pending, a first typed embedding facade, CLI, deterministic profiles, reusable
+692 fixtures / 491 refs / 0 pending, a first typed embedding facade with host-pluggable output/clock services,
+CLI, deterministic profiles, reusable
 private HotIR, and a reproducible 12-adapter dedicated-Linux benchmark pipeline. The current `a562919` snapshot
 puts rustia 3.494x behind `mlua-luau` and 3.833x behind Luaur by five-workload minimum-time geometric mean; the
 targeted closure slice reduced rustia median latency by 15.036%. Before public release, prioritize complete
-object/program reclamation, memory accounting/quotas/OOM, epoch-safe decision reset, runtime providers/module
-loading/rich values, semantic-tail hardening, then further measured optimization and packaging.
+object/program reclamation, memory accounting/quotas/OOM, epoch-safe decision reset, module loading/rich
+values, semantic-tail hardening, then further measured optimization and packaging.
 
 ## The decision axes (each gets ~5 directions explored)
 

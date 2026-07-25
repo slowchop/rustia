@@ -18,8 +18,11 @@ use crate::number::{binary, canonicalize_number, NumericOp};
 use crate::profile::Profile;
 use crate::value::{Value, ValueKind};
 use smallvec::SmallVec;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::fmt;
 use std::num::NonZeroU64;
+use std::rc::Rc;
 use std::sync::Arc;
 
 const LUAU_TABLE_MAX_SIZE: usize = 1 << 26;
@@ -30,6 +33,8 @@ const READONLY_TABLE_ERROR: &str = "attempt to modify a readonly table";
 const LUAU_UTF8_CHARPATTERN: &[u8] = b"[\0-\x7f\xc2-\xf4][\x80-\xbf]*";
 const LUAU_RECURSIVE_REVERSE_GSUB_PATTERN: &[u8] = b"(.)(.+)";
 const OS_TIME_NOW_SECONDS: i64 = 1_700_000_000;
+// Logical `os.clock` default: executed instructions per logical second (design/72-host-services.md).
+const LOGICAL_CLOCK_INSTRUCTIONS_PER_SECOND: f64 = 1_000_000.0;
 pub const MAX_RECURSION_LIMIT: usize = 512;
 const LUAU_TAIL_CALL_LIMIT: usize = 20_000;
 const CONSTANT_ATOM_EMPTY: u32 = 0;
@@ -55,6 +60,103 @@ const OPCODE_FUEL_OR_SPECIAL: [u8; OPCODE_TAG_SPACE] = {
 pub type LoadStringCompiler =
     fn(source: &[u8], source_name: Option<&[u8]>) -> std::result::Result<Program, String>;
 
+type SharedStdoutSink = Rc<RefCell<dyn FnMut(&str)>>;
+
+/// Shared host sink for composed `print` output. Cloning shares the underlying sink.
+#[derive(Clone)]
+pub struct StdoutSink {
+    sink: SharedStdoutSink,
+}
+
+impl StdoutSink {
+    pub fn new(sink: impl FnMut(&str) + 'static) -> Self {
+        Self {
+            sink: Rc::new(RefCell::new(sink)),
+        }
+    }
+
+    fn write(&self, text: &str) {
+        (self.sink.borrow_mut())(text);
+    }
+}
+
+impl fmt::Debug for StdoutSink {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_struct("StdoutSink").finish_non_exhaustive()
+    }
+}
+
+/// Shared host clock provider. `deterministic` marks readings as replay-stable;
+/// `DeterministicSim` silently drops providers without the label. Cloning shares the
+/// underlying provider.
+#[derive(Clone)]
+pub struct ClockProvider {
+    clock: Rc<RefCell<dyn FnMut() -> f64>>,
+    deterministic: bool,
+}
+
+impl ClockProvider {
+    pub fn new(clock: impl FnMut() -> f64 + 'static, deterministic: bool) -> Self {
+        Self {
+            clock: Rc::new(RefCell::new(clock)),
+            deterministic,
+        }
+    }
+
+    #[inline]
+    pub const fn deterministic(&self) -> bool {
+        self.deterministic
+    }
+
+    fn read(&self) -> f64 {
+        (self.clock.borrow_mut())()
+    }
+}
+
+impl fmt::Debug for ClockProvider {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ClockProvider")
+            .field("deterministic", &self.deterministic)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Host-pluggable service sockets (design/72-host-services.md). The default is empty: every
+/// socket falls back to the VM's built-in deterministic default (`print` no-op, the pinned
+/// epoch for `os.time`/`os.date`, the logical clock for `os.clock`).
+#[derive(Clone, Debug, Default)]
+pub struct VmServices {
+    pub stdout: Option<StdoutSink>,
+    pub wall_clock: Option<ClockProvider>,
+    pub monotonic_clock: Option<ClockProvider>,
+}
+
+impl VmServices {
+    /// `DeterministicSim` admits only deterministic providers; nondeterministic clocks are
+    /// silently dropped (same rule as `loadstring_compiler`).
+    fn retain_deterministic_clocks(&mut self) {
+        if self
+            .wall_clock
+            .as_ref()
+            .is_some_and(|clock| !clock.deterministic())
+        {
+            self.wall_clock = None;
+        }
+        if self
+            .monotonic_clock
+            .as_ref()
+            .is_some_and(|clock| !clock.deterministic())
+        {
+            self.monotonic_clock = None;
+        }
+    }
+
+    fn has_clock_provider(&self) -> bool {
+        self.wall_clock.is_some() || self.monotonic_clock.is_some()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct VmSettings {
     pub initial_fuel: Option<u64>,
@@ -67,6 +169,7 @@ pub struct VmSettings {
     pub enable_conformance_native_userdata: bool,
     pub enable_conformance_native_type_checks: bool,
     pub enable_conformance_pcall_helpers: bool,
+    pub services: VmServices,
 }
 
 impl Default for VmSettings {
@@ -83,6 +186,7 @@ impl Default for VmSettings {
             enable_conformance_native_userdata: false,
             enable_conformance_native_type_checks: false,
             enable_conformance_pcall_helpers: false,
+            services: VmServices::default(),
         }
     }
 }
@@ -1254,19 +1358,24 @@ impl Vm {
     }
 
     pub fn with_settings(profile: Profile, settings: VmSettings) -> Self {
-        let settings = VmSettings {
+        let mut settings = VmSettings {
             recursion_limit: settings.recursion_limit.min(MAX_RECURSION_LIMIT),
             ..settings
         };
+        if profile.is_deterministic_sim() {
+            settings.services.retain_deterministic_clocks();
+        }
         let mut heap = VmCell::new();
         let globals = heap.alloc_array_table(&[]);
         let enable_loadstring =
             settings.loadstring_compiler.is_some() && !profile.is_deterministic_sim();
+        let register_os = !profile.is_deterministic_sim() || settings.services.has_clock_provider();
         let standard_globals = initialize_standard_globals(
             &mut heap,
             globals,
             profile,
             enable_loadstring,
+            register_os,
             settings.enable_conformance_coverage,
             settings.enable_conformance_int64_userdata,
             settings.enable_conformance_native_userdata,
@@ -8782,6 +8891,11 @@ impl Vm {
                 .native_tostring(program, args, depth, fuel)
                 .map(|value| vec![value]);
         }
+        if native == NativeFunction::Print {
+            return self
+                .native_print(program, args, depth, fuel)
+                .map(|value| vec![value]);
+        }
         if native == NativeFunction::StringFormat {
             return self
                 .native_string_format(program, args, depth, fuel)
@@ -8943,7 +9057,7 @@ impl Vm {
             NativeFunction::Error => self.native_error(args, call_site),
             NativeFunction::DebugTraceback => self.native_debug_traceback(args, call_site),
             NativeFunction::DebugInfo => unreachable!("debug.info returns a variable result list"),
-            NativeFunction::Print => self.native_print(args),
+            NativeFunction::Print => unreachable!("print needs call context"),
             NativeFunction::Next => unreachable!("next returns a variable result list"),
             NativeFunction::CoroutineCreate => self.native_coroutine_create(args),
             NativeFunction::CoroutineWrap => self.native_coroutine_wrap(args),
@@ -10068,7 +10182,29 @@ impl Vm {
         results
     }
 
-    fn native_print(&mut self, _args: &[Value]) -> Result<Value> {
+    fn native_print(
+        &mut self,
+        program: &Program,
+        args: &[Value],
+        depth: usize,
+        fuel: &mut Option<u64>,
+    ) -> Result<Value> {
+        let Some(sink) = self.settings.services.stdout.clone() else {
+            return Ok(Value::nil());
+        };
+        // Composition per design/50-conformance.md: tostring per argument (honoring
+        // `__tostring`), arguments joined with "\t", trailing "\n".
+        let mut output = Vec::new();
+        for (index, argument) in args.iter().enumerate() {
+            if index > 0 {
+                output.push(b'\t');
+            }
+            output.extend_from_slice(
+                &self.value_to_tostring_with_metamethod(program, *argument, depth, fuel)?,
+            );
+        }
+        output.push(b'\n');
+        sink.write(&String::from_utf8_lossy(&output));
         Ok(Value::nil())
     }
 
@@ -11502,7 +11638,12 @@ impl Vm {
 
     fn native_os_clock(&mut self, args: &[Value]) -> Result<Value> {
         validate_native_arity(args, 0, u8::MAX as usize, "os.clock arguments")?;
-        Ok(Value::number(0.0))
+        if let Some(clock) = self.settings.services.monotonic_clock.clone() {
+            return Ok(Value::number(clock.read()));
+        }
+        Ok(Value::number(
+            self.executed_instructions as f64 / LOGICAL_CLOCK_INSTRUCTIONS_PER_SECOND,
+        ))
     }
 
     fn native_os_date(&mut self, args: &[Value]) -> Result<Value> {
@@ -11518,8 +11659,10 @@ impl Vm {
             format.remove(0);
         }
         let timestamp = match args.get(1).copied() {
-            None => OS_TIME_NOW_SECONDS,
-            Some(value) if value.kind() == ValueKind::Nil => OS_TIME_NOW_SECONDS,
+            None => os_timestamp_from_wall_seconds(self.os_wall_now_seconds()),
+            Some(value) if value.kind() == ValueKind::Nil => {
+                os_timestamp_from_wall_seconds(self.os_wall_now_seconds())
+            }
             Some(value) => self.os_time_number_arg(value)?,
         };
         if timestamp < 0 {
@@ -11536,10 +11679,10 @@ impl Vm {
     fn native_os_time(&mut self, args: &[Value]) -> Result<Value> {
         validate_native_arity(args, 0, 1, "os.time arguments")?;
         let Some(value) = args.first().copied() else {
-            return Ok(Value::number(OS_TIME_NOW_SECONDS as f64));
+            return Ok(Value::number(self.os_wall_now_seconds()));
         };
         if value.kind() == ValueKind::Nil {
-            return Ok(Value::number(OS_TIME_NOW_SECONDS as f64));
+            return Ok(Value::number(self.os_wall_now_seconds()));
         }
         let table = value
             .as_table()
@@ -11561,6 +11704,15 @@ impl Vm {
             .coerce_to_number(args[1])?
             .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
         Ok(Value::number(end - start))
+    }
+
+    /// Wall-clock reading for no-arg `os.time` and the default `os.date` timestamp: the
+    /// plugged provider's value, or the pinned epoch when the socket is empty.
+    fn os_wall_now_seconds(&self) -> f64 {
+        match self.settings.services.wall_clock.clone() {
+            Some(clock) => clock.read(),
+            None => OS_TIME_NOW_SECONDS as f64,
+        }
     }
 
     fn os_timestamp_from_table(&mut self, table: u32) -> Result<i64> {
@@ -16037,6 +16189,7 @@ fn initialize_standard_globals(
     globals: u32,
     profile: Profile,
     enable_loadstring: bool,
+    register_os: bool,
     enable_conformance_coverage: bool,
     enable_conformance_int64_userdata: bool,
     enable_conformance_native_userdata: bool,
@@ -16188,6 +16341,8 @@ fn initialize_standard_globals(
             "gcinfo",
             NativeFunction::GcInfo,
         );
+    }
+    if register_os {
         let os = heap.alloc_array_table(&[]);
         for (name, native) in OS_NATIVE_FUNCTIONS {
             set_native_table_field(heap, os, name, *native);
@@ -16396,7 +16551,7 @@ fn initialize_standard_globals(
         Value::table(coroutine),
     );
 
-    let rtti = build_standard_global_rtti(heap, profile, enable_loadstring);
+    let rtti = build_standard_global_rtti(heap, profile, enable_loadstring, register_os);
     set_standard_index_field(heap, standard_globals, "RTTI", Value::table(rtti));
 
     let metatable = heap.alloc_array_table(&[]);
@@ -16484,7 +16639,12 @@ fn native_function_value(heap: &mut VmCell, native: NativeFunction, environment:
     )
 }
 
-fn build_standard_global_rtti(heap: &mut VmCell, profile: Profile, enable_loadstring: bool) -> u32 {
+fn build_standard_global_rtti(
+    heap: &mut VmCell,
+    profile: Profile,
+    enable_loadstring: bool,
+    register_os: bool,
+) -> u32 {
     let rtti = heap.alloc_array_table(&[]);
     set_rtti_table_type(heap, rtti, "_G");
     for (name, _) in GLOBAL_FUNCTION_TYPES {
@@ -16495,6 +16655,8 @@ fn build_standard_global_rtti(heap: &mut VmCell, profile: Profile, enable_loadst
     }
     if !profile.is_deterministic_sim() {
         set_rtti_function_type(heap, rtti, "collectgarbage");
+    }
+    if register_os {
         let os = build_native_function_rtti(heap, OS_NATIVE_FUNCTIONS);
         set_table_field(heap, rtti, "os", Value::table(os));
     }
@@ -17122,6 +17284,12 @@ struct OsDateParts {
     second: i64,
     wday: i64,
     yday: i64,
+}
+
+/// Truncates a wall-clock reading to whole seconds; the `as` cast saturates out-of-range and
+/// NaN readings into the `i64` range.
+fn os_timestamp_from_wall_seconds(seconds: f64) -> i64 {
+    canonicalize_number(seconds).trunc() as i64
 }
 
 fn os_date_parts(timestamp: i64) -> OsDateParts {

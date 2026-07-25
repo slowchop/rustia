@@ -551,6 +551,10 @@ fn compile_and_run_luau_conformance(
     }
     .with_source_bytes(source_name, source);
     let program = compile_with_options(&chunk, options).map_err(|error| error.to_string())?;
+    // No stdout sink is installed on purpose: upstream Luau's conformance harness silences
+    // print globally (`lua_silence`, no tostring execution), and rustia's no-sink print is
+    // the same no-op. An active capture sink would run `__tostring` metamethods where the
+    // oracle runs nothing, diverging fixture behavior from the oracle.
     let mut vm = Vm::with_settings(
         profile,
         VmSettings {

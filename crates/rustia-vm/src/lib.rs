@@ -21,4 +21,6 @@ pub use extension::{
 };
 pub use profile::Profile;
 pub use value::{Value, ValueKind};
-pub use vm::{LoadStringCompiler, Vm, VmSettings, MAX_RECURSION_LIMIT};
+pub use vm::{
+    ClockProvider, LoadStringCompiler, StdoutSink, Vm, VmServices, VmSettings, MAX_RECURSION_LIMIT,
+};

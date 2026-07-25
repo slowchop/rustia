@@ -11,7 +11,7 @@ use rustia_vm::{Program, Vm};
 use std::fmt;
 
 pub use extension_api::{
-    RustiaBuilder, RustiaExtension, RustiaHostFuelPolicy, RustiaHostFunctionInfo,
+    RustiaBuilder, RustiaExtension, RustiaHostFuelPolicy, RustiaHostFunctionInfo, ServiceClock,
     RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
     RUSTIA_MIN_HOST_FUNCTION_FUEL,
 };
@@ -30,8 +30,11 @@ pub struct Rustia {
 }
 
 impl Rustia {
+    /// Returns the [`standard`](RustiaBuilder::standard) preset: reproducible-by-default,
+    /// with a real stdout `print` sink on native targets. [`Rustia::new`] and
+    /// [`Rustia::with_settings`] remain the service-free construction paths.
     pub fn builder() -> RustiaBuilder {
-        RustiaBuilder::new()
+        RustiaBuilder::standard()
     }
 
     pub fn new(profile: Profile) -> Self {
@@ -374,15 +377,17 @@ impl std::error::Error for Error {}
 mod tests {
     use super::{
         Error, FromRustia, OpCapability, OwnedTable, OwnedValue, Profile, Result, Rustia,
-        RustiaExtension, RustiaHostFunctionInfo, SourceSpan, VmErrorKind, VmSettings,
-        RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
-        RUSTIA_MIN_HOST_FUNCTION_FUEL,
+        RustiaBuilder, RustiaExtension, RustiaHostFunctionInfo, ServiceClock, SourceSpan,
+        VmErrorKind, VmSettings, RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION,
+        RUSTIA_HOST_FUEL_POLICY, RUSTIA_MIN_HOST_FUNCTION_FUEL,
     };
     use rustia_compiler::{compile_with_options, CompileOptions};
     use rustia_parser::parse_source;
     use rustia_vm::Vm;
     use serde::{Deserialize, Serialize};
+    use std::cell::RefCell;
     use std::collections::BTreeMap;
+    use std::rc::Rc;
 
     #[test]
     fn compile_and_run_smoke() {
@@ -1539,5 +1544,110 @@ return ok and done and not protected and string.find(err, 'foo', 1, true) ~= nil
             )
             .unwrap();
         assert!(bool::from_rustia(result).unwrap());
+    }
+
+    #[test]
+    fn deterministic_builder_captures_print_through_the_stdout_sink() {
+        let captured = Rc::new(RefCell::new(String::new()));
+        let sink = Rc::clone(&captured);
+        let mut rustia = RustiaBuilder::deterministic()
+            .stdout(move |text| sink.borrow_mut().push_str(text))
+            .build()
+            .unwrap();
+
+        rustia.run_owned("print('hello', 42)").unwrap();
+        assert_eq!(captured.borrow().as_str(), "hello\t42\n");
+    }
+
+    #[test]
+    fn deterministic_builder_admits_deterministic_clock_providers() {
+        let mut rustia = RustiaBuilder::deterministic()
+            .wall_clock(ServiceClock::fixed(1.5))
+            .build()
+            .unwrap();
+
+        let time: f64 = rustia.run("return os.time()").unwrap();
+        assert_eq!(time, 1.5);
+        let surface: bool = rustia
+            .run(
+                "\
+return type(os) == 'table'
+    and type(os.time) == 'function'
+    and type(os.clock) == 'function'
+    and type(os.date) == 'function'
+    and type(os.difftime) == 'function'
+",
+            )
+            .unwrap();
+        assert!(surface);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn deterministic_builder_rejects_system_service_clocks() {
+        let result = RustiaBuilder::deterministic()
+            .wall_clock(ServiceClock::system())
+            .build();
+        let Err(Error::Vm(error)) = result else {
+            panic!("expected deterministic profile to reject a nondeterministic wall clock");
+        };
+        assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
+
+        let result = RustiaBuilder::deterministic()
+            .monotonic_clock(ServiceClock::system())
+            .build();
+        let Err(Error::Vm(error)) = result else {
+            panic!("expected deterministic profile to reject a nondeterministic monotonic clock");
+        };
+        assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
+    }
+
+    #[test]
+    fn standard_preset_keeps_the_pinned_epoch_and_logical_clock_by_default() {
+        let mut rustia = Rustia::builder().build().unwrap();
+
+        let time: f64 = rustia.run("return os.time()").unwrap();
+        assert_eq!(time, 1_700_000_000.0);
+        let logical: bool = rustia
+            .run(
+                "\
+local first = os.clock()
+local second = os.clock()
+return first >= 0 and second >= first
+",
+            )
+            .unwrap();
+        assert!(logical);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn live_preset_installs_system_clocks_and_the_stock_loadstring_compiler() {
+        let mut rustia = RustiaBuilder::live().build().unwrap();
+
+        let time: f64 = rustia.run("return os.time()").unwrap();
+        assert!(
+            time >= 1_700_000_000.0,
+            "live() os.time() should read the real wall clock, got {time}"
+        );
+        let clock: f64 = rustia.run("return os.clock()").unwrap();
+        assert!(
+            clock > 0.0,
+            "live() os.clock() should read the real monotonic clock, got {clock}"
+        );
+        let answer: f64 = rustia.run("return loadstring('return 40 + 2')()").unwrap();
+        assert_eq!(answer, 42.0);
+        // print goes to real process stdout via `print!`, which a test cannot read back from
+        // inside the process; sink delivery is covered by the VM-level capture tests.
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    fn live_preset_fails_loudly_on_wasm32() {
+        let result = RustiaBuilder::live().build();
+        let Err(Error::Vm(error)) = result else {
+            panic!("expected live() to fail on wasm32");
+        };
+        assert!(matches!(error.kind, VmErrorKind::Unsupported { .. }));
     }
 }

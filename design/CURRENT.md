@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-23.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-25.)
 
 ## One-paragraph state
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
@@ -13,6 +13,10 @@ owned values with typed and nested table helpers, source-named run/compile helpe
 fallible `rustia::Result<T>` returns, pre-install host signature/fuel ABI metadata, retained script function
 handles with freshness checks and current-generation accessors, public source-span/runtime-location error
 accessors, owned-value/table serde, deterministic extension registration, hot reload, and macro sugar.
+The host services bus from [`72-host-services.md`](72-host-services.md) is now implemented: facade presets
+`standard()`/`deterministic()`/`live()`, a host stdout sink giving `print` its real Luau composition,
+determinism-labeled wall/monotonic clock providers feeding `os.time`/`os.date`/`os.clock`, and a deterministic
+logical `os.clock` fallback (executed instructions / 1_000_000) replacing the former `0.0`.
 A from-scratch Rust Luau
 interpreter is validated as **GO** by the earlier spikes and is now backed by the production conformance suite;
 performance is continuously benchmark-gated, and the generated gate does not yet approve a blanket public speed
@@ -194,15 +198,18 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    provide a decision/scratch reset primitive. Hosts can reconstruct a VM today; the roadmap requires an
    explicit, tested reset/reuse path that cannot silently preserve globals, upvalues, coroutines, or heap state
    across authoritative decisions.
-3. **Host-provided runtime services.** `print` is currently a placeholder no-op, no-argument `os.time`
-   and `os.date` use a fixed timestamp, `os.clock` is zero, `collectgarbage("count")` is zero, and `gcinfo` is
-   synthetic. Standard/LuauCompat need
-   capability-tagged output and clock providers plus honest internal VM memory accounting/telemetry;
-   DeterministicSim must reject nondeterministic providers or use deterministic ones. Typed callbacks also need
+3. **Host-provided runtime services.** The output/time provider slice is implemented
+   ([`72-host-services.md`](72-host-services.md)): `print` composes `tostring` per argument (honoring
+   `__tostring`), tab-joins, and writes to a host stdout sink when one is attached; no-argument
+   `os.time`/`os.date` read a wall-clock provider with a pinned-epoch fallback; and `os.clock` reads a
+   monotonic-clock provider with a deterministic logical-clock fallback. Still open:
+   `collectgarbage("count")` is zero and `gcinfo` is synthetic — honest internal VM memory
+   accounting/telemetry remains. Typed callbacks also need
    a cheap worker-local/per-call host-context seam instead of requiring captured synchronization for mutable
    slot/effect state. Practical multi-file
    programs also need a host-owned `require` resolver, execute-once cache, and cycle detection; resolution
-   remains host policy rather than a core filesystem API.
+   remains host policy rather than a core filesystem API. Module/extension installation still needs
+   transactional or isolated failure semantics.
 4. **Complete public value interop.** `OwnedValue` intentionally starts small, but it cannot yet faithfully
    carry binary strings, buffers, vectors, opaque userdata identity, non-scalar/identity table keys,
    cyclic/shared table graphs, or zero-copy live values. Add the live-value serde path and identity-safe handles
@@ -225,7 +232,7 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    quotas; an explicit OOM contract; and a deterministic
    per-decision reset/reuse API. Prove it with long-lived churn, cyclic graphs, hot reload, retained handles,
    weak tables, native/wasm parity, and representative mixed-heap memory evidence before tuning final intervals.
-2. **Finish the host-facing runtime boundary.** Add capability-tagged output/time providers, honest internal
+2. **Finish the host-facing runtime boundary.** Add honest internal
    memory accounting/telemetry, a worker-local/per-call host context, a host-owned module resolver/cache,
    complete binary/rich-value interop, zero-copy live serde, and transactional install/hot-reload/stack
    diagnostics. Keep these layered and public-clean; do not leak grabby-specific types or a raw C API.
@@ -324,11 +331,18 @@ remain ongoing gates.
   Standard service/capability surface. Further reference-oriented knobs require explicit implementation/tests.
 - **ReproducibleStandard** (the recommended public default) — targets the full pinned standalone Luau surface
   and is pending-free on the current 491-ref denominator, with reproducible choices for unspecified behavior
-  (insertion-order iteration, pinned PCG32, Schubfach tostring, libm). It is not an unbounded full-conformance or
+  (insertion-order iteration, pinned PCG32, Schubfach tostring, libm). Its `os` table is always registered;
+  without providers, `os.time`/`os.date` read the pinned epoch and `os.clock()` returns the deterministic
+  logical clock (executed instructions / 1_000_000) instead of the former `0.0`
+  ([`72-host-services.md`](72-host-services.md)). It is not an unbounded full-conformance or
   byte-identical-to-reference claim; semantic-tail and full-target gates remain.
 - **DeterministicSim** (grabby) — ReproducibleStandard minus the env-dependent globals `collectgarbage`,
   `gcinfo`, and `os.*`, plus any optional host-supplied `loadstring`; it rejects external-mutable-state and
-  nondeterministic-effect host registrations. Weak tables remain supported and are swept on the deterministic
+  nondeterministic-effect host registrations. Deterministic output/clock providers are admitted: a stdout
+  sink may be attached on any profile, the `os` table (all four members) is registered iff at least one
+  deterministic clock provider is plugged, and a nondeterministic provider is rejected by the facade
+  `build()` and silently dropped by the infallible VM constructors. Weak tables remain supported and are
+  swept on the deterministic
   instruction-count schedule. A sandboxed subset designed for bit-identical replay and verified on the current
   tested matrix. (M2: the Standard modes use an
   **incremental/paced** collection schedule; only DeterministicSim
@@ -346,6 +360,7 @@ remain ongoing gates.
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
 | [`56-performance-research.md`](56-performance-research.md) | no-unsafe SotA performance stack, top-10 ordered bets, C++ Luau estimates | current research note |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative** ✅ |
+| [`72-host-services.md`](72-host-services.md) | host services bus: stdout sink, determinism-labeled clock providers, facade presets, logical `os.clock` | **implemented** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + deterministic extension/linker plan | **implemented first slice** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |
 | [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/target-first report/package metadata and dedicated Linode lifecycle implemented; standalone split pending** |
@@ -376,7 +391,7 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
 1. **Implement and validate bounded object reclamation, quotas, OOM behavior, and per-decision reset/reuse.**
    Coroutine/program stores, true public-handle rooting, weak tables, cyclic graphs, hot reload, and native/wasm
    behavior must remain correct; ordinary retained calls survive hot reload outside an explicit reset epoch.
-2. **Complete the host service and rich-value boundary:** capability-tagged output/time providers, honest
+2. **Complete the host service and rich-value boundary:** honest
    internal VM memory telemetry and quota enforcement, a worker-local/per-call host context, a host-owned
    deterministic module resolver/cache, binary/rich/cyclic values, live-value serde, transactional
    extension/module/hot-reload failure behavior, and stronger traceback diagnostics.
