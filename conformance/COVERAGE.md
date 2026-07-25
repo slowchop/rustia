@@ -5,7 +5,7 @@ The declared behavior-topic catalog is `REFS.tsv`.
 
 ## Current Status
 
-- The current manifest contains 692 fixtures and 491 refs: 692 executable `luau-0.709` fixtures, 0
+- The current manifest contains 694 fixtures and 493 refs: 694 executable `luau-0.709` fixtures, 0
   `pending-oracle` P1 smoke fixtures, and 0 whole upstream Luau 0.709 conformance scripts as
   `pending-impl` inventory.
 - No manifest rows or catalog refs remain pending. P1 smoke fixtures are now pinned to Luau 0.709 oracle

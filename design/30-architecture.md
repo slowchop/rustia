@@ -10,7 +10,7 @@
 > [`40-spikes/`](40-spikes/), [`25-review-raw.json`](25-review-raw.json), spike crates in [`../spikes/`](../spikes/).
 >
 > **v3.1 refinements (2026-06-30 historical snapshot):** the per-behavior conformance table was then 709 design
-> rows; the live executable state is now tracked in [`CURRENT.md`](CURRENT.md) at 692 fixtures / 491 refs /
+> rows; the live executable state is now tracked in [`CURRENT.md`](CURRENT.md) at 694 fixtures / 493 refs /
 > 0 pending. **10 adopted, conformance-verified
 > improvements** are in [`55-improvements.md`](55-improvements.md) — they REFINE the axes below (notably: axis D's
 > flat map → Luau's **dual-part table** with stable logical-deletion order; a **per-Program `Arc` string-intern pool +
@@ -206,7 +206,7 @@ Determinism work splits in two, and only the second part needs a flag:
 
 ⇒ **ONE engine with THREE concrete `Profile` variants** (review M1):
 - **`ReproducibleStandard` (the public default):** targets the full pinned standalone surface with Group A on
-  and the Standard service surface available; the current 491-ref executable denominator is pending-free.
+  and the Standard service surface available; the current 493-ref executable denominator is pending-free.
   It is cross-platform-reproducible for scripts inside the proven surface that avoid environment services.
   *Honest framing: this is
   reproducible-conformant, NOT byte-identical to reference Luau on unspecified behavior (iteration order,

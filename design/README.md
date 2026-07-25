@@ -28,7 +28,7 @@ docs are design intent.
 | [`25-review-raw.json`](25-review-raw.json) | 5-lens adversarial review of the ADR + P0 superinstruction measurement (raw) | **✅** |
 | [`35-axes-raw.json`](35-axes-raw.json) | 5-agent exploration of the open axes (scope, snapshot, value-repr, GC, embedding API) — raw | **✅** |
 | [`30-architecture.md`](30-architecture.md) | the architecture decision record + build plan — **v3 plus v3.1-v3.3 refinements, all 8 axes resolved** | **[ARCHITECTURE v3.3]** ✅ |
-| [`50-conformance.md`](50-conformance.md) | historical 709-row behavior inventory; executable Luau-0.709 truth is 692 fixtures / 491 refs / 0 pending | **[INVENTORY + LIVE CORPUS]** ✅ |
+| [`50-conformance.md`](50-conformance.md) | historical 709-row behavior inventory; executable Luau-0.709 truth is 694 fixtures / 493 refs / 0 pending | **[INVENTORY + LIVE CORPUS]** ✅ |
 | [`55-improvements.md`](55-improvements.md) | **10 adopted design improvements**, each verified still-conformant (dual-part table, string interning, FASTCALL, libm-enforcement, …) | **[IMPROVEMENTS v1]** ✅ |
 | [`56-performance-research.md`](56-performance-research.md) | safe-Rust performance sequence, landed HotIR/closure fast paths, current Linux evidence, and measurement protocol | **[PERFORMANCE RESEARCH v2.0]** |
 | [`65-wasmjit.md`](65-wasmjit.md) | **wasm-emit JIT / AOT-to-wasm spike** (verified) — ~176× the interpreter in V8, crossover ≈ 6 calls; the in-browser near-native path | **[SPIKE]** ✅ |
@@ -44,7 +44,7 @@ docs are design intent.
 | [`publishability.json`](publishability.json) | generated publishability blocker audit for every workspace package | **[GENERATED]** |
 
 **TL;DR of where we are:** the architecture is decided and a substantial safe-Rust Luau 0.709 engine exists:
-692 fixtures / 491 refs / 0 pending, a first typed embedding facade with host-pluggable output/clock services,
+694 fixtures / 493 refs / 0 pending, a first typed embedding facade with host-pluggable output/clock services,
 CLI, deterministic profiles, reusable
 private HotIR, and a reproducible 12-adapter dedicated-Linux benchmark pipeline. The current `a562919` snapshot
 puts rustia 3.494x behind `mlua-luau` and 3.833x behind Luaur by five-workload minimum-time geometric mean; the

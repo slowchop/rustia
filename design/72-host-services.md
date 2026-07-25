@@ -192,10 +192,10 @@ by the engine.
   non-decreasing; value derives from executed instructions; provider override wins).
 - Conformance runner: unchanged VM behavior by default; optionally installs a capture sink for
   output cleanliness. Existing `print_*`/`gcinfo_*`/`collectgarbage_basic` fixtures stay green;
-  692/491/0-pending stands.
-- New fixtures must not canonize pre-existing oracle divergences (out of scope, scheduled under
+  694/493/0-pending stands.
+- New fixtures must not canonize the pre-existing oracle divergence (out of scope, scheduled under
   semantic-tail hardening): Luau `os.date` without `!` is localtime (rustia is UTC-only and ignores
-  `!`), Luau `os.time(table)` defaults `hour` to 12 (rustia 0), Luau `*t` sets `isdst` (rustia omits).
+  `!`). The `os.time(table)` hour default (12) and UTC `*t` `isdst` (false) now match the oracle.
 
 ## Docs updated in this change
 
