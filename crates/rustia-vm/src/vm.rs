@@ -11724,7 +11724,7 @@ impl Vm {
         let year = self.os_time_table_field(table, "year", None)?;
         let month = self.os_time_table_field(table, "month", None)?;
         let day = self.os_time_table_field(table, "day", None)?;
-        let hour = self.os_time_table_field(table, "hour", Some(0))?;
+        let hour = self.os_time_table_field(table, "hour", Some(12))?;
         let minute = self.os_time_table_field(table, "min", Some(0))?;
         let second = self.os_time_table_field(table, "sec", Some(0))?;
 
@@ -11822,6 +11822,9 @@ impl Vm {
             "yday",
             Value::number(parts.yday as f64),
         );
+        // UTC-only: `tm_isdst` is always 0, so `isdst` is always false (matches the
+        // pinned oracle's `setboolfield(L, "isdst", tm_isdst)` under `gmtime_r`).
+        set_table_field(&mut self.heap, table, "isdst", Value::boolean(false));
         table
     }
 

@@ -9,7 +9,7 @@ Current unpublished workspace version: `0.0.1`.
 ### Added
 
 - Luau 0.709 conformance tracking is pending-free, with the current manifest at
-  692 fixtures and 491 behavior refs.
+  694 fixtures and 493 behavior refs.
 - VM strings and larger insertion-ordered table hash parts now use compact
   deterministic open-addressed `u32` side indices. The table index is built at
   16 hash entries, kept at or below 50% load, and releases its allocation after
@@ -322,6 +322,16 @@ Current unpublished workspace version: `0.0.1`.
   non-decreasing values derived from executed instructions; a plugged monotonic
   provider overrides it on any profile, and `DeterministicSim` keeps no ambient
   clock unless a provider is plugged.
+
+### Fixed
+
+- `os.time(table)` now defaults a missing `hour` field to 12 (noon) instead of 0,
+  matching the pinned Luau 0.709 oracle (`VM/src/loslib.cpp` reads the field with
+  `getfield(L, "hour", 12)`).
+- `os.date("*t")`/`os.date("!*t")` date tables now carry a boolean `isdst` field
+  set to `false`, matching the pinned oracle's `setboolfield(L, "isdst", tm_isdst)`;
+  rustia is UTC-only, so `isdst` is always `false`. The non-`!` localtime
+  divergence remains parked.
 
 ## Release Policy
 

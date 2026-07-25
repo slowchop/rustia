@@ -14,8 +14,8 @@
     "canonical_facts": {
       "luau_target": "Luau 0.709, standalone surface",
       "conformance": {
-        "fixtures": 692,
-        "refs": 491,
+        "fixtures": 694,
+        "refs": 493,
         "pending": 0
       },
       "benchmark_adapters": {
@@ -87,7 +87,7 @@
       "name": "Full public standalone Luau engine release",
       "complete": 49,
       "confidence": 76,
-      "state": "The Luau 0.709 standalone target and 491-ref conformance denominator are strong. Release still requires bounded object/program lifetimes, aggregate memory limits and OOM behavior, deterministic lifecycle/reset semantics, a per-call host-context seam and honest memory telemetry, module loading, richer value interop, transactional installation, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.",
+      "state": "The Luau 0.709 standalone target and 493-ref conformance denominator are strong. Release still requires bounded object/program lifetimes, aggregate memory limits and OOM behavior, deterministic lifecycle/reset semantics, a per-call host-context seam and honest memory telemetry, module loading, richer value interop, transactional installation, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.",
       "future_plan": "Close the runtime lifecycle and host-boundary gates, harden the semantic tail and cross-target goldens, then package and publish against the pinned target."
     },
     {
@@ -165,7 +165,7 @@
           "name": "Manifest and refs",
           "complete": 90,
           "confidence": 90,
-          "state": "692 fixtures and 491 refs are executable with 0 pending rows.",
+          "state": "694 fixtures and 493 refs are executable with 0 pending rows.",
           "future_plan": "Add focused fixtures for newly found gaps instead of reopening bulk inventory."
         },
         {
