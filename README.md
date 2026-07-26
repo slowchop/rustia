@@ -92,7 +92,7 @@ The canonical decision filter is [`design/02-pillars.md`](design/02-pillars.md).
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](design/progress.json) into
-[`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-25 for the
+[`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-27 for the
 public rustia project; actual grabby integration work is explicitly out of scope.
 
 | goal | complete | confidence |

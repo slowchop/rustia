@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "date": "2026-07-25",
+    "date": "2026-07-27",
     "scope": "Public rustia project readiness, based on the current workspace and canonical design docs.",
     "excludes": [
       "Actual grabby integration work"
@@ -38,11 +38,17 @@
         "note": "mlua-lua54 runs separately from mlua-luau because both mlua-sys builds use links = \"lua\"; mlua-luau-jit is an explicit execution mode in the mlua-luau adapter family."
       },
       "benchmark_workloads": {
-        "present": 12,
+        "present": 18,
         "default": 5,
         "current_results": 5,
         "source_covered_non_default": [
-          "string_building"
+          "string_building",
+          "memory_burst",
+          "memory_churn",
+          "memory_retained_control",
+          "todo_steady",
+          "todo_history",
+          "todo_retained_control"
         ]
       },
       "wasm_target_bench": {
@@ -94,7 +100,7 @@
       "name": "Standalone benchmark OSS project",
       "complete": 82,
       "confidence": 88,
-      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, a standalone target-first current-results HTML report with interpreter-only and best-mode rankings plus cold-start costs, five default workload families, 12 workload entries with cross-adapter #15 string-building source coverage, all 12 requested adapters plus a verified mlua/Luau JIT mode, exact ephemeral-Linux fixed-throughput and evidence-only memory protocols, a recurring wasm target runner for rustia+koto+rhai on Node/V8, retained cross-engine wasm evidence, a call_ref versus br_table dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle are present.",
+      "state": "Harness, package metadata, split notes, machine-readable inventory, current-results JSON, generated claim gate, history, a standalone target-first current-results HTML report with interpreter-only and best-mode rankings plus cold-start costs, five default workload families, 18 workload entries with cross-adapter #15 string-building source coverage and six synthetic/realistic memory probes, all 12 requested adapters plus a verified mlua/Luau JIT mode, exact ephemeral-Linux fixed-throughput and evidence-only memory protocols, a recurring wasm target runner for rustia+koto+rhai on Node/V8, retained cross-engine wasm evidence, a call_ref versus br_table dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle are present.",
       "future_plan": "Split from the workspace, add the interop/serde/fuel-limit tranche and regression alerts, and accumulate longer-run public history."
     },
     {
@@ -414,8 +420,8 @@
           "name": "Workloads",
           "complete": 65,
           "confidence": 80,
-          "state": "Five default workload families are wired, with 12 workload entries present; the non-default #15 string-building/concat workload has source coverage and smoke-tested execution across all requested adapters.",
-          "future_plan": "Expand the remaining #12 interop, #13 serde, and #14 fuel/limit workload plan, then refresh intentional measurement history."
+          "state": "Five default workload families are wired, with 18 workload entries present; the non-default #15 string-building/concat workload has source coverage and smoke-tested execution across all requested adapters, #16–#18 provide portable burst/churn/intentional-retention memory probes, and #19–#21 provide deterministic steady/history/intentional-retention todo-app probes for Luau and Koto.",
+          "future_plan": "Record the first coherent cross-engine Linux memory cohort, expand the remaining #12 interop, #13 serde, and #14 fuel/limit workload plan, then refresh intentional measurement history."
         },
         {
           "name": "History and static report",
@@ -428,8 +434,8 @@
           "name": "Benchmark operations",
           "complete": 75,
           "confidence": 90,
-          "state": "Hosted CI validates committed benchmark artifacts without measuring. An explicit operator-started Linode lifecycle is the sole active timing source and promotes only a complete Linux native-plus-wasm matrix after confirmed instance deletion.",
-          "future_plan": "Keep the Linode lifecycle reproducible, accumulate longer coherent Linux history, and add regression alerts without mixing developer-machine timings."
+          "state": "Hosted CI validates committed benchmark artifacts without measuring. An explicit operator-started Linode lifecycle is the sole active timing source and promotes only complete evidence after confirmed instance deletion. The isolated memory child/supervisor, cgroup-v2 sampler, repeated-epoch analyzer, publication schema, and pending dashboard state are implemented; the pre-reclamation Linode cohort remains to be recorded.",
+          "future_plan": "Record and publish the pre-reclamation memory baseline, keep the Linode lifecycle reproducible, accumulate longer coherent Linux history, and add regression alerts without mixing developer-machine timings."
         }
       ]
     },

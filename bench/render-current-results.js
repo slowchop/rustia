@@ -11,6 +11,7 @@ const historyBackfillDirectory = path.join(__dirname, "history", "backfills");
 const wasmResultsPath = path.join(__dirname, "wasm", "current-results.json");
 const wasmDispatchPath = path.join(__dirname, "wasm", "dispatch-current-results.json");
 const cohortEvidencePath = path.join(__dirname, "history", "evidence");
+const memoryResultsPath = path.join(__dirname, "memory", "current-results.json");
 const outputPath = path.join(__dirname, "current-results.html");
 const checkOnly = process.argv.includes("--check");
 const REQUIRED_COMMON_WORKLOADS = Object.freeze([
@@ -188,6 +189,46 @@ function readJson(filePath) {
   } catch (error) {
     fail(`could not parse ${relative(filePath)}: ${error.message}`);
   }
+}
+
+function readMemoryResults() {
+  const data = readJson(memoryResultsPath);
+  if (data.schema_version !== 1 || data.schema !== "rustia.bench.memory-current-results.v1") {
+    fail("memory results must use rustia.bench.memory-current-results.v1");
+  }
+  if (!["pending", "ready"].includes(data.status)) {
+    fail("memory results status must be pending or ready");
+  }
+  if (!Array.isArray(data.rows) || !Array.isArray(data.detector_coverage)) {
+    fail("memory results rows and detector_coverage must be arrays");
+  }
+  if (data.status === "pending" && data.rows.length !== 0) {
+    fail("pending memory results must not contain rows");
+  }
+  if (data.status === "ready" && data.rows.length === 0) {
+    fail("ready memory results must contain rows");
+  }
+  data.rows.forEach((row, index) => {
+    const label = `memory results row ${index + 1}`;
+    for (const key of ["commit", "target", "engine", "dialect", "execution_mode", "workload", "classification"]) {
+      if (typeof row[key] !== "string" || row[key] === "") fail(`${label}.${key} must be a string`);
+    }
+    if (row.metrics == null || typeof row.metrics !== "object" || Array.isArray(row.metrics)) {
+      fail(`${label}.metrics must be an object`);
+    }
+    for (const metric of [
+      "spawned_anon_kib",
+      "prepared_delta_anon_kib",
+      "peak_delta_kib",
+      "quiescent_retained_delta_anon_kib",
+      "tail_growth_kib_per_epoch",
+    ]) {
+      if (!Number.isFinite(Number(row.metrics[metric]?.median))) {
+        fail(`${label}.metrics.${metric}.median must be finite`);
+      }
+    }
+  });
+  return data;
 }
 
 function readWasmResults() {
@@ -1465,6 +1506,85 @@ function coldStartSection(rows) {
   `;
 }
 
+function memoryResultsSection(data) {
+  if (data.status === "pending") {
+    return `
+      <section class="panel" id="memory">
+        <div class="section-head">
+          <div>
+            <h2>Memory</h2>
+            <p>Fresh-process cgroup peaks, smaps phase deltas, and epoch growth across engines.</p>
+          </div>
+        </div>
+        <p class="pending-note"><strong>Pre-reclamation baseline pending.</strong> The supervisor and detector-validation workloads are being implemented; this panel will remain empty rather than showing local or Rustia-only measurements.</p>
+      </section>
+    `;
+  }
+  const rows = [...data.rows].sort(
+    (left, right) =>
+      left.workload.localeCompare(right.workload) ||
+      Number(left.metrics.peak_delta_kib.median) - Number(right.metrics.peak_delta_kib.median) ||
+      left.engine.localeCompare(right.engine),
+  );
+  const coverage = new Map(data.detector_coverage.map((entry) => [entry.engine, entry.detector_validated === true]));
+  return `
+    <section class="panel" id="memory">
+      <div class="section-head">
+        <div>
+          <h2>Memory</h2>
+          <p>Fresh process+cgroup samples. Peak catches short spikes; retained and growth use smaps anonymous memory at explicit phase/epoch markers.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Implementation · language</th><th>Workload</th><th>Mode</th><th>Idle anon</th><th>Prepared Δ</th><th>Peak Δ</th><th>Retained Δ</th><th>Tail growth</th><th>Signal</th></tr></thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td>${implementationLanguage(row.engine, languageLabel(row.dialect))}</td>
+                <td><strong>${escapeHtml(workloadLabel(row.workload))}</strong></td>
+                <td>${modeBadge(row.execution_mode)}</td>
+                <td>${formatMemoryKib(row.metrics.spawned_anon_kib.median)}</td>
+                <td>${formatSignedMemoryKib(row.metrics.prepared_delta_anon_kib.median)}</td>
+                <td><strong>${formatMemoryKib(row.metrics.peak_delta_kib.median)}</strong></td>
+                <td>${formatSignedMemoryKib(row.metrics.quiescent_retained_delta_anon_kib.median)}</td>
+                <td>${formatSignedMemoryKib(row.metrics.tail_growth_kib_per_epoch.median)}/epoch</td>
+                <td>${memoryClassification(row.classification, coverage.get(row.engine) === true)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function formatMemoryKib(value) {
+  value = Number(value);
+  if (!Number.isFinite(value)) return "n/a";
+  if (Math.abs(value) >= 1024) return `${formatNumber(value / 1024)} MiB`;
+  return `${formatNumber(value)} KiB`;
+}
+
+function formatSignedMemoryKib(value) {
+  value = Number(value);
+  if (!Number.isFinite(value)) return "n/a";
+  return `${value > 0 ? "+" : ""}${formatMemoryKib(value)}`;
+}
+
+function memoryClassification(classification, detectorValidated) {
+  const labels = {
+    expected_retention: "expected retention",
+    growth_signal: "growth signal",
+    stable_in_tested_window: "stable",
+    inconclusive: "inconclusive",
+    detector_failed: "detector failed",
+  };
+  const ready = classification === "stable_in_tested_window" || classification === "expected_retention";
+  const detector = detectorValidated ? "" : ' <span class="subtle">control unverified</span>';
+  return `<span class="claim-pill ${ready ? "claim-ready" : "claim-blocked"}">${escapeHtml(labels[classification] ?? classification)}</span>${detector}`;
+}
+
 function formatDurationNs(value) {
   if (!Number.isFinite(value)) return "n/a";
   if (value >= 1e6) return `${formatNumber(value / 1e6)} ms`;
@@ -1833,7 +1953,7 @@ function targetRuntimeLabel(row) {
   return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.runtime)}</span></span>`;
 }
 
-function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts, historyBackfills = []) {
+function render(data, wasmResults, wasmDispatchResults, memoryResults, historyRecords, cohorts, historyBackfills = []) {
   const wasmRows = wasmTargetRows(wasmResults);
   const summary = summarize(data, wasmRows);
   const history = summarizeHistory(historyRecords);
@@ -1948,6 +2068,13 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts,
       color: var(--muted);
       font-size: 12px;
       font-weight: 600;
+    }
+
+    .pending-note {
+      margin: 0;
+      padding: 18px 20px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
     }
 
     .language-targets {
@@ -2791,17 +2918,19 @@ function render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts,
 
     <nav class="nav" aria-label="Targets">
       <a href="#linux-comparison">Linux Comparison</a>
+      <a href="#memory">Memory</a>
       <a href="#cold-start">Cold Start</a>
       <a href="#claim-gate">Claim Gate</a>
       <a href="#history">History</a>
     </nav>
 
     ${linuxComparisonSection(summary.linuxComparisonViews)}
+    ${memoryResultsSection(memoryResults)}
     ${coldStartSection(summary.coldStartRows)}
     ${claimGateSection(claimRows)}
       ${historySection(history, historyBackfills, data.rows)}
 
-    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Memory <code>${escapeHtml(relative(memoryResultsPath))}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
   <script>
     (() => {
@@ -2868,8 +2997,9 @@ function main() {
   const historyBackfills = readHistoryBackfills();
   const wasmResults = readWasmResults();
   const wasmDispatchResults = readWasmDispatchResults();
+  const memoryResults = readMemoryResults();
   const cohorts = readCohortEvidence();
-  const html = render(data, wasmResults, wasmDispatchResults, historyRecords, cohorts, historyBackfills).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
+  const html = render(data, wasmResults, wasmDispatchResults, memoryResults, historyRecords, cohorts, historyBackfills).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
   const output = `${html}\n`;
   if (checkOnly) {
     let current;

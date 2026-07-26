@@ -16,6 +16,7 @@ const REPO = path.resolve(__dirname, "..");
 const DEFAULT_CONFIG = path.join(REPO, "bench/cloud/linode-dense-ed65077.json");
 const REMOTE_RUNNER = path.join(REPO, "tools/run-linux-fixed-benchmark.js");
 const MATRIX_REMOTE_RUNNER = path.join(REPO, "tools/run-linux-matrix-benchmark.js");
+const MEMORY_REMOTE_RUNNER = path.join(REPO, "tools/run-linux-memory-benchmark.js");
 const HISTORY_BACKFILL_REMOTE_RUNNER = path.join(REPO, "tools/run-linux-history-backfill.js");
 const STATE_ROOT = path.join(REPO, ".rustia-benchmark-state/linode");
 const RUNS_ROOT = path.join(STATE_ROOT, "runs");
@@ -38,12 +39,14 @@ const MAX_EXPORT_ENTRIES = 10_000;
 const FIXED_THROUGHPUT_PROTOCOL = "fixed_throughput_v1";
 const VM_STRING_MEMORY_PROTOCOL = "vm_string_memory_v1";
 const CROSS_ENGINE_MATRIX_PROTOCOL = "cross_engine_matrix_v4";
+const CROSS_ENGINE_MEMORY_PROTOCOL = "cross_engine_memory_v1";
 const HISTORY_BACKFILL_PROTOCOL = "rustia_history_backfill_v1";
 const MAX_TIMED_ATTEMPTS_PER_GROUP = 3;
 const ALLOWED_PROTOCOLS = new Set([
   FIXED_THROUGHPUT_PROTOCOL,
   VM_STRING_MEMORY_PROTOCOL,
   CROSS_ENGINE_MATRIX_PROTOCOL,
+  CROSS_ENGINE_MEMORY_PROTOCOL,
   HISTORY_BACKFILL_PROTOCOL,
 ]);
 const MATRIX_NATIVE_TARGET = "linux-x86_64";
@@ -74,6 +77,64 @@ const MATRIX_WASM_ADAPTERS = Object.freeze(["rustia", "koto", "rhai"]);
 const MATRIX_RUNTIME_FAMILIES = Object.freeze({
   node: "V8",
 });
+const MEMORY_GROUPS = Object.freeze([
+  {
+    binary: "all",
+    engines: MATRIX_NATIVE_ENGINES.filter((engine) => engine !== "mlua-lua54"),
+    workloads: MATRIX_WORKLOADS.map((id) => ({ id, n: 128, epochs: 16 })),
+  },
+  {
+    binary: "lua54",
+    engines: ["mlua-lua54"],
+    workloads: MATRIX_WORKLOADS.map((id) => ({ id, n: 128, epochs: 16 })),
+  },
+  {
+    binary: "all",
+    engines: ["rustia", "luaur", "mlua-luau", "mlua-luau-jit", "ruau"],
+    workloads: [
+      { id: "memory_burst", n: 1, epochs: 16 },
+      { id: "memory_churn", n: 1, epochs: 40 },
+      { id: "memory_retained_control", n: 1, epochs: 40 },
+      { id: "todo_steady", n: 128, epochs: 40 },
+      { id: "todo_history", n: 128, epochs: 40 },
+      { id: "todo_retained_control", n: 128, epochs: 40 },
+    ],
+  },
+  {
+    binary: "all",
+    engines: ["koto"],
+    workloads: [
+      { id: "memory_burst", n: 1, epochs: 16 },
+      { id: "memory_churn", n: 1, epochs: 40 },
+      { id: "memory_retained_control", n: 1, epochs: 40 },
+      { id: "todo_steady", n: 128, epochs: 40 },
+      { id: "todo_history", n: 128, epochs: 40 },
+      { id: "todo_retained_control", n: 128, epochs: 40 },
+    ],
+  },
+  {
+    binary: "all",
+    engines: ["boa", "rquickjs"],
+    workloads: [
+      { id: "memory_burst", n: 1, epochs: 16 },
+      { id: "memory_churn", n: 1, epochs: 40 },
+      { id: "memory_retained_control", n: 1, epochs: 40 },
+    ],
+  },
+  {
+    binary: "lua54",
+    engines: ["mlua-lua54"],
+    workloads: [
+      { id: "memory_burst", n: 1, epochs: 16 },
+      { id: "memory_churn", n: 1, epochs: 40 },
+      { id: "memory_retained_control", n: 1, epochs: 40 },
+    ],
+  },
+]);
+const MEMORY_ROWS = MEMORY_GROUPS.reduce(
+  (sum, group) => sum + group.engines.length * group.workloads.length,
+  0,
+);
 const VM_STRING_SCENARIOS = Object.freeze([
   "empty",
   "short_unloaded",
@@ -204,18 +265,23 @@ function isCrossEngineMatrix(config) {
   return protocolKind(config) === CROSS_ENGINE_MATRIX_PROTOCOL;
 }
 
+function isCrossEngineMemory(config) {
+  return protocolKind(config) === CROSS_ENGINE_MEMORY_PROTOCOL;
+}
+
 function isHistoryBackfill(config) {
   return protocolKind(config) === HISTORY_BACKFILL_PROTOCOL;
 }
 
 function benchmarkCommit(config) {
-  if (isCrossEngineMatrix(config)) return config.source.benchmark_commit;
+  if (isCrossEngineMatrix(config) || isCrossEngineMemory(config)) return config.source.benchmark_commit;
   if (isHistoryBackfill(config)) return config.source.harness_commit;
   return config.source.candidate_commit;
 }
 
 function remoteRunnerForConfig(config) {
   if (isCrossEngineMatrix(config)) return MATRIX_REMOTE_RUNNER;
+  if (isCrossEngineMemory(config)) return MEMORY_REMOTE_RUNNER;
   if (isHistoryBackfill(config)) return HISTORY_BACKFILL_REMOTE_RUNNER;
   return REMOTE_RUNNER;
 }
@@ -268,6 +334,7 @@ function validateConfig(value) {
     root,
     kind === VM_STRING_MEMORY_PROTOCOL ||
       kind === CROSS_ENGINE_MATRIX_PROTOCOL ||
+      kind === CROSS_ENGINE_MEMORY_PROTOCOL ||
       kind === HISTORY_BACKFILL_PROTOCOL
       ? ["schema", "provider", "source", "measurement", "host_gate", "publication"]
       : ["schema", "provider", "source", "measurement", "qualification", "host_gate", "publication"],
@@ -306,14 +373,14 @@ function validateConfig(value) {
   const source = requireObject(root.source, "config.source");
   requireExactKeys(
     source,
-    kind === CROSS_ENGINE_MATRIX_PROTOCOL
+    kind === CROSS_ENGINE_MATRIX_PROTOCOL || kind === CROSS_ENGINE_MEMORY_PROTOCOL
       ? ["benchmark_commit", "expected_sha256"]
       : kind === HISTORY_BACKFILL_PROTOCOL
       ? ["harness_commit", "target_commits", "expected_sha256"]
       : ["baseline_commit", "candidate_commit", "harness_commit", "expected_sha256"],
     "config.source",
   );
-  if (kind === CROSS_ENGINE_MATRIX_PROTOCOL) {
+  if (kind === CROSS_ENGINE_MATRIX_PROTOCOL || kind === CROSS_ENGINE_MEMORY_PROTOCOL) {
     if (!FULL_COMMIT.test(requireString(source.benchmark_commit, "config.source.benchmark_commit"))) {
       fail("config.source.benchmark_commit must be a lowercase full commit");
     }
@@ -361,6 +428,19 @@ function validateConfig(value) {
           "wasm_measure_module",
           "wasm_dispatch_measure",
           "history_before",
+        ]
+      : kind === CROSS_ENGINE_MEMORY_PROTOCOL
+      ? [
+          "bench_manifest",
+          "native_harness",
+          "cargo_lock",
+          "toolchain",
+          "memory_supervisor",
+          "memory_analyzer",
+          "memory_cohort",
+          "memory_publisher",
+          "memory_history_before",
+          "memory_current_before",
         ]
       : kind === HISTORY_BACKFILL_PROTOCOL
       ? [
@@ -437,6 +517,76 @@ function validateConfig(value) {
       }
     }
     validateRuntimeArtifacts(measurement.runtime_artifacts, "config.measurement.runtime_artifacts");
+  } else if (kind === CROSS_ENGINE_MEMORY_PROTOCOL) {
+    requireExactKeys(
+      measurement,
+      [
+        "protocol",
+        "cohort_id",
+        "samples",
+        "bootstrap_repetitions",
+        "bootstrap_seed",
+        "growth_thresholds",
+        "sample_interval_ms",
+        "sample_timeout_ms",
+        "groups",
+      ],
+      "config.measurement",
+    );
+    if (!SAFE_WORKLOAD_FILE_COMPONENT.test(requireString(measurement.cohort_id, "config.measurement.cohort_id"))) {
+      fail("config.measurement.cohort_id must be a safe identifier");
+    }
+    if (requireInteger(measurement.samples, "config.measurement.samples", 1) !== 9) {
+      fail("config.measurement.samples must remain frozen at 9");
+    }
+    if (
+      requireInteger(
+        measurement.bootstrap_repetitions,
+        "config.measurement.bootstrap_repetitions",
+        1000,
+      ) !== 20000
+    ) {
+      fail("config.measurement.bootstrap_repetitions must remain frozen at 20000");
+    }
+    if (
+      requireInteger(measurement.bootstrap_seed, "config.measurement.bootstrap_seed", 0) !==
+      1381323604
+    ) {
+      fail("config.measurement.bootstrap_seed must remain frozen at 1381323604");
+    }
+    const thresholds = requireObject(
+      measurement.growth_thresholds,
+      "config.measurement.growth_thresholds",
+    );
+    requireExactKeys(
+      thresholds,
+      ["absolute_kib_per_epoch", "proportional_percent_per_epoch"],
+      "config.measurement.growth_thresholds",
+    );
+    if (
+      requireNumber(
+        thresholds.absolute_kib_per_epoch,
+        "config.measurement.growth_thresholds.absolute_kib_per_epoch",
+        0.001,
+      ) !== 4 ||
+      requireNumber(
+        thresholds.proportional_percent_per_epoch,
+        "config.measurement.growth_thresholds.proportional_percent_per_epoch",
+        0.001,
+      ) !== 0.05
+    ) {
+      fail("config.measurement growth thresholds must remain frozen at 4 KiB and 0.05%");
+    }
+    if (
+      requireInteger(measurement.sample_interval_ms, "config.measurement.sample_interval_ms", 1) !== 10 ||
+      requireInteger(measurement.sample_timeout_ms, "config.measurement.sample_timeout_ms", 1000) !==
+        600000
+    ) {
+      fail("config.measurement sampling must remain frozen at 10 ms / 600000 ms");
+    }
+    if (canonicalJson(measurement.groups) !== canonicalJson(MEMORY_GROUPS)) {
+      fail("config.measurement.groups does not match the frozen cross-engine memory matrix");
+    }
   } else if (kind === HISTORY_BACKFILL_PROTOCOL) {
     requireExactKeys(
       measurement,
@@ -578,31 +728,63 @@ function validateConfig(value) {
   const gate = requireObject(root.host_gate, "config.host_gate");
   requireExactKeys(
     gate,
-    [
-      "benchmark_cpu",
-      "cooldown_seconds",
-      "idle_window_seconds",
-      "minimum_idle_percent",
-      "maximum_load_1m",
-      "maximum_steal_ticks",
-      "maximum_timed_steal_percent",
-      ...(kind === CROSS_ENGINE_MATRIX_PROTOCOL || kind === HISTORY_BACKFILL_PROTOCOL
-        ? ["maximum_timed_steal_ticks", "maximum_timed_attempts_per_group"]
-        : []),
-      "wait_timeout_seconds",
-    ],
+    kind === CROSS_ENGINE_MEMORY_PROTOCOL
+      ? [
+          "benchmark_cpu",
+          "supervisor_cpu",
+          "idle_window_seconds",
+          "minimum_idle_percent",
+          "maximum_load_1m",
+          "maximum_idle_steal_ticks",
+          "maximum_run_steal_percent",
+          "wait_timeout_seconds",
+        ]
+      : [
+          "benchmark_cpu",
+          "cooldown_seconds",
+          "idle_window_seconds",
+          "minimum_idle_percent",
+          "maximum_load_1m",
+          "maximum_steal_ticks",
+          "maximum_timed_steal_percent",
+          ...(kind === CROSS_ENGINE_MATRIX_PROTOCOL || kind === HISTORY_BACKFILL_PROTOCOL
+            ? ["maximum_timed_steal_ticks", "maximum_timed_attempts_per_group"]
+            : []),
+          "wait_timeout_seconds",
+        ],
     "config.host_gate",
   );
   requireInteger(gate.benchmark_cpu, "config.host_gate.benchmark_cpu", 0);
-  requireInteger(gate.cooldown_seconds, "config.host_gate.cooldown_seconds", 1);
   requireInteger(gate.idle_window_seconds, "config.host_gate.idle_window_seconds", 1);
   requireNumber(gate.minimum_idle_percent, "config.host_gate.minimum_idle_percent", 0);
   if (gate.minimum_idle_percent > 100) fail("config.host_gate.minimum_idle_percent must be <= 100");
   requireNumber(gate.maximum_load_1m, "config.host_gate.maximum_load_1m", 0);
-  requireInteger(gate.maximum_steal_ticks, "config.host_gate.maximum_steal_ticks", 0);
-  requireNumber(gate.maximum_timed_steal_percent, "config.host_gate.maximum_timed_steal_percent", 0);
-  if (gate.maximum_steal_ticks !== 0 || gate.maximum_timed_steal_percent !== 0.1) {
-    fail("Linode v2 steal budget must remain zero while idle and 0.1% during a timed leg");
+  if (kind === CROSS_ENGINE_MEMORY_PROTOCOL) {
+    requireInteger(gate.supervisor_cpu, "config.host_gate.supervisor_cpu", 0);
+    if (gate.supervisor_cpu === gate.benchmark_cpu) {
+      fail("config.host_gate supervisor and benchmark CPUs must differ");
+    }
+    if (
+      requireInteger(
+        gate.maximum_idle_steal_ticks,
+        "config.host_gate.maximum_idle_steal_ticks",
+        0,
+      ) !== 0 ||
+      requireNumber(
+        gate.maximum_run_steal_percent,
+        "config.host_gate.maximum_run_steal_percent",
+        0,
+      ) !== 0.1
+    ) {
+      fail("memory protocol steal budget must remain zero while idle and 0.1% during the cohort");
+    }
+  } else {
+    requireInteger(gate.cooldown_seconds, "config.host_gate.cooldown_seconds", 1);
+    requireInteger(gate.maximum_steal_ticks, "config.host_gate.maximum_steal_ticks", 0);
+    requireNumber(gate.maximum_timed_steal_percent, "config.host_gate.maximum_timed_steal_percent", 0);
+    if (gate.maximum_steal_ticks !== 0 || gate.maximum_timed_steal_percent !== 0.1) {
+      fail("Linode v2 steal budget must remain zero while idle and 0.1% during a timed leg");
+    }
   }
   if (kind === CROSS_ENGINE_MATRIX_PROTOCOL || kind === HISTORY_BACKFILL_PROTOCOL) {
     if (
@@ -654,6 +836,14 @@ function validateConfig(value) {
       if (requireInteger(publication[field], `config.publication.${field}`, 1) !== wanted) {
         fail(`config.publication.${field} must remain frozen at ${wanted}`);
       }
+    }
+  } else if (kind === CROSS_ENGINE_MEMORY_PROTOCOL) {
+    requireExactKeys(publication, ["mode", "rows"], "config.publication");
+    if (publication.mode !== "memory") {
+      fail("cross_engine_memory_v1 publication.mode must be memory");
+    }
+    if (requireInteger(publication.rows, "config.publication.rows", 1) !== MEMORY_ROWS) {
+      fail(`config.publication.rows must remain frozen at ${MEMORY_ROWS}`);
     }
   } else if (kind === HISTORY_BACKFILL_PROTOCOL) {
     requireExactKeys(publication, ["mode", "rows"], "config.publication");
@@ -1301,7 +1491,7 @@ async function verifySource(config, configFile = DEFAULT_CONFIG) {
     await run("git", ["status", "--porcelain=v1", "--untracked-files=no"]),
   );
   if (trackedStatus.length > 0) fail("tracked worktree changes must be committed before a cloud benchmark");
-  const sourceCommits = isCrossEngineMatrix(config)
+  const sourceCommits = isCrossEngineMatrix(config) || isCrossEngineMemory(config)
     ? [config.source.benchmark_commit]
     : isHistoryBackfill(config)
     ? [config.source.harness_commit, ...config.source.target_commits]
@@ -1372,6 +1562,51 @@ async function verifySource(config, configFile = DEFAULT_CONFIG) {
       expected.history_before,
     ],
     ["current history", sha256File(path.join(REPO, "bench/history/runs.jsonl")), expected.history_before],
+  ] : isCrossEngineMemory(config) ? [
+    ["benchmark manifest", sha256(await gitBlob(source.benchmark_commit, "bench/Cargo.toml")), expected.bench_manifest],
+    ["native harness", sha256(await gitBlob(source.benchmark_commit, "bench/src/main.rs")), expected.native_harness],
+    ["Cargo.lock", sha256(await gitBlob(source.benchmark_commit, "Cargo.lock")), expected.cargo_lock],
+    ["toolchain", sha256(await gitBlob(source.benchmark_commit, "rust-toolchain.toml")), expected.toolchain],
+    [
+      "memory supervisor",
+      sha256(await gitBlob(source.benchmark_commit, "bench/run-memory-supervisor.js")),
+      expected.memory_supervisor,
+    ],
+    [
+      "memory analyzer",
+      sha256(await gitBlob(source.benchmark_commit, "bench/analyze-memory-samples.js")),
+      expected.memory_analyzer,
+    ],
+    [
+      "memory cohort",
+      sha256(await gitBlob(source.benchmark_commit, "bench/run-memory-cohort.js")),
+      expected.memory_cohort,
+    ],
+    [
+      "memory publisher",
+      sha256(await gitBlob(source.benchmark_commit, "bench/publish-memory-analysis.js")),
+      expected.memory_publisher,
+    ],
+    [
+      "memory history",
+      sha256(await gitBlob(source.benchmark_commit, "bench/memory/history/runs.jsonl")),
+      expected.memory_history_before,
+    ],
+    [
+      "memory current results",
+      sha256(await gitBlob(source.benchmark_commit, "bench/memory/current-results.json")),
+      expected.memory_current_before,
+    ],
+    [
+      "current memory history",
+      sha256File(path.join(REPO, "bench/memory/history/runs.jsonl")),
+      expected.memory_history_before,
+    ],
+    [
+      "current memory results",
+      sha256File(path.join(REPO, "bench/memory/current-results.json")),
+      expected.memory_current_before,
+    ],
   ] : isHistoryBackfill(config) ? [
     ["backfill bench manifest", sha256(await gitBlob(source.harness_commit, "bench/Cargo.toml")), expected.bench_manifest],
     ["backfill native harness", sha256(await gitBlob(source.harness_commit, "bench/src/main.rs")), expected.native_harness],
@@ -1483,7 +1718,7 @@ async function verifySource(config, configFile = DEFAULT_CONFIG) {
     config_path: relativeConfig,
     config_sha256: sha256File(configFile),
     coordinator_sha256: sha256File(__filename),
-    ...(isCrossEngineMatrix(config) || isHistoryBackfill(config)
+    ...(isCrossEngineMatrix(config) || isCrossEngineMemory(config) || isHistoryBackfill(config)
       ? { remote_runner_path: path.relative(REPO, selectedRemoteRunner) }
       : {}),
     remote_runner_sha256: sha256File(selectedRemoteRunner),
@@ -1553,6 +1788,17 @@ function sanitizedProviderPlan(config, provider, source) {
             wasm_rows: config.publication.wasm_rows,
             dispatch_runtimes: config.publication.dispatch_runtimes,
           },
+        }
+      : isCrossEngineMemory(config)
+      ? {
+          protocol: CROSS_ENGINE_MEMORY_PROTOCOL,
+          benchmark_commit: config.source.benchmark_commit,
+          cohort_id: config.measurement.cohort_id,
+          samples_per_case: config.measurement.samples,
+          groups: config.measurement.groups,
+          benchmark_cpu: config.host_gate.benchmark_cpu,
+          supervisor_cpu: config.host_gate.supervisor_cpu,
+          result_shape: { rows: config.publication.rows },
         }
       : isHistoryBackfill(config)
       ? {
@@ -2381,6 +2627,7 @@ function validateMemoryEvidenceStatus(status) {
 
 function expectedTerminalStatus(config) {
   if (isCrossEngineMatrix(config)) return "matrix_complete";
+  if (isCrossEngineMemory(config)) return "memory_complete";
   if (isHistoryBackfill(config)) return "backfill_complete";
   return isVmStringMemory(config) ? "evidence_complete" : "accepted_and_published";
 }
@@ -4618,6 +4865,255 @@ async function promoteHistoryBackfill(
   return true;
 }
 
+function validateCrossEngineMemoryStatus(status) {
+  requireObject(status, "cross-engine memory status");
+  requireExactKeys(
+    status,
+    ["schema", "status", "detail", "started_at", "finished_at"],
+    "cross-engine memory status",
+  );
+  if (status.schema !== "rustia.bench.cloud-run-status.v1" || status.status !== "memory_complete") {
+    fail("cross-engine memory status has the wrong schema or terminal state");
+  }
+  if (status.detail !== "fresh-process cross-engine Linux memory cohort completed") {
+    fail("cross-engine memory status has an unexpected detail");
+  }
+  const started = requireIsoTimestamp(status.started_at, "cross-engine memory status.started_at");
+  const finished = requireIsoTimestamp(status.finished_at, "cross-engine memory status.finished_at");
+  if (finished < started) fail("cross-engine memory status finished before it started");
+}
+
+function expectedMemoryProtocol(config) {
+  return {
+    schema: "rustia.bench.memory-protocol.v1",
+    cohort_id: config.measurement.cohort_id,
+    commit: config.source.benchmark_commit,
+    samples: config.measurement.samples,
+    bootstrap_repetitions: config.measurement.bootstrap_repetitions,
+    bootstrap_seed: config.measurement.bootstrap_seed,
+    growth_thresholds: config.measurement.growth_thresholds,
+    host: {
+      benchmark_cpu: config.host_gate.benchmark_cpu,
+      supervisor_cpu: config.host_gate.supervisor_cpu,
+      sample_interval_ms: config.measurement.sample_interval_ms,
+      timeout_ms: config.measurement.sample_timeout_ms,
+    },
+    groups: config.measurement.groups,
+  };
+}
+
+async function validateCrossEngineMemoryEvidence(config, evidenceSource) {
+  const required = [
+    "analysis.json",
+    "host.json",
+    "linode-build.json",
+    "linode-run-gate.json",
+    "manifest.json",
+    "protocol.json",
+    "run-order.json",
+  ];
+  for (const relative of required) {
+    const file = path.join(evidenceSource, relative);
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
+      fail(`cross-engine memory evidence is missing a single regular ${relative}`);
+    }
+  }
+  const rawDirectory = path.join(evidenceSource, "raw");
+  const rawStat = fs.lstatSync(rawDirectory);
+  if (!rawStat.isDirectory() || rawStat.isSymbolicLink()) fail("cross-engine memory raw evidence is unsafe");
+  const rawFiles = fs.readdirSync(rawDirectory).sort();
+  const expectedRawCount = config.publication.rows * config.measurement.samples;
+  if (rawFiles.length !== expectedRawCount || rawFiles.some((file) => !file.endsWith(".json"))) {
+    fail(`cross-engine memory evidence has ${rawFiles.length} raw samples, expected ${expectedRawCount}`);
+  }
+  requireJsonEqual(
+    loadJsonRegular(path.join(evidenceSource, "protocol.json"), "memory protocol"),
+    expectedMemoryProtocol(config),
+    "cross-engine memory protocol",
+  );
+  const manifest = loadJsonRegular(path.join(evidenceSource, "manifest.json"), "memory manifest");
+  if (
+    manifest.schema_version !== 1 ||
+    manifest.schema !== "rustia.bench.memory-cohort-evidence.v1" ||
+    manifest.commit !== config.source.benchmark_commit ||
+    manifest.cohort_id !== config.measurement.cohort_id ||
+    manifest.case_count !== config.publication.rows ||
+    manifest.samples_per_case !== config.measurement.samples ||
+    manifest.raw_sample_count !== expectedRawCount
+  ) {
+    fail("cross-engine memory manifest has the wrong identity or shape");
+  }
+  if (
+    manifest.supervisor_sha256 !== config.source.expected_sha256.memory_supervisor ||
+    manifest.analyzer_sha256 !== config.source.expected_sha256.memory_analyzer
+  ) {
+    fail("cross-engine memory manifest script identity is wrong");
+  }
+  const rawHashes = requireObject(
+    requireObject(manifest.evidence_sha256, "memory manifest evidence hashes").raw,
+    "memory manifest raw hashes",
+  );
+  requireJsonEqual(Object.keys(rawHashes).sort(), rawFiles, "memory manifest raw inventory");
+  for (const file of rawFiles) {
+    if (!SHA256.test(rawHashes[file]) || sha256File(path.join(rawDirectory, file)) !== rawHashes[file]) {
+      fail(`cross-engine memory raw hash is wrong for ${file}`);
+    }
+  }
+  const analysisFile = path.join(evidenceSource, "analysis.json");
+  const analysis = loadJsonRegular(analysisFile, "memory analysis");
+  if (
+    analysis.schema_version !== 1 ||
+    analysis.schema !== "rustia.bench.memory-analysis.v1" ||
+    analysis.row_count !== config.publication.rows ||
+    analysis.raw_sample_count !== expectedRawCount ||
+    !Array.isArray(analysis.rows) ||
+    analysis.rows.length !== config.publication.rows
+  ) {
+    fail("cross-engine memory analysis has the wrong schema or shape");
+  }
+  if (analysis.rows.some((row) => row.commit !== config.source.benchmark_commit)) {
+    fail("cross-engine memory analysis contains a different commit");
+  }
+  if (analysis.rows.some((row) => row.classification === "detector_failed")) {
+    fail("cross-engine memory positive retention control failed");
+  }
+  const recomputed = path.join(
+    path.dirname(evidenceSource),
+    `.recomputed-${crypto.randomBytes(6).toString("hex")}.json`,
+  );
+  try {
+    await run(
+      "node",
+      [
+        path.join(REPO, "bench/analyze-memory-samples.js"),
+        ...rawFiles.flatMap((file) => ["--input", path.join(rawDirectory, file)]),
+        "--output",
+        recomputed,
+        "--minimum-samples",
+        String(config.measurement.samples),
+        "--bootstrap-repetitions",
+        String(config.measurement.bootstrap_repetitions),
+        "--bootstrap-seed",
+        String(config.measurement.bootstrap_seed),
+        "--absolute-growth-kib-per-epoch",
+        String(config.measurement.growth_thresholds.absolute_kib_per_epoch),
+        "--proportional-growth-percent-per-epoch",
+        String(config.measurement.growth_thresholds.proportional_percent_per_epoch),
+      ],
+      { announce: true },
+    );
+    const independentlyAnalyzed = loadJsonRegular(recomputed, "recomputed memory analysis");
+    delete analysis.generated_at;
+    delete independentlyAnalyzed.generated_at;
+    requireJsonEqual(independentlyAnalyzed, analysis, "recomputed cross-engine memory analysis");
+  } finally {
+    fs.rmSync(recomputed, { force: true });
+  }
+}
+
+async function promoteCrossEngineMemory(config, state, downloadDirectory, verifyCheckout) {
+  if (!state.linode_destroyed_at) fail("refusing memory publication before confirmed Linode deletion");
+  const status = loadJsonRegular(path.join(downloadDirectory, "status.json"), "remote memory status");
+  state.remote_status = status.status;
+  state.remote_status_detail = status.detail || null;
+  saveState(state);
+  if (status.status !== "memory_complete") {
+    process.stdout.write(
+      `Linode memory run was retained as diagnostics at ${path.relative(REPO, downloadDirectory)} ` +
+        `(${status.status}${status.detail ? `: ${status.detail}` : ""}).\n`,
+    );
+    return false;
+  }
+  validateCrossEngineMemoryStatus(status);
+  await verifyCheckout(config, state);
+  const commit = config.source.benchmark_commit;
+  const cohort = config.measurement.cohort_id;
+  const evidenceSource = path.join(downloadDirectory, "evidence", "memory", commit, cohort);
+  await validateCrossEngineMemoryEvidence(config, evidenceSource);
+  const evidenceDestination = path.join(REPO, "bench/memory/raw", commit, cohort);
+  if (fs.existsSync(evidenceDestination)) fail(`refusing to overwrite memory evidence ${evidenceDestination}`);
+  const historyDestination = path.join(REPO, "bench/memory/history/runs.jsonl");
+  const currentDestination = path.join(REPO, "bench/memory/current-results.json");
+  if (
+    sha256File(historyDestination) !== config.source.expected_sha256.memory_history_before ||
+    sha256File(currentDestination) !== config.source.expected_sha256.memory_current_before
+  ) {
+    fail("local memory publication changed while the Linode cohort was in flight");
+  }
+  const nonce = crypto.randomBytes(6).toString("hex");
+  const evidenceStage = `${evidenceDestination}.incoming-${nonce}`;
+  const historyStage = `${historyDestination}.incoming-${nonce}`;
+  const currentStage = `${currentDestination}.incoming-${nonce}`;
+  const dashboard = path.join(REPO, "bench/current-results.html");
+  const snapshots = [historyDestination, currentDestination, dashboard].map((file) => ({
+    file,
+    bytes: fs.readFileSync(file),
+    mode: fs.statSync(file).mode & 0o777,
+  }));
+  let evidenceCommitted = false;
+  let publicationsCommitted = false;
+  try {
+    fs.mkdirSync(path.dirname(evidenceDestination), { recursive: true });
+    fs.cpSync(evidenceSource, evidenceStage, { recursive: true, errorOnExist: true, force: false });
+    fs.copyFileSync(historyDestination, historyStage, fs.constants.COPYFILE_EXCL);
+    await run(
+      "node",
+      [
+        path.join(REPO, "bench/publish-memory-analysis.js"),
+        "--analysis",
+        path.join(evidenceStage, "analysis.json"),
+        "--cohort-id",
+        cohort,
+        "--evidence",
+        path.relative(REPO, evidenceDestination),
+        "--history",
+        historyStage,
+        "--current",
+        currentStage,
+        "--commit",
+        commit,
+      ],
+      { announce: true },
+    );
+    throwIfInterrupted();
+    state.promotion_started_at = new Date().toISOString();
+    saveState(state);
+    fs.renameSync(evidenceStage, evidenceDestination);
+    evidenceCommitted = true;
+    fs.renameSync(historyStage, historyDestination);
+    fs.renameSync(currentStage, currentDestination);
+    publicationsCommitted = true;
+    await run("node", [path.join(REPO, "bench/render-current-results.js")], {
+      capture: false,
+      announce: true,
+    });
+    await run("node", [path.join(REPO, "bench/render-current-results.js"), "--check"], {
+      capture: false,
+      announce: true,
+    });
+  } catch (error) {
+    fs.rmSync(evidenceStage, { recursive: true, force: true });
+    fs.rmSync(historyStage, { force: true });
+    fs.rmSync(currentStage, { force: true });
+    if (evidenceCommitted) fs.rmSync(evidenceDestination, { recursive: true, force: true });
+    if (publicationsCommitted) {
+      for (const snapshot of snapshots) writeBytesAtomic(snapshot.file, snapshot.bytes, snapshot.mode);
+    }
+    state.promotion_rolled_back_at = new Date().toISOString();
+    state.promotion_rollback_reason = error.message;
+    saveState(state);
+    throw error;
+  }
+  state.promoted_at = new Date().toISOString();
+  saveState(state);
+  process.stdout.write(
+    `Memory cohort published with ${config.publication.rows} rows; evidence imported to ` +
+      `${path.relative(REPO, evidenceDestination)}.\n`,
+  );
+  return true;
+}
+
 async function promoteAcceptedResult(
   config,
   state,
@@ -4626,6 +5122,9 @@ async function promoteAcceptedResult(
 ) {
   if (isCrossEngineMatrix(config)) {
     return promoteMatrixResult(config, state, downloadDirectory, verifyCheckout);
+  }
+  if (isCrossEngineMemory(config)) {
+    return promoteCrossEngineMemory(config, state, downloadDirectory, verifyCheckout);
   }
   if (isHistoryBackfill(config)) {
     return promoteHistoryBackfill(config, state, downloadDirectory, verifyCheckout);
@@ -5510,6 +6009,71 @@ async function selfTest(config) {
   assert.equal(expectedTerminalStatus(matrixConfig), "matrix_complete");
   assert.equal(benchmarkCommit(matrixConfig), matrixConfig.source.benchmark_commit);
   assert.equal(remoteRunnerForConfig(matrixConfig), MATRIX_REMOTE_RUNNER);
+  const crossEngineMemoryConfig = {
+    schema: "rustia.linode-fixed-benchmark.v2",
+    provider: matrixConfig.provider,
+    source: {
+      benchmark_commit: matrixConfig.source.benchmark_commit,
+      expected_sha256: {
+        bench_manifest: memoryHash,
+        native_harness: memoryHash,
+        cargo_lock: memoryHash,
+        toolchain: memoryHash,
+        memory_supervisor: memoryHash,
+        memory_analyzer: memoryHash,
+        memory_cohort: memoryHash,
+        memory_publisher: memoryHash,
+        memory_history_before: memoryHash,
+        memory_current_before: memoryHash,
+      },
+    },
+    measurement: {
+      protocol: CROSS_ENGINE_MEMORY_PROTOCOL,
+      cohort_id: "pre-reclamation-fixture",
+      samples: 9,
+      bootstrap_repetitions: 20000,
+      bootstrap_seed: 1381323604,
+      growth_thresholds: {
+        absolute_kib_per_epoch: 4,
+        proportional_percent_per_epoch: 0.05,
+      },
+      sample_interval_ms: 10,
+      sample_timeout_ms: 600000,
+      groups: MEMORY_GROUPS,
+    },
+    host_gate: {
+      benchmark_cpu: 3,
+      supervisor_cpu: 2,
+      idle_window_seconds: 10,
+      minimum_idle_percent: 99,
+      maximum_load_1m: 0.1,
+      maximum_idle_steal_ticks: 0,
+      maximum_run_steal_percent: 0.1,
+      wait_timeout_seconds: 300,
+    },
+    publication: { mode: "memory", rows: MEMORY_ROWS },
+  };
+  assert.equal(validateConfig(crossEngineMemoryConfig), crossEngineMemoryConfig);
+  assert.equal(expectedTerminalStatus(crossEngineMemoryConfig), "memory_complete");
+  assert.equal(benchmarkCommit(crossEngineMemoryConfig), crossEngineMemoryConfig.source.benchmark_commit);
+  assert.equal(remoteRunnerForConfig(crossEngineMemoryConfig), MEMORY_REMOTE_RUNNER);
+  assert.equal(MEMORY_ROWS, 110);
+  validateCrossEngineMemoryStatus({
+    schema: "rustia.bench.cloud-run-status.v1",
+    status: "memory_complete",
+    detail: "fresh-process cross-engine Linux memory cohort completed",
+    started_at: "2026-07-27T00:00:00.000Z",
+    finished_at: "2026-07-27T00:01:00.000Z",
+  });
+  assert.throws(() =>
+    validateConfig({
+      ...crossEngineMemoryConfig,
+      measurement: {
+        ...crossEngineMemoryConfig.measurement,
+        groups: [...MEMORY_GROUPS].reverse(),
+      },
+    }),
+  );
   const historyBackfillConfig = {
     schema: "rustia.linode-fixed-benchmark.v2",
     provider: config.provider,

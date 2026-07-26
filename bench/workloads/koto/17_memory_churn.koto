@@ -1,0 +1,24 @@
+# Koto equivalent of the bounded-live memory_churn control.
+ring = []
+state = [0]
+
+export f = |n|
+  checksum = 0
+  for _ in 0..n
+    state[0] += 1
+    step = state[0]
+    batch = []
+    batch_checksum = 0
+    for i in 1..=128
+      row = []
+      for j in 1..=32
+        row.push (step * 131 + i * 17 + j * 7) % 65521
+      batch.push row
+      batch_checksum += row.first() + row.last()
+    slot = (step - 1) % 8
+    if (size ring) < 8
+      ring.push batch
+    else
+      ring[slot] = batch
+    checksum += batch_checksum
+  checksum + step + size ring

@@ -24,6 +24,10 @@ but it is structured to become a standalone OSS benchmark project.
 - Keep `analyze-fixed-samples.js` dependency-free and retain its exact seeded
   pooled/hierarchical analysis output beside accepted sidecars so the
   conservative regression verdict is reproducible after the split.
+- Keep memory results in a separate versioned ledger under `bench/memory/`.
+  Memory samples use one fresh process/cgroup per engine and workload, while
+  the existing throughput history remains uninstrumented. The protocol and
+  dashboard contract are defined in `design/57-memory-benchmarking.md`.
 
 ## Workspace Seams
 

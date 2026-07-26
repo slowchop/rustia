@@ -1,0 +1,52 @@
+# Koto version of the seeded bounded todo CRUD/search workload.
+modulus = 2147483647
+capacity = 256
+random_state = [1234567]
+tasks = {}
+revision = [0]
+
+next_random = ||
+  random_state[0] = (random_state[0] * 48271) % modulus
+  random_state[0]
+
+make_task = |slot, value, previous|
+  revision[0] += 1
+  completed = value % 2 == 0
+  if previous != null and value % 3 == 0
+    completed = previous[3]
+  [slot, "task-{slot}-{revision[0]}-{value}", (value % 5) + 1, completed, value % 8, revision[0]]
+
+export f = |n|
+  checksum = 0
+  for _ in 0..n
+    command = next_random()
+    selector = next_random()
+    value = next_random()
+    operation = command % 6
+    slot = (selector % capacity) + 1
+    task = tasks.get slot
+
+    if operation == 0
+      tasks.insert slot, make_task slot, value, task
+    else if operation == 1
+      if task != null
+        checksum += task[0] + (size task[1]) + task[2] + task[4] + task[5]
+    else if operation == 2
+      if task != null
+        tasks.insert slot, make_task slot, value, task
+    else if operation == 3
+      if task != null
+        revision[0] += 1
+        tasks.insert slot, [task[0], task[1], task[2], not task[3], task[4], revision[0]]
+    else if operation == 4
+      tasks.remove slot
+    else
+      wanted_priority = (value % 5) + 1
+      wanted_tag = value % 8
+      for _, candidate in tasks
+        if candidate[2] == wanted_priority or candidate[4] == wanted_tag
+          checksum += candidate[0] + candidate[5]
+          if candidate[3]
+            checksum += 1
+    checksum = (checksum + operation + slot + value) % modulus
+  (checksum + (size tasks) * 257 + revision[0]) % modulus

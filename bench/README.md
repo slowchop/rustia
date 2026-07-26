@@ -24,10 +24,13 @@ The default build runs the in-repo `rustia` adapter over five workload families:
 - `generic_iteration`
 - `stdlib_math_table`
 
-The inventory currently contains 12 workload entries. Non-default workloads are
-kept out of the committed current-results snapshot until they have intentional
+The inventory currently contains 18 workload entries. Non-default workloads are
+kept out of the committed timing snapshot until they have intentional
 measurement history; `string_building` is wired across every requested adapter
-as the #15 string/concat workload source set.
+as the #15 string/concat workload source set. Entries #16–#18 are portable
+burst/churn/intentional-retention memory probes, and #19–#21 are deterministic
+steady/history/intentional-retention todo-app memory workloads for Luau and
+Koto.
 
 ```sh
 cargo run -p script-bench-harness --release -- --history bench/history/runs.jsonl
@@ -70,6 +73,25 @@ The local hardening diagnostics, 2026-07-20 accepted dense/OOP comparisons, and 
 recorded in [`../design/56-performance-research.md`](../design/56-performance-research.md),
 including exact identities, paired protocols, confidence intervals, retained artifacts, and the deliberately
 conservative claim posture.
+
+## Memory benchmark direction
+
+The existing `vm-string-memory` sampler is a focused Rustia A/B evidence tool, not a general engine comparison.
+The first-class memory product is specified in
+[`../design/57-memory-benchmarking.md`](../design/57-memory-benchmarking.md). Its child/supervisor, cgroup-v2
+sampling, repeated-epoch analyzer, synthetic controls, deterministic todo workloads, separate history, and
+pending/ready dashboard integration are now implemented; the first dedicated-Linux pre-reclamation cohort is
+the publication gate. Throughput and instrumented memory measurements remain separate.
+
+```sh
+just bench-memory-self-test
+just bench-linode-memory-plan bench/cloud/linode-cross-engine-memory-COMMIT.json
+just bench-linode-memory bench/cloud/linode-cross-engine-memory-COMMIT.json
+```
+
+The billed command uses the same fail-closed Linode lifecycle as timing: it downloads the complete raw cohort,
+confirms deletion, independently reruns the analysis locally, then atomically installs evidence, memory history,
+the current snapshot, and the generated dashboard.
 
 ## Equal-work validation and publication
 

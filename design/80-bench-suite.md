@@ -67,8 +67,9 @@ a conservative-envelope verdict that is retained with accepted evidence.
 
 **Current implementation slice:** `.github/workflows/ci.yml` runs release-preflight checks on hosted Linux CI
 without fresh benchmark measurements; no benchmark-measurement workflow is present. The `bench` crate now enumerates all 12
-requested adapters, five default measured workloads, and 12 workload entries including cross-adapter source
-coverage for #15 `string_building`. It also owns `bench/wasm-gate.json`, a deterministic pre-lock gate tracker
+requested adapters, five default measured workloads, and 18 workload entries including cross-adapter source
+coverage for #15 `string_building`, portable memory probes #16–#18, and deterministic todo-app probes #19–#21.
+It also owns `bench/wasm-gate.json`, a deterministic pre-lock gate tracker
 exposed by `script-bench --wasm-gate-json` and rendered by the generated HTML report. The wasm target bench builds
 `bench/wasm/adapter-runner` and records `rustia`, `koto`, and `rhai` under Node/V8 in
 `bench/wasm/current-results.json`; the accepted four-runtime matrix is retained under `bench/wasm/history/`, and

@@ -1,0 +1,13 @@
+# Koto equivalent of memory_burst.
+export f = |n|
+  checksum = 0
+  for epoch in 0..n
+    batch = []
+    for i in 1..=512
+      row = []
+      for j in 1..=64
+        row.push ((epoch + 1) * 131 + i * 17 + j * 7) % 65521
+      batch.push row
+      checksum += row.first() + row.last()
+    checksum += size batch
+  checksum

@@ -31,6 +31,7 @@ docs are design intent.
 | [`50-conformance.md`](50-conformance.md) | historical 709-row behavior inventory; executable Luau-0.709 truth is 694 fixtures / 493 refs / 0 pending | **[INVENTORY + LIVE CORPUS]** ✅ |
 | [`55-improvements.md`](55-improvements.md) | **10 adopted design improvements**, each verified still-conformant (dual-part table, string interning, FASTCALL, libm-enforcement, …) | **[IMPROVEMENTS v1]** ✅ |
 | [`56-performance-research.md`](56-performance-research.md) | safe-Rust performance sequence, landed HotIR/closure fast paths, current Linux evidence, and measurement protocol | **[PERFORMANCE RESEARCH v2.0]** |
+| [`57-memory-benchmarking.md`](57-memory-benchmarking.md) | cross-engine short-spike, phase, plateau/growth, pressure, and dashboard memory protocol | **[DESIGN — IMPLEMENTATION PENDING]** |
 | [`65-wasmjit.md`](65-wasmjit.md) | **wasm-emit JIT / AOT-to-wasm spike** (verified) — ~176× the interpreter in V8, crossover ≈ 6 calls; the in-browser near-native path | **[SPIKE]** ✅ |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | deterministic effect/slot contract and the still-pending mechanically enforced decision reset | **[CONTRACT]** |
 | [`72-host-services.md`](72-host-services.md) | **host services bus** — stdout sink, determinism-labeled `ServiceClock` providers, `standard()`/`deterministic()`/`live()` presets, logical `os.clock` | **[IMPLEMENTED v1]** ✅ |

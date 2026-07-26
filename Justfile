@@ -43,6 +43,11 @@ check-benchmark-results:
     node tools/run-digitalocean-benchmark.js self-test
     node tools/run-linode-benchmark.js self-test
     node tools/run-linux-matrix-benchmark.js self-test
+    node bench/run-memory-supervisor.js self-test
+    node bench/analyze-memory-samples.js self-test
+    node bench/run-memory-cohort.js self-test
+    node bench/publish-memory-analysis.js self-test
+    node tools/run-linux-memory-benchmark.js self-test
     node tools/run-vultr-benchmark.js self-test
     node tools/run-scaleway-benchmark.js self-test
     node tools/run-wasm-gate.js self-test
@@ -124,6 +129,22 @@ bench-linode-matrix-plan config:
 # Run and atomically publish one fresh Linux + wasm matrix on an ephemeral dedicated Linode.
 bench-linode-matrix config:
     node tools/run-linode-benchmark.js bench "{{ config }}"
+
+# Validate a frozen cross-engine Linux memory cohort without creating a Linode.
+bench-linode-memory-plan config:
+    node tools/run-linode-benchmark.js plan "{{ config }}"
+
+# Record and atomically publish one cross-engine Linux memory cohort.
+bench-linode-memory config:
+    node tools/run-linode-benchmark.js bench "{{ config }}"
+
+# Validate the isolated memory child/supervisor, cohort analyzer, and publisher locally.
+bench-memory-self-test:
+    node bench/run-memory-supervisor.js self-test
+    node bench/analyze-memory-samples.js self-test
+    node bench/run-memory-cohort.js self-test
+    node bench/publish-memory-analysis.js self-test
+    node tools/run-linux-memory-benchmark.js self-test
 
 # Run the selected frozen config on one ephemeral dedicated-CPU Linode and confirm deletion.
 bench-linode config="":

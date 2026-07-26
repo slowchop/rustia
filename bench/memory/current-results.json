@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "schema": "rustia.bench.memory-current-results.v1",
+  "status": "pending",
+  "metadata": {
+    "description": "Cross-engine cgroup/smaps memory baseline has not been recorded yet.",
+    "protocol": "design/57-memory-benchmarking.md",
+    "history": "bench/memory/history/runs.jsonl"
+  },
+  "detector_coverage": [],
+  "rows": []
+}

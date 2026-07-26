@@ -108,6 +108,13 @@
       font-weight: 600;
     }
 
+    .pending-note {
+      margin: 0;
+      padding: 18px 20px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+    }
+
     .language-targets {
       display: grid;
     }
@@ -949,6 +956,7 @@
 
     <nav class="nav" aria-label="Targets">
       <a href="#linux-comparison">Linux Comparison</a>
+      <a href="#memory">Memory</a>
       <a href="#cold-start">Cold Start</a>
       <a href="#claim-gate">Claim Gate</a>
       <a href="#history">History</a>
@@ -1459,6 +1467,17 @@
     </section>
 
 
+      <section class="panel" id="memory">
+        <div class="section-head">
+          <div>
+            <h2>Memory</h2>
+            <p>Fresh-process cgroup peaks, smaps phase deltas, and epoch growth across engines.</p>
+          </div>
+        </div>
+        <p class="pending-note"><strong>Pre-reclamation baseline pending.</strong> The supervisor and detector-validation workloads are being implemented; this panel will remain empty rather than showing local or Rustia-only measurements.</p>
+      </section>
+
+
     <section class="panel" id="cold-start">
       <div class="section-head">
         <div>
@@ -1752,7 +1771,7 @@
     </section>
 
 
-    <p class="footnote">Schema <code>rustia.bench.current-results.v1</code>. Wasm sources <code>bench/wasm/current-results.json</code> and <code>bench/wasm/dispatch-current-results.json</code>. History <code>bench/history/runs.jsonl</code> (jsonl-v1). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>rustia.bench.current-results.v1</code>. Memory <code>bench/memory/current-results.json</code>. Wasm sources <code>bench/wasm/current-results.json</code> and <code>bench/wasm/dispatch-current-results.json</code>. History <code>bench/history/runs.jsonl</code> (jsonl-v1). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
   <script>
     (() => {

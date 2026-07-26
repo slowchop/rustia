@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-25.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-26.)
 
 ## One-paragraph state
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
@@ -24,7 +24,8 @@ headline. All 8 architecture axes are decided
 ([`30-architecture.md`](30-architecture.md) v3), 10 conformance-verified improvements are adopted
 ([`55-improvements.md`](55-improvements.md)), the no-unsafe SotA performance research stack is now captured in
 [`56-performance-research.md`](56-performance-research.md), and the standalone benchmark harness has the engine/workload/history
-shell, generated current-results HTML report, 12 workload entries including cross-adapter `string_building` source coverage, and
+shell, generated current-results HTML report, 18 workload entries including cross-adapter `string_building` source coverage and
+six synthetic/realistic memory workloads, and
 the `rustia`/`boa`/`koto`/`luaur`/`mlua-lua54`/`mlua-luau`/`rhai`/`roto`/`ruau`/`rquickjs`/`wasmi`/`wasmtime` native adapters in
 place.
 The benchmark artifacts now also include a first-class wasm pre-lock gate source
@@ -227,7 +228,11 @@ production concern or host-facing facility is finished. The highest-impact gaps 
 → the doc for your task. (A fresh Claude session in this repo also auto-loads the project memory.)
 
 **Action queue:**
-1. **Design and implement bounded VM object lifetimes.** Add reachability-based reclamation/reuse for ordinary
+1. **Baseline memory, then implement bounded VM object lifetimes.** First implement and record the
+   cross-engine short-spike/phase/retention protocol in
+   [`57-memory-benchmarking.md`](57-memory-benchmarking.md), including memory rows for the existing workloads,
+   bounded-churn and intentional-retention controls, and dashboard views. Then add reachability-based
+   reclamation/reuse for ordinary
    VM objects, coroutine state, and loaded programs; true host-handle roots/epoch-safe reuse; heap/allocation
    quotas; an explicit OOM contract; and a deterministic
    per-decision reset/reuse API. Prove it with long-lived churn, cyclic graphs, hot reload, retained handles,
@@ -248,8 +253,8 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    cached-length and iterator/table refinements, add profile-led superinstructions/O2, and only then productionize
    type-directed wasm/AOT with guards, deopt, and interpreter-equivalence tests.
 5. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
-   The runner already exposes the requested engine matrix, five default workloads, 12 workload entries including
-   source-covered `string_building`, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
+   The runner already exposes the requested engine matrix, five default workloads, 18 workload entries including
+   source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
    a standalone HTML report, an explicit closed wasm pre-lock gate artifact, a wasm target bench for rustia+koto+rhai, a `call_ref`
    versus `br_table` dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle.
    Next work is the actual standalone-project split, the interop/serde/fuel-limit workload tranche, regression
@@ -388,7 +393,10 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 
 ## What's next (the genuine remaining public-release gates)
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items, in order:
-1. **Implement and validate bounded object reclamation, quotas, OOM behavior, and per-decision reset/reuse.**
+1. **Freeze the pre-reclamation memory baseline, then implement and validate bounded object reclamation,
+   quotas, OOM behavior, and per-decision reset/reuse.** Use the external cgroup/smaps phase, peak, and
+   retention protocol in [`57-memory-benchmarking.md`](57-memory-benchmarking.md) across rustia and applicable
+   competitors before changing lifetime policy.
    Coroutine/program stores, true public-handle rooting, weak tables, cyclic graphs, hot reload, and native/wasm
    behavior must remain correct; ordinary retained calls survive hot reload outside an explicit reset epoch.
 2. **Complete the host service and rich-value boundary:** honest

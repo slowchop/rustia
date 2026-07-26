@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -158,6 +158,42 @@ const WORKLOADS: &[Workload] = &[
         unit: "build+concat 64 string fragments",
         default: false,
     },
+    Workload {
+        id: "memory_burst",
+        file_stem: "16_memory_burst",
+        unit: "allocate+touch+drop one 512x64 nested-array burst",
+        default: false,
+    },
+    Workload {
+        id: "memory_churn",
+        file_stem: "17_memory_churn",
+        unit: "replace one slot in an 8-batch bounded live ring",
+        default: false,
+    },
+    Workload {
+        id: "memory_retained_control",
+        file_stem: "18_memory_retained_control",
+        unit: "retain one additional allocation batch",
+        default: false,
+    },
+    Workload {
+        id: "todo_steady",
+        file_stem: "19_todo_steady",
+        unit: "one seeded bounded todo CRUD/search operation",
+        default: false,
+    },
+    Workload {
+        id: "todo_history",
+        file_stem: "20_todo_history",
+        unit: "one seeded todo operation with 64-entry undo history",
+        default: false,
+    },
+    Workload {
+        id: "todo_retained_control",
+        file_stem: "21_todo_retained_control",
+        unit: "one seeded todo operation with intentionally unbounded history",
+        default: false,
+    },
 ];
 
 #[derive(Clone, Copy)]
@@ -281,6 +317,8 @@ struct Config {
     wasm_gate_json: bool,
     check_history: bool,
     refresh_results: bool,
+    memory_child: bool,
+    memory_epochs: usize,
 }
 
 impl Default for Config {
@@ -310,6 +348,8 @@ impl Default for Config {
             wasm_gate_json: false,
             check_history: false,
             refresh_results: false,
+            memory_child: false,
+            memory_epochs: 1,
         }
     }
 }
@@ -519,6 +559,9 @@ fn main() {
 
 fn run() -> Result<()> {
     let config = parse_args(env::args().skip(1))?;
+    if config.memory_child {
+        return run_memory_child(&config);
+    }
     if config.wasm_gate_json {
         print_wasm_gate_json()?;
         return Ok(());
@@ -668,6 +711,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
             "--wasm-gate-json" => config.wasm_gate_json = true,
             "--check-history" => config.check_history = true,
             "--refresh-results" => config.refresh_results = true,
+            "--memory-child" => config.memory_child = true,
             "--no-history" => config.history = None,
             "--no-results" => config.results = None,
             "--no-latest-json" => config.latest_json = None,
@@ -725,6 +769,17 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
                     return Err(Error::new("--fixed-n must be greater than zero"));
                 }
                 config.fixed_n = Some(fixed_n);
+            }
+            "--memory-epochs" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| Error::new("--memory-epochs requires a value"))?;
+                config.memory_epochs = value
+                    .parse::<usize>()
+                    .map_err(|_| Error::new(format!("invalid --memory-epochs value {value:?}")))?;
+                if config.memory_epochs == 0 {
+                    return Err(Error::new("--memory-epochs must be greater than zero"));
+                }
             }
             "--history" => {
                 let value = args
@@ -790,6 +845,8 @@ fn print_usage() {
     println!("  --wasm-gate-json");
     println!("  --check-history");
     println!("  --refresh-results");
+    println!("  --memory-child");
+    println!("  --memory-epochs <positive integer>");
     println!("  --engines rustia,koto,mlua-luau");
     println!("  --workloads dense_tables,sparse_tables,closures_upvalues,generic_iteration,stdlib_math_table");
     println!("  --target-ms 250");
@@ -803,6 +860,127 @@ fn print_usage() {
     println!("  --no-history");
     println!("  --no-results");
     println!("  --no-latest-json");
+}
+
+fn run_memory_child(config: &Config) -> Result<()> {
+    if config.engines.len() != 1 {
+        return Err(Error::new(
+            "--memory-child requires exactly one selected engine",
+        ));
+    }
+    if config.workloads.len() != 1 {
+        return Err(Error::new(
+            "--memory-child requires exactly one selected workload",
+        ));
+    }
+    let n = config
+        .fixed_n
+        .ok_or_else(|| Error::new("--memory-child requires --fixed-n"))?;
+    if config.history.is_some()
+        || config.results.is_some()
+        || config.latest_json.is_some()
+        || config.samples_json.is_some()
+    {
+        return Err(Error::new(
+            "--memory-child requires --no-history --no-results --no-latest-json and no --samples-json",
+        ));
+    }
+
+    let engine = select_engines(&config.engines)?[0];
+    if !engine.enabled || !engine.implemented {
+        return Err(Error::new(format!(
+            "memory child engine {:?} is unavailable: {}",
+            engine.id,
+            unavailable_reason(engine)
+        )));
+    }
+    let workload = select_workloads(&config.workloads)?[0];
+    let repo = repo_root()?;
+    let source_path = workload_path(&repo, engine.dialect, workload).ok_or_else(|| {
+        Error::new(format!(
+            "memory child has no {} source for workload {}",
+            engine.dialect.as_str(),
+            workload.id
+        ))
+    })?;
+    let source =
+        fs::read_to_string(&source_path).map_err(|error| Error::io(&source_path, error))?;
+
+    let stdin = io::stdin();
+    let mut input = stdin.lock().lines();
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    let mut sequence = 0_u64;
+    let mut emit = |phase: &str, epoch: Option<usize>, checksum: Option<&str>| -> Result<()> {
+        sequence += 1;
+        let value = serde_json::json!({
+            "schema_version": 1,
+            "schema": "rustia.bench.memory-child-event.v1",
+            "sequence": sequence,
+            "phase": phase,
+            "epoch": epoch,
+            "pid": std::process::id(),
+            "engine": engine.id,
+            "dialect": engine.dialect.as_str(),
+            "workload": workload.id,
+            "unit": workload.unit,
+            "n": n,
+            "epochs": config.memory_epochs,
+            "commit": config.commit.clone().unwrap_or_else(git_commit),
+            "target": format!("{}-{}", env::consts::OS, env::consts::ARCH),
+            "mode_family": mode_family(engine.id),
+            "execution_mode": execution_mode(engine.id),
+            "checksum": checksum,
+        });
+        serde_json::to_writer(&mut output, &value)
+            .map_err(|error| Error::new(format!("memory child event encoding failed: {error}")))?;
+        output
+            .write_all(b"\n")
+            .map_err(|error| Error::new(format!("memory child event write failed: {error}")))?;
+        output
+            .flush()
+            .map_err(|error| Error::new(format!("memory child event flush failed: {error}")))
+    };
+    let mut wait = |phase: &str| -> Result<()> {
+        let line = input
+            .next()
+            .ok_or_else(|| Error::new(format!("memory child lost supervisor after {phase}")))?
+            .map_err(|error| {
+                Error::new(format!(
+                    "memory child supervisor read failed after {phase}: {error}"
+                ))
+            })?;
+        if line.trim() != "continue" {
+            return Err(Error::new(format!(
+                "memory child expected supervisor continue after {phase}, got {line:?}"
+            )));
+        }
+        Ok(())
+    };
+
+    emit("spawned", None, None)?;
+    wait("spawned")?;
+
+    let mut prepared = prepare(engine, workload, &source)?;
+    emit("prepared", None, None)?;
+    wait("prepared")?;
+
+    let warm_checksum = prepared.run(n)?;
+    emit("warmed", None, Some(&warm_checksum))?;
+    wait("warmed")?;
+
+    for epoch in 1..=config.memory_epochs {
+        let checksum = prepared.run(n)?;
+        emit("epoch", Some(epoch), Some(&checksum))?;
+        wait("epoch")?;
+    }
+
+    emit("quiescent", None, None)?;
+    wait("quiescent")?;
+    drop(prepared);
+    emit("dropped", None, None)?;
+    wait("dropped")?;
+    Ok(())
 }
 
 fn print_inventory() {
@@ -2715,7 +2893,7 @@ mod tests {
             .get("workloads")
             .and_then(serde_json::Value::as_array)
             .expect("workloads array");
-        assert_eq!(workloads.len(), 12);
+        assert_eq!(workloads.len(), 18);
 
         let defaults = workloads
             .iter()
@@ -2755,6 +2933,47 @@ mod tests {
             "string_building should stay opt-in until it has stable public baselines"
         );
         assert_sources_for_all_benchmark_dialects(&repo, workload);
+    }
+
+    #[test]
+    fn memory_detector_workloads_cover_luau_koto_lua54_and_javascript() {
+        let repo = repo_root().expect("repo root");
+        for id in ["memory_burst", "memory_churn", "memory_retained_control"] {
+            let workload = WORKLOADS
+                .iter()
+                .find(|entry| entry.id == id)
+                .expect("memory workload");
+            for dialect in [
+                Dialect::Luau,
+                Dialect::Koto,
+                Dialect::Lua54,
+                Dialect::JavaScript,
+            ] {
+                assert!(
+                    workload_path(&repo, dialect, workload).is_some(),
+                    "missing {} source for memory workload {id}",
+                    dialect.as_str()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn realistic_todo_memory_workloads_cover_luau_and_koto() {
+        let repo = repo_root().expect("repo root");
+        for id in ["todo_steady", "todo_history", "todo_retained_control"] {
+            let workload = WORKLOADS
+                .iter()
+                .find(|entry| entry.id == id)
+                .expect("todo memory workload");
+            for dialect in [Dialect::Luau, Dialect::Koto] {
+                assert!(
+                    workload_path(&repo, dialect, workload).is_some(),
+                    "missing {} source for todo workload {id}",
+                    dialect.as_str()
+                );
+            }
+        }
     }
 
     #[test]
@@ -2873,6 +3092,17 @@ mod tests {
 
         let error = parse_args(["--fixed-n".to_owned(), "0".to_owned()].into_iter())
             .expect_err("zero fixed n should fail");
+        assert!(error.to_string().contains("greater than zero"));
+    }
+
+    #[test]
+    fn parse_args_accepts_positive_memory_epochs_and_rejects_zero() {
+        let config = parse_args(["--memory-epochs".to_owned(), "40".to_owned()].into_iter())
+            .expect("memory epochs");
+        assert_eq!(config.memory_epochs, 40);
+
+        let error = parse_args(["--memory-epochs".to_owned(), "0".to_owned()].into_iter())
+            .expect_err("zero memory epochs should fail");
         assert!(error.to_string().contains("greater than zero"));
     }
 
