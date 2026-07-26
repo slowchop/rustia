@@ -1531,9 +1531,12 @@ function memoryResultsSection(data) {
     <section class="panel" id="memory">
       <div class="section-head">
         <div>
-          <h2>Memory</h2>
-          <p>Fresh process+cgroup samples. Peak catches short spikes; retained and growth use smaps anonymous memory at explicit phase/epoch markers.</p>
+          <h2>Linux Memory Comparison</h2>
+          <p>Best-first charts use fresh process+cgroup samples. Peak catches short spikes; retained uses anonymous memory after quiescence.</p>
         </div>
+      </div>
+      <div class="memory-cohorts">
+        ${memoryComparisonCharts(rows)}
       </div>
       <div class="table-wrap">
         <table>
@@ -1557,6 +1560,116 @@ function memoryResultsSection(data) {
       </div>
     </section>
   `;
+}
+
+function memoryComparisonCharts(rows) {
+  const cohorts = [
+    {
+      title: "Shared benchmark workloads",
+      description: "the same five workloads used by the Linux speed comparison",
+      workloads: REQUIRED_COMMON_WORKLOADS,
+    },
+    {
+      title: "Allocation stress",
+      description: "bounded burst and churn probes; the intentional-retention control is excluded",
+      workloads: ["memory_burst", "memory_churn"],
+    },
+    {
+      title: "Stateful todo application",
+      description: "bounded steady-state CRUD and fixed-size history; the intentional-retention control is excluded",
+      workloads: ["todo_steady", "todo_history"],
+    },
+  ];
+  return cohorts.map((cohort) => memoryCohortCharts(rows, cohort)).join("");
+}
+
+function memoryCohortCharts(rows, cohort) {
+  const implementations = [...groupBy(
+    rows.filter((row) => cohort.workloads.includes(row.workload)),
+    (row) => row.engine,
+  )]
+    .map(([engine, values]) => {
+      const measurements = cohort.workloads
+        .map((workload) => values.find((row) => row.workload === workload))
+        .filter(Boolean);
+      if (measurements.length !== cohort.workloads.length) return null;
+      return {
+        engine,
+        language: languageLabel(measurements[0].dialect),
+        mode: measurements[0].execution_mode,
+        coverage: measurements.length,
+        peak: geometricMean(
+          measurements.map((row) => Number(row.metrics.peak_delta_kib.median)),
+        ),
+        retained: measurements.reduce(
+          (sum, row) => sum + Number(row.metrics.quiescent_retained_delta_anon_kib.median),
+          0,
+        ) / measurements.length,
+      };
+    })
+    .filter(Boolean);
+  return `
+    <section class="memory-cohort-summary">
+      <div class="language-target-head">
+        <div>
+          <h3>${escapeHtml(cohort.title)}</h3>
+          <p>${escapeHtml(cohort.description)} · ${formatInteger(implementations.length)} complete implementations</p>
+        </div>
+      </div>
+      <div class="memory-chart-grid">
+        ${memoryMetricChart(
+          implementations,
+          "peak",
+          "Peak allocation",
+          "geometric mean peak Δ · lower is better",
+        )}
+        ${memoryMetricChart(
+          implementations,
+          "retained",
+          "Retained after quiescence",
+          "arithmetic mean retained Δ · lower is better",
+        )}
+      </div>
+    </section>
+  `;
+}
+
+function memoryMetricChart(rows, metric, title, caption) {
+  const ranked = [...rows].sort(
+    (left, right) =>
+      left[metric] - right[metric] ||
+      left.language.localeCompare(right.language) ||
+      left.engine.localeCompare(right.engine),
+  );
+  const values = ranked.map((row) => row[metric]);
+  return `
+    <div class="memory-ranked-headline">
+      <div class="memory-chart-head">
+        <strong>${escapeHtml(title)}</strong>
+        <span>${escapeHtml(caption)}</span>
+      </div>
+      <div class="ranked-bars" role="list" aria-label="${escapeHtml(`${title}, ${caption}`)}">
+        ${ranked.map((row, index) => `
+          <div class="memory-rank-row" role="listitem">
+            <span class="rank-number">${formatInteger(index + 1)}</span>
+            ${implementationLanguage(row.engine, row.language, row.mode)}
+            <div class="rank-track" aria-hidden="true"><span class="rank-fill" style="width:${memoryRankBarWidth(row[metric], values).toFixed(3)}%"></span></div>
+            <strong class="rank-value">${escapeHtml(formatMemoryKib(row[metric]))}</strong>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function memoryRankBarWidth(value, values) {
+  if (!Number.isFinite(value) || value < 0) return 0;
+  const finite = values.filter((candidate) => Number.isFinite(candidate) && candidate >= 0);
+  if (finite.length === 0) return 0;
+  const low = Math.log1p(Math.min(...finite));
+  const high = Math.log1p(Math.max(...finite));
+  if (low === high) return 100;
+  return 14 + ((high - Math.log1p(value)) / (high - low)) * 86;
 }
 
 function formatMemoryKib(value) {
@@ -2240,6 +2353,57 @@ function render(data, wasmResults, wasmDispatchResults, memoryResults, historyRe
       transition: width 180ms ease;
     }
 
+    .memory-cohorts {
+      display: grid;
+      gap: 18px;
+      padding: 0 20px 20px;
+    }
+
+    .memory-cohort-summary {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+
+    .memory-chart-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      border-top: 1px solid var(--line);
+    }
+
+    .memory-ranked-headline {
+      min-width: 0;
+      padding: 16px 18px 18px;
+    }
+
+    .memory-ranked-headline + .memory-ranked-headline {
+      border-left: 1px solid var(--line);
+    }
+
+    .memory-chart-head {
+      display: grid;
+      gap: 2px;
+      margin-bottom: 10px;
+    }
+
+    .memory-chart-head strong {
+      font-size: 14px;
+    }
+
+    .memory-chart-head span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .memory-rank-row {
+      display: grid;
+      grid-template-columns: 24px minmax(135px, 180px) minmax(80px, 1fr) 78px;
+      gap: 9px;
+      align-items: center;
+      min-height: 36px;
+    }
+
     .rank-value {
       text-align: right;
     }
@@ -2850,6 +3014,20 @@ function render(data, wasmResults, wasmDispatchResults, memoryResults, historyRe
         gap: 8px;
       }
 
+      .memory-chart-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .memory-ranked-headline + .memory-ranked-headline {
+        border-top: 1px solid var(--line);
+        border-left: 0;
+      }
+
+      .memory-rank-row {
+        grid-template-columns: 22px minmax(110px, 150px) minmax(60px, 1fr) 72px;
+        gap: 7px;
+      }
+
       .language-target-head {
         flex-direction: column;
       }
@@ -3030,6 +3208,7 @@ module.exports = {
   languageLabel,
   linuxComparisonSection,
   languagesByTargetSection,
+  memoryComparisonCharts,
   summarizeLanguageTargets,
   wasmTargetRows,
 };

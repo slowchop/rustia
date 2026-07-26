@@ -10,6 +10,7 @@ const {
   languageLabel,
   linuxComparisonSection,
   languagesByTargetSection,
+  memoryComparisonCharts,
   summarizeLanguageTargets,
   wasmTargetRows,
 } = require("../bench/render-current-results.js");
@@ -207,6 +208,46 @@ function main() {
   }]);
   assert.match(coldHtml, /Compile and First-call Cost/);
   assert.match(coldHtml, /3\.95x A\/B/);
+
+  const memoryWorkloads = [
+    ...REQUIRED_COMMON_WORKLOADS,
+    "memory_burst",
+    "memory_churn",
+    "todo_steady",
+    "todo_history",
+  ];
+  const memoryRows = ["rustia", "koto"].flatMap((engine) =>
+    memoryWorkloads.map((workload) => ({
+      engine,
+      dialect: engine === "rustia" ? "luau" : "koto",
+      execution_mode: "interpreter",
+      workload,
+      metrics: {
+        peak_delta_kib: { median: engine === "rustia" ? 1_024 : 256 },
+        quiescent_retained_delta_anon_kib: { median: engine === "rustia" ? 512 : 16 },
+      },
+    }))
+  );
+  memoryRows.push({
+    engine: "rustia",
+    dialect: "luau",
+    execution_mode: "interpreter",
+    workload: "memory_retained_control",
+    metrics: {
+      peak_delta_kib: { median: 65_536 },
+      quiescent_retained_delta_anon_kib: { median: 65_536 },
+    },
+  });
+  const memoryHtml = memoryComparisonCharts(memoryRows);
+  assert.equal(count(memoryHtml, 'class="memory-cohort-summary"'), 3);
+  assert.equal(count(memoryHtml, 'class="memory-ranked-headline"'), 6);
+  assert.match(memoryHtml, /Shared benchmark workloads/);
+  assert.match(memoryHtml, /Allocation stress/);
+  assert.match(memoryHtml, /Stateful todo application/);
+  assert.match(memoryHtml, /geometric mean peak Δ · lower is better/);
+  assert.match(memoryHtml, /arithmetic mean retained Δ · lower is better/);
+  assert.ok(memoryHtml.indexOf("<strong>koto</strong>") < memoryHtml.indexOf("<strong>rustia</strong>"));
+  assert.doesNotMatch(memoryHtml, /memory_retained_control|64 MiB/);
 
   const wasmRows = wasmTargetRows({
     runs: [
