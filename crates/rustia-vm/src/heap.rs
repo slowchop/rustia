@@ -546,7 +546,8 @@ impl VmCell {
             if modes.iter().all(Option::is_none) {
                 return;
             }
-            let live = mark_weak_reachable(&root, tables, functions, upvalues, &modes, roots);
+            let live = mark_heap_reachable(&root, tables, functions, upvalues, &modes, roots);
+            debug_assert!(live.upvalues.len() <= upvalues.len());
             for (index, mode) in modes.into_iter().enumerate() {
                 if let Some(mode) = mode {
                     if let Some(table) = tables.get_mut(index) {
@@ -1943,24 +1944,31 @@ struct WeakMode {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum WeakRef {
+enum HeapRef {
     Table(u32),
     Function(u32),
     Userdata(u32),
     Buffer(u32),
 }
 
-struct WeakLiveSet {
-    refs: BTreeSet<WeakRef>,
+/// The mark result shared by weak-table sweeping and ordinary heap reclamation.
+///
+/// Tables, functions, and upvalues currently use compact append-only handles
+/// outside `gc-arena`. Keeping their complete liveness graph here lets the
+/// forthcoming ordinary sweep use exactly the same reachability rules as weak
+/// tables instead of growing a second, subtly different tracer.
+struct HeapLiveSet {
+    refs: BTreeSet<HeapRef>,
+    upvalues: BTreeSet<u32>,
 }
 
-impl WeakLiveSet {
+impl HeapLiveSet {
     fn contains_value(&self, value: Value) -> bool {
-        weak_ref_from_value(value).is_some_and(|reference| self.refs.contains(&reference))
+        heap_ref_from_value(value).is_some_and(|reference| self.refs.contains(&reference))
     }
 
     fn contains_key(&self, key: TableKey) -> bool {
-        weak_ref_from_key(key).is_some_and(|reference| self.refs.contains(&reference))
+        heap_ref_from_key(key).is_some_and(|reference| self.refs.contains(&reference))
     }
 }
 
@@ -1991,42 +1999,51 @@ fn string_value_contains(root: &RootData<'_>, value: Value, needle: u8) -> Optio
         .map(|value| value.as_bytes().contains(&needle))
 }
 
-fn mark_weak_reachable(
+fn mark_heap_reachable(
     root: &RootData<'_>,
     tables: &[TableData],
     functions: &[FunctionData],
     upvalues: &[UpvalueData],
     modes: &[Option<WeakMode>],
     roots: &[Value],
-) -> WeakLiveSet {
+) -> HeapLiveSet {
     let mut refs = BTreeSet::new();
+    let mut live_upvalues = BTreeSet::new();
     let mut queue = VecDeque::new();
 
     for value in roots {
-        mark_weak_value(*value, &mut refs, &mut queue);
+        mark_heap_value(*value, &mut refs, &mut queue);
     }
 
     while let Some(reference) = queue.pop_front() {
         match reference {
-            WeakRef::Buffer(_) => {}
-            WeakRef::Userdata(handle) => {
+            HeapRef::Buffer(_) => {}
+            HeapRef::Userdata(handle) => {
                 let Some(userdata) = root.userdatas.get(handle as usize) else {
                     continue;
                 };
                 if let Some(metatable) = userdata.metatable {
-                    mark_weak_value(Value::table(metatable), &mut refs, &mut queue);
+                    mark_heap_value(Value::table(metatable), &mut refs, &mut queue);
+                }
+                if let UserdataPayload::ConformanceVertex { pos, normal, uv } = userdata.payload {
+                    mark_heap_value(pos, &mut refs, &mut queue);
+                    mark_heap_value(normal, &mut refs, &mut queue);
+                    mark_heap_value(uv, &mut refs, &mut queue);
                 }
             }
-            WeakRef::Function(handle) => {
+            HeapRef::Function(handle) => {
                 let Some(function) = functions.get(handle as usize) else {
                     continue;
                 };
-                mark_weak_value(Value::table(function.environment), &mut refs, &mut queue);
+                mark_heap_value(Value::table(function.environment), &mut refs, &mut queue);
                 for capture in &function.captures {
                     let value = if let Some(cell) = capture.cell() {
                         let Some(upvalue) = upvalues.get(cell as usize) else {
                             continue;
                         };
+                        if !live_upvalues.insert(cell) {
+                            continue;
+                        }
                         upvalue.value
                     } else {
                         let Some(value) = capture.direct_value() else {
@@ -2034,58 +2051,61 @@ fn mark_weak_reachable(
                         };
                         value
                     };
-                    mark_weak_value(value, &mut refs, &mut queue);
+                    mark_heap_value(value, &mut refs, &mut queue);
                 }
             }
-            WeakRef::Table(handle) => {
+            HeapRef::Table(handle) => {
                 let Some(table) = tables.get(handle as usize) else {
                     continue;
                 };
                 if let Some(metatable) = table.metatable {
-                    mark_weak_value(Value::table(metatable), &mut refs, &mut queue);
+                    mark_heap_value(Value::table(metatable), &mut refs, &mut queue);
                 }
                 let mode = modes.get(handle as usize).copied().flatten();
                 let weak_keys = mode.is_some_and(|mode| mode.keys);
                 let weak_values = mode.is_some_and(|mode| mode.values);
                 if !weak_values {
                     for value in &table.array {
-                        mark_weak_value(*value, &mut refs, &mut queue);
+                        mark_heap_value(*value, &mut refs, &mut queue);
                     }
                 }
                 for entry in &table.hash {
                     if !weak_keys {
-                        mark_weak_key(entry.key, &mut refs, &mut queue);
+                        mark_heap_key(entry.key, &mut refs, &mut queue);
                     }
                     if !weak_values {
-                        mark_weak_value(entry.value, &mut refs, &mut queue);
+                        mark_heap_value(entry.value, &mut refs, &mut queue);
                     }
                 }
             }
         }
     }
 
-    WeakLiveSet { refs }
-}
-
-fn mark_weak_value(value: Value, refs: &mut BTreeSet<WeakRef>, queue: &mut VecDeque<WeakRef>) {
-    if let Some(reference) = weak_ref_from_value(value) {
-        mark_weak_ref(reference, refs, queue);
+    HeapLiveSet {
+        refs,
+        upvalues: live_upvalues,
     }
 }
 
-fn mark_weak_key(key: TableKey, refs: &mut BTreeSet<WeakRef>, queue: &mut VecDeque<WeakRef>) {
-    if let Some(reference) = weak_ref_from_key(key) {
-        mark_weak_ref(reference, refs, queue);
+fn mark_heap_value(value: Value, refs: &mut BTreeSet<HeapRef>, queue: &mut VecDeque<HeapRef>) {
+    if let Some(reference) = heap_ref_from_value(value) {
+        mark_heap_ref(reference, refs, queue);
     }
 }
 
-fn mark_weak_ref(reference: WeakRef, refs: &mut BTreeSet<WeakRef>, queue: &mut VecDeque<WeakRef>) {
+fn mark_heap_key(key: TableKey, refs: &mut BTreeSet<HeapRef>, queue: &mut VecDeque<HeapRef>) {
+    if let Some(reference) = heap_ref_from_key(key) {
+        mark_heap_ref(reference, refs, queue);
+    }
+}
+
+fn mark_heap_ref(reference: HeapRef, refs: &mut BTreeSet<HeapRef>, queue: &mut VecDeque<HeapRef>) {
     if refs.insert(reference) {
         queue.push_back(reference);
     }
 }
 
-fn sweep_weak_table(table: &mut TableData, mode: WeakMode, live: &WeakLiveSet) {
+fn sweep_weak_table(table: &mut TableData, mode: WeakMode, live: &HeapLiveSet) {
     if mode.values {
         for value in &mut table.array {
             if weak_value_is_collectable(*value) && !live.contains_value(*value) {
@@ -2113,31 +2133,31 @@ fn sweep_weak_table(table: &mut TableData, mode: WeakMode, live: &WeakLiveSet) {
 }
 
 fn table_key_is_collectable(key: TableKey) -> bool {
-    weak_ref_from_key(key).is_some()
+    heap_ref_from_key(key).is_some()
 }
 
 fn weak_value_is_collectable(value: Value) -> bool {
-    weak_ref_from_value(value).is_some()
+    heap_ref_from_value(value).is_some()
 }
 
-fn weak_ref_from_key(key: TableKey) -> Option<WeakRef> {
+fn heap_ref_from_key(key: TableKey) -> Option<HeapRef> {
     match key {
-        TableKey::Table(handle) => Some(WeakRef::Table(handle)),
-        TableKey::Function(handle) => Some(WeakRef::Function(handle)),
-        TableKey::Userdata(handle) => Some(WeakRef::Userdata(handle)),
-        TableKey::Buffer(handle) => Some(WeakRef::Buffer(handle)),
+        TableKey::Table(handle) => Some(HeapRef::Table(handle)),
+        TableKey::Function(handle) => Some(HeapRef::Function(handle)),
+        TableKey::Userdata(handle) => Some(HeapRef::Userdata(handle)),
+        TableKey::Buffer(handle) => Some(HeapRef::Buffer(handle)),
         TableKey::Boolean(_) | TableKey::Number(_) | TableKey::String(_) | TableKey::Vector(_) => {
             None
         }
     }
 }
 
-fn weak_ref_from_value(value: Value) -> Option<WeakRef> {
+fn heap_ref_from_value(value: Value) -> Option<HeapRef> {
     match value.kind() {
-        ValueKind::Table => value.as_table().map(WeakRef::Table),
-        ValueKind::Function => value.as_function().map(WeakRef::Function),
-        ValueKind::Userdata => value.as_userdata().map(WeakRef::Userdata),
-        ValueKind::Buffer => value.as_buffer().map(WeakRef::Buffer),
+        ValueKind::Table => value.as_table().map(HeapRef::Table),
+        ValueKind::Function => value.as_function().map(HeapRef::Function),
+        ValueKind::Userdata => value.as_userdata().map(HeapRef::Userdata),
+        ValueKind::Buffer => value.as_buffer().map(HeapRef::Buffer),
         ValueKind::Nil
         | ValueKind::Boolean
         | ValueKind::Number
@@ -2915,6 +2935,88 @@ mod tests {
             .table_get(weak, target_key)
             .unwrap_or_else(Value::nil)
             .is_nil());
+    }
+
+    #[test]
+    fn collector_mark_phase_distinguishes_live_and_unreachable_cycles() {
+        let mut heap = VmCell::new();
+
+        let live_environment = heap.alloc_array_table(&[]);
+        let live_target = heap.alloc_array_table(&[]);
+        let live_upvalue = heap
+            .alloc_upvalue(Value::table(live_target))
+            .expect("live upvalue handle");
+        let live_function = heap
+            .alloc_native_function_with_upvalues(
+                NativeFunction::Assert,
+                vec![live_upvalue],
+                live_environment,
+            )
+            .expect("live function handle");
+        heap.tables[live_environment as usize]
+            .array
+            .push(Value::function(live_function));
+        let live_userdata_target = heap.alloc_array_table(&[]);
+        let live_userdata = heap
+            .alloc_userdata_with_payload(
+                None,
+                UserdataPayload::ConformanceVertex {
+                    pos: Value::table(live_userdata_target),
+                    normal: Value::nil(),
+                    uv: Value::nil(),
+                },
+            )
+            .expect("live userdata handle");
+
+        let dead_environment = heap.alloc_array_table(&[]);
+        let dead_target = heap.alloc_array_table(&[]);
+        let dead_upvalue = heap
+            .alloc_upvalue(Value::table(dead_target))
+            .expect("dead upvalue handle");
+        let dead_function = heap
+            .alloc_native_function_with_upvalues(
+                NativeFunction::Assert,
+                vec![dead_upvalue],
+                dead_environment,
+            )
+            .expect("dead function handle");
+        heap.tables[dead_environment as usize]
+            .array
+            .push(Value::function(dead_function));
+        heap.tables[dead_target as usize]
+            .array
+            .push(Value::table(dead_environment));
+
+        let modes = vec![None; heap.tables.len()];
+        let tables = &heap.tables;
+        let functions = &heap.functions;
+        let upvalues = &heap.upvalues;
+        let live = heap.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            mark_heap_reachable(
+                &root,
+                tables,
+                functions,
+                upvalues,
+                &modes,
+                &[
+                    Value::function(live_function),
+                    Value::userdata(live_userdata),
+                ],
+            )
+        });
+
+        assert!(live.refs.contains(&HeapRef::Function(live_function)));
+        assert!(live.refs.contains(&HeapRef::Table(live_environment)));
+        assert!(live.refs.contains(&HeapRef::Table(live_target)));
+        assert!(live.refs.contains(&HeapRef::Userdata(live_userdata)));
+        assert!(live.refs.contains(&HeapRef::Table(live_userdata_target)));
+        assert!(live.upvalues.contains(&live_upvalue));
+
+        assert!(!live.refs.contains(&HeapRef::Function(dead_function)));
+        assert!(!live.refs.contains(&HeapRef::Table(dead_environment)));
+        assert!(!live.refs.contains(&HeapRef::Table(dead_target)));
+        assert!(!live.upvalues.contains(&dead_upvalue));
     }
 
     #[test]

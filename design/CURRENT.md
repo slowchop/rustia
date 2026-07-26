@@ -193,7 +193,10 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    catchable-or-host OOM policy, and representative long-lived/mixed-heap evidence. Public `Function`/`Exports`
    copies must become real roots or use an ownership/API redesign before slots can be reused: ordinary calls
    stay valid across hot reload outside an explicit reset epoch, while reset may invalidate every handle.
-   GC interval tuning alone is not a substitute for reclamation.
+   GC interval tuning alone is not a substitute for reclamation. The first reclamation slice is now underway:
+   weak-table collection and the future ordinary-object sweep share one heap mark phase, including function
+   environments, direct captures, upvalue cells, userdata payload values, metatables, and cyclic graphs.
+   External-handle rooting and generation-safe slot reuse remain the next safety boundary.
 2. **A mechanically enforced per-decision lifecycle.** The deterministic host contract says authoritative
    cross-tick state lives in host slots and the script heap is transient, but the public facade does not yet
    provide a decision/scratch reset primitive. Hosts can reconstruct a VM today; the roadmap requires an
@@ -232,8 +235,9 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    `pre-reclamation-18b58d8` now freezes the 110-row/990-process cross-engine short-spike/phase/retention
    baseline from [`57-memory-benchmarking.md`](57-memory-benchmarking.md), including existing workloads,
    bounded-churn and intentional-retention controls, and dashboard views. Add reachability-based
-   reclamation/reuse for ordinary
-   VM objects, coroutine state, and loaded programs; true host-handle roots/epoch-safe reuse; heap/allocation
+   reclamation/reuse for ordinary VM objects, coroutine state, and loaded programs; the shared ordinary-object
+   mark phase has begun, so next add true host-handle roots/epoch-safe reuse before enabling its sweep;
+   heap/allocation
    quotas; an explicit OOM contract; and a deterministic
    per-decision reset/reuse API. Prove it with long-lived churn, cyclic graphs, hot reload, retained handles,
    weak tables, native/wasm parity, and representative mixed-heap memory evidence before tuning final intervals.

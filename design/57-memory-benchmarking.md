@@ -293,7 +293,10 @@ instrumentation cost. Such traces explain *why* a cohort moved; they do not repl
 4. Add memory history/current-result generators and the ranked-bar/heatmap/phase dashboard.
 5. Record and promote the pre-reclamation dedicated-Linux baseline.
 6. Add cycles, table resize, string, closure/coroutine, VM-scale, reset, module, and OOM lanes.
-7. Implement reclamation/quotas/reset, compare against the frozen baseline, and retain raw evidence.
+7. Implement reclamation/quotas/reset, compare against the frozen baseline, and retain raw evidence. The shared
+   ordinary-object mark phase is now implemented and tested for reachable versus unreachable cycles, upvalue
+   cells, function environments/captures, userdata payloads, metatables, and weak edges; exported-handle roots
+   and generation-safe sweep/reuse are next.
 8. Add the periodic `memory.max` pressure curve and targeted attribution tooling.
 
 ## Acceptance gate before memory work is declared complete
