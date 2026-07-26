@@ -434,8 +434,8 @@
           "name": "Benchmark operations",
           "complete": 75,
           "confidence": 90,
-          "state": "Hosted CI validates committed benchmark artifacts without measuring. An explicit operator-started Linode lifecycle is the sole active timing source and promotes only complete evidence after confirmed instance deletion. The isolated memory child/supervisor, cgroup-v2 sampler, repeated-epoch analyzer, publication schema, and pending dashboard state are implemented; the pre-reclamation Linode cohort remains to be recorded.",
-          "future_plan": "Record and publish the pre-reclamation memory baseline, keep the Linode lifecycle reproducible, accumulate longer coherent Linux history, and add regression alerts without mixing developer-machine timings."
+          "state": "Hosted CI validates committed benchmark artifacts without measuring. An explicit operator-started Linode lifecycle is the sole active measurement source and promotes only complete evidence after confirmed instance deletion. The isolated memory child/supervisor, cgroup-v2 sampler, repeated-epoch analyzer, publication schema, and dashboard are implemented; cohort pre-reclamation-18b58d8 published 110 rows from 990 fresh processes after independent local re-analysis.",
+          "future_plan": "Use the frozen memory baseline to gate bounded reclamation, keep the Linode lifecycle reproducible, accumulate longer coherent Linux history, and add regression alerts without mixing developer-machine timings."
         }
       ]
     },

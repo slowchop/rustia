@@ -1,8 +1,9 @@
 # rustia — cross-engine memory benchmark design
 
-> **Status: [IMPLEMENTATION IN PROGRESS] (2026-07-27).** The isolated child/supervisor, cgroup-v2 sampler,
-> repeated-epoch analyzer, first portable controls, deterministic todo-app workloads, publication schema, and
-> pending dashboard state are implemented. The pre-reclamation Linode cohort is not yet published. This
+> **Status: [PRE-RECLAMATION BASELINE RECORDED] (2026-07-27).** The isolated child/supervisor, cgroup-v2 sampler,
+> repeated-epoch analyzer, portable controls, deterministic todo-app workloads, publication schema, and
+> dashboard are implemented. Cohort `pre-reclamation-18b58d8` published 110 rows from 990 fresh processes after
+> confirmed Linode deletion and independent local re-analysis. This
 > protocol is the measurement prerequisite for bounded object reclamation, quotas, OOM behavior, and final GC tuning. It extends the existing
 > `vm-string-memory` evidence rather than replacing it. Canonical project state remains
 > [`CURRENT.md`](CURRENT.md).

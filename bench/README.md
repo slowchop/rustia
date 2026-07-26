@@ -81,7 +81,8 @@ The first-class memory product is specified in
 [`../design/57-memory-benchmarking.md`](../design/57-memory-benchmarking.md). Its child/supervisor, cgroup-v2
 sampling, repeated-epoch analyzer, synthetic controls, deterministic todo workloads, separate history, and
 pending/ready dashboard integration are now implemented; the first dedicated-Linux pre-reclamation cohort is
-the publication gate. Throughput and instrumented memory measurements remain separate.
+published as `pre-reclamation-18b58d8` (110 rows, 990 fresh processes). Throughput and instrumented memory
+measurements remain separate.
 
 ```sh
 just bench-memory-self-test

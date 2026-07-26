@@ -228,10 +228,10 @@ production concern or host-facing facility is finished. The highest-impact gaps 
 → the doc for your task. (A fresh Claude session in this repo also auto-loads the project memory.)
 
 **Action queue:**
-1. **Baseline memory, then implement bounded VM object lifetimes.** First implement and record the
-   cross-engine short-spike/phase/retention protocol in
-   [`57-memory-benchmarking.md`](57-memory-benchmarking.md), including memory rows for the existing workloads,
-   bounded-churn and intentional-retention controls, and dashboard views. Then add reachability-based
+1. **Implement bounded VM object lifetimes against the recorded baseline.** Cohort
+   `pre-reclamation-18b58d8` now freezes the 110-row/990-process cross-engine short-spike/phase/retention
+   baseline from [`57-memory-benchmarking.md`](57-memory-benchmarking.md), including existing workloads,
+   bounded-churn and intentional-retention controls, and dashboard views. Add reachability-based
    reclamation/reuse for ordinary
    VM objects, coroutine state, and loaded programs; true host-handle roots/epoch-safe reuse; heap/allocation
    quotas; an explicit OOM contract; and a deterministic
@@ -393,10 +393,10 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 
 ## What's next (the genuine remaining public-release gates)
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items, in order:
-1. **Freeze the pre-reclamation memory baseline, then implement and validate bounded object reclamation,
-   quotas, OOM behavior, and per-decision reset/reuse.** Use the external cgroup/smaps phase, peak, and
-   retention protocol in [`57-memory-benchmarking.md`](57-memory-benchmarking.md) across rustia and applicable
-   competitors before changing lifetime policy.
+1. **Implement and validate bounded object reclamation, quotas, OOM behavior, and per-decision reset/reuse
+   against the frozen pre-reclamation baseline.** Use the external cgroup/smaps phase, peak, and
+   retention protocol in [`57-memory-benchmarking.md`](57-memory-benchmarking.md); cohort
+   `pre-reclamation-18b58d8` is the pre-change comparator.
    Coroutine/program stores, true public-handle rooting, weak tables, cyclic graphs, hot reload, and native/wasm
    behavior must remain correct; ordinary retained calls survive hot reload outside an explicit reset epoch.
 2. **Complete the host service and rich-value boundary:** honest

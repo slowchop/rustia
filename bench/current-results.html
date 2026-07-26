@@ -1467,15 +1467,1342 @@
     </section>
 
 
-      <section class="panel" id="memory">
-        <div class="section-head">
-          <div>
-            <h2>Memory</h2>
-            <p>Fresh-process cgroup peaks, smaps phase deltas, and epoch growth across engines.</p>
-          </div>
+    <section class="panel" id="memory">
+      <div class="section-head">
+        <div>
+          <h2>Memory</h2>
+          <p>Fresh process+cgroup samples. Peak catches short spikes; retained and growth use smaps anonymous memory at explicit phase/epoch markers.</p>
         </div>
-        <p class="pending-note"><strong>Pre-reclamation baseline pending.</strong> The supervisor and detector-validation workloads are being implemented; this panel will remain empty rather than showing local or Rustia-only measurements.</p>
-      </section>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Implementation · language</th><th>Workload</th><th>Mode</th><th>Idle anon</th><th>Prepared Δ</th><th>Peak Δ</th><th>Retained Δ</th><th>Tail growth</th><th>Signal</th></tr></thead>
+          <tbody>
+
+              <tr>
+                <td><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></td>
+                <td><strong>Closures</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+96 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>luaur</strong><span>Luau</span></span></td>
+                <td><strong>Closures</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+156 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+16 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Lua 5.4</span></span></td>
+                <td><strong>Closures</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>156 KiB</td>
+                <td>+36 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+20 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Closures</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+216 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+12 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rquickjs</strong><span>JavaScript</span></span></td>
+                <td><strong>Closures</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.301 MiB</td>
+                <td>+136 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Closures</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+132 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+28 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>wasmi</strong><span>WebAssembly</span></span></td>
+                <td><strong>Closures</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+32 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Closures</strong></td>
+                <td><span class="mode-badge mode-jit">jit</span></td>
+                <td>1.297 MiB</td>
+                <td>+248 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+12 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rhai</strong><span>Rhai</span></span></td>
+                <td><strong>Closures</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+256 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>wasmtime</strong><span>WebAssembly</span></span></td>
+                <td><strong>Closures</strong></td>
+                <td><span class="mode-badge mode-native">native</span></td>
+                <td>1.297 MiB</td>
+                <td>+264 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>roto</strong><span>Roto</span></span></td>
+                <td><strong>Closures</strong></td>
+                <td><span class="mode-badge mode-native">native</span></td>
+                <td>1.297 MiB</td>
+                <td>+616 KiB</td>
+                <td><strong>768 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>boa</strong><span>JavaScript</span></span></td>
+                <td><strong>Closures</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+408 KiB</td>
+                <td><strong>1.75 MiB</strong></td>
+                <td>+1.207 MiB</td>
+                <td>+77.6 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>ruau</strong><span>Luau</span></span></td>
+                <td><strong>Closures</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+2.809 MiB</td>
+                <td><strong>3 MiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></td>
+                <td><strong>Dense tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+96 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Lua 5.4</span></span></td>
+                <td><strong>Dense tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>160 KiB</td>
+                <td>+32 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+4 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rquickjs</strong><span>JavaScript</span></span></td>
+                <td><strong>Dense tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+144 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+8 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>wasmi</strong><span>WebAssembly</span></span></td>
+                <td><strong>Dense tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+96 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>luaur</strong><span>Luau</span></span></td>
+                <td><strong>Dense tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+160 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+32 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Dense tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+224 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+12 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Dense tables</strong></td>
+                <td><span class="mode-badge mode-jit">jit</span></td>
+                <td>1.297 MiB</td>
+                <td>+284 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+12 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rhai</strong><span>Rhai</span></span></td>
+                <td><strong>Dense tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+268 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>wasmtime</strong><span>WebAssembly</span></span></td>
+                <td><strong>Dense tables</strong></td>
+                <td><span class="mode-badge mode-native">native</span></td>
+                <td>1.297 MiB</td>
+                <td>+268 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>roto</strong><span>Roto</span></span></td>
+                <td><strong>Dense tables</strong></td>
+                <td><span class="mode-badge mode-native">native</span></td>
+                <td>1.297 MiB</td>
+                <td>+884 KiB</td>
+                <td><strong>1 MiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>ruau</strong><span>Luau</span></span></td>
+                <td><strong>Dense tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+2.809 MiB</td>
+                <td><strong>3 MiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>boa</strong><span>JavaScript</span></span></td>
+                <td><strong>Dense tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+396 KiB</td>
+                <td><strong>4 MiB</strong></td>
+                <td>+3.176 MiB</td>
+                <td>+203 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Dense tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+132 KiB</td>
+                <td><strong>9 MiB</strong></td>
+                <td>+8.227 MiB</td>
+                <td>+526 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></td>
+                <td><strong>Iteration</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+92 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Lua 5.4</span></span></td>
+                <td><strong>Iteration</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>156 KiB</td>
+                <td>+40 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+24 KiB</td>
+                <td>+0.619 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rquickjs</strong><span>JavaScript</span></span></td>
+                <td><strong>Iteration</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+144 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>wasmi</strong><span>WebAssembly</span></span></td>
+                <td><strong>Iteration</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.301 MiB</td>
+                <td>+32 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>luaur</strong><span>Luau</span></span></td>
+                <td><strong>Iteration</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.301 MiB</td>
+                <td>+184 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+80 KiB</td>
+                <td>+1.071 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Iteration</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+236 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+60 KiB</td>
+                <td>+2 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Iteration</strong></td>
+                <td><span class="mode-badge mode-jit">jit</span></td>
+                <td>1.297 MiB</td>
+                <td>+280 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+48 KiB</td>
+                <td>+2 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rhai</strong><span>Rhai</span></span></td>
+                <td><strong>Iteration</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+264 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>wasmtime</strong><span>WebAssembly</span></span></td>
+                <td><strong>Iteration</strong></td>
+                <td><span class="mode-badge mode-native">native</span></td>
+                <td>1.297 MiB</td>
+                <td>+276 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Iteration</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+160 KiB</td>
+                <td><strong>768 KiB</strong></td>
+                <td>+504 KiB</td>
+                <td>+21 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>roto</strong><span>Roto</span></span></td>
+                <td><strong>Iteration</strong></td>
+                <td><span class="mode-badge mode-native">native</span></td>
+                <td>1.297 MiB</td>
+                <td>+820 KiB</td>
+                <td><strong>1 MiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>boa</strong><span>JavaScript</span></span></td>
+                <td><strong>Iteration</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+420 KiB</td>
+                <td><strong>2.43 MiB</strong></td>
+                <td>+1.523 MiB</td>
+                <td>+2.429 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>ruau</strong><span>Luau</span></span></td>
+                <td><strong>Iteration</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+2.809 MiB</td>
+                <td><strong>3.195 MiB</strong></td>
+                <td>+64 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></td>
+                <td><strong>Memory Burst</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+104 KiB</td>
+                <td><strong>1.223 MiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rquickjs</strong><span>JavaScript</span></span></td>
+                <td><strong>Memory Burst</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+144 KiB</td>
+                <td><strong>1.25 MiB</strong></td>
+                <td>+192 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Lua 5.4</span></span></td>
+                <td><strong>Memory Burst</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>156 KiB</td>
+                <td>+32 KiB</td>
+                <td><strong>1.5 MiB</strong></td>
+                <td>+676 KiB</td>
+                <td>+5.238 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>luaur</strong><span>Luau</span></span></td>
+                <td><strong>Memory Burst</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+156 KiB</td>
+                <td><strong>2.078 MiB</strong></td>
+                <td>+1.055 MiB</td>
+                <td>+22.3 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">inconclusive</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Memory Burst</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+216 KiB</td>
+                <td><strong>2.25 MiB</strong></td>
+                <td>+1.113 MiB</td>
+                <td>-8.067 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">inconclusive</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Memory Burst</strong></td>
+                <td><span class="mode-badge mode-jit">jit</span></td>
+                <td>1.297 MiB</td>
+                <td>+280 KiB</td>
+                <td><strong>2.438 MiB</strong></td>
+                <td>+1.168 MiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">inconclusive</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>ruau</strong><span>Luau</span></span></td>
+                <td><strong>Memory Burst</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+2.797 MiB</td>
+                <td><strong>3.137 MiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>boa</strong><span>JavaScript</span></span></td>
+                <td><strong>Memory Burst</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+432 KiB</td>
+                <td><strong>4.25 MiB</strong></td>
+                <td>+3.531 MiB</td>
+                <td>+224 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Memory Burst</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+140 KiB</td>
+                <td><strong>10 MiB</strong></td>
+                <td>+9.012 MiB</td>
+                <td>+578 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></td>
+                <td><strong>Memory Churn</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+120 KiB</td>
+                <td><strong>1.25 MiB</strong></td>
+                <td>+1,008 KiB</td>
+                <td>+1.143 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rquickjs</strong><span>JavaScript</span></span></td>
+                <td><strong>Memory Churn</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+148 KiB</td>
+                <td><strong>1.25 MiB</strong></td>
+                <td>+1,008 KiB</td>
+                <td>+4.706 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Lua 5.4</span></span></td>
+                <td><strong>Memory Churn</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>156 KiB</td>
+                <td>+36 KiB</td>
+                <td><strong>1.5 MiB</strong></td>
+                <td>+1.234 MiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>boa</strong><span>JavaScript</span></span></td>
+                <td><strong>Memory Churn</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+436 KiB</td>
+                <td><strong>2.25 MiB</strong></td>
+                <td>+1.617 MiB</td>
+                <td>+41.1 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>luaur</strong><span>Luau</span></span></td>
+                <td><strong>Memory Churn</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+156 KiB</td>
+                <td><strong>2.5 MiB</strong></td>
+                <td>+2.125 MiB</td>
+                <td>+21.6 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Memory Churn</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+216 KiB</td>
+                <td><strong>2.75 MiB</strong></td>
+                <td>+2.262 MiB</td>
+                <td>+26.7 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Memory Churn</strong></td>
+                <td><span class="mode-badge mode-jit">jit</span></td>
+                <td>1.297 MiB</td>
+                <td>+284 KiB</td>
+                <td><strong>2.75 MiB</strong></td>
+                <td>+2.168 MiB</td>
+                <td>+21.6 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>ruau</strong><span>Luau</span></span></td>
+                <td><strong>Memory Churn</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+2.801 MiB</td>
+                <td><strong>3.23 MiB</strong></td>
+                <td>+176 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Memory Churn</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+144 KiB</td>
+                <td><strong>3.5 MiB</strong></td>
+                <td>+3.145 MiB</td>
+                <td>+80.5 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>boa</strong><span>JavaScript</span></span></td>
+                <td><strong>Memory Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+428 KiB</td>
+                <td><strong>2.25 MiB</strong></td>
+                <td>+1.621 MiB</td>
+                <td>+41.1 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>luaur</strong><span>Luau</span></span></td>
+                <td><strong>Memory Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+156 KiB</td>
+                <td><strong>3.25 MiB</strong></td>
+                <td>+2.922 MiB</td>
+                <td>+74 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Lua 5.4</span></span></td>
+                <td><strong>Memory Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>156 KiB</td>
+                <td>+36 KiB</td>
+                <td><strong>3.25 MiB</strong></td>
+                <td>+3.012 MiB</td>
+                <td>+76.8 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Memory Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+220 KiB</td>
+                <td><strong>3.25 MiB</strong></td>
+                <td>+2.918 MiB</td>
+                <td>+74.2 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Memory Retained Control</strong></td>
+                <td><span class="mode-badge mode-jit">jit</span></td>
+                <td>1.297 MiB</td>
+                <td>+288 KiB</td>
+                <td><strong>3.5 MiB</strong></td>
+                <td>+2.895 MiB</td>
+                <td>+74.2 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Memory Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+148 KiB</td>
+                <td><strong>3.5 MiB</strong></td>
+                <td>+3.152 MiB</td>
+                <td>+80.5 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rquickjs</strong><span>JavaScript</span></span></td>
+                <td><strong>Memory Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+144 KiB</td>
+                <td><strong>4.5 MiB</strong></td>
+                <td>+4.086 MiB</td>
+                <td>+104 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></td>
+                <td><strong>Memory Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+112 KiB</td>
+                <td><strong>5 MiB</strong></td>
+                <td>+4.672 MiB</td>
+                <td>+120 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>ruau</strong><span>Luau</span></span></td>
+                <td><strong>Memory Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+2.809 MiB</td>
+                <td><strong>5.5 MiB</strong></td>
+                <td>+2.477 MiB</td>
+                <td>+122 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></td>
+                <td><strong>Sparse tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+108 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+4 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Lua 5.4</span></span></td>
+                <td><strong>Sparse tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>156 KiB</td>
+                <td>+32 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rquickjs</strong><span>JavaScript</span></span></td>
+                <td><strong>Sparse tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+144 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+16 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>wasmi</strong><span>WebAssembly</span></span></td>
+                <td><strong>Sparse tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+96 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>luaur</strong><span>Luau</span></span></td>
+                <td><strong>Sparse tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+156 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+32 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Sparse tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+216 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+4 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Sparse tables</strong></td>
+                <td><span class="mode-badge mode-jit">jit</span></td>
+                <td>1.301 MiB</td>
+                <td>+280 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+8 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rhai</strong><span>Rhai</span></span></td>
+                <td><strong>Sparse tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+276 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>wasmtime</strong><span>WebAssembly</span></span></td>
+                <td><strong>Sparse tables</strong></td>
+                <td><span class="mode-badge mode-native">native</span></td>
+                <td>1.297 MiB</td>
+                <td>+288 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>roto</strong><span>Roto</span></span></td>
+                <td><strong>Sparse tables</strong></td>
+                <td><span class="mode-badge mode-native">native</span></td>
+                <td>1.297 MiB</td>
+                <td>+880 KiB</td>
+                <td><strong>1 MiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>ruau</strong><span>Luau</span></span></td>
+                <td><strong>Sparse tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+2.809 MiB</td>
+                <td><strong>3 MiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>boa</strong><span>JavaScript</span></span></td>
+                <td><strong>Sparse tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+436 KiB</td>
+                <td><strong>5.941 MiB</strong></td>
+                <td>+268 KiB</td>
+                <td>+16 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Sparse tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+140 KiB</td>
+                <td><strong>15.5 MiB</strong></td>
+                <td>+14.3 MiB</td>
+                <td>+912 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></td>
+                <td><strong>Math / table</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+100 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>luaur</strong><span>Luau</span></span></td>
+                <td><strong>Math / table</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.301 MiB</td>
+                <td>+172 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+56 KiB</td>
+                <td>+4 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Lua 5.4</span></span></td>
+                <td><strong>Math / table</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>156 KiB</td>
+                <td>+32 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+32 KiB</td>
+                <td>+2.343 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rquickjs</strong><span>JavaScript</span></span></td>
+                <td><strong>Math / table</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+148 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+8 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Math / table</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+144 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+40 KiB</td>
+                <td>+3.333 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>wasmi</strong><span>WebAssembly</span></span></td>
+                <td><strong>Math / table</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+28 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>boa</strong><span>JavaScript</span></span></td>
+                <td><strong>Math / table</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+432 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+16 KiB</td>
+                <td>+1 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Math / table</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.301 MiB</td>
+                <td>+232 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+44 KiB</td>
+                <td>+2 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Math / table</strong></td>
+                <td><span class="mode-badge mode-jit">jit</span></td>
+                <td>1.301 MiB</td>
+                <td>+288 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+44 KiB</td>
+                <td>+2 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rhai</strong><span>Rhai</span></span></td>
+                <td><strong>Math / table</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+264 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+4 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>wasmtime</strong><span>WebAssembly</span></span></td>
+                <td><strong>Math / table</strong></td>
+                <td><span class="mode-badge mode-native">native</span></td>
+                <td>1.297 MiB</td>
+                <td>+272 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>roto</strong><span>Roto</span></span></td>
+                <td><strong>Math / table</strong></td>
+                <td><span class="mode-badge mode-native">native</span></td>
+                <td>1.297 MiB</td>
+                <td>+808 KiB</td>
+                <td><strong>1 MiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span> <span class="subtle">control unverified</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>ruau</strong><span>Luau</span></span></td>
+                <td><strong>Math / table</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+2.809 MiB</td>
+                <td><strong>3 MiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></td>
+                <td><strong>Todo History</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+184 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+24 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Todo History</strong></td>
+                <td><span class="mode-badge mode-jit">jit</span></td>
+                <td>1.301 MiB</td>
+                <td>+444 KiB</td>
+                <td><strong>692 KiB</strong></td>
+                <td>+140 KiB</td>
+                <td>+1.282 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>luaur</strong><span>Luau</span></span></td>
+                <td><strong>Todo History</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+268 KiB</td>
+                <td><strong>768 KiB</strong></td>
+                <td>+320 KiB</td>
+                <td>+1.333 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Todo History</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+276 KiB</td>
+                <td><strong>768 KiB</strong></td>
+                <td>+260 KiB</td>
+                <td>+1 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Todo History</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+220 KiB</td>
+                <td><strong>1.75 MiB</strong></td>
+                <td>+1.352 MiB</td>
+                <td>+36 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>ruau</strong><span>Luau</span></span></td>
+                <td><strong>Todo History</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+2.801 MiB</td>
+                <td><strong>3 MiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>luaur</strong><span>Luau</span></span></td>
+                <td><strong>Todo Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+240 KiB</td>
+                <td><strong>1.5 MiB</strong></td>
+                <td>+1.141 MiB</td>
+                <td>+31.7 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Todo Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+244 KiB</td>
+                <td><strong>1.5 MiB</strong></td>
+                <td>+1.105 MiB</td>
+                <td>+30.8 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Todo Retained Control</strong></td>
+                <td><span class="mode-badge mode-jit">jit</span></td>
+                <td>1.297 MiB</td>
+                <td>+432 KiB</td>
+                <td><strong>1.68 MiB</strong></td>
+                <td>+1,004 KiB</td>
+                <td>+31.1 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></td>
+                <td><strong>Todo Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+172 KiB</td>
+                <td><strong>1.75 MiB</strong></td>
+                <td>+1.375 MiB</td>
+                <td>+37 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Todo Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.301 MiB</td>
+                <td>+220 KiB</td>
+                <td><strong>2.25 MiB</strong></td>
+                <td>+1.852 MiB</td>
+                <td>+50.7 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>ruau</strong><span>Luau</span></span></td>
+                <td><strong>Todo Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+2.801 MiB</td>
+                <td><strong>4 MiB</strong></td>
+                <td>+1 MiB</td>
+                <td>+25.6 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>koto</strong><span>Koto</span></span></td>
+                <td><strong>Todo Steady</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+168 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+12 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>luaur</strong><span>Luau</span></span></td>
+                <td><strong>Todo Steady</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+240 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+184 KiB</td>
+                <td>+2 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Todo Steady</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.301 MiB</td>
+                <td>+228 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+208 KiB</td>
+                <td>+4.889 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>mlua</strong><span>Luau</span></span></td>
+                <td><strong>Todo Steady</strong></td>
+                <td><span class="mode-badge mode-jit">jit</span></td>
+                <td>1.297 MiB</td>
+                <td>+356 KiB</td>
+                <td><strong>700 KiB</strong></td>
+                <td>+156 KiB</td>
+                <td>+4.829 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Todo Steady</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+208 KiB</td>
+                <td><strong>1.25 MiB</strong></td>
+                <td>+992 KiB</td>
+                <td>+27 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>ruau</strong><span>Luau</span></span></td>
+                <td><strong>Todo Steady</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>1.297 MiB</td>
+                <td>+2.801 MiB</td>
+                <td><strong>3 MiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+          </tbody>
+        </table>
+      </div>
+    </section>
 
 
     <section class="panel" id="cold-start">

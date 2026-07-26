@@ -1,0 +1,3723 @@
+{
+  "schema_version": 1,
+  "schema": "rustia.bench.memory-raw.v1",
+  "sample_id": "round-02-boa-dense_tables",
+  "captured_at": "2026-07-26T22:20:38.378Z",
+  "started_at": "2026-07-26T22:20:36.126Z",
+  "identity": {
+    "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+    "binary": "/opt/rustia/target-memory-all/release/script-bench",
+    "binary_sha256": "ad6b6f9b8658dda3aab31c2731e680d0fcca7988d932df7f7b28581dea79736a",
+    "engine": "boa",
+    "workload": "dense_tables",
+    "n": 128,
+    "epochs": 16
+  },
+  "platform": {
+    "os": "linux",
+    "arch": "x64",
+    "release": "6.8.0-134-generic",
+    "hostname": "localhost",
+    "benchmark_cpu": 3,
+    "supervisor_cpu": 2,
+    "page_size_bytes": 4096,
+    "cgroup_v2": true,
+    "resettable_memory_peak": false,
+    "sample_interval_ms": 10,
+    "vm_rss_hwm_is_diagnostic_only": true
+  },
+  "protocol": {
+    "child_schema": "rustia.bench.memory-child-event.v1",
+    "isolation": "fresh process and cgroup-v2 leaf",
+    "primary_phase_memory": "process_memory.smaps_rollup_kib.anonymous",
+    "corroborating_phase_memory": [
+      "pss",
+      "private_dirty",
+      "rss"
+    ],
+    "primary_short_spike_memory": "final_cgroup.peak_bytes",
+    "memory_peak_scope": "whole sample",
+    "phase_peak_memory": "events[].phase_peak_bytes when resettable_memory_peak is true",
+    "forced_collection": false,
+    "allocator_purge": false
+  },
+  "events": [
+    {
+      "event": {
+        "checksum": null,
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": null,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "spawned",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 1,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 22.565517,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 9260,
+          "pss": 6509,
+          "pss_anon": 1328,
+          "pss_file": 5181,
+          "pss_shmem": 0,
+          "private_clean": 4728,
+          "private_dirty": 1328,
+          "anonymous": 1328,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 9260,
+          "vm_hwm": 9260,
+          "rss_anon": 1328,
+          "rss_file": 7932,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 0,
+        "peak_bytes": 0,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 0,
+          "file": 0,
+          "kernel": 0,
+          "kernel_stack": 0,
+          "pagetables": 0,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 0,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 0,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": null,
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": null,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "prepared",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 2,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 27.25522,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 14008,
+          "pss": 11196,
+          "pss_anon": 1724,
+          "pss_file": 9472,
+          "pss_shmem": 0,
+          "private_clean": 9016,
+          "private_dirty": 1724,
+          "anonymous": 1724,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 14008,
+          "vm_hwm": 14008,
+          "rss_anon": 1724,
+          "rss_file": 12284,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 524288,
+        "peak_bytes": 524288,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 405504,
+          "file": 0,
+          "kernel": 12288,
+          "kernel_stack": 0,
+          "pagetables": 8192,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 389120,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 169,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": null,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "warmed",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 3,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 156.211573,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 14536,
+          "pss": 11724,
+          "pss_anon": 1932,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 1932,
+          "anonymous": 1932,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 14536,
+          "vm_hwm": 14536,
+          "rss_anon": 1932,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 786432,
+        "peak_bytes": 786432,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 405504,
+          "file": 0,
+          "kernel": 12288,
+          "kernel_stack": 0,
+          "pagetables": 8192,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 389120,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 169,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 1,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 4,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 287.018476,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 14740,
+          "pss": 11928,
+          "pss_anon": 2136,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 2136,
+          "anonymous": 2136,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 14740,
+          "vm_hwm": 14740,
+          "rss_anon": 2136,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 1048576,
+        "peak_bytes": 1048576,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 827392,
+          "file": 0,
+          "kernel": 16384,
+          "kernel_stack": 0,
+          "pagetables": 12288,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 811008,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 277,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 2,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 5,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 415.081266,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 14940,
+          "pss": 12128,
+          "pss_anon": 2336,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 2336,
+          "anonymous": 2336,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 14940,
+          "vm_hwm": 14940,
+          "rss_anon": 2336,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 1048576,
+        "peak_bytes": 1048576,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 827392,
+          "file": 0,
+          "kernel": 16384,
+          "kernel_stack": 0,
+          "pagetables": 12288,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 811008,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 277,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 3,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 6,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 542.302662,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 15144,
+          "pss": 12332,
+          "pss_anon": 2540,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 2540,
+          "anonymous": 2540,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 15144,
+          "vm_hwm": 15144,
+          "rss_anon": 2540,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 1310720,
+        "peak_bytes": 1310720,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 1241088,
+          "file": 0,
+          "kernel": 16384,
+          "kernel_stack": 0,
+          "pagetables": 12288,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 1196032,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 378,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 4,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 7,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 670.969321,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 15348,
+          "pss": 12536,
+          "pss_anon": 2744,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 2744,
+          "anonymous": 2744,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 15348,
+          "vm_hwm": 15348,
+          "rss_anon": 2744,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 1572864,
+        "peak_bytes": 1572864,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 1241088,
+          "file": 0,
+          "kernel": 16384,
+          "kernel_stack": 0,
+          "pagetables": 12288,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 1196032,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 378,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 5,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 8,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 799.080261,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 15548,
+          "pss": 12736,
+          "pss_anon": 2944,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 2944,
+          "anonymous": 2944,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 15548,
+          "vm_hwm": 15548,
+          "rss_anon": 2944,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 1835008,
+        "peak_bytes": 1835008,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 1654784,
+          "file": 0,
+          "kernel": 16384,
+          "kernel_stack": 0,
+          "pagetables": 12288,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 1654784,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 479,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 6,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 9,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 930.108147,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 15752,
+          "pss": 12940,
+          "pss_anon": 3148,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 3148,
+          "anonymous": 3148,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 15752,
+          "vm_hwm": 15752,
+          "rss_anon": 3148,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 2097152,
+        "peak_bytes": 2097152,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 1654784,
+          "file": 0,
+          "kernel": 16384,
+          "kernel_stack": 0,
+          "pagetables": 12288,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 1654784,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 479,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 7,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 10,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 1058.967138,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 15956,
+          "pss": 13144,
+          "pss_anon": 3352,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 3352,
+          "anonymous": 3352,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 15956,
+          "vm_hwm": 15956,
+          "rss_anon": 3352,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 2097152,
+        "peak_bytes": 2097152,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 2072576,
+          "file": 0,
+          "kernel": 16384,
+          "kernel_stack": 0,
+          "pagetables": 12288,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 2056192,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 581,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 8,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 11,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 1187.704888,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 16164,
+          "pss": 13352,
+          "pss_anon": 3560,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 3560,
+          "anonymous": 3560,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 16164,
+          "vm_hwm": 16164,
+          "rss_anon": 3560,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 2359296,
+        "peak_bytes": 2359296,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 2072576,
+          "file": 0,
+          "kernel": 16384,
+          "kernel_stack": 0,
+          "pagetables": 12288,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 2056192,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 581,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 9,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 12,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 1317.027016,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 16364,
+          "pss": 13552,
+          "pss_anon": 3760,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 3760,
+          "anonymous": 3760,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 16364,
+          "vm_hwm": 16364,
+          "rss_anon": 3760,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 2621440,
+        "peak_bytes": 2621440,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 2490368,
+          "file": 0,
+          "kernel": 16384,
+          "kernel_stack": 0,
+          "pagetables": 12288,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 2457600,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 683,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 10,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 13,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 1446.061751,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 16568,
+          "pss": 13756,
+          "pss_anon": 3964,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 3964,
+          "anonymous": 3964,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 16568,
+          "vm_hwm": 16568,
+          "rss_anon": 3964,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 2883584,
+        "peak_bytes": 2883584,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 2490368,
+          "file": 0,
+          "kernel": 16384,
+          "kernel_stack": 0,
+          "pagetables": 12288,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 2457600,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 683,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 11,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 14,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 1574.713519,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 16772,
+          "pss": 13960,
+          "pss_anon": 4168,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 4168,
+          "anonymous": 4168,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 16772,
+          "vm_hwm": 16772,
+          "rss_anon": 4168,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 3145728,
+        "peak_bytes": 3145728,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 2908160,
+          "file": 0,
+          "kernel": 20480,
+          "kernel_stack": 0,
+          "pagetables": 16384,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 2854912,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 785,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 12,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 15,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 1702.329921,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 16976,
+          "pss": 14164,
+          "pss_anon": 4372,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 4372,
+          "anonymous": 4372,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 16976,
+          "vm_hwm": 16976,
+          "rss_anon": 4372,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 3145728,
+        "peak_bytes": 3145728,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 3067904,
+          "file": 0,
+          "kernel": 20480,
+          "kernel_stack": 0,
+          "pagetables": 16384,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 3059712,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 320,
+          "slab": 320,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 824,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 13,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 16,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 1830.924329,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 17176,
+          "pss": 14364,
+          "pss_anon": 4572,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 4572,
+          "anonymous": 4572,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 17176,
+          "vm_hwm": 17176,
+          "rss_anon": 4572,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 3407872,
+        "peak_bytes": 3407872,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 3067904,
+          "file": 0,
+          "kernel": 20480,
+          "kernel_stack": 0,
+          "pagetables": 16384,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 3059712,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 320,
+          "slab": 320,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 824,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 14,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 17,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 1960.261577,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 17380,
+          "pss": 14568,
+          "pss_anon": 4776,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 4776,
+          "anonymous": 4776,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 17380,
+          "vm_hwm": 17380,
+          "rss_anon": 4776,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 3670016,
+        "peak_bytes": 3670016,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 3530752,
+          "file": 0,
+          "kernel": 20480,
+          "kernel_stack": 0,
+          "pagetables": 16384,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 3522560,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 937,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 15,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 18,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 2088.422577,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 17584,
+          "pss": 14772,
+          "pss_anon": 4980,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 4980,
+          "anonymous": 4980,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 17584,
+          "vm_hwm": 17584,
+          "rss_anon": 4980,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 3932160,
+        "peak_bytes": 3932160,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 3530752,
+          "file": 0,
+          "kernel": 20480,
+          "kernel_stack": 0,
+          "pagetables": 16384,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 3522560,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 937,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": "f64:508302555.00000000000000000",
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": 16,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "epoch",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 19,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 2234.462842,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 17788,
+          "pss": 14976,
+          "pss_anon": 5184,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 5184,
+          "anonymous": 5184,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 17788,
+          "vm_hwm": 17788,
+          "rss_anon": 5184,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 4194304,
+        "peak_bytes": 4194304,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 3948544,
+          "file": 0,
+          "kernel": 20480,
+          "kernel_stack": 0,
+          "pagetables": 16384,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 3919872,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 1039,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": null,
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": null,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "quiescent",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 20,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 2239.210305,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 17788,
+          "pss": 14976,
+          "pss_anon": 5184,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 5184,
+          "anonymous": 5184,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 17788,
+          "vm_hwm": 17788,
+          "rss_anon": 5184,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 4194304,
+        "peak_bytes": 4194304,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 3948544,
+          "file": 0,
+          "kernel": 20480,
+          "kernel_stack": 0,
+          "pagetables": 16384,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 3919872,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 1039,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    },
+    {
+      "event": {
+        "checksum": null,
+        "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+        "dialect": "javascript",
+        "engine": "boa",
+        "epoch": null,
+        "epochs": 16,
+        "execution_mode": "interpreter",
+        "mode_family": "boa",
+        "n": 128,
+        "phase": "dropped",
+        "pid": 13013,
+        "schema": "rustia.bench.memory-child-event.v1",
+        "schema_version": 1,
+        "sequence": 21,
+        "target": "linux-x86_64",
+        "unit": "build+sum+sort of 256-elem array",
+        "workload": "dense_tables"
+      },
+      "elapsed_ms": 2241.795644,
+      "process_memory": {
+        "smaps_rollup_kib": {
+          "rss": 17788,
+          "pss": 14976,
+          "pss_anon": 5184,
+          "pss_file": 9792,
+          "pss_shmem": 0,
+          "private_clean": 9336,
+          "private_dirty": 5184,
+          "anonymous": 5184,
+          "swap": 0
+        },
+        "status_kib": {
+          "vm_rss": 17788,
+          "vm_hwm": 17788,
+          "rss_anon": 5184,
+          "rss_file": 12604,
+          "rss_shmem": 0,
+          "vm_swap": 0
+        }
+      },
+      "cgroup_memory": {
+        "current_bytes": 4194304,
+        "peak_bytes": 4194304,
+        "swap_current_bytes": 0,
+        "stat_bytes": {
+          "anon": 3948544,
+          "file": 0,
+          "kernel": 20480,
+          "kernel_stack": 0,
+          "pagetables": 16384,
+          "sec_pagetables": 0,
+          "percpu": 0,
+          "sock": 0,
+          "vmalloc": 0,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 0,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 0,
+          "active_anon": 3919872,
+          "inactive_file": 0,
+          "active_file": 0,
+          "unevictable": 0,
+          "slab_reclaimable": 0,
+          "slab_unreclaimable": 0,
+          "slab": 0,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 0,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgscan": 0,
+          "pgsteal": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 0,
+          "pgscan_khugepaged": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 0,
+          "pgsteal_khugepaged": 0,
+          "pgfault": 1039,
+          "pgmajfault": 0,
+          "pgrefill": 0,
+          "pgactivate": 0,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 0,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        },
+        "pressure": {
+          "some": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          },
+          "full": {
+            "avg10": 0,
+            "avg60": 0,
+            "avg300": 0,
+            "total": 0
+          }
+        }
+      },
+      "phase_peak_bytes": null
+    }
+  ],
+  "timeline": [
+    {
+      "elapsed_ms": 13.356426,
+      "current_bytes": 0
+    },
+    {
+      "elapsed_ms": 25.087507,
+      "current_bytes": 524288
+    },
+    {
+      "elapsed_ms": 35.70255,
+      "current_bytes": 524288
+    },
+    {
+      "elapsed_ms": 45.100905,
+      "current_bytes": 524288
+    },
+    {
+      "elapsed_ms": 55.381163,
+      "current_bytes": 524288
+    },
+    {
+      "elapsed_ms": 65.857853,
+      "current_bytes": 524288
+    },
+    {
+      "elapsed_ms": 76.136521,
+      "current_bytes": 524288
+    },
+    {
+      "elapsed_ms": 86.553431,
+      "current_bytes": 524288
+    },
+    {
+      "elapsed_ms": 96.853041,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 107.107408,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 117.326465,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 127.541252,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 137.749419,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 147.108494,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 157.384172,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 167.594258,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 177.838626,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 188.036013,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 198.24349,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 208.66033,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 218.899878,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 229.121555,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 239.343862,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 249.559409,
+      "current_bytes": 786432
+    },
+    {
+      "elapsed_ms": 259.033165,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 269.252122,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 279.467799,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 289.228,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 299.434277,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 309.836596,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 320.040723,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 330.24064,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 340.445137,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 350.639654,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 360.8464,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 371.083529,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 381.285196,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 391.498263,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 401.025959,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 411.236566,
+      "current_bytes": 1048576
+    },
+    {
+      "elapsed_ms": 421.25022,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 431.463747,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 441.833777,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 452.048804,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 462.265181,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 472.478248,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 482.838587,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 493.056425,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 503.271392,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 513.470529,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 523.838338,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 534.080236,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 544.484525,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 554.696432,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 563.949725,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 574.164072,
+      "current_bytes": 1310720
+    },
+    {
+      "elapsed_ms": 584.361659,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 594.544025,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 604.734832,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 613.978765,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 624.170651,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 634.405249,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 644.698337,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 653.949719,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 664.205427,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 674.1399,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 684.350427,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 694.832638,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 705.072585,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 715.343464,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 725.766114,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 735.086437,
+      "current_bytes": 1572864
+    },
+    {
+      "elapsed_ms": 745.355066,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 755.628434,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 765.911122,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 776.1894,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 786.470388,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 796.863107,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 807.268988,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 817.697508,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 827.890925,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 838.123372,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 848.315139,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 858.518886,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 868.916435,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 879.199363,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 889.680705,
+      "current_bytes": 1835008
+    },
+    {
+      "elapsed_ms": 898.984018,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 909.239175,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 919.516394,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 930.29686,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 940.489946,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 950.700073,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 960.88592,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 971.082886,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 981.279433,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 991.528392,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 1001.788819,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 1011.067501,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 1021.304309,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 1031.683789,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 1041.015092,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 1051.2894,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 1061.166032,
+      "current_bytes": 2097152
+    },
+    {
+      "elapsed_ms": 1071.379669,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1081.635757,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1091.891555,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1102.152402,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1112.40889,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1122.887321,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1133.165319,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1143.434977,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1153.902608,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1164.172616,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1174.450494,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1184.893694,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1195.063481,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1205.318098,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1215.573387,
+      "current_bytes": 2359296
+    },
+    {
+      "elapsed_ms": 1225.936866,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1236.193454,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1246.459771,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1256.865761,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1267.294361,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1277.519588,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1287.738736,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1297.006808,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1307.260306,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1317.100687,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1327.313794,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1337.533651,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1347.886451,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1358.104928,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1368.330825,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1378.761276,
+      "current_bytes": 2621440
+    },
+    {
+      "elapsed_ms": 1388.038729,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1398.257406,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1408.507323,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1418.897363,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1429.14951,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1439.402558,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1449.247769,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1459.503567,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1469.891457,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1480.144205,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1490.403093,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1500.719501,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1510.001324,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1520.231581,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1530.483609,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1540.917279,
+      "current_bytes": 2883584
+    },
+    {
+      "elapsed_ms": 1551.168607,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1561.420704,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1571.856675,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1582.929425,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1593.185783,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1603.45026,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1613.916192,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1624.17336,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1634.440237,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1644.873668,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1655.168456,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1665.430243,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1675.699861,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1684.979734,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1695.208821,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1705.687432,
+      "current_bytes": 3145728
+    },
+    {
+      "elapsed_ms": 1715.886909,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1726.121147,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1736.389485,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1746.855196,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1757.129224,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1767.379271,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1777.72617,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1787.004943,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1797.269651,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1807.512138,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1817.890838,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1828.119416,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1838.11507,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1848.366667,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1858.627705,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1868.04089,
+      "current_bytes": 3407872
+    },
+    {
+      "elapsed_ms": 1878.267677,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 1888.529935,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 1897.969409,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 1908.196637,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 1918.430064,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 1928.710652,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 1937.995044,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 1948.227312,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 1960.331218,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 1970.555065,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 1980.858834,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 1991.148962,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 2001.42759,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 2011.88095,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 2022.140169,
+      "current_bytes": 3670016
+    },
+    {
+      "elapsed_ms": 2032.421407,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2042.885147,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2053.147895,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2063.381182,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2073.624909,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2083.084145,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2093.770189,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2103.026172,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2113.239109,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2123.572677,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2134.272772,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2144.729973,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2154.060446,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2164.336514,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2174.797825,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2184.259211,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2194.565229,
+      "current_bytes": 3932160
+    },
+    {
+      "elapsed_ms": 2204.864737,
+      "current_bytes": 4194304
+    },
+    {
+      "elapsed_ms": 2215.171966,
+      "current_bytes": 4194304
+    },
+    {
+      "elapsed_ms": 2235.052151,
+      "current_bytes": 4194304
+    },
+    {
+      "elapsed_ms": 2249.022276,
+      "current_bytes": 16384
+    },
+    {
+      "elapsed_ms": 2249.647975,
+      "current_bytes": 16384
+    }
+  ],
+  "final_cgroup": {
+    "current_bytes": 16384,
+    "peak_bytes": 4194304,
+    "swap_current_bytes": 0,
+    "stat_bytes": {
+      "anon": 0,
+      "file": 0,
+      "kernel": 16384,
+      "kernel_stack": 0,
+      "pagetables": 0,
+      "sec_pagetables": 0,
+      "percpu": 0,
+      "sock": 0,
+      "vmalloc": 0,
+      "shmem": 0,
+      "zswap": 0,
+      "zswapped": 0,
+      "file_mapped": 0,
+      "file_dirty": 0,
+      "file_writeback": 0,
+      "swapcached": 0,
+      "anon_thp": 0,
+      "file_thp": 0,
+      "shmem_thp": 0,
+      "inactive_anon": 0,
+      "active_anon": 0,
+      "inactive_file": 0,
+      "active_file": 0,
+      "unevictable": 0,
+      "slab_reclaimable": 0,
+      "slab_unreclaimable": 0,
+      "slab": 0,
+      "workingset_refault_anon": 0,
+      "workingset_refault_file": 0,
+      "workingset_activate_anon": 0,
+      "workingset_activate_file": 0,
+      "workingset_restore_anon": 0,
+      "workingset_restore_file": 0,
+      "workingset_nodereclaim": 0,
+      "pgscan": 0,
+      "pgsteal": 0,
+      "pgscan_kswapd": 0,
+      "pgscan_direct": 0,
+      "pgscan_khugepaged": 0,
+      "pgsteal_kswapd": 0,
+      "pgsteal_direct": 0,
+      "pgsteal_khugepaged": 0,
+      "pgfault": 1046,
+      "pgmajfault": 0,
+      "pgrefill": 0,
+      "pgactivate": 0,
+      "pgdeactivate": 0,
+      "pglazyfree": 0,
+      "pglazyfreed": 0,
+      "zswpin": 0,
+      "zswpout": 0,
+      "zswpwb": 0,
+      "thp_fault_alloc": 0,
+      "thp_collapse_alloc": 0,
+      "thp_swpout": 0,
+      "thp_swpout_fallback": 0
+    },
+    "events": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0
+    },
+    "pressure": {
+      "some": {
+        "avg10": 0,
+        "avg60": 0,
+        "avg300": 0,
+        "total": 0
+      },
+      "full": {
+        "avg10": 0,
+        "avg60": 0,
+        "avg300": 0,
+        "total": 0
+      }
+    }
+  },
+  "child_stderr": ""
+}
