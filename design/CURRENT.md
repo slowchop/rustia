@@ -198,9 +198,11 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    enforces that logical-live boundary with one forced-collection retry, catchable OOM, preflight for large
    string/table/buffer requests, and candidate-before-commit growing table writes. Script-visible
    `gcinfo`/`collectgarbage("count")` remain compatibility values until O(1) incremental accounting replaces the
-   correctness-first quota-mode boundary scan. Still required before public release: lifecycle reset and
-   representative long-lived native/wasm mixed-heap pressure evidence. GC interval tuning is not a substitute
-   for those remaining policies.
+   correctness-first quota-mode boundary scan. Exact-commit Linode cohort `safe-memory-588b541` retained 99
+   native samples after confirmed deletion, passed the wasm32 512 KiB quota/recovery probe, tied the 256 KiB
+   best shared peak, and reduced the shared retained mean to 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. Still
+   required before public release: lifecycle reset, O(1) accounting, and broader mixed-heap pressure coverage.
+   GC interval tuning is not a substitute for those remaining policies.
 2. **A mechanically enforced per-decision lifecycle.** The deterministic host contract says authoritative
    cross-tick state lives in host slots and the script heap is transient, but the public facade does not yet
    provide a decision/scratch reset primitive. Hosts can reconstruct a VM today; the roadmap requires an
@@ -400,13 +402,11 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 
 ## What's next (the genuine remaining public-release gates)
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items, in order:
-1. **Validate bounded object reclamation, quotas, OOM behavior, and implement per-decision reset/reuse
-   against the frozen pre-reclamation baseline.** Use the external cgroup/smaps phase, peak, and
-   retention protocol in [`57-memory-benchmarking.md`](57-memory-benchmarking.md); cohort
-   `pre-reclamation-18b58d8` is the pre-change comparator.
-   Coroutine/program stores, true public-handle rooting, weak tables, cyclic graphs, and hot reload now have the
-   first safety coverage; complete the native/wasm pressure evidence. Ordinary retained calls survive hot reload
-   outside an explicit reset epoch.
+1. **Implement per-decision reset/reuse and broaden the mixed-heap pressure matrix.** The frozen comparator is
+   `pre-reclamation-18b58d8`; exact-commit cohort `safe-memory-588b541` now validates the bounded native
+   workloads and wasm32 quota/recovery path. Coroutine/program stores, true public-handle rooting, weak tables,
+   cyclic graphs, hot reload, logical-live quotas, and atomic OOM have their first safety coverage. Ordinary
+   retained calls survive hot reload outside an explicit reset epoch.
 2. **Complete the host service and rich-value boundary:** O(1) quota accounting, a worker-local/per-call host
    context, a host-owned
    deterministic module resolver/cache, binary/rich/cyclic values, live-value serde, transactional

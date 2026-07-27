@@ -1,0 +1,10 @@
+{
+  "captured_at": "2026-07-27T04:38:50.911Z",
+  "platform": "linux",
+  "arch": "x64",
+  "release": "6.8.0-134-generic",
+  "hostname": "localhost",
+  "uname": "Linux localhost 6.8.0-134-generic #134-Ubuntu SMP PREEMPT_DYNAMIC Fri Jun 26 18:43:11 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux",
+  "cgroup_filesystems": "nodev\tsysfs\nnodev\ttmpfs\nnodev\tbdev\nnodev\tproc\nnodev\tcgroup\nnodev\tcgroup2\nnodev\tcpuset\nnodev\tdevtmpfs\nnodev\tconfigfs\nnodev\tdebugfs\nnodev\ttracefs\nnodev\tsecurityfs\nnodev\tsockfs\nnodev\tbpf\nnodev\tpipefs\nnodev\tramfs\nnodev\thugetlbfs\nnodev\tdevpts\n\text3\n\text2\n\text4\n\tsquashfs\n\tvfat\nnodev\tecryptfs\n\tfuseblk\nnodev\tfuse\nnodev\tfusectl\nnodev\tefivarfs\nnodev\tmqueue\nnodev\tpstore\n\tbtrfs\nnodev\tautofs\nnodev\tbinfmt_misc\n",
+  "cpuinfo_sha256": "f08da87ed673992cbb3814df906dcca2f6eee370604d28eb9d2650e34af75f82"
+}

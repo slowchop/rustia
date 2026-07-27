@@ -310,8 +310,12 @@ instrumentation cost. Such traces explain *why* a cohort moved; they do not repl
    replace tree-set mark scratch. A logical-live per-VM quota now forces one collection before catchable OOM,
    preflights large string/table/buffer requests, and commits growing table writes only after an exact candidate
    fits. The script-visible counters and quota hot path still await O(1) incremental accounting because a full
-   census in legacy `gcinfo` polling loops is quadratic. Native/wasm pressure evidence, allocator page-return
-   evidence, and lifecycle reset are next.
+   census in legacy `gcinfo` polling loops is quadratic. Exact-commit cohort `safe-memory-588b541` retained 99
+   native samples after confirmed Linode deletion and passed the wasm32 512 KiB quota/recovery probe. Relative
+   to the frozen competitor cohort, Rustia ties the 256 KiB best shared-workload peak, ranks first for stress
+   peak, second for stress retention, second for todo peak, and third for todo retention. The shared retained
+   mean is 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. Broader allocator page-return evidence and lifecycle reset
+   are next.
 8. Add the periodic `memory.max` pressure curve and targeted attribution tooling.
 
 ## Acceptance gate before memory work is declared complete

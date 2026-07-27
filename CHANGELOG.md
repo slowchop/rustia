@@ -30,6 +30,13 @@ Current unpublished workspace version: `0.0.1`.
   then returns catchable `OutOfMemory`; large string/table/buffer allocations
   are preflighted and growth writes stage a complete candidate before commit,
   so rejection is recoverable without a partial table mutation.
+- The exact-commit `safe-memory-588b541` Sydney Linode cohort retained all 99
+  native samples after confirmed server deletion and also passed the wasm32
+  512 KiB quota/recovery probe. Against the frozen competitor cohort, Rustia
+  now ties the 256 KiB best shared-workload peak, ranks first for allocation
+  stress peak, second for stress retention, second for todo peak, and third for
+  todo retention. Its shared-workload retained mean is 14.4 KiB versus
+  mlua/Luau/JIT's 24.8 KiB.
 - Luau 0.709 conformance tracking is pending-free, with the current manifest at
   694 fixtures and 493 behavior refs.
 - VM strings and larger insertion-ordered table hash parts now use compact

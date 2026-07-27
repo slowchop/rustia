@@ -153,9 +153,11 @@ remain on their O(1) compatibility path until incremental accounting can back th
 census. `VmSettings::memory_limit_bytes` now enforces a deterministic logical-live quota: pressure forces one
 collection, preflights large string/table/buffer allocations, stages growing table writes before commit, and
 returns catchable `OutOfMemory`. The correctness-first implementation scans at quota-enabled instruction
-boundaries; O(1) incremental accounting is a later performance optimization. The remaining axis-D work is
-lifecycle reset and long-run native/wasm mixed-heap pressure/plateau evidence before interval tuning is
-meaningful.
+boundaries; O(1) incremental accounting is a later performance optimization. Exact-commit Linode cohort
+`safe-memory-588b541` retained 99 native samples after confirmed deletion and passed the wasm32 512 KiB
+quota/recovery probe. Rustia tied the 256 KiB best shared-workload peak and retained a 14.4 KiB shared mean,
+below the frozen mlua/Luau/JIT reference's 24.8 KiB. The remaining axis-D work is lifecycle reset, O(1)
+accounting, and broader mixed-heap pressure/plateau coverage before interval tuning is meaningful.
 
 **E. Determinism enforcement — LOCKED.** Dense `Vec` array parts plus insertion-ordered `Vec` hash entries;
 larger hash parts use a stable custom-mixed open-addressed `Vec<u32>` side index at no more than 50% load, and
