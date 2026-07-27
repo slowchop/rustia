@@ -127,6 +127,7 @@ function checkCi(text) {
   requireIncludes(text, "node tools/check-benchmark-results.js", label);
   requireIncludes(text, "node tools/check-wasm-gate-results.js", label);
   requireIncludes(text, "node tools/check-current-report-summary.js", label);
+  requireIncludes(text, "node tools/merge-rustia-ci-memory-data.js self-test", label);
   requireIncludes(text, "node bench/render-current-results.js --check", label);
   requireIncludes(text, "node bench/render-claims.js --check", label);
   requireIncludes(text, "cargo test -p rustia --examples --no-run", label);
@@ -156,6 +157,11 @@ function checkRustiaMemory(text) {
   requireIncludes(text, "node tools/create-rustia-ci-memory-config.js", label);
   requireIncludes(text, "node tools/run-linode-benchmark.js bench", label);
   requireIncludes(text, "node tools/summarize-rustia-ci-memory.js", label);
+  requireIncludes(text, "BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
+  requireIncludes(text, "git@github.com:slowchop/rustia-bench-data.git", label);
+  requireIncludes(text, "node tools/merge-rustia-ci-memory-data.js", label);
+  requireIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
+  requireIncludes(text, "git -C \"$pages_dir\" push origin HEAD:gh-pages", label);
   requireIncludes(text, "node tools/run-linode-benchmark.js destroy", label);
   forbidIncludes(text, "actions/upload-artifact", label);
   forbidIncludes(text, "retention-days:", label);

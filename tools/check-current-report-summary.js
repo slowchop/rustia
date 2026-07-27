@@ -11,6 +11,8 @@ const {
   linuxComparisonSection,
   languagesByTargetSection,
   memoryComparisonCharts,
+  memoryHistoryModel,
+  memoryHistorySection,
   summarizeLanguageTargets,
   wasmTargetRows,
 } = require("../bench/render-current-results.js");
@@ -248,6 +250,58 @@ function main() {
   assert.match(memoryHtml, /arithmetic mean retained Δ · lower is better/);
   assert.ok(memoryHtml.indexOf("<strong>koto</strong>") < memoryHtml.indexOf("<strong>rustia</strong>"));
   assert.doesNotMatch(memoryHtml, /memory_retained_control|64 MiB/);
+
+  const memoryHistoryWorkloads = [
+    ...REQUIRED_COMMON_WORKLOADS,
+    "memory_burst",
+    "memory_churn",
+    "todo_history",
+    "todo_steady",
+  ];
+  const memoryHistoryRow = (engine, workload, peak, retained) => ({
+    target: "linux-x86_64",
+    engine,
+    workload,
+    metrics: {
+      peak_delta_kib: { median: peak },
+      quiescent_retained_delta_anon_kib: { median: retained },
+    },
+  });
+  const memoryHistory = [{
+    schema_version: 1,
+    schema: "rustia.bench.memory-cohort.v1",
+    cohort_id: "baseline",
+    commit: "baseline-commit",
+    created_at: "2026-07-01T00:00:00.000Z",
+    rows: memoryHistoryWorkloads.flatMap((workload) => [
+      memoryHistoryRow("mlua-luau-jit", workload, 100, 50),
+      memoryHistoryRow("rustia", workload, 200, 200),
+    ]),
+  }, {
+    schema_version: 1,
+    schema: "rustia.bench.memory-cohort.v1",
+    cohort_id: "current",
+    commit: "current-commit",
+    created_at: "2026-07-02T00:00:00.000Z",
+    rows: memoryHistoryWorkloads.map((workload) =>
+      memoryHistoryRow("rustia", workload, 50, 25)
+    ),
+  }];
+  const memoryHistoryModelValue = memoryHistoryModel(memoryHistory);
+  assert.equal(memoryHistoryModelValue.points.length, 2);
+  assert.equal(memoryHistoryModelValue.points[0].peak, 0.5);
+  assert.equal(memoryHistoryModelValue.points[0].retained, 0.25);
+  assert.equal(memoryHistoryModelValue.points[1].peak, 2);
+  assert.equal(memoryHistoryModelValue.points[1].retained, 2);
+  const memoryHistoryHtml = memoryHistorySection(memoryHistory);
+  assert.match(memoryHistoryHtml, /rustia Memory History/);
+  assert.match(memoryHistoryHtml, /data-memory-history-metric="peak" aria-pressed="true"/);
+  assert.match(memoryHistoryHtml, /data-memory-history-metric="retained" aria-pressed="false"/);
+  assert.match(memoryHistoryHtml, /data-history-axis="date" aria-pressed="true"/);
+  assert.match(memoryHistoryHtml, /data-history-axis="commit" aria-pressed="false"/);
+  assert.equal(count(memoryHistoryHtml, 'data-memory-history-metric-view="peak"'), 2);
+  assert.equal(count(memoryHistoryHtml, 'data-memory-history-metric-view="retained" hidden'), 2);
+  assert.match(memoryHistoryHtml, /mlua<\/strong> \/ Luau \/ JIT · 1×/);
 
   const wasmRows = wasmTargetRows({
     runs: [

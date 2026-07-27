@@ -3,11 +3,11 @@
   "schema": "rustia.bench.memory-current-results.v1",
   "status": "ready",
   "metadata": {
-    "description": "Latest coherent dedicated-Linux cross-engine memory cohort.",
-    "cohort_id": "pre-reclamation-18b58d8",
-    "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
-    "evidence": "bench/memory/raw/18b58d85431cdf38b7cf00665f1a348b305292aa/pre-reclamation-18b58d8",
-    "history": "history/runs.jsonl.incoming-26ed2b989be7",
+    "description": "Latest compatible dedicated-Linux memory rows by engine; Rustia is refreshed by successful main CI.",
+    "cohort_id": "rustia-ci-0fd5946add19",
+    "commit": "0fd5946add196854780cf5a87b9bfa3ab175a9c1",
+    "evidence": "bench/memory/raw/0fd5946add196854780cf5a87b9bfa3ab175a9c1/rustia-ci-0fd5946add19",
+    "history": "history/runs.jsonl",
     "targets": [
       "linux-x86_64"
     ],
@@ -53,7 +53,11 @@
       "absolute_growth_kib_per_epoch": 4,
       "proportional_growth_percent_per_epoch": 0.05,
       "rss_hwm_role": "diagnostic only"
-    }
+    },
+    "source_cohorts": [
+      "pre-reclamation-18b58d8",
+      "rustia-ci-0fd5946add19"
+    ]
   },
   "detector_coverage": [
     {
@@ -187,7 +191,7 @@
       "detector_validated": true
     },
     {
-      "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+      "commit": "0fd5946add196854780cf5a87b9bfa3ab175a9c1",
       "target": "linux-x86_64",
       "engine": "rustia",
       "retained_controls": [
@@ -1549,7 +1553,7 @@
       "classification": "stable_in_tested_window"
     },
     {
-      "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+      "commit": "0fd5946add196854780cf5a87b9bfa3ab175a9c1",
       "target": "linux-x86_64",
       "engine": "rustia",
       "dialect": "luau",
@@ -1590,27 +1594,27 @@
       "metrics": {
         "spawned_anon_kib": {
           "sample_count": 9,
-          "min": 1328,
-          "q1": 1328,
-          "median": 1328,
-          "q3": 1328,
-          "max": 1328
+          "min": 152,
+          "q1": 156,
+          "median": 156,
+          "q3": 156,
+          "max": 160
         },
         "spawned_pss_kib": {
           "sample_count": 9,
-          "min": 6398,
-          "q1": 6455,
-          "median": 6507,
-          "q3": 6555,
-          "max": 6678
+          "min": 1023,
+          "q1": 1023,
+          "median": 1059,
+          "q3": 1091,
+          "max": 1111
         },
         "prepared_delta_anon_kib": {
           "sample_count": 9,
-          "min": 132,
-          "q1": 132,
-          "median": 132,
-          "q3": 132,
-          "max": 132
+          "min": 124,
+          "q1": 128,
+          "median": 128,
+          "q3": 128,
+          "max": 128
         },
         "peak_delta_kib": {
           "sample_count": 9,
@@ -1622,64 +1626,64 @@
         },
         "quiescent_retained_delta_anon_kib": {
           "sample_count": 9,
-          "min": 28,
-          "q1": 28,
-          "median": 28,
-          "q3": 28,
-          "max": 28
+          "min": 8,
+          "q1": 8,
+          "median": 8,
+          "q3": 8,
+          "max": 8
         },
         "dropped_delta_anon_kib": {
           "sample_count": 9,
-          "min": 176,
-          "q1": 176,
-          "median": 176,
-          "q3": 176,
-          "max": 176
+          "min": 160,
+          "q1": 160,
+          "median": 160,
+          "q3": 160,
+          "max": 160
         },
         "recovery_ratio": {
           "sample_count": 9,
-          "min": 0.890625,
-          "q1": 0.890625,
-          "median": 0.890625,
-          "q3": 0.890625,
-          "max": 0.890625
+          "min": 0.96875,
+          "q1": 0.96875,
+          "median": 0.96875,
+          "q3": 0.96875,
+          "max": 0.96875
         },
         "tail_growth_kib_per_epoch": {
           "sample_count": 9,
-          "min": 0,
-          "q1": 0,
-          "median": 0,
-          "q3": 0,
-          "max": 0
+          "min": 0.6666666666666666,
+          "q1": 0.6666666666666666,
+          "median": 0.6666666666666666,
+          "q3": 0.6666666666666666,
+          "max": 0.6666666666666666
         },
         "tail_growth_percent_per_epoch": {
           "sample_count": 9,
-          "min": 0,
-          "q1": 0,
-          "median": 0,
-          "q3": 0,
-          "max": 0
+          "min": 0.21367521367521367,
+          "q1": 0.21645021645021645,
+          "median": 0.21645021645021645,
+          "q3": 0.21645021645021645,
+          "max": 0.21929824561403508
         },
         "memory_area_kib_seconds_per_unit": {
           "sample_count": 9,
-          "min": 0.0012914373750000001,
-          "q1": 0.0014072411249999995,
-          "median": 0.0024650453750000006,
-          "q3": 0.0025273182499999996,
-          "max": 0.0027104115
+          "min": 0.00121854275,
+          "q1": 0.0012479249999999996,
+          "median": 0.0012597607499999998,
+          "q3": 0.0012964584999999999,
+          "max": 0.0023757412500000005
         }
       },
       "tail_growth_ci_95": {
         "kib_per_epoch": {
-          "lower": 0,
-          "upper": 0
+          "lower": 0.6666666666666666,
+          "upper": 0.6666666666666666
         },
         "percent_per_epoch": {
-          "lower": 0,
-          "upper": 0
+          "lower": 0.21367521367521367,
+          "upper": 0.21929824561403508
         }
       },
-      "classification": "stable_in_tested_window"
+      "classification": "growth_signal"
     },
     {
       "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
@@ -3278,7 +3282,7 @@
       "classification": "stable_in_tested_window"
     },
     {
-      "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+      "commit": "0fd5946add196854780cf5a87b9bfa3ab175a9c1",
       "target": "linux-x86_64",
       "engine": "rustia",
       "dialect": "luau",
@@ -3319,96 +3323,96 @@
       "metrics": {
         "spawned_anon_kib": {
           "sample_count": 9,
-          "min": 1324,
-          "q1": 1328,
-          "median": 1328,
-          "q3": 1328,
-          "max": 1332
+          "min": 152,
+          "q1": 156,
+          "median": 156,
+          "q3": 156,
+          "max": 160
         },
         "spawned_pss_kib": {
           "sample_count": 9,
-          "min": 6395,
-          "q1": 6455,
-          "median": 6459,
-          "q3": 6515,
-          "max": 6675
+          "min": 1015,
+          "q1": 1063,
+          "median": 1095,
+          "q3": 1103,
+          "max": 1115
         },
         "prepared_delta_anon_kib": {
           "sample_count": 9,
-          "min": 128,
-          "q1": 128,
-          "median": 132,
-          "q3": 132,
-          "max": 132
+          "min": 132,
+          "q1": 136,
+          "median": 136,
+          "q3": 136,
+          "max": 136
         },
         "peak_delta_kib": {
           "sample_count": 9,
-          "min": 9216,
-          "q1": 9216,
-          "median": 9216,
-          "q3": 9216,
-          "max": 9216
+          "min": 256,
+          "q1": 256,
+          "median": 256,
+          "q3": 256,
+          "max": 256
         },
         "quiescent_retained_delta_anon_kib": {
           "sample_count": 9,
-          "min": 8424,
-          "q1": 8424,
-          "median": 8424,
-          "q3": 8424,
-          "max": 8424
+          "min": 16,
+          "q1": 16,
+          "median": 16,
+          "q3": 16,
+          "max": 16
         },
         "dropped_delta_anon_kib": {
           "sample_count": 9,
-          "min": 292,
-          "q1": 292,
-          "median": 296,
-          "q3": 296,
-          "max": 296
+          "min": 168,
+          "q1": 172,
+          "median": 172,
+          "q3": 172,
+          "max": 172
         },
         "recovery_ratio": {
           "sample_count": 9,
-          "min": 0.0859375,
-          "q1": 0.0859375,
-          "median": 0.0859375,
-          "q3": 0.0859375,
-          "max": 0.0859375
+          "min": 0.9375,
+          "q1": 0.9375,
+          "median": 0.9375,
+          "q3": 0.9375,
+          "max": 0.9375
         },
         "tail_growth_kib_per_epoch": {
           "sample_count": 9,
-          "min": 526,
-          "q1": 526,
-          "median": 526,
-          "q3": 526,
-          "max": 526
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
         },
         "tail_growth_percent_per_epoch": {
           "sample_count": 9,
-          "min": 26.24750499001996,
-          "q1": 26.24750499001996,
-          "median": 26.24750499001996,
-          "q3": 26.24750499001996,
-          "max": 26.3
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
         },
         "memory_area_kib_seconds_per_unit": {
           "sample_count": 9,
-          "min": 0.29310590675,
-          "q1": 0.309925074875,
-          "median": 0.3237912035,
-          "q3": 0.3332503897500001,
-          "max": 0.3431623006875001
+          "min": 0.013148525124999998,
+          "q1": 0.013271670875,
+          "median": 0.013560948,
+          "q3": 0.013866930875,
+          "max": 0.014012032374999999
         }
       },
       "tail_growth_ci_95": {
         "kib_per_epoch": {
-          "lower": 526,
-          "upper": 526
+          "lower": 0,
+          "upper": 0
         },
         "percent_per_epoch": {
-          "lower": 26.24750499001996,
-          "upper": 26.3
+          "lower": 0,
+          "upper": 0
         }
       },
-      "classification": "growth_signal"
+      "classification": "stable_in_tested_window"
     },
     {
       "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
@@ -5007,7 +5011,7 @@
       "classification": "stable_in_tested_window"
     },
     {
-      "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+      "commit": "0fd5946add196854780cf5a87b9bfa3ab175a9c1",
       "target": "linux-x86_64",
       "engine": "rustia",
       "dialect": "luau",
@@ -5048,96 +5052,96 @@
       "metrics": {
         "spawned_anon_kib": {
           "sample_count": 9,
-          "min": 1324,
-          "q1": 1328,
-          "median": 1328,
-          "q3": 1332,
-          "max": 1332
+          "min": 152,
+          "q1": 156,
+          "median": 156,
+          "q3": 156,
+          "max": 160
         },
         "spawned_pss_kib": {
           "sample_count": 9,
-          "min": 6399,
-          "q1": 6403,
-          "median": 6435,
-          "q3": 6655,
-          "max": 6783
+          "min": 1015,
+          "q1": 1019,
+          "median": 1095,
+          "q3": 1099,
+          "max": 1119
         },
         "prepared_delta_anon_kib": {
           "sample_count": 9,
-          "min": 160,
-          "q1": 160,
-          "median": 160,
-          "q3": 160,
-          "max": 160
+          "min": 152,
+          "q1": 156,
+          "median": 156,
+          "q3": 156,
+          "max": 156
         },
         "peak_delta_kib": {
           "sample_count": 9,
-          "min": 768,
-          "q1": 768,
-          "median": 768,
-          "q3": 768,
-          "max": 768
+          "min": 256,
+          "q1": 256,
+          "median": 256,
+          "q3": 256,
+          "max": 256
         },
         "quiescent_retained_delta_anon_kib": {
           "sample_count": 9,
-          "min": 504,
-          "q1": 504,
-          "median": 504,
-          "q3": 504,
-          "max": 504
+          "min": 12,
+          "q1": 12,
+          "median": 12,
+          "q3": 12,
+          "max": 12
         },
         "dropped_delta_anon_kib": {
           "sample_count": 9,
-          "min": 352,
-          "q1": 352,
-          "median": 352,
-          "q3": 352,
-          "max": 352
+          "min": 196,
+          "q1": 196,
+          "median": 200,
+          "q3": 200,
+          "max": 200
         },
         "recovery_ratio": {
           "sample_count": 9,
-          "min": 0.34375,
-          "q1": 0.34375,
-          "median": 0.34375,
-          "q3": 0.34375,
-          "max": 0.34375
+          "min": 0.953125,
+          "q1": 0.953125,
+          "median": 0.953125,
+          "q3": 0.953125,
+          "max": 0.953125
         },
         "tail_growth_kib_per_epoch": {
           "sample_count": 9,
-          "min": 21,
-          "q1": 21,
-          "median": 21,
-          "q3": 21,
-          "max": 21
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
         },
         "tail_growth_percent_per_epoch": {
           "sample_count": 9,
-          "min": 1.3565891472868217,
-          "q1": 1.3565891472868217,
-          "median": 1.3601036269430051,
-          "q3": 1.3601036269430051,
-          "max": 1.3636363636363635
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
         },
         "memory_area_kib_seconds_per_unit": {
           "sample_count": 9,
-          "min": 0.0111549494375,
-          "q1": 0.014031811437500001,
-          "median": 0.014227722250000002,
-          "q3": 0.014390705187500002,
-          "max": 0.015190958125
+          "min": 0.005066883374999999,
+          "q1": 0.005334024125000001,
+          "median": 0.0055105628750000005,
+          "q3": 0.005662150375,
+          "max": 0.006349729625
         }
       },
       "tail_growth_ci_95": {
         "kib_per_epoch": {
-          "lower": 21,
-          "upper": 21
+          "lower": 0,
+          "upper": 0
         },
         "percent_per_epoch": {
-          "lower": 1.3565891472868217,
-          "upper": 1.3601036269430051
+          "lower": 0,
+          "upper": 0
         }
       },
-      "classification": "growth_signal"
+      "classification": "stable_in_tested_window"
     },
     {
       "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
@@ -6470,7 +6474,7 @@
       "classification": "stable_in_tested_window"
     },
     {
-      "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+      "commit": "0fd5946add196854780cf5a87b9bfa3ab175a9c1",
       "target": "linux-x86_64",
       "engine": "rustia",
       "dialect": "luau",
@@ -6511,93 +6515,93 @@
       "metrics": {
         "spawned_anon_kib": {
           "sample_count": 9,
-          "min": 1324,
-          "q1": 1328,
-          "median": 1328,
-          "q3": 1332,
-          "max": 1332
+          "min": 152,
+          "q1": 156,
+          "median": 156,
+          "q3": 156,
+          "max": 160
         },
         "spawned_pss_kib": {
           "sample_count": 9,
-          "min": 6395,
-          "q1": 6459,
-          "median": 6499,
-          "q3": 6551,
-          "max": 6783
+          "min": 1071,
+          "q1": 1075,
+          "median": 1095,
+          "q3": 1099,
+          "max": 1119
         },
         "prepared_delta_anon_kib": {
           "sample_count": 9,
-          "min": 136,
-          "q1": 136,
-          "median": 140,
-          "q3": 140,
-          "max": 140
+          "min": 128,
+          "q1": 132,
+          "median": 132,
+          "q3": 132,
+          "max": 132
         },
         "peak_delta_kib": {
           "sample_count": 9,
-          "min": 10240,
-          "q1": 10240,
-          "median": 10240,
-          "q3": 10240,
-          "max": 10240
+          "min": 1024,
+          "q1": 1024,
+          "median": 1024,
+          "q3": 1024,
+          "max": 1024
         },
         "quiescent_retained_delta_anon_kib": {
           "sample_count": 9,
-          "min": 9228,
-          "q1": 9228,
-          "median": 9228,
-          "q3": 9228,
-          "max": 9228
+          "min": 36,
+          "q1": 36,
+          "median": 36,
+          "q3": 36,
+          "max": 36
         },
         "dropped_delta_anon_kib": {
           "sample_count": 9,
-          "min": 1892,
-          "q1": 1892,
-          "median": 1896,
-          "q3": 1896,
-          "max": 1896
+          "min": 820,
+          "q1": 824,
+          "median": 824,
+          "q3": 824,
+          "max": 824
         },
         "recovery_ratio": {
           "sample_count": 9,
-          "min": 0.098828125,
-          "q1": 0.098828125,
-          "median": 0.098828125,
-          "q3": 0.098828125,
-          "max": 0.098828125
+          "min": 0.96484375,
+          "q1": 0.96484375,
+          "median": 0.96484375,
+          "q3": 0.96484375,
+          "max": 0.96484375
         },
         "tail_growth_kib_per_epoch": {
           "sample_count": 9,
-          "min": 578,
-          "q1": 578,
-          "median": 578,
-          "q3": 578,
-          "max": 578
+          "min": 1.8571428571428572,
+          "q1": 1.8571428571428572,
+          "median": 1.8571428571428572,
+          "q3": 1.8571428571428572,
+          "max": 1.8571428571428572
         },
         "tail_growth_percent_per_epoch": {
           "sample_count": 9,
-          "min": 27.842003853564545,
-          "q1": 27.895752895752896,
-          "median": 27.895752895752896,
-          "q3": 27.949709864603484,
-          "max": 27.949709864603484
+          "min": 0.19590114526823388,
+          "q1": 0.19673123486682811,
+          "median": 0.19673123486682811,
+          "q3": 0.19673123486682811,
+          "max": 0.1975683890577508
         },
         "memory_area_kib_seconds_per_unit": {
           "sample_count": 9,
-          "min": 30.942506024,
-          "q1": 31.414640199999997,
-          "median": 32.279874392,
-          "q3": 34.721112063999996,
-          "max": 39.068940416000004
+          "min": 9.327179968,
+          "q1": 9.597074368,
+          "median": 9.680417471999998,
+          "q3": 9.779906175999999,
+          "max": 9.893181376
         }
       },
       "tail_growth_ci_95": {
         "kib_per_epoch": {
-          "lower": 578,
-          "upper": 578
+          "lower": 1.8571428571428572,
+          "upper": 1.8571428571428572
         },
         "percent_per_epoch": {
-          "lower": 27.895752895752896,
-          "upper": 27.949709864603484
+          "lower": 0.19673123486682811,
+          "upper": 0.1975683890577508
         }
       },
       "classification": "growth_signal"
@@ -7859,7 +7863,7 @@
       "classification": "stable_in_tested_window"
     },
     {
-      "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+      "commit": "0fd5946add196854780cf5a87b9bfa3ab175a9c1",
       "target": "linux-x86_64",
       "engine": "rustia",
       "dialect": "luau",
@@ -7924,23 +7928,23 @@
       "metrics": {
         "spawned_anon_kib": {
           "sample_count": 9,
-          "min": 1328,
-          "q1": 1328,
-          "median": 1328,
-          "q3": 1332,
-          "max": 1332
+          "min": 152,
+          "q1": 152,
+          "median": 156,
+          "q3": 156,
+          "max": 160
         },
         "spawned_pss_kib": {
           "sample_count": 9,
-          "min": 6398,
-          "q1": 6442,
-          "median": 6467,
-          "q3": 6519,
-          "max": 6783
+          "min": 1017,
+          "q1": 1063,
+          "median": 1099,
+          "q3": 1111,
+          "max": 1115
         },
         "prepared_delta_anon_kib": {
           "sample_count": 9,
-          "min": 140,
+          "min": 144,
           "q1": 144,
           "median": 144,
           "q3": 144,
@@ -7948,69 +7952,69 @@
         },
         "peak_delta_kib": {
           "sample_count": 9,
-          "min": 3584,
-          "q1": 3584,
-          "median": 3584,
-          "q3": 3584,
-          "max": 3584
+          "min": 1280,
+          "q1": 1280,
+          "median": 1280,
+          "q3": 1280,
+          "max": 1280
         },
         "quiescent_retained_delta_anon_kib": {
           "sample_count": 9,
-          "min": 3220,
-          "q1": 3220,
-          "median": 3220,
-          "q3": 3220,
-          "max": 3220
+          "min": 800,
+          "q1": 800,
+          "median": 800,
+          "q3": 800,
+          "max": 804
         },
         "dropped_delta_anon_kib": {
           "sample_count": 9,
-          "min": 984,
-          "q1": 988,
-          "median": 988,
-          "q3": 988,
-          "max": 988
+          "min": 944,
+          "q1": 944,
+          "median": 944,
+          "q3": 948,
+          "max": 948
         },
         "recovery_ratio": {
           "sample_count": 9,
-          "min": 0.1015625,
-          "q1": 0.1015625,
-          "median": 0.1015625,
-          "q3": 0.1015625,
-          "max": 0.1015625
+          "min": 0.371875,
+          "q1": 0.375,
+          "median": 0.375,
+          "q3": 0.375,
+          "max": 0.375
         },
         "tail_growth_kib_per_epoch": {
           "sample_count": 9,
-          "min": 80.5,
-          "q1": 80.5,
-          "median": 80.5,
-          "q3": 80.5,
-          "max": 80.5
+          "min": 2.4,
+          "q1": 2.4,
+          "median": 2.4,
+          "q3": 2.4,
+          "max": 2.4
         },
         "tail_growth_percent_per_epoch": {
           "sample_count": 9,
-          "min": 5.1078680203045685,
-          "q1": 5.120865139949109,
-          "median": 5.120865139949109,
-          "q3": 5.120865139949109,
-          "max": 5.120865139949109
+          "min": 0.5607476635514018,
+          "q1": 0.5660377358490566,
+          "median": 0.5660377358490566,
+          "q3": 0.5660377358490566,
+          "max": 0.5714285714285714
         },
         "memory_area_kib_seconds_per_unit": {
           "sample_count": 9,
-          "min": 3.3923883328000004,
-          "q1": 3.5992450080000005,
-          "median": 3.7398511711999993,
-          "q3": 4.1791488384,
-          "max": 4.468945545599999
+          "min": 3.6069913151999997,
+          "q1": 3.8430169472,
+          "median": 3.8769094527999997,
+          "q3": 4.0130618432,
+          "max": 4.166398912
         }
       },
       "tail_growth_ci_95": {
         "kib_per_epoch": {
-          "lower": 80.5,
-          "upper": 80.5
+          "lower": 2.4,
+          "upper": 2.4
         },
         "percent_per_epoch": {
-          "lower": 5.1078680203045685,
-          "upper": 5.120865139949109
+          "lower": 0.5660377358490566,
+          "upper": 0.5714285714285714
         }
       },
       "classification": "growth_signal"
@@ -9272,7 +9276,7 @@
       "classification": "expected_retention"
     },
     {
-      "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+      "commit": "0fd5946add196854780cf5a87b9bfa3ab175a9c1",
       "target": "linux-x86_64",
       "engine": "rustia",
       "dialect": "luau",
@@ -9337,93 +9341,93 @@
       "metrics": {
         "spawned_anon_kib": {
           "sample_count": 9,
-          "min": 1324,
-          "q1": 1328,
-          "median": 1328,
-          "q3": 1332,
-          "max": 1332
+          "min": 152,
+          "q1": 156,
+          "median": 156,
+          "q3": 156,
+          "max": 156
         },
         "spawned_pss_kib": {
           "sample_count": 9,
-          "min": 6394,
-          "q1": 6438,
-          "median": 6463,
-          "q3": 6507,
-          "max": 6658
+          "min": 1015,
+          "q1": 1019,
+          "median": 1047,
+          "q3": 1071,
+          "max": 1099
         },
         "prepared_delta_anon_kib": {
           "sample_count": 9,
-          "min": 144,
-          "q1": 148,
-          "median": 148,
-          "q3": 148,
-          "max": 148
+          "min": 136,
+          "q1": 140,
+          "median": 140,
+          "q3": 140,
+          "max": 140
         },
         "peak_delta_kib": {
           "sample_count": 9,
-          "min": 3584,
-          "q1": 3584,
-          "median": 3584,
-          "q3": 3584,
-          "max": 3584
+          "min": 3840,
+          "q1": 3840,
+          "median": 3840,
+          "q3": 3840,
+          "max": 3840
         },
         "quiescent_retained_delta_anon_kib": {
           "sample_count": 9,
-          "min": 3228,
-          "q1": 3228,
-          "median": 3228,
-          "q3": 3228,
-          "max": 3228
+          "min": 3484,
+          "q1": 3484,
+          "median": 3484,
+          "q3": 3484,
+          "max": 3484
         },
         "dropped_delta_anon_kib": {
           "sample_count": 9,
-          "min": 2564,
-          "q1": 2568,
-          "median": 2568,
-          "q3": 2568,
-          "max": 2568
+          "min": 2844,
+          "q1": 2844,
+          "median": 2844,
+          "q3": 2844,
+          "max": 2848
         },
         "recovery_ratio": {
           "sample_count": 9,
-          "min": 0.09933035714285714,
-          "q1": 0.09933035714285714,
-          "median": 0.09933035714285714,
-          "q3": 0.09933035714285714,
-          "max": 0.09933035714285714
+          "min": 0.09270833333333334,
+          "q1": 0.09270833333333334,
+          "median": 0.09270833333333334,
+          "q3": 0.09270833333333334,
+          "max": 0.09270833333333334
         },
         "tail_growth_kib_per_epoch": {
           "sample_count": 9,
-          "min": 80.5,
-          "q1": 80.5,
-          "median": 80.5,
-          "q3": 80.5,
-          "max": 80.5
+          "min": 86.48076923076923,
+          "q1": 86.48076923076923,
+          "median": 86.48076923076923,
+          "q3": 86.48076923076923,
+          "max": 86.48076923076923
         },
         "tail_growth_percent_per_epoch": {
           "sample_count": 9,
-          "min": 5.120865139949109,
-          "q1": 5.133928571428571,
-          "median": 5.133928571428571,
-          "q3": 5.133928571428571,
-          "max": 5.147058823529411
+          "min": 20.59065934065934,
+          "q1": 20.78864644970414,
+          "median": 20.78864644970414,
+          "q3": 20.78864644970414,
+          "max": 20.78864644970414
         },
         "memory_area_kib_seconds_per_unit": {
           "sample_count": 9,
-          "min": 3.1204658271999994,
-          "q1": 3.6846600447999998,
-          "median": 3.7552352320000004,
-          "q3": 4.0078222944,
-          "max": 4.0314656128
+          "min": 16.128178591999994,
+          "q1": 16.26423664,
+          "median": 16.3253861888,
+          "q3": 16.9859852224,
+          "max": 17.1830497696
         }
       },
       "tail_growth_ci_95": {
         "kib_per_epoch": {
-          "lower": 80.5,
-          "upper": 80.5
+          "lower": 86.48076923076923,
+          "upper": 86.48076923076923
         },
         "percent_per_epoch": {
-          "lower": 5.133928571428571,
-          "upper": 5.133928571428571
+          "lower": 20.78864644970414,
+          "upper": 20.78864644970414
         }
       },
       "classification": "expected_retention"
@@ -10759,7 +10763,7 @@
       "classification": "stable_in_tested_window"
     },
     {
-      "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+      "commit": "0fd5946add196854780cf5a87b9bfa3ab175a9c1",
       "target": "linux-x86_64",
       "engine": "rustia",
       "dialect": "luau",
@@ -10800,96 +10804,96 @@
       "metrics": {
         "spawned_anon_kib": {
           "sample_count": 9,
-          "min": 1328,
-          "q1": 1328,
-          "median": 1328,
-          "q3": 1332,
-          "max": 1332
+          "min": 156,
+          "q1": 156,
+          "median": 156,
+          "q3": 156,
+          "max": 160
         },
         "spawned_pss_kib": {
           "sample_count": 9,
-          "min": 6398,
-          "q1": 6399,
-          "median": 6494,
-          "q3": 6555,
-          "max": 6655
+          "min": 1015,
+          "q1": 1027,
+          "median": 1071,
+          "q3": 1079,
+          "max": 1115
         },
         "prepared_delta_anon_kib": {
           "sample_count": 9,
-          "min": 136,
-          "q1": 136,
-          "median": 140,
-          "q3": 140,
-          "max": 140
+          "min": 128,
+          "q1": 128,
+          "median": 132,
+          "q3": 132,
+          "max": 132
         },
         "peak_delta_kib": {
           "sample_count": 9,
-          "min": 15872,
-          "q1": 15872,
-          "median": 15872,
-          "q3": 15872,
-          "max": 15872
+          "min": 256,
+          "q1": 256,
+          "median": 256,
+          "q3": 256,
+          "max": 256
         },
         "quiescent_retained_delta_anon_kib": {
           "sample_count": 9,
-          "min": 14596,
-          "q1": 14596,
-          "median": 14596,
-          "q3": 14596,
-          "max": 14596
+          "min": 32,
+          "q1": 32,
+          "median": 32,
+          "q3": 32,
+          "max": 32
         },
         "dropped_delta_anon_kib": {
           "sample_count": 9,
-          "min": 3828,
-          "q1": 3828,
-          "median": 3832,
-          "q3": 3832,
-          "max": 3832
+          "min": 208,
+          "q1": 208,
+          "median": 212,
+          "q3": 212,
+          "max": 212
         },
         "recovery_ratio": {
           "sample_count": 9,
-          "min": 0.08039314516129033,
-          "q1": 0.08039314516129033,
-          "median": 0.08039314516129033,
-          "q3": 0.08039314516129033,
-          "max": 0.08039314516129033
+          "min": 0.875,
+          "q1": 0.875,
+          "median": 0.875,
+          "q3": 0.875,
+          "max": 0.875
         },
         "tail_growth_kib_per_epoch": {
           "sample_count": 9,
-          "min": 912,
-          "q1": 912,
-          "median": 912,
-          "q3": 912,
-          "max": 912
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
         },
         "tail_growth_percent_per_epoch": {
           "sample_count": 9,
-          "min": 38.25503355704698,
-          "q1": 38.31932773109244,
-          "median": 38.31932773109244,
-          "q3": 38.38383838383838,
-          "max": 38.38383838383838
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
         },
         "memory_area_kib_seconds_per_unit": {
           "sample_count": 9,
-          "min": 0.7874304044374999,
-          "q1": 0.8513406298125001,
-          "median": 0.8927069143124999,
-          "q3": 0.9189540081874998,
-          "max": 0.9838108503124997
+          "min": 0.0233149265,
+          "q1": 0.024090684625000004,
+          "median": 0.024247280375,
+          "q3": 0.025086303375000008,
+          "max": 0.025778393624999996
         }
       },
       "tail_growth_ci_95": {
         "kib_per_epoch": {
-          "lower": 912,
-          "upper": 912
+          "lower": 0,
+          "upper": 0
         },
         "percent_per_epoch": {
-          "lower": 38.25503355704698,
-          "upper": 38.38383838383838
+          "lower": 0,
+          "upper": 0
         }
       },
-      "classification": "growth_signal"
+      "classification": "stable_in_tested_window"
     },
     {
       "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
@@ -12488,7 +12492,7 @@
       "classification": "stable_in_tested_window"
     },
     {
-      "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+      "commit": "0fd5946add196854780cf5a87b9bfa3ab175a9c1",
       "target": "linux-x86_64",
       "engine": "rustia",
       "dialect": "luau",
@@ -12529,27 +12533,27 @@
       "metrics": {
         "spawned_anon_kib": {
           "sample_count": 9,
-          "min": 1328,
-          "q1": 1328,
-          "median": 1328,
-          "q3": 1332,
-          "max": 1332
+          "min": 152,
+          "q1": 156,
+          "median": 160,
+          "q3": 160,
+          "max": 160
         },
         "spawned_pss_kib": {
           "sample_count": 9,
-          "min": 6399,
-          "q1": 6451,
-          "median": 6501,
-          "q3": 6655,
-          "max": 6782
+          "min": 1015,
+          "q1": 1024,
+          "median": 1095,
+          "q3": 1115,
+          "max": 1123
         },
         "prepared_delta_anon_kib": {
           "sample_count": 9,
-          "min": 140,
-          "q1": 144,
-          "median": 144,
-          "q3": 144,
-          "max": 144
+          "min": 136,
+          "q1": 136,
+          "median": 136,
+          "q3": 140,
+          "max": 140
         },
         "peak_delta_kib": {
           "sample_count": 9,
@@ -12557,68 +12561,68 @@
           "q1": 256,
           "median": 256,
           "q3": 256,
-          "max": 404
+          "max": 256
         },
         "quiescent_retained_delta_anon_kib": {
           "sample_count": 9,
-          "min": 40,
-          "q1": 40,
-          "median": 40,
-          "q3": 40,
-          "max": 40
+          "min": 12,
+          "q1": 12,
+          "median": 12,
+          "q3": 12,
+          "max": 12
         },
         "dropped_delta_anon_kib": {
           "sample_count": 9,
-          "min": 180,
-          "q1": 184,
-          "median": 184,
-          "q3": 184,
-          "max": 184
+          "min": 148,
+          "q1": 148,
+          "median": 148,
+          "q3": 152,
+          "max": 152
         },
         "recovery_ratio": {
           "sample_count": 9,
-          "min": 0.84375,
-          "q1": 0.84375,
-          "median": 0.84375,
-          "q3": 0.84375,
-          "max": 0.900990099009901
+          "min": 0.953125,
+          "q1": 0.953125,
+          "median": 0.953125,
+          "q3": 0.953125,
+          "max": 0.953125
         },
         "tail_growth_kib_per_epoch": {
           "sample_count": 9,
-          "min": 3.3333333333333335,
-          "q1": 3.3333333333333335,
-          "median": 3.3333333333333335,
-          "q3": 3.3333333333333335,
-          "max": 3.3333333333333335
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
         },
         "tail_growth_percent_per_epoch": {
           "sample_count": 9,
-          "min": 0.22583559168925024,
-          "q1": 0.22583559168925024,
-          "median": 0.22644927536231885,
-          "q3": 0.22644927536231885,
-          "max": 0.2270663033605813
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
         },
         "memory_area_kib_seconds_per_unit": {
           "sample_count": 9,
-          "min": 0.0012559003749999995,
-          "q1": 0.0024571065000000003,
-          "median": 0.002479500625,
-          "q3": 0.00249714025,
-          "max": 0.004498679466796876
+          "min": 0.0012127831250000004,
+          "q1": 0.0012490048749999997,
+          "median": 0.001264433125,
+          "q3": 0.0013367118749999997,
+          "max": 0.0025404666249999996
         }
       },
       "tail_growth_ci_95": {
         "kib_per_epoch": {
-          "lower": 3.3333333333333335,
-          "upper": 3.3333333333333335
+          "lower": 0,
+          "upper": 0
         },
         "percent_per_epoch": {
-          "lower": 0.22583559168925024,
-          "upper": 0.22644927536231885
+          "lower": 0,
+          "upper": 0
         }
       },
-      "classification": "growth_signal"
+      "classification": "stable_in_tested_window"
     },
     {
       "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
@@ -13672,7 +13676,7 @@
       "classification": "stable_in_tested_window"
     },
     {
-      "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+      "commit": "0fd5946add196854780cf5a87b9bfa3ab175a9c1",
       "target": "linux-x86_64",
       "engine": "rustia",
       "dialect": "luau",
@@ -13737,93 +13741,93 @@
       "metrics": {
         "spawned_anon_kib": {
           "sample_count": 9,
-          "min": 1328,
-          "q1": 1328,
-          "median": 1328,
-          "q3": 1328,
-          "max": 1332
+          "min": 152,
+          "q1": 156,
+          "median": 156,
+          "q3": 160,
+          "max": 160
         },
         "spawned_pss_kib": {
           "sample_count": 9,
-          "min": 6399,
-          "q1": 6462,
-          "median": 6557,
-          "q3": 6655,
-          "max": 6783
+          "min": 1015,
+          "q1": 1075,
+          "median": 1095,
+          "q3": 1119,
+          "max": 1123
         },
         "prepared_delta_anon_kib": {
           "sample_count": 9,
-          "min": 216,
-          "q1": 220,
-          "median": 220,
-          "q3": 220,
-          "max": 220
+          "min": 208,
+          "q1": 212,
+          "median": 212,
+          "q3": 212,
+          "max": 212
         },
         "peak_delta_kib": {
           "sample_count": 9,
-          "min": 1792,
-          "q1": 1792,
-          "median": 1792,
-          "q3": 1792,
-          "max": 1792
+          "min": 1024,
+          "q1": 1024,
+          "median": 1024,
+          "q3": 1024,
+          "max": 1024
         },
         "quiescent_retained_delta_anon_kib": {
           "sample_count": 9,
-          "min": 1384,
-          "q1": 1384,
-          "median": 1384,
-          "q3": 1384,
-          "max": 1388
+          "min": 720,
+          "q1": 720,
+          "median": 720,
+          "q3": 720,
+          "max": 720
         },
         "dropped_delta_anon_kib": {
           "sample_count": 9,
-          "min": 1124,
-          "q1": 1124,
-          "median": 1124,
-          "q3": 1124,
-          "max": 1124
+          "min": 860,
+          "q1": 860,
+          "median": 860,
+          "q3": 860,
+          "max": 860
         },
         "recovery_ratio": {
           "sample_count": 9,
-          "min": 0.22544642857142858,
-          "q1": 0.22767857142857142,
-          "median": 0.22767857142857142,
-          "q3": 0.22767857142857142,
-          "max": 0.22767857142857142
+          "min": 0.296875,
+          "q1": 0.296875,
+          "median": 0.296875,
+          "q3": 0.296875,
+          "max": 0.296875
         },
         "tail_growth_kib_per_epoch": {
           "sample_count": 9,
-          "min": 36,
-          "q1": 36,
-          "median": 36,
-          "q3": 36,
-          "max": 36
+          "min": 16,
+          "q1": 16,
+          "median": 16,
+          "q3": 16,
+          "max": 16
         },
         "tail_growth_percent_per_epoch": {
           "sample_count": 9,
-          "min": 2.278481012658228,
-          "q1": 2.284263959390863,
-          "median": 2.284263959390863,
-          "q3": 2.284263959390863,
-          "max": 2.2900763358778624
+          "min": 3.8834951456310676,
+          "q1": 3.8834951456310676,
+          "median": 3.9215686274509802,
+          "q3": 3.9215686274509802,
+          "max": 3.9603960396039604
         },
         "memory_area_kib_seconds_per_unit": {
           "sample_count": 9,
-          "min": 0.021633144025000006,
-          "q1": 0.022666987774999998,
-          "median": 0.023934353024999997,
-          "q3": 0.024310977424999998,
-          "max": 0.024801612025000006
+          "min": 0.017062848375000002,
+          "q1": 0.017233586050000003,
+          "median": 0.017950097625,
+          "q3": 0.018564142975,
+          "max": 0.01885804165
         }
       },
       "tail_growth_ci_95": {
         "kib_per_epoch": {
-          "lower": 36,
-          "upper": 36
+          "lower": 16,
+          "upper": 16
         },
         "percent_per_epoch": {
-          "lower": 2.278481012658228,
-          "upper": 2.284263959390863
+          "lower": 3.8834951456310676,
+          "upper": 3.9215686274509802
         }
       },
       "classification": "growth_signal"
@@ -14614,7 +14618,7 @@
       "classification": "expected_retention"
     },
     {
-      "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+      "commit": "0fd5946add196854780cf5a87b9bfa3ab175a9c1",
       "target": "linux-x86_64",
       "engine": "rustia",
       "dialect": "luau",
@@ -14679,93 +14683,93 @@
       "metrics": {
         "spawned_anon_kib": {
           "sample_count": 9,
-          "min": 1328,
-          "q1": 1328,
-          "median": 1332,
-          "q3": 1332,
-          "max": 1332
+          "min": 156,
+          "q1": 156,
+          "median": 156,
+          "q3": 160,
+          "max": 160
         },
         "spawned_pss_kib": {
           "sample_count": 9,
-          "min": 6399,
-          "q1": 6515,
-          "median": 6519,
-          "q3": 6655,
-          "max": 6659
+          "min": 1059,
+          "q1": 1072,
+          "median": 1095,
+          "q3": 1099,
+          "max": 1111
         },
         "prepared_delta_anon_kib": {
           "sample_count": 9,
-          "min": 216,
-          "q1": 216,
-          "median": 220,
-          "q3": 220,
-          "max": 220
+          "min": 212,
+          "q1": 212,
+          "median": 216,
+          "q3": 216,
+          "max": 216
         },
         "peak_delta_kib": {
           "sample_count": 9,
-          "min": 2304,
-          "q1": 2304,
-          "median": 2304,
-          "q3": 2304,
-          "max": 2304
+          "min": 2560,
+          "q1": 2560,
+          "median": 2560,
+          "q3": 2560,
+          "max": 2560
         },
         "quiescent_retained_delta_anon_kib": {
           "sample_count": 9,
-          "min": 1896,
-          "q1": 1896,
-          "median": 1896,
-          "q3": 1896,
-          "max": 1896
+          "min": 2112,
+          "q1": 2112,
+          "median": 2112,
+          "q3": 2112,
+          "max": 2116
         },
         "dropped_delta_anon_kib": {
           "sample_count": 9,
-          "min": 1308,
-          "q1": 1308,
-          "median": 1312,
-          "q3": 1312,
-          "max": 1312
+          "min": 1556,
+          "q1": 1556,
+          "median": 1556,
+          "q3": 1556,
+          "max": 1560
         },
         "recovery_ratio": {
           "sample_count": 9,
-          "min": 0.17708333333333334,
-          "q1": 0.17708333333333334,
-          "median": 0.17708333333333334,
-          "q3": 0.17708333333333334,
-          "max": 0.17708333333333334
+          "min": 0.1734375,
+          "q1": 0.175,
+          "median": 0.175,
+          "q3": 0.175,
+          "max": 0.175
         },
         "tail_growth_kib_per_epoch": {
           "sample_count": 9,
-          "min": 50.666666666666664,
-          "q1": 50.666666666666664,
-          "median": 50.666666666666664,
-          "q3": 50.666666666666664,
-          "max": 50.666666666666664
+          "min": 56,
+          "q1": 56,
+          "median": 56,
+          "q3": 56,
+          "max": 56
         },
         "tail_growth_percent_per_epoch": {
           "sample_count": 9,
-          "min": 3.1825795644891124,
-          "q1": 3.1825795644891124,
-          "median": 3.190596137699412,
-          "q3": 3.190596137699412,
-          "max": 3.1986531986531985
+          "min": 13.333333333333334,
+          "q1": 13.333333333333334,
+          "median": 13.333333333333334,
+          "q3": 13.461538461538462,
+          "max": 13.461538461538462
         },
         "memory_area_kib_seconds_per_unit": {
           "sample_count": 9,
-          "min": 0.02947037640000001,
-          "q1": 0.030074715999999994,
-          "median": 0.0311241547,
-          "q3": 0.03145510224999999,
-          "max": 0.03319061084999999
+          "min": 0.09283809859999999,
+          "q1": 0.09549676100000001,
+          "median": 0.097722926725,
+          "q3": 0.09863342757500002,
+          "max": 0.10025060857500001
         }
       },
       "tail_growth_ci_95": {
         "kib_per_epoch": {
-          "lower": 50.666666666666664,
-          "upper": 50.666666666666664
+          "lower": 56,
+          "upper": 56
         },
         "percent_per_epoch": {
-          "lower": 3.1825795644891124,
-          "upper": 3.190596137699412
+          "lower": 13.333333333333334,
+          "upper": 13.461538461538462
         }
       },
       "classification": "expected_retention"
@@ -15556,7 +15560,7 @@
       "classification": "stable_in_tested_window"
     },
     {
-      "commit": "18b58d85431cdf38b7cf00665f1a348b305292aa",
+      "commit": "0fd5946add196854780cf5a87b9bfa3ab175a9c1",
       "target": "linux-x86_64",
       "engine": "rustia",
       "dialect": "luau",
@@ -15621,93 +15625,93 @@
       "metrics": {
         "spawned_anon_kib": {
           "sample_count": 9,
-          "min": 1324,
-          "q1": 1328,
-          "median": 1328,
-          "q3": 1332,
-          "max": 1332
+          "min": 152,
+          "q1": 152,
+          "median": 156,
+          "q3": 156,
+          "max": 156
         },
         "spawned_pss_kib": {
           "sample_count": 9,
-          "min": 6399,
-          "q1": 6439,
-          "median": 6495,
-          "q3": 6655,
-          "max": 6682
+          "min": 1011,
+          "q1": 1023,
+          "median": 1063,
+          "q3": 1075,
+          "max": 1111
         },
         "prepared_delta_anon_kib": {
           "sample_count": 9,
-          "min": 204,
-          "q1": 208,
-          "median": 208,
-          "q3": 208,
-          "max": 208
+          "min": 208,
+          "q1": 212,
+          "median": 212,
+          "q3": 212,
+          "max": 212
         },
         "peak_delta_kib": {
           "sample_count": 9,
-          "min": 1280,
-          "q1": 1280,
-          "median": 1280,
-          "q3": 1280,
-          "max": 1280
+          "min": 1024,
+          "q1": 1024,
+          "median": 1024,
+          "q3": 1024,
+          "max": 1024
         },
         "quiescent_retained_delta_anon_kib": {
           "sample_count": 9,
-          "min": 992,
-          "q1": 992,
-          "median": 992,
-          "q3": 992,
-          "max": 992
+          "min": 672,
+          "q1": 672,
+          "median": 672,
+          "q3": 672,
+          "max": 676
         },
         "dropped_delta_anon_kib": {
           "sample_count": 9,
-          "min": 948,
-          "q1": 952,
-          "median": 952,
-          "q3": 952,
-          "max": 952
+          "min": 796,
+          "q1": 796,
+          "median": 796,
+          "q3": 800,
+          "max": 800
         },
         "recovery_ratio": {
           "sample_count": 9,
-          "min": 0.225,
-          "q1": 0.225,
-          "median": 0.225,
-          "q3": 0.225,
-          "max": 0.225
+          "min": 0.33984375,
+          "q1": 0.34375,
+          "median": 0.34375,
+          "q3": 0.34375,
+          "max": 0.34375
         },
         "tail_growth_kib_per_epoch": {
           "sample_count": 9,
-          "min": 27,
-          "q1": 27,
-          "median": 27,
-          "q3": 27,
-          "max": 27
+          "min": 15.155555555555555,
+          "q1": 15.155555555555555,
+          "median": 15.155555555555555,
+          "q3": 15.155555555555555,
+          "max": 15.155555555555555
         },
         "tail_growth_percent_per_epoch": {
           "sample_count": 9,
-          "min": 1.7307692307692308,
-          "q1": 1.7307692307692308,
-          "median": 1.7352185089974295,
-          "q3": 1.7352185089974295,
-          "max": 1.7396907216494846
+          "min": 3.8271604938271606,
+          "q1": 3.8662131519274374,
+          "median": 3.8662131519274374,
+          "q3": 3.8662131519274374,
+          "max": 3.906071019473081
         },
         "memory_area_kib_seconds_per_unit": {
           "sample_count": 9,
-          "min": 0.016236772375000003,
-          "q1": 0.016340119475,
-          "median": 0.017052754875,
-          "q3": 0.017139547749999998,
-          "max": 0.018172632399999996
+          "min": 0.015030460525,
+          "q1": 0.015324540525,
+          "median": 0.015856810174999996,
+          "q3": 0.016257694425,
+          "max": 0.016606564125
         }
       },
       "tail_growth_ci_95": {
         "kib_per_epoch": {
-          "lower": 27,
-          "upper": 27
+          "lower": 15.155555555555555,
+          "upper": 15.155555555555555
         },
         "percent_per_epoch": {
-          "lower": 1.7307692307692308,
-          "upper": 1.7396907216494846
+          "lower": 3.8662131519274374,
+          "upper": 3.906071019473081
         }
       },
       "classification": "growth_signal"

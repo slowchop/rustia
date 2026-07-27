@@ -12,6 +12,7 @@ const wasmResultsPath = path.join(__dirname, "wasm", "current-results.json");
 const wasmDispatchPath = path.join(__dirname, "wasm", "dispatch-current-results.json");
 const cohortEvidencePath = path.join(__dirname, "history", "evidence");
 const memoryResultsPath = path.join(__dirname, "memory", "current-results.json");
+const memoryHistoryPath = path.join(__dirname, "memory", "history", "runs.jsonl");
 const outputPath = path.join(__dirname, "current-results.html");
 const checkOnly = process.argv.includes("--check");
 const REQUIRED_COMMON_WORKLOADS = Object.freeze([
@@ -22,6 +23,13 @@ const REQUIRED_COMMON_WORKLOADS = Object.freeze([
   "stdlib_math_table",
 ]);
 const REQUIRED_COMMON_WORKLOAD_SET = new Set(REQUIRED_COMMON_WORKLOADS);
+const MEMORY_HISTORY_WORKLOADS = Object.freeze([
+  ...REQUIRED_COMMON_WORKLOADS,
+  "memory_burst",
+  "memory_churn",
+  "todo_history",
+  "todo_steady",
+]);
 
 function fail(message) {
   console.error(`render-current-results: ${message}`);
@@ -229,6 +237,46 @@ function readMemoryResults() {
     }
   });
   return data;
+}
+
+function readMemoryHistory() {
+  let text;
+  try {
+    text = fs.readFileSync(memoryHistoryPath, "utf8");
+  } catch (error) {
+    fail(`could not read ${relative(memoryHistoryPath)}: ${error.message}`);
+  }
+  const records = [];
+  for (const [index, rawLine] of text.split(/\r?\n/).entries()) {
+    const line = rawLine.trim();
+    if (line === "") continue;
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch (error) {
+      fail(`${relative(memoryHistoryPath)} line ${index + 1} is not JSON: ${error.message}`);
+    }
+    const label = `${relative(memoryHistoryPath)} line ${index + 1}`;
+    if (record.schema_version !== 1 || record.schema !== "rustia.bench.memory-cohort.v1") {
+      fail(`${label} must use rustia.bench.memory-cohort.v1`);
+    }
+    if (typeof record.commit !== "string" || record.commit === "") {
+      fail(`${label}.commit must be a string`);
+    }
+    if (!Number.isFinite(Date.parse(record.created_at))) {
+      fail(`${label}.created_at must be an ISO timestamp`);
+    }
+    if (!Array.isArray(record.rows) || record.rows.length === 0) {
+      fail(`${label}.rows must be a non-empty array`);
+    }
+    records.push(record);
+  }
+  if (records.length === 0) {
+    fail(`${relative(memoryHistoryPath)} must contain at least one memory cohort`);
+  }
+  return records.sort(
+    (left, right) => Date.parse(left.created_at) - Date.parse(right.created_at),
+  );
 }
 
 function readWasmResults() {
@@ -1217,6 +1265,170 @@ function rustiaOverallHistoryTable(eras) {
   return `<div class="table-wrap history-table"><table><thead><tr><th>Series</th><th>First run</th><th>Latest run</th><th>Improvement</th><th>Latest gap</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
+function memoryHistoryModel(records) {
+  const completeRows = (record, engine) => {
+    const byWorkload = new Map(
+      record.rows
+        .filter((row) => row.target === "linux-x86_64" && row.engine === engine)
+        .map((row) => [row.workload, row]),
+    );
+    const rows = MEMORY_HISTORY_WORKLOADS.map((workload) => byWorkload.get(workload));
+    return rows.every(Boolean) ? rows : null;
+  };
+  const referenceRecord = records.find((record) => completeRows(record, "mlua-luau-jit") != null);
+  if (referenceRecord == null) {
+    fail("memory history has no complete mlua-luau-jit reference cohort");
+  }
+  const referenceRows = completeRows(referenceRecord, "mlua-luau-jit");
+  const metricKeys = {
+    peak: "peak_delta_kib",
+    retained: "quiescent_retained_delta_anon_kib",
+  };
+  const points = records.flatMap((record) => {
+    const rustiaRows = completeRows(record, "rustia");
+    if (rustiaRows == null) return [];
+    const scores = Object.fromEntries(
+      Object.entries(metricKeys).map(([metric, key]) => {
+        const ratios = rustiaRows.map((row, index) => {
+          const rustia = Number(row.metrics?.[key]?.median);
+          const reference = Number(referenceRows[index].metrics?.[key]?.median);
+          if (!Number.isFinite(rustia) || rustia < 0 || !Number.isFinite(reference) || reference < 0) {
+            fail(`memory history ${record.cohort_id ?? record.commit} has invalid ${key}`);
+          }
+          return Math.max(1, reference) / Math.max(1, rustia);
+        });
+        return [metric, geometricMean(ratios)];
+      }),
+    );
+    return [{
+      commit: record.commit,
+      cohort: record.cohort_id,
+      timestamp_unix: Date.parse(record.created_at) / 1000,
+      ...scores,
+    }];
+  });
+  if (points.length === 0) {
+    fail("memory history has no complete Rustia cohorts");
+  }
+  return {
+    points,
+    reference: {
+      commit: referenceRecord.commit,
+      cohort: referenceRecord.cohort_id,
+    },
+  };
+}
+
+function memoryHistorySection(records) {
+  const model = memoryHistoryModel(records);
+  const latest = model.points.at(-1);
+  return `
+    <section class="panel history-axis-panel memory-history-panel" id="memory-history">
+      <div class="section-head">
+        <div>
+          <h2>rustia Memory History</h2>
+          <p>${formatInteger(model.points.length)} complete dedicated-Linux Rustia cohorts across ${formatInteger(MEMORY_HISTORY_WORKLOADS.length)} non-control workloads.</p>
+        </div>
+        <div class="comparison-controls">
+          <div class="metric-toggle" role="group" aria-label="Memory history metric">
+            <button type="button" data-memory-history-metric="peak" aria-pressed="true">Peak</button>
+            <button type="button" data-memory-history-metric="retained" aria-pressed="false">Retained</button>
+          </div>
+          <div class="metric-toggle" role="group" aria-label="Memory history x-axis">
+            <button type="button" data-history-axis="date" aria-pressed="true">Date</button>
+            <button type="button" data-history-axis="commit" aria-pressed="false">Commit</button>
+          </div>
+        </div>
+      </div>
+      <p class="history-answer"><strong>Higher is better; mlua/JIT is 1×.</strong> Each score is the geometric mean of mlua/Luau/JIT memory divided by Rustia memory per workload. Values use a 1 KiB measurement floor; intentional-retention controls are excluded.</p>
+      <div data-history-axis-view="date">
+        <div data-memory-history-metric-view="peak">${memoryHistoryChart(model, "peak", "date")}</div>
+        <div data-memory-history-metric-view="retained" hidden>${memoryHistoryChart(model, "retained", "date")}</div>
+      </div>
+      <div data-history-axis-view="commit" hidden>
+        <div data-memory-history-metric-view="peak">${memoryHistoryChart(model, "peak", "commit")}</div>
+        <div data-memory-history-metric-view="retained" hidden>${memoryHistoryChart(model, "retained", "commit")}</div>
+      </div>
+      ${memoryHistoryTable(model)}
+      <p class="cohort-note">The mlua/JIT reference is fixed from cross-engine cohort <code>${escapeHtml(model.reference.cohort)}</code> at <code>${escapeHtml(model.reference.commit.slice(0, 7))}</code>. Rustia points are separate fresh-VM cohorts; the latest is <code>${escapeHtml(latest.commit.slice(0, 7))}</code>.</p>
+    </section>
+  `;
+}
+
+function memoryHistoryChart(model, metric, axisMode) {
+  const width = 920;
+  const height = 300;
+  const pad = { left: 54, right: 20, top: 22, bottom: 42 };
+  const points = model.points;
+  const minX = axisMode === "commit" ? 0 : Math.min(...points.map((point) => point.timestamp_unix));
+  const maxX = axisMode === "commit"
+    ? Math.max(1, points.length - 1)
+    : Math.max(...points.map((point) => point.timestamp_unix));
+  const maxScore = Math.max(1, ...points.map((point) => point[metric]));
+  const maxY = Math.max(1.25, Math.ceil(maxScore * 1.08 * 4) / 4);
+  const tickStep = maxY <= 2 ? 0.25 : maxY <= 5 ? 1 : Math.ceil(maxY / 5);
+  const ticks = [];
+  for (let tick = 0; tick <= maxY + Number.EPSILON; tick += tickStep) {
+    ticks.push(Number(tick.toFixed(6)));
+  }
+  if (!ticks.includes(1)) ticks.push(1);
+  if (!ticks.includes(maxY)) ticks.push(maxY);
+  ticks.sort((left, right) => left - right);
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const xValue = (point, index) => axisMode === "commit" ? index : point.timestamp_unix;
+  const xScale = (point, index) => maxX === minX
+    ? pad.left + plotWidth / 2
+    : pad.left + ((xValue(point, index) - minX) / (maxX - minX)) * plotWidth;
+  const yScale = (score) => pad.top + (1 - score / maxY) * plotHeight;
+  const firstLabel = axisMode === "commit"
+    ? points[0].commit.slice(0, 7)
+    : formatIsoDate(minX);
+  const lastLabel = axisMode === "commit"
+    ? points.at(-1).commit.slice(0, 7)
+    : formatIsoDate(maxX);
+  const rustiaColor = "#0f766e";
+  const referenceColor = "#ea580c";
+  const metricLabel = metric === "peak" ? "peak" : "retained";
+  const polyline = points
+    .map((point, index) => `${xScale(point, index).toFixed(2)},${yScale(point[metric]).toFixed(2)}`)
+    .join(" ");
+  return `
+    <div class="history-chart">
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="rustia ${escapeHtml(metricLabel)} memory efficiency history by ${escapeHtml(axisMode)} versus mlua JIT, higher is better">
+        <rect x="0" y="0" width="${width}" height="${height}" class="history-chart-bg" />
+        ${ticks.map((tick) => `<line x1="${pad.left}" y1="${yScale(tick).toFixed(2)}" x2="${width - pad.right}" y2="${yScale(tick).toFixed(2)}" class="history-grid-line" /><text x="8" y="${(yScale(tick) + 4).toFixed(2)}" class="history-axis-label">${formatSpeed(tick)}</text>`).join("")}
+        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" class="history-axis" />
+        <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" class="history-axis" />
+        <text x="${pad.left}" y="${height - 10}" class="history-axis-label">${escapeHtml(firstLabel)}</text>
+        <text x="${width - pad.right}" y="${height - 10}" text-anchor="end" class="history-axis-label">${escapeHtml(lastLabel)}</text>
+        <line x1="${pad.left}" y1="${yScale(1).toFixed(2)}" x2="${width - pad.right}" y2="${yScale(1).toFixed(2)}" stroke="${referenceColor}" stroke-width="1.4" stroke-dasharray="7 6"><title>${escapeHtml(`mlua / Luau / JIT · ${metricLabel} reference · 1×`)}</title></line>
+        <polyline points="${polyline}" fill="none" stroke="${rustiaColor}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        ${points.map((point, index) => `<circle cx="${xScale(point, index).toFixed(2)}" cy="${yScale(point[metric]).toFixed(2)}" r="2.2" fill="${rustiaColor}"><title>${escapeHtml(`rustia · ${point.commit.slice(0, 7)} · ${formatSpeed(point[metric])} mlua/JIT ${metricLabel} efficiency`)}</title></circle>`).join("")}
+      </svg>
+      <div class="history-legend"><span>${colorDotMarkup(rustiaColor)}<strong>rustia</strong> · ${escapeHtml(metricLabel)} memory efficiency</span><span>${colorDotMarkup(referenceColor)}<strong>mlua</strong> / Luau / JIT · 1×</span></div>
+    </div>
+  `;
+}
+
+function memoryHistoryTable(model) {
+  const labels = {
+    peak: "Peak allocation",
+    retained: "Retained after quiescence",
+  };
+  const rows = Object.entries(labels).map(([metric, label]) => {
+    const first = model.points[0][metric];
+    const latest = model.points.at(-1)[metric];
+    const improvement = latest / first;
+    const relativePercent = (1 / latest - 1) * 100;
+    const comparison = Math.abs(relativePercent) < 0.05
+      ? "matches mlua/JIT"
+      : `Rustia uses <strong>${formatNumber(Math.abs(relativePercent))}% ${relativePercent < 0 ? "less" : "more"}</strong>`;
+    return `<tr><td><strong>${escapeHtml(label)}</strong></td><td>${formatSpeed(first)} of mlua/JIT · <code>${escapeHtml(model.points[0].commit.slice(0, 7))}</code></td><td>${formatSpeed(latest)} of mlua/JIT · <code>${escapeHtml(model.points.at(-1).commit.slice(0, 7))}</code></td><td><strong>${formatSpeed(improvement)}</strong></td><td>${comparison}</td></tr>`;
+  }).join("");
+  return `<div class="table-wrap history-table"><table><thead><tr><th>Metric</th><th>First run</th><th>Latest run</th><th>Efficiency gain</th><th>Latest comparison</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
 function workloadLabel(workload) {
   const labels = {
     dense_tables: "Dense tables",
@@ -2066,7 +2278,7 @@ function targetRuntimeLabel(row) {
   return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.runtime)}</span></span>`;
 }
 
-function render(data, wasmResults, wasmDispatchResults, memoryResults, historyRecords, cohorts, historyBackfills = []) {
+function render(data, wasmResults, wasmDispatchResults, memoryResults, memoryHistory, historyRecords, cohorts, historyBackfills = []) {
   const wasmRows = wasmTargetRows(wasmResults);
   const summary = summarize(data, wasmRows);
   const history = summarizeHistory(historyRecords);
@@ -3097,6 +3309,7 @@ function render(data, wasmResults, wasmDispatchResults, memoryResults, historyRe
     <nav class="nav" aria-label="Targets">
       <a href="#linux-comparison">Linux Comparison</a>
       <a href="#memory">Memory</a>
+      <a href="#memory-history">Memory History</a>
       <a href="#cold-start">Cold Start</a>
       <a href="#claim-gate">Claim Gate</a>
       <a href="#history">History</a>
@@ -3104,11 +3317,12 @@ function render(data, wasmResults, wasmDispatchResults, memoryResults, historyRe
 
     ${linuxComparisonSection(summary.linuxComparisonViews)}
     ${memoryResultsSection(memoryResults)}
+    ${memoryHistorySection(memoryHistory)}
     ${coldStartSection(summary.coldStartRows)}
     ${claimGateSection(claimRows)}
       ${historySection(history, historyBackfills, data.rows)}
 
-    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Memory <code>${escapeHtml(relative(memoryResultsPath))}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. History <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Memory <code>${escapeHtml(relative(memoryResultsPath))}</code> with history <code>${escapeHtml(relative(memoryHistoryPath))}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. Performance history <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
   <script>
     (() => {
@@ -3162,6 +3376,20 @@ function render(data, wasmResults, wasmDispatchResults, memoryResults, historyRe
         });
         setHistoryAxis("date");
       });
+      document.querySelectorAll(".memory-history-panel").forEach((root) => {
+        const setMemoryHistoryMetric = (metric) => {
+          root.querySelectorAll("[data-memory-history-metric]").forEach((button) => {
+            button.setAttribute("aria-pressed", String(button.dataset.memoryHistoryMetric === metric));
+          });
+          root.querySelectorAll("[data-memory-history-metric-view]").forEach((view) => {
+            view.hidden = view.dataset.memoryHistoryMetricView !== metric;
+          });
+        };
+        root.querySelectorAll("[data-memory-history-metric]").forEach((button) => {
+          button.addEventListener("click", () => setMemoryHistoryMetric(button.dataset.memoryHistoryMetric));
+        });
+        setMemoryHistoryMetric("peak");
+      });
     })();
   </script>
 </body>
@@ -3176,8 +3404,9 @@ function main() {
   const wasmResults = readWasmResults();
   const wasmDispatchResults = readWasmDispatchResults();
   const memoryResults = readMemoryResults();
+  const memoryHistory = readMemoryHistory();
   const cohorts = readCohortEvidence();
-  const html = render(data, wasmResults, wasmDispatchResults, memoryResults, historyRecords, cohorts, historyBackfills).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
+  const html = render(data, wasmResults, wasmDispatchResults, memoryResults, memoryHistory, historyRecords, cohorts, historyBackfills).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
   const output = `${html}\n`;
   if (checkOnly) {
     let current;
@@ -3209,6 +3438,8 @@ module.exports = {
   linuxComparisonSection,
   languagesByTargetSection,
   memoryComparisonCharts,
+  memoryHistoryModel,
+  memoryHistorySection,
   summarizeLanguageTargets,
   wasmTargetRows,
 };
