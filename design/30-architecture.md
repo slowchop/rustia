@@ -142,14 +142,12 @@ O(1), and it has no cycle reclamation). Two API rules: (i) hosts parallelize wit
 immutable compiled artifacts/configuration, not by moving live VMs; (ii) DeterministicSim collection uses the
 instruction counter, never byte-debt, while Standard/LuauCompat may use allocation debt.
 
-**Production implementation gap (2026-07-23):** the profile triggers and weak-table sweeping exist, but the
-current table/function/upvalue/coroutine stores, atomized/non-inline runtime string and
-userdata/buffer/vector roots, and loaded-program store retain append-only slots until VM drop. This does not
-overturn axis D; it means P1 still needs complete reachability/sweep and generation-safe slot reuse, honest
-live/peak accounting, aggregate quotas and atomic OOM behavior, plus long-run native/wasm memory-plateau
-evidence before interval tuning is meaningful. Copyable public `Function`/`Exports` handles must become true
-roots or use an ownership redesign before reuse; their documented cross-reload calls survive outside an
-explicit reset epoch, while reset may invalidate all handles.
+**Production implementation gap (2026-07-27):** ordinary reachability and generation-safe reuse cover tables,
+functions, upvalues, atomized runtime strings, userdata, buffers, and vectors; retained host values are explicit
+roots. Host-requested quiescence also prunes unreachable coroutine state and releases spare heap/interner/stack
+capacity. The remaining axis-D work is loaded-program reclamation, honest live/peak accounting, aggregate
+quotas and atomic OOM behavior, lifecycle reset, and long-run native/wasm mixed-heap plateau evidence before
+interval tuning is meaningful.
 
 **E. Determinism enforcement — LOCKED.** Dense `Vec` array parts plus insertion-ordered `Vec` hash entries;
 larger hash parts use a stable custom-mixed open-addressed `Vec<u32>` side index at no more than 50% load, and

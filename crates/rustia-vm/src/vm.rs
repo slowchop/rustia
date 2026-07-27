@@ -1725,6 +1725,28 @@ impl Vm {
         Ok(first_result_or_nil(results))
     }
 
+    /// Completes a full collection and releases spare VM-owned allocations.
+    ///
+    /// Hosts can call this at a known idle boundary after a burst of script
+    /// work. Ordinary execution keeps reusable capacity for throughput;
+    /// explicit quiescence returns spare allocations to the process allocator.
+    pub fn collect_garbage(&mut self) {
+        let roots = self.collectgarbage_roots(&[]);
+        self.heap.finish_collection_cycle();
+        self.heap.collect_weak_tables_with_roots(&roots);
+        self.prune_unreachable_coroutines();
+        // The first pass can remove VM-side roots (including interned
+        // strings and unreachable coroutine state). A second completed arena
+        // cycle returns the backing allocations those roots owned.
+        let roots = self.collectgarbage_roots(&[]);
+        self.heap.finish_collection_cycle();
+        self.heap.collect_weak_tables_with_roots(&roots);
+        self.heap.release_spare_capacity();
+        self.release_stack_capacity();
+        self.gc_step_counter = 0;
+        self.gc_stopped = false;
+    }
+
     fn run_function(
         &mut self,
         program: &Program,
@@ -11525,6 +11547,15 @@ impl Vm {
             .map(Value::table),
         );
         roots.extend(self.external_roots.borrow().values.values().copied());
+        for loaded in &self.dynamic_programs {
+            roots.extend(
+                loaded
+                    .constant_atoms
+                    .iter()
+                    .filter_map(|encoded| encoded.checked_sub(1))
+                    .map(Value::string_atom),
+            );
+        }
         roots.extend_from_slice(args);
         for frame in &self.call_stack {
             collect_call_stack_frame_roots(&mut roots, frame);
@@ -11560,6 +11591,60 @@ impl Vm {
             collect_traceback_snapshot_roots(&mut roots, snapshot);
         }
         roots
+    }
+
+    fn release_stack_capacity(&mut self) {
+        for frame in &mut self.call_stack {
+            shrink_call_stack_frame_capacity(frame);
+        }
+        self.call_stack.shrink_to_fit();
+        self.running_coroutines.shrink_to_fit();
+        self.running_coroutine_stack_bases.shrink_to_fit();
+        for frames in &mut self.active_coroutine_frames {
+            frames.shrink_to_fit();
+        }
+        self.active_coroutine_frames.shrink_to_fit();
+        for collector in &mut self.yield_collectors {
+            for values in collector.iter_mut() {
+                values.shrink_to_fit();
+            }
+            collector.shrink_to_fit();
+        }
+        self.yield_collectors.shrink_to_fit();
+        for coroutine in &mut self.coroutines {
+            for frame in &mut coroutine.frames {
+                shrink_coroutine_frame_capacity(frame);
+            }
+            coroutine.frames.shrink_to_fit();
+            if let Some(snapshot) = &mut coroutine.debug_snapshot {
+                for frame in &mut snapshot.frames {
+                    shrink_call_stack_frame_capacity(frame);
+                }
+                snapshot.frames.shrink_to_fit();
+            }
+        }
+        self.coroutines.shrink_to_fit();
+        if let Some(snapshot) = &mut self.last_error_traceback {
+            for frame in &mut snapshot.frames {
+                shrink_call_stack_frame_capacity(frame);
+            }
+            snapshot.frames.shrink_to_fit();
+        }
+        if let Some(snapshot) = &mut self.protected_error_traceback {
+            for frame in &mut snapshot.frames {
+                shrink_call_stack_frame_capacity(frame);
+            }
+            snapshot.frames.shrink_to_fit();
+        }
+    }
+
+    fn prune_unreachable_coroutines(&mut self) {
+        debug_assert!(self.running_coroutines.is_empty());
+        debug_assert!(self.running_coroutine_stack_bases.is_empty());
+        debug_assert!(self.active_coroutine_frames.is_empty());
+        let heap = &mut self.heap;
+        self.coroutines
+            .retain(|coroutine| heap.has_userdata(coroutine.handle));
     }
 
     fn extend_coroutine_frame_roots(&self, roots: &mut Vec<Value>, frame: &CoroutineFrame) {
@@ -11621,11 +11706,11 @@ impl Vm {
             return 0;
         };
         let mark = frame.stackless_roots.len();
-        extend_weak_collectable_roots(&mut frame.stackless_roots, registers);
+        extend_heap_backed_roots(&mut frame.stackless_roots, registers);
         extend_capture_cell_roots(&mut frame.stackless_roots, register_cells);
-        extend_weak_collectable_roots(&mut frame.stackless_roots, varargs);
-        extend_weak_collectable_roots(&mut frame.stackless_roots, pending_return_prefixes);
-        extend_bytecode_continuation_weak_roots(&mut frame.stackless_roots, continuation);
+        extend_heap_backed_roots(&mut frame.stackless_roots, varargs);
+        extend_heap_backed_roots(&mut frame.stackless_roots, pending_return_prefixes);
+        extend_bytecode_continuation_heap_roots(&mut frame.stackless_roots, continuation);
         mark
     }
 
@@ -11634,7 +11719,7 @@ impl Vm {
             return 0;
         };
         let mark = frame.stackless_roots.len();
-        extend_bytecode_continuation_weak_roots(&mut frame.stackless_roots, continuation);
+        extend_bytecode_continuation_heap_roots(&mut frame.stackless_roots, continuation);
         mark
     }
 
@@ -11658,7 +11743,7 @@ impl Vm {
         call_frame.stackless_debug_frames.clear();
         for stackless_frame in frames {
             stackless_frame.root_mark = call_frame.stackless_roots.len();
-            extend_stackless_self_call_frame_weak_roots(
+            extend_stackless_self_call_frame_heap_roots(
                 &mut call_frame.stackless_roots,
                 stackless_frame,
             );
@@ -18566,6 +18651,56 @@ fn collect_traceback_snapshot_roots(roots: &mut Vec<Value>, snapshot: &Traceback
     }
 }
 
+fn shrink_call_stack_frame_capacity(frame: &mut CallStackFrame) {
+    if let Some(name) = &mut frame.debug_name {
+        name.shrink_to_fit();
+    }
+    frame.roots.shrink_to_fit();
+    frame.stackless_roots.shrink_to_fit();
+    for run in &mut frame.stackless_debug_frames {
+        if let Some(name) = &mut run.frame.debug_name {
+            name.shrink_to_fit();
+        }
+    }
+    frame.stackless_debug_frames.shrink_to_fit();
+}
+
+fn shrink_bytecode_continuation_capacity(continuation: &mut BytecodeContinuation) {
+    match continuation {
+        BytecodeContinuation::CallExpandAfterTrailing { args, .. } => args.shrink_to_fit(),
+        BytecodeContinuation::ReturnWithPrefix { prefix } => prefix.shrink_to_fit(),
+        BytecodeContinuation::WriteFirst { .. }
+        | BytecodeContinuation::WriteFixed { .. }
+        | BytecodeContinuation::PCallWriteFixed { .. }
+        | BytecodeContinuation::AppendToTable { .. } => {}
+    }
+}
+
+fn shrink_coroutine_frame_capacity(frame: &mut CoroutineFrame) {
+    match frame {
+        CoroutineFrame::Bytecode(frame) => {
+            frame.captures.shrink_to_fit();
+            frame.registers.shrink_to_fit();
+            frame.register_cells.shrink_to_fit();
+            frame.varargs.shrink_to_fit();
+            frame.pending_return_prefixes.shrink_to_fit();
+            shrink_bytecode_continuation_capacity(&mut frame.continuation);
+            for stackless in &mut frame.stackless_self_calls {
+                stackless.registers.shrink_to_fit();
+                stackless.register_cells.shrink_to_fit();
+                stackless.varargs.shrink_to_fit();
+                stackless.pending_return_prefixes.shrink_to_fit();
+                shrink_bytecode_continuation_capacity(&mut stackless.continuation);
+                if let Some(name) = &mut stackless.debug_frame.debug_name {
+                    name.shrink_to_fit();
+                }
+            }
+            frame.stackless_self_calls.shrink_to_fit();
+        }
+        CoroutineFrame::PCall | CoroutineFrame::XPCall(_) => {}
+    }
+}
+
 fn collect_call_stack_frame_roots(roots: &mut Vec<Value>, frame: &CallStackFrame) {
     roots.push(Value::table(frame.environment));
     if let Some(function) = frame.function {
@@ -20197,12 +20332,12 @@ fn set_register(registers: &mut [Value], register: u8, value: Value) -> Result<(
     }
 }
 
-fn extend_weak_collectable_roots(roots: &mut Vec<Value>, values: &[Value]) {
+fn extend_heap_backed_roots(roots: &mut Vec<Value>, values: &[Value]) {
     roots.extend(
         values
             .iter()
             .copied()
-            .filter(|value| value_is_weak_collectable_root(*value)),
+            .filter(|value| value_is_heap_backed_root(*value)),
     );
 }
 
@@ -20228,7 +20363,7 @@ fn extend_bytecode_continuation_roots(roots: &mut Vec<Value>, continuation: &Byt
     }
 }
 
-fn extend_bytecode_continuation_weak_roots(
+fn extend_bytecode_continuation_heap_roots(
     roots: &mut Vec<Value>,
     continuation: &BytecodeContinuation,
 ) {
@@ -20236,11 +20371,11 @@ fn extend_bytecode_continuation_weak_roots(
         BytecodeContinuation::CallExpandAfterTrailing {
             outer_callee, args, ..
         } => {
-            extend_weak_collectable_roots(roots, &[*outer_callee]);
-            extend_weak_collectable_roots(roots, args);
+            extend_heap_backed_roots(roots, &[*outer_callee]);
+            extend_heap_backed_roots(roots, args);
         }
         BytecodeContinuation::ReturnWithPrefix { prefix } => {
-            extend_weak_collectable_roots(roots, prefix);
+            extend_heap_backed_roots(roots, prefix);
         }
         BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
@@ -20258,22 +20393,27 @@ fn extend_stackless_self_call_frame_roots(roots: &mut Vec<Value>, frame: &Stackl
     extend_bytecode_continuation_roots(roots, &frame.continuation);
 }
 
-fn extend_stackless_self_call_frame_weak_roots(
+fn extend_stackless_self_call_frame_heap_roots(
     roots: &mut Vec<Value>,
     frame: &StacklessSelfCallFrame,
 ) {
     collect_stackless_debug_frame_roots(roots, &frame.debug_frame);
-    extend_weak_collectable_roots(roots, &frame.registers);
+    extend_heap_backed_roots(roots, &frame.registers);
     extend_capture_cell_roots(roots, &frame.register_cells);
-    extend_weak_collectable_roots(roots, &frame.varargs);
-    extend_weak_collectable_roots(roots, &frame.pending_return_prefixes);
-    extend_bytecode_continuation_weak_roots(roots, &frame.continuation);
+    extend_heap_backed_roots(roots, &frame.varargs);
+    extend_heap_backed_roots(roots, &frame.pending_return_prefixes);
+    extend_bytecode_continuation_heap_roots(roots, &frame.continuation);
 }
 
-fn value_is_weak_collectable_root(value: Value) -> bool {
+fn value_is_heap_backed_root(value: Value) -> bool {
     matches!(
         value.kind(),
-        ValueKind::Table | ValueKind::Function | ValueKind::Userdata | ValueKind::Buffer
+        ValueKind::String
+            | ValueKind::Table
+            | ValueKind::Function
+            | ValueKind::Userdata
+            | ValueKind::Buffer
+            | ValueKind::Vector
     )
 }
 
@@ -24358,6 +24498,71 @@ mod inline_cache_tests {
             .expect("string constant")
             .expect("string atom");
         assert_eq!(first_atom, second_atom);
+
+        let dead = vm
+            .heap
+            .intern_string("runtime-string-not-referenced-after-quiescence");
+        vm.collect_garbage();
+        assert_eq!(
+            vm.heap.string_bytes(first_atom).as_deref(),
+            Some(b"field".as_slice())
+        );
+        assert!(vm.heap.string_bytes(dead).is_none());
+    }
+
+    #[test]
+    fn explicit_collection_releases_idle_stack_capacity() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        vm.call_stack.reserve(4_096);
+        vm.running_coroutines.reserve(4_096);
+        vm.running_coroutine_stack_bases.reserve(4_096);
+        vm.active_coroutine_frames.reserve(4_096);
+        vm.yield_collectors.reserve(4_096);
+        assert!(vm.call_stack.capacity() >= 4_096);
+
+        vm.collect_garbage();
+
+        assert_eq!(vm.call_stack.capacity(), 0);
+        assert_eq!(vm.running_coroutines.capacity(), 0);
+        assert_eq!(vm.running_coroutine_stack_bases.capacity(), 0);
+        assert_eq!(vm.active_coroutine_frames.capacity(), 0);
+        assert_eq!(vm.yield_collectors.capacity(), 0);
+    }
+
+    #[test]
+    fn explicit_collection_prunes_only_unreachable_coroutine_state() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let live_handle = vm
+            .heap
+            .alloc_userdata(None)
+            .expect("live coroutine userdata");
+        let dead_handle = vm
+            .heap
+            .alloc_userdata(None)
+            .expect("dead coroutine userdata");
+        let live_root = vm.retain_value(Value::userdata(live_handle));
+        for handle in [live_handle, dead_handle] {
+            vm.coroutines.push(CoroutineState {
+                handle,
+                callee: Value::nil(),
+                frames: Vec::new(),
+                initialized: false,
+                dead: false,
+                error: None,
+                debug_snapshot: None,
+            });
+        }
+
+        vm.collect_garbage();
+
+        assert_eq!(vm.coroutines.len(), 1);
+        assert_eq!(vm.coroutines[0].handle, live_handle);
+        assert!(vm.heap.has_userdata(live_handle));
+        assert!(!vm.heap.has_userdata(dead_handle));
+        drop(live_root);
+        vm.collect_garbage();
+        assert!(vm.coroutines.is_empty());
+        assert!(!vm.heap.has_userdata(live_handle));
     }
 
     #[test]

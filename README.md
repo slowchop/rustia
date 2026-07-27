@@ -141,6 +141,11 @@ public rustia project; actual grabby integration work is explicitly out of scope
 - `cargo run -p rustia --example embedding` — globals, fallible typed host functions, deterministic extensions, retained script functions, and serde.
 - `cargo run -p rustia --example hot_reload` — compile/install hot reload plus retained-handle survival and freshness checks.
 
+Long-lived hosts can call `Vm::collect_garbage()` at an idle boundary to finish
+reclamation and release spare VM-owned allocations to the process allocator.
+Values that must survive that boundary need an active `RetainedValue` lease
+from `Vm::retain_value`.
+
 ## CLI
 - `cargo run -p rustia-cli -- path/to/script.luau`
 - `cargo run -p rustia-cli -- --profile deterministic-sim --fuel 100000 --eval "return 40 + 2"`

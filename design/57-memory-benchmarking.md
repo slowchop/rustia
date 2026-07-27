@@ -301,8 +301,10 @@ instrumentation cost. Such traces explain *why* a cohort moved; they do not repl
    root leases. Tests cover collection after dropping parent exports, repeated reuse around retained closures,
    stale-handle rejection, generation-exhaustion retirement, bounded churn, cross-VM rejection, reachable versus
    unreachable cycles, function environments/captures, userdata payloads, metatables, vector keys, and weak
-   edges. Capacity shrinking/page return, deliberate interned-string lifetime policy, quotas, atomic OOM, and
-   lifecycle reset are next.
+   edges. Runtime string atoms now use the same generation-safe lifetime model, and explicit host quiescence
+   completes reclamation, prunes unreachable coroutine records, compacts bounded application tables, and shrinks
+   heap/interner/stack capacity. Loaded-program reclamation, allocator page-return evidence, quotas, atomic OOM,
+   and lifecycle reset are next.
 8. Add the periodic `memory.max` pressure curve and targeted attribution tooling.
 
 ## Acceptance gate before memory work is declared complete

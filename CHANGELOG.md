@@ -8,6 +8,13 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- Runtime string atoms now use generation-checked reusable slots and ordinary
+  tracing collections reclaim unreachable strings without allowing stale
+  handles to alias replacements. `Vm::collect_garbage()` adds an explicit host
+  quiescence boundary that completes reclamation, prunes unreachable coroutine
+  state, and releases spare table, buffer, interner, and stack allocations to
+  the process allocator while preserving retained values and compiled string
+  constants.
 - Luau 0.709 conformance tracking is pending-free, with the current manifest at
   694 fixtures and 493 behavior refs.
 - VM strings and larger insertion-ordered table hash parts now use compact

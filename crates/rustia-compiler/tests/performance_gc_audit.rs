@@ -119,3 +119,50 @@ fn leaf_shortcuts_match_interpreted_gc_countdown_across_boundaries_and_runs() {
         }
     }
 }
+
+#[test]
+fn quiescent_collection_preserves_bounded_todo_application_state() {
+    for source in [
+        include_str!("../../../bench/workloads/luau/19_todo_steady.luau"),
+        include_str!("../../../bench/workloads/luau/20_todo_history.luau"),
+    ] {
+        let program = compile_source(source);
+        let mut collected = Vm::new(Profile::ReproducibleStandard);
+        let collected_function = collected.run(&program).unwrap();
+        let collected_function = collected.retain_value(collected_function);
+        let mut natural = Vm::new(Profile::ReproducibleStandard);
+        let natural_function = natural.run(&program).unwrap();
+        let natural_function = natural.retain_value(natural_function);
+
+        for _ in 0..40 {
+            let collected_result = collected
+                .call_retained_function(
+                    collected_function.value(),
+                    &[rustia_vm::Value::number(128.0)],
+                )
+                .unwrap();
+            let natural_result = natural
+                .call_retained_function(
+                    natural_function.value(),
+                    &[rustia_vm::Value::number(128.0)],
+                )
+                .unwrap();
+            assert_eq!(
+                collected_result[0].as_number(),
+                natural_result[0].as_number()
+            );
+        }
+
+        collected.collect_garbage();
+        let after_collection = collected
+            .call_retained_function(
+                collected_function.value(),
+                &[rustia_vm::Value::number(128.0)],
+            )
+            .unwrap();
+        let natural_next = natural
+            .call_retained_function(natural_function.value(), &[rustia_vm::Value::number(128.0)])
+            .unwrap();
+        assert_eq!(after_collection[0].as_number(), natural_next[0].as_number());
+    }
+}

@@ -186,17 +186,15 @@ API parity release-critical work.
 The pending-free conformance corpus proves the named 493-behavior denominator; it does **not** mean that every
 production concern or host-facing facility is finished. The highest-impact gaps are:
 
-1. **Bounded object lifetime and memory policy.** Tables, functions, upvalues, coroutine states,
-   atomized/non-inline runtime strings, userdata, buffers, vectors, and loaded programs currently occupy stable
-   append-only VM slots; unreachable entries are not reclaimed or reused independently of dropping the VM.
-   Before public release, rustia needs a safe-Rust reachability/reuse design, explicit heap/allocation limits,
-   catchable-or-host OOM policy, and representative long-lived/mixed-heap evidence. Public `Function`/`Exports`
-   copies must become real roots or use an ownership/API redesign before slots can be reused: ordinary calls
-   stay valid across hot reload outside an explicit reset epoch, while reset may invalidate every handle.
-   GC interval tuning alone is not a substitute for reclamation. The first reclamation slice is now underway:
-   weak-table collection and the future ordinary-object sweep share one heap mark phase, including function
-   environments, direct captures, upvalue cells, userdata payload values, metatables, and cyclic graphs.
-   External-handle rooting and generation-safe slot reuse remain the next safety boundary.
+1. **Bounded object lifetime and memory policy.** Ordinary reachability now reclaims and generation-safely
+   reuses tables, functions, upvalues, atomized runtime strings, userdata, buffers, and vectors. Public retained
+   values are collector roots. At an explicit idle boundary, `Vm::collect_garbage()` completes two reclamation
+   passes, removes coroutine state whose userdata is unreachable, compacts bounded table/buffer/interner
+   storage, and shrinks VM/coroutine/traceback stack capacity. Compiled constant atoms stay rooted and stale
+   handles cannot alias replacements. Still required before public release: loaded-program reclamation,
+   explicit heap/allocation limits, catchable-or-host OOM policy, honest live/peak accounting, lifecycle reset,
+   and representative long-lived native/wasm mixed-heap evidence. GC interval tuning is not a substitute for
+   those remaining policies.
 2. **A mechanically enforced per-decision lifecycle.** The deterministic host contract says authoritative
    cross-tick state lives in host slots and the script heap is transient, but the public facade does not yet
    provide a decision/scratch reset primitive. Hosts can reconstruct a VM today; the roadmap requires an
