@@ -18,6 +18,7 @@ pub use extension_api::{
 pub use function::{Exports, Function};
 pub use rustia_vm::{
     Error as VmError, ErrorKind as VmErrorKind, OpCapability, Profile, VmMemoryStats, VmSettings,
+    DECISION_RESET_ABI_VERSION as RUSTIA_DECISION_RESET_ABI_VERSION,
 };
 pub use serde_value::SerdeValueError;
 pub use value::{
@@ -57,10 +58,29 @@ impl Rustia {
         self.vm.memory_stats()
     }
 
+    /// Current decision epoch. Epoch zero begins at construction.
+    pub fn decision_epoch(&self) -> u64 {
+        self.vm.decision_epoch()
+    }
+
+    /// Discards all guest state and begins a fresh decision epoch.
+    ///
+    /// VM configuration, services, extensions, and installed host functions
+    /// persist. Globals inserted with [`insert_global`](Self::insert_global)
+    /// and [`insert_serde`](Self::insert_serde) are decision inputs and must be
+    /// rebound afterward. Every prior [`Function`] and [`Exports`] handle is
+    /// invalidated, while host-owned [`CompiledModule`] values remain reusable.
+    ///
+    /// Replay protocols must record
+    /// [`RUSTIA_DECISION_RESET_ABI_VERSION`].
+    pub fn reset_decision(&mut self) -> Result<()> {
+        self.vm.reset_decision().map_err(Error::Vm)
+    }
+
     pub fn compile_and_run(&mut self, source: &str) -> Result<Exports> {
         let value = self.compile_and_run_raw(source)?;
         let value = self.vm.retain_value(value);
-        Ok(Exports::new(value, self.generation))
+        Ok(Exports::new(value, self.generation, self.decision_epoch()))
     }
 
     pub fn compile_and_run_named(
@@ -70,7 +90,7 @@ impl Rustia {
     ) -> Result<Exports> {
         let value = self.compile_and_run_raw_named(source_name, source)?;
         let value = self.vm.retain_value(value);
-        Ok(Exports::new(value, self.generation))
+        Ok(Exports::new(value, self.generation, self.decision_epoch()))
     }
 
     pub fn compile_and_run_exports(&mut self, source: &str) -> Result<Exports> {
@@ -273,7 +293,7 @@ impl Rustia {
         let value = self.vm.run(&module.program).map_err(Error::Vm)?;
         self.advance_generation();
         let value = self.vm.retain_value(value);
-        Ok(Exports::new(value, self.generation))
+        Ok(Exports::new(value, self.generation, self.decision_epoch()))
     }
 
     pub fn hot_reload(&mut self, source_name: impl Into<String>, source: &str) -> Result<Exports> {
@@ -392,8 +412,9 @@ mod tests {
     use super::{
         Error, FromRustia, OpCapability, OwnedTable, OwnedValue, Profile, Result, Rustia,
         RustiaBuilder, RustiaExtension, RustiaHostFunctionInfo, ServiceClock, SourceSpan,
-        VmErrorKind, VmSettings, RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION,
-        RUSTIA_HOST_FUEL_POLICY, RUSTIA_MIN_HOST_FUNCTION_FUEL,
+        VmErrorKind, VmSettings, RUSTIA_DECISION_RESET_ABI_VERSION,
+        RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
+        RUSTIA_MIN_HOST_FUNCTION_FUEL,
     };
     use rustia_compiler::{compile_with_options, CompileOptions};
     use rustia_parser::parse_source;
@@ -401,6 +422,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use std::cell::RefCell;
     use std::collections::BTreeMap;
+    use std::num::NonZeroU64;
     use std::rc::Rc;
 
     #[test]
@@ -1703,6 +1725,148 @@ return first >= 0 and second >= first
             )
             .unwrap();
         assert!(logical);
+    }
+
+    #[test]
+    fn decision_reset_invalidates_every_retained_facade_handle() {
+        assert_eq!(RUSTIA_DECISION_RESET_ABI_VERSION, 1);
+        let module = Rustia::compile(
+            "decision.luau",
+            "return { answer = 42, decide = function(x) return x + 1 end }",
+        )
+        .unwrap();
+        let mut rustia = RustiaBuilder::deterministic().build().unwrap();
+        let exports = rustia.install(module.clone()).unwrap();
+        let decide = exports.function(&mut rustia, "decide").unwrap();
+        let exports_clone = exports.clone();
+        let decide_clone = decide.clone();
+
+        assert_eq!(exports.decision_epoch(), 0);
+        assert_eq!(decide.decision_epoch(), 0);
+        assert_eq!(decide.call::<_, f64>(&mut rustia, (4.0,)).unwrap(), 5.0);
+
+        rustia.reset_decision().unwrap();
+        assert_eq!(rustia.decision_epoch(), 1);
+        assert!(!exports.is_current(&rustia));
+        assert!(!decide.is_current(&rustia));
+        for result in [
+            exports.get::<f64>(&mut rustia, "answer").map(|_| ()),
+            exports_clone.get::<f64>(&mut rustia, "answer").map(|_| ()),
+            decide.call::<_, f64>(&mut rustia, ()).map(|_| ()),
+            decide_clone.call::<_, f64>(&mut rustia, ()).map(|_| ()),
+        ] {
+            let error = result.expect_err("pre-reset handle must be stale");
+            assert!(
+                error.to_string().contains("decision epoch 0"),
+                "unexpected stale-handle error: {error}"
+            );
+        }
+
+        let fresh = rustia.install(module).unwrap();
+        let fresh_decide = fresh.function(&mut rustia, "decide").unwrap();
+        assert_eq!(fresh.decision_epoch(), 1);
+        assert_eq!(
+            fresh_decide.call::<_, f64>(&mut rustia, (9.0,)).unwrap(),
+            10.0
+        );
+    }
+
+    #[test]
+    fn decision_reset_discards_guest_state_and_restores_host_configuration_and_rng() {
+        let settings = VmSettings {
+            deterministic_gc_interval: NonZeroU64::new(8).unwrap(),
+            enable_memory_tracking: true,
+            ..VmSettings::default()
+        };
+        let extension = RustiaExtension::new("host").fn_pure("bias", || -> f64 { 7.0 });
+        let mut rustia = RustiaBuilder::deterministic()
+            .settings(settings)
+            .wall_clock(ServiceClock::fixed(1_234.0))
+            .extension(extension)
+            .build()
+            .unwrap();
+        rustia
+            .add_pure_fn("double", |value: f64| value * 2.0)
+            .unwrap();
+        rustia.insert_global("input", 5.0).unwrap();
+
+        let configured: bool = rustia
+            .run(
+                "\
+decision_global = (decision_global or 0) + 1
+return input == 5 and decision_global == 1
+    and host.bias() == 7 and double(3) == 6 and os.time() == 1234
+",
+            )
+            .unwrap();
+        assert!(configured);
+        let first_random: Vec<f64> = rustia
+            .run("return { math.random(), math.random(), math.random() }")
+            .unwrap();
+        assert!(rustia.vm().deterministic_collection_count() > 0);
+        let peak_before_reset = rustia.memory_stats().peak_live_bytes.unwrap();
+
+        rustia.reset_decision().unwrap();
+        assert_eq!(rustia.vm().deterministic_collection_count(), 0);
+        assert_eq!(
+            rustia.memory_stats().peak_live_bytes,
+            Some(peak_before_reset),
+            "lifetime peak telemetry must survive a decision reset"
+        );
+        let clean_and_configured: bool = rustia
+            .run(
+                "\
+return input == nil and decision_global == nil
+    and host.bias() == 7 and double(3) == 6 and os.time() == 1234
+",
+            )
+            .unwrap();
+        assert!(clean_and_configured);
+        let second_random: Vec<f64> = rustia
+            .run("return { math.random(), math.random(), math.random() }")
+            .unwrap();
+        assert_eq!(first_random, second_random);
+        assert!(rustia.vm().deterministic_collection_count() > 0);
+    }
+
+    #[test]
+    fn decision_reset_reaches_a_many_decision_memory_plateau() {
+        let module = Rustia::compile(
+            "plateau.luau",
+            "\
+decision_global = {}
+for i = 1, 64 do
+    decision_global[i] = { value = i, label = 'temporary-' .. i }
+end
+local thread = coroutine.create(function()
+    coroutine.yield(decision_global)
+end)
+coroutine.resume(thread)
+return { count = #decision_global }
+",
+        )
+        .unwrap();
+        let mut rustia = RustiaBuilder::deterministic().build().unwrap();
+        let mut plateau = None;
+
+        for decision in 0..600 {
+            let exports = rustia.install(module.clone()).unwrap();
+            assert_eq!(exports.get::<usize>(&mut rustia, "count").unwrap(), 64);
+            rustia.reset_decision().unwrap();
+            let stats = rustia.memory_stats();
+            if decision == 49 {
+                plateau = Some(stats);
+            } else if decision > 49 {
+                assert_eq!(
+                    Some(stats),
+                    plateau,
+                    "VM memory changed after the warm plateau at decision {decision}"
+                );
+            }
+        }
+        assert_eq!(rustia.decision_epoch(), 600);
+        let clean: bool = rustia.run("return decision_global == nil").unwrap();
+        assert!(clean);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

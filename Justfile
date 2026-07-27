@@ -58,7 +58,7 @@ check-benchmark-results:
     node bench/render-current-results.js --check
     node bench/render-claims.js --check
 
-# Build the wasm adapter and prove quota/OOM catchability under linear memory.
+# Build the wasm adapter and prove quota/OOM catchability plus decision reset.
 test-wasm-memory-limit:
     cargo build --manifest-path bench/wasm/adapter-runner/Cargo.toml --target wasm32-unknown-unknown --release
     node bench/wasm/test-rustia-memory-limit.mjs

@@ -1,11 +1,13 @@
 use rustia_vm::number::{binary, NumericOp, CANON_NAN_BITS};
 use rustia_vm::{
-    ClockProvider, Constant, ExtensionOp, Function, Instruction, OpCapability, Opcode, Profile,
-    Program, StdoutSink, Value, ValueKind, Vm, VmServices, VmSettings, MAX_RECURSION_LIMIT,
+    ClockProvider, Constant, ErrorKind, ExtensionOp, Function, HostFunctionOp, Instruction,
+    OpCapability, Opcode, Profile, Program, StdoutSink, Value, ValueKind, Vm, VmServices,
+    VmSettings, DECISION_RESET_ABI_VERSION, MAX_RECURSION_LIMIT,
 };
 use std::cell::RefCell;
 use std::num::NonZeroU64;
 use std::rc::Rc;
+use std::sync::Arc;
 
 fn first_arg(args: &[Value]) -> rustia_vm::Result<Value> {
     Ok(args.first().copied().unwrap_or_else(Value::nil))
@@ -893,6 +895,82 @@ fn conformance_top_level_coroutine_yield_is_gated() {
     let mut conformance_vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
     let value = conformance_vm.run(&program).unwrap();
     assert_eq!(value.as_number(), Some(7.0));
+}
+
+#[test]
+fn decision_reset_requires_idle_execution_and_preserves_installed_host_functions() {
+    assert_eq!(DECISION_RESET_ABI_VERSION, 1);
+    let mut vm = Vm::new(Profile::DeterministicSim);
+    let extension_id = vm
+        .register_extension_op(ExtensionOp::new(
+            "identity",
+            1,
+            OpCapability::Pure,
+            first_arg,
+        ))
+        .unwrap();
+    vm.install_host_function(HostFunctionOp::new(
+        "try_reset",
+        1,
+        OpCapability::Pure,
+        Arc::new(|vm, _| {
+            let epoch = vm.decision_epoch();
+            let error = vm
+                .reset_decision()
+                .expect_err("a host callback must not reset an active VM");
+            assert!(matches!(error.kind, ErrorKind::DecisionResetWhileRunning));
+            assert_eq!(vm.decision_epoch(), epoch);
+            Ok(vec![Value::boolean(true)])
+        }),
+    ))
+    .unwrap();
+    let call = Program::new(
+        Function::new(
+            vec![
+                Instruction::with_aux(Opcode::GetGlobal, 0, 0, 0, 0),
+                Instruction::with_aux(Opcode::Call, 0, 0, 1, 0),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+            ],
+            1,
+        ),
+        vec![Constant::String(b"try_reset".to_vec())],
+    );
+    let extension_call = Program::new(
+        Function::new(
+            vec![
+                Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                Instruction::with_aux(Opcode::CallExtension, 1, 0, 1, i32::from(extension_id)),
+                Instruction::new(Opcode::Return, 1, 1, 0),
+            ],
+            2,
+        ),
+        vec![Constant::Number(7.0)],
+    );
+    let retained_table = vm.empty_table();
+    let retained = vm.retain_value(retained_table);
+
+    assert_eq!(vm.run(&call).unwrap().as_bool(), Some(true));
+    assert_eq!(vm.run(&extension_call).unwrap().as_number(), Some(7.0));
+    assert!(retained.belongs_to(&vm));
+    assert!(retained.value(&vm).is_ok());
+    let other_vm = Vm::new(Profile::DeterministicSim);
+    assert!(matches!(
+        retained.value(&other_vm).unwrap_err().kind,
+        ErrorKind::RetainedValueFromDifferentVm
+    ));
+    assert_eq!(vm.decision_epoch(), 0);
+    vm.reset_decision().unwrap();
+    assert_eq!(vm.decision_epoch(), 1);
+    assert!(!retained.belongs_to(&vm));
+    assert!(matches!(
+        retained.value(&vm).unwrap_err().kind,
+        ErrorKind::StaleRetainedValue {
+            retained_epoch: 0,
+            current_epoch: 1
+        }
+    ));
+    assert_eq!(vm.run(&call).unwrap().as_bool(), Some(true));
+    assert_eq!(vm.run(&extension_call).unwrap().as_number(), Some(7.0));
 }
 
 #[test]

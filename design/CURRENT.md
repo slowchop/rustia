@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-26.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-27.)
 
 ## One-paragraph state
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
@@ -13,6 +13,16 @@ owned values with typed and nested table helpers, source-named run/compile helpe
 fallible `rustia::Result<T>` returns, pre-install host signature/fuel ABI metadata, retained script function
 handles with freshness checks and current-generation accessors, public source-span/runtime-location error
 accessors, owned-value/table serde, deterministic extension registration, hot reload, and macro sugar.
+Decision-reset ABI v1 is now implemented at both VM and facade layers. An idle reset reuses the VM's allocation
+containers, preserves profile/settings/services/extensions/installed host functions and modules plus
+host-owned immutable compiled modules and lifetime peaks, and discards every guest global, object, upvalue,
+coroutine, loaded program/cache, traceback, coverage row, and retained root. RNG, logical time, compatibility
+GC state, and deterministic collection scheduling restart from construction values; per-execution fuel remains
+fresh. Every retained `Function`/`Exports` clone is epoch-checked and becomes stale after reset. Focused tests
+cover active-execution rejection and an exact post-warmup memory plateau across 600 mixed
+table/coroutine/program/retained-export decisions. The wasm32 Node/V8 lifecycle probe runs 300 more decisions
+and verifies module reuse, restored host functions, cleared inputs, RNG restart, stale handles, and the same
+exact plateau in WebAssembly.
 The host services bus from [`72-host-services.md`](72-host-services.md) is now implemented: facade presets
 `standard()`/`deterministic()`/`live()`, a host stdout sink giving `print` its real Luau composition,
 determinism-labeled wall/monotonic clock providers feeding `os.time`/`os.date`/`os.clock`, and a deterministic
@@ -201,14 +211,9 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    correctness-first quota-mode boundary scan. Exact-commit Linode cohort `safe-memory-588b541` retained 99
    native samples after confirmed deletion, passed the wasm32 512 KiB quota/recovery probe, tied the 256 KiB
    best shared peak, and reduced the shared retained mean to 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. Still
-   required before public release: lifecycle reset, O(1) accounting, and broader mixed-heap pressure coverage.
+   required before public release: O(1) accounting and broader mixed-heap/native/Wasm pressure coverage.
    GC interval tuning is not a substitute for those remaining policies.
-2. **A mechanically enforced per-decision lifecycle.** The deterministic host contract says authoritative
-   cross-tick state lives in host slots and the script heap is transient, but the public facade does not yet
-   provide a decision/scratch reset primitive. Hosts can reconstruct a VM today; the roadmap requires an
-   explicit, tested reset/reuse path that cannot silently preserve globals, upvalues, coroutines, or heap state
-   across authoritative decisions.
-3. **Host-provided runtime services.** The output/time provider slice is implemented
+2. **Host-provided runtime services.** The output/time provider slice is implemented
    ([`72-host-services.md`](72-host-services.md)): `print` composes `tostring` per argument (honoring
    `__tostring`), tab-joins, and writes to a host stdout sink when one is attached; no-argument
    `os.time`/`os.date` read a wall-clock provider with a pinned-epoch fallback; and `os.clock` reads a
@@ -220,12 +225,12 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    programs also need a host-owned `require` resolver, execute-once cache, and cycle detection; resolution
    remains host policy rather than a core filesystem API. Module/extension installation still needs
    transactional or isolated failure semantics.
-4. **Complete public value interop.** `OwnedValue` intentionally starts small, but it cannot yet faithfully
+3. **Complete public value interop.** `OwnedValue` intentionally starts small, but it cannot yet faithfully
    carry binary strings, buffers, vectors, opaque userdata identity, non-scalar/identity table keys,
    cyclic/shared table graphs, or zero-copy live values. Add the live-value serde path and identity-safe handles
    before claiming a general rich embedding boundary; full mlua-style `UserData`/`Scope` registration and async
    callbacks remain later, optional layers.
-5. **Semantic-tail and diagnostics hardening.** Continue differential parser/compiler testing, keep valid
+4. **Semantic-tail and diagnostics hardening.** Continue differential parser/compiler testing, keep valid
    runtime errors catchable at runtime rather than prematurely rejecting them at compile time, and finish
    public stack traces/source diagnostics. Module/extension installation and runtime-failing hot reload also need
    documented transactional or isolated failure semantics; generation counters alone do not roll back partial
@@ -243,9 +248,11 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    bounded-churn and intentional-retention controls, and dashboard views. Add reachability-based
    reclamation/reuse for ordinary VM objects, coroutine state, and loaded programs; those stores, retained host
    roots, stale-handle defenses, VM-owned live/reserved/peak accounting, and logical-live quota/atomic OOM
-   semantics are now active. Next add a deterministic per-decision reset/reuse API and optimize quota accounting
-   to O(1). Prove the memory path with long-lived churn, cyclic graphs, hot reload, retained handles, weak tables,
-   native/wasm parity, and representative mixed-heap evidence before tuning final intervals.
+   semantics are now active. Decision-reset ABI v1 also provides epoch-safe retained-handle invalidation,
+   deterministic counter restart, reusable allocation containers, and a 600-decision exact plateau. Next
+   optimize quota accounting to O(1) and prove the complete memory path with broader long-lived churn, cyclic
+   graphs, hot reload, retained handles, weak tables, native/wasm parity, and representative mixed-heap evidence
+   before tuning final intervals.
 2. **Finish the host-facing runtime boundary.** Add a worker-local/per-call host context, a host-owned module
    resolver/cache,
    complete binary/rich-value interop, zero-copy live serde, and transactional install/hot-reload/stack
@@ -276,9 +283,9 @@ production concern or host-facing facility is finished. The highest-impact gaps 
 8. **Maintain benchmark operations** — hosted CI remains validation-only; the operator-started Linode lifecycle
    is the sole active timing source and must keep its Linux-only completeness and cleanup gates green.
 
-**Pre-release gates:** see the "What's next" section below. Object reclamation/limits and the deterministic
-decision-reset contract now precede final GC tuning; benchmark publication and the `LuauIntegerType2` watch
-remain ongoing gates.
+**Pre-release gates:** see the "What's next" section below. Object reclamation/limits and deterministic
+decision reset are implemented; O(1) accounting and broader mixed-heap pressure evidence now precede final GC
+tuning. Benchmark publication and the `LuauIntegerType2` watch remain ongoing gates.
 
 **Project setup facts:** dual `MIT OR Apache-2.0` (holder Gak Dev Pty Ltd); the public/private boundary +
 `private/` mount are in [`CLAUDE.md`](../CLAUDE.md); no Linear.
@@ -402,11 +409,12 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 
 ## What's next (the genuine remaining public-release gates)
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items, in order:
-1. **Implement per-decision reset/reuse and broaden the mixed-heap pressure matrix.** The frozen comparator is
+1. **Broaden the mixed-heap pressure matrix and finish O(1) accounting.** The frozen comparator is
    `pre-reclamation-18b58d8`; exact-commit cohort `safe-memory-588b541` now validates the bounded native
    workloads and wasm32 quota/recovery path. Coroutine/program stores, true public-handle rooting, weak tables,
-   cyclic graphs, hot reload, logical-live quotas, and atomic OOM have their first safety coverage. Ordinary
-   retained calls survive hot reload outside an explicit reset epoch.
+   cyclic graphs, hot reload, logical-live quotas, and atomic OOM have their first safety coverage. Decision
+   reset now invalidates every prior retained-handle clone by epoch, restarts deterministic state, and plateaus
+   exactly across 600 focused decisions; ordinary retained calls still survive hot reload outside a reset.
 2. **Complete the host service and rich-value boundary:** O(1) quota accounting, a worker-local/per-call host
    context, a host-owned
    deterministic module resolver/cache, binary/rich/cyclic values, live-value serde, transactional

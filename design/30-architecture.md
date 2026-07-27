@@ -27,10 +27,11 @@
 > implemented; full Luau `__namecall` context remains a separate conformance item. Exact dedicated-Linux runs
 > now retain accepted dense/OOP throughput evidence plus a separate paired 512-VM string-memory corpus.
 >
-> **v3.3 roadmap correction (2026-07-23):** the collection scheduling/profile decision remains locked, but
-> the production VM's stable handle stores and loaded-program store are still append-only. Complete
-> reachability/reuse, aggregate accounting and quotas, atomic OOM behavior, and epoch-safe decision reset are
-> release gates. The current first embedding slice is owned-value based; live zero-copy serde remains planned.
+> **v3.3 implementation update (2026-07-27):** the collection scheduling/profile decision remains locked.
+> Complete object/program reachability and generation-safe reuse, aggregate logical-live quotas with atomic OOM,
+> and epoch-safe decision-reset ABI v1 are implemented. O(1) incremental accounting and broader mixed-heap
+> native/Wasm pressure evidence remain release gates. The current first embedding slice is owned-value based;
+> live zero-copy serde remains planned.
 
 ## 0. The bet — proven, with honest framing
 
@@ -156,8 +157,11 @@ returns catchable `OutOfMemory`. The correctness-first implementation scans at q
 boundaries; O(1) incremental accounting is a later performance optimization. Exact-commit Linode cohort
 `safe-memory-588b541` retained 99 native samples after confirmed deletion and passed the wasm32 512 KiB
 quota/recovery probe. Rustia tied the 256 KiB best shared-workload peak and retained a 14.4 KiB shared mean,
-below the frozen mlua/Luau/JIT reference's 24.8 KiB. The remaining axis-D work is lifecycle reset, O(1)
-accounting, and broader mixed-heap pressure/plateau coverage before interval tuning is meaningful.
+below the frozen mlua/Luau/JIT reference's 24.8 KiB. Decision-reset ABI v1 now discards every guest allocation
+and retained root, restores deterministic state, invalidates handles by epoch, and remains exactly flat after
+warm-up across 600 focused native decisions. A Node/V8 wasm32 probe verifies the same lifecycle and exact
+plateau across 300 more decisions. The remaining axis-D work is O(1) accounting and broader mixed-heap
+native/Wasm pressure coverage before interval tuning is meaningful.
 
 **E. Determinism enforcement — LOCKED.** Dense `Vec` array parts plus insertion-ordered `Vec` hash entries;
 larger hash parts use a stable custom-mixed open-addressed `Vec<u32>` side index at no more than 50% load, and
@@ -276,8 +280,8 @@ the restricted globals.
    rollback invariant, from the parallelism agent). Any script state that persists across ticks and affects the
    sim lives in host-provided **typed slots in the captured columnar arrays**; the GC heap stays
    transient/reconstructable, out of the 24-deep rollback ring. A script stashing persistent decision state in a
-   global/upvalue = an un-captured authoritative-state leak → replay desync. `DeterministicSim` must enforce
-   this with the planned decision-reset API; reconstructing the VM per decision is the safe mechanism today.
+   global/upvalue = an un-captured authoritative-state leak → replay desync. `DeterministicSim` hosts enforce
+   this with the implemented `reset_decision()` ABI at every authoritative decision boundary.
 10. **Effect-merge / tick-phase contract (the host-bridge):** scripted leaves run in the parallel-solve phase,
     read ONLY the frozen previous-tick snapshot (never another lane's this-tick writes), and emit into a per-lane
     typed effect-queue; the host commits effects single-threaded, sorted by **(emitter SimId, intra-agent
@@ -344,7 +348,7 @@ the restricted globals.
 | Value-layout/correctness evidence is still incomplete across the full native/browser matrix; real **Safari/iOS JSC** remains open even though V8, Bun/JSC-family, and SpiderMonkey shell wasm are measured | **high** | close the residual §C0 public-release build/golden matrix while keeping timings dedicated-Linux-only; keep `Value` sealed/swappable until then |
 | Earlier general-script perf evidence came from narrow spike workloads | med | use the committed multi-workload harness and generated per-workload claim gate |
 | Live VM is thread-affine instead of `Send` | med | Avoids unsafe in production; hosts should construct VMs on worker threads and share only immutable compiled artifacts/configuration |
-| Stable object/program stores are currently append-only, so long-lived VMs can retain unreachable allocations | **high** | implement reachability/sweep, generation-safe reuse, quotas/OOM semantics, decision reset, and long-run native+wasm plateau tests before tuning intervals |
+| O(1) accounting and broad native/Wasm mixed-heap pressure evidence remain incomplete | **high** | object/program reuse, quotas/OOM, epoch reset, a focused 600-decision native plateau, and a 300-decision Node/V8 wasm32 plateau are implemented; replace boundary scans and extend the external long-run pressure matrix before tuning intervals |
 | GC full-collect cost scales O(live-objects) (~10 ns/obj; ~200 µs at 20k objects) | med | after reclamation lands, tune the instruction-count collection interval on realistic heap sizes and confirm bit-reproducible native vs wasm |
 | Remaining semantic/diagnostic tail can move errors across compile/runtime boundaries | med | add focused pinned-Luau fixtures plus differential/fuzz tests and public stack-trace/source diagnostics |
 | Representative mixed-heap/wasm per-VM RSS remains open; 16B Value doubles value memory, GcBox adds 16 B/obj, and wasm memory grows only | med | retain the exact paired 512-VM Linux corpus: the candidate's primary residual string contrasts are approximately 0 KiB/VM for shared short/long program bytes and loaded 13-byte strings, plus 7.078 KiB/VM for loaded long atoms; extend to representative heaps/native+wasm targets, then set the P1 budget |

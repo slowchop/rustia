@@ -191,8 +191,10 @@ These cannot be represented honestly as one script function and therefore remain
 - VM creation, load, run, and drop at 1/16/128/512 VM scales;
 - hot reload and failed reload;
 - module load/cache/cycle and cache reset;
-- deterministic decision reset/reuse;
-- retained public handles across reload and invalidation across reset;
+- deterministic decision reset/reuse — focused native ABI coverage includes 600 exact post-warmup plateau
+  decisions, and the Node/V8 wasm32 lifecycle probe executes another 300 with the same exact plateau; extend
+  this into the external dedicated-Linux long-running-host lane;
+- retained public handles across reload and invalidation across reset — focused epoch coverage is implemented;
 - aggregate quota and atomic OOM behavior.
 
 Rustia must pass this lane before reclamation is considered production-safe. Comparable engines may participate
@@ -314,8 +316,10 @@ instrumentation cost. Such traces explain *why* a cohort moved; they do not repl
    native samples after confirmed Linode deletion and passed the wasm32 512 KiB quota/recovery probe. Relative
    to the frozen competitor cohort, Rustia ties the 256 KiB best shared-workload peak, ranks first for stress
    peak, second for stress retention, second for todo peak, and third for todo retention. The shared retained
-   mean is 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. Broader allocator page-return evidence and lifecycle reset
-   are next.
+   mean is 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. Decision-reset ABI v1 now adds focused 600-decision
+   native table/coroutine/program/retained-handle plateau evidence, plus a 300-decision Node/V8 wasm32 probe
+   covering module reuse, host restoration, input clearing, RNG restart, handle invalidation, and exact
+   plateau. Broader allocator page-return and external dedicated-Linux reset evidence are next.
 8. Add the periodic `memory.max` pressure curve and targeted attribution tooling.
 
 ## Acceptance gate before memory work is declared complete
@@ -326,7 +330,8 @@ instrumentation cost. Such traces explain *why* a cohort moved; they do not repl
 - Rustia demonstrates bounded native and wasm plateaus across tables, strings, functions/upvalues, coroutines,
   userdata/buffers/vectors, and loaded programs.
 - Public-handle roots, weak tables, cyclic graphs, hot reload, decision reset, quotas, and atomic OOM retain
-  correctness under the same runs.
+  correctness under the same external native/Wasm runs. Focused native and Node/V8 wasm32
+  reset/epoch/plateau coverage is already implemented.
 - The dashboard reads committed memory history and exposes absolute, incremental, phase, retention, and history
   views without changing the timing claims.
 

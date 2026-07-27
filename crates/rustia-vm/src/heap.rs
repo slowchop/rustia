@@ -153,6 +153,18 @@ impl<T> ReusableSlots<T> {
         removed
     }
 
+    fn reset_epoch(&mut self) {
+        self.free.clear();
+        for (index, slot) in self.slots.iter_mut().enumerate().rev() {
+            slot.value = None;
+            // Generation zero identifies first-epoch allocations. Reset
+            // epochs are protected by the VM epoch and reuse generation one
+            // so the ordinary free-list invariant remains explicit.
+            slot.generation = 1;
+            self.free.push(index as u32);
+        }
+    }
+
     fn occupied_len(&self) -> usize {
         self.slots
             .iter()
@@ -738,6 +750,29 @@ impl VmCell {
     }
 
     pub fn finish_collection_cycle(&mut self) {
+        self.arena.finish_cycle();
+        self.allocation_debt_pending = self.arena.metrics().allocation_debt() > 0.0;
+    }
+
+    /// Discards every guest allocation while retaining reusable slot-vector
+    /// capacity for the next decision epoch.
+    ///
+    /// Compact heap handles are epoch-local after this operation. Public
+    /// retained handles are invalidated by `Vm` before this method runs; raw
+    /// `Value`s must never cross an explicit decision reset.
+    pub(crate) fn reset_decision_epoch(&mut self) {
+        self.tables.reset_epoch();
+        self.functions.reset_epoch();
+        self.upvalues.reset_epoch();
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            root.strings.reset_epoch();
+            root.string_index.clear();
+            root.userdatas.reset_epoch();
+            root.buffers.reset_epoch();
+            root.vectors.reset_epoch();
+        });
+        self.arena.finish_cycle();
         self.arena.finish_cycle();
         self.allocation_debt_pending = self.arena.metrics().allocation_debt() > 0.0;
     }

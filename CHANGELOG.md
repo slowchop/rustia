@@ -8,6 +8,17 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- `Vm::reset_decision()` / `Rustia::reset_decision()` implement decision-reset
+  ABI v1. An idle reset reuses VM allocation containers while discarding guest
+  globals, objects, upvalues, coroutines, loaded programs/caches, tracebacks,
+  coverage, and retained roots; it restarts RNG, logical time, and deterministic
+  GC scheduling. Settings, services, extension operations, installed host
+  functions/modules, immutable compiled modules, and lifetime memory peaks
+  persist. `Function`/`Exports` handles now carry a checked decision epoch, and
+  a 600-decision mixed table/coroutine/program test proves an exact post-warmup
+  VM-memory plateau. The wasm32 Node/V8 lifecycle probe executes another 300
+  decisions and verifies the same compiled-module reuse, host-binding restore,
+  input clearing, RNG restart, handle invalidation, and exact plateau.
 - Runtime string atoms now use generation-checked reusable slots and ordinary
   tracing collections reclaim unreachable strings without allowing stale
   handles to alias replacements. `Vm::collect_garbage()` adds an explicit host

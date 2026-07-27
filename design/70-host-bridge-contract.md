@@ -1,6 +1,6 @@
 # rustia — host-bridge / effect-queue contract (grabby integration)
 
-> **Status: [CONTRACT — implementation incomplete] (updated 2026-07-23).** The deterministic seam between rustia scripts and
+> **Status: [CONTRACT — reset implemented, host context incomplete] (updated 2026-07-27).** The deterministic seam between rustia scripts and
 > grabby's (parallel, rollback) sim, agreed with the grabby parallelism agent. grabby's threading is
 > design-stage/parked, so the **envelope is stable** (grounded in grabby's existing `ControlInput`/`host_discrete`/
 > `SimId` model); only the `Effect` variant set grows. See [`CURRENT.md`](CURRENT.md) + the integration memory.
@@ -44,21 +44,31 @@ provides the **generic seam**:
 Current implementation boundary: capability-labelled registration helpers exist, but typed callbacks do not
 yet receive a per-VM/per-call host context. Mutable worker-local slot/effect state currently needs captured
 synchronization or interior mutability. A cheap context-rebinding seam is therefore part of completing this
-contract, alongside the decision-reset gate below.
+contract. The decision-reset gate below is implemented.
 
 grabby's host-bridge maps rustia host-fn calls → `EffectRecord`/`Effect` and performs the `(emitter, seq)`
 commit + `SetSlot`↔columnar writeback.
 
 ## Mechanical enforcement of the cross-tick invariant
-**Required, not yet implemented:** in `DeterministicSim`, per-agent leaves must run on a **scratch heap reset
-between decisions** so a global/upvalue physically cannot survive to influence a future tick; the only
-cross-tick channel is `SetSlot`↔host columnar slots. The current public facade has install-generation freshness
-checks, but no decision-reset API, and the VM's object/program stores are retained until VM drop. The production
-gate is therefore an explicit reset/reuse operation with epoch-safe invalidation of every retained handle, a
-versioned definition of which RNG/fuel/GC/global state resets, and a many-decision memory-plateau test. Until
-that lands, reconstructing the VM per decision is the only mechanically safe implementation of this contract.
-(Outside an explicit reset epoch, ordinary retained function calls must keep their documented survival across
-successful hot reload; reclamation therefore also needs true host-handle roots or an ownership redesign.)
+**Implemented:** `Vm::reset_decision()` / `Rustia::reset_decision()` provide the **scratch heap reset between
+decisions** required by `DeterministicSim`, so a global/upvalue/coroutine physically cannot survive to influence
+a future tick; the only sanctioned cross-tick channel is `SetSlot`↔host columnar slots. Decision-reset ABI v1
+preserves the profile, settings, service providers, extension operations, installed global host functions and
+host modules, host-owned immutable compiled modules, and lifetime memory peaks. It discards guest globals,
+tables/functions/upvalues, coroutines, loaded programs/caches, tracebacks, coverage rows, and retained roots;
+RNG, logical time, compatibility GC state, and deterministic collection scheduling restart from construction
+values. Per-call fuel already starts from `VmSettings::initial_fuel` on every execution. Ordinary inserted
+globals are decision inputs and must be rebound after reset.
+
+Every successful reset advances a checked `u64` decision epoch. All `Function`/`Exports` clones retain their
+creation epoch and reject every operation after reset; the raw `RetainedValue` registry is replaced as the
+lower-level epoch boundary. Reset is idle-only and is rejected from guest/host-callback execution. A
+600-decision native table/coroutine/program/retained-export test remains exactly flat after warm-up, including
+across the compact per-slot generation range. The wasm32 Node/V8 probe runs a further 300 decisions and checks
+module reuse, host-binding restoration, input clearing, RNG restart, stale handles, and the same exact plateau.
+Replay/golden protocols must record
+`RUSTIA_DECISION_RESET_ABI_VERSION` (currently 1). Outside an explicit reset epoch, ordinary retained function
+calls retain their documented survival across successful hot reload.
 (Scenario run-once + console use are separate paths, not this hot loop.)
 
 ## Illustrative catalog (grows on grabby's side)

@@ -1,31 +1,29 @@
 # Release Readiness Checklist
 
 This checklist tracks what must be true before any public rustia crate flips
-from `publish = false` to publishable. Updated 2026-07-23; the ordered runtime
+from `publish = false` to publishable. Updated 2026-07-27; the ordered runtime
 blockers below take precedence over packaging polish.
 
 ## Current Release Blockers (Ordered)
 
-1. Retain native/wasm pressure evidence for the implemented per-VM logical-live
-   quota and atomic, catchable OOM path. Host-facing VM-owned live/reserved
-   accounting and opt-in instruction-boundary peaks are implemented; an O(1)
-   incremental optimization must replace quota-mode boundary scans before
-   script-visible compatibility counters can use the same accounting.
-2. Add a deterministic decision-boundary reset/reuse API with epoch-safe
-   invalidation for every retained handle and a versioned reset/replay ABI.
-3. Add cheap worker-local/per-call host context; capability-tagged output and
+1. Replace quota-mode boundary scans with O(1) incremental accounting, connect
+   script-visible compatibility counters to the same census, and retain broader
+   native/wasm mixed-heap pressure evidence. The per-VM logical-live quota,
+   atomic/catchable OOM path, VM-owned live/reserved/peak telemetry, epoch-safe
+   decision-reset ABI, and focused 600-decision plateau are implemented.
+2. Add cheap worker-local/per-call host context; capability-tagged output and
    clock/time providers plus real internal VM memory telemetry are implemented. Reject
    nondeterministic providers in DeterministicSim.
-4. Add a host-owned script-visible `require` resolver/cache with deterministic
+3. Add a host-owned script-visible `require` resolver/cache with deterministic
    identity, execute-once behavior, and cycle diagnostics.
-5. Complete the release value surface for binary strings, buffers, vectors,
+4. Complete the release value surface for binary strings, buffers, vectors,
    non-scalar/identity keys, opaque identity-safe userdata handles,
    shared/cyclic table graphs, and a lifetime-safe live serde layer. Full
    mlua-style `UserData`/`Scope` registration remains a later optional layer.
-6. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
+5. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
    transactional extension/module/hot-reload failure behavior, and
    differential/fuzz coverage before stabilizing and publishing the API.
-7. Close the full correctness/build/golden target matrix from
+6. Close the full correctness/build/golden target matrix from
    [`00-constraints.md`](00-constraints.md); Linux remains the only active
    timing source, but not the only correctness target.
 
@@ -128,8 +126,13 @@ blockers below take precedence over packaging polish.
   and loaded programs without allowing stale handles to alias reused slots.
 - Live/peak allocation accounting, aggregate quotas, and atomic OOM behavior
   are covered under long-running native and wasm churn.
-- A decision reset defines and tests exactly which programs, globals, upvalues,
-  coroutines, RNG state, fuel, and collection counters reset or persist.
+- Decision-reset ABI v1 is mechanically tested: configuration/services/
+  extensions/installed host bindings/compiled modules/lifetime peaks persist;
+  guest programs, globals, upvalues, coroutines, tracebacks, coverage, and
+  retained roots are discarded; RNG/logical time/GC scheduling restart; fuel
+  remains per execution; stale handles fail by epoch; idle-only rejection and
+  a 600-decision native exact post-warmup plateau are covered. The Node/V8
+  wasm32 probe covers the same lifecycle and exact plateau across 300 decisions.
 - GC pacing is tuned for Standard profiles only after reclamation works, and
   DeterministicSim collection intervals are treated as deterministic ABI.
 - Host-provided output/time services and internal VM memory telemetry obey each

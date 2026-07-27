@@ -95,6 +95,23 @@ return {
     )?;
     assert_eq!(String::from_rustia(value)?, "brute:2");
 
+    let next_decision = Rustia::compile(
+        "next_decision.luau",
+        "return clamp(input + host.bias(), 0, 10)",
+    )?;
+    let prior_epoch = rustia.decision_epoch();
+    rustia.reset_decision()?;
+    assert_eq!(rustia.decision_epoch(), prior_epoch + 1);
+    assert!(!exports.is_current(&rustia));
+    assert!(!decide.is_current(&rustia));
+
+    // Installed host functions and extensions survive; ordinary inputs do not.
+    let value = rustia.run_owned("return difficulty == nil and host.bias() == 2")?;
+    assert!(bool::from_rustia(value)?);
+    rustia.insert_global("input", 9_i32)?;
+    let value = rustia.install(next_decision)?.value(&mut rustia)?;
+    assert_eq!(f64::from_rustia(value)?, 10.0);
+
     println!("embedding example ok");
     Ok(())
 }

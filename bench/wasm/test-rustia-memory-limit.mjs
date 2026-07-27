@@ -14,6 +14,7 @@ for (const name of [
   "bench_alloc",
   "bench_dealloc",
   "bench_prepare_rustia_limited",
+  "bench_rustia_decision_reset_probe",
   "bench_run",
   "bench_result_ptr",
   "bench_result_len",
@@ -47,12 +48,15 @@ if (result !== 42) {
   throw new Error(`limited wasm workload returned ${result}: ${readLastResult(exports)}`);
 }
 const pagesAfter = exports.memory.buffer.byteLength / 65_536;
+const resetStatus = exports.bench_rustia_decision_reset_probe();
+if (resetStatus !== 0) throw new Error(readLastResult(exports));
 console.log(
   JSON.stringify({
     status: "ok",
     target: "wasm32-unknown-unknown",
     memory_limit_bytes: 512 * 1024,
     result,
+    decision_reset_decisions: 300,
     linear_memory_pages_before: pagesBefore,
     linear_memory_pages_after: pagesAfter,
   }),

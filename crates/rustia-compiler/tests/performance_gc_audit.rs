@@ -135,17 +135,13 @@ fn quiescent_collection_preserves_bounded_todo_application_state() {
         let natural_function = natural.retain_value(natural_function);
 
         for _ in 0..40 {
+            let collected_value = collected_function.value(&collected).unwrap();
             let collected_result = collected
-                .call_retained_function(
-                    collected_function.value(),
-                    &[rustia_vm::Value::number(128.0)],
-                )
+                .call_retained_function(collected_value, &[rustia_vm::Value::number(128.0)])
                 .unwrap();
+            let natural_value = natural_function.value(&natural).unwrap();
             let natural_result = natural
-                .call_retained_function(
-                    natural_function.value(),
-                    &[rustia_vm::Value::number(128.0)],
-                )
+                .call_retained_function(natural_value, &[rustia_vm::Value::number(128.0)])
                 .unwrap();
             assert_eq!(
                 collected_result[0].as_number(),
@@ -154,14 +150,13 @@ fn quiescent_collection_preserves_bounded_todo_application_state() {
         }
 
         collected.collect_garbage();
+        let collected_value = collected_function.value(&collected).unwrap();
         let after_collection = collected
-            .call_retained_function(
-                collected_function.value(),
-                &[rustia_vm::Value::number(128.0)],
-            )
+            .call_retained_function(collected_value, &[rustia_vm::Value::number(128.0)])
             .unwrap();
+        let natural_value = natural_function.value(&natural).unwrap();
         let natural_next = natural
-            .call_retained_function(natural_function.value(), &[rustia_vm::Value::number(128.0)])
+            .call_retained_function(natural_value, &[rustia_vm::Value::number(128.0)])
             .unwrap();
         assert_eq!(after_collection[0].as_number(), natural_next[0].as_number());
     }

@@ -443,22 +443,9 @@ impl RustiaExtension {
             return Ok(());
         };
 
-        let table = rustia.vm_mut().empty_table();
-        for function in self.functions {
-            let name = function.name.clone();
-            let value = rustia
-                .vm_mut()
-                .register_host_function(function)
-                .map_err(Error::Vm)?;
-            let key = rustia.vm_mut().string(&name);
-            rustia
-                .vm_mut()
-                .raw_table_set_value(table, key, value)
-                .map_err(Error::Vm)?;
-        }
         rustia
             .vm_mut()
-            .set_global_value(namespace, table)
+            .install_host_module(namespace, self.functions)
             .map_err(Error::Vm)
     }
 }

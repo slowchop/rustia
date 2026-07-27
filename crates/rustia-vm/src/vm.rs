@@ -37,6 +37,14 @@ const OS_TIME_NOW_SECONDS: i64 = 1_700_000_000;
 // Logical `os.clock` default: executed instructions per logical second (design/72-host-services.md).
 const LOGICAL_CLOCK_INSTRUCTIONS_PER_SECOND: f64 = 1_000_000.0;
 pub const MAX_RECURSION_LIMIT: usize = 512;
+/// Version of the state transition performed by [`Vm::reset_decision`].
+///
+/// Replay protocols that depend on decision resets must record this value.
+/// Version 1 preserves VM configuration, services, extension operations, and
+/// installed host-function bindings; it discards all guest-created state and
+/// restarts RNG and deterministic collection scheduling from their initial
+/// state.
+pub const DECISION_RESET_ABI_VERSION: u32 = 1;
 const LUAU_TAIL_CALL_LIMIT: usize = 20_000;
 const CONSTANT_ATOM_EMPTY: u32 = 0;
 const SITE_CACHE_CLOSURE_CALL_EMPTY: u32 = u32::MAX - 4;
@@ -229,6 +237,7 @@ pub struct Vm {
     conformance_vertex_metatable: Option<u32>,
     extensions: ExtensionRegistry,
     host_functions: Vec<HostFunctionOp>,
+    host_function_bindings: Vec<HostFunctionBinding>,
     dynamic_programs: LoadedPrograms,
     call_stack: Vec<CallStackFrame>,
     coroutines: Vec<CoroutineState>,
@@ -239,6 +248,7 @@ pub struct Vm {
     last_error_traceback: Option<TracebackSnapshot>,
     protected_error_traceback: Option<TracebackSnapshot>,
     non_yieldable_depth: usize,
+    initial_rng_state: u64,
     rng_state: u64,
     gcinfo_counter: u64,
     gc_step_counter: u64,
@@ -246,6 +256,7 @@ pub struct Vm {
     executed_instructions: u64,
     next_weak_collection_instruction: u64,
     deterministic_collection_count: u64,
+    decision_epoch: u64,
     external_roots: Rc<RefCell<ExternalRootRegistry>>,
     coverage_hits: BTreeMap<CoverageKey, u64>,
     peak_live_bytes: usize,
@@ -256,14 +267,15 @@ pub struct Vm {
     closure_call_mode: ClosureCallTestMode,
 }
 
-#[derive(Default)]
 struct ExternalRootRegistry {
+    decision_epoch: u64,
     next_id: u64,
     values: BTreeMap<u64, Value>,
 }
 
 struct ExternalRootLease {
     id: u64,
+    decision_epoch: u64,
     registry: Weak<RefCell<ExternalRootRegistry>>,
 }
 
@@ -287,18 +299,60 @@ pub struct RetainedValue {
 }
 
 impl RetainedValue {
+    /// Returns the retained raw value after validating VM identity and decision
+    /// epoch.
+    ///
+    /// The checked VM argument prevents compact raw handles from crossing an
+    /// explicit reset epoch and aliasing reused scratch slots.
     #[inline]
-    pub fn value(&self) -> Value {
-        self.value
+    pub fn value(&self, vm: &Vm) -> Result<Value> {
+        let Some(registry) = self.lease.registry.upgrade() else {
+            return Err(Error::new(ErrorKind::StaleRetainedValue {
+                retained_epoch: self.lease.decision_epoch,
+                current_epoch: vm.decision_epoch,
+            })
+            .without_source_location());
+        };
+        if !Rc::ptr_eq(&registry, &vm.external_roots) {
+            return Err(
+                Error::new(ErrorKind::RetainedValueFromDifferentVm).without_source_location()
+            );
+        }
+        if self.lease.decision_epoch != vm.decision_epoch {
+            return Err(Error::new(ErrorKind::StaleRetainedValue {
+                retained_epoch: self.lease.decision_epoch,
+                current_epoch: vm.decision_epoch,
+            })
+            .without_source_location());
+        }
+        Ok(self.value)
     }
 
     #[inline]
     pub fn belongs_to(&self, vm: &Vm) -> bool {
-        self.lease
-            .registry
-            .upgrade()
-            .is_some_and(|registry| Rc::ptr_eq(&registry, &vm.external_roots))
+        self.lease.registry.upgrade().is_some_and(|registry| {
+            Rc::ptr_eq(&registry, &vm.external_roots)
+                && self.lease.decision_epoch == vm.decision_epoch
+        })
     }
+
+    /// Decision epoch in which this value was retained.
+    #[inline]
+    pub fn decision_epoch(&self) -> u64 {
+        self.lease.decision_epoch
+    }
+}
+
+#[derive(Clone, Debug)]
+enum HostFunctionBinding {
+    Global {
+        name: String,
+        host: u32,
+    },
+    Module {
+        namespace: String,
+        functions: Vec<(String, u32)>,
+    },
 }
 
 impl fmt::Debug for RetainedValue {
@@ -457,6 +511,15 @@ impl LoadedPrograms {
             }
         }
         removed
+    }
+
+    fn reset_epoch(&mut self) {
+        self.free.clear();
+        for (index, slot) in self.slots.iter_mut().enumerate().rev() {
+            slot.value = None;
+            slot.generation = 1;
+            self.free.push(index as u32);
+        }
     }
 
     fn release_spare_capacity(&mut self) {
@@ -1668,7 +1731,8 @@ impl Vm {
             settings.enable_conformance_native_type_checks,
             settings.enable_conformance_pcall_helpers,
         );
-        let rng_state = pcg32_seed(0);
+        let initial_rng_state = pcg32_seed(0);
+        let rng_state = initial_rng_state;
         let next_weak_collection_instruction = settings.deterministic_gc_interval.get();
         let mut vm = Self {
             profile,
@@ -1681,6 +1745,7 @@ impl Vm {
             conformance_vertex_metatable: standard_globals.conformance_vertex_metatable,
             extensions: ExtensionRegistry::default(),
             host_functions: Vec::new(),
+            host_function_bindings: Vec::new(),
             dynamic_programs: LoadedPrograms::default(),
             call_stack: Vec::new(),
             coroutines: Vec::new(),
@@ -1691,6 +1756,7 @@ impl Vm {
             last_error_traceback: None,
             protected_error_traceback: None,
             non_yieldable_depth: 0,
+            initial_rng_state,
             rng_state,
             gcinfo_counter: 0,
             gc_step_counter: 0,
@@ -1698,7 +1764,12 @@ impl Vm {
             executed_instructions: 0,
             next_weak_collection_instruction,
             deterministic_collection_count: 0,
-            external_roots: Rc::new(RefCell::new(ExternalRootRegistry::default())),
+            decision_epoch: 0,
+            external_roots: Rc::new(RefCell::new(ExternalRootRegistry {
+                decision_epoch: 0,
+                next_id: 0,
+                values: BTreeMap::new(),
+            })),
             coverage_hits: BTreeMap::new(),
             peak_live_bytes: 0,
             peak_reserved_bytes: 0,
@@ -1767,6 +1838,132 @@ impl Vm {
                 .settings
                 .enable_memory_tracking
                 .then_some(self.peak_reserved_bytes),
+        }
+    }
+
+    /// Returns the current decision epoch.
+    ///
+    /// Epoch zero begins at VM construction. Every successful
+    /// [`reset_decision`](Self::reset_decision) advances it exactly once.
+    #[inline]
+    pub const fn decision_epoch(&self) -> u64 {
+        self.decision_epoch
+    }
+
+    /// Starts a fresh decision epoch while reusing this VM's allocation
+    /// containers.
+    ///
+    /// Reset ABI version [`DECISION_RESET_ABI_VERSION`] preserves the profile,
+    /// settings, service providers, extension operations, installed global
+    /// host functions, installed host modules, and lifetime memory peaks. It
+    /// discards guest globals, tables, functions/upvalues, coroutines, loaded
+    /// programs and caches, tracebacks, coverage counters, and public retained
+    /// roots. RNG, logical time, compatibility GC state, and deterministic
+    /// collection scheduling restart from their construction values.
+    ///
+    /// Ordinary values inserted with `set_global_value` are decision inputs,
+    /// not VM configuration, and must be rebound by the host after reset.
+    /// Host-owned immutable [`Program`] values remain reusable and can be run
+    /// again in the new epoch. Compact raw [`Value`] values are epoch-local;
+    /// [`RetainedValue::value`] requires the current VM and rejects stale or
+    /// cross-VM access.
+    ///
+    /// The VM must be idle. Calling this from guest execution, including a
+    /// host callback, returns [`ErrorKind::DecisionResetWhileRunning`] without
+    /// changing state.
+    pub fn reset_decision(&mut self) -> Result<()> {
+        if !self.call_stack.is_empty()
+            || !self.running_coroutines.is_empty()
+            || !self.running_coroutine_stack_bases.is_empty()
+            || !self.active_coroutine_frames.is_empty()
+            || !self.yield_collectors.is_empty()
+            || self.non_yieldable_depth != 0
+        {
+            return Err(Error::new(ErrorKind::DecisionResetWhileRunning).without_source_location());
+        }
+        let next_epoch = self.decision_epoch.checked_add(1).ok_or_else(|| {
+            Error::new(ErrorKind::DecisionEpochExhausted).without_source_location()
+        })?;
+
+        self.coroutines.clear();
+        self.last_error_traceback = None;
+        self.protected_error_traceback = None;
+        self.dynamic_programs.reset_epoch();
+        self.coverage_hits.clear();
+        self.external_roots = Rc::new(RefCell::new(ExternalRootRegistry {
+            decision_epoch: next_epoch,
+            next_id: 0,
+            values: BTreeMap::new(),
+        }));
+
+        self.heap.reset_decision_epoch();
+        let globals = self.heap.alloc_array_table(&[]);
+        let enable_loadstring =
+            self.settings.loadstring_compiler.is_some() && !self.profile.is_deterministic_sim();
+        let register_os =
+            !self.profile.is_deterministic_sim() || self.settings.services.has_clock_provider();
+        let standard_globals = initialize_standard_globals(
+            &mut self.heap,
+            globals,
+            self.profile,
+            enable_loadstring,
+            register_os,
+            self.settings.enable_conformance_coverage,
+            self.settings.enable_conformance_int64_userdata,
+            self.settings.enable_conformance_native_userdata,
+            self.settings.enable_conformance_native_type_checks,
+            self.settings.enable_conformance_pcall_helpers,
+        );
+        self.globals = globals;
+        self.standard_globals = standard_globals.standard_globals;
+        self.conformance_int64_metatable = standard_globals.conformance_int64_metatable;
+        self.conformance_vec2_metatable = standard_globals.conformance_vec2_metatable;
+        self.conformance_vertex_metatable = standard_globals.conformance_vertex_metatable;
+        self.restore_host_function_bindings();
+
+        self.rng_state = self.initial_rng_state;
+        self.gcinfo_counter = 0;
+        self.gc_step_counter = 0;
+        self.gc_stopped = false;
+        self.executed_instructions = 0;
+        self.next_weak_collection_instruction = self.settings.deterministic_gc_interval.get();
+        self.deterministic_collection_count = 0;
+        self.decision_epoch = next_epoch;
+        self.record_memory_peak();
+        Ok(())
+    }
+
+    fn restore_host_function_bindings(&mut self) {
+        for binding in self.host_function_bindings.clone() {
+            match binding {
+                HostFunctionBinding::Global { name, host } => {
+                    debug_assert!((host as usize) < self.host_functions.len());
+                    let handle = self
+                        .heap
+                        .alloc_host_function(host, self.globals)
+                        .expect("persisted host function handle must remain representable");
+                    self.set_global_value(name, Value::function(handle))
+                        .expect("fresh globals must accept a persisted host function");
+                }
+                HostFunctionBinding::Module {
+                    namespace,
+                    functions,
+                } => {
+                    let table = self.empty_table();
+                    for (name, host) in functions {
+                        debug_assert!((host as usize) < self.host_functions.len());
+                        let handle = self
+                            .heap
+                            .alloc_host_function(host, self.globals)
+                            .expect("persisted module function handle must remain representable");
+                        let key = self.string(name);
+                        self.raw_table_set_value(table, key, Value::function(handle))
+                            .expect("fresh module table must accept a persisted host function");
+                    }
+                    self.set_global_value(namespace, table)
+                        .expect("fresh globals must accept a persisted host module");
+                }
+            }
         }
     }
 
@@ -1866,8 +2063,49 @@ impl Vm {
 
     pub fn install_host_function(&mut self, op: HostFunctionOp) -> Result<()> {
         let name = op.name.clone();
+        let host = u32::try_from(self.host_functions.len()).map_err(|_| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "host function table exhausted",
+            })
+        })?;
         let value = self.register_host_function(op)?;
-        self.set_global_value(&name, value)
+        self.set_global_value(&name, value)?;
+        self.host_function_bindings
+            .push(HostFunctionBinding::Global { name, host });
+        Ok(())
+    }
+
+    /// Installs a table of host functions under one global namespace.
+    ///
+    /// The binding is VM configuration rather than guest state and is rebuilt
+    /// automatically by [`Vm::reset_decision`].
+    pub fn install_host_module(
+        &mut self,
+        namespace: impl Into<String>,
+        functions: Vec<HostFunctionOp>,
+    ) -> Result<()> {
+        let namespace = namespace.into();
+        let table = self.empty_table();
+        let mut bindings = Vec::with_capacity(functions.len());
+        for function in functions {
+            let name = function.name.clone();
+            let host = u32::try_from(self.host_functions.len()).map_err(|_| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "host function table exhausted",
+                })
+            })?;
+            let value = self.register_host_function(function)?;
+            let key = self.string(&name);
+            self.raw_table_set_value(table, key, value)?;
+            bindings.push((name, host));
+        }
+        self.set_global_value(&namespace, table)?;
+        self.host_function_bindings
+            .push(HostFunctionBinding::Module {
+                namespace,
+                functions: bindings,
+            });
+        Ok(())
     }
 
     pub fn string(&mut self, value: impl AsRef<str>) -> Value {
@@ -1988,17 +2226,18 @@ impl Vm {
 
     /// Retains a value as an embedder-owned collector root.
     pub fn retain_value(&mut self, value: Value) -> RetainedValue {
-        let id = {
+        let (id, decision_epoch) = {
             let mut roots = self.external_roots.borrow_mut();
             let id = roots.next_id;
             roots.next_id = roots.next_id.wrapping_add(1);
             roots.values.insert(id, value);
-            id
+            (id, roots.decision_epoch)
         };
         RetainedValue {
             value,
             lease: Rc::new(ExternalRootLease {
                 id,
+                decision_epoch,
                 registry: Rc::downgrade(&self.external_roots),
             }),
         }
@@ -19160,6 +19399,24 @@ fn add_vm_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
         usage.add_vec(&op.parameter_types);
         usage.add_vec(&op.return_types);
     }
+    usage.add_vec(&vm.host_function_bindings);
+    for binding in &vm.host_function_bindings {
+        match binding {
+            HostFunctionBinding::Global { name, .. } => {
+                usage.add(name.len(), name.capacity());
+            }
+            HostFunctionBinding::Module {
+                namespace,
+                functions,
+            } => {
+                usage.add(namespace.len(), namespace.capacity());
+                usage.add_vec(functions);
+                for (name, _) in functions {
+                    usage.add(name.len(), name.capacity());
+                }
+            }
+        }
+    }
     usage.add_vec(&vm.call_stack);
     for frame in &vm.call_stack {
         add_call_stack_frame_memory(frame, usage);
@@ -26514,5 +26771,58 @@ mod inline_cache_tests {
         assert!(vm
             .raw_equal_values(inline, atom)
             .expect("mixed equality should be symmetric"));
+    }
+
+    #[test]
+    fn decision_reset_restarts_rng_gc_and_logical_time_state_but_keeps_lifetime_peaks() {
+        let settings = VmSettings {
+            deterministic_gc_interval: NonZeroU64::new(17).unwrap(),
+            enable_memory_tracking: true,
+            ..VmSettings::default()
+        };
+        let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
+        let initial_rng_state = vm.initial_rng_state;
+        vm.rng_state = 123;
+        vm.gcinfo_counter = 9;
+        vm.gc_step_counter = 8;
+        vm.gc_stopped = true;
+        vm.executed_instructions = 77;
+        vm.next_weak_collection_instruction = 85;
+        vm.deterministic_collection_count = 4;
+        vm.peak_live_bytes = vm.peak_live_bytes.max(99_999);
+        vm.peak_reserved_bytes = vm.peak_reserved_bytes.max(199_999);
+
+        vm.reset_decision().unwrap();
+
+        assert_eq!(vm.rng_state, initial_rng_state);
+        assert_eq!(vm.gcinfo_counter, 0);
+        assert_eq!(vm.gc_step_counter, 0);
+        assert!(!vm.gc_stopped);
+        assert_eq!(vm.executed_instructions, 0);
+        assert_eq!(vm.next_weak_collection_instruction, 17);
+        assert_eq!(vm.deterministic_collection_count, 0);
+        assert_eq!(vm.peak_live_bytes, 99_999);
+        assert_eq!(vm.peak_reserved_bytes, 199_999);
+    }
+
+    #[test]
+    fn decision_epoch_exhaustion_rejects_reset_before_mutating_state() {
+        let mut vm = Vm::new(Profile::DeterministicSim);
+        vm.decision_epoch = u64::MAX;
+        vm.external_roots.borrow_mut().decision_epoch = u64::MAX;
+        vm.set_global_value("survives", Value::number(42.0))
+            .unwrap();
+        let table = vm.empty_table();
+        let retained = vm.retain_value(table);
+
+        let error = vm.reset_decision().unwrap_err();
+
+        assert!(matches!(error.kind, ErrorKind::DecisionEpochExhausted));
+        assert_eq!(vm.decision_epoch(), u64::MAX);
+        assert_eq!(
+            vm.get_global_value("survives").unwrap().as_number(),
+            Some(42.0)
+        );
+        assert!(retained.value(&vm).is_ok());
     }
 }

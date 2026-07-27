@@ -5,8 +5,9 @@ deterministic game runtime and intended for public release as a standalone Luau 
 once its conformance, benchmark, API, memory-lifecycle, and release gates are satisfied.
 
 > **Status: P1 engine implementation is substantial but not release-complete.** The locked design has a broad
-> production VM/compiler/API/conformance slice; the next release-critical work is bounded object reclamation,
-> memory quotas/OOM semantics, deterministic decision reset, and the remaining host/module/value boundary.
+> production VM/compiler/API/conformance slice; bounded object/program reclamation, quotas/OOM, and deterministic
+> decision reset are implemented. The next release-critical work is O(1) accounting, broader mixed-heap
+> pressure evidence, and the remaining host/module/value boundary.
 > `spikes/` are throwaway prototypes that validated the design.
 > Read **[`design/CURRENT.md`](design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](design/README.md) for the full doc map.
@@ -19,7 +20,8 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   Luau-conformant while making reproducible choices for unspecified behavior.
 - One portable engine: big-`match`→`br_table` interpreter plus a validated future wasm-emit JIT/AOT tier;
   **gc-arena-backed collection scheduling/storage scaffolding**, **16-byte tagged** values, a hand-written
-  Luau parser, and thread-affine safe-Rust VM execution. Full ordinary-object reclamation/reuse remains a gate.
+  Luau parser, and thread-affine safe-Rust VM execution. Ordinary objects and loaded programs use
+  reachability-based reclamation with generation-safe reuse.
 - Interpreter performance foundation: compact deterministic open-addressed `u32` side indices for VM-local
   atoms and larger insertion-ordered hash parts; compact loaded-program constant atoms; a 4-byte per-PC cache
   site map with lazily allocated 16-byte shape/key/live-slot records; constant-key
@@ -45,8 +47,8 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   eight arguments/results, retained script functions, pre-install host signature/fuel ABI metadata,
   retained-handle freshness checks and current-generation accessors, public source-span/runtime-location error
   accessors, owned-value/table serde, deterministic extensions, hot reload, and early macro sugar. Ordinary
-  object/program reclamation, epoch-safe decision reset, module resolution, a per-call host context,
-  transactional installation, rich graph values, and live zero-copy serde remain planned.
+  object/program reclamation and the epoch-safe decision-reset ABI are implemented; module resolution, a
+  per-call host context, transactional installation, rich graph values, and live zero-copy serde remain planned.
 - Host services are host-pluggable through the facade: `RustiaBuilder::standard()`/`deterministic()`/`live()`
   environment presets, a `.stdout(...)` print sink with the real Luau composition (`tostring` honoring
   `__tostring`, tab-joined, trailing newline), and `.wall_clock(...)`/`.monotonic_clock(...)` sockets taking a
@@ -97,11 +99,11 @@ public rustia project; actual grabby integration work is explicitly out of scope
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 79% | 78% |
-| Usable embedded scripting crate | 78% | 82% |
-| Full public standalone Luau engine release | 49% | 76% |
+| Whole public rustia project | 84% | 84% |
+| Usable embedded scripting crate | 87% | 89% |
+| Full public standalone Luau engine release | 58% | 83% |
 | Standalone benchmark OSS project | 82% | 88% |
-| Public release readiness | 70% | 82% |
+| Public release readiness | 78% | 88% |
 
 - Current conformance runner: **694 fixtures**, **493 refs**, **0 pending**.
 - The benchmark harness has all 12 requested adapters, an explicit verified `mlua-luau-jit` mode, and a
@@ -119,8 +121,9 @@ public rustia project; actual grabby integration work is explicitly out of scope
 - Exact-commit cohort `safe-memory-588b541` now supplies the first dedicated-Linode native pressure evidence
   for reclamation/telemetry/quota work and passes the wasm32 512 KiB quota/recovery probe. Rustia ties the best
   shared peak at 256 KiB and retains 14.4 KiB across the shared set versus mlua/Luau/JIT's 24.8 KiB.
-- Major remaining gates, in order, are epoch-safe decision reset; an O(1) quota-accounting fast path and script
-  counters; broader mixed-heap pressure coverage; a per-call host context, module loading, rich values, and
+  The same Node/V8 probe now runs 300 decision resets and verifies an exact post-warmup VM-owned-memory plateau.
+- Major remaining gates, in order, are an O(1) quota-accounting fast path and script counters; broader
+  mixed-heap/native/Wasm pressure coverage; a per-call host context, module loading, rich values, and
   transactional installation,
   compiler/runtime semantic-tail
   hardening, the full cross-target correctness/golden matrix, broader benchmark history, and release packaging.
@@ -149,6 +152,14 @@ Long-lived hosts can call `Vm::collect_garbage()` at an idle boundary to finish
 reclamation and release spare VM-owned allocations to the process allocator.
 Values that must survive that boundary need an active `RetainedValue` lease
 from `Vm::retain_value`.
+
+Deterministic per-decision hosts can call `Rustia::reset_decision()` at an idle
+boundary. Reset ABI v1 keeps VM settings, services, extensions, and installed
+host functions/modules, but discards all guest state, restarts RNG/logical
+time/GC scheduling, and invalidates every prior `Function`/`Exports` handle.
+Host-owned `CompiledModule` values remain reusable; ordinary inserted globals
+must be rebound for the next decision. Replay protocols should record
+`RUSTIA_DECISION_RESET_ABI_VERSION`.
 
 ## CLI
 - `cargo run -p rustia-cli -- path/to/script.luau`

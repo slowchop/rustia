@@ -1,6 +1,6 @@
 # rustia - embedded API goal and plan
 
-> **Status: [IMPLEMENTED FIRST SLICE - stabilization and advanced interop pending] (updated 2026-07-25).**
+> **Status: [IMPLEMENTED FIRST SLICE + DECISION RESET - advanced interop pending] (updated 2026-07-27).**
 > This records the public Rust embedding API direction and its honest implementation boundary after comparing
 > rustia's constraints with current Rust scripting/runtime APIs. It refines the locked
 > architecture axis H in [`30-architecture.md`](30-architecture.md) and the grabby bridge contract in
@@ -23,8 +23,8 @@ and determinism-labeled clock providers per [`72-host-services.md`](72-host-serv
 Object/program reclamation, real VM-owned live/reserved/peak telemetry, and the correctness-first logical-live
 quota/atomic OOM path are now implemented and validated by the exact-commit `safe-memory-588b541` native Linode
 cohort plus its wasm32 512 KiB quota/recovery probe. The next release-critical slice is not more facade
-decoration: it is O(1) quota accounting, epoch-safe decision reset, a cheap worker-local/per-call host context,
-a host-owned module resolver/cache,
+decoration: the epoch-safe decision reset is now implemented; remaining work is O(1) quota accounting, a cheap
+worker-local/per-call host context, a host-owned module resolver/cache,
 transactional installation/reload failures, rich graph-preserving values, and live zero-copy serde.
 
 ## Non-Negotiable Requirements
@@ -276,9 +276,11 @@ rustia owns:
 - deterministic execution and fuel.
 - typed argument/result conversion.
 - capability enforcement.
-- a future scratch-heap reset operation for per-decision DeterministicSim leaves; reconstruct the VM per
-  decision until that operation and epoch-safe retained-handle invalidation land.
-- current generation/freshness checks, plus planned true-root handle ownership and transactional hot reload.
+- `reset_decision()` for per-decision `DeterministicSim` leaves, with decision-reset ABI v1, idle-only execution,
+  allocation-container reuse, deterministic RNG/GC/logical-time restart, and epoch invalidation of every
+  retained handle.
+- install-generation/freshness checks plus VM/epoch-rooted handle ownership; transactional hot reload remains
+  planned.
 
 The hot AI leaf remains a per-decision pure function. Coroutines are still valid inside one decision and in
 scenario/console paths, but a coroutine must not persist across ticks in DeterministicSim because that would
@@ -300,8 +302,10 @@ store authoritative state on the GC heap instead of in captured host slots.
 9. ✅ logical-live quotas and atomic/catchable OOM — implemented through
    `VmSettings::memory_limit_bytes` / `RustiaBuilder::memory_limit_bytes`; exact-commit native Linode and wasm32
    pressure validation is retained under `safe-memory-588b541`, while O(1) accounting remains an optimization.
-10. ⏳ epoch-safe reset, per-call host context, modules, transactional install/reload, and rich/live values —
-    next.
+10. ✅ epoch-safe decision reset — `Vm::reset_decision()` / `Rustia::reset_decision()` preserve host
+    configuration, discard all guest state, restart deterministic counters, invalidate every old retained
+    handle clone, and plateau exactly in the 600-decision mixed lifecycle test.
+11. ⏳ per-call host context, modules, transactional install/reload, and rich/live values — next.
 
 Defer mlua-style `UserData`/`Scope` until the above is stable. The first useful embedding target is typed
 owned values, retained script function handles, serde, and deterministic extension registration.

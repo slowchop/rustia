@@ -1,4 +1,4 @@
-use rustia::{Function, Profile, Rustia};
+use rustia::{Function, Profile, Rustia, VmMemoryStats};
 use std::cell::RefCell;
 use std::slice;
 use std::str;
@@ -150,6 +150,22 @@ pub extern "C" fn bench_run(n: u32) -> f64 {
 }
 
 #[no_mangle]
+pub extern "C" fn bench_rustia_decision_reset_probe() -> i32 {
+    match run_rustia_decision_reset_probe() {
+        Ok(()) => {
+            set_last_result("ok\nrustia decision reset probe passed");
+            0
+        }
+        Err(error) => {
+            set_last_result(format!(
+                "error\nrustia decision reset probe failed: {error}"
+            ));
+            1
+        }
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn bench_result_ptr() -> *const u8 {
     LAST_RESULT.with(|result| result.borrow().as_ptr())
 }
@@ -186,6 +202,100 @@ fn prepare_rustia(source: &str, memory_limit_bytes: Option<usize>) -> Result<Ben
         .function(&mut engine, "f")
         .map_err(|error| error.to_string())?;
     Ok(BenchState::Rustia { engine, function })
+}
+
+fn run_rustia_decision_reset_probe() -> Result<(), String> {
+    const DECISIONS: u64 = 300;
+    const WARMUP_DECISIONS: u64 = 50;
+
+    let mut engine = Rustia::builder()
+        .profile(Profile::DeterministicSim)
+        .memory_tracking(true)
+        .build()
+        .map_err(|error| error.to_string())?;
+    engine
+        .add_pure_fn("bias", || 7.0)
+        .map_err(|error| error.to_string())?;
+    let module = Rustia::compile(
+        "wasm-reset-probe.luau",
+        "\
+local temporary = {}
+for i = 1, 48 do
+    temporary[i] = { label = 'wasm-reset-' .. i, value = i }
+end
+local thread = coroutine.create(function()
+    coroutine.yield(temporary)
+end)
+coroutine.resume(thread)
+return {
+    answer = input + bias() + math.random(),
+    count = #temporary,
+}
+",
+    )
+    .map_err(|error| error.to_string())?;
+
+    let mut expected_answer = None;
+    let mut plateau: Option<VmMemoryStats> = None;
+    for decision in 0..DECISIONS {
+        let input_is_clear: bool = engine
+            .run("return input == nil")
+            .map_err(|error| error.to_string())?;
+        if !input_is_clear {
+            return Err(format!(
+                "decision input survived reset before epoch {decision}"
+            ));
+        }
+        engine
+            .insert_global("input", 5.0)
+            .map_err(|error| error.to_string())?;
+        let exports = engine
+            .install(module.clone())
+            .map_err(|error| error.to_string())?;
+        if exports
+            .get::<usize>(&mut engine, "count")
+            .map_err(|error| error.to_string())?
+            != 48
+        {
+            return Err(format!("guest heap result changed in epoch {decision}"));
+        }
+        let answer = exports
+            .get::<f64>(&mut engine, "answer")
+            .map_err(|error| error.to_string())?;
+        match expected_answer {
+            Some(expected) if answer != expected => {
+                return Err(format!(
+                    "RNG sequence changed in epoch {decision}: expected {expected}, got {answer}"
+                ));
+            }
+            None => expected_answer = Some(answer),
+            _ => {}
+        }
+
+        engine.reset_decision().map_err(|error| error.to_string())?;
+        if exports.is_current(&engine) {
+            return Err(format!(
+                "pre-reset exports remained current after epoch {decision}"
+            ));
+        }
+        let stats = engine.memory_stats();
+        if decision == WARMUP_DECISIONS - 1 {
+            plateau = Some(stats);
+        } else if decision >= WARMUP_DECISIONS && plateau != Some(stats) {
+            return Err(format!(
+                "VM-owned memory left its warm plateau after epoch {decision}: expected {:?}, got {stats:?}",
+                plateau.expect("plateau is initialized after warmup")
+            ));
+        }
+    }
+
+    if engine.decision_epoch() != DECISIONS {
+        return Err(format!(
+            "expected decision epoch {DECISIONS}, got {}",
+            engine.decision_epoch()
+        ));
+    }
+    Ok(())
 }
 
 fn prepare_koto(source: &str) -> Result<BenchState, String> {

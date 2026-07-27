@@ -38,6 +38,13 @@ pub enum ErrorKind {
         expected: &'static str,
     },
     OutOfMemory,
+    DecisionResetWhileRunning,
+    DecisionEpochExhausted,
+    StaleRetainedValue {
+        retained_epoch: u64,
+        current_epoch: u64,
+    },
+    RetainedValueFromDifferentVm,
     TableIndexNil,
     TableIndexNaN,
     InvalidKeyToNext,
@@ -137,6 +144,22 @@ impl fmt::Display for Error {
                 write!(formatter, "type error: expected {expected}")
             }
             ErrorKind::OutOfMemory => formatter.write_str("not enough memory"),
+            ErrorKind::DecisionResetWhileRunning => {
+                formatter.write_str("decision reset requires an idle VM")
+            }
+            ErrorKind::DecisionEpochExhausted => {
+                formatter.write_str("decision epoch counter exhausted")
+            }
+            ErrorKind::StaleRetainedValue {
+                retained_epoch,
+                current_epoch,
+            } => write!(
+                formatter,
+                "retained value from decision epoch {retained_epoch} is stale; current decision epoch is {current_epoch}"
+            ),
+            ErrorKind::RetainedValueFromDifferentVm => {
+                formatter.write_str("retained value belongs to a different VM")
+            }
             ErrorKind::TableIndexNil => formatter.write_str("table index is nil"),
             ErrorKind::TableIndexNaN => formatter.write_str("table index is NaN"),
             ErrorKind::InvalidKeyToNext => formatter.write_str("invalid key to 'next'"),
