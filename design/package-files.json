@@ -17,7 +17,7 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 1312,
+      "file_count": 1313,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
@@ -52,6 +52,7 @@
         "cloud/linode-dense-ed65077.json",
         "cloud/linode-history-backfill-57dfaff.json",
         "cloud/linode-oop-f208c12.json",
+        "cloud/linode-rustia-memory-588b541.json",
         "cloud/linode-vm-string-memory-1370d6c.json",
         "cloud/scaleway-dense-ed65077.json",
         "cloud/vultr-dense-ed65077.json",
