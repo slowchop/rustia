@@ -188,14 +188,16 @@ cannot expose a partially resolved import path.
 misses and non-native/reassigned callees use the ordinary call path with the same yield, error, and continuation
 behavior.
 
-**H. Embedding API — LOCKED direction: koto-SHAPED facade over a typed `FromRustia`/`IntoRustia` core, with an
-owned bridge first and a future live ZERO-COPY serde layer; defer mlua `UserData`/`Scope`.** Considered:
+**H. Embedding API — LOCKED direction: koto-SHAPED facade over a typed `FromRustia`/`IntoRustia` core, with
+lifetime-safe per-invocation host contexts, transactional records, an owned bridge first, and a future live
+ZERO-COPY serde layer; defer mlua `UserData`/`Scope`.** Considered:
 koto-shim [✓ outer]; mlua-style [partial — take the typed core]; both-layered [✓]; trait-objects [defer];
 serde-centric [✓ as a sub-facility]. *Historical vertical-slice evidence:* the spike used
 `Box<dyn Fn(&[OwnedValue]) -> Result<OwnedValue>>` as its `call_indirect` target/GC firewall and covered the
-then-audited grabby host functions. Production instead stores an internal `Arc` callback over `&mut Vm` and
-live `Value` slices; the public typed wrappers snapshot/convert arguments and load owned returns. They do not
-yet inject cheap per-call host context. **Zero-copy serde**
+then-audited grabby host functions. Production now separates a lifetime-independent `HostSchema` from a fresh
+borrowed `HostContext` on every `Rustia::invoke`; capability-specific views expose input, slots, transactional
+effects/writes, or profile-gated external mutation without storing context pointers in the VM. The public typed
+wrappers snapshot/convert guest values and load owned returns. **Zero-copy serde**
 (serde directly over live in-arena values inside `mutate`, behind `vm.deserialize_exports::<T>()`) is **30%
 faster** than the literal `exports().clone()`-then-serde (1.01 vs 1.47 µs; the snapshot deep-copy is the cost,
 not serde at 0.065 µs). **`exports()` = "the table the chunk returns"** (Luau has no `export{…}`). **0 lines of
@@ -307,14 +309,15 @@ the restricted globals.
   full grammar + Luau niceties; libs
   math/table/string(+format+patterns)/bit32/coroutine + base globals; metatable OOP; floored `%`. Byte-compat:
   Schubfach `tostring` (high), `string.format` (high), ASCII/C-locale pattern classes (high), PCG32 (low).
-- **P3 — drop into grabby (private fork).** koto-shaped shim + typed core + zero-copy serde. Wire behind the
-  `Selector` trait + the `ai_bakeoff` Criterion harness as a continuous perf/golden gate. Rewrite the `.koto`
-  scenario/console scripts → `.luau`. Register grabby's bespoke fused AI op via the op-extension hook.
+- **P3 — drop into grabby (private fork).** Use the landed typed invocation/effect-transaction core through a
+  koto-shaped shim; add zero-copy serde only where profiling justifies it. Wire behind the `Selector` trait +
+  the `ai_bakeoff` Criterion harness as a continuous perf/golden gate. Rewrite the `.koto` scenario/console
+  scripts → `.luau`. Register grabby's bespoke fused AI op via the typed host-module surface.
 - **P4 — production hardening + public release.** `buffer`, `vector`, `utf8`, `string.pack`, and the major
   standalone library surface are already conformance-backed. The remaining release-critical work is complete
   object/program reclamation and reuse, memory accounting/quotas/OOM behavior, deterministic reset semantics,
-  host-provided output/time services plus honest VM memory telemetry and cheap per-call context, host-owned
-  `require` resolution/cache, transactional extension/module/hot-reload failure semantics, rich/live value
+  host-provided output/time services plus honest VM memory telemetry, host-owned `require` resolution/cache,
+  transactional guest-module install/hot-reload failure semantics, rich/live value
   interop, diagnostic and semantic-tail hardening, realistic mixed-heap native+wasm evidence, the full
   cross-target correctness/golden matrix, API/semver stabilization, and crate publication. The gradual
   typechecker/LSP is a separate later track, not a

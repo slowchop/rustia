@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-27.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-28.)
 
 ## One-paragraph state
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
@@ -12,13 +12,18 @@ embedding facade from [`75-embedded-api.md`](75-embedded-api.md) is implemented 
 owned values with typed and nested table helpers, source-named run/compile helpers, typed host functions with
 fallible `rustia::Result<T>` returns, pre-install host signature/fuel ABI metadata, retained script function
 handles with freshness checks and current-generation accessors, public source-span/runtime-location error
-accessors, owned-value/table serde, deterministic extension registration, hot reload, and macro sugar.
+accessors, owned-value/table serde, deterministic extension registration, hot reload, and macro sugar. The
+typed host transaction is now concrete: `HostSchema` keeps registration lifetime-independent while every
+`invoke`/`invoke_into` borrows a fresh, possibly block-local `HostContext`; capability-derived views expose
+input, slots, effects, slot writes, or profile-gated external mutation. Typed VMs execute guest code only through
+a lexical `Invocation`, whose calls share one fuel budget and bounded record-count/logical-byte journal.
 Decision-reset ABI v1 is now implemented at both VM and facade layers. An idle reset reuses the VM's allocation
 containers, preserves profile/settings/services/extensions/installed host functions and modules plus
 host-owned immutable compiled modules and lifetime peaks, and discards every guest global, object, upvalue,
 coroutine, loaded program/cache, traceback, coverage row, and retained root. RNG, logical time, compatibility
-GC state, and deterministic collection scheduling restart from construction values; per-execution fuel remains
-fresh. Every retained `Function`/`Exports` clone is epoch-checked and becomes stale after reset. Focused tests
+GC state, and deterministic collection scheduling restart from construction values; legacy execution fuel is
+fresh per call and typed invocation fuel is explicitly shared. Every retained `Function`/`Exports` clone is
+epoch-checked and becomes stale after reset. Focused tests
 cover active-execution rejection and an exact post-warmup memory plateau across 600 mixed
 table/coroutine/program/retained-export decisions. The wasm32 Node/V8 lifecycle probe runs 300 more decisions
 and verifies module reuse, restored host functions, cleared inputs, RNG restart, stale handles, and the same
@@ -27,6 +32,18 @@ The host services bus from [`72-host-services.md`](72-host-services.md) is now i
 `standard()`/`deterministic()`/`live()`, a host stdout sink giving `print` its real Luau composition,
 determinism-labeled wall/monotonic clock providers feeding `os.time`/`os.date`/`os.clock`, and a deterministic
 logical `os.clock` fallback (executed instructions / 1_000_000) replacing the former `0.0`.
+The typed record journal assigns one dense sequence across effects and slot writes. A failed/panicking handler
+rolls back its own suffix; an error escaping the invocation publishes nothing; a completed host call remains
+complete if a later guest error is caught by `pcall`. Transactional fuel exhaustion, OOM, count/byte overflow,
+invalid boundary yield, a missing typed-host dispatcher, and host panic are hard aborts; the transactional
+OOM/yield rule does not change ordinary legacy execution. A caught host panic poisons the VM, so every later
+guest execution entry point rejects until decision reset. Containment includes host functions, typed dispatch,
+legacy extension ops, stdout/clocks, and the `loadstring` compiler. Rollback
+covers staged records only—not guest heap writes, `HostMut`, captured callback state, or context interior
+mutation. `invoke` exposes the reusable journal plus fuel/count/byte usage; `invoke_into` pre-reserves and
+publishes to a caller lane with no allocation at final append. Callback captures remain a semantic trust
+boundary. Grabby must allow only one successful invoke per `(tick, phase, emitter)`, because the dense sequence
+restarts at every invoke.
 A from-scratch Rust Luau
 interpreter is validated as **GO** by the earlier spikes and is now backed by the production conformance suite;
 performance is continuously benchmark-gated, and the generated gate does not yet approve a blanket public speed
@@ -213,18 +230,18 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    best shared peak, and reduced the shared retained mean to 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. Still
    required before public release: O(1) accounting and broader mixed-heap/native/Wasm pressure coverage.
    GC interval tuning is not a substitute for those remaining policies.
-2. **Host-provided runtime services.** The output/time provider slice is implemented
+2. **Host-provided runtime services and modules.** The output/time provider slice is implemented
    ([`72-host-services.md`](72-host-services.md)): `print` composes `tostring` per argument (honoring
    `__tostring`), tab-joins, and writes to a host stdout sink when one is attached; no-argument
    `os.time`/`os.date` read a wall-clock provider with a pinned-epoch fallback; and `os.clock` reads a
-   monotonic-clock provider with a deterministic logical-clock fallback. Still open:
+   monotonic-clock provider with a deterministic logical-clock fallback. The typed per-invocation context,
+   capability views, shared fuel, bounded ordered record journal, rollback/`pcall` contract, usage receipts,
+   panic poisoning/reset, and atomic typed `HostModule` registration are implemented. Still open:
    Host-facing VM memory telemetry is now honest for the documented VM-owned logical allocation boundary;
-   script-visible counters still need the O(1) quota counter. Typed callbacks still need
-   a cheap worker-local/per-call host-context seam instead of requiring captured synchronization for mutable
-   slot/effect state. Practical multi-file
-   programs also need a host-owned `require` resolver, execute-once cache, and cycle detection; resolution
-   remains host policy rather than a core filesystem API. Module/extension installation still needs
-   transactional or isolated failure semantics.
+   script-visible counters still need the O(1) quota counter. Practical multi-file programs also need a
+   host-owned `require` resolver, execute-once cache, and cycle detection; resolution remains host policy rather
+   than a core filesystem API. Guest module/extension installation and hot reload still need documented
+   transactional or isolated failure semantics beyond record-only invocation rollback.
 3. **Complete public value interop.** `OwnedValue` intentionally starts small, but it cannot yet faithfully
    carry binary strings, buffers, vectors, opaque userdata identity, non-scalar/identity table keys,
    cyclic/shared table graphs, or zero-copy live values. Add the live-value serde path and identity-safe handles
@@ -253,10 +270,10 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    optimize quota accounting to O(1) and prove the complete memory path with broader long-lived churn, cyclic
    graphs, hot reload, retained handles, weak tables, native/wasm parity, and representative mixed-heap evidence
    before tuning final intervals.
-2. **Finish the host-facing runtime boundary.** Add a worker-local/per-call host context, a host-owned module
-   resolver/cache,
-   complete binary/rich-value interop, zero-copy live serde, and transactional install/hot-reload/stack
-   diagnostics. Keep these layered and public-clean; do not leak grabby-specific types or a raw C API.
+2. **Finish the remaining host-facing runtime boundary.** The typed schema/context and deterministic record
+   transaction are implemented. Add a host-owned module resolver/cache, complete binary/rich-value interop,
+   zero-copy live serde, and transactional install/hot-reload/stack diagnostics. Keep these layered and
+   public-clean; do not leak grabby-specific types or a raw C API.
 3. **Harden the production engine** against the LOCKED decisions ([`30-architecture.md`](30-architecture.md) §1–§4):
    keep the 16-byte tagged `Value` firewall, portable `br_table`-friendly dispatch, instruction-count fuel,
    deterministic f64/libm behavior, table-key `-0` normalization, profile-specific GC behavior, and the public
@@ -359,7 +376,12 @@ tuning. Benchmark publication and the `LuauIntegerType2` watch remain ongoing ga
   byte-identical-to-reference claim; semantic-tail and full-target gates remain.
 - **DeterministicSim** (grabby) — ReproducibleStandard minus the env-dependent globals `collectgarbage`,
   `gcinfo`, and `os.*`, plus any optional host-supplied `loadstring`; it rejects external-mutable-state and
-  nondeterministic-effect host registrations. Deterministic output/clock providers are admitted: a stdout
+  nondeterministic-effect host registrations. Its typed `HostSchema` registrations can access an invocation's
+  deterministic input, slots, effect journal, and slot-write journal only through the matching capability view.
+  The invocation makes fuel/OOM/record overflow/yield-boundary failure/missing dispatch/host callback panic
+  hard, shares fuel across all nested calls, and publishes bounded records only after the outer operation
+  succeeds. Deterministic
+  output/clock providers are admitted: a stdout
   sink may be attached on any profile, the `os` table (all four members) is registered iff at least one
   deterministic clock provider is plugged, and a nondeterministic provider is rejected by the facade
   `build()` and silently dropped by the infallible VM constructors. Weak tables remain supported and are
@@ -380,9 +402,9 @@ tuning. Benchmark publication and the `LuauIntegerType2` watch remain ongoing ga
 | [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 694 fixtures / 493 refs / 0 pending |
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
 | [`56-performance-research.md`](56-performance-research.md) | no-unsafe SotA performance stack, top-10 ordered bets, C++ Luau estimates | current research note |
-| [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative** ✅ |
+| [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | typed invocation plus the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative + implemented generic seam** ✅ |
 | [`72-host-services.md`](72-host-services.md) | host services bus: stdout sink, determinism-labeled clock providers, facade presets, logical `os.clock` | **implemented** ✅ |
-| [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + deterministic extension/linker plan | **implemented first slice** ✅ |
+| [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **typed invocation implemented; advanced interop pending** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |
 | [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/target-first report/package metadata and dedicated Linode lifecycle implemented; standalone split pending** |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **metadata/checklist/changelog/preflight/CI gates started; publish=false remains** |
@@ -415,10 +437,10 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
    cyclic graphs, hot reload, logical-live quotas, and atomic OOM have their first safety coverage. Decision
    reset now invalidates every prior retained-handle clone by epoch, restarts deterministic state, and plateaus
    exactly across 600 focused decisions; ordinary retained calls still survive hot reload outside a reset.
-2. **Complete the host service and rich-value boundary:** O(1) quota accounting, a worker-local/per-call host
-   context, a host-owned
-   deterministic module resolver/cache, binary/rich/cyclic values, live-value serde, transactional
-   extension/module/hot-reload failure behavior, and stronger traceback diagnostics.
+2. **Complete the remaining host service and rich-value boundary:** the worker-local typed invocation seam is
+   implemented; finish O(1) quota accounting, a host-owned deterministic module resolver/cache,
+   binary/rich/cyclic values, live-value serde, transactional extension/module/hot-reload failure behavior, and
+   stronger traceback diagnostics.
 3. **Tune the GC intervals only after reclamation exists** (Deterministic instruction-count interval =
    determinism ABI; Standard paced-debt multiplier) on realistic long-lived and mixed heaps.
 4. **Harden compiler/runtime error-phase parity** with focused oracle fixtures plus differential/fuzz testing.

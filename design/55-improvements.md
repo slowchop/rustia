@@ -62,16 +62,18 @@ This mutation guarantee applies to calls lowered through the guarded import/call
 math/string opcodes still use their existing source-level safeenv gates; making those opcodes observe arbitrary
 host-time replacement is separate hardening work.
 
-**4. Borrowing internal host-fn ABI (zero-copy inside `mutate`) + typed `add_fn` sugar.** *(speed #1 · memory
-#2 · DX #5)* Add an internal `Fn(&Ctx<'gc>, &[Value<'gc>]) -> Result<Value<'gc>>` convention for the stdlib +
-op-hook ops (zero-copy on live values), exposed to embedders only via typed sugar:
-`vm.add_fn("clamp", |x:f64, lo:f64, hi:f64| …)` — args extracted off the register window via `FromValue`, no
-per-call `Vec<OwnedValue>`. **Why better:** the measured value-boundary cost is the deep-copy, not serde
-(1.47 vs 1.01 µs); the stdlib is called constantly, so paying `OwnedValue` round-trips on every builtin is pure
-waste — collapses the ~4.7% host-call cost and gives the ergonomic typed API. **Conformant:** the public
-`Box<dyn Fn(&[OwnedValue])->Result>` ABI is **retained as the `'gc` firewall** for embedder code; typed sugar
-yields owned Rust scalars (brand never leaks); runs on the owning thread inside `mutate` → thread-affine VM intact.
-**Cost:** medium (one internal trait + ~8 arity impls; public ABI unchanged).
+**4. Borrowing internal host-fn ABI + typed registration sugar.** *(speed #1 · memory #2 · DX #5 ·
+IMPLEMENTED, REFINED 2026-07-28)* Production extracts typed arguments directly from live VM values and converts
+returns back into the VM without a per-call `Vec<OwnedValue>` round trip. The public boundary never exposes a
+GC lifetime. `Rustia<H>` additionally separates the lifetime-independent `HostSchema` stored with callbacks
+from a fresh borrowed `HostContext<H>` threaded structurally through a lexical `Invocation`; sealed `Input`,
+`Slots`, `Effects`, `SlotWrites`, and `HostMut` views expose only the registered capability. This supersedes the
+earlier proposed public `Box<dyn Fn(&[OwnedValue])>` firewall and `Ctx<'gc>` sketch. **Why better:** it keeps
+tick-local borrows zero-copy, makes context escape impossible in safe Rust, avoids owned-value deep copies on
+host calls, and still leaves the VM thread-affine. Typed callback arities through eight, fallible returns,
+metadata, panic containment, and contextual dispatch are implemented. See
+[`70-host-bridge-contract.md`](70-host-bridge-contract.md) and
+[`75-embedded-api.md`](75-embedded-api.md).
 
 **5. Enforce libm-only transcendentals in-tree (clippy `disallowed-methods` + deny FMA/relaxed-SIMD).** *(determinism #4 · wasm #3)* Hard-forbid `f64::{sin,cos,…,powf,…}` everywhere (route through the `libm` crate);
 whitelist the correctly-rounded ops (`sqrt`/`floor`/`ceil`/`trunc`/`abs`/`copysign`/`nearest`); deny
@@ -89,15 +91,16 @@ saturating is one branchless opcode and bit-identical across engines. **Conforma
 truncate-toward-zero exactly like Luau (SPECIFIED, untouched); out-of-range is C-UB in reference Luau →
 UNSPECIFIED → free to pick the deterministic option. **Cost:** low.
 
-**7. Capability-typed, fuel-declaring contract on the op-extension hook.** *(public-clean · determinism #4 ·
-DX #5)* Each op registered through the hook (the seam that keeps grabby's bespoke `OP_UTIL` a thin private
-delta) must declare: (1) its **fuel cost** (folded into the versioned cost table → fuel stays fusion-invariant);
-(2) a purity/capability tag (Pure / ReadsHostMutableState / Effectful); (3) profile-eligibility — and a
-`Deterministic` VM **refuses at registration** to install any non-deterministic-safe op. **Why better:** the
-public/private split is only as safe as the hook contract; without it a private op could read wall-clock or
-mischarge fuel and *silently* break the determinism the *public* engine advertises. Makes the private fork a
-**verifiable** thin delta. **Conformant:** no script-observable change; strengthens the split + axis-G
-fuel-ABI. **Cost:** low.
+**7. Capability-typed, fuel-declaring contract on the host-operation hook.** *(public-clean · determinism #4 ·
+DX #5 · IMPLEMENTED, REFINED 2026-07-28)* Every host operation declares a non-zero fuel charge and one of seven
+capabilities: `Pure`, `ReadsDeterministicInput`, `ReadsSlotState`, `EmitsDeterministicEffect`,
+`WritesSlotEffect`, `ReadsExternalMutableState`, or `NondeterministicEffect`. Typed registration derives the
+tag from the sealed callback view instead of accepting an arbitrary label; namespaced `HostModule<H>` values
+expose the resulting metadata before atomic installation. `DeterministicSim` rejects either external capability
+before making any binding callable. **Why better:** a private host module cannot accidentally acquire broader
+context authority through the typed surface, misclassified operations fail closed at registration, and the
+explicit versioned fuel policy remains auditable. The legacy `RustiaExtension` label-taking surface remains
+available only to `Rustia<()>`.
 
 **8. Two-class f64 ingress (buffer/pack store RAW bytes; canon only when bytes become a *number*).** *(determinism #4 · compat #4)* Name the canon point as an invariant: a NaN/`-0` is canonicalized **when it becomes
 a number `Value`**, never when it's byte-reinterpreted — so `buffer`/`string.pack` memory stores the exact

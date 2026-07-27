@@ -1,7 +1,7 @@
 # Release Readiness Checklist
 
 This checklist tracks what must be true before any public rustia crate flips
-from `publish = false` to publishable. Updated 2026-07-27; the ordered runtime
+from `publish = false` to publishable. Updated 2026-07-28; the ordered runtime
 blockers below take precedence over packaging polish.
 
 ## Current Release Blockers (Ordered)
@@ -11,21 +11,23 @@ blockers below take precedence over packaging polish.
    native/wasm mixed-heap pressure evidence. The per-VM logical-live quota,
    atomic/catchable OOM path, VM-owned live/reserved/peak telemetry, epoch-safe
    decision-reset ABI, and focused 600-decision plateau are implemented.
-2. Add cheap worker-local/per-call host context; capability-tagged output and
-   clock/time providers plus real internal VM memory telemetry are implemented. Reject
-   nondeterministic providers in DeterministicSim.
-3. Add a host-owned script-visible `require` resolver/cache with deterministic
+2. Add a host-owned script-visible `require` resolver/cache with deterministic
    identity, execute-once behavior, and cycle diagnostics.
-4. Complete the release value surface for binary strings, buffers, vectors,
+3. Complete the release value surface for binary strings, buffers, vectors,
    non-scalar/identity keys, opaque identity-safe userdata handles,
    shared/cyclic table graphs, and a lifetime-safe live serde layer. Full
    mlua-style `UserData`/`Scope` registration remains a later optional layer.
-5. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
+4. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
    transactional extension/module/hot-reload failure behavior, and
    differential/fuzz coverage before stabilizing and publishing the API.
-6. Close the full correctness/build/golden target matrix from
+5. Close the full correctness/build/golden target matrix from
    [`00-constraints.md`](00-constraints.md); Linux remains the only active
    timing source, but not the only correctness target.
+
+The cheap worker-local host-context blocker is closed: `HostSchema` registrations
+are persistent, each typed invocation borrows a fresh `HostContext`, and bounded
+record transactions publish to reusable or caller-owned lanes. Capability-tagged
+output/time providers and VM-owned telemetry are also implemented.
 
 ## Current Policy
 
@@ -94,6 +96,31 @@ blockers below take precedence over packaging polish.
 - The public facade has capability-specific helpers for pure functions,
   deterministic input, slot reads/writes, deterministic effects, external
   mutable-state reads, and nondeterministic effects.
+- `Rustia<H>` stores a lifetime-independent `HostSchema`; each
+  `invoke`/`invoke_into` accepts a fresh `HostContext<H>` whose concrete value
+  may borrow block-local input and slots. Typed VMs execute guest code only
+  through the lexical `Invocation`.
+- Typed callbacks receive only their declared `Input`, `Slots`, `Effects`,
+  `SlotWrites`, or profile-gated `HostMut` authority. Callback captures remain
+  an explicit semantic trust boundary because safe Rust cannot prove a
+  `'static` closure free of global or interior state.
+- `InvocationLimits` supplies one shared fuel budget and bounded record-count
+  and logical-byte budgets for all guest calls in the invocation. Effects and
+  slot writes share one dense sequence.
+- Handler failure/panic rolls back that handler's record suffix; an error
+  escaping the outer operation publishes no records. Completed host calls
+  survive later guest errors caught by `pcall`. Fuel/OOM/record overflow/
+  invalid boundary yield/missing typed-host dispatcher/host panic are hard for
+  typed transactional execution, without globally changing legacy OOM/yield
+  behavior.
+- The rollback contract is records only, not guest heap/global mutation,
+  profile-gated `HostMut`, callback captures, or host-context interior
+  mutation. Host panic poisons the VM; all later guest execution entry points
+  reject until decision reset. Containment covers registered callbacks,
+  extension ops, stdout/clocks, and the configured `loadstring` compiler.
+- `InvocationOutcome` and `InvocationReceipt` expose fuel/count/byte usage;
+  `invoke_into` reserves a caller-owned lane before execution and performs no
+  allocation or fallible operation in its final append.
 - `RustiaExtension` exposes namespace, host-fuel policy, and per-function name,
   fuel ABI version, fuel cost, capability, parameter-count, parameter type,
   return type, and fallibility metadata before installation.
@@ -109,6 +136,9 @@ blockers below take precedence over packaging polish.
     script functions, and serde.
   - `crates/rustia/examples/hot_reload.rs` covers compile/install hot reload
     plus retained-handle survival and freshness checks.
+  - `crates/rustia/examples/typed_invocation.rs` covers `HostSchema`, a
+    block-local `HostContext`, capability views, namespaced typed functions,
+    shared limits, dense records, usage receipts, and `invoke_into`.
 - Retained `Function` handles and `Exports` expose install generations, and
   failed hot reloads leave the current generation unchanged. `is_current()` /
   `ensure_current()` expose freshness checks, while `Function::call_current()`
@@ -138,6 +168,10 @@ blockers below take precedence over packaging polish.
 - Host-provided output/time services and internal VM memory telemetry obey each
   profile's capability policy; placeholder print/time/collectgarbage-count/
   gcinfo behavior is gone, and callbacks can receive cheap worker-local state.
+- Transactional typed execution makes fuel, OOM, record overflow, invalid
+  boundary yields, missing dispatch, and host panic uncatchable by guest
+  `pcall`; record savepoints and outer rollback are tested, and a host panic
+  poisons the VM until `reset_decision()`.
 - Module resolution/cache, rich value interop, error-phase parity, and public
   stack/source diagnostics satisfy their focused tests; failed extension/module
   installation and runtime-failing reload cannot leave undocumented partial state.

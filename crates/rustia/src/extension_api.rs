@@ -1,5 +1,5 @@
 use crate::function::IntoHostFunction;
-use crate::{Error, Profile, Result, Rustia, VmError, VmErrorKind, VmSettings};
+use crate::{Error, HostSchema, Profile, Result, Rustia, VmError, VmErrorKind, VmSettings};
 use rustia_compiler::{compile_with_options, CompileOptions};
 use rustia_vm::{ClockProvider, HostFunctionOp, OpCapability, Program, StdoutSink};
 #[cfg(not(target_arch = "wasm32"))]
@@ -73,6 +73,12 @@ impl RustiaBuilder {
         self
     }
 
+    /// Sets the VM-wide execution fuel ceiling.
+    ///
+    /// Direct `Rustia<()>` entry points use this as their top-level budget. A
+    /// typed invocation uses the lower of this ceiling and its explicit
+    /// [`crate::InvocationLimits`] fuel, across every guest call in that
+    /// invocation.
     pub fn fuel(mut self, fuel: u64) -> Self {
         self.settings.initial_fuel = Some(fuel);
         self
@@ -121,6 +127,39 @@ impl RustiaBuilder {
     }
 
     pub fn build(self) -> Result<Rustia> {
+        self.validate()?;
+        let mut rustia = Rustia::with_settings(self.profile, self.settings);
+        for extension in self.extensions {
+            rustia.install_extension(extension)?;
+        }
+        Ok(rustia)
+    }
+
+    /// Builds a typed VM while preserving this builder's profile, settings,
+    /// and host services.
+    ///
+    /// Legacy [`RustiaExtension`] values deliberately do not cross into the
+    /// typed capability surface; install a [`crate::HostModule<H>`] after
+    /// building instead.
+    pub fn build_for_host<H>(self) -> Result<Rustia<H>>
+    where
+        H: HostSchema,
+    {
+        self.validate()?;
+        if !self.extensions.is_empty() {
+            return Err(Error::Embed(
+                "legacy RustiaExtension values cannot be installed into a typed VM; \
+                 use HostModule instead"
+                    .to_owned(),
+            ));
+        }
+        Ok(Rustia::for_host_with_settings::<H>(
+            self.profile,
+            self.settings,
+        ))
+    }
+
+    fn validate(&self) -> Result<()> {
         if cfg!(target_arch = "wasm32") && self.live_requested {
             return Err(Error::Vm(VmError::new(VmErrorKind::Unsupported {
                 feature: "live() preset on wasm32 (no system clock or stdout exists; plug \
@@ -141,16 +180,13 @@ impl RustiaBuilder {
                 if clock.as_ref().is_some_and(|clock| !clock.deterministic()) {
                     return Err(Error::Vm(VmError::new(VmErrorKind::CapabilityRemoved {
                         feature,
+                        operation: None,
                         profile: self.profile,
                     })));
                 }
             }
         }
-        let mut rustia = Rustia::with_settings(self.profile, self.settings);
-        for extension in self.extensions {
-            rustia.install_extension(extension)?;
-        }
-        Ok(rustia)
+        Ok(())
     }
 }
 

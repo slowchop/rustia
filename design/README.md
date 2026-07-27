@@ -2,12 +2,13 @@
 
 > ⚠️ **Read [`CURRENT.md`](CURRENT.md) first — it is the single canonical state.** This index and the dated
 > docs are staged snapshots and can lag; `CURRENT.md` wins on any disagreement. (Drift fixed per review H1.)
-> **Status note (2026-07-27):** the broad production VM/compiler/API slice, pending-free pinned conformance
+> **Status note (2026-07-28):** the broad production VM/compiler/API slice, pending-free pinned conformance
 > corpus, 12-adapter Linux benchmark snapshot, cross-engine wasm pre-lock gate, and host output/time services
 > slice are in-tree. Historical spike
 > multipliers are not current product claims. Bounded object/program lifetimes, quotas/OOM, and deterministic
-> reset are implemented. The next release gates are O(1) accounting, broader pressure evidence, and the
-> remaining host/module/value boundary — see `CURRENT.md`.
+> reset are implemented, as is the typed schema/context invocation with bounded record transactions. The next
+> release gates are O(1) accounting, broader pressure evidence, and the remaining module/value boundary — see
+> `CURRENT.md`.
 
 **rustia** = a fast, low-memory, wasm-friendly **Luau interpreter in Rust** with a great embedding API,
 built to replace **koto** in `../grabby-aliens/`. Design-first: we explore ~5 directions per decision,
@@ -34,9 +35,9 @@ docs are design intent.
 | [`56-performance-research.md`](56-performance-research.md) | safe-Rust performance sequence, landed HotIR/closure fast paths, current Linux evidence, and measurement protocol | **[PERFORMANCE RESEARCH v2.0]** |
 | [`57-memory-benchmarking.md`](57-memory-benchmarking.md) | cross-engine short-spike, phase, plateau/growth, pressure, and dashboard memory protocol | **[DESIGN — IMPLEMENTATION PENDING]** |
 | [`65-wasmjit.md`](65-wasmjit.md) | **wasm-emit JIT / AOT-to-wasm spike** (verified) — ~176× the interpreter in V8, crossover ≈ 6 calls; the in-browser near-native path | **[SPIKE]** ✅ |
-| [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | deterministic effect/slot contract and implemented decision-reset ABI; per-call context remains | **[CONTRACT + RESET IMPLEMENTED]** ✅ |
+| [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | typed invocation plus the deterministic effect/slot and decision-reset contract | **[CONTRACT + GENERIC SEAM IMPLEMENTED]** ✅ |
 | [`72-host-services.md`](72-host-services.md) | **host services bus** — stdout sink, determinism-labeled `ServiceClock` providers, `standard()`/`deterministic()`/`live()` presets, logical `os.clock` | **[IMPLEMENTED v1]** ✅ |
-| [`75-embedded-api.md`](75-embedded-api.md) | **Grabby-Compatible Embedded API** — public koto-shaped facade, typed conversion, serde, hot reload, deterministic extension/linker plan | **[IMPLEMENTED FIRST SLICE]** ✅ |
+| [`75-embedded-api.md`](75-embedded-api.md) | **Grabby-Compatible Embedded API** — facade, typed schema/context transaction, serde, hot reload, extension/linker | **[TYPED INVOCATION IMPLEMENTED]** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public koto-to-rustia migration guide for the implemented embedding facade | **[GUIDE]** |
 | [`80-bench-suite.md`](80-bench-suite.md) | 12-adapter Linux/wasm benchmark product, evidence protocol, generated report, and standalone split plan | **[IMPLEMENTED; SPLIT PENDING]** |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **[CHECKLIST]** |
@@ -46,14 +47,15 @@ docs are design intent.
 | [`publishability.json`](publishability.json) | generated publishability blocker audit for every workspace package | **[GENERATED]** |
 
 **TL;DR of where we are:** the architecture is decided and a substantial safe-Rust Luau 0.709 engine exists:
-694 fixtures / 493 refs / 0 pending, a first typed embedding facade with host-pluggable output/clock services,
+694 fixtures / 493 refs / 0 pending, a typed embedding facade with host-pluggable output/clock services,
+block-local invocation contexts, capability views, shared fuel, and bounded record transactions,
 CLI, deterministic profiles, reusable
 private HotIR, and a reproducible 12-adapter dedicated-Linux benchmark pipeline. The current `a562919` snapshot
 puts rustia 3.494x behind `mlua-luau` and 3.833x behind Luaur by five-workload minimum-time geometric mean; the
 targeted closure slice reduced rustia median latency by 15.036%. Before public release, prioritize complete
-O(1) quota accounting, broader mixed-heap/native/Wasm pressure evidence, per-call context, module loading/rich
-values, semantic-tail hardening, then further measured optimization and packaging. Object/program reclamation,
-quotas/OOM, and epoch-safe decision reset are implemented.
+O(1) quota accounting, broader mixed-heap/native/Wasm pressure evidence, module loading/rich values,
+semantic-tail hardening, then further measured optimization and packaging. Object/program reclamation,
+quotas/OOM, epoch-safe decision reset, and the per-invocation host seam are implemented.
 
 ## The decision axes (each gets ~5 directions explored)
 

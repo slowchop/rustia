@@ -5,7 +5,9 @@ use crate::bytecode::{
     ASSERT_MESSAGE_MISSING_ARGUMENT, ASSERT_MESSAGE_NONE,
 };
 use crate::error::{Error, ErrorKind, ErrorLocation, Result};
-use crate::extension::{validate_registered_op, ExtensionOp, ExtensionRegistry, HostFunctionOp};
+use crate::extension::{
+    validate_registered_op, ExtensionOp, ExtensionRegistry, HostFunctionOp, HostFunctionTarget,
+};
 use crate::heap::{
     FunctionCapture, FunctionKind, NativeFunction, QuotaTableWrite, TableIterationOrder, TableNext,
     TableNumericArrayWrite, TableStringHashSlot, TableStringHashWrite, UserdataPayload, VectorData,
@@ -23,6 +25,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::mem::size_of;
 use std::num::NonZeroU64;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
@@ -58,6 +61,10 @@ const OPCODE_TAG_SPACE: usize = u8::MAX as usize + 1;
 const PROGRAM_HANDLE_INDEX_BITS: u32 = 24;
 const PROGRAM_HANDLE_INDEX_MASK: u32 = (1 << PROGRAM_HANDLE_INDEX_BITS) - 1;
 const PROGRAM_HANDLE_MAX_GENERATION: u8 = u8::MAX;
+const STDOUT_SERVICE_NAME: &str = "service::stdout";
+const LOADSTRING_COMPILER_SERVICE_NAME: &str = "service::loadstring_compiler";
+const WALL_CLOCK_SERVICE_NAME: &str = "service::wall_clock";
+const MONOTONIC_CLOCK_SERVICE_NAME: &str = "service::monotonic_clock";
 // Zero selects the validated special-cost path; every other opcode tag defaults to one fuel.
 const OPCODE_FUEL_OR_SPECIAL: [u8; OPCODE_TAG_SPACE] = {
     let mut costs = [1; OPCODE_TAG_SPACE];
@@ -226,9 +233,39 @@ pub struct VmMemoryStats {
     pub peak_reserved_bytes: Option<usize>,
 }
 
+/// Fuel state shared by all guest calls in one embedding invocation.
+///
+/// This is a low-level seam used by the typed invocation API in the `rustia`
+/// crate. Create it with [`Vm::begin_execution`] and pass it only to the
+/// matching `*_in` methods.
+#[doc(hidden)]
+pub struct VmExecution {
+    fuel: Option<u64>,
+    fuel_limit: Option<u64>,
+    hard_resource_errors: bool,
+}
+
+impl VmExecution {
+    /// Fuel remaining in this shared execution, or `None` when unmetered.
+    #[doc(hidden)]
+    pub const fn fuel_remaining(&self) -> Option<u64> {
+        self.fuel
+    }
+
+    /// Fuel consumed across every guest call in this shared execution.
+    #[doc(hidden)]
+    pub const fn fuel_used(&self) -> u64 {
+        match (self.fuel_limit, self.fuel) {
+            (Some(limit), Some(remaining)) => limit.saturating_sub(remaining),
+            _ => 0,
+        }
+    }
+}
+
 pub struct Vm {
     profile: Profile,
     settings: VmSettings,
+    poisoned: bool,
     heap: VmCell,
     globals: u32,
     standard_globals: u32,
@@ -1605,6 +1642,34 @@ type ReturnValues = SmallVec<[Value; 4]>;
 type RegisterValues = SmallVec<[Value; 32]>;
 type RegisterCells = SmallVec<[Option<u32>; 32]>;
 
+trait HostDispatcher {
+    fn invoke(&mut self, vm: &mut Vm, key: u32, args: &[Value]) -> Result<Vec<Value>>;
+}
+
+struct CallbackHostDispatcher<'a, F>(&'a mut F);
+
+impl<F> HostDispatcher for CallbackHostDispatcher<'_, F>
+where
+    F: FnMut(&mut Vm, u32, &[Value]) -> Result<Vec<Value>>,
+{
+    fn invoke(&mut self, vm: &mut Vm, key: u32, args: &[Value]) -> Result<Vec<Value>> {
+        (self.0)(vm, key, args)
+    }
+}
+
+struct RejectHostDispatcher;
+
+impl HostDispatcher for RejectHostDispatcher {
+    fn invoke(&mut self, _vm: &mut Vm, key: u32, _args: &[Value]) -> Result<Vec<Value>> {
+        Err(Error::new(ErrorKind::HostDispatcherUnavailable { key }).without_source_location())
+    }
+}
+
+struct Execution<'a> {
+    state: &'a mut VmExecution,
+    hosts: &'a mut dyn HostDispatcher,
+}
+
 #[derive(Clone)]
 struct CoroutineYield {
     yielded: Vec<Value>,
@@ -1737,6 +1802,7 @@ impl Vm {
         let mut vm = Self {
             profile,
             settings,
+            poisoned: false,
             heap,
             globals,
             standard_globals: standard_globals.standard_globals,
@@ -1850,6 +1916,16 @@ impl Vm {
         self.decision_epoch
     }
 
+    /// Whether a host callback panic has poisoned this VM.
+    ///
+    /// A poisoned VM rejects every guest execution entry point. A successful
+    /// [`reset_decision`](Self::reset_decision) is the only way to make it
+    /// executable again.
+    #[inline]
+    pub const fn is_poisoned(&self) -> bool {
+        self.poisoned
+    }
+
     /// Starts a fresh decision epoch while reusing this VM's allocation
     /// containers.
     ///
@@ -1929,8 +2005,34 @@ impl Vm {
         self.next_weak_collection_instruction = self.settings.deterministic_gc_interval.get();
         self.deterministic_collection_count = 0;
         self.decision_epoch = next_epoch;
+        self.poisoned = false;
         self.record_memory_peak();
         Ok(())
+    }
+
+    fn ensure_healthy(&self) -> Result<()> {
+        if self.poisoned {
+            Err(Error::new(ErrorKind::VmPoisoned).without_source_location())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn catch_host_callback<T>(
+        &mut self,
+        function: impl Into<String>,
+        callback: impl FnOnce() -> T,
+    ) -> Result<T> {
+        match catch_unwind(AssertUnwindSafe(callback)) {
+            Ok(value) => Ok(value),
+            Err(_) => {
+                self.poisoned = true;
+                Err(Error::new(ErrorKind::HostPanicked {
+                    function: function.into(),
+                })
+                .without_source_location())
+            }
+        }
     }
 
     fn restore_host_function_bindings(&mut self) {
@@ -2043,7 +2145,7 @@ impl Vm {
     }
 
     pub fn register_host_function(&mut self, op: HostFunctionOp) -> Result<Value> {
-        validate_registered_op(self.profile, op.fuel_cost, op.capability)?;
+        validate_registered_op(self.profile, &op.name, op.fuel_cost, op.capability)?;
         let id = u32::try_from(self.host_functions.len()).map_err(|_| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "host function table exhausted",
@@ -2062,14 +2164,25 @@ impl Vm {
     }
 
     pub fn install_host_function(&mut self, op: HostFunctionOp) -> Result<()> {
+        validate_registered_op(self.profile, &op.name, op.fuel_cost, op.capability)?;
+        self.host_functions
+            .try_reserve(1)
+            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        self.host_function_bindings
+            .try_reserve(1)
+            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
         let name = op.name.clone();
         let host = u32::try_from(self.host_functions.len()).map_err(|_| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "host function table exhausted",
             })
         })?;
+        let host_functions_checkpoint = self.host_functions.len();
         let value = self.register_host_function(op)?;
-        self.set_global_value(&name, value)?;
+        if let Err(error) = self.set_global_value(&name, value) {
+            self.host_functions.truncate(host_functions_checkpoint);
+            return Err(error);
+        }
         self.host_function_bindings
             .push(HostFunctionBinding::Global { name, host });
         Ok(())
@@ -2085,21 +2198,46 @@ impl Vm {
         functions: Vec<HostFunctionOp>,
     ) -> Result<()> {
         let namespace = namespace.into();
-        let table = self.empty_table();
-        let mut bindings = Vec::with_capacity(functions.len());
-        for function in functions {
-            let name = function.name.clone();
-            let host = u32::try_from(self.host_functions.len()).map_err(|_| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "host function table exhausted",
-                })
-            })?;
-            let value = self.register_host_function(function)?;
-            let key = self.string(&name);
-            self.raw_table_set_value(table, key, value)?;
-            bindings.push((name, host));
+        for function in &functions {
+            let qualified_name = format!("{namespace}.{}", function.name);
+            validate_registered_op(
+                self.profile,
+                &qualified_name,
+                function.fuel_cost,
+                function.capability,
+            )?;
         }
-        self.set_global_value(&namespace, table)?;
+        self.host_functions
+            .try_reserve(functions.len())
+            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        self.host_function_bindings
+            .try_reserve(1)
+            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        let table = self.empty_table();
+        let mut bindings = Vec::new();
+        bindings
+            .try_reserve(functions.len())
+            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        let host_functions_checkpoint = self.host_functions.len();
+        let install = (|| {
+            for function in functions {
+                let name = function.name.clone();
+                let host = u32::try_from(self.host_functions.len()).map_err(|_| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "host function table exhausted",
+                    })
+                })?;
+                let value = self.register_host_function(function)?;
+                let key = self.string(&name);
+                self.raw_table_set_value(table, key, value)?;
+                bindings.push((name, host));
+            }
+            self.set_global_value(&namespace, table)
+        })();
+        if let Err(error) = install {
+            self.host_functions.truncate(host_functions_checkpoint);
+            return Err(error);
+        }
         self.host_function_bindings
             .push(HostFunctionBinding::Module {
                 namespace,
@@ -2216,12 +2354,70 @@ impl Vm {
         function: Value,
         args: &[Value],
     ) -> Result<Vec<Value>> {
+        let mut state = self.begin_execution();
+        let mut hosts = RejectHostDispatcher;
+        let mut execution = Execution {
+            state: &mut state,
+            hosts: &mut hosts,
+        };
+        self.call_retained_function_with_execution(function, args, &mut execution)
+    }
+
+    /// Starts a fuel budget that can be shared by several guest calls in one
+    /// typed host invocation.
+    #[doc(hidden)]
+    pub fn begin_execution(&self) -> VmExecution {
+        VmExecution {
+            fuel: self.settings.initial_fuel,
+            fuel_limit: self.settings.initial_fuel,
+            hard_resource_errors: false,
+        }
+    }
+
+    /// Starts a deterministic transaction whose resource failures cannot be
+    /// swallowed by protected guest calls.
+    #[doc(hidden)]
+    pub fn begin_transactional_execution_with_fuel(&self, fuel: Option<u64>) -> VmExecution {
+        VmExecution {
+            fuel,
+            fuel_limit: fuel,
+            hard_resource_errors: true,
+        }
+    }
+
+    /// Calls a retained function using a short-lived host dispatcher and a
+    /// shared invocation fuel budget.
+    #[doc(hidden)]
+    pub fn call_retained_function_in<F>(
+        &mut self,
+        function: Value,
+        args: &[Value],
+        state: &mut VmExecution,
+        host: &mut F,
+    ) -> Result<Vec<Value>>
+    where
+        F: FnMut(&mut Vm, u32, &[Value]) -> Result<Vec<Value>>,
+    {
+        let mut hosts = CallbackHostDispatcher(host);
+        let mut execution = Execution {
+            state,
+            hosts: &mut hosts,
+        };
+        self.call_retained_function_with_execution(function, args, &mut execution)
+    }
+
+    fn call_retained_function_with_execution(
+        &mut self,
+        function: Value,
+        args: &[Value],
+        execution: &mut Execution<'_>,
+    ) -> Result<Vec<Value>> {
+        self.ensure_healthy()?;
         let program = Program::new(
             Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
             Vec::new(),
         );
-        let mut fuel = self.settings.initial_fuel;
-        self.call_value(&program, function, args, 0, &mut fuel)
+        self.call_value(&program, function, args, 0, execution)
     }
 
     /// Retains a value as an embedder-owned collector root.
@@ -2249,7 +2445,41 @@ impl Vm {
     }
 
     pub fn run(&mut self, program: &Program) -> Result<Value> {
-        let mut fuel = self.settings.initial_fuel;
+        let mut state = self.begin_execution();
+        let mut hosts = RejectHostDispatcher;
+        let mut execution = Execution {
+            state: &mut state,
+            hosts: &mut hosts,
+        };
+        self.run_with_execution(program, &mut execution)
+    }
+
+    /// Runs a program with a borrowed host dispatcher and an invocation-wide
+    /// fuel budget.
+    #[doc(hidden)]
+    pub fn run_in<F>(
+        &mut self,
+        program: &Program,
+        state: &mut VmExecution,
+        host: &mut F,
+    ) -> Result<Value>
+    where
+        F: FnMut(&mut Vm, u32, &[Value]) -> Result<Vec<Value>>,
+    {
+        let mut hosts = CallbackHostDispatcher(host);
+        let mut execution = Execution {
+            state,
+            hosts: &mut hosts,
+        };
+        self.run_with_execution(program, &mut execution)
+    }
+
+    fn run_with_execution(
+        &mut self,
+        program: &Program,
+        execution: &mut Execution<'_>,
+    ) -> Result<Value> {
+        self.ensure_healthy()?;
         let program_id = self.retain_dynamic_program_ref(program)?;
         let results = self
             .run_function(
@@ -2266,13 +2496,11 @@ impl Vm {
                     prototype: None,
                 },
                 None,
-                &mut fuel,
+                execution,
             )
             .map_err(|error| attach_existing_instruction_source(program, &program.main, error))?;
         let VmFlow::Return(results) = results else {
-            return Err(Error::new(ErrorKind::RuntimeError {
-                message: "attempt to yield across metamethod/C-call boundary".to_owned(),
-            }));
+            return Err(non_yieldable_boundary_error());
         };
         Ok(first_result_or_nil(results))
     }
@@ -2283,8 +2511,38 @@ impl Vm {
         function: Value,
         args: &[Value],
     ) -> Result<Value> {
-        let mut fuel = self.settings.initial_fuel;
-        let results = self.call_value(program, function, args, 0, &mut fuel)?;
+        self.ensure_healthy()?;
+        let mut state = self.begin_execution();
+        let mut hosts = RejectHostDispatcher;
+        let mut execution = Execution {
+            state: &mut state,
+            hosts: &mut hosts,
+        };
+        let results = self.call_value(program, function, args, 0, &mut execution)?;
+        Ok(first_result_or_nil(results))
+    }
+
+    /// Calls a raw function with a borrowed host dispatcher and an
+    /// invocation-wide fuel budget.
+    #[doc(hidden)]
+    pub fn call_function_in<F>(
+        &mut self,
+        program: &Program,
+        function: Value,
+        args: &[Value],
+        state: &mut VmExecution,
+        host: &mut F,
+    ) -> Result<Value>
+    where
+        F: FnMut(&mut Vm, u32, &[Value]) -> Result<Vec<Value>>,
+    {
+        self.ensure_healthy()?;
+        let mut hosts = CallbackHostDispatcher(host);
+        let mut execution = Execution {
+            state,
+            hosts: &mut hosts,
+        };
+        let results = self.call_value(program, function, args, 0, &mut execution)?;
         Ok(first_result_or_nil(results))
     }
 
@@ -2342,7 +2600,7 @@ impl Vm {
         args: &[Value],
         context: FunctionCallContext<'_>,
         resumed: Option<ResumedFunctionState>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
         self.call_stack.push(CallStackFrame {
             function: context.current_function,
@@ -2472,7 +2730,7 @@ impl Vm {
             macro_rules! unwind_stackless_error {
                 ($error:expr) => {{
                     let error = $error;
-                    if error_is_uncatchable(&error) {
+                    if error_is_uncatchable(&error, fuel) {
                         return Err(error);
                     }
                     let mut error = Some(error);
@@ -2581,7 +2839,7 @@ impl Vm {
 
                         if instruction.op == Opcode::ForLoop
                             && self.hot_ir_enabled()
-                            && fuel.is_none()
+                            && fuel.state.fuel.is_none()
                             && !self.settings.enable_conformance_coverage
                             && !self.heap.has_allocation_debt()
                             && !self.weak_collection_due_within(1)
@@ -2661,7 +2919,7 @@ impl Vm {
                                 | Opcode::SetIndex
                         );
                         let can_try_common_fast_path = is_common_fast_path_candidate
-                            && fuel.is_none()
+                            && fuel.state.fuel.is_none()
                             && !self.settings.enable_conformance_coverage
                             && !self.heap.has_allocation_debt()
                             && !self.weak_collection_due_within(1);
@@ -2686,7 +2944,7 @@ impl Vm {
                             let fuel_cost = self
                                 .instruction_fuel_cost(instruction)
                                 .map_err(|e| e.at_pc(pc))?;
-                            charge_fuel(fuel, self.settings.initial_fuel, fuel_cost)
+                            charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, fuel_cost)
                                 .map_err(|error| error.at_pc(pc))?;
                             let weak_collection_due = self.weak_collection_due_within(fuel_cost);
                             if weak_collection_due
@@ -3886,8 +4144,12 @@ impl Vm {
                                 let extra_fuel = self
                                     .string_find_opcode_fuel(&registers, instruction)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                charge_fuel(fuel, self.settings.initial_fuel, extra_fuel)
-                                    .map_err(|error| error.at_pc(pc - 1))?;
+                                charge_fuel(
+                                    &mut fuel.state.fuel,
+                                    fuel.state.fuel_limit,
+                                    extra_fuel,
+                                )
+                                .map_err(|error| error.at_pc(pc - 1))?;
                                 let value = self
                                     .string_find(&registers, instruction)
                                     .map_err(|e| e.at_pc(pc - 1))?;
@@ -3953,8 +4215,12 @@ impl Vm {
                                 let extra_fuel = self
                                     .table_insert_extra_fuel(&registers, instruction)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                charge_fuel(fuel, self.settings.initial_fuel, extra_fuel)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                charge_fuel(
+                                    &mut fuel.state.fuel,
+                                    fuel.state.fuel_limit,
+                                    extra_fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
                                 let value = self
                                     .table_insert(&registers, instruction)
                                     .map_err(|e| e.at_pc(pc - 1))?;
@@ -5740,7 +6006,7 @@ impl Vm {
         pending_return_prefixes: &mut Vec<Value>,
         continuation: BytecodeContinuation,
         mut results: Vec<Value>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Option<Vec<Value>>> {
         match continuation {
             BytecodeContinuation::WriteFirst { register } => {
@@ -5855,7 +6121,7 @@ impl Vm {
         pc: usize,
         instruction: Instruction,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         if instruction.aux < 0 {
             return Err(Error::new(ErrorKind::InvalidProgram {
@@ -6253,7 +6519,7 @@ impl Vm {
         program: &Program,
         value: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<u8>> {
         let Some(method) = self.tostring_metamethod(value)? else {
             return self.value_to_tostring(value);
@@ -6378,7 +6644,7 @@ impl Vm {
         instruction: Instruction,
         op: NumericOp,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         let lhs = get_register(registers, instruction.b)?;
         let rhs = get_register(registers, instruction.c)?;
@@ -6398,7 +6664,7 @@ impl Vm {
         instruction: Instruction,
         op: NumericOp,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         let value = get_register(registers, instruction.b)?;
         let result = self.numeric_unop_value(program, value, op, depth, fuel)?;
@@ -6412,7 +6678,7 @@ impl Vm {
         rhs: Value,
         op: NumericOp,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         if lhs.kind() == ValueKind::Vector || rhs.kind() == ValueKind::Vector {
             return self.vector_binop_value(lhs, rhs, op);
@@ -6440,7 +6706,7 @@ impl Vm {
         value: Value,
         op: NumericOp,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         if value.kind() == ValueKind::Vector && op == NumericOp::Neg {
             let vector = self.vector_data(value)?;
@@ -6499,7 +6765,7 @@ impl Vm {
         instruction: Instruction,
         invert: bool,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         let lhs = get_register(registers, instruction.b)?;
         let rhs = get_register(registers, instruction.c)?;
@@ -6513,7 +6779,7 @@ impl Vm {
         lhs: Value,
         rhs: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<bool> {
         if let Some(method) = self.compatible_binary_metamethod(lhs, rhs, "__eq")? {
             let results =
@@ -6579,7 +6845,7 @@ impl Vm {
         instruction: Instruction,
         comparison: OrderComparison,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         let lhs = get_register(registers, instruction.b)?;
         let rhs = get_register(registers, instruction.c)?;
@@ -6594,7 +6860,7 @@ impl Vm {
         rhs: Value,
         comparison: OrderComparison,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<bool> {
         match comparison {
             OrderComparison::Less => self.less_than(program, lhs, rhs, depth, fuel),
@@ -6610,7 +6876,7 @@ impl Vm {
         lhs: Value,
         rhs: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<bool> {
         if let Some(result) = self.raw_order(lhs, rhs, OrderComparison::Less)? {
             return Ok(result);
@@ -6629,7 +6895,7 @@ impl Vm {
         lhs: Value,
         rhs: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<bool> {
         if let Some(result) = self.raw_order(lhs, rhs, OrderComparison::LessEqual)? {
             return Ok(result);
@@ -6695,7 +6961,7 @@ impl Vm {
         registers: &[Value],
         instruction: Instruction,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         let lhs = get_register(registers, instruction.b)?;
         let rhs = get_register(registers, instruction.c)?;
@@ -6708,7 +6974,7 @@ impl Vm {
         lhs: Value,
         rhs: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         if let (Ok(mut lhs_text), Ok(rhs_text)) =
             (self.value_to_string(lhs), self.value_to_string(rhs))
@@ -6759,7 +7025,7 @@ impl Vm {
         program: &Program,
         value: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         if value.kind() == ValueKind::String {
             return Ok(Value::number(self.raw_len_value(value)? as f64));
@@ -6793,7 +7059,7 @@ impl Vm {
         object: Value,
         key: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         self.check_recursion_depth(depth)?;
         if let Some(table) = object.as_table() {
@@ -7060,7 +7326,7 @@ impl Vm {
         object: Value,
         key: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         if let Some(table) = object.as_table() {
             return self.get_table_index_with_inline_cache(
@@ -7079,7 +7345,7 @@ impl Vm {
         object: Value,
         key: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         let Some(table) = object.as_table() else {
             return self.get_index_value(program, object, key, depth, fuel);
@@ -7177,7 +7443,7 @@ impl Vm {
         object: Value,
         key: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         if let Some(table) = object.as_table() {
             return self.get_table_index_with_import_inline_cache(
@@ -7222,7 +7488,7 @@ impl Vm {
         table: u32,
         key: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         self.check_recursion_depth(depth)?;
         if let Some(index) = key.as_number().and_then(array_iterator_index) {
@@ -7251,7 +7517,7 @@ impl Vm {
         table: u32,
         key: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         self.check_recursion_depth(depth)?;
         if let Some(index) = key.as_number().and_then(array_iterator_index) {
@@ -7307,7 +7573,7 @@ impl Vm {
         table: u32,
         key: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         self.check_recursion_depth(depth)?;
         let Some(program_id) = program_id else {
@@ -7353,7 +7619,7 @@ impl Vm {
         object: Value,
         key: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         self.check_recursion_depth(depth)?;
         let Some(method) = self.metamethod_for_value(object, "__index")? else {
@@ -7404,7 +7670,7 @@ impl Vm {
         key: Value,
         value: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         self.check_recursion_depth(depth)?;
         if let Some(table) = object.as_table() {
@@ -7426,7 +7692,7 @@ impl Vm {
         key: Value,
         value: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         if let Some(table) = object.as_table() {
             return self.set_table_index_with_inline_cache(
@@ -7443,7 +7709,7 @@ impl Vm {
         key: Value,
         value: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         self.check_recursion_depth(depth)?;
         let existing = self.raw_table_get(table, key)?;
@@ -7473,7 +7739,7 @@ impl Vm {
         key: Value,
         value: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         self.check_recursion_depth(depth)?;
         if let Some(index) = key.as_number().and_then(array_iterator_index) {
@@ -7541,7 +7807,7 @@ impl Vm {
         key: Value,
         value: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         self.check_recursion_depth(depth)?;
         let Some(method) = self.metamethod_for_value(object, "__newindex")? else {
@@ -7557,7 +7823,7 @@ impl Vm {
         method: Value,
         entry: [Value; 2],
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         self.check_recursion_depth(depth)?;
         match method.kind() {
@@ -7777,7 +8043,7 @@ impl Vm {
         registers: &[Value],
         instruction: Instruction,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         if !(2..=3).contains(&instruction.aux) {
             return Err(Error::new(ErrorKind::InvalidProgram {
@@ -8092,7 +8358,7 @@ impl Vm {
         instruction: Instruction,
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
         if instruction.aux < 0 || instruction.aux > i32::from(u8::MAX) {
             return Err(Error::new(ErrorKind::InvalidProgram {
@@ -8129,7 +8395,7 @@ impl Vm {
         depth: usize,
         call_site: Option<ErrorLocation>,
         cache_site: NativeCallCacheSite,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
         if instruction.aux < 0 || instruction.aux > i32::from(u8::MAX) {
             return Err(Error::new(ErrorKind::InvalidProgram {
@@ -8167,7 +8433,7 @@ impl Vm {
         instruction: Instruction,
         depth: usize,
         cache_site: NativeCallCacheSite,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Option<Value>> {
         if instruction.aux < 0 || instruction.aux > i32::from(u8::MAX) {
             return Err(Error::new(ErrorKind::InvalidProgram {
@@ -8230,7 +8496,7 @@ impl Vm {
         };
         self.check_recursion_depth(depth)?;
         let extra_fuel = self.native_extra_fuel_cost(handle, native, args);
-        charge_fuel(fuel, self.settings.initial_fuel, extra_fuel)?;
+        charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, extra_fuel)?;
         self.call_native_scalar_function(program, native, args, None)
             .map(Some)
     }
@@ -8241,7 +8507,7 @@ impl Vm {
         callee: Value,
         args: &[Value],
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         match self.call_value_with_site_resumable(program, callee, args, depth, None, fuel)? {
             VmFlow::Return(results) => Ok(results.into_vec()),
@@ -8256,7 +8522,7 @@ impl Vm {
         args: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         match self.call_value_with_site_resumable(program, callee, args, depth, call_site, fuel)? {
             VmFlow::Return(results) => Ok(results.into_vec()),
@@ -8270,7 +8536,7 @@ impl Vm {
         callee: Value,
         args: &[Value],
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         self.non_yieldable_depth = self.non_yieldable_depth.saturating_add(1);
         let result = self.call_value(program, callee, args, depth, fuel);
@@ -8285,7 +8551,7 @@ impl Vm {
         args: &[Value],
         depth: usize,
         traceback: TracebackSnapshot,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         let previous = self.protected_error_traceback.replace(traceback);
         let result = self.call_value(program, callee, args, depth, fuel);
@@ -8300,7 +8566,7 @@ impl Vm {
         args: &[Value],
         depth: usize,
         traceback: TracebackSnapshot,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         self.non_yieldable_depth = self.non_yieldable_depth.saturating_add(1);
         let result =
@@ -8316,7 +8582,7 @@ impl Vm {
         args: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
         self.check_recursion_depth(depth)?;
         let Some(handle) = callee.as_function() else {
@@ -8359,7 +8625,7 @@ impl Vm {
         depth: usize,
         call_site: Option<ErrorLocation>,
         cache_site: NativeCallCacheSite,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
         self.check_recursion_depth(depth)?;
         let Some(handle) = callee.as_function() else {
@@ -8441,7 +8707,7 @@ impl Vm {
         args: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
         match kind {
             FunctionKind::Bytecode {
@@ -8510,11 +8776,34 @@ impl Vm {
                 )
             }
             FunctionKind::Host(host) => {
-                let op = self.host_function(host)?.clone();
-                charge_fuel(fuel, self.settings.initial_fuel, u64::from(op.fuel_cost))?;
-                (op.handler)(self, args)
-                    .map(ReturnValues::from_vec)
-                    .map(VmFlow::Return)
+                let (fuel_cost, target) = {
+                    let op = self.host_function(host)?;
+                    (op.fuel_cost, op.target.clone())
+                };
+                charge_fuel(
+                    &mut fuel.state.fuel,
+                    fuel.state.fuel_limit,
+                    u64::from(fuel_cost),
+                )?;
+                let result = catch_unwind(AssertUnwindSafe(|| match target {
+                    HostFunctionTarget::Inline(handler) => handler(self, args),
+                    HostFunctionTarget::Dispatcher(key) => fuel.hosts.invoke(self, key, args),
+                }));
+                let result = match result {
+                    Ok(result) => result,
+                    Err(_) => {
+                        let function = self.host_function(host)?.name.clone();
+                        Err(Error::new(ErrorKind::HostPanicked { function })
+                            .without_source_location())
+                    }
+                };
+                if result
+                    .as_ref()
+                    .is_err_and(|error| matches!(error.kind, ErrorKind::HostPanicked { .. }))
+                {
+                    self.poisoned = true;
+                }
+                result.map(ReturnValues::from_vec).map(VmFlow::Return)
             }
             FunctionKind::Native(native) => self
                 .call_native_function_resumable(
@@ -8797,7 +9086,7 @@ impl Vm {
         args: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
         let (captures, environment) = bytecode_data.ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
@@ -8828,7 +9117,7 @@ impl Vm {
         kind: FunctionKind,
         handle: u32,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Option<ReturnValues>> {
         let FunctionKind::Bytecode {
             program: Some(program_id),
@@ -8846,7 +9135,7 @@ impl Vm {
         };
         if !self.closure_call_fast_path_enabled()
             || self.settings.initial_fuel.is_some()
-            || fuel.is_some()
+            || fuel.state.fuel.is_some()
             || self.settings.enable_conformance_coverage
             || self.heap.has_allocation_debt()
             || self.weak_collection_due_within(plan.maximum_instruction_count())
@@ -8876,12 +9165,12 @@ impl Vm {
         registers: &[Value],
         instruction: Instruction,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Option<LeafCallOutcome>> {
         if instruction.op != Opcode::Call
             || !self.closure_call_fast_path_enabled()
             || self.settings.initial_fuel.is_some()
-            || fuel.is_some()
+            || fuel.state.fuel.is_some()
             || self.settings.enable_conformance_coverage
             || self.heap.has_allocation_debt()
         {
@@ -8977,7 +9266,7 @@ impl Vm {
         plan: LeafCallPlan,
         captures: &[FunctionCapture],
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Option<ReturnValues>> {
         // Fuel and coverage are deliberately kept on the ordinary interpreter
         // so their per-instruction accounting and source attribution remain
@@ -8985,7 +9274,7 @@ impl Vm {
         // a deterministic weak-collection boundary.
         if !self.closure_call_fast_path_enabled()
             || self.settings.initial_fuel.is_some()
-            || fuel.is_some()
+            || fuel.state.fuel.is_some()
             || self.settings.enable_conformance_coverage
             || self.heap.has_allocation_debt()
             || self.weak_collection_due_within(plan.maximum_instruction_count())
@@ -9102,7 +9391,7 @@ impl Vm {
         callee: Value,
         args: &[Value],
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         match callee.kind() {
             ValueKind::Table | ValueKind::Userdata => {
@@ -9129,7 +9418,7 @@ impl Vm {
         instruction: Instruction,
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<()> {
         let base = usize::from(instruction.a);
         let argc = usize::from(instruction.b);
@@ -9211,7 +9500,7 @@ impl Vm {
         varargs: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<()> {
         let base = usize::from(instruction.a);
         let prefix_count = usize::from(instruction.b);
@@ -9267,7 +9556,7 @@ impl Vm {
         instruction: Instruction,
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         let result_count = usize::from(instruction.c);
         let results = self.nested_expand_results(
@@ -9294,7 +9583,7 @@ impl Vm {
         instruction: Instruction,
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         let result_count = usize::from(instruction.b);
         let leaf_argc = usize::from(instruction.c);
@@ -9324,7 +9613,7 @@ impl Vm {
         varargs: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         let result_count = usize::from(instruction.c);
         let results = self.nested_expand_varargs_results(
@@ -9355,7 +9644,7 @@ impl Vm {
         aux: i32,
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         let (outer_prefix_count, middle_prefix_count, inner_argc) = unpack_nested_expand_aux(aux)?;
         let outer_prefix_count = usize::from(outer_prefix_count);
@@ -9410,7 +9699,7 @@ impl Vm {
         leaf_argc: usize,
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         let (outer_prefix_count, middle_prefix_count, inner_prefix_count) =
             unpack_nested_expand_aux(aux)?;
@@ -9483,7 +9772,7 @@ impl Vm {
         varargs: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         let (outer_prefix_count, middle_prefix_count) = unpack_expand_varargs_aux(spec.aux)?;
         let outer_prefix_count = usize::from(outer_prefix_count);
@@ -9525,7 +9814,7 @@ impl Vm {
         varargs: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         let (outer_prefix_count, middle_prefix_count, inner_prefix_count) =
             unpack_nested_expand_aux(spec.aux)?;
@@ -9586,7 +9875,7 @@ impl Vm {
         program: &Program,
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<Vec<Value>> {
         if native == NativeFunction::CoroutineYield {
             return self.native_coroutine_yield_resumable(args, call_site);
@@ -9609,11 +9898,11 @@ impl Vm {
         program: &Program,
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         self.check_recursion_depth(depth)?;
         let extra_fuel = self.native_extra_fuel_cost(handle, native, args);
-        charge_fuel(fuel, self.settings.initial_fuel, extra_fuel)?;
+        charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, extra_fuel)?;
         if native == NativeFunction::Assert {
             return self.native_assert(args);
         }
@@ -10957,7 +11246,7 @@ impl Vm {
         program: &Program,
         args: &[Value],
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         let Some(sink) = self.settings.services.stdout.clone() else {
             return Ok(Value::nil());
@@ -10974,7 +11263,9 @@ impl Vm {
             );
         }
         output.push(b'\n');
-        sink.write(&String::from_utf8_lossy(&output));
+        self.catch_host_callback(STDOUT_SERVICE_NAME, || {
+            sink.write(&String::from_utf8_lossy(&output));
+        })?;
         Ok(Value::nil())
     }
 
@@ -10996,7 +11287,10 @@ impl Vm {
                 .intern_string_value_bytes(b"loadstring compiler is not configured");
             return Ok(vec![Value::nil(), message]);
         };
-        let program = match compiler(&source, source_name.as_deref()) {
+        let compiled = self.catch_host_callback(LOADSTRING_COMPILER_SERVICE_NAME, || {
+            compiler(&source, source_name.as_deref())
+        })?;
+        let program = match compiled {
             Ok(program) => program,
             Err(message) => {
                 let message = self.heap.intern_string_value_bytes(message.as_bytes());
@@ -11099,9 +11393,7 @@ impl Vm {
             if self.settings.enable_conformance_top_level_yield {
                 return Ok(args.to_vec());
             }
-            return Err(Error::new(ErrorKind::RuntimeError {
-                message: "attempt to yield across metamethod/C-call boundary".to_owned(),
-            }));
+            return Err(non_yieldable_boundary_error());
         };
         collector.push(args.to_vec());
         Ok(Vec::new())
@@ -11215,7 +11507,7 @@ impl Vm {
         callee: Value,
         args: &[Value],
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<Vec<Value>> {
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
@@ -11240,7 +11532,7 @@ impl Vm {
         coroutine: usize,
         frames: Vec<CoroutineFrame>,
         resume_results: Vec<Value>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<Vec<Value>> {
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
@@ -11261,7 +11553,7 @@ impl Vm {
         coroutine: usize,
         frames: Vec<CoroutineFrame>,
         error: Error,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<Vec<Value>> {
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
@@ -11281,7 +11573,7 @@ impl Vm {
         &mut self,
         mut frames: Vec<CoroutineFrame>,
         mut results: Vec<Value>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<Vec<Value>> {
         loop {
             if frames.is_empty() {
@@ -11327,8 +11619,11 @@ impl Vm {
         &mut self,
         mut frames: Vec<CoroutineFrame>,
         error: Error,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<Vec<Value>> {
+        if error_is_uncatchable(&error, fuel) {
+            return Err(error);
+        }
         loop {
             if frames.is_empty() {
                 return Err(error);
@@ -11356,7 +11651,7 @@ impl Vm {
         &mut self,
         frame: SuspendedXPCallFrame,
         error: Error,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         let program = self.dynamic_program(frame.program_id)?;
         let original_is_out_of_memory = error_is_out_of_memory(&error);
@@ -11372,7 +11667,7 @@ impl Vm {
             fuel,
         ) {
             Ok(results) => Ok(vec![Value::boolean(false), first_result_or_nil(results)]),
-            Err(error) if error_is_uncatchable(&error) => Err(error),
+            Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
             Err(handler_error) => {
                 Ok(self.xpcall_handler_error_result(original_is_out_of_memory, handler_error))
             }
@@ -11383,7 +11678,7 @@ impl Vm {
         &mut self,
         frame: SuspendedBytecodeFrame,
         resume_results: Vec<Value>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<Vec<Value>> {
         let program = self.dynamic_program(frame.program_id)?;
         let function = match frame.prototype {
@@ -11429,7 +11724,7 @@ impl Vm {
         args: &[Value],
         program: &Program,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         validate_native_arity(args, 1, u8::MAX as usize, "coroutine.resume arguments")?;
         let coroutine = self.coroutine_index(args[0])?;
@@ -11475,7 +11770,7 @@ impl Vm {
                 values.extend(suspension.yielded);
                 Ok(values)
             }
-            Err(error) if error_is_uncatchable(&error) => Err(error),
+            Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
             Err(error) => {
                 self.coroutines[coroutine].dead = true;
                 self.coroutines[coroutine].frames.clear();
@@ -11489,7 +11784,7 @@ impl Vm {
     fn native_conformance_resume_error(
         &mut self,
         args: &[Value],
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         validate_native_arity(args, 2, 2, "resumeerror arguments")?;
         let coroutine = self.coroutine_index(args[0])?;
@@ -11526,7 +11821,7 @@ impl Vm {
                 state.frames = suspension.frames;
                 Ok(Vec::new())
             }
-            Err(error) if error_is_uncatchable(&error) => Err(error),
+            Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
             Err(error) => {
                 self.coroutines[coroutine].dead = true;
                 self.coroutines[coroutine].frames.clear();
@@ -11542,7 +11837,7 @@ impl Vm {
         args: &[Value],
         program: &Program,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         let Some(wrapper) = args.first().copied() else {
             return Err(Error::new(ErrorKind::TypeError { expected: "thread" }));
@@ -11583,7 +11878,7 @@ impl Vm {
                 state.frames = suspension.frames;
                 Ok(suspension.yielded)
             }
-            Err(error) if error_is_uncatchable(&error) => Err(error),
+            Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
             Err(error) => {
                 self.coroutines[coroutine].dead = true;
                 self.coroutines[coroutine].frames.clear();
@@ -11647,7 +11942,7 @@ impl Vm {
         args: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         let callee = args.first().copied().unwrap_or_else(Value::nil);
         let call_args = args.get(1..).unwrap_or(&[]);
@@ -11666,7 +11961,7 @@ impl Vm {
                 protected_results.extend(results);
                 Ok(protected_results)
             }
-            Err(error) if error_is_uncatchable(&error) => Err(error),
+            Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
             Err(error) => {
                 self.last_error_traceback = None;
                 let error = self.error_object(error);
@@ -11681,7 +11976,7 @@ impl Vm {
         args: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<Vec<Value>> {
         let callee = args.first().copied().unwrap_or_else(Value::nil);
         let call_args = args.get(1..).unwrap_or(&[]);
@@ -11704,7 +11999,7 @@ impl Vm {
                 suspension.frames.push(CoroutineFrame::PCall);
                 Ok(VmFlow::Yield(suspension))
             }
-            Err(error) if error_is_uncatchable(&error) => Err(error),
+            Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
             Err(error) => {
                 self.last_error_traceback = None;
                 let error = self.error_object(error);
@@ -11719,7 +12014,7 @@ impl Vm {
         args: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         let callee = args.first().copied().unwrap_or_else(Value::nil);
         let handler = self.xpcall_handler(args)?;
@@ -11740,7 +12035,7 @@ impl Vm {
                 protected_results.extend(results);
                 Ok(protected_results)
             }
-            Err(error) if error_is_uncatchable(&error) => Err(error),
+            Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
             Err(error) => {
                 let original_is_out_of_memory = error_is_out_of_memory(&error);
                 let traceback = self.take_error_traceback(&error);
@@ -11755,7 +12050,7 @@ impl Vm {
                     fuel,
                 ) {
                     Ok(results) => Ok(vec![Value::boolean(false), first_result_or_nil(results)]),
-                    Err(error) if error_is_uncatchable(&error) => Err(error),
+                    Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
                     Err(handler_error) => {
                         Ok(self
                             .xpcall_handler_error_result(original_is_out_of_memory, handler_error))
@@ -11771,7 +12066,7 @@ impl Vm {
         args: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> VmFlowResult<Vec<Value>> {
         let callee = args.first().copied().unwrap_or_else(Value::nil);
         let handler = self.xpcall_handler(args)?;
@@ -11804,7 +12099,7 @@ impl Vm {
                     }));
                 Ok(VmFlow::Yield(suspension))
             }
-            Err(error) if error_is_uncatchable(&error) => Err(error),
+            Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
             Err(error) => {
                 let original_is_out_of_memory = error_is_out_of_memory(&error);
                 let traceback = self.take_error_traceback(&error);
@@ -11822,7 +12117,7 @@ impl Vm {
                         Value::boolean(false),
                         first_result_or_nil(results),
                     ])),
-                    Err(error) if error_is_uncatchable(&error) => Err(error),
+                    Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
                     Err(handler_error) => Ok(VmFlow::Return(
                         self.xpcall_handler_error_result(original_is_out_of_memory, handler_error),
                     )),
@@ -11955,7 +12250,7 @@ impl Vm {
         program: &Program,
         args: &[Value],
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         validate_native_arity(args, 1, usize::MAX, "tostring argument")?;
         let text = self.value_to_tostring_with_metamethod(program, args[0], depth, fuel)?;
@@ -12511,7 +12806,9 @@ impl Vm {
     fn native_os_clock(&mut self, args: &[Value]) -> Result<Value> {
         validate_native_arity(args, 0, u8::MAX as usize, "os.clock arguments")?;
         if let Some(clock) = self.settings.services.monotonic_clock.clone() {
-            return Ok(Value::number(clock.read()));
+            let reading =
+                self.catch_host_callback(MONOTONIC_CLOCK_SERVICE_NAME, || clock.read())?;
+            return Ok(Value::number(reading));
         }
         Ok(Value::number(
             self.executed_instructions as f64 / LOGICAL_CLOCK_INSTRUCTIONS_PER_SECOND,
@@ -12531,9 +12828,9 @@ impl Vm {
             format.remove(0);
         }
         let timestamp = match args.get(1).copied() {
-            None => os_timestamp_from_wall_seconds(self.os_wall_now_seconds()),
+            None => os_timestamp_from_wall_seconds(self.os_wall_now_seconds()?),
             Some(value) if value.kind() == ValueKind::Nil => {
-                os_timestamp_from_wall_seconds(self.os_wall_now_seconds())
+                os_timestamp_from_wall_seconds(self.os_wall_now_seconds()?)
             }
             Some(value) => self.os_time_number_arg(value)?,
         };
@@ -12551,10 +12848,10 @@ impl Vm {
     fn native_os_time(&mut self, args: &[Value]) -> Result<Value> {
         validate_native_arity(args, 0, 1, "os.time arguments")?;
         let Some(value) = args.first().copied() else {
-            return Ok(Value::number(self.os_wall_now_seconds()));
+            return Ok(Value::number(self.os_wall_now_seconds()?));
         };
         if value.kind() == ValueKind::Nil {
-            return Ok(Value::number(self.os_wall_now_seconds()));
+            return Ok(Value::number(self.os_wall_now_seconds()?));
         }
         let table = value
             .as_table()
@@ -12580,10 +12877,10 @@ impl Vm {
 
     /// Wall-clock reading for no-arg `os.time` and the default `os.date` timestamp: the
     /// plugged provider's value, or the pinned epoch when the socket is empty.
-    fn os_wall_now_seconds(&self) -> f64 {
+    fn os_wall_now_seconds(&mut self) -> Result<f64> {
         match self.settings.services.wall_clock.clone() {
-            Some(clock) => clock.read(),
-            None => OS_TIME_NOW_SECONDS as f64,
+            Some(clock) => self.catch_host_callback(WALL_CLOCK_SERVICE_NAME, || clock.read()),
+            None => Ok(OS_TIME_NOW_SECONDS as f64),
         }
     }
 
@@ -14531,7 +14828,7 @@ impl Vm {
         program: &Program,
         args: &[Value],
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         validate_native_arity(args, 3, 4, "string.gsub arguments")?;
         let text = self.value_to_string(args[0])?;
@@ -14570,7 +14867,7 @@ impl Vm {
         replacement: Value,
         max_replacements: usize,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<(Vec<u8>, usize)> {
         if max_replacements == 0 {
             return Ok((text.to_vec(), 0));
@@ -14690,7 +14987,7 @@ impl Vm {
         program: &Program,
         value: Value,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<GSubReplacement> {
         if value.kind() == ValueKind::String || value.kind() == ValueKind::Number {
             return Ok(GSubReplacement::String(self.value_to_string(value)?));
@@ -14717,7 +15014,7 @@ impl Vm {
         text: &[u8],
         matched: &GSubMatch,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Option<Vec<u8>>> {
         match replacement {
             GSubReplacement::String(replacement) => {
@@ -14931,7 +15228,7 @@ impl Vm {
         program: &Program,
         args: &[Value],
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         validate_native_arity(args, 1, u8::MAX as usize, "string.format arguments")?;
         let format = self.value_to_string(args[0])?;
@@ -15293,7 +15590,7 @@ impl Vm {
         format: &[u8],
         args: &[Value],
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<u8>> {
         let mut output = Vec::new();
         let mut arg_index = 0usize;
@@ -15601,7 +15898,7 @@ impl Vm {
         args: &[Value],
         program: &Program,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         validate_native_arity(args, 2, 3, "table.find arguments")?;
         let registers = native_registers(args)?;
@@ -15619,7 +15916,7 @@ impl Vm {
         args: &[Value],
         program: &Program,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
         mode: TableForeachMode,
     ) -> Result<Value> {
         validate_native_arity(args, 2, 2, "table.foreach arguments")?;
@@ -15649,7 +15946,7 @@ impl Vm {
         callback: Value,
         program: &Program,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         let mut key = Value::nil();
         loop {
@@ -15683,7 +15980,7 @@ impl Vm {
         callback: Value,
         program: &Program,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         let len = self.table_foreachi_len(table)?;
         for index in 1..=len {
@@ -15848,7 +16145,7 @@ impl Vm {
         args: &[Value],
         program: &Program,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         validate_native_arity(args, 1, u8::MAX as usize, "table.sort arguments")?;
         let table = args[0]
@@ -15930,7 +16227,7 @@ impl Vm {
         initial_storage_len: usize,
         program: &Program,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         if values.len() < 2 {
             return Ok(());
@@ -15982,7 +16279,7 @@ impl Vm {
         initial_storage_len: usize,
         program: &Program,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<()> {
         let mut root = start;
         loop {
@@ -16036,7 +16333,7 @@ impl Vm {
         initial_storage_len: usize,
         program: &Program,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<bool> {
         let result = if let Some(comparator) = comparator {
             let results =
@@ -16397,7 +16694,7 @@ impl Vm {
         first: u8,
         argc: u8,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Value> {
         let first = first as usize;
         let argc = argc as usize;
@@ -16569,7 +16866,7 @@ impl Vm {
         register_cells: &mut [Option<u32>],
         instruction: Instruction,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<bool> {
         let window = CallIteratorRegisters::generic(instruction.a, instruction.c)?;
         window.validate(registers.len(), "generic call iterator")?;
@@ -16591,7 +16888,7 @@ impl Vm {
         register_cells: &mut [Option<u32>],
         instruction: Instruction,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<bool> {
         let window = GeneralizedIteratorRegisters::new(instruction.a, instruction.c)?;
         window.validate(registers.len())?;
@@ -16655,7 +16952,7 @@ impl Vm {
         register_cells: &mut [Option<u32>],
         instruction: Instruction,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<bool> {
         let window = GeneralizedIteratorRegisters::new(instruction.a, instruction.c)?;
         window.validate(registers.len())?;
@@ -16707,7 +17004,7 @@ impl Vm {
         )
     }
 
-    fn call_iterator_step(&mut self, context: CallIteratorStepContext<'_>) -> Result<bool> {
+    fn call_iterator_step(&mut self, context: CallIteratorStepContext<'_, '_>) -> Result<bool> {
         let CallIteratorStepContext {
             program,
             registers,
@@ -16778,7 +17075,7 @@ impl Vm {
         register_cells: &mut [Option<u32>],
         window: CallIteratorRegisters,
         depth: usize,
-        fuel: &mut Option<u64>,
+        fuel: &mut Execution<'_>,
     ) -> Result<Option<bool>> {
         let Some(handle) = iterator.as_function() else {
             return Ok(None);
@@ -16791,7 +17088,7 @@ impl Vm {
         self.check_recursion_depth(depth)?;
         let args = [state, control];
         let extra_fuel = self.native_extra_fuel_cost(handle, native, &args);
-        charge_fuel(fuel, self.settings.initial_fuel, extra_fuel)?;
+        charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, extra_fuel)?;
 
         let table = state
             .as_table()
@@ -16952,8 +17249,11 @@ impl Vm {
             ))
     }
 
-    fn call_extension(&self, registers: &[Value], instruction: Instruction) -> Result<Value> {
-        let op = self.extension(instruction)?;
+    fn call_extension(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
+        let (name, handler) = {
+            let op = self.extension(instruction)?;
+            (op.name.clone(), op.handler)
+        };
         let first = instruction.b as usize;
         let argc = instruction.c as usize;
         let end = first.checked_add(argc).ok_or_else(|| {
@@ -16967,7 +17267,16 @@ impl Vm {
                 max: registers.len(),
             }));
         }
-        (op.handler)(&registers[first..end])
+        let result = self.catch_host_callback(format!("extension::{name}"), || {
+            handler(&registers[first..end])
+        })?;
+        if result
+            .as_ref()
+            .is_err_and(|error| matches!(error.kind, ErrorKind::HostPanicked { .. }))
+        {
+            self.poisoned = true;
+        }
+        result
     }
 
     fn extension(&self, instruction: Instruction) -> Result<&ExtensionOp> {
@@ -19580,8 +19889,12 @@ fn collect_stackless_debug_frame_roots(roots: &mut Vec<Value>, frame: &Stackless
     }
 }
 
-fn error_is_uncatchable(error: &Error) -> bool {
-    matches!(error.kind, ErrorKind::FuelExhausted { .. })
+fn error_is_uncatchable(error: &Error, execution: &Execution<'_>) -> bool {
+    if execution.state.hard_resource_errors {
+        error.is_transaction_abort()
+    } else {
+        error.is_always_hard_abort()
+    }
 }
 
 fn error_is_out_of_memory(error: &Error) -> bool {
@@ -19589,9 +19902,7 @@ fn error_is_out_of_memory(error: &Error) -> bool {
 }
 
 fn non_yieldable_boundary_error() -> Error {
-    Error::new(ErrorKind::RuntimeError {
-        message: "attempt to yield across metamethod/C-call boundary".to_owned(),
-    })
+    Error::new(ErrorKind::YieldAcrossBoundary)
 }
 
 fn attach_instruction_source(
@@ -20552,13 +20863,13 @@ enum InvalidIteratorCallee {
     Iterate,
 }
 
-struct CallIteratorStepContext<'a> {
+struct CallIteratorStepContext<'a, 'call> {
     program: &'a Program,
     registers: &'a mut [Value],
     register_cells: &'a mut [Option<u32>],
     window: CallIteratorRegisters,
     depth: usize,
-    fuel: &'a mut Option<u64>,
+    fuel: &'a mut Execution<'call>,
     invalid_callee: InvalidIteratorCallee,
 }
 
@@ -24165,6 +24476,22 @@ fn table_expected_error() -> Error {
 mod inline_cache_tests {
     use super::*;
 
+    macro_rules! test_execution {
+        ($name:ident = $fuel:expr) => {
+            let initial_fuel = $fuel;
+            let mut execution_state = VmExecution {
+                fuel: initial_fuel,
+                fuel_limit: initial_fuel,
+                hard_resource_errors: false,
+            };
+            let mut host_dispatcher = RejectHostDispatcher;
+            let mut $name = Execution {
+                state: &mut execution_state,
+                hosts: &mut host_dispatcher,
+            };
+        };
+    }
+
     #[test]
     fn array_iterator_index_uses_exact_i32_round_trip_bounds() {
         assert_eq!(array_iterator_index(1.0), Some(1));
@@ -25029,7 +25356,7 @@ mod inline_cache_tests {
         }
 
         let instruction = Instruction::with_aux(Opcode::Call, 0, 1, 0, 0);
-        let mut fuel = None;
+        test_execution!(fuel = None);
         for round in 2..=3 {
             for (index, closure) in closures.iter().copied().enumerate() {
                 let registers = [Value::nil(), closure];
@@ -25175,7 +25502,7 @@ mod inline_cache_tests {
             .unwrap();
         let registers = [Value::nil(), Value::function(handle)];
         let instruction = Instruction::with_aux(Opcode::Call, 0, 1, 0, 0);
-        let mut fuel = None;
+        test_execution!(fuel = None);
         assert!(vm
             .try_closure_call_scalar(program_id, None, 0, &registers, instruction, 0, &mut fuel,)
             .unwrap()
@@ -25213,7 +25540,7 @@ mod inline_cache_tests {
                 fuelled.globals,
             )
             .unwrap();
-        let mut remaining = Some(100);
+        test_execution!(remaining = Some(100));
         assert!(fuelled
             .try_closure_call_scalar(
                 fuelled_program,
@@ -25267,7 +25594,7 @@ mod inline_cache_tests {
             make_closure(&mut vm, other_program, 0, 30.0),
         ];
         let instruction = Instruction::with_aux(Opcode::Call, 0, 1, 0, 0);
-        let mut fuel = None;
+        test_execution!(fuel = None);
         for round in 1..=2 {
             for (index, closure) in closures.iter().copied().enumerate() {
                 let outcome = vm
@@ -25647,7 +25974,7 @@ mod inline_cache_tests {
             .retain_dynamic_program(program.clone())
             .expect("program should be retained");
         let (table, key) = table_with_field(&mut vm, "x", Value::number(1.0));
-        let mut fuel = None;
+        test_execution!(fuel = None);
 
         let uncached = vm
             .get_table_index_with_inline_cache(
@@ -25697,7 +26024,7 @@ mod inline_cache_tests {
             .retain_dynamic_program(program.clone())
             .expect("program should be retained");
         let (table, key) = table_with_field(&mut vm, "x", Value::number(1.0));
-        let mut fuel = Some(50);
+        test_execution!(fuel = Some(50));
 
         let first = vm
             .get_table_index_with_inline_cache(
@@ -25721,7 +26048,7 @@ mod inline_cache_tests {
             vm.dynamic_programs[program_id as usize].table_inline_cache_hits,
             0
         );
-        assert_eq!(fuel, Some(50));
+        assert_eq!(fuel.state.fuel, Some(50));
 
         vm.heap
             .table_set(table, key, Value::number(2.0))
@@ -25743,7 +26070,7 @@ mod inline_cache_tests {
             vm.dynamic_programs[program_id as usize].table_inline_cache_hits,
             1
         );
-        assert_eq!(fuel, Some(50));
+        assert_eq!(fuel.state.fuel, Some(50));
     }
 
     #[test]
@@ -25766,7 +26093,7 @@ mod inline_cache_tests {
         vm.heap
             .table_set(second, key, Value::number(2.0))
             .expect("second x field");
-        let mut fuel = None;
+        test_execution!(fuel = None);
 
         let first_value = vm
             .get_table_index_with_inline_cache(
@@ -25805,7 +26132,7 @@ mod inline_cache_tests {
             .retain_dynamic_program(program.clone())
             .expect("program should be retained");
         let (table, key) = table_with_field(&mut vm, "x", Value::number(1.0));
-        let mut fuel = None;
+        test_execution!(fuel = None);
 
         vm.get_table_index_with_inline_cache(
             &program,
@@ -25879,7 +26206,7 @@ mod inline_cache_tests {
         vm.heap
             .table_set(table, cached_key, Value::number(99.0))
             .expect("cached field");
-        let mut fuel = None;
+        test_execution!(fuel = None);
 
         let before_sweep = vm
             .get_table_index_with_inline_cache(
@@ -26050,7 +26377,7 @@ mod inline_cache_tests {
         vm.heap
             .table_set_metatable(table, Some(metatable))
             .expect("table metatable");
-        let mut fuel = None;
+        test_execution!(fuel = None);
 
         let cached = vm
             .get_table_index_with_inline_cache(
@@ -26101,7 +26428,7 @@ mod inline_cache_tests {
         vm.heap
             .table_set_metatable(table, Some(metatable))
             .expect("table metatable");
-        let mut fuel = None;
+        test_execution!(fuel = None);
 
         vm.set_table_index_with_inline_cache(
             &program,
@@ -26158,7 +26485,7 @@ mod inline_cache_tests {
             .retain_dynamic_program(program.clone())
             .expect("program should be retained");
         let (table, key) = table_with_field(&mut vm, "x", Value::number(1.0));
-        let mut fuel = None;
+        test_execution!(fuel = None);
 
         vm.set_table_index_with_inline_cache(
             &program,
@@ -26336,9 +26663,9 @@ mod inline_cache_tests {
         vm.heap
             .table_set_metatable(object, Some(metatable))
             .expect("object metatable");
-        let mut fuel = None;
+        test_execution!(fuel = None);
 
-        let lookup = |vm: &mut Vm, fuel: &mut Option<u64>| {
+        let lookup = |vm: &mut Vm, fuel: &mut Execution<'_>| {
             vm.get_index_value_with_namecall_inline_cache(
                 &program,
                 Some(program_id),
@@ -26443,7 +26770,7 @@ mod inline_cache_tests {
             .table_set_metatable(object, Some(metatable))
             .expect("object metatable");
         let object = Value::table(object);
-        let mut fuel = None;
+        test_execution!(fuel = None);
 
         assert_eq!(
             vm.get_index_value_with_namecall_inline_cache(

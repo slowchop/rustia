@@ -8,6 +8,28 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- `HostSchema` and `RustiaBuilder::build_for_host::<H>()` now separate a typed
+  VM's lifetime-independent host API from the fresh `HostContext` borrowed by
+  each `invoke`/`invoke_into`. Contexts may contain block-local input and slot
+  borrows; callbacks receive only their
+  declared `Input`, `Slots`, `Effects`, `SlotWrites`, or profile-gated
+  `HostMut` view. Typed VMs execute guest modules and retained functions
+  through a lexical `Invocation`, whose calls share one fuel budget and one
+  bounded record-count/logical-byte journal. Records use a single dense
+  sequence per invocation. Callback failure or panic rolls back that
+  callback's suffix, while an error escaping the invocation rolls back all
+  staged records; completed calls survive a later guest error caught by
+  `pcall`. Transactional fuel exhaustion, OOM, record overflow, invalid
+  boundary yields, a missing typed-host dispatcher, and host panic cannot be
+  swallowed. Host panic poisons the VM; every later guest execution entry
+  point rejects until `reset_decision()` succeeds. Containment includes typed
+  and legacy callbacks, extension ops, stdout/clocks, and the `loadstring`
+  compiler. Rollback is explicitly
+  record-only: it does not undo guest heap mutation, `HostMut`, captured
+  globals, or context interior mutation. Successful `invoke` outcomes expose
+  usage plus a borrowed reusable journal, while `invoke_into` pre-reserves and
+  publishes into a caller lane without allocation during the final append and
+  returns a non-borrowing usage receipt.
 - `Vm::reset_decision()` / `Rustia::reset_decision()` implement decision-reset
   ABI v1. An idle reset reuses VM allocation containers while discarding guest
   globals, objects, upvalues, coroutines, loaded programs/caches, tracebacks,

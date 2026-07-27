@@ -10,6 +10,12 @@ pub type ExtensionHandler = fn(&[Value]) -> Result<Value>;
 pub type HostFunctionHandler =
     Arc<dyn Fn(&mut Vm, &[Value]) -> Result<Vec<Value>> + Send + Sync + 'static>;
 
+#[derive(Clone)]
+pub(crate) enum HostFunctionTarget {
+    Inline(HostFunctionHandler),
+    Dispatcher(u32),
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OpCapability {
     Pure,
@@ -80,7 +86,7 @@ pub struct HostFunctionOp {
     pub parameter_types: Vec<&'static str>,
     pub return_types: Vec<&'static str>,
     pub fallible: bool,
-    pub handler: HostFunctionHandler,
+    pub(crate) target: HostFunctionTarget,
 }
 
 impl HostFunctionOp {
@@ -98,7 +104,31 @@ impl HostFunctionOp {
             parameter_types: Vec::new(),
             return_types: Vec::new(),
             fallible: false,
-            handler,
+            target: HostFunctionTarget::Inline(handler),
+        }
+    }
+
+    /// Creates a host operation whose implementation is supplied by the
+    /// short-lived dispatcher passed to a VM execution.
+    ///
+    /// This is a low-level embedding seam. Most embedders should use the typed
+    /// invocation API in the `rustia` crate instead.
+    #[doc(hidden)]
+    pub fn dispatched(
+        name: impl Into<String>,
+        fuel_cost: u32,
+        capability: OpCapability,
+        dispatcher_key: u32,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            fuel_cost,
+            capability,
+            parameter_count: 0,
+            parameter_types: Vec::new(),
+            return_types: Vec::new(),
+            fallible: false,
+            target: HostFunctionTarget::Dispatcher(dispatcher_key),
         }
     }
 
@@ -140,7 +170,7 @@ pub struct ExtensionRegistry {
 
 impl ExtensionRegistry {
     pub fn register(&mut self, profile: Profile, op: ExtensionOp) -> Result<u16> {
-        validate_registered_op(profile, op.fuel_cost, op.capability)?;
+        validate_registered_op(profile, &op.name, op.fuel_cost, op.capability)?;
         let id = self.ops.len();
         if id > u16::MAX as usize {
             return Err(Error::new(ErrorKind::InvalidProgram {
@@ -179,17 +209,32 @@ impl ExtensionRegistry {
 
 pub(crate) fn validate_registered_op(
     profile: Profile,
+    operation: &str,
     fuel_cost: u32,
     capability: OpCapability,
 ) -> Result<()> {
     if fuel_cost == 0 {
         return Err(Error::new(ErrorKind::InvalidProgram {
-            reason: "extension op fuel cost must be non-zero",
+            reason: "host operation fuel cost must be non-zero",
         }));
     }
     if !ExtensionOp::is_allowed_in(capability, profile) {
+        let feature = match capability {
+            OpCapability::Pure => "pure host function",
+            OpCapability::ReadsDeterministicInput => "host function reading invocation input",
+            OpCapability::ReadsSlotState => "host function reading persistent slots",
+            OpCapability::EmitsDeterministicEffect => {
+                "host function recording a deterministic effect"
+            }
+            OpCapability::WritesSlotEffect => "host function writing persistent slots",
+            OpCapability::ReadsExternalMutableState => {
+                "host function reading external mutable state"
+            }
+            OpCapability::NondeterministicEffect => "host function with a nondeterministic effect",
+        };
         return Err(Error::new(ErrorKind::CapabilityRemoved {
-            feature: "non-deterministic extension op",
+            feature,
+            operation: Some(operation.to_owned()),
             profile,
         }));
     }

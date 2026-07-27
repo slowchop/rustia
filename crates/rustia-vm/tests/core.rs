@@ -36,6 +36,41 @@ fn loadstring_compiler_should_not_run(
     panic!("loadstring compiler should not run after fuel exhaustion")
 }
 
+fn panicking_loadstring_compiler(
+    _source: &[u8],
+    _source_name: Option<&[u8]>,
+) -> std::result::Result<Program, String> {
+    panic!("loadstring compiler panic")
+}
+
+fn panicking_extension(_args: &[Value]) -> rustia_vm::Result<Value> {
+    panic!("extension panic")
+}
+
+fn assert_host_panic_poison_and_reset(vm: &mut Vm, program: &Program, function: &str) {
+    let error = vm.run(program).unwrap_err();
+    assert!(matches!(
+        &error.kind,
+        ErrorKind::HostPanicked {
+            function: actual
+        } if actual == function
+    ));
+    assert!(vm.is_poisoned());
+
+    let idle = Program::new(
+        Function::new(vec![Instruction::new(Opcode::Return, 0, 1, 0)], 1),
+        Vec::new(),
+    );
+    assert!(matches!(
+        vm.run(&idle).unwrap_err().kind,
+        ErrorKind::VmPoisoned
+    ));
+    vm.reset_decision()
+        .expect("contained host panic must leave the VM resettable");
+    assert!(!vm.is_poisoned());
+    assert_eq!(vm.run(&idle).unwrap().kind(), ValueKind::Nil);
+}
+
 fn global_kind(profile: Profile, name: &[u8]) -> ValueKind {
     global_kind_in(&mut Vm::new(profile), name)
 }
@@ -1581,6 +1616,94 @@ fn clock_providers_feed_exact_os_time_and_os_clock_values() {
     assert_eq!(time.as_number(), Some(1_234_567.5));
     let clock = vm.run(&os_member_call_program(b"clock")).unwrap();
     assert_eq!(clock.as_number(), Some(42.25));
+}
+
+#[test]
+fn every_host_controlled_callback_panic_is_contained_poisoned_and_resettable() {
+    let settings = VmSettings {
+        services: VmServices {
+            stdout: Some(StdoutSink::new(|_| panic!("stdout panic"))),
+            ..VmServices::default()
+        },
+        ..VmSettings::default()
+    };
+    let mut stdout_vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+    assert_host_panic_poison_and_reset(&mut stdout_vm, &print_call_program(&[]), "service::stdout");
+
+    let settings = VmSettings {
+        services: VmServices {
+            wall_clock: Some(ClockProvider::new(|| panic!("wall clock panic"), true)),
+            ..VmServices::default()
+        },
+        ..VmSettings::default()
+    };
+    let mut wall_clock_vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+    assert_host_panic_poison_and_reset(
+        &mut wall_clock_vm,
+        &os_member_call_program(b"time"),
+        "service::wall_clock",
+    );
+
+    let settings = VmSettings {
+        services: VmServices {
+            monotonic_clock: Some(ClockProvider::new(|| panic!("monotonic clock panic"), true)),
+            ..VmServices::default()
+        },
+        ..VmSettings::default()
+    };
+    let mut monotonic_clock_vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+    assert_host_panic_poison_and_reset(
+        &mut monotonic_clock_vm,
+        &os_member_call_program(b"clock"),
+        "service::monotonic_clock",
+    );
+
+    let loadstring = Program::new(
+        Function::new(
+            vec![
+                Instruction::with_aux(Opcode::GetGlobal, 0, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                Instruction::with_aux(Opcode::Call, 0, 0, 1, 1),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+            ],
+            2,
+        ),
+        vec![
+            Constant::String(b"loadstring".to_vec()),
+            Constant::String(b"return 1".to_vec()),
+        ],
+    );
+    let settings = VmSettings {
+        loadstring_compiler: Some(panicking_loadstring_compiler),
+        ..VmSettings::default()
+    };
+    let mut loadstring_vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+    assert_host_panic_poison_and_reset(
+        &mut loadstring_vm,
+        &loadstring,
+        "service::loadstring_compiler",
+    );
+
+    let mut extension_vm = Vm::new(Profile::ReproducibleStandard);
+    let extension_id = extension_vm
+        .register_extension_op(ExtensionOp::new(
+            "panic",
+            1,
+            OpCapability::Pure,
+            panicking_extension,
+        ))
+        .unwrap();
+    let extension = Program::new(
+        Function::new(
+            vec![
+                Instruction::with_aux(Opcode::CallExtension, 0, 0, 0, i32::from(extension_id)),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+            ],
+            1,
+        ),
+        Vec::new(),
+    );
+    assert_host_panic_poison_and_reset(&mut extension_vm, &extension, "extension::panic");
 }
 
 #[test]

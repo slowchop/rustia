@@ -5,9 +5,9 @@ deterministic game runtime and intended for public release as a standalone Luau 
 once its conformance, benchmark, API, memory-lifecycle, and release gates are satisfied.
 
 > **Status: P1 engine implementation is substantial but not release-complete.** The locked design has a broad
-> production VM/compiler/API/conformance slice; bounded object/program reclamation, quotas/OOM, and deterministic
-> decision reset are implemented. The next release-critical work is O(1) accounting, broader mixed-heap
-> pressure evidence, and the remaining host/module/value boundary.
+> production VM/compiler/API/conformance slice; bounded object/program reclamation, quotas/OOM, deterministic
+> decision reset, and the typed per-invocation host transaction are implemented. The next release-critical work
+> is O(1) accounting, broader mixed-heap pressure evidence, and the remaining module/value boundary.
 > `spikes/` are throwaway prototypes that validated the design.
 > Read **[`design/CURRENT.md`](design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](design/README.md) for the full doc map.
@@ -46,9 +46,12 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   run/compile helpers, typed/capability-tagged host functions with fallible `rustia::Result<T>` returns and up to
   eight arguments/results, retained script functions, pre-install host signature/fuel ABI metadata,
   retained-handle freshness checks and current-generation accessors, public source-span/runtime-location error
-  accessors, owned-value/table serde, deterministic extensions, hot reload, and early macro sugar. Ordinary
-  object/program reclamation and the epoch-safe decision-reset ABI are implemented; module resolution, a
-  per-call host context, transactional installation, rich graph values, and live zero-copy serde remain planned.
+  accessors, owned-value/table serde, deterministic extensions, hot reload, and early macro sugar. `HostSchema`
+  separates persistent function registration from a block-local `HostContext`; capability-specific views expose
+  input, slots, ordered effects, slot writes, or profile-gated external mutation. Typed invocations share one
+  fuel budget and stage a bounded count/byte record transaction. Ordinary object/program reclamation and the
+  epoch-safe decision-reset ABI are implemented; module resolution, transactional installation/hot reload,
+  rich graph values, and live zero-copy serde remain planned.
 - Host services are host-pluggable through the facade: `RustiaBuilder::standard()`/`deterministic()`/`live()`
   environment presets, a `.stdout(...)` print sink with the real Luau composition (`tostring` honoring
   `__tostring`, tab-joined, trailing newline), and `.wall_clock(...)`/`.monotonic_clock(...)` sockets taking a
@@ -60,7 +63,9 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
 ## Embedding presets
 
 The facade picks an environment in one word; `Rustia::builder()` delegates to `standard()`, and
-`Rustia::new`/`with_settings` stay service-free.
+`Rustia::new`/`with_settings` stay service-free. Finish with `build_for_host::<H>()` instead of `build()` when
+constructing a typed `Rustia<H>`. Builder `.fuel(n)` is a VM-wide ceiling; a typed call uses the lower of that
+ceiling and its explicit `InvocationLimits::new(fuel)` budget.
 
 | | `deterministic()` | `standard()` (default) | `live()` |
 |---|---|---|---|
@@ -94,13 +99,13 @@ The canonical decision filter is [`design/02-pillars.md`](design/02-pillars.md).
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](design/progress.json) into
-[`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-27 for the
+[`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-28 for the
 public rustia project; actual grabby integration work is explicitly out of scope.
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 84% | 84% |
-| Usable embedded scripting crate | 87% | 89% |
+| Whole public rustia project | 86% | 84% |
+| Usable embedded scripting crate | 92% | 92% |
 | Full public standalone Luau engine release | 58% | 83% |
 | Standalone benchmark OSS project | 82% | 88% |
 | Public release readiness | 78% | 88% |
@@ -123,8 +128,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
   shared peak at 256 KiB and retains 14.4 KiB across the shared set versus mlua/Luau/JIT's 24.8 KiB.
   The same Node/V8 probe now runs 300 decision resets and verifies an exact post-warmup VM-owned-memory plateau.
 - Major remaining gates, in order, are an O(1) quota-accounting fast path and script counters; broader
-  mixed-heap/native/Wasm pressure coverage; a per-call host context, module loading, rich values, and
-  transactional installation,
+  mixed-heap/native/Wasm pressure coverage; module loading, rich values, and transactional installation,
   compiler/runtime semantic-tail
   hardening, the full cross-target correctness/golden matrix, broader benchmark history, and release packaging.
   Semver policy is tracked in [`design/91-semver-policy.md`](design/91-semver-policy.md),
@@ -147,6 +151,30 @@ public rustia project; actual grabby integration work is explicitly out of scope
 ## Examples
 - `cargo run -p rustia --example embedding` — globals, fallible typed host functions, deterministic extensions, retained script functions, and serde.
 - `cargo run -p rustia --example hot_reload` — compile/install hot reload plus retained-handle survival and freshness checks.
+- `cargo run -p rustia --example typed_invocation` — a block-local host context, capability views, shared fuel,
+  bounded ordered records, and allocation-safe publication into a caller-owned lane.
+
+`Rustia<H>` stores only a lifetime-independent `HostSchema` and its registered callbacks. Each `invoke` or
+`invoke_into` borrows a fresh `HostContext<H>`, so tick-local input and slot slices need not be `'static`.
+Typed VMs run guest code only through the lexical `Invocation`; several `Function::call_in` operations share
+the invocation's fuel and record budget. Successful effects and slot writes receive one dense sequence across
+both kinds, starting at zero for each invocation.
+
+Record staging is transactional: a failing or panicking callback loses the records appended by that callback,
+and an error escaping the outer invocation publishes no records. A guest `pcall` that catches a later guest
+error does not erase already completed host calls. Fuel exhaustion, OOM, record count/byte overflow, an invalid
+yield boundary, a missing typed-host dispatcher, and host panic are hard transaction aborts. The transactional
+OOM/yield rule is scoped to typed `Invocation` execution and does not redefine ordinary legacy execution. A
+host panic poisons the VM: every later guest execution entry point rejects until `reset_decision()` succeeds.
+Containment covers registered host functions, typed dispatch, legacy extension ops, stdout and clock services,
+and the configured `loadstring` compiler.
+Rollback covers Rustia's private record journal only—not guest heap
+mutations, `HostMut`, callback captures, or context state changed through interior mutability.
+
+For grabby, make at most one invocation successful for each `(tick, phase, emitter)` and append with
+`invoke_into`; this makes the per-emitter sequence unique before lanes are stably sorted by `(emitter, seq)`.
+The returned `InvocationReceipt` reports fuel, record count, and logical record bytes without borrowing
+Rustia's journal.
 
 Long-lived hosts can call `Vm::collect_garbage()` at an idle boundary to finish
 reclamation and release spare VM-owned allocations to the process allocator.

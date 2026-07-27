@@ -1,18 +1,23 @@
 # rustia — host-bridge / effect-queue contract (grabby integration)
 
-> **Status: [CONTRACT — reset implemented, host context incomplete] (updated 2026-07-27).** The deterministic seam between rustia scripts and
-> grabby's (parallel, rollback) sim, agreed with the grabby parallelism agent. grabby's threading is
-> design-stage/parked, so the **envelope is stable** (grounded in grabby's existing `ControlInput`/`host_discrete`/
-> `SimId` model); only the `Effect` variant set grows. See [`CURRENT.md`](CURRENT.md) + the integration memory.
+> **Status: [CONTRACT + TYPED INVOCATION + RESET IMPLEMENTED] (updated 2026-07-28).** The deterministic seam
+> between rustia scripts and grabby's (parallel, rollback) sim, agreed with the grabby parallelism agent.
+> grabby's threading is design-stage/parked, so the **envelope is stable** (grounded in grabby's existing
+> `ControlInput`/`host_discrete`/`SimId` model); only the `Effect` variant set grows. See
+> [`CURRENT.md`](CURRENT.md) + the integration memory.
 
 ## The envelope (stable)
 ```rust
-struct EffectRecord { emitter: SimId /*u64*/, seq: u32 /*intra-agent, reset each tick 0,1,2…*/, effect: Effect }
+struct EffectRecord { emitter: SimId /*u64*/, seq: u32 /*one successful invoke: 0,1,2…*/, effect: Effect }
 ```
 - **Per-lane collection:** each lane owns its own `Vec<EffectRecord>` (disjoint append, no shared mutation).
-- **Commit:** concat all lanes → **stable-sort by `(emitter, seq)`** → apply single-threaded in that order.
-  `(emitter, seq)` is globally unique within a tick ⇒ a **total, schedule-independent** order. Conflicts on the
-  same target resolve in that order; each `Effect` variant defines its combine (Damage accumulates,
+- **Invocation identity:** grabby permits exactly one successful rustia invocation for each
+  `(tick, phase, emitter)`. Rustia resets its dense sequence at every invocation, so this host rule makes
+  `(emitter, seq)` unique within the phase; a failed attempt publishes nothing and may be retried.
+- **Commit each phase separately:** concat all lanes → **stable-sort by `(emitter, seq)`** → apply
+  single-threaded in that order. `(emitter, seq)` is globally unique within the phase ⇒ a **total,
+  schedule-independent** order. Conflicts on the same target resolve in that order; each `Effect` variant
+  defines its combine (Damage accumulates,
   SetNavGoal last-wins).
 - **Payload = integer/fixed-point ONLY** — no `f64`/`usize`/pointers in any field. Continuous values cross at
   **Q16.16** (`Fixed = i32`, `FixedVec2 = [i32;2]`, angle = fixed-turns `i32`). Scripts compute f64-internally
@@ -35,19 +40,72 @@ shared heap (no serialize).
 `Effect`/`EffectRecord`/`grabby-effects` are **grabby-specific → they live on grabby's side** (the host-bridge /
 private-fork glue), **NOT in public rustia** (public stays clean, no grabby-specific code). rustia-public
 provides the **generic seam**:
-1. **Host-fn registration** where fns take integer/Q16.16 args (the Q16.16 boundary; f64→`Fixed` is a
-   deterministic integer conversion).
-2. **Deterministic, ordered host-fn dispatch** — so grabby's host-bridge can stamp `emitter` + `seq`
-   (host-bridge owns `emitter` — it knows which agent's VM is running — and counts `seq` per decision).
-3. **Host-provided typed-slot accessors** = the `SetSlot` mechanism.
+1. **A lifetime-independent `HostSchema`** stored by `Rustia<H>` and its registered functions. The schema names
+   input, slot, external, effect, slot-write, and final record types without owning one tick's values.
+2. **A fresh `HostContext<H>` per invocation.** The concrete context may contain block-local borrows into
+   worker-local input/slot snapshots. It constructs records with Rustia's dense `sequence` and supplies their
+   deterministic logical byte charge; grabby's context adds `emitter`.
+3. **Capability-derived callback views.** `Input` and `Slots` expose immutable projections; `Effects` and
+   `SlotWrites` append typed records; `HostMut` exists only for external/nondeterministic registrations, which
+   `DeterministicSim` rejects. Registration selects the view and capability together rather than accepting an
+   arbitrary capability label.
+4. **Host-fn integer/Q16.16 signatures** (the Q16.16 boundary; f64→`Fixed` is a deterministic integer
+   conversion) and namespaced `HostModule<H>` registration.
 
-Current implementation boundary: capability-labelled registration helpers exist, but typed callbacks do not
-yet receive a per-VM/per-call host context. Mutable worker-local slot/effect state currently needs captured
-synchronization or interior mutability. A cheap context-rebinding seam is therefore part of completing this
-contract. The decision-reset gate below is implemented.
+Typed VMs execute module top-level code and retained functions only through a lexical `Invocation`; there is no
+stored context pointer to become stale and no callback VM handle with which to re-enter. Callback types remain
+`Fn + Send + Sync + 'static`, while the views they receive are short borrows tied to the invocation. The
+callback itself is nevertheless a semantic trust boundary: safe Rust cannot stop a `'static` closure from
+reading a captured global or mutating captured/interior state. Grabby must keep deterministic registrations
+capture-free (or capture only audited immutable data).
 
 grabby's host-bridge maps rustia host-fn calls → `EffectRecord`/`Effect` and performs the `(emitter, seq)`
 commit + `SetSlot`↔columnar writeback.
+
+## Invocation record transaction (implemented)
+
+`InvocationLimits::new(fuel).with_max_records(count).with_max_record_bytes(bytes)` applies one explicitly named,
+monotonic budget to the whole host operation. Every `Function::call_in`, module install/run, metamethod, nested
+guest call, and host-function fuel charge consumes the same fuel counter. Effects and slot writes share one
+bounded journal and one dense sequence, starting at zero. `record_bytes` is a host-defined deterministic
+protocol size, not allocator size.
+
+The journal has two rollback levels:
+
+- each host callback starts at a checkpoint; if that callback returns an error or panics, records appended by
+  that callback are removed;
+- if the Rust closure passed to `invoke`/`invoke_into` returns an error—including guest failure or result
+  conversion failure—the entire invocation publishes no records.
+
+This deliberately follows guest `pcall` structure. A completed host call stays complete when a later guest
+error is caught by `pcall`; a host callback that appends and then fails loses only its own suffix, after which a
+catching script may continue and append the next dense record. If the failure escapes the outer invocation, all
+records disappear.
+
+Fuel exhaustion, OOM, record-count/byte overflow, an invalid yield across a boundary, a missing typed-host
+dispatcher, and host panic are hard transaction aborts and cannot be hidden by a callback or guest `pcall`.
+This hard-transaction treatment is scoped to typed transactional execution; it does not globally redefine
+ordinary legacy execution's catchable OOM/yield behavior. Rustia catches a host panic, rolls back records, and
+marks the VM poisoned; every later guest execution entry point rejects until `reset_decision()` succeeds.
+The VM-wide containment layer covers typed and context-free host functions, low-level extension ops, stdout and
+clock providers, and the configured `loadstring` compiler.
+
+The outer Rust closure passed to `invoke`/`invoke_into` is caller control flow, not a VM callback. If it or a
+caller-side value conversion panics, normal Rust unwinding drops the private journal without publication and
+ends the VM/context borrows; Rustia does not translate or poison on that path. VM stacks are already idle
+between lexical guest calls, so the facade remains reusable. Guest heap/context/service mutations completed
+before the panic remain, matching the record-only transaction rule.
+
+The guarantee is **record-transactional, not a general state transaction**. Rustia does not undo ordinary guest
+heap/global writes, mutation through `HostMut`, captured callback state, or `HostContext` mutation hidden behind
+interior mutability. `DeterministicSim` excludes `HostMut`, and grabby keeps cross-tick authority in captured
+slots plus the record lane, but embedders must still audit callback captures.
+
+On success, `invoke` returns an `InvocationOutcome` containing the value, a slice of Rustia's reusable journal,
+and usage (fuel, record count, logical bytes); the slice lasts until the next mutable VM use. `invoke_into`
+reserves the caller's lane before guest execution, moves committed records into it without an allocation or
+fallible step during the final append, and returns a non-borrowing `InvocationReceipt`. This is the intended
+grabby worker-lane path.
 
 ## Mechanical enforcement of the cross-tick invariant
 **Implemented:** `Vm::reset_decision()` / `Rustia::reset_decision()` provide the **scratch heap reset between
@@ -57,8 +115,9 @@ preserves the profile, settings, service providers, extension operations, instal
 host modules, host-owned immutable compiled modules, and lifetime memory peaks. It discards guest globals,
 tables/functions/upvalues, coroutines, loaded programs/caches, tracebacks, coverage rows, and retained roots;
 RNG, logical time, compatibility GC state, and deterministic collection scheduling restart from construction
-values. Per-call fuel already starts from `VmSettings::initial_fuel` on every execution. Ordinary inserted
-globals are decision inputs and must be rebound after reset.
+values. Ordinary legacy calls still receive their configured per-execution fuel; typed invocations instead use
+the explicit shared fuel in `InvocationLimits`. Ordinary inserted globals are decision inputs and must be
+rebound after reset.
 
 Every successful reset advances a checked `u64` decision epoch. All `Function`/`Exports` clones retain their
 creation epoch and reject every operation after reset; the raw `RetainedValue` registry is replaced as the
