@@ -1,7 +1,8 @@
 use gc_arena::lock::RefLock;
 use gc_arena::{Arena, Collect, DynamicRootSet, Gc, Rootable, Static};
 use smallvec::SmallVec;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::BTreeMap;
+use std::mem::size_of;
 
 use crate::bytecode::{stable_bytes_hash, SharedProgramString};
 use crate::number::table_key_number_bits;
@@ -33,6 +34,39 @@ struct ReusableSlots<T> {
 struct ReusableSlot<T> {
     generation: u8,
     value: Option<T>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct HeapMemoryUsage {
+    pub(crate) live_bytes: usize,
+    pub(crate) reserved_bytes: usize,
+}
+
+impl HeapMemoryUsage {
+    fn add(&mut self, live_bytes: usize, reserved_bytes: usize) {
+        self.live_bytes = self.live_bytes.saturating_add(live_bytes);
+        self.reserved_bytes = self.reserved_bytes.saturating_add(reserved_bytes);
+    }
+
+    fn add_vec<T>(&mut self, values: &Vec<T>) {
+        self.add(
+            values.len().saturating_mul(size_of::<T>()),
+            values.capacity().saturating_mul(size_of::<T>()),
+        );
+    }
+
+    fn add_slots<T>(&mut self, slots: &ReusableSlots<T>) {
+        self.add(
+            slots
+                .occupied_len()
+                .saturating_mul(size_of::<ReusableSlot<T>>()),
+            slots
+                .slots
+                .capacity()
+                .saturating_mul(size_of::<ReusableSlot<T>>()),
+        );
+        self.add_vec(&slots.free);
+    }
 }
 
 impl<T> ReusableSlots<T> {
@@ -683,6 +717,50 @@ impl VmCell {
         self.allocation_debt_pending = self.arena.metrics().allocation_debt() > 0.0;
     }
 
+    pub(crate) fn memory_usage(&mut self) -> HeapMemoryUsage {
+        let mut usage = HeapMemoryUsage::default();
+        usage.add_slots(&self.tables);
+        usage.add_slots(&self.functions);
+        usage.add_slots(&self.upvalues);
+        for table in self.tables.values() {
+            usage.add_vec(&table.array);
+            usage.add_vec(&table.hash);
+            usage.add_vec(&table.hash_index);
+        }
+        for function in self.functions.values() {
+            usage.add(
+                function
+                    .captures
+                    .len()
+                    .saturating_mul(size_of::<FunctionCapture>()),
+                function
+                    .captures
+                    .capacity()
+                    .saturating_mul(size_of::<FunctionCapture>()),
+            );
+        }
+
+        let arena_bytes = self.arena.metrics().total_gc_allocation();
+        usage.add(arena_bytes, arena_bytes);
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            usage.add_slots(&root.strings);
+            usage.add_slots(&root.userdatas);
+            usage.add_slots(&root.buffers);
+            usage.add_slots(&root.vectors);
+            usage.add_vec(&root.string_index);
+            for string in root.strings.values() {
+                if let InternedString::Owned(value) = string {
+                    usage.add_vec(&value.0);
+                }
+            }
+            for buffer in root.buffers.values() {
+                usage.add_vec(&buffer.bytes);
+            }
+        });
+        usage
+    }
+
     pub fn collect_weak_tables_with_roots(&mut self, roots: &[Value]) {
         let tables = &mut self.tables;
         let functions = &mut self.functions;
@@ -700,7 +778,7 @@ impl VmCell {
                     .collect()
             });
             let live = mark_heap_reachable(&root, tables, functions, upvalues, &modes, roots);
-            debug_assert!(live.upvalues.len() <= upvalues.occupied_len());
+            debug_assert!(live.upvalues.live_len() <= upvalues.occupied_len());
             for (handle, mode) in modes {
                 if let Some(table) = tables.get_mut(handle) {
                     sweep_weak_table(table, mode, &live);
@@ -2121,11 +2199,17 @@ impl LiveSlotGenerations {
         }
     }
 
-    fn insert(&mut self, handle: u32) {
+    fn insert(&mut self, handle: u32) -> bool {
         let (index, generation) = slot_handle_parts(handle);
         if let Some(slot) = self.encoded.get_mut(index) {
-            *slot = u16::from(generation) + 1;
+            let encoded = u16::from(generation) + 1;
+            if *slot == encoded {
+                return false;
+            }
+            *slot = encoded;
+            return true;
         }
+        false
     }
 
     fn contains(&self, handle: u32) -> bool {
@@ -2134,33 +2218,74 @@ impl LiveSlotGenerations {
             .get(index)
             .is_some_and(|encoded| *encoded == u16::from(generation) + 1)
     }
+
+    fn live_len(&self) -> usize {
+        self.encoded.iter().filter(|encoded| **encoded != 0).count()
+    }
 }
 
 /// The mark result shared by weak-table sweeping and ordinary heap reclamation.
 ///
-/// Tables, functions, and upvalues currently use compact append-only handles
-/// outside `gc-arena`. Keeping their complete liveness graph here lets the
-/// forthcoming ordinary sweep use exactly the same reachability rules as weak
-/// tables instead of growing a second, subtly different tracer.
+/// Every side store uses generation-safe compact handles outside `gc-arena`.
+/// Per-store generation arrays retain exact liveness without the allocation
+/// and pointer overhead of general-purpose tree sets, and the same result
+/// drives weak-table sweeping and ordinary reclamation.
 struct HeapLiveSet {
-    refs: BTreeSet<HeapRef>,
     strings: LiveSlotGenerations,
-    upvalues: BTreeSet<u32>,
+    tables: LiveSlotGenerations,
+    functions: LiveSlotGenerations,
+    upvalues: LiveSlotGenerations,
+    userdatas: LiveSlotGenerations,
+    buffers: LiveSlotGenerations,
+    vectors: LiveSlotGenerations,
 }
 
 impl HeapLiveSet {
-    fn contains_value(&self, value: Value) -> bool {
-        if let Some(atom) = value.as_string_atom() {
-            return self.strings.contains(atom);
+    fn new(
+        root: &RootData<'_>,
+        tables: &ReusableSlots<TableData>,
+        functions: &ReusableSlots<FunctionData>,
+        upvalues: &ReusableSlots<UpvalueData>,
+    ) -> Self {
+        Self {
+            strings: LiveSlotGenerations::new(root.strings.slots.len()),
+            tables: LiveSlotGenerations::new(tables.slots.len()),
+            functions: LiveSlotGenerations::new(functions.slots.len()),
+            upvalues: LiveSlotGenerations::new(upvalues.slots.len()),
+            userdatas: LiveSlotGenerations::new(root.userdatas.slots.len()),
+            buffers: LiveSlotGenerations::new(root.buffers.slots.len()),
+            vectors: LiveSlotGenerations::new(root.vectors.slots.len()),
         }
-        heap_ref_from_value(value).is_some_and(|reference| self.refs.contains(&reference))
+    }
+
+    fn insert_ref(&mut self, reference: HeapRef) -> bool {
+        match reference {
+            HeapRef::String(handle) => self.strings.insert(handle),
+            HeapRef::Table(handle) => self.tables.insert(handle),
+            HeapRef::Function(handle) => self.functions.insert(handle),
+            HeapRef::Userdata(handle) => self.userdatas.insert(handle),
+            HeapRef::Buffer(handle) => self.buffers.insert(handle),
+            HeapRef::Vector(handle) => self.vectors.insert(handle),
+        }
+    }
+
+    fn contains_ref(&self, reference: HeapRef) -> bool {
+        match reference {
+            HeapRef::String(handle) => self.strings.contains(handle),
+            HeapRef::Table(handle) => self.tables.contains(handle),
+            HeapRef::Function(handle) => self.functions.contains(handle),
+            HeapRef::Userdata(handle) => self.userdatas.contains(handle),
+            HeapRef::Buffer(handle) => self.buffers.contains(handle),
+            HeapRef::Vector(handle) => self.vectors.contains(handle),
+        }
+    }
+
+    fn contains_value(&self, value: Value) -> bool {
+        heap_ref_from_value(value).is_some_and(|reference| self.contains_ref(reference))
     }
 
     fn contains_key(&self, key: TableKey) -> bool {
-        if let TableKey::String(atom) = key {
-            return self.strings.contains(atom);
-        }
-        heap_ref_from_key(key).is_some_and(|reference| self.refs.contains(&reference))
+        heap_ref_from_key(key).is_some_and(|reference| self.contains_ref(reference))
     }
 }
 
@@ -2199,27 +2324,18 @@ fn mark_heap_reachable(
     modes: &BTreeMap<u32, WeakMode>,
     roots: &[Value],
 ) -> HeapLiveSet {
-    let mut refs = BTreeSet::new();
-    let mut live_strings = LiveSlotGenerations::new(root.strings.slots.len());
-    let mut live_upvalues = BTreeSet::new();
-    let mut queue = VecDeque::new();
+    let mut live = HeapLiveSet::new(root, tables, functions, upvalues);
+    let mut queue = Vec::new();
 
     for value in roots {
         if let Some(cell) = value.as_capture_cell() {
-            mark_heap_upvalue(
-                cell,
-                upvalues,
-                &mut live_upvalues,
-                &mut refs,
-                &mut live_strings,
-                &mut queue,
-            );
+            mark_heap_upvalue(cell, upvalues, &mut live, &mut queue);
         } else {
-            mark_heap_value(*value, &mut refs, &mut live_strings, &mut queue);
+            mark_heap_value(*value, &mut live, &mut queue);
         }
     }
 
-    while let Some(reference) = queue.pop_front() {
+    while let Some(reference) = queue.pop() {
         match reference {
             HeapRef::String(_) => {}
             HeapRef::Buffer(_) => {}
@@ -2229,39 +2345,22 @@ fn mark_heap_reachable(
                     continue;
                 };
                 if let Some(metatable) = userdata.metatable {
-                    mark_heap_value(
-                        Value::table(metatable),
-                        &mut refs,
-                        &mut live_strings,
-                        &mut queue,
-                    );
+                    mark_heap_value(Value::table(metatable), &mut live, &mut queue);
                 }
                 if let UserdataPayload::ConformanceVertex { pos, normal, uv } = userdata.payload {
-                    mark_heap_value(pos, &mut refs, &mut live_strings, &mut queue);
-                    mark_heap_value(normal, &mut refs, &mut live_strings, &mut queue);
-                    mark_heap_value(uv, &mut refs, &mut live_strings, &mut queue);
+                    mark_heap_value(pos, &mut live, &mut queue);
+                    mark_heap_value(normal, &mut live, &mut queue);
+                    mark_heap_value(uv, &mut live, &mut queue);
                 }
             }
             HeapRef::Function(handle) => {
                 let Some(function) = functions.get(handle) else {
                     continue;
                 };
-                mark_heap_value(
-                    Value::table(function.environment),
-                    &mut refs,
-                    &mut live_strings,
-                    &mut queue,
-                );
+                mark_heap_value(Value::table(function.environment), &mut live, &mut queue);
                 for capture in &function.captures {
                     let value = if let Some(cell) = capture.cell() {
-                        mark_heap_upvalue(
-                            cell,
-                            upvalues,
-                            &mut live_upvalues,
-                            &mut refs,
-                            &mut live_strings,
-                            &mut queue,
-                        );
+                        mark_heap_upvalue(cell, upvalues, &mut live, &mut queue);
                         continue;
                     } else {
                         let Some(value) = capture.direct_value() else {
@@ -2269,7 +2368,7 @@ fn mark_heap_reachable(
                         };
                         value
                     };
-                    mark_heap_value(value, &mut refs, &mut live_strings, &mut queue);
+                    mark_heap_value(value, &mut live, &mut queue);
                 }
             }
             HeapRef::Table(handle) => {
@@ -2277,97 +2376,75 @@ fn mark_heap_reachable(
                     continue;
                 };
                 if let Some(metatable) = table.metatable {
-                    mark_heap_value(
-                        Value::table(metatable),
-                        &mut refs,
-                        &mut live_strings,
-                        &mut queue,
-                    );
+                    mark_heap_value(Value::table(metatable), &mut live, &mut queue);
                 }
                 let mode = modes.get(&handle).copied();
                 let weak_keys = mode.is_some_and(|mode| mode.keys);
                 let weak_values = mode.is_some_and(|mode| mode.values);
                 if !weak_values {
                     for value in &table.array {
-                        mark_heap_value(*value, &mut refs, &mut live_strings, &mut queue);
+                        mark_heap_value(*value, &mut live, &mut queue);
                     }
                 }
                 for entry in &table.hash {
                     if !weak_keys {
-                        mark_heap_key(entry.key, &mut refs, &mut live_strings, &mut queue);
+                        mark_heap_key(entry.key, &mut live, &mut queue);
                     }
                     // Strings and vectors are value-like in Luau weak-table
                     // semantics. Rustia stores their payloads in reusable
                     // backing slots, so keep those slots live for every key,
                     // including keys in a weak-key table.
                     if matches!(entry.key, TableKey::String(_)) {
-                        mark_heap_key(entry.key, &mut refs, &mut live_strings, &mut queue);
+                        mark_heap_key(entry.key, &mut live, &mut queue);
                     } else if matches!(entry.key, TableKey::Vector(_)) {
-                        mark_heap_value(entry.key_value, &mut refs, &mut live_strings, &mut queue);
+                        mark_heap_value(entry.key_value, &mut live, &mut queue);
                     }
                     if !weak_values {
-                        mark_heap_value(entry.value, &mut refs, &mut live_strings, &mut queue);
+                        mark_heap_value(entry.value, &mut live, &mut queue);
                     }
                 }
             }
         }
     }
 
-    HeapLiveSet {
-        refs,
-        strings: live_strings,
-        upvalues: live_upvalues,
-    }
+    live
 }
 
 fn mark_heap_upvalue(
     cell: u32,
     upvalues: &ReusableSlots<UpvalueData>,
-    live_upvalues: &mut BTreeSet<u32>,
-    refs: &mut BTreeSet<HeapRef>,
-    live_strings: &mut LiveSlotGenerations,
-    queue: &mut VecDeque<HeapRef>,
+    live: &mut HeapLiveSet,
+    queue: &mut Vec<HeapRef>,
 ) {
     let Some(upvalue) = upvalues.get(cell) else {
         return;
     };
-    if live_upvalues.insert(cell) {
-        mark_heap_value(upvalue.value, refs, live_strings, queue);
+    if live.upvalues.insert(cell) {
+        mark_heap_value(upvalue.value, live, queue);
     }
 }
 
-fn mark_heap_value(
-    value: Value,
-    refs: &mut BTreeSet<HeapRef>,
-    live_strings: &mut LiveSlotGenerations,
-    queue: &mut VecDeque<HeapRef>,
-) {
+fn mark_heap_value(value: Value, live: &mut HeapLiveSet, queue: &mut Vec<HeapRef>) {
     if let Some(reference) = heap_ref_from_value(value) {
-        mark_heap_ref(reference, refs, live_strings, queue);
+        mark_heap_ref(reference, live, queue);
     }
 }
 
-fn mark_heap_key(
-    key: TableKey,
-    refs: &mut BTreeSet<HeapRef>,
-    live_strings: &mut LiveSlotGenerations,
-    queue: &mut VecDeque<HeapRef>,
-) {
+fn mark_heap_key(key: TableKey, live: &mut HeapLiveSet, queue: &mut Vec<HeapRef>) {
     if let Some(reference) = heap_ref_from_key(key) {
-        mark_heap_ref(reference, refs, live_strings, queue);
+        mark_heap_ref(reference, live, queue);
     }
 }
 
-fn mark_heap_ref(
-    reference: HeapRef,
-    refs: &mut BTreeSet<HeapRef>,
-    live_strings: &mut LiveSlotGenerations,
-    queue: &mut VecDeque<HeapRef>,
-) {
-    if let HeapRef::String(atom) = reference {
-        live_strings.insert(atom);
-    } else if refs.insert(reference) {
-        queue.push_back(reference);
+fn mark_heap_ref(reference: HeapRef, live: &mut HeapLiveSet, queue: &mut Vec<HeapRef>) {
+    if !live.insert_ref(reference) {
+        return;
+    }
+    if matches!(
+        reference,
+        HeapRef::Table(_) | HeapRef::Function(_) | HeapRef::Userdata(_)
+    ) {
+        queue.push(reference);
     }
 }
 
@@ -2412,15 +2489,15 @@ fn reclaim_unreachable(
         rebuild_string_index(root, STRING_INDEX_MIN_CAPACITY);
     }
 
-    tables.retain_handles(|handle| live.refs.contains(&HeapRef::Table(handle)));
-    functions.retain_handles(|handle| live.refs.contains(&HeapRef::Function(handle)));
-    upvalues.retain_handles(|handle| live.upvalues.contains(&handle));
+    tables.retain_handles(|handle| live.tables.contains(handle));
+    functions.retain_handles(|handle| live.functions.contains(handle));
+    upvalues.retain_handles(|handle| live.upvalues.contains(handle));
     root.userdatas
-        .retain_handles(|handle| live.refs.contains(&HeapRef::Userdata(handle)));
+        .retain_handles(|handle| live.userdatas.contains(handle));
     root.buffers
-        .retain_handles(|handle| live.refs.contains(&HeapRef::Buffer(handle)));
+        .retain_handles(|handle| live.buffers.contains(handle));
     root.vectors
-        .retain_handles(|handle| live.refs.contains(&HeapRef::Vector(handle)));
+        .retain_handles(|handle| live.vectors.contains(handle));
 }
 
 fn table_key_is_collectable(key: TableKey) -> bool {
@@ -3304,17 +3381,17 @@ mod tests {
             )
         });
 
-        assert!(live.refs.contains(&HeapRef::Function(live_function)));
-        assert!(live.refs.contains(&HeapRef::Table(live_environment)));
-        assert!(live.refs.contains(&HeapRef::Table(live_target)));
-        assert!(live.refs.contains(&HeapRef::Userdata(live_userdata)));
-        assert!(live.refs.contains(&HeapRef::Table(live_userdata_target)));
-        assert!(live.upvalues.contains(&live_upvalue));
+        assert!(live.contains_ref(HeapRef::Function(live_function)));
+        assert!(live.contains_ref(HeapRef::Table(live_environment)));
+        assert!(live.contains_ref(HeapRef::Table(live_target)));
+        assert!(live.contains_ref(HeapRef::Userdata(live_userdata)));
+        assert!(live.contains_ref(HeapRef::Table(live_userdata_target)));
+        assert!(live.upvalues.contains(live_upvalue));
 
-        assert!(!live.refs.contains(&HeapRef::Function(dead_function)));
-        assert!(!live.refs.contains(&HeapRef::Table(dead_environment)));
-        assert!(!live.refs.contains(&HeapRef::Table(dead_target)));
-        assert!(!live.upvalues.contains(&dead_upvalue));
+        assert!(!live.contains_ref(HeapRef::Function(dead_function)));
+        assert!(!live.contains_ref(HeapRef::Table(dead_environment)));
+        assert!(!live.contains_ref(HeapRef::Table(dead_target)));
+        assert!(!live.upvalues.contains(dead_upvalue));
     }
 
     #[test]

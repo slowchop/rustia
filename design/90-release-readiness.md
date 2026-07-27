@@ -6,12 +6,14 @@ blockers below take precedence over packaging polish.
 
 ## Current Release Blockers (Ordered)
 
-1. Add honest live/peak VM memory accounting, per-VM aggregate quotas, and a
-   documented atomic OOM path with catchable-or-host-visible failure tests.
+1. Add per-VM aggregate quotas and a documented atomic OOM path with
+   catchable-or-host-visible failure tests. Host-facing VM-owned live/reserved
+   accounting and opt-in instruction-boundary peaks are implemented; the same
+   O(1) quota tracker must replace script-visible compatibility counters.
 2. Add a deterministic decision-boundary reset/reuse API with epoch-safe
    invalidation for every retained handle and a versioned reset/replay ABI.
-3. Add capability-tagged output and clock/time providers, real internal VM
-   memory telemetry, and cheap worker-local/per-call host context; reject
+3. Add cheap worker-local/per-call host context; capability-tagged output and
+   clock/time providers plus real internal VM memory telemetry are implemented. Reject
    nondeterministic providers in DeterministicSim.
 4. Add a host-owned script-visible `require` resolver/cache with deterministic
    identity, execute-once behavior, and cycle diagnostics.

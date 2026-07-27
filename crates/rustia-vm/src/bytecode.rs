@@ -1,3 +1,4 @@
+use std::mem::size_of;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -304,6 +305,93 @@ impl Program {
                 index,
             }
         })
+    }
+
+    pub(crate) fn constant_storage_identity(&self) -> *const () {
+        Arc::as_ptr(&self.constants).cast()
+    }
+
+    pub(crate) fn memory_usage(&self, include_shared_constants: bool) -> (usize, usize) {
+        let mut live = size_of::<Self>();
+        let mut reserved = size_of::<Self>();
+        add_function_memory(&self.main, &mut live, &mut reserved);
+        live = live.saturating_add(self.functions.len().saturating_mul(size_of::<Function>()));
+        reserved = reserved.saturating_add(
+            self.functions
+                .capacity()
+                .saturating_mul(size_of::<Function>()),
+        );
+        for function in &self.functions {
+            add_function_memory(function, &mut live, &mut reserved);
+        }
+        if let Some(source_name) = &self.source_name {
+            live = live.saturating_add(source_name.len());
+            reserved = reserved.saturating_add(source_name.len());
+        }
+        if include_shared_constants {
+            live = live
+                .saturating_add(size_of::<ConstantStorage>())
+                .saturating_add(
+                    self.constants
+                        .values
+                        .len()
+                        .saturating_mul(size_of::<Constant>()),
+                )
+                .saturating_add(
+                    self.constants
+                        .string_hashes
+                        .len()
+                        .saturating_mul(size_of::<u64>()),
+                );
+            reserved = reserved
+                .saturating_add(size_of::<ConstantStorage>())
+                .saturating_add(
+                    self.constants
+                        .values
+                        .len()
+                        .saturating_mul(size_of::<Constant>()),
+                )
+                .saturating_add(
+                    self.constants
+                        .string_hashes
+                        .len()
+                        .saturating_mul(size_of::<u64>()),
+                );
+            for constant in self.constants() {
+                match constant {
+                    Constant::String(bytes) => {
+                        live = live.saturating_add(bytes.len());
+                        reserved = reserved.saturating_add(bytes.capacity());
+                    }
+                    Constant::Import(path) => {
+                        live = live.saturating_add(path.len().saturating_mul(size_of::<u32>()));
+                        reserved = reserved
+                            .saturating_add(path.capacity().saturating_mul(size_of::<u32>()));
+                    }
+                    Constant::Nil | Constant::Boolean(_) | Constant::Number(_) => {}
+                }
+            }
+        }
+        (live, reserved)
+    }
+}
+
+fn add_function_memory(function: &Function, live: &mut usize, reserved: &mut usize) {
+    macro_rules! add_vec {
+        ($field:expr, $element:ty) => {
+            *live = live.saturating_add($field.len().saturating_mul(size_of::<$element>()));
+            *reserved =
+                reserved.saturating_add($field.capacity().saturating_mul(size_of::<$element>()));
+        };
+    }
+    add_vec!(function.code, Instruction);
+    add_vec!(function.upvalues, UpvalueDescriptor);
+    add_vec!(function.captured_registers, u8);
+    add_vec!(function.source_map, InstructionSource);
+    add_vec!(function.parameter_types, RuntimeType);
+    if let Some(debug_name) = &function.debug_name {
+        *live = live.saturating_add(debug_name.len());
+        *reserved = reserved.saturating_add(debug_name.capacity());
     }
 }
 

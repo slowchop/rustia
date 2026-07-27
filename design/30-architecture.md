@@ -147,8 +147,11 @@ functions, upvalues, atomized runtime strings, userdata, buffers, and vectors; r
 roots. Host-requested quiescence also prunes unreachable coroutine state and releases spare heap/interner/stack
 capacity. Loaded programs use generation-safe reusable handles and host-requested quiescence drops obsolete
 program bytecode, constants, inline caches, and coverage rows after the final reachable function disappears.
-The remaining axis-D work is honest live/peak accounting, aggregate quotas and atomic OOM behavior, lifecycle
-reset, and long-run native/wasm mixed-heap plateau evidence before interval tuning is meaningful.
+`Vm::memory_stats()` now exposes VM-owned live/reserved bytes and optional instruction-boundary peaks. Mark
+scratch uses compact generation arrays instead of general-purpose tree nodes. The legacy script-visible counters
+remain on their O(1) compatibility path until the quota tracker can back them without a quadratic full census.
+The remaining axis-D work is aggregate quotas and atomic OOM behavior, lifecycle reset, and long-run native/wasm
+mixed-heap plateau evidence before interval tuning is meaningful.
 
 **E. Determinism enforcement — LOCKED.** Dense `Vec` array parts plus insertion-ordered `Vec` hash entries;
 larger hash parts use a stable custom-mixed open-addressed `Vec<u32>` side index at no more than 50% load, and

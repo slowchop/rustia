@@ -3,6 +3,7 @@ use crate::profile::Profile;
 use crate::value::Value;
 use crate::vm::Vm;
 use std::fmt;
+use std::mem::size_of;
 use std::sync::Arc;
 
 pub type ExtensionHandler = fn(&[Value]) -> Result<Value>;
@@ -163,6 +164,16 @@ impl ExtensionRegistry {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.ops.is_empty()
+    }
+
+    pub(crate) fn memory_usage(&self) -> (usize, usize) {
+        let mut live = self.ops.len().saturating_mul(size_of::<ExtensionOp>());
+        let mut reserved = self.ops.capacity().saturating_mul(size_of::<ExtensionOp>());
+        for op in &self.ops {
+            live = live.saturating_add(op.name.len());
+            reserved = reserved.saturating_add(op.name.capacity());
+        }
+        (live, reserved)
     }
 }
 

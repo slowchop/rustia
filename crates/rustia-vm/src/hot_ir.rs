@@ -10,6 +10,7 @@
 
 use crate::bytecode::{Constant, Function, Instruction, Opcode, Program};
 use crate::number::NumericOp;
+use std::mem::size_of;
 use std::sync::Arc;
 
 pub(crate) const MAX_HOT_IR_BODY_INSTRUCTIONS: usize = 128;
@@ -38,6 +39,21 @@ pub(crate) struct HotIr {
 }
 
 impl HotIr {
+    pub(crate) fn memory_bytes(&self) -> usize {
+        size_of::<Self>()
+            .saturating_add(self.operations.len().saturating_mul(size_of::<HotIrOp>()))
+            .saturating_add(
+                self.register_writes
+                    .len()
+                    .saturating_mul(size_of::<HotIrRegisterWrite>()),
+            )
+            .saturating_add(
+                self.cell_clears
+                    .len()
+                    .saturating_mul(size_of::<HotIrCellClear>()),
+            )
+    }
+
     #[inline]
     pub(crate) const fn continuing_iteration_instruction_count(&self) -> u64 {
         1 + self.body_instruction_count

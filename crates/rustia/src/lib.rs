@@ -17,7 +17,7 @@ pub use extension_api::{
 };
 pub use function::{Exports, Function};
 pub use rustia_vm::{
-    Error as VmError, ErrorKind as VmErrorKind, OpCapability, Profile, VmSettings,
+    Error as VmError, ErrorKind as VmErrorKind, OpCapability, Profile, VmMemoryStats, VmSettings,
 };
 pub use serde_value::SerdeValueError;
 pub use value::{
@@ -49,6 +49,12 @@ impl Rustia {
             vm: Vm::with_settings(profile, settings),
             generation: 0,
         }
+    }
+
+    /// Returns the VM-owned logical live/reserved memory census and optional
+    /// instruction-boundary peaks.
+    pub fn memory_stats(&mut self) -> VmMemoryStats {
+        self.vm.memory_stats()
     }
 
     pub fn compile_and_run(&mut self, source: &str) -> Result<Exports> {

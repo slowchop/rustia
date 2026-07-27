@@ -67,7 +67,7 @@ The facade picks an environment in one word; `Rustia::builder()` delegates to `s
 | `os.time()` / `os.date()` | `os` absent unless a deterministic clock provider is plugged | pinned epoch 1_700_000_000 unless a wall-clock provider is plugged | system wall clock |
 | `os.clock()` | follows the `os` registration rule | logical clock (executed instructions / 1_000_000) unless a monotonic provider is plugged | system monotonic clock |
 | Pure `os` fns (`os.time(t)`, `os.date(f, t)`, `os.difftime`) | follow the `os` registration rule | always available | always available |
-| `collectgarbage("count")` / `gcinfo` | not registered | registered; canned values until honest memory accounting lands | registered; same canned values |
+| `collectgarbage("count")` / `gcinfo` | not registered | registered; compatibility values pending O(1) incremental accounting | registered; same compatibility values |
 | `loadstring` | opt-in host compiler only | opt-in host compiler only | enabled with the stock compiler |
 | Host-fn capabilities | the five deterministic capabilities; external-state/nondeterministic registrations and nondeterministic clock providers rejected | all seven capabilities | all seven |
 | GC | full collection on the deterministic instruction-count schedule | incremental/paced | incremental/paced |

@@ -21,6 +21,7 @@ use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::mem::size_of;
 use std::num::NonZeroU64;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -172,6 +173,10 @@ pub struct VmSettings {
     pub enable_conformance_native_userdata: bool,
     pub enable_conformance_native_type_checks: bool,
     pub enable_conformance_pcall_helpers: bool,
+    /// Records exact VM-owned logical live/reserved high-water marks at every
+    /// instruction boundary. Disabled by default so benchmark timings do not
+    /// include telemetry scans.
+    pub enable_memory_tracking: bool,
     pub services: VmServices,
 }
 
@@ -189,9 +194,22 @@ impl Default for VmSettings {
             enable_conformance_native_userdata: false,
             enable_conformance_native_type_checks: false,
             enable_conformance_pcall_helpers: false,
+            enable_memory_tracking: false,
             services: VmServices::default(),
         }
     }
+}
+
+/// VM-owned memory measured from live object lengths and retained allocation
+/// capacities. Process allocator metadata, executable mappings, and temporary
+/// Rust call scratch are intentionally external and remain observable through
+/// the cgroup benchmark protocol.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VmMemoryStats {
+    pub live_bytes: usize,
+    pub reserved_bytes: usize,
+    pub peak_live_bytes: Option<usize>,
+    pub peak_reserved_bytes: Option<usize>,
 }
 
 pub struct Vm {
@@ -224,6 +242,8 @@ pub struct Vm {
     deterministic_collection_count: u64,
     external_roots: Rc<RefCell<ExternalRootRegistry>>,
     coverage_hits: BTreeMap<CoverageKey, u64>,
+    peak_live_bytes: usize,
+    peak_reserved_bytes: usize,
     #[cfg(test)]
     hot_ir_mode: HotIrTestMode,
     #[cfg(test)]
@@ -340,6 +360,31 @@ struct LoadedProgramSlot {
     value: Option<LoadedProgram>,
 }
 
+#[derive(Clone, Copy, Default)]
+struct MemoryUsage {
+    live_bytes: usize,
+    reserved_bytes: usize,
+}
+
+impl MemoryUsage {
+    fn add(&mut self, live_bytes: usize, reserved_bytes: usize) {
+        self.live_bytes = self.live_bytes.saturating_add(live_bytes);
+        self.reserved_bytes = self.reserved_bytes.saturating_add(reserved_bytes);
+    }
+
+    fn add_vec<T>(&mut self, values: &Vec<T>) {
+        self.add(
+            values.len().saturating_mul(size_of::<T>()),
+            values.capacity().saturating_mul(size_of::<T>()),
+        );
+    }
+
+    fn add_boxed_slice<T>(&mut self, values: &[T]) {
+        let bytes = values.len().saturating_mul(size_of::<T>());
+        self.add(bytes, bytes);
+    }
+}
+
 impl LoadedPrograms {
     fn insert(&mut self, value: LoadedProgram) -> Option<u32> {
         if let Some(index) = self.free.pop() {
@@ -411,6 +456,26 @@ impl LoadedPrograms {
     fn release_spare_capacity(&mut self) {
         self.slots.shrink_to_fit();
         self.free.shrink_to_fit();
+    }
+
+    fn memory_usage(&self) -> MemoryUsage {
+        let mut usage = MemoryUsage::default();
+        usage.add(
+            self.slots
+                .iter()
+                .filter(|slot| slot.value.is_some())
+                .count()
+                .saturating_mul(size_of::<LoadedProgramSlot>()),
+            self.slots
+                .capacity()
+                .saturating_mul(size_of::<LoadedProgramSlot>()),
+        );
+        usage.add_vec(&self.free);
+        let mut shared_constants = std::collections::BTreeSet::new();
+        for loaded in self.values() {
+            loaded.add_memory_usage(&mut usage, &mut shared_constants);
+        }
+        usage
     }
 
     #[cfg(test)]
@@ -626,6 +691,23 @@ impl LoadedProgram {
         *self.constant_atoms.get_mut(index)? = encoded;
         Some(())
     }
+
+    fn add_memory_usage(
+        &self,
+        usage: &mut MemoryUsage,
+        shared_constants: &mut std::collections::BTreeSet<*const ()>,
+    ) {
+        let include_shared_constants =
+            shared_constants.insert(self.program.constant_storage_identity());
+        let (program_live, program_reserved) = self.program.memory_usage(include_shared_constants);
+        usage.add(program_live, program_reserved);
+        usage.add_vec(&self.constant_atoms);
+        self.main_inline_caches.add_memory_usage(usage);
+        usage.add_vec(&self.function_inline_caches);
+        for caches in &self.function_inline_caches {
+            caches.add_memory_usage(usage);
+        }
+    }
 }
 
 struct FunctionInlineCaches {
@@ -684,6 +766,28 @@ impl FunctionInlineCaches {
             leaf_call_plan,
             hot_ir_by_pc,
             hot_irs,
+        }
+    }
+
+    fn add_memory_usage(&self, usage: &mut MemoryUsage) {
+        usage.add_vec(&self.entry_by_pc);
+        usage.add_vec(&self.table_entries);
+        usage.add_vec(&self.import_entries);
+        usage.add_vec(&self.native_call_entries);
+        if let Some(entries) = &self.closure_call_entries {
+            usage.add(
+                size_of::<Vec<ClosureCallInlineCache>>(),
+                size_of::<Vec<ClosureCallInlineCache>>(),
+            );
+            usage.add_vec(entries);
+        }
+        if let Some(by_pc) = &self.hot_ir_by_pc {
+            usage.add_boxed_slice(by_pc);
+        }
+        usage.add_vec(&self.hot_irs);
+        for hot_ir in &self.hot_irs {
+            let bytes = hot_ir.memory_bytes();
+            usage.add(bytes, bytes);
         }
     }
 
@@ -1560,7 +1664,7 @@ impl Vm {
         );
         let rng_state = pcg32_seed(0);
         let next_weak_collection_instruction = settings.deterministic_gc_interval.get();
-        Self {
+        let mut vm = Self {
             profile,
             settings,
             heap,
@@ -1590,11 +1694,15 @@ impl Vm {
             deterministic_collection_count: 0,
             external_roots: Rc::new(RefCell::new(ExternalRootRegistry::default())),
             coverage_hits: BTreeMap::new(),
+            peak_live_bytes: 0,
+            peak_reserved_bytes: 0,
             #[cfg(test)]
             hot_ir_mode: HotIrTestMode::Auto,
             #[cfg(test)]
             closure_call_mode: ClosureCallTestMode::Auto,
-        }
+        };
+        vm.record_memory_peak();
+        vm
     }
 
     #[inline]
@@ -1629,6 +1737,52 @@ impl Vm {
     #[inline]
     pub const fn settings(&self) -> &VmSettings {
         &self.settings
+    }
+
+    /// Returns an exact census of VM-managed heap/program/control allocations.
+    ///
+    /// Peak fields are present only when `VmSettings::enable_memory_tracking`
+    /// is enabled; that mode scans at every logical instruction boundary and
+    /// is intentionally excluded from throughput benchmarks.
+    pub fn memory_stats(&mut self) -> VmMemoryStats {
+        let current = self.current_memory_usage();
+        if self.settings.enable_memory_tracking {
+            self.peak_live_bytes = self.peak_live_bytes.max(current.live_bytes);
+            self.peak_reserved_bytes = self.peak_reserved_bytes.max(current.reserved_bytes);
+        }
+        VmMemoryStats {
+            live_bytes: current.live_bytes,
+            reserved_bytes: current.reserved_bytes,
+            peak_live_bytes: self
+                .settings
+                .enable_memory_tracking
+                .then_some(self.peak_live_bytes),
+            peak_reserved_bytes: self
+                .settings
+                .enable_memory_tracking
+                .then_some(self.peak_reserved_bytes),
+        }
+    }
+
+    fn record_memory_peak(&mut self) {
+        if !self.settings.enable_memory_tracking {
+            return;
+        }
+        let current = self.current_memory_usage();
+        self.peak_live_bytes = self.peak_live_bytes.max(current.live_bytes);
+        self.peak_reserved_bytes = self.peak_reserved_bytes.max(current.reserved_bytes);
+    }
+
+    fn current_memory_usage(&mut self) -> MemoryUsage {
+        let heap = self.heap.memory_usage();
+        let mut usage = MemoryUsage {
+            live_bytes: heap.live_bytes,
+            reserved_bytes: heap.reserved_bytes,
+        };
+        let programs = self.dynamic_programs.memory_usage();
+        usage.add(programs.live_bytes, programs.reserved_bytes);
+        add_vm_control_memory(self, &mut usage);
+        usage
     }
 
     pub fn register_extension_op(&mut self, op: ExtensionOp) -> Result<u16> {
@@ -16478,6 +16632,7 @@ impl Vm {
                 .next_weak_collection_instruction
                 .wrapping_add(self.settings.deterministic_gc_interval.get());
         }
+        self.record_memory_peak();
     }
 
     #[inline(always)]
@@ -16505,6 +16660,7 @@ impl Vm {
                 .next_weak_collection_instruction
                 .wrapping_add(self.settings.deterministic_gc_interval.get());
         }
+        self.record_memory_peak();
     }
 
     #[inline(always)]
@@ -18852,6 +19008,171 @@ fn collect_call_stack_frame_roots(roots: &mut Vec<Value>, frame: &CallStackFrame
     roots.extend_from_slice(&frame.stackless_roots);
     for stackless_run in &frame.stackless_debug_frames {
         collect_stackless_debug_frame_roots(roots, &stackless_run.frame);
+    }
+}
+
+fn add_vm_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
+    let (extension_live, extension_reserved) = vm.extensions.memory_usage();
+    usage.add(extension_live, extension_reserved);
+    usage.add_vec(&vm.host_functions);
+    for op in &vm.host_functions {
+        usage.add(op.name.len(), op.name.capacity());
+        usage.add_vec(&op.parameter_types);
+        usage.add_vec(&op.return_types);
+    }
+    usage.add_vec(&vm.call_stack);
+    for frame in &vm.call_stack {
+        add_call_stack_frame_memory(frame, usage);
+    }
+    usage.add_vec(&vm.coroutines);
+    for coroutine in &vm.coroutines {
+        usage.add_vec(&coroutine.frames);
+        for frame in &coroutine.frames {
+            add_coroutine_frame_memory(frame, usage);
+        }
+        if let Some(snapshot) = &coroutine.debug_snapshot {
+            usage.add_vec(&snapshot.frames);
+            for frame in &snapshot.frames {
+                add_call_stack_frame_memory(frame, usage);
+            }
+            add_error_location_memory(snapshot.top_location.as_ref(), usage);
+        }
+    }
+    usage.add_vec(&vm.running_coroutines);
+    usage.add_vec(&vm.running_coroutine_stack_bases);
+    usage.add_vec(&vm.active_coroutine_frames);
+    for frames in &vm.active_coroutine_frames {
+        usage.add_vec(frames);
+        for frame in frames {
+            add_coroutine_frame_memory(frame, usage);
+        }
+    }
+    usage.add_vec(&vm.yield_collectors);
+    for collector in &vm.yield_collectors {
+        usage.add_vec(collector);
+        for values in collector {
+            usage.add_vec(values);
+        }
+    }
+    for snapshot in [
+        vm.last_error_traceback.as_ref(),
+        vm.protected_error_traceback.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        usage.add_vec(&snapshot.frames);
+        for frame in &snapshot.frames {
+            add_call_stack_frame_memory(frame, usage);
+        }
+        add_error_location_memory(snapshot.top_location.as_ref(), usage);
+    }
+    let roots = vm.external_roots.borrow();
+    let root_node_bytes = roots.values.len().saturating_mul(
+        size_of::<u64>()
+            .saturating_add(size_of::<Value>())
+            .saturating_add(size_of::<usize>().saturating_mul(4)),
+    );
+    usage.add(root_node_bytes, root_node_bytes);
+    let coverage_node_bytes = vm.coverage_hits.len().saturating_mul(
+        size_of::<CoverageKey>()
+            .saturating_add(size_of::<u64>())
+            .saturating_add(size_of::<usize>().saturating_mul(4)),
+    );
+    usage.add(coverage_node_bytes, coverage_node_bytes);
+}
+
+fn add_call_stack_frame_memory(frame: &CallStackFrame, usage: &mut MemoryUsage) {
+    if let Some(name) = &frame.debug_name {
+        usage.add(name.len(), name.capacity());
+    }
+    add_error_location_memory(frame.call_site.as_ref(), usage);
+    usage.add_vec(&frame.roots);
+    usage.add_vec(&frame.stackless_roots);
+    usage.add_vec(&frame.stackless_debug_frames);
+    for run in &frame.stackless_debug_frames {
+        if let Some(name) = &run.frame.debug_name {
+            usage.add(name.len(), name.capacity());
+        }
+        add_error_location_memory(run.frame.call_site.as_ref(), usage);
+    }
+}
+
+fn add_error_location_memory(location: Option<&ErrorLocation>, usage: &mut MemoryUsage) {
+    if let Some(location) = location {
+        usage.add(location.source.len(), location.source.len());
+    }
+}
+
+fn add_coroutine_frame_memory(frame: &CoroutineFrame, usage: &mut MemoryUsage) {
+    match frame {
+        CoroutineFrame::Bytecode(frame) => {
+            usage.add(
+                size_of::<SuspendedBytecodeFrame>(),
+                size_of::<SuspendedBytecodeFrame>(),
+            );
+            usage.add_vec(&frame.captures);
+            add_error_location_memory(frame.call_site.as_ref(), usage);
+            add_register_values_memory(&frame.registers, usage);
+            add_register_cells_memory(&frame.register_cells, usage);
+            usage.add_vec(&frame.varargs);
+            usage.add_vec(&frame.pending_return_prefixes);
+            add_continuation_memory(&frame.continuation, usage);
+            usage.add_vec(&frame.stackless_self_calls);
+            for call in &frame.stackless_self_calls {
+                add_stackless_self_call_memory(call, usage);
+            }
+        }
+        CoroutineFrame::XPCall(frame) => {
+            let _ = frame;
+        }
+        CoroutineFrame::PCall => {}
+    }
+}
+
+fn add_stackless_self_call_memory(frame: &StacklessSelfCallFrame, usage: &mut MemoryUsage) {
+    add_register_values_memory(&frame.registers, usage);
+    add_register_cells_memory(&frame.register_cells, usage);
+    usage.add_vec(&frame.varargs);
+    usage.add_vec(&frame.pending_return_prefixes);
+    add_continuation_memory(&frame.continuation, usage);
+    if let Some(name) = &frame.debug_frame.debug_name {
+        usage.add(name.len(), name.capacity());
+    }
+    add_error_location_memory(frame.debug_frame.call_site.as_ref(), usage);
+}
+
+fn add_register_values_memory(values: &RegisterValues, usage: &mut MemoryUsage) {
+    if values.spilled() {
+        usage.add(
+            values.len().saturating_mul(size_of::<Value>()),
+            values.capacity().saturating_mul(size_of::<Value>()),
+        );
+    }
+}
+
+fn add_register_cells_memory(values: &RegisterCells, usage: &mut MemoryUsage) {
+    if values.spilled() {
+        usage.add(
+            values.len().saturating_mul(size_of::<Option<u32>>()),
+            values.capacity().saturating_mul(size_of::<Option<u32>>()),
+        );
+    }
+}
+
+fn add_continuation_memory(continuation: &BytecodeContinuation, usage: &mut MemoryUsage) {
+    match continuation {
+        BytecodeContinuation::CallExpandAfterTrailing {
+            args, call_site, ..
+        } => {
+            usage.add_vec(args);
+            add_error_location_memory(call_site.as_ref(), usage);
+        }
+        BytecodeContinuation::ReturnWithPrefix { prefix } => usage.add_vec(prefix),
+        BytecodeContinuation::WriteFirst { .. }
+        | BytecodeContinuation::WriteFixed { .. }
+        | BytecodeContinuation::PCallWriteFixed { .. }
+        | BytecodeContinuation::AppendToTable { .. } => {}
     }
 }
 
@@ -24720,6 +25041,48 @@ mod inline_cache_tests {
         assert_eq!(vm.running_coroutine_stack_bases.capacity(), 0);
         assert_eq!(vm.active_coroutine_frames.capacity(), 0);
         assert_eq!(vm.yield_collectors.capacity(), 0);
+    }
+
+    #[test]
+    fn memory_stats_track_live_reserved_and_peak_vm_owned_bytes() {
+        let mut vm = Vm::with_settings(
+            Profile::ReproducibleStandard,
+            VmSettings {
+                enable_memory_tracking: true,
+                ..VmSettings::default()
+            },
+        );
+        let baseline = vm.memory_stats();
+        assert!(baseline.live_bytes > 0);
+        assert!(baseline.reserved_bytes >= baseline.live_bytes);
+        assert_eq!(baseline.peak_live_bytes, Some(baseline.live_bytes));
+        assert_eq!(baseline.peak_reserved_bytes, Some(baseline.reserved_bytes));
+
+        let table = vm.heap.alloc_filled_array_table(8_192, Value::nil());
+        let root = vm.retain_value(Value::table(table));
+        let allocated = vm.memory_stats();
+        assert!(allocated.live_bytes >= baseline.live_bytes + 8_192 * size_of::<Value>());
+        assert!(allocated.reserved_bytes >= allocated.live_bytes);
+        assert!(allocated.peak_live_bytes >= Some(allocated.live_bytes));
+        assert!(allocated.peak_reserved_bytes >= Some(allocated.reserved_bytes));
+
+        drop(root);
+        vm.collect_garbage();
+        let collected = vm.memory_stats();
+        assert!(collected.live_bytes < allocated.live_bytes);
+        assert!(collected.reserved_bytes < allocated.reserved_bytes);
+        assert!(collected.peak_live_bytes >= Some(allocated.live_bytes));
+        assert!(collected.peak_reserved_bytes >= Some(allocated.reserved_bytes));
+    }
+
+    #[test]
+    fn memory_peak_fields_are_explicitly_unavailable_without_tracking() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let stats = vm.memory_stats();
+        assert!(stats.live_bytes > 0);
+        assert!(stats.reserved_bytes >= stats.live_bytes);
+        assert_eq!(stats.peak_live_bytes, None);
+        assert_eq!(stats.peak_reserved_bytes, None);
     }
 
     #[test]

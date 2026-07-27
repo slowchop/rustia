@@ -19,6 +19,11 @@ Current unpublished workspace version: `0.0.1`.
   quiescence reclaims obsolete program bytecode, constants, inline caches, and
   coverage rows after the last reachable closure/coroutine/retained value drops;
   stale program handles cannot alias a replacement loaded into the reused slot.
+- `Vm::memory_stats()` and the public facade expose VM-owned live/reserved
+  allocation bytes plus opt-in instruction-boundary high-water marks. Heap
+  marking uses compact per-store generation arrays rather than tree-set nodes,
+  reducing temporary collection scratch while preserving the shared
+  weak-table/reclamation graph.
 - Luau 0.709 conformance tracking is pending-free, with the current manifest at
   694 fixtures and 493 behavior refs.
 - VM strings and larger insertion-ordered table hash parts now use compact

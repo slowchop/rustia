@@ -194,9 +194,11 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    obsolete program bytecode, constants, inline caches, and coverage rows are reclaimed only after no reachable
    closure, coroutine, or retained host value refers to them. Compiled constant atoms stay rooted while their
    program is live, and stale object/program handles cannot alias replacements. Still required before public
-   release: explicit heap/allocation limits, catchable-or-host OOM policy, honest live/peak accounting,
-   lifecycle reset, and representative long-lived native/wasm mixed-heap evidence. GC interval tuning is not a
-   substitute for those remaining policies.
+   release: explicit heap/allocation limits, catchable-or-host OOM policy, lifecycle reset, and representative
+   long-lived native/wasm mixed-heap evidence. `Vm::memory_stats()` now provides a VM-owned live/reserved census
+   and opt-in instruction-boundary peaks. Script-visible `gcinfo`/`collectgarbage("count")` remain compatibility
+   values until quotas supply an O(1) incremental counter; calling the full census from legacy polling loops is
+   intentionally rejected as quadratic. GC interval tuning is not a substitute for the remaining policies.
 2. **A mechanically enforced per-decision lifecycle.** The deterministic host contract says authoritative
    cross-tick state lives in host slots and the script heap is transient, but the public facade does not yet
    provide a decision/scratch reset primitive. Hosts can reconstruct a VM today; the roadmap requires an
@@ -207,8 +209,8 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    `__tostring`), tab-joins, and writes to a host stdout sink when one is attached; no-argument
    `os.time`/`os.date` read a wall-clock provider with a pinned-epoch fallback; and `os.clock` reads a
    monotonic-clock provider with a deterministic logical-clock fallback. Still open:
-   `collectgarbage("count")` is zero and `gcinfo` is synthetic — honest internal VM memory
-   accounting/telemetry remains. Typed callbacks also need
+   Host-facing VM memory telemetry is now honest for the documented VM-owned logical allocation boundary;
+   script-visible counters still need the O(1) quota counter. Typed callbacks still need
    a cheap worker-local/per-call host-context seam instead of requiring captured synchronization for mutable
    slot/effect state. Practical multi-file
    programs also need a host-owned `require` resolver, execute-once cache, and cycle detection; resolution
@@ -236,7 +238,7 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    baseline from [`57-memory-benchmarking.md`](57-memory-benchmarking.md), including existing workloads,
    bounded-churn and intentional-retention controls, and dashboard views. Add reachability-based
    reclamation/reuse for ordinary VM objects, coroutine state, and loaded programs; those stores, retained host
-   roots, and stale-handle defenses are now active. Next add honest aggregate live/peak accounting,
+   roots, stale-handle defenses, and VM-owned live/reserved/peak accounting are now active. Next add
    heap/allocation quotas; an explicit atomic OOM contract; and a deterministic
    per-decision reset/reuse API. Prove it with long-lived churn, cyclic graphs, hot reload, retained handles,
    weak tables, native/wasm parity, and representative mixed-heap memory evidence before tuning final intervals.
@@ -403,8 +405,8 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
    Coroutine/program stores, true public-handle rooting, weak tables, cyclic graphs, and hot reload now have the
    first safety coverage; complete the native/wasm pressure evidence. Ordinary retained calls survive hot reload
    outside an explicit reset epoch.
-2. **Complete the host service and rich-value boundary:** honest
-   internal VM memory telemetry and quota enforcement, a worker-local/per-call host context, a host-owned
+2. **Complete the host service and rich-value boundary:** memory quota enforcement, a worker-local/per-call
+   host context, a host-owned
    deterministic module resolver/cache, binary/rich/cyclic values, live-value serde, transactional
    extension/module/hot-reload failure behavior, and stronger traceback diagnostics.
 3. **Tune the GC intervals only after reclamation exists** (Deterministic instruction-count interval =
