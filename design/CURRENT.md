@@ -190,11 +190,13 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    reuses tables, functions, upvalues, atomized runtime strings, userdata, buffers, and vectors. Public retained
    values are collector roots. At an explicit idle boundary, `Vm::collect_garbage()` completes two reclamation
    passes, removes coroutine state whose userdata is unreachable, compacts bounded table/buffer/interner
-   storage, and shrinks VM/coroutine/traceback stack capacity. Compiled constant atoms stay rooted and stale
-   handles cannot alias replacements. Still required before public release: loaded-program reclamation,
-   explicit heap/allocation limits, catchable-or-host OOM policy, honest live/peak accounting, lifecycle reset,
-   and representative long-lived native/wasm mixed-heap evidence. GC interval tuning is not a substitute for
-   those remaining policies.
+   storage, and shrinks VM/coroutine/traceback stack capacity. Loaded programs also use generation-safe slots:
+   obsolete program bytecode, constants, inline caches, and coverage rows are reclaimed only after no reachable
+   closure, coroutine, or retained host value refers to them. Compiled constant atoms stay rooted while their
+   program is live, and stale object/program handles cannot alias replacements. Still required before public
+   release: explicit heap/allocation limits, catchable-or-host OOM policy, honest live/peak accounting,
+   lifecycle reset, and representative long-lived native/wasm mixed-heap evidence. GC interval tuning is not a
+   substitute for those remaining policies.
 2. **A mechanically enforced per-decision lifecycle.** The deterministic host contract says authoritative
    cross-tick state lives in host slots and the script heap is transient, but the public facade does not yet
    provide a decision/scratch reset primitive. Hosts can reconstruct a VM today; the roadmap requires an
@@ -233,10 +235,9 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    `pre-reclamation-18b58d8` now freezes the 110-row/990-process cross-engine short-spike/phase/retention
    baseline from [`57-memory-benchmarking.md`](57-memory-benchmarking.md), including existing workloads,
    bounded-churn and intentional-retention controls, and dashboard views. Add reachability-based
-   reclamation/reuse for ordinary VM objects, coroutine state, and loaded programs; the shared ordinary-object
-   mark phase has begun, so next add true host-handle roots/epoch-safe reuse before enabling its sweep;
-   heap/allocation
-   quotas; an explicit OOM contract; and a deterministic
+   reclamation/reuse for ordinary VM objects, coroutine state, and loaded programs; those stores, retained host
+   roots, and stale-handle defenses are now active. Next add honest aggregate live/peak accounting,
+   heap/allocation quotas; an explicit atomic OOM contract; and a deterministic
    per-decision reset/reuse API. Prove it with long-lived churn, cyclic graphs, hot reload, retained handles,
    weak tables, native/wasm parity, and representative mixed-heap memory evidence before tuning final intervals.
 2. **Finish the host-facing runtime boundary.** Add honest internal
@@ -399,8 +400,9 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
    against the frozen pre-reclamation baseline.** Use the external cgroup/smaps phase, peak, and
    retention protocol in [`57-memory-benchmarking.md`](57-memory-benchmarking.md); cohort
    `pre-reclamation-18b58d8` is the pre-change comparator.
-   Coroutine/program stores, true public-handle rooting, weak tables, cyclic graphs, hot reload, and native/wasm
-   behavior must remain correct; ordinary retained calls survive hot reload outside an explicit reset epoch.
+   Coroutine/program stores, true public-handle rooting, weak tables, cyclic graphs, and hot reload now have the
+   first safety coverage; complete the native/wasm pressure evidence. Ordinary retained calls survive hot reload
+   outside an explicit reset epoch.
 2. **Complete the host service and rich-value boundary:** honest
    internal VM memory telemetry and quota enforcement, a worker-local/per-call host context, a host-owned
    deterministic module resolver/cache, binary/rich/cyclic values, live-value serde, transactional

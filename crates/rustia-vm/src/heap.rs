@@ -91,6 +91,10 @@ impl<T> ReusableSlots<T> {
         })
     }
 
+    fn values(&self) -> impl Iterator<Item = &T> {
+        self.slots.iter().filter_map(|slot| slot.value.as_ref())
+    }
+
     fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
         self.slots.iter_mut().filter_map(|slot| slot.value.as_mut())
     }
@@ -965,6 +969,22 @@ impl VmCell {
     #[inline]
     pub fn function_kind(&self, handle: u32) -> Option<FunctionKind> {
         self.functions.get(handle).map(|function| function.kind)
+    }
+
+    pub(crate) fn referenced_programs(&self) -> Vec<u32> {
+        self.functions
+            .values()
+            .filter_map(|function| match function.kind {
+                FunctionKind::Bytecode {
+                    program: Some(program),
+                    ..
+                }
+                | FunctionKind::DynamicMain { program } => Some(program),
+                FunctionKind::Bytecode { program: None, .. }
+                | FunctionKind::Host(_)
+                | FunctionKind::Native(_) => None,
+            })
+            .collect()
     }
 
     /// Returns the data needed to dispatch a function call in one arena access.

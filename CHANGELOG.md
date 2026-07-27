@@ -15,6 +15,10 @@ Current unpublished workspace version: `0.0.1`.
   state, and releases spare table, buffer, interner, and stack allocations to
   the process allocator while preserving retained values and compiled string
   constants.
+- Loaded programs now use generation-checked reusable handles. Explicit host
+  quiescence reclaims obsolete program bytecode, constants, inline caches, and
+  coverage rows after the last reachable closure/coroutine/retained value drops;
+  stale program handles cannot alias a replacement loaded into the reused slot.
 - Luau 0.709 conformance tracking is pending-free, with the current manifest at
   694 fixtures and 493 behavior refs.
 - VM strings and larger insertion-ordered table hash parts now use compact

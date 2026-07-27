@@ -303,8 +303,10 @@ instrumentation cost. Such traces explain *why* a cohort moved; they do not repl
    unreachable cycles, function environments/captures, userdata payloads, metatables, vector keys, and weak
    edges. Runtime string atoms now use the same generation-safe lifetime model, and explicit host quiescence
    completes reclamation, prunes unreachable coroutine records, compacts bounded application tables, and shrinks
-   heap/interner/stack capacity. Loaded-program reclamation, allocator page-return evidence, quotas, atomic OOM,
-   and lifecycle reset are next.
+   heap/interner/stack capacity. Loaded programs now use generation-safe reusable handles; quiescence preserves
+   programs referenced by live closures/coroutines/host roots and reclaims obsolete bytecode, constants, caches,
+   and coverage rows without stale-handle aliasing. Allocator page-return evidence, accounting, quotas, atomic
+   OOM, and lifecycle reset are next.
 8. Add the periodic `memory.max` pressure curve and targeted attribution tooling.
 
 ## Acceptance gate before memory work is declared complete

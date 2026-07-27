@@ -46,6 +46,9 @@ const SITE_CACHE_INELIGIBLE: u32 = u32::MAX;
 const IMPORT_CACHE_LANES: usize = 3;
 const CLOSURE_CALL_CACHE_LANES: usize = 4;
 const OPCODE_TAG_SPACE: usize = u8::MAX as usize + 1;
+const PROGRAM_HANDLE_INDEX_BITS: u32 = 24;
+const PROGRAM_HANDLE_INDEX_MASK: u32 = (1 << PROGRAM_HANDLE_INDEX_BITS) - 1;
+const PROGRAM_HANDLE_MAX_GENERATION: u8 = u8::MAX;
 // Zero selects the validated special-cost path; every other opcode tag defaults to one fuel.
 const OPCODE_FUEL_OR_SPECIAL: [u8; OPCODE_TAG_SPACE] = {
     let mut costs = [1; OPCODE_TAG_SPACE];
@@ -202,7 +205,7 @@ pub struct Vm {
     conformance_vertex_metatable: Option<u32>,
     extensions: ExtensionRegistry,
     host_functions: Vec<HostFunctionOp>,
-    dynamic_programs: Vec<LoadedProgram>,
+    dynamic_programs: LoadedPrograms,
     call_stack: Vec<CallStackFrame>,
     coroutines: Vec<CoroutineState>,
     running_coroutines: Vec<usize>,
@@ -324,6 +327,123 @@ struct LoadedProgram {
     closure_call_fast_entries: u64,
     #[cfg(test)]
     closure_call_guard_exits: u64,
+}
+
+#[derive(Default)]
+struct LoadedPrograms {
+    slots: Vec<LoadedProgramSlot>,
+    free: Vec<u32>,
+}
+
+struct LoadedProgramSlot {
+    generation: u8,
+    value: Option<LoadedProgram>,
+}
+
+impl LoadedPrograms {
+    fn insert(&mut self, value: LoadedProgram) -> Option<u32> {
+        if let Some(index) = self.free.pop() {
+            let slot = self.slots.get_mut(index as usize)?;
+            debug_assert!(slot.value.is_none());
+            debug_assert!(slot.generation > 0);
+            slot.value = Some(value);
+            return Some(program_handle(index, slot.generation));
+        }
+
+        let index = u32::try_from(self.slots.len()).ok()?;
+        if index >= PROGRAM_HANDLE_INDEX_MASK {
+            return None;
+        }
+        self.slots.push(LoadedProgramSlot {
+            generation: 0,
+            value: Some(value),
+        });
+        Some(program_handle(index, 0))
+    }
+
+    #[inline]
+    fn get(&self, handle: u32) -> Option<&LoadedProgram> {
+        let (index, generation) = program_handle_parts(handle);
+        let slot = self.slots.get(index)?;
+        (slot.generation == generation)
+            .then_some(slot.value.as_ref())
+            .flatten()
+    }
+
+    #[inline]
+    fn get_mut(&mut self, handle: u32) -> Option<&mut LoadedProgram> {
+        let (index, generation) = program_handle_parts(handle);
+        let slot = self.slots.get_mut(index)?;
+        (slot.generation == generation)
+            .then_some(slot.value.as_mut())
+            .flatten()
+    }
+
+    fn values(&self) -> impl Iterator<Item = &LoadedProgram> {
+        self.slots.iter().filter_map(|slot| slot.value.as_ref())
+    }
+
+    #[cfg(test)]
+    fn last(&self) -> Option<&LoadedProgram> {
+        self.slots.iter().rev().find_map(|slot| slot.value.as_ref())
+    }
+
+    fn retain_handles(&mut self, mut keep: impl FnMut(u32) -> bool) -> Vec<u32> {
+        let mut removed = Vec::new();
+        for (index, slot) in self.slots.iter_mut().enumerate() {
+            if slot.value.is_none() {
+                continue;
+            }
+            let handle = program_handle(index as u32, slot.generation);
+            if keep(handle) {
+                continue;
+            }
+            slot.value = None;
+            removed.push(handle);
+            if slot.generation < PROGRAM_HANDLE_MAX_GENERATION {
+                slot.generation += 1;
+                self.free.push(index as u32);
+            }
+        }
+        removed
+    }
+
+    fn release_spare_capacity(&mut self) {
+        self.slots.shrink_to_fit();
+        self.free.shrink_to_fit();
+    }
+
+    #[cfg(test)]
+    fn occupied_len(&self) -> usize {
+        self.slots
+            .iter()
+            .filter(|slot| slot.value.is_some())
+            .count()
+    }
+}
+
+#[inline]
+const fn program_handle(index: u32, generation: u8) -> u32 {
+    debug_assert!(index < PROGRAM_HANDLE_INDEX_MASK);
+    index | ((generation as u32) << PROGRAM_HANDLE_INDEX_BITS)
+}
+
+#[inline]
+const fn program_handle_parts(handle: u32) -> (usize, u8) {
+    (
+        (handle & PROGRAM_HANDLE_INDEX_MASK) as usize,
+        (handle >> PROGRAM_HANDLE_INDEX_BITS) as u8,
+    )
+}
+
+#[cfg(test)]
+impl std::ops::Index<usize> for LoadedPrograms {
+    type Output = LoadedProgram;
+
+    fn index(&self, handle: usize) -> &Self::Output {
+        self.get(handle as u32)
+            .expect("test dynamic program handle must be live")
+    }
 }
 
 impl LoadedProgram {
@@ -1451,7 +1571,7 @@ impl Vm {
             conformance_vertex_metatable: standard_globals.conformance_vertex_metatable,
             extensions: ExtensionRegistry::default(),
             host_functions: Vec::new(),
-            dynamic_programs: Vec::new(),
+            dynamic_programs: LoadedPrograms::default(),
             call_stack: Vec::new(),
             coroutines: Vec::new(),
             running_coroutines: Vec::new(),
@@ -1735,16 +1855,40 @@ impl Vm {
         self.heap.finish_collection_cycle();
         self.heap.collect_weak_tables_with_roots(&roots);
         self.prune_unreachable_coroutines();
+        self.reclaim_unreferenced_programs();
         // The first pass can remove VM-side roots (including interned
-        // strings and unreachable coroutine state). A second completed arena
-        // cycle returns the backing allocations those roots owned.
+        // strings, unreachable coroutine state, and obsolete loaded programs).
+        // A second completed arena cycle returns the backing allocations those
+        // roots owned.
         let roots = self.collectgarbage_roots(&[]);
         self.heap.finish_collection_cycle();
         self.heap.collect_weak_tables_with_roots(&roots);
         self.heap.release_spare_capacity();
+        self.dynamic_programs.release_spare_capacity();
         self.release_stack_capacity();
         self.gc_step_counter = 0;
         self.gc_stopped = false;
+    }
+
+    fn reclaim_unreferenced_programs(&mut self) {
+        let referenced = self
+            .heap
+            .referenced_programs()
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        let removed = self
+            .dynamic_programs
+            .retain_handles(|handle| referenced.contains(&handle));
+        if removed.is_empty() {
+            return;
+        }
+        let removed = removed
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        self.coverage_hits.retain(|key, _| {
+            key.program
+                .is_none_or(|program| !removed.contains(&program))
+        });
     }
 
     fn run_function(
@@ -5369,7 +5513,7 @@ impl Vm {
         if let Some(program_id) = program_id {
             if let Some(atom) = self
                 .dynamic_programs
-                .get(program_id as usize)
+                .get(program_id)
                 .and_then(|program| program.constant_atom(index))
             {
                 return Ok(Some(atom));
@@ -5382,7 +5526,7 @@ impl Vm {
         })?;
         let atom = self.heap.intern_shared_string(shared);
         if let Some(program_id) = program_id {
-            if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+            if let Some(program) = self.dynamic_programs.get_mut(program_id) {
                 program.set_constant_atom(index, atom);
             }
         }
@@ -5427,7 +5571,7 @@ impl Vm {
         if let Some(program_id) = program_id {
             if let Some(atom) = self
                 .dynamic_programs
-                .get(program_id as usize)
+                .get(program_id)
                 .and_then(|program| program.constant_atom(index))
             {
                 return Ok(Value::string_atom(atom));
@@ -5470,7 +5614,7 @@ impl Vm {
             return key;
         };
         if let (Some(program_id), Ok(index)) = (program_id, usize::try_from(constant_index)) {
-            if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+            if let Some(program) = self.dynamic_programs.get_mut(program_id) {
                 program.set_constant_atom(index, atom);
             }
         }
@@ -7905,7 +8049,7 @@ impl Vm {
 
     fn dynamic_program(&self, program_id: u32) -> Result<Arc<Program>> {
         self.dynamic_programs
-            .get(program_id as usize)
+            .get(program_id)
             .map(|program| Arc::clone(&program.program))
             .ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
@@ -7915,9 +8059,7 @@ impl Vm {
     }
 
     fn hot_ir(&self, program_id: u32, prototype: Option<u32>, pc: usize) -> Option<Arc<HotIr>> {
-        self.dynamic_programs
-            .get(program_id as usize)?
-            .hot_ir(prototype, pc)
+        self.dynamic_programs.get(program_id)?.hot_ir(prototype, pc)
     }
 
     fn table_inline_cache(
@@ -7927,7 +8069,7 @@ impl Vm {
         pc: usize,
     ) -> Option<TableStringInlineCache> {
         self.dynamic_programs
-            .get(program_id as usize)?
+            .get(program_id)?
             .table_inline_cache(prototype, pc)
     }
 
@@ -7938,7 +8080,7 @@ impl Vm {
         pc: usize,
         entry: TableStringInlineCache,
     ) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
             if program
                 .set_table_inline_cache(prototype, pc, entry)
                 .is_some()
@@ -7960,7 +8102,7 @@ impl Vm {
         lane: usize,
     ) -> Option<TableStringInlineCache> {
         self.dynamic_programs
-            .get(program_id as usize)?
+            .get(program_id)?
             .import_inline_cache(prototype, pc, lane)
     }
 
@@ -7972,7 +8114,7 @@ impl Vm {
         lane: usize,
         entry: TableStringInlineCache,
     ) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
             if program
                 .set_import_inline_cache(prototype, pc, lane, entry)
                 .is_some()
@@ -7993,7 +8135,7 @@ impl Vm {
         pc: usize,
     ) -> Option<NativeCallInlineCache> {
         self.dynamic_programs
-            .get(program_id as usize)?
+            .get(program_id)?
             .native_call_inline_cache(prototype, pc)
     }
 
@@ -8004,7 +8146,7 @@ impl Vm {
         pc: usize,
         entry: NativeCallInlineCache,
     ) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
             if program
                 .set_native_call_inline_cache(prototype, pc, entry)
                 .is_some()
@@ -8027,7 +8169,7 @@ impl Vm {
         callee_prototype: u32,
     ) -> Option<ClosureCallCacheEntry> {
         self.dynamic_programs
-            .get(caller_program as usize)?
+            .get(caller_program)?
             .closure_call_inline_cache(caller_prototype, pc, callee_program, callee_prototype)
     }
 
@@ -8038,7 +8180,7 @@ impl Vm {
         pc: usize,
         entry: ClosureCallCacheEntry,
     ) {
-        if let Some(program) = self.dynamic_programs.get_mut(caller_program as usize) {
+        if let Some(program) = self.dynamic_programs.get_mut(caller_program) {
             let _filled = program.set_closure_call_inline_cache(caller_prototype, pc, entry);
             #[cfg(test)]
             if matches!(_filled, Some(true)) {
@@ -8050,7 +8192,7 @@ impl Vm {
 
     #[cfg(test)]
     fn record_closure_call_prototype_hit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
             program.closure_call_prototype_hits =
                 program.closure_call_prototype_hits.saturating_add(1);
         }
@@ -8058,21 +8200,21 @@ impl Vm {
 
     #[cfg(test)]
     fn record_closure_call_fast_entry(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
             program.closure_call_fast_entries = program.closure_call_fast_entries.saturating_add(1);
         }
     }
 
     #[cfg(test)]
     fn record_closure_call_guard_exit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
             program.closure_call_guard_exits = program.closure_call_guard_exits.saturating_add(1);
         }
     }
 
     #[cfg(test)]
     fn record_native_call_inline_cache_hit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
             program.native_call_inline_cache_hits =
                 program.native_call_inline_cache_hits.saturating_add(1);
         }
@@ -8080,21 +8222,21 @@ impl Vm {
 
     #[cfg(test)]
     fn record_table_inline_cache_hit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
             program.table_inline_cache_hits = program.table_inline_cache_hits.saturating_add(1);
         }
     }
 
     #[cfg(test)]
     fn record_hot_ir_entry(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
             program.hot_ir_entries = program.hot_ir_entries.saturating_add(1);
         }
     }
 
     #[cfg(test)]
     fn record_hot_ir_iterations(&mut self, program_id: u32, iterations: u64) {
-        let Some(program) = self.dynamic_programs.get_mut(program_id as usize) else {
+        let Some(program) = self.dynamic_programs.get_mut(program_id) else {
             return;
         };
         program.hot_ir_iterations = program.hot_ir_iterations.saturating_add(iterations);
@@ -8102,7 +8244,7 @@ impl Vm {
 
     #[cfg(test)]
     fn record_hot_ir_guard_exit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id as usize) {
+        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
             program.hot_ir_guard_exits = program.hot_ir_guard_exits.saturating_add(1);
         }
     }
@@ -8116,13 +8258,13 @@ impl Vm {
     }
 
     fn retain_dynamic_program(&mut self, program: Program) -> Result<u32> {
-        let program_id = u32::try_from(self.dynamic_programs.len()).map_err(|_| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "dynamic program handle overflow",
+        self.dynamic_programs
+            .insert(LoadedProgram::new(program))
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "dynamic program handle overflow",
+                })
             })
-        })?;
-        self.dynamic_programs.push(LoadedProgram::new(program));
-        Ok(program_id)
     }
 
     fn call_bytecode_function(
@@ -8178,7 +8320,7 @@ impl Vm {
         };
         let Some(plan) = self
             .dynamic_programs
-            .get(program_id as usize)
+            .get(program_id)
             .and_then(|program| program.leaf_call_plan(prototype))
         else {
             return Ok(None);
@@ -8264,7 +8406,7 @@ impl Vm {
         } else {
             let Some(plan) = self
                 .dynamic_programs
-                .get(callee_program as usize)
+                .get(callee_program)
                 .and_then(|program| program.leaf_call_plan(callee_prototype))
             else {
                 return Ok(None);
@@ -11547,7 +11689,7 @@ impl Vm {
             .map(Value::table),
         );
         roots.extend(self.external_roots.borrow().values.values().copied());
-        for loaded in &self.dynamic_programs {
+        for loaded in self.dynamic_programs.values() {
             roots.extend(
                 loaded
                     .constant_atoms
@@ -24498,16 +24640,67 @@ mod inline_cache_tests {
             .expect("string constant")
             .expect("string atom");
         assert_eq!(first_atom, second_atom);
+        let retained_function = vm
+            .heap
+            .alloc_function(Some(first_program), 0, Vec::new(), vm.globals)
+            .expect("program-rooting function");
+        let retained_function = vm.retain_value(Value::function(retained_function));
 
         let dead = vm
             .heap
             .intern_string("runtime-string-not-referenced-after-quiescence");
         vm.collect_garbage();
+        assert_eq!(vm.dynamic_programs.occupied_len(), 1);
+        assert!(vm.dynamic_programs.get(first_program).is_some());
+        assert!(vm.dynamic_programs.get(second_program).is_none());
         assert_eq!(
             vm.heap.string_bytes(first_atom).as_deref(),
             Some(b"field".as_slice())
         );
         assert!(vm.heap.string_bytes(dead).is_none());
+        drop(retained_function);
+        vm.collect_garbage();
+        assert_eq!(vm.dynamic_programs.occupied_len(), 0);
+        assert!(vm.heap.string_bytes(first_atom).is_none());
+    }
+
+    #[test]
+    fn explicit_collection_reuses_program_slots_without_stale_handle_aliasing() {
+        let program = Program::with_functions(
+            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            Vec::new(),
+            vec![Function::new(
+                vec![Instruction::new(Opcode::Return, 0, 0, 0)],
+                1,
+            )],
+        );
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let old_program = vm
+            .retain_dynamic_program(program.clone())
+            .expect("first program");
+        let old_function = vm
+            .heap
+            .alloc_function(Some(old_program), 0, Vec::new(), vm.globals)
+            .expect("first function");
+        let old_root = vm.retain_value(Value::function(old_function));
+
+        vm.collect_garbage();
+        assert!(vm.dynamic_programs.get(old_program).is_some());
+
+        drop(old_root);
+        vm.collect_garbage();
+        assert!(vm.dynamic_programs.get(old_program).is_none());
+
+        let replacement = vm
+            .retain_dynamic_program(program)
+            .expect("replacement program");
+        assert_ne!(replacement, old_program);
+        assert_eq!(
+            program_handle_parts(replacement).0,
+            program_handle_parts(old_program).0
+        );
+        assert!(vm.dynamic_program(old_program).is_err());
+        assert!(vm.dynamic_program(replacement).is_ok());
     }
 
     #[test]

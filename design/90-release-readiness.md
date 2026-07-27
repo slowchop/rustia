@@ -6,28 +6,23 @@ blockers below take precedence over packaging polish.
 
 ## Current Release Blockers (Ordered)
 
-1. Complete reachability-based reclamation and generation-safe reuse for the
-   append-only table/function/upvalue/coroutine, atomized and non-inline runtime
-   string, userdata, buffer/vector, and loaded-program stores. Copyable public
-   `Function`/`Exports` handles must become true roots or use an ownership
-   redesign before slots can be reused.
-2. Add honest live/peak VM memory accounting, per-VM aggregate quotas, and a
+1. Add honest live/peak VM memory accounting, per-VM aggregate quotas, and a
    documented atomic OOM path with catchable-or-host-visible failure tests.
-3. Add a deterministic decision-boundary reset/reuse API with epoch-safe
+2. Add a deterministic decision-boundary reset/reuse API with epoch-safe
    invalidation for every retained handle and a versioned reset/replay ABI.
-4. Add capability-tagged output and clock/time providers, real internal VM
+3. Add capability-tagged output and clock/time providers, real internal VM
    memory telemetry, and cheap worker-local/per-call host context; reject
    nondeterministic providers in DeterministicSim.
-5. Add a host-owned script-visible `require` resolver/cache with deterministic
+4. Add a host-owned script-visible `require` resolver/cache with deterministic
    identity, execute-once behavior, and cycle diagnostics.
-6. Complete the release value surface for binary strings, buffers, vectors,
+5. Complete the release value surface for binary strings, buffers, vectors,
    non-scalar/identity keys, opaque identity-safe userdata handles,
    shared/cyclic table graphs, and a lifetime-safe live serde layer. Full
    mlua-style `UserData`/`Scope` registration remains a later optional layer.
-7. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
+6. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
    transactional extension/module/hot-reload failure behavior, and
    differential/fuzz coverage before stabilizing and publishing the API.
-8. Close the full correctness/build/golden target matrix from
+7. Close the full correctness/build/golden target matrix from
    [`00-constraints.md`](00-constraints.md); Linux remains the only active
    timing source, but not the only correctness target.
 

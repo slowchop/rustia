@@ -145,9 +145,10 @@ instruction counter, never byte-debt, while Standard/LuauCompat may use allocati
 **Production implementation gap (2026-07-27):** ordinary reachability and generation-safe reuse cover tables,
 functions, upvalues, atomized runtime strings, userdata, buffers, and vectors; retained host values are explicit
 roots. Host-requested quiescence also prunes unreachable coroutine state and releases spare heap/interner/stack
-capacity. The remaining axis-D work is loaded-program reclamation, honest live/peak accounting, aggregate
-quotas and atomic OOM behavior, lifecycle reset, and long-run native/wasm mixed-heap plateau evidence before
-interval tuning is meaningful.
+capacity. Loaded programs use generation-safe reusable handles and host-requested quiescence drops obsolete
+program bytecode, constants, inline caches, and coverage rows after the final reachable function disappears.
+The remaining axis-D work is honest live/peak accounting, aggregate quotas and atomic OOM behavior, lifecycle
+reset, and long-run native/wasm mixed-heap plateau evidence before interval tuning is meaningful.
 
 **E. Determinism enforcement — LOCKED.** Dense `Vec` array parts plus insertion-ordered `Vec` hash entries;
 larger hash parts use a stable custom-mixed open-addressed `Vec<u32>` side index at no more than 50% load, and
