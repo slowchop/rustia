@@ -531,21 +531,19 @@ impl VmCell {
 
     pub fn collect_weak_tables_with_roots(&mut self, roots: &[Value]) {
         let tables = &mut self.tables;
-        let functions = &self.functions;
-        let upvalues = &self.upvalues;
+        let functions = &mut self.functions;
+        let upvalues = &mut self.upvalues;
         self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+            let mut root = root.unlock(mc).borrow_mut();
             let mode_key = b"__mode";
-            let Some(mode_atom) = string_index_lookup(&root, mode_key, stable_bytes_hash(mode_key))
-            else {
-                return;
+            let mode_atom = string_index_lookup(&root, mode_key, stable_bytes_hash(mode_key));
+            let modes = if let Some(mode_atom) = mode_atom {
+                (0..tables.len())
+                    .map(|index| table_weak_mode(&root, tables, index, mode_atom))
+                    .collect::<Vec<_>>()
+            } else {
+                vec![None; tables.len()]
             };
-            let modes = (0..tables.len())
-                .map(|index| table_weak_mode(&root, tables, index, mode_atom))
-                .collect::<Vec<_>>();
-            if modes.iter().all(Option::is_none) {
-                return;
-            }
             let live = mark_heap_reachable(&root, tables, functions, upvalues, &modes, roots);
             debug_assert!(live.upvalues.len() <= upvalues.len());
             for (index, mode) in modes.into_iter().enumerate() {
@@ -555,6 +553,7 @@ impl VmCell {
                     }
                 }
             }
+            reclaim_unreachable(&mut root, tables, functions, upvalues, &live);
         })
     }
 
@@ -2012,7 +2011,11 @@ fn mark_heap_reachable(
     let mut queue = VecDeque::new();
 
     for value in roots {
-        mark_heap_value(*value, &mut refs, &mut queue);
+        if let Some(cell) = value.as_capture_cell() {
+            mark_heap_upvalue(cell, upvalues, &mut live_upvalues, &mut refs, &mut queue);
+        } else {
+            mark_heap_value(*value, &mut refs, &mut queue);
+        }
     }
 
     while let Some(reference) = queue.pop_front() {
@@ -2038,13 +2041,14 @@ fn mark_heap_reachable(
                 mark_heap_value(Value::table(function.environment), &mut refs, &mut queue);
                 for capture in &function.captures {
                     let value = if let Some(cell) = capture.cell() {
-                        let Some(upvalue) = upvalues.get(cell as usize) else {
-                            continue;
-                        };
-                        if !live_upvalues.insert(cell) {
-                            continue;
-                        }
-                        upvalue.value
+                        mark_heap_upvalue(
+                            cell,
+                            upvalues,
+                            &mut live_upvalues,
+                            &mut refs,
+                            &mut queue,
+                        );
+                        continue;
                     } else {
                         let Some(value) = capture.direct_value() else {
                             continue;
@@ -2084,6 +2088,21 @@ fn mark_heap_reachable(
     HeapLiveSet {
         refs,
         upvalues: live_upvalues,
+    }
+}
+
+fn mark_heap_upvalue(
+    cell: u32,
+    upvalues: &[UpvalueData],
+    live_upvalues: &mut BTreeSet<u32>,
+    refs: &mut BTreeSet<HeapRef>,
+    queue: &mut VecDeque<HeapRef>,
+) {
+    let Some(upvalue) = upvalues.get(cell as usize) else {
+        return;
+    };
+    if live_upvalues.insert(cell) {
+        mark_heap_value(upvalue.value, refs, queue);
     }
 }
 
@@ -2129,6 +2148,69 @@ fn sweep_weak_table(table: &mut TableData, mode: WeakMode, live: &HeapLiveSet) {
     if table.hash.len() != hash_len {
         bump_table_shape_version(table);
         rebuild_hash_index(table);
+    }
+}
+
+fn reclaim_unreachable(
+    root: &mut RootData<'_>,
+    tables: &mut [TableData],
+    functions: &mut [FunctionData],
+    upvalues: &mut [UpvalueData],
+    live: &HeapLiveSet,
+) {
+    for (index, table) in tables.iter_mut().enumerate() {
+        let Ok(handle) = u32::try_from(index) else {
+            break;
+        };
+        if live.refs.contains(&HeapRef::Table(handle)) {
+            continue;
+        }
+        table.array = Vec::new();
+        table.hash = Vec::new();
+        table.hash_index = Vec::new();
+        table.metatable = None;
+        table.readonly = false;
+        bump_table_shape_version(table);
+    }
+
+    for (index, function) in functions.iter_mut().enumerate() {
+        let Ok(handle) = u32::try_from(index) else {
+            break;
+        };
+        if live.refs.contains(&HeapRef::Function(handle)) {
+            continue;
+        }
+        function.captures = SmallVec::new();
+    }
+
+    for (index, upvalue) in upvalues.iter_mut().enumerate() {
+        let Ok(handle) = u32::try_from(index) else {
+            break;
+        };
+        if !live.upvalues.contains(&handle) {
+            upvalue.value = Value::nil();
+        }
+    }
+
+    for (index, userdata) in root.userdatas.iter_mut().enumerate() {
+        let Ok(handle) = u32::try_from(index) else {
+            break;
+        };
+        if !live.refs.contains(&HeapRef::Userdata(handle)) {
+            *userdata = UserdataData {
+                metatable: None,
+                payload: UserdataPayload::None,
+            };
+        }
+    }
+
+    for (index, buffer) in root.buffers.iter_mut().enumerate() {
+        let Ok(handle) = u32::try_from(index) else {
+            break;
+        };
+        if !live.refs.contains(&HeapRef::Buffer(handle)) {
+            buffer.bytes = Vec::new();
+        }
     }
 }
 
@@ -3017,6 +3099,33 @@ mod tests {
         assert!(!live.refs.contains(&HeapRef::Table(dead_environment)));
         assert!(!live.refs.contains(&HeapRef::Table(dead_target)));
         assert!(!live.upvalues.contains(&dead_upvalue));
+    }
+
+    #[test]
+    fn ordinary_sweep_releases_unreachable_backing_allocations() {
+        let mut heap = VmCell::new();
+        let live = heap.alloc_filled_array_table(128, Value::number(1.0));
+        let dead = heap.alloc_filled_array_table(4_096, Value::number(2.0));
+        let dead_upvalue = heap
+            .alloc_upvalue(Value::table(dead))
+            .expect("dead upvalue handle");
+        let dead_function = heap
+            .alloc_native_function_with_upvalues(NativeFunction::Assert, vec![dead_upvalue], dead)
+            .expect("dead function handle");
+        let dead_buffer = heap
+            .alloc_buffer(vec![0xaa; 64 * 1_024])
+            .expect("dead buffer handle");
+
+        heap.collect_weak_tables_with_roots(&[Value::table(live)]);
+
+        assert_eq!(heap.tables[live as usize].array.len(), 128);
+        assert!(heap.tables[dead as usize].array.is_empty());
+        assert!(heap.functions[dead_function as usize].captures.is_empty());
+        assert!(heap.upvalues[dead_upvalue as usize].value.is_nil());
+        heap.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            assert!(root.buffers[dead_buffer as usize].bytes.is_empty());
+        });
     }
 
     #[test]

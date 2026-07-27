@@ -53,6 +53,7 @@ impl Rustia {
 
     pub fn compile_and_run(&mut self, source: &str) -> Result<Exports> {
         let value = self.compile_and_run_raw(source)?;
+        let value = self.vm.retain_value(value);
         Ok(Exports::new(value, self.generation))
     }
 
@@ -62,6 +63,7 @@ impl Rustia {
         source: &str,
     ) -> Result<Exports> {
         let value = self.compile_and_run_raw_named(source_name, source)?;
+        let value = self.vm.retain_value(value);
         Ok(Exports::new(value, self.generation))
     }
 
@@ -264,6 +266,7 @@ impl Rustia {
     pub fn install(&mut self, module: CompiledModule) -> Result<Exports> {
         let value = self.vm.run(&module.program).map_err(Error::Vm)?;
         self.advance_generation();
+        let value = self.vm.retain_value(value);
         Ok(Exports::new(value, self.generation))
     }
 
@@ -283,6 +286,11 @@ impl Rustia {
     #[inline]
     pub(crate) fn vm_mut(&mut self) -> &mut Vm {
         &mut self.vm
+    }
+
+    #[inline]
+    pub(crate) fn vm(&self) -> &Vm {
+        &self.vm
     }
 }
 
@@ -1166,6 +1174,48 @@ return {
         );
         let current: f64 = second_decide.call_current(&mut rustia, ()).unwrap();
         assert_eq!(current, 2.0);
+    }
+
+    #[test]
+    fn retained_function_root_survives_after_exports_are_dropped() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let exports = rustia
+            .compile_and_run(
+                "local state = { answer = 42 }; \
+                 return { read = function() return state.answer end }",
+            )
+            .unwrap();
+        let read = exports.function(&mut rustia, "read").unwrap();
+        drop(exports);
+
+        let _: f64 = rustia.run("collectgarbage('collect'); return 0").unwrap();
+        let answer: f64 = read.call(&mut rustia, ()).unwrap();
+        assert_eq!(answer, 42.0);
+    }
+
+    #[test]
+    fn retained_handles_reject_a_different_vm() {
+        let mut first = Rustia::new(Profile::ReproducibleStandard);
+        let exports = first
+            .compile_and_run("return { read = function() return 42 end }")
+            .unwrap();
+        let read = exports.function(&mut first, "read").unwrap();
+        let mut second = Rustia::new(Profile::ReproducibleStandard);
+
+        let exports_error = exports.value(&mut second).unwrap_err();
+        assert!(
+            exports_error
+                .to_string()
+                .contains("belongs to a different Rustia VM"),
+            "{exports_error}"
+        );
+        let function_error = read.call::<_, f64>(&mut second, ()).unwrap_err();
+        assert!(
+            function_error
+                .to_string()
+                .contains("belongs to a different Rustia VM"),
+            "{function_error}"
+        );
     }
 
     #[test]

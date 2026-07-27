@@ -294,9 +294,11 @@ instrumentation cost. Such traces explain *why* a cohort moved; they do not repl
 5. Record and promote the pre-reclamation dedicated-Linux baseline.
 6. Add cycles, table resize, string, closure/coroutine, VM-scale, reset, module, and OOM lanes.
 7. Implement reclamation/quotas/reset, compare against the frozen baseline, and retain raw evidence. The shared
-   ordinary-object mark phase is now implemented and tested for reachable versus unreachable cycles, upvalue
-   cells, function environments/captures, userdata payloads, metatables, and weak edges; exported-handle roots
-   and generation-safe sweep/reuse are next.
+   ordinary-object mark phase and first backing-allocation sweep are implemented for tables, functions,
+   upvalues, userdata, and buffers. Public exported handles use VM-specific reference-counted root leases, with
+   tests covering collection after dropping the parent exports, cross-VM rejection, reachable versus
+   unreachable cycles, function environments/captures, userdata payloads, metatables, and weak edges.
+   Generation-safe slot reuse and the remaining append-only stores are next.
 8. Add the periodic `memory.max` pressure curve and targeted attribution tooling.
 
 ## Acceptance gate before memory work is declared complete

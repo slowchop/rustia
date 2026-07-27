@@ -22,7 +22,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::num::NonZeroU64;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 const LUAU_TABLE_MAX_SIZE: usize = 1 << 26;
@@ -207,6 +207,7 @@ pub struct Vm {
     coroutines: Vec<CoroutineState>,
     running_coroutines: Vec<usize>,
     running_coroutine_stack_bases: Vec<usize>,
+    active_coroutine_frames: Vec<Vec<CoroutineFrame>>,
     yield_collectors: Vec<Vec<Vec<Value>>>,
     last_error_traceback: Option<TracebackSnapshot>,
     protected_error_traceback: Option<TracebackSnapshot>,
@@ -218,11 +219,66 @@ pub struct Vm {
     executed_instructions: u64,
     next_weak_collection_instruction: u64,
     deterministic_collection_count: u64,
+    external_roots: Rc<RefCell<ExternalRootRegistry>>,
     coverage_hits: BTreeMap<CoverageKey, u64>,
     #[cfg(test)]
     hot_ir_mode: HotIrTestMode,
     #[cfg(test)]
     closure_call_mode: ClosureCallTestMode,
+}
+
+#[derive(Default)]
+struct ExternalRootRegistry {
+    next_id: u64,
+    values: BTreeMap<u64, Value>,
+}
+
+struct ExternalRootLease {
+    id: u64,
+    registry: Weak<RefCell<ExternalRootRegistry>>,
+}
+
+impl Drop for ExternalRootLease {
+    fn drop(&mut self) {
+        if let Some(registry) = self.registry.upgrade() {
+            registry.borrow_mut().values.remove(&self.id);
+        }
+    }
+}
+
+/// A script value kept alive outside the VM execution stack.
+///
+/// Clones share one root lease. The value stops participating in tracing when
+/// the final clone is dropped, so embedders can safely keep exported tables and
+/// functions across collections without making them permanent VM roots.
+#[derive(Clone)]
+pub struct RetainedValue {
+    value: Value,
+    lease: Rc<ExternalRootLease>,
+}
+
+impl RetainedValue {
+    #[inline]
+    pub fn value(&self) -> Value {
+        self.value
+    }
+
+    #[inline]
+    pub fn belongs_to(&self, vm: &Vm) -> bool {
+        self.lease
+            .registry
+            .upgrade()
+            .is_some_and(|registry| Rc::ptr_eq(&registry, &vm.external_roots))
+    }
+}
+
+impl fmt::Debug for RetainedValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RetainedValue")
+            .field("value", &self.value)
+            .finish_non_exhaustive()
+    }
 }
 
 #[cfg(test)]
@@ -1400,6 +1456,7 @@ impl Vm {
             coroutines: Vec::new(),
             running_coroutines: Vec::new(),
             running_coroutine_stack_bases: Vec::new(),
+            active_coroutine_frames: Vec::new(),
             yield_collectors: Vec::new(),
             last_error_traceback: None,
             protected_error_traceback: None,
@@ -1411,6 +1468,7 @@ impl Vm {
             executed_instructions: 0,
             next_weak_collection_instruction,
             deterministic_collection_count: 0,
+            external_roots: Rc::new(RefCell::new(ExternalRootRegistry::default())),
             coverage_hits: BTreeMap::new(),
             #[cfg(test)]
             hot_ir_mode: HotIrTestMode::Auto,
@@ -1604,6 +1662,24 @@ impl Vm {
         self.call_value(&program, function, args, 0, &mut fuel)
     }
 
+    /// Retains a value as an embedder-owned collector root.
+    pub fn retain_value(&mut self, value: Value) -> RetainedValue {
+        let id = {
+            let mut roots = self.external_roots.borrow_mut();
+            let id = roots.next_id;
+            roots.next_id = roots.next_id.wrapping_add(1);
+            roots.values.insert(id, value);
+            id
+        };
+        RetainedValue {
+            value,
+            lease: Rc::new(ExternalRootLease {
+                id,
+                registry: Rc::downgrade(&self.external_roots),
+            }),
+        }
+    }
+
     #[inline]
     pub const fn deterministic_collection_count(&self) -> u64 {
         self.deterministic_collection_count
@@ -1762,6 +1838,7 @@ impl Vm {
                         self.truncate_stackless_self_call_debug_frames(debug_mark);
                         self.update_current_gc_roots(
                             &registers,
+                            &register_cells,
                             &varargs,
                             &pending_return_prefixes,
                         );
@@ -1815,6 +1892,7 @@ impl Vm {
                                 self.truncate_stackless_self_call_debug_frames(debug_mark);
                                 self.update_current_gc_roots(
                                     &registers,
+                                    &register_cells,
                                     &varargs,
                                     &pending_return_prefixes,
                                 );
@@ -1853,7 +1931,12 @@ impl Vm {
 
             'run_function_loop: loop {
                 if let Some((continuation, resume_results)) = resumed_continuation.take() {
-                    self.update_current_gc_roots(&registers, &varargs, &pending_return_prefixes);
+                    self.update_current_gc_roots(
+                        &registers,
+                        &register_cells,
+                        &varargs,
+                        &pending_return_prefixes,
+                    );
                     let continuation_root_mark =
                         self.push_bytecode_continuation_roots(&continuation);
                     let continuation_result = self.apply_bytecode_continuation(
@@ -1986,6 +2069,7 @@ impl Vm {
                             }
                             self.update_current_gc_roots(
                                 &registers,
+                                &register_cells,
                                 &varargs,
                                 &pending_return_prefixes,
                             );
@@ -2001,6 +2085,7 @@ impl Vm {
                             {
                                 self.update_current_gc_roots(
                                     &registers,
+                                    &register_cells,
                                     &varargs,
                                     &pending_return_prefixes,
                                 );
@@ -3404,6 +3489,7 @@ impl Vm {
                                     };
                                     let root_mark = self.push_stackless_self_call_roots(
                                         &registers,
+                                        &register_cells,
                                         &varargs,
                                         &pending_return_prefixes,
                                         &continuation,
@@ -3644,6 +3730,7 @@ impl Vm {
                                     };
                                     let root_mark = self.push_stackless_self_call_roots(
                                         &registers,
+                                        &register_cells,
                                         &varargs,
                                         &pending_return_prefixes,
                                         &continuation,
@@ -10475,7 +10562,10 @@ impl Vm {
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
+        self.active_coroutine_frames.push(frames.clone());
         let flow = self.resume_coroutine_frames_inner(frames, resume_results, fuel);
+        let active = self.active_coroutine_frames.pop();
+        debug_assert!(active.is_some());
         let stack_base = self.running_coroutine_stack_bases.pop();
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
         let running = self.running_coroutines.pop();
@@ -10493,7 +10583,10 @@ impl Vm {
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
+        self.active_coroutine_frames.push(frames.clone());
         let flow = self.propagate_coroutine_error(frames, error, fuel);
+        let active = self.active_coroutine_frames.pop();
+        debug_assert!(active.is_some());
         let stack_base = self.running_coroutine_stack_bases.pop();
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
         let running = self.running_coroutines.pop();
@@ -11421,39 +11514,38 @@ impl Vm {
         let mut roots = Vec::new();
         roots.push(Value::table(self.globals));
         roots.push(Value::table(self.standard_globals));
+        roots.extend(
+            [
+                self.conformance_int64_metatable,
+                self.conformance_vec2_metatable,
+                self.conformance_vertex_metatable,
+            ]
+            .into_iter()
+            .flatten()
+            .map(Value::table),
+        );
+        roots.extend(self.external_roots.borrow().values.values().copied());
         roots.extend_from_slice(args);
         for frame in &self.call_stack {
-            roots.push(Value::table(frame.environment));
-            if let Some(function) = frame.function {
-                roots.push(function);
-            }
-            roots.extend_from_slice(&frame.roots);
-            roots.extend_from_slice(&frame.stackless_roots);
+            collect_call_stack_frame_roots(&mut roots, frame);
         }
         for coroutine in &self.coroutines {
             roots.push(coroutine.callee);
             for frame in &coroutine.frames {
-                match frame {
-                    CoroutineFrame::Bytecode(frame) => {
-                        if let Some(function) = frame.current_function {
-                            roots.push(function);
-                        }
-                        roots.extend_from_slice(&frame.registers);
-                        roots.extend_from_slice(&frame.varargs);
-                        roots.extend_from_slice(&frame.pending_return_prefixes);
-                        extend_bytecode_continuation_roots(&mut roots, &frame.continuation);
-                        for stackless_frame in &frame.stackless_self_calls {
-                            extend_stackless_self_call_frame_roots(&mut roots, stackless_frame);
-                        }
-                    }
-                    CoroutineFrame::PCall => {}
-                    CoroutineFrame::XPCall(frame) => {
-                        roots.push(frame.handler);
-                    }
-                }
+                self.extend_coroutine_frame_roots(&mut roots, frame);
             }
             if let Some(error) = coroutine.error {
                 roots.push(error);
+            }
+            if let Some(snapshot) = &coroutine.debug_snapshot {
+                for frame in &snapshot.frames {
+                    collect_call_stack_frame_roots(&mut roots, frame);
+                }
+            }
+        }
+        for frames in &self.active_coroutine_frames {
+            for frame in frames {
+                self.extend_coroutine_frame_roots(&mut roots, frame);
             }
         }
         for collector in &self.yield_collectors {
@@ -11470,9 +11562,40 @@ impl Vm {
         roots
     }
 
+    fn extend_coroutine_frame_roots(&self, roots: &mut Vec<Value>, frame: &CoroutineFrame) {
+        match frame {
+            CoroutineFrame::Bytecode(frame) => {
+                if let Some(function) = frame.current_function {
+                    roots.push(function);
+                }
+                roots.push(Value::table(frame.environment));
+                for capture in &frame.captures {
+                    if let Some(cell) = capture.cell() {
+                        roots.push(Value::capture_cell(cell));
+                    } else if let Some(value) = self.heap.capture_get(*capture) {
+                        roots.push(value);
+                    }
+                }
+                roots.extend_from_slice(&frame.registers);
+                extend_capture_cell_roots(roots, &frame.register_cells);
+                roots.extend_from_slice(&frame.varargs);
+                roots.extend_from_slice(&frame.pending_return_prefixes);
+                extend_bytecode_continuation_roots(roots, &frame.continuation);
+                for stackless_frame in &frame.stackless_self_calls {
+                    extend_stackless_self_call_frame_roots(roots, stackless_frame);
+                }
+            }
+            CoroutineFrame::PCall => {}
+            CoroutineFrame::XPCall(frame) => {
+                roots.push(frame.handler);
+            }
+        }
+    }
+
     fn update_current_gc_roots(
         &mut self,
         registers: &[Value],
+        register_cells: &[Option<u32>],
         varargs: &[Value],
         pending_return_prefixes: &[Value],
     ) {
@@ -11481,6 +11604,7 @@ impl Vm {
         };
         frame.roots.clear();
         frame.roots.extend_from_slice(registers);
+        extend_capture_cell_roots(&mut frame.roots, register_cells);
         frame.roots.extend_from_slice(varargs);
         frame.roots.extend_from_slice(pending_return_prefixes);
     }
@@ -11488,6 +11612,7 @@ impl Vm {
     fn push_stackless_self_call_roots(
         &mut self,
         registers: &[Value],
+        register_cells: &[Option<u32>],
         varargs: &[Value],
         pending_return_prefixes: &[Value],
         continuation: &BytecodeContinuation,
@@ -11497,6 +11622,7 @@ impl Vm {
         };
         let mark = frame.stackless_roots.len();
         extend_weak_collectable_roots(&mut frame.stackless_roots, registers);
+        extend_capture_cell_roots(&mut frame.stackless_roots, register_cells);
         extend_weak_collectable_roots(&mut frame.stackless_roots, varargs);
         extend_weak_collectable_roots(&mut frame.stackless_roots, pending_return_prefixes);
         extend_bytecode_continuation_weak_roots(&mut frame.stackless_roots, continuation);
@@ -20080,6 +20206,10 @@ fn extend_weak_collectable_roots(roots: &mut Vec<Value>, values: &[Value]) {
     );
 }
 
+fn extend_capture_cell_roots(roots: &mut Vec<Value>, cells: &[Option<u32>]) {
+    roots.extend(cells.iter().copied().flatten().map(Value::capture_cell));
+}
+
 fn extend_bytecode_continuation_roots(roots: &mut Vec<Value>, continuation: &BytecodeContinuation) {
     match continuation {
         BytecodeContinuation::CallExpandAfterTrailing {
@@ -20120,7 +20250,9 @@ fn extend_bytecode_continuation_weak_roots(
 }
 
 fn extend_stackless_self_call_frame_roots(roots: &mut Vec<Value>, frame: &StacklessSelfCallFrame) {
+    collect_stackless_debug_frame_roots(roots, &frame.debug_frame);
     roots.extend_from_slice(&frame.registers);
+    extend_capture_cell_roots(roots, &frame.register_cells);
     roots.extend_from_slice(&frame.varargs);
     roots.extend_from_slice(&frame.pending_return_prefixes);
     extend_bytecode_continuation_roots(roots, &frame.continuation);
@@ -20130,7 +20262,9 @@ fn extend_stackless_self_call_frame_weak_roots(
     roots: &mut Vec<Value>,
     frame: &StacklessSelfCallFrame,
 ) {
+    collect_stackless_debug_frame_roots(roots, &frame.debug_frame);
     extend_weak_collectable_roots(roots, &frame.registers);
+    extend_capture_cell_roots(roots, &frame.register_cells);
     extend_weak_collectable_roots(roots, &frame.varargs);
     extend_weak_collectable_roots(roots, &frame.pending_return_prefixes);
     extend_bytecode_continuation_weak_roots(roots, &frame.continuation);

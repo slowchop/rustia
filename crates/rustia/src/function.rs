@@ -3,18 +3,18 @@ use crate::value::{
     IntoRustiaMulti, OwnedValue,
 };
 use crate::{Error, Result, Rustia};
-use rustia_vm::{HostFunctionOp, OpCapability, Value as RawValue, ValueKind, Vm};
+use rustia_vm::{HostFunctionOp, OpCapability, RetainedValue, Value as RawValue, ValueKind, Vm};
 use std::any::type_name;
 use std::sync::Arc;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Function {
-    value: RawValue,
+    value: RetainedValue,
     generation: u64,
 }
 
 impl Function {
-    pub(crate) const fn new(value: RawValue, generation: u64) -> Self {
+    pub(crate) fn new(value: RetainedValue, generation: u64) -> Self {
         Self { value, generation }
     }
 
@@ -35,6 +35,7 @@ impl Function {
         Args: IntoRustiaMulti,
         Return: FromRustiaMulti,
     {
+        ensure_same_vm("function handle", &self.value, rustia)?;
         let raw_args = args
             .into_rustia_multi()
             .iter()
@@ -42,7 +43,7 @@ impl Function {
             .collect::<Result<Vec<_>>>()?;
         let raw_results = rustia
             .vm_mut()
-            .call_retained_function(self.value, &raw_args)
+            .call_retained_function(self.value.value(), &raw_args)
             .map_err(Error::Vm)?;
         let results = raw_results
             .into_iter()
@@ -61,14 +62,14 @@ impl Function {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Exports {
-    value: RawValue,
+    value: RetainedValue,
     generation: u64,
 }
 
 impl Exports {
-    pub(crate) const fn new(value: RawValue, generation: u64) -> Self {
+    pub(crate) fn new(value: RetainedValue, generation: u64) -> Self {
         Self { value, generation }
     }
 
@@ -85,7 +86,8 @@ impl Exports {
     }
 
     pub fn value(&self, rustia: &mut Rustia) -> Result<OwnedValue> {
-        snapshot_value(rustia.vm_mut(), self.value)
+        ensure_same_vm("exports handle", &self.value, rustia)?;
+        snapshot_value(rustia.vm_mut(), self.value.value())
     }
 
     pub fn value_current(&self, rustia: &mut Rustia) -> Result<OwnedValue> {
@@ -131,6 +133,7 @@ impl Exports {
         if value.kind() != ValueKind::Function {
             return Err(Error::Embed(format!("export `{name}` is not a function")));
         }
+        let value = rustia.vm_mut().retain_value(value);
         Ok(Function::new(value, self.generation))
     }
 
@@ -140,12 +143,22 @@ impl Exports {
     }
 
     fn raw_get(&self, rustia: &mut Rustia, name: &str) -> Result<RawValue> {
+        ensure_same_vm("exports handle", &self.value, rustia)?;
         let key = rustia.vm_mut().string(name);
         rustia
             .vm_mut()
-            .raw_table_get_value(self.value, key)
+            .raw_table_get_value(self.value.value(), key)
             .map_err(Error::Vm)
     }
+}
+
+fn ensure_same_vm(label: &str, value: &RetainedValue, rustia: &Rustia) -> Result<()> {
+    if value.belongs_to(rustia.vm()) {
+        return Ok(());
+    }
+    Err(Error::Embed(format!(
+        "{label} belongs to a different Rustia VM"
+    )))
 }
 
 fn ensure_current_generation(
