@@ -193,12 +193,14 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    storage, and shrinks VM/coroutine/traceback stack capacity. Loaded programs also use generation-safe slots:
    obsolete program bytecode, constants, inline caches, and coverage rows are reclaimed only after no reachable
    closure, coroutine, or retained host value refers to them. Compiled constant atoms stay rooted while their
-   program is live, and stale object/program handles cannot alias replacements. Still required before public
-   release: explicit heap/allocation limits, catchable-or-host OOM policy, lifecycle reset, and representative
-   long-lived native/wasm mixed-heap evidence. `Vm::memory_stats()` now provides a VM-owned live/reserved census
-   and opt-in instruction-boundary peaks. Script-visible `gcinfo`/`collectgarbage("count")` remain compatibility
-   values until quotas supply an O(1) incremental counter; calling the full census from legacy polling loops is
-   intentionally rejected as quadratic. GC interval tuning is not a substitute for the remaining policies.
+   program is live, and stale object/program handles cannot alias replacements. `Vm::memory_stats()` provides a
+   VM-owned live/reserved census and opt-in instruction-boundary peaks. `VmSettings::memory_limit_bytes` now
+   enforces that logical-live boundary with one forced-collection retry, catchable OOM, preflight for large
+   string/table/buffer requests, and candidate-before-commit growing table writes. Script-visible
+   `gcinfo`/`collectgarbage("count")` remain compatibility values until O(1) incremental accounting replaces the
+   correctness-first quota-mode boundary scan. Still required before public release: lifecycle reset and
+   representative long-lived native/wasm mixed-heap pressure evidence. GC interval tuning is not a substitute
+   for those remaining policies.
 2. **A mechanically enforced per-decision lifecycle.** The deterministic host contract says authoritative
    cross-tick state lives in host slots and the script heap is transient, but the public facade does not yet
    provide a decision/scratch reset primitive. Hosts can reconstruct a VM today; the roadmap requires an
@@ -238,12 +240,12 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    baseline from [`57-memory-benchmarking.md`](57-memory-benchmarking.md), including existing workloads,
    bounded-churn and intentional-retention controls, and dashboard views. Add reachability-based
    reclamation/reuse for ordinary VM objects, coroutine state, and loaded programs; those stores, retained host
-   roots, stale-handle defenses, and VM-owned live/reserved/peak accounting are now active. Next add
-   heap/allocation quotas; an explicit atomic OOM contract; and a deterministic
-   per-decision reset/reuse API. Prove it with long-lived churn, cyclic graphs, hot reload, retained handles,
-   weak tables, native/wasm parity, and representative mixed-heap memory evidence before tuning final intervals.
-2. **Finish the host-facing runtime boundary.** Add honest internal
-   memory accounting/telemetry, a worker-local/per-call host context, a host-owned module resolver/cache,
+   roots, stale-handle defenses, VM-owned live/reserved/peak accounting, and logical-live quota/atomic OOM
+   semantics are now active. Next add a deterministic per-decision reset/reuse API and optimize quota accounting
+   to O(1). Prove the memory path with long-lived churn, cyclic graphs, hot reload, retained handles, weak tables,
+   native/wasm parity, and representative mixed-heap evidence before tuning final intervals.
+2. **Finish the host-facing runtime boundary.** Add a worker-local/per-call host context, a host-owned module
+   resolver/cache,
    complete binary/rich-value interop, zero-copy live serde, and transactional install/hot-reload/stack
    diagnostics. Keep these layered and public-clean; do not leak grabby-specific types or a raw C API.
 3. **Harden the production engine** against the LOCKED decisions ([`30-architecture.md`](30-architecture.md) §1–§4):
@@ -398,15 +400,15 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 
 ## What's next (the genuine remaining public-release gates)
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items, in order:
-1. **Implement and validate bounded object reclamation, quotas, OOM behavior, and per-decision reset/reuse
+1. **Validate bounded object reclamation, quotas, OOM behavior, and implement per-decision reset/reuse
    against the frozen pre-reclamation baseline.** Use the external cgroup/smaps phase, peak, and
    retention protocol in [`57-memory-benchmarking.md`](57-memory-benchmarking.md); cohort
    `pre-reclamation-18b58d8` is the pre-change comparator.
    Coroutine/program stores, true public-handle rooting, weak tables, cyclic graphs, and hot reload now have the
    first safety coverage; complete the native/wasm pressure evidence. Ordinary retained calls survive hot reload
    outside an explicit reset epoch.
-2. **Complete the host service and rich-value boundary:** memory quota enforcement, a worker-local/per-call
-   host context, a host-owned
+2. **Complete the host service and rich-value boundary:** O(1) quota accounting, a worker-local/per-call host
+   context, a host-owned
    deterministic module resolver/cache, binary/rich/cyclic values, live-value serde, transactional
    extension/module/hot-reload failure behavior, and stronger traceback diagnostics.
 3. **Tune the GC intervals only after reclamation exists** (Deterministic instruction-count interval =

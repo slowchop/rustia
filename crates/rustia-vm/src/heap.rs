@@ -650,6 +650,13 @@ pub(crate) enum TableStringHashWrite {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum QuotaTableWrite {
+    Stored,
+    WouldExceed,
+    Invalid,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TableNumericArrayWrite {
     Stored,
     Deferred,
@@ -688,6 +695,24 @@ pub struct VmCell {
 }
 
 impl VmCell {
+    pub(crate) const fn filled_array_table_live_bytes(size: usize) -> usize {
+        size_of::<ReusableSlot<TableData>>().saturating_add(size.saturating_mul(size_of::<Value>()))
+    }
+
+    pub(crate) const fn buffer_live_bytes(size: usize) -> usize {
+        size_of::<ReusableSlot<BufferData>>().saturating_add(size)
+    }
+
+    pub(crate) const fn owned_string_live_bytes(size: usize) -> usize {
+        // The arena allocation is counted in addition to the reusable atom
+        // slot and owned byte vector. Keep a conservative fixed allowance for
+        // the arena header and Vec descriptor.
+        size_of::<ReusableSlot<InternedString<'static>>>()
+            .saturating_add(size)
+            .saturating_add(size_of::<Vec<u8>>())
+            .saturating_add(64)
+    }
+
     pub fn new() -> Self {
         let arena = VmArena::new(|mc| {
             Gc::new(
@@ -969,6 +994,7 @@ impl VmCell {
             .expect("table slot limit exceeded")
     }
 
+    #[cfg(test)]
     pub fn alloc_filled_array_table(&mut self, size: usize, value: Value) -> u32 {
         self.tables
             .insert(TableData {
@@ -980,6 +1006,24 @@ impl VmCell {
                 shape_version: 0,
             })
             .expect("table slot limit exceeded")
+    }
+
+    pub(crate) fn try_alloc_filled_array_table(
+        &mut self,
+        size: usize,
+        value: Value,
+    ) -> Option<u32> {
+        let mut array = Vec::new();
+        array.try_reserve_exact(size).ok()?;
+        array.resize(size, value);
+        self.tables.insert(TableData {
+            array,
+            hash: Vec::new(),
+            hash_index: Vec::new(),
+            readonly: false,
+            metatable: None,
+            shape_version: 0,
+        })
     }
 
     pub fn alloc_function(
@@ -1524,32 +1568,102 @@ impl VmCell {
         if table.readonly {
             return None;
         }
-        if value.is_nil() {
-            if let Some(index) = table_key_array_index(table_key) {
-                if let Some(slot) = table.array.get_mut(index - 1) {
-                    *slot = Value::nil();
-                }
-            }
-            if let Some(entry) = table_hash_entry_mut(table, table_key) {
-                entry.value = Value::nil();
-            }
-            return Some(());
-        }
-        if let Some(index) = table_key_array_index(table_key) {
-            if index <= table.array.len() + 1 {
-                if index > table.array.len() {
-                    table.array.resize(index, Value::nil());
-                }
-                table.array[index - 1] = value;
-                if !table.hash.is_empty() {
-                    remove_hash_key(table, table_key);
-                }
-                return Some(());
-            }
-        }
-
-        set_hash_key(table, table_key, key_value, value);
+        set_table_data(table, table_key, key_value, value);
         Some(())
+    }
+
+    /// Stages the complete table update before committing it, so a quota
+    /// rejection cannot leave a guest-visible partial write.
+    pub(crate) fn table_set_with_live_growth_limit(
+        &mut self,
+        table: u32,
+        key: Value,
+        value: Value,
+        allowed_growth: usize,
+    ) -> QuotaTableWrite {
+        let heap_before = self.memory_usage().live_bytes;
+        let key_value = key;
+        let table_key = if let Some(number) = key.as_number() {
+            let Some(key) = number_table_key(number) else {
+                return QuotaTableWrite::Invalid;
+            };
+            key
+        } else {
+            let key = if let Some(short) = key.as_short_string() {
+                let stable_hash = stable_bytes_hash(short.as_bytes());
+                let atom = self
+                    .find_string_atom_bytes(short.as_bytes())
+                    .unwrap_or_else(|| self.intern_inline_string(short, stable_hash));
+                Value::string_atom(atom)
+            } else {
+                key
+            };
+            let Some(key) = self.table_key_from_value(key) else {
+                return QuotaTableWrite::Invalid;
+            };
+            key
+        };
+        let Some(key_value) = self.table_key_visible_value(table_key, key_value) else {
+            return QuotaTableWrite::Invalid;
+        };
+        let Some(existing) = self.tables.get(table) else {
+            return QuotaTableWrite::Invalid;
+        };
+        if existing.readonly {
+            return QuotaTableWrite::Invalid;
+        }
+        let old_table_bytes = table_data_live_bytes(existing);
+        let mut candidate = existing.clone();
+        set_table_data(&mut candidate, table_key, key_value, value);
+        let table_growth = table_data_live_bytes(&candidate).saturating_sub(old_table_bytes);
+        let atom_growth = self.memory_usage().live_bytes.saturating_sub(heap_before);
+        if atom_growth.saturating_add(table_growth) > allowed_growth {
+            return QuotaTableWrite::WouldExceed;
+        }
+        *self
+            .tables
+            .get_mut(table)
+            .expect("validated table remains available") = candidate;
+        QuotaTableWrite::Stored
+    }
+
+    pub(crate) fn table_set_array_slot_with_live_growth_limit(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+        allowed_growth: usize,
+    ) -> QuotaTableWrite {
+        if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
+            return QuotaTableWrite::Invalid;
+        }
+        let Some(existing) = self.tables.get(table) else {
+            return QuotaTableWrite::Invalid;
+        };
+        if existing.readonly {
+            return QuotaTableWrite::Invalid;
+        }
+        let old_table_bytes = table_data_live_bytes(existing);
+        let mut candidate = existing.clone();
+        let Some(key) = number_table_key(one_based_index as f64) else {
+            return QuotaTableWrite::Invalid;
+        };
+        if one_based_index > candidate.array.len() {
+            candidate.array.resize(one_based_index, Value::nil());
+        }
+        candidate.array[one_based_index - 1] = value;
+        if !candidate.hash.is_empty() {
+            remove_hash_key(&mut candidate, key);
+        }
+        let growth = table_data_live_bytes(&candidate).saturating_sub(old_table_bytes);
+        if growth > allowed_growth {
+            return QuotaTableWrite::WouldExceed;
+        }
+        *self
+            .tables
+            .get_mut(table)
+            .expect("validated table remains available") = candidate;
+        QuotaTableWrite::Stored
     }
 
     pub fn table_set_array_slot(
@@ -1955,6 +2069,42 @@ fn set_hash_number_key(table: &mut TableData, number: f64, value: Value) {
         _ => Value::number(number),
     };
     set_hash_key(table, key, key_value, value);
+}
+
+fn table_data_live_bytes(table: &TableData) -> usize {
+    table
+        .array
+        .len()
+        .saturating_mul(size_of::<Value>())
+        .saturating_add(table.hash.len().saturating_mul(size_of::<TableEntry>()))
+        .saturating_add(table.hash_index.len().saturating_mul(size_of::<u32>()))
+}
+
+fn set_table_data(table: &mut TableData, table_key: TableKey, key_value: Value, value: Value) {
+    if value.is_nil() {
+        if let Some(index) = table_key_array_index(table_key) {
+            if let Some(slot) = table.array.get_mut(index - 1) {
+                *slot = Value::nil();
+            }
+        }
+        if let Some(entry) = table_hash_entry_mut(table, table_key) {
+            entry.value = Value::nil();
+        }
+        return;
+    }
+    if let Some(index) = table_key_array_index(table_key) {
+        if index <= table.array.len() + 1 {
+            if index > table.array.len() {
+                table.array.resize(index, Value::nil());
+            }
+            table.array[index - 1] = value;
+            if !table.hash.is_empty() {
+                remove_hash_key(table, table_key);
+            }
+            return;
+        }
+    }
+    set_hash_key(table, table_key, key_value, value);
 }
 
 fn set_hash_key(table: &mut TableData, key: TableKey, key_value: Value, value: Value) {

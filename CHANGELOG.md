@@ -24,6 +24,12 @@ Current unpublished workspace version: `0.0.1`.
   marking uses compact per-store generation arrays rather than tree-set nodes,
   reducing temporary collection scratch while preserving the shared
   weak-table/reclamation graph.
+- `VmSettings::memory_limit_bytes` and
+  `RustiaBuilder::memory_limit_bytes(...)` cap VM-owned logical live bytes with
+  identical native/wasm32 semantics. Limit pressure forces one collection,
+  then returns catchable `OutOfMemory`; large string/table/buffer allocations
+  are preflighted and growth writes stage a complete candidate before commit,
+  so rejection is recoverable without a partial table mutation.
 - Luau 0.709 conformance tracking is pending-free, with the current manifest at
   694 fixtures and 493 behavior refs.
 - VM strings and larger insertion-ordered table hash parts now use compact

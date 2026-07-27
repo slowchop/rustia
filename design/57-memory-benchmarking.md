@@ -307,9 +307,11 @@ instrumentation cost. Such traces explain *why* a cohort moved; they do not repl
    programs referenced by live closures/coroutines/host roots and reclaims obsolete bytecode, constants, caches,
    and coverage rows without stale-handle aliasing. VM-owned live/reserved accounting and opt-in
    instruction-boundary peaks are implemented as internal corroboration. Compact per-store generation arrays
-   replace tree-set mark scratch. The script-visible counters await the O(1) incremental quota tracker because
-   a full census in legacy `gcinfo` polling loops is quadratic. Allocator page-return evidence, quotas, atomic
-   OOM, and lifecycle reset are next.
+   replace tree-set mark scratch. A logical-live per-VM quota now forces one collection before catchable OOM,
+   preflights large string/table/buffer requests, and commits growing table writes only after an exact candidate
+   fits. The script-visible counters and quota hot path still await O(1) incremental accounting because a full
+   census in legacy `gcinfo` polling loops is quadratic. Native/wasm pressure evidence, allocator page-return
+   evidence, and lifecycle reset are next.
 8. Add the periodic `memory.max` pressure curve and targeted attribution tooling.
 
 ## Acceptance gate before memory work is declared complete

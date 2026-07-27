@@ -149,9 +149,13 @@ capacity. Loaded programs use generation-safe reusable handles and host-requeste
 program bytecode, constants, inline caches, and coverage rows after the final reachable function disappears.
 `Vm::memory_stats()` now exposes VM-owned live/reserved bytes and optional instruction-boundary peaks. Mark
 scratch uses compact generation arrays instead of general-purpose tree nodes. The legacy script-visible counters
-remain on their O(1) compatibility path until the quota tracker can back them without a quadratic full census.
-The remaining axis-D work is aggregate quotas and atomic OOM behavior, lifecycle reset, and long-run native/wasm
-mixed-heap plateau evidence before interval tuning is meaningful.
+remain on their O(1) compatibility path until incremental accounting can back them without a quadratic full
+census. `VmSettings::memory_limit_bytes` now enforces a deterministic logical-live quota: pressure forces one
+collection, preflights large string/table/buffer allocations, stages growing table writes before commit, and
+returns catchable `OutOfMemory`. The correctness-first implementation scans at quota-enabled instruction
+boundaries; O(1) incremental accounting is a later performance optimization. The remaining axis-D work is
+lifecycle reset and long-run native/wasm mixed-heap pressure/plateau evidence before interval tuning is
+meaningful.
 
 **E. Determinism enforcement — LOCKED.** Dense `Vec` array parts plus insertion-ordered `Vec` hash entries;
 larger hash parts use a stable custom-mixed open-addressed `Vec<u32>` side index at no more than 50% load, and

@@ -78,6 +78,20 @@ impl RustiaBuilder {
         self
     }
 
+    /// Caps VM-owned logical live bytes. The same value has deterministic
+    /// semantics on native and wasm32; process RSS and allocator capacity
+    /// remain separate host-level measurements.
+    pub fn memory_limit_bytes(mut self, bytes: usize) -> Self {
+        self.settings.memory_limit_bytes = Some(bytes);
+        self
+    }
+
+    /// Enables exact instruction-boundary live/reserved peak telemetry.
+    pub fn memory_tracking(mut self, enabled: bool) -> Self {
+        self.settings.enable_memory_tracking = enabled;
+        self
+    }
+
     pub fn extension(mut self, extension: RustiaExtension) -> Self {
         self.extensions.push(extension);
         self

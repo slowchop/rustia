@@ -17,7 +17,7 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 1311,
+      "file_count": 1312,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
@@ -1260,6 +1260,7 @@
         "wasm/measure-dispatch-wasm.js",
         "wasm/measure-rustia-wasm-sm.js",
         "wasm/measure-rustia-wasm.mjs",
+        "wasm/test-rustia-memory-limit.mjs",
         "wasm-gate.json",
         "workloads/javascript/01_dense_tables.js",
         "workloads/javascript/02_sparse_tables.js",

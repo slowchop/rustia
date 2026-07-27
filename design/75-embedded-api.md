@@ -20,9 +20,10 @@ Typed run/compile helpers, owned scalar and table values, typed host functions, 
 retained `Function`/`Exports` handles with install-generation checks, owned serde, hot reload, diagnostics,
 early declarative macro sugar, and the runtime output/time services slice (environment presets, a stdout sink,
 and determinism-labeled clock providers per [`72-host-services.md`](72-host-services.md)) are implemented.
-Object/program reclamation and real VM-owned live/reserved/peak telemetry are now implemented. The next
-release-critical slice is not more facade decoration: it is aggregate quotas and atomic OOM, epoch-safe decision
-reset, a cheap worker-local/per-call host context, a host-owned module resolver/cache,
+Object/program reclamation, real VM-owned live/reserved/peak telemetry, and the correctness-first logical-live
+quota/atomic OOM path are now implemented. The next release-critical slice is not more facade decoration: it is
+native/wasm pressure evidence and O(1) quota accounting, epoch-safe decision reset, a cheap worker-local/per-call
+host context, a host-owned module resolver/cache,
 transactional installation/reload failures, rich graph-preserving values, and live zero-copy serde.
 
 ## Non-Negotiable Requirements
@@ -295,8 +296,11 @@ store authoritative state on the GC heap instead of in captured host slots.
    presets, `ServiceClock` provider sockets, real `print` composition, pinned-epoch and logical-clock
    fallbacks; honest host-facing VM-owned telemetry (`Vm::memory_stats()`) is now implemented by the later
    accounting tranche, while script-visible counters await the O(1) quota tracker.
-9. ⏳ quotas/atomic OOM, epoch-safe reset, per-call host context, modules,
-   transactional install/reload, and rich/live values — next.
+9. ✅ logical-live quotas and atomic/catchable OOM — implemented through
+   `VmSettings::memory_limit_bytes` / `RustiaBuilder::memory_limit_bytes`; native/wasm pressure evidence and an
+   O(1) accounting optimization remain.
+10. ⏳ epoch-safe reset, per-call host context, modules, transactional install/reload, and rich/live values —
+    next.
 
 Defer mlua-style `UserData`/`Scope` until the above is stable. The first useful embedding target is typed
 owned values, retained script function handles, serde, and deterministic extension registration.

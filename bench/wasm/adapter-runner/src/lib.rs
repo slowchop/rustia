@@ -93,6 +93,45 @@ pub unsafe extern "C" fn bench_prepare(adapter: u32, ptr: *const u8, len: usize)
 }
 
 #[no_mangle]
+/// Prepares the rustia adapter with a logical-live VM quota.
+///
+/// # Safety
+///
+/// `ptr` must point to `len` initialized bytes that remain valid for the
+/// duration of this call.
+pub unsafe extern "C" fn bench_prepare_rustia_limited(
+    ptr: *const u8,
+    len: usize,
+    memory_limit_bytes: usize,
+) -> i32 {
+    let bytes = slice::from_raw_parts(ptr, len);
+    let source = match str::from_utf8(bytes) {
+        Ok(source) => source,
+        Err(error) => {
+            set_last_result(format!(
+                "error\nbench workload source is not valid UTF-8: {error}"
+            ));
+            return 1;
+        }
+    };
+    match prepare_rustia(source, Some(memory_limit_bytes)) {
+        Ok(state) => {
+            BENCH.with(|bench| {
+                *bench.borrow_mut() = Some(state);
+            });
+            set_last_result("ok\nlimited rustia workload prepared");
+            0
+        }
+        Err(error) => {
+            set_last_result(format!(
+                "error\nlimited rustia workload prepare failed: {error}"
+            ));
+            1
+        }
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn bench_run(n: u32) -> f64 {
     BENCH.with(|bench| {
         let mut bench = bench.borrow_mut();
@@ -122,7 +161,7 @@ pub extern "C" fn bench_result_len() -> usize {
 
 fn prepare(adapter: u32, source: &str) -> Result<BenchState, String> {
     match adapter {
-        ADAPTER_RUSTIA => prepare_rustia(source),
+        ADAPTER_RUSTIA => prepare_rustia(source, None),
         ADAPTER_KOTO => prepare_koto(source),
         ADAPTER_WASMI => prepare_wasmi(source),
         ADAPTER_RHAI => prepare_rhai(source),
@@ -130,9 +169,16 @@ fn prepare(adapter: u32, source: &str) -> Result<BenchState, String> {
     }
 }
 
-fn prepare_rustia(source: &str) -> Result<BenchState, String> {
+fn prepare_rustia(source: &str, memory_limit_bytes: Option<usize>) -> Result<BenchState, String> {
     let wrapped = format!("return {{ f = (function()\n{source}\nend)() }}");
-    let mut engine = Rustia::new(Profile::ReproducibleStandard);
+    let mut engine = match memory_limit_bytes {
+        Some(limit) => Rustia::builder()
+            .profile(Profile::ReproducibleStandard)
+            .memory_limit_bytes(limit)
+            .build()
+            .map_err(|error| error.to_string())?,
+        None => Rustia::new(Profile::ReproducibleStandard),
+    };
     let exports = engine
         .compile_and_run_exports_named("bench/workload.luau", &wrapped)
         .map_err(|error| error.to_string())?;

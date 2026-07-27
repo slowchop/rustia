@@ -7,7 +7,7 @@ use crate::bytecode::{
 use crate::error::{Error, ErrorKind, ErrorLocation, Result};
 use crate::extension::{validate_registered_op, ExtensionOp, ExtensionRegistry, HostFunctionOp};
 use crate::heap::{
-    FunctionCapture, FunctionKind, NativeFunction, TableIterationOrder, TableNext,
+    FunctionCapture, FunctionKind, NativeFunction, QuotaTableWrite, TableIterationOrder, TableNext,
     TableNumericArrayWrite, TableStringHashSlot, TableStringHashWrite, UserdataPayload, VectorData,
     VmCell,
 };
@@ -177,6 +177,11 @@ pub struct VmSettings {
     /// instruction boundary. Disabled by default so benchmark timings do not
     /// include telemetry scans.
     pub enable_memory_tracking: bool,
+    /// Maximum VM-owned logical live bytes admitted at guest instruction
+    /// boundaries. A breach forces one collection before returning a
+    /// catchable `OutOfMemory` error. Reserved allocator capacity is telemetry
+    /// only and is not part of this deterministic native/Wasm limit.
+    pub memory_limit_bytes: Option<usize>,
     pub services: VmServices,
 }
 
@@ -195,6 +200,7 @@ impl Default for VmSettings {
             enable_conformance_native_type_checks: false,
             enable_conformance_pcall_helpers: false,
             enable_memory_tracking: false,
+            memory_limit_bytes: None,
             services: VmServices::default(),
         }
     }
@@ -1785,6 +1791,56 @@ impl Vm {
         usage
     }
 
+    fn collect_for_memory_limit(&mut self, transient_roots: &[Value]) {
+        let roots = self.collectgarbage_roots(transient_roots);
+        self.heap.finish_collection_cycle();
+        self.heap.collect_weak_tables_with_roots(&roots);
+    }
+
+    fn enforce_memory_limit(&mut self, transient_roots: &[Value]) -> Result<()> {
+        let Some(limit) = self.settings.memory_limit_bytes else {
+            return Ok(());
+        };
+        if self.current_memory_usage().live_bytes <= limit {
+            return Ok(());
+        }
+        // The quota collector is allowed to run even while script collection
+        // is stopped: a host safety boundary cannot be disabled by guest code.
+        self.collect_for_memory_limit(transient_roots);
+        if self.current_memory_usage().live_bytes <= limit {
+            return Ok(());
+        }
+        Err(Error::new(ErrorKind::OutOfMemory).without_source_location())
+    }
+
+    fn ensure_memory_growth(
+        &mut self,
+        additional_live_bytes: usize,
+        transient_roots: &[Value],
+    ) -> Result<()> {
+        let Some(limit) = self.settings.memory_limit_bytes else {
+            return Ok(());
+        };
+        if self
+            .current_memory_usage()
+            .live_bytes
+            .saturating_add(additional_live_bytes)
+            <= limit
+        {
+            return Ok(());
+        }
+        self.collect_for_memory_limit(transient_roots);
+        if self
+            .current_memory_usage()
+            .live_bytes
+            .saturating_add(additional_live_bytes)
+            <= limit
+        {
+            return Ok(());
+        }
+        Err(Error::new(ErrorKind::OutOfMemory).without_source_location())
+    }
+
     pub fn register_extension_op(&mut self, op: ExtensionOp) -> Result<u16> {
         self.extensions.register(self.profile, op)
     }
@@ -1837,13 +1893,7 @@ impl Vm {
 
     pub fn set_global_value(&mut self, name: impl AsRef<str>, value: Value) -> Result<()> {
         let key = self.string(name);
-        self.heap
-            .table_set(self.globals, key, value)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "global table write failed",
-                })
-            })
+        self.set_table_index(self.globals, key, value)
     }
 
     pub fn raw_table_get_value(&mut self, table: Value, key: Value) -> Result<Value> {
@@ -1877,17 +1927,17 @@ impl Vm {
         if key.as_number().is_some_and(f64::is_nan) {
             return Err(Error::new(ErrorKind::TableIndexNaN));
         }
-        self.heap.table_set(table, key, value).ok_or_else(|| {
-            if self.heap.has_table(table) {
-                Error::new(ErrorKind::RuntimeError {
-                    message: "table write failed".to_owned(),
-                })
-            } else {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "table handle is missing",
-                })
-            }
-        })
+        if !self.heap.has_table(table) {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            }));
+        }
+        if self.heap.table_is_readonly(table) == Some(true) {
+            return Err(Error::new(ErrorKind::RuntimeError {
+                message: "table write failed".to_owned(),
+            }));
+        }
+        self.set_table_index(table, key, value)
     }
 
     pub fn raw_table_entries_value(&mut self, table: Value) -> Result<Vec<(Value, Value)>> {
@@ -1961,7 +2011,7 @@ impl Vm {
 
     pub fn run(&mut self, program: &Program) -> Result<Value> {
         let mut fuel = self.settings.initial_fuel;
-        let program_id = self.retain_dynamic_program(program.clone())?;
+        let program_id = self.retain_dynamic_program_ref(program)?;
         let results = self
             .run_function(
                 program,
@@ -2401,6 +2451,7 @@ impl Vm {
                                 .map_err(|error| error.at_pc(pc))?;
                             let weak_collection_due = self.weak_collection_due_within(fuel_cost);
                             if weak_collection_due
+                                || self.settings.memory_limit_bytes.is_some()
                                 || instruction_may_invoke_guest(&registers, instruction)
                             {
                                 self.update_current_gc_roots(
@@ -2411,7 +2462,7 @@ impl Vm {
                                 );
                             }
                             self.executed_instructions = self.executed_instructions.wrapping_add(1);
-                            self.maybe_collect();
+                            self.maybe_collect()?;
                             self.record_coverage_hit(program_id, context.prototype, function, pc);
                         }
 
@@ -3253,7 +3304,7 @@ impl Vm {
                                     instruction.aux,
                                     key,
                                 );
-                                self.advance_fused_instruction_steps_with_root(1, object);
+                                self.advance_fused_instruction_steps_with_root(1, object)?;
                                 if instruction.c != 0 {
                                     set_register(&mut registers, instruction.c, key).map_err(
                                         |e| attach_instruction_source(program, function, pc - 1, e),
@@ -3298,7 +3349,7 @@ impl Vm {
                                     instruction.aux,
                                     key,
                                 );
-                                self.advance_fused_instruction_steps_with_root(1, object);
+                                self.advance_fused_instruction_steps_with_root(1, object)?;
                                 let callee = self
                                     .get_index_value_with_namecall_inline_cache(
                                         program,
@@ -3317,7 +3368,7 @@ impl Vm {
                                     |e| attach_instruction_source(program, function, pc - 1, e),
                                 )?;
                                 if instruction.c == 1 {
-                                    self.advance_fused_instruction_steps_with_root(1, callee);
+                                    self.advance_fused_instruction_steps_with_root(1, callee)?;
                                     self.check_method_value(callee, object, key).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
@@ -3422,7 +3473,7 @@ impl Vm {
                                     }
                                     expected_key
                                 } else {
-                                    self.advance_fused_instruction_steps_with_root(1, object);
+                                    self.advance_fused_instruction_steps_with_root(1, object)?;
                                     expected_key
                                 };
                                 let key = self.canonicalize_existing_string_key(
@@ -5617,7 +5668,7 @@ impl Vm {
         let mut object = Value::table(environment);
         for (lane, component) in path.iter().copied().enumerate() {
             if lane > 0 {
-                self.advance_fused_instruction_steps_with_root(1, object);
+                self.advance_fused_instruction_steps_with_root(1, object)?;
             }
             let component = usize::try_from(component).map_err(|_| {
                 Error::new(ErrorKind::InvalidProgram {
@@ -5632,7 +5683,7 @@ impl Vm {
                     })
                 })?;
             if lane > 0 {
-                self.advance_fused_instruction_steps_with_root(1, object);
+                self.advance_fused_instruction_steps_with_root(1, object)?;
             }
             object = self.get_index_value_with_import_inline_cache(
                 program,
@@ -7347,11 +7398,34 @@ impl Vm {
         }
         self.validate_table_key(key)?;
         self.ensure_table_writable(table)?;
-        self.heap.table_set(table, key, value).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "table set failed after validation",
-            })
-        })
+        let Some(limit) = self.settings.memory_limit_bytes else {
+            return self.heap.table_set(table, key, value).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table set failed after validation",
+                })
+            });
+        };
+        for attempt in 0..2 {
+            let allowed_growth = limit.saturating_sub(self.current_memory_usage().live_bytes);
+            match self
+                .heap
+                .table_set_with_live_growth_limit(table, key, value, allowed_growth)
+            {
+                QuotaTableWrite::Stored => return Ok(()),
+                QuotaTableWrite::Invalid => {
+                    return Err(Error::new(ErrorKind::InvalidProgram {
+                        reason: "table set failed after validation",
+                    }));
+                }
+                QuotaTableWrite::WouldExceed if attempt == 0 => {
+                    self.collect_for_memory_limit(&[Value::table(table), key, value]);
+                }
+                QuotaTableWrite::WouldExceed => {
+                    return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+                }
+            }
+        }
+        unreachable!("quota table writes retry at most once")
     }
 
     fn table_uses_standard_global_type_surface(&mut self, table: u32) -> Result<bool> {
@@ -7377,13 +7451,39 @@ impl Vm {
             }));
         }
         self.ensure_table_writable(table)?;
-        self.heap
-            .table_set_array_slot(table, index, value)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "table array slot set failed after validation",
-                })
-            })
+        let Some(limit) = self.settings.memory_limit_bytes else {
+            return self
+                .heap
+                .table_set_array_slot(table, index, value)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table array slot set failed after validation",
+                    })
+                });
+        };
+        for attempt in 0..2 {
+            let allowed_growth = limit.saturating_sub(self.current_memory_usage().live_bytes);
+            match self.heap.table_set_array_slot_with_live_growth_limit(
+                table,
+                index,
+                value,
+                allowed_growth,
+            ) {
+                QuotaTableWrite::Stored => return Ok(()),
+                QuotaTableWrite::Invalid => {
+                    return Err(Error::new(ErrorKind::InvalidProgram {
+                        reason: "table array slot set failed after validation",
+                    }));
+                }
+                QuotaTableWrite::WouldExceed if attempt == 0 => {
+                    self.collect_for_memory_limit(&[Value::table(table), value]);
+                }
+                QuotaTableWrite::WouldExceed => {
+                    return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+                }
+            }
+        }
+        unreachable!("quota array writes retry at most once")
     }
 
     fn ensure_table_writable(&mut self, table: u32) -> Result<()> {
@@ -7498,9 +7598,12 @@ impl Vm {
         } else {
             Value::nil()
         };
-        Ok(Value::table(
-            self.heap.alloc_filled_array_table(size, value),
-        ))
+        self.ensure_memory_growth(VmCell::filled_array_table_live_bytes(size), &[value])?;
+        let table = self
+            .heap
+            .try_alloc_filled_array_table(size, value)
+            .ok_or_else(|| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        Ok(Value::table(table))
     }
 
     fn table_insert(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
@@ -8411,7 +8514,30 @@ impl Vm {
         })
     }
 
+    fn retain_dynamic_program_ref(&mut self, program: &Program) -> Result<u32> {
+        self.ensure_dynamic_program_growth(program)?;
+        self.insert_dynamic_program(program.clone())
+    }
+
     fn retain_dynamic_program(&mut self, program: Program) -> Result<u32> {
+        self.ensure_dynamic_program_growth(&program)?;
+        self.insert_dynamic_program(program)
+    }
+
+    fn ensure_dynamic_program_growth(&mut self, program: &Program) -> Result<()> {
+        let (program_live, _) = program.memory_usage(true);
+        // Inline-cache indexes are linear in bytecode size. Two complete
+        // program footprints plus the loaded slot is a conservative admission
+        // bound before any cache vectors are constructed.
+        self.ensure_memory_growth(
+            program_live
+                .saturating_mul(2)
+                .saturating_add(size_of::<LoadedProgramSlot>()),
+            &[],
+        )
+    }
+
+    fn insert_dynamic_program(&mut self, program: Program) -> Result<u32> {
         self.dynamic_programs
             .insert(LoadedProgram::new(program))
             .ok_or_else(|| {
@@ -11428,7 +11554,7 @@ impl Vm {
                 Ok(VmFlow::Return(protected_results))
             }
             Ok(VmFlow::Yield(mut suspension)) => {
-                let program_id = self.retain_dynamic_program(program.clone())?;
+                let program_id = self.retain_dynamic_program_ref(program)?;
                 suspension
                     .frames
                     .push(CoroutineFrame::XPCall(SuspendedXPCallFrame {
@@ -12339,11 +12465,16 @@ impl Vm {
         validate_native_arity(args, 1, 1, "buffer.create arguments")?;
         let size =
             self.buffer_nonnegative_arg(args[0], "invalid argument #1 to 'create' (size)")?;
-        let handle = self.heap.alloc_buffer(vec![0; size]).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "buffer handle overflow",
-            })
-        })?;
+        self.ensure_memory_growth(VmCell::buffer_live_bytes(size), &[])?;
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(size)
+            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        bytes.resize(size, 0);
+        let handle = self
+            .heap
+            .alloc_buffer(bytes)
+            .ok_or_else(|| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
         Ok(Value::buffer(handle))
     }
 
@@ -15777,6 +15908,8 @@ impl Vm {
         }
         let text = self.coerce_to_string(registers, instruction.b)?;
         let count = string_repeat_count(get_number(registers, instruction.c)?)?;
+        let result_len = string_repeat_len(text.len(), count)?;
+        self.ensure_memory_growth(VmCell::owned_string_live_bytes(result_len), &[])?;
         let output = repeat_string(&text, count)?;
         Ok(self.heap.intern_string_value_bytes(&output))
     }
@@ -16549,11 +16682,16 @@ impl Vm {
         }
     }
 
-    fn advance_fused_instruction_steps_with_root(&mut self, steps: usize, root: Value) {
+    fn advance_fused_instruction_steps_with_root(
+        &mut self,
+        steps: usize,
+        root: Value,
+    ) -> Result<()> {
         for _ in 0..steps {
             self.executed_instructions = self.executed_instructions.wrapping_add(1);
-            self.maybe_collect_with_roots(&[root]);
+            self.maybe_collect_with_roots(&[root])?;
         }
+        Ok(())
     }
 
     fn string_find_opcode_fuel(
@@ -16608,7 +16746,7 @@ impl Vm {
     }
 
     #[inline(always)]
-    fn maybe_collect(&mut self) {
+    fn maybe_collect(&mut self) -> Result<()> {
         let weak_collection_due =
             self.executed_instructions == self.next_weak_collection_instruction;
         if self.profile.is_deterministic_sim() {
@@ -16633,10 +16771,11 @@ impl Vm {
                 .wrapping_add(self.settings.deterministic_gc_interval.get());
         }
         self.record_memory_peak();
+        self.enforce_memory_limit(&[])
     }
 
     #[inline(always)]
-    fn maybe_collect_with_roots(&mut self, transient_roots: &[Value]) {
+    fn maybe_collect_with_roots(&mut self, transient_roots: &[Value]) -> Result<()> {
         let weak_collection_due =
             self.executed_instructions == self.next_weak_collection_instruction;
         if self.profile.is_deterministic_sim() {
@@ -16661,6 +16800,7 @@ impl Vm {
                 .wrapping_add(self.settings.deterministic_gc_interval.get());
         }
         self.record_memory_peak();
+        self.enforce_memory_limit(transient_roots)
     }
 
     #[inline(always)]
@@ -21869,16 +22009,16 @@ fn string_repeat_count(value: f64) -> Result<i64> {
     Ok(value as i64)
 }
 
-fn repeat_string(text: &[u8], count: i64) -> Result<Vec<u8>> {
-    if count <= 0 || text.is_empty() {
-        return Ok(Vec::new());
+fn string_repeat_len(text_len: usize, count: i64) -> Result<usize> {
+    if count <= 0 || text_len == 0 {
+        return Ok(0);
     }
     let count = usize::try_from(count).map_err(|_| {
         Error::new(ErrorKind::TypeError {
             expected: "non-negative string.rep count",
         })
     })?;
-    let total_len = text.len().checked_mul(count).ok_or_else(|| {
+    let total_len = text_len.checked_mul(count).ok_or_else(|| {
         Error::new(ErrorKind::TypeError {
             expected: "string.rep result below allocation limit",
         })
@@ -21888,7 +22028,27 @@ fn repeat_string(text: &[u8], count: i64) -> Result<Vec<u8>> {
             expected: "string.rep result below allocation limit",
         }));
     }
-    Ok(text.repeat(count))
+    Ok(total_len)
+}
+
+fn repeat_string(text: &[u8], count: i64) -> Result<Vec<u8>> {
+    let total_len = string_repeat_len(text.len(), count)?;
+    if total_len == 0 {
+        return Ok(Vec::new());
+    }
+    let count = usize::try_from(count).map_err(|_| {
+        Error::new(ErrorKind::TypeError {
+            expected: "non-negative string.rep count",
+        })
+    })?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(total_len)
+        .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+    for _ in 0..count {
+        output.extend_from_slice(text);
+    }
+    Ok(output)
 }
 
 fn luau_string_find_first(
@@ -24586,7 +24746,7 @@ mod inline_cache_tests {
         let program = closure_call_counter_program();
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         vm.closure_call_mode = ClosureCallTestMode::Force;
-        vm.maybe_collect();
+        vm.maybe_collect().unwrap();
         let program_id = vm.retain_dynamic_program(program).unwrap();
         let mut closures = Vec::new();
         let mut value_cells = Vec::new();
@@ -24741,7 +24901,7 @@ mod inline_cache_tests {
         let program = closure_call_counter_program();
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         vm.closure_call_mode = ClosureCallTestMode::Force;
-        vm.maybe_collect();
+        vm.maybe_collect().unwrap();
         let program_id = vm.retain_dynamic_program(program).unwrap();
         let value_cell = vm.heap.alloc_upvalue(Value::number(7.0)).unwrap();
         let handle = vm
@@ -24824,7 +24984,7 @@ mod inline_cache_tests {
         let second_program = closure_call_counter_program();
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         vm.closure_call_mode = ClosureCallTestMode::Force;
-        vm.maybe_collect();
+        vm.maybe_collect().unwrap();
         let caller_program = vm.retain_dynamic_program(first_program).unwrap();
         let other_program = vm.retain_dynamic_program(second_program).unwrap();
 
@@ -25073,6 +25233,34 @@ mod inline_cache_tests {
         assert!(collected.reserved_bytes < allocated.reserved_bytes);
         assert!(collected.peak_live_bytes >= Some(allocated.live_bytes));
         assert!(collected.peak_reserved_bytes >= Some(allocated.reserved_bytes));
+    }
+
+    #[test]
+    fn quota_rejected_array_growth_is_atomic_and_vm_remains_usable() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let table = vm.heap.alloc_array_table(&[Value::nil()]);
+        vm.set_global_value("quota_state", Value::table(table))
+            .expect("setup should be unbounded");
+        vm.settings.memory_limit_bytes = Some(vm.memory_stats().live_bytes);
+
+        let error = vm
+            .set_table_array_slot(table, 4_096, Value::number(99.0))
+            .expect_err("growth beyond the exact current live-byte limit must fail");
+        assert!(matches!(error.kind, ErrorKind::OutOfMemory));
+        assert!(
+            vm.heap.table_get(table, Value::number(4_096.0)).is_none(),
+            "a rejected write must not resize or mutate the table",
+        );
+
+        vm.set_table_array_slot(table, 1, Value::number(42.0))
+            .expect("a no-growth write must remain usable after OOM");
+        assert_eq!(
+            vm.heap
+                .table_get(table, Value::number(1.0))
+                .and_then(Value::as_number),
+            Some(42.0)
+        );
+        assert!(vm.memory_stats().live_bytes <= vm.settings.memory_limit_bytes.unwrap());
     }
 
     #[test]

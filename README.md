@@ -116,8 +116,9 @@ public rustia project; actual grabby integration work is explicitly out of scope
   rustia overall and 8.036x on closures, with its compile/first-call costs reported separately. Earlier
   dense/OOP/string/HotIR cohorts remain traceable historical evidence. Every result is specific to its workload,
   target, and protocol; details are in [`design/56-performance-research.md`](design/56-performance-research.md).
-- Major remaining gates, in order, are bounded object/program reclamation and quotas, epoch-safe decision reset,
-  honest memory telemetry, a per-call host context, module loading, rich values, and transactional installation,
+- Major remaining gates, in order, are native/wasm pressure evidence for the implemented reclamation,
+  telemetry, and logical-live quota/OOM path; epoch-safe decision reset; an O(1) quota-accounting fast path and
+  script counters; a per-call host context, module loading, rich values, and transactional installation,
   compiler/runtime semantic-tail
   hardening, the full cross-target correctness/golden matrix, broader benchmark history, and release packaging.
   Semver policy is tracked in [`design/91-semver-policy.md`](design/91-semver-policy.md),
