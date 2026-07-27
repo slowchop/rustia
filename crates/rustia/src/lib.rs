@@ -1194,6 +1194,35 @@ return {
     }
 
     #[test]
+    fn retained_function_root_survives_repeated_slot_reuse() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let exports = rustia
+            .compile_and_run(
+                "local state = { answer = 42 }; \
+                 return { read = function() return state.answer end }",
+            )
+            .unwrap();
+        let read = exports.function(&mut rustia, "read").unwrap();
+        drop(exports);
+
+        for _ in 0..32 {
+            let _: f64 = rustia
+                .run(
+                    "for i = 1, 256 do \
+                         local state = { answer = i }; \
+                         local function read() return state.answer end \
+                         if read() ~= i then error('bad churn closure') end \
+                     end \
+                     collectgarbage('collect'); \
+                     return 0",
+                )
+                .unwrap();
+            let answer: f64 = read.call(&mut rustia, ()).unwrap();
+            assert_eq!(answer, 42.0);
+        }
+    }
+
+    #[test]
     fn retained_handles_reject_a_different_vm() {
         let mut first = Rustia::new(Profile::ReproducibleStandard);
         let exports = first

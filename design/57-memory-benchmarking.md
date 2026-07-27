@@ -1,10 +1,12 @@
 # rustia — cross-engine memory benchmark design
 
-> **Status: [PRE-RECLAMATION BASELINE RECORDED] (2026-07-27).** The isolated child/supervisor, cgroup-v2 sampler,
+> **Status: [GENERATION-SAFE ORDINARY RECLAMATION IMPLEMENTED] (2026-07-27).** The isolated child/supervisor, cgroup-v2 sampler,
 > repeated-epoch analyzer, portable controls, deterministic todo-app workloads, publication schema, and
 > dashboard are implemented. Cohort `pre-reclamation-18b58d8` published 110 rows from 990 fresh processes after
-> confirmed Linode deletion and independent local re-analysis. This
-> protocol is the measurement prerequisite for bounded object reclamation, quotas, OOM behavior, and final GC tuning. It extends the existing
+> confirmed Linode deletion and independent local re-analysis. Tables, functions, upvalues, userdata, buffers,
+> and vectors now reclaim backing allocations into generation-validated reusable slots; stale handles cannot
+> alias replacement objects, and generation exhaustion retires the slot instead of wrapping. This protocol is
+> the measurement prerequisite for quotas, OOM behavior, and final GC tuning. It extends the existing
 > `vm-string-memory` evidence rather than replacing it. Canonical project state remains
 > [`CURRENT.md`](CURRENT.md).
 
@@ -294,11 +296,13 @@ instrumentation cost. Such traces explain *why* a cohort moved; they do not repl
 5. Record and promote the pre-reclamation dedicated-Linux baseline.
 6. Add cycles, table resize, string, closure/coroutine, VM-scale, reset, module, and OOM lanes.
 7. Implement reclamation/quotas/reset, compare against the frozen baseline, and retain raw evidence. The shared
-   ordinary-object mark phase and first backing-allocation sweep are implemented for tables, functions,
-   upvalues, userdata, and buffers. Public exported handles use VM-specific reference-counted root leases, with
-   tests covering collection after dropping the parent exports, cross-VM rejection, reachable versus
-   unreachable cycles, function environments/captures, userdata payloads, metatables, and weak edges.
-   Generation-safe slot reuse and the remaining append-only stores are next.
+   ordinary-object mark/sweep phase and generation-safe reusable slot stores are implemented for tables,
+   functions, upvalues, userdata, buffers, and vectors. Public exported handles use VM-specific reference-counted
+   root leases. Tests cover collection after dropping parent exports, repeated reuse around retained closures,
+   stale-handle rejection, generation-exhaustion retirement, bounded churn, cross-VM rejection, reachable versus
+   unreachable cycles, function environments/captures, userdata payloads, metatables, vector keys, and weak
+   edges. Capacity shrinking/page return, deliberate interned-string lifetime policy, quotas, atomic OOM, and
+   lifecycle reset are next.
 8. Add the periodic `memory.max` pressure curve and targeted attribution tooling.
 
 ## Acceptance gate before memory work is declared complete
