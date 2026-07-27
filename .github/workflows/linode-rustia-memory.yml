@@ -1,0 +1,96 @@
+name: Rustia Linode Memory
+
+"on":
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rustia-linode-memory-main
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    name: Rustia-only dedicated-Linux memory
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      !contains(github.event.workflow_run.head_commit.message, '[skip linode]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+
+    steps:
+      - name: Checkout successful main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Linode credential
+        env:
+          LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}
+        run: |
+          test -n "$LINODE_TOKEN"
+          install -d -m 700 .rustia-benchmark-state/linode
+          install -m 600 /dev/null .rustia-benchmark-state/linode/token
+          printf '%s\n' "$LINODE_TOKEN" > .rustia-benchmark-state/linode/token
+
+      - name: Freeze per-commit protocol
+        env:
+          BENCHMARK_COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          short_commit="${BENCHMARK_COMMIT:0:12}"
+          config="bench/cloud/linode-rustia-ci-memory-${short_commit}.json"
+          node tools/create-rustia-ci-memory-config.js --output "$config"
+          git config user.name "rustia-benchmark"
+          git config user.email "benchmark@rustia.invalid"
+          git add "$config"
+          git commit -m "Freeze Rustia CI memory protocol for ${short_commit} [skip linode]"
+          printf 'RUSTIA_MEMORY_CONFIG=%s\n' "$config" >> "$GITHUB_ENV"
+          printf 'RUSTIA_MEMORY_COHORT=rustia-ci-%s\n' "$short_commit" >> "$GITHUB_ENV"
+
+      - name: Run Rustia-only Linode memory cohort
+        run: node tools/run-linode-benchmark.js bench "$RUSTIA_MEMORY_CONFIG"
+
+      - name: Summarize improvement
+        run: |
+          node tools/summarize-rustia-ci-memory.js \
+            --current bench/memory/current-results.json \
+            --history bench/memory/history/runs.jsonl \
+            --output rustia-memory-summary.md
+          cat rustia-memory-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload reproducible evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustia-memory-${{ github.event.workflow_run.head_sha }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            rustia-memory-summary.md
+            ${{ env.RUSTIA_MEMORY_CONFIG }}
+            bench/memory/current-results.json
+            bench/memory/history/runs.jsonl
+            bench/memory/raw/${{ github.event.workflow_run.head_sha }}/${{ env.RUSTIA_MEMORY_COHORT }}
+
+      - name: Confirm cloud cleanup
+        if: always()
+        run: |
+          node tools/run-linode-benchmark.js status > /tmp/rustia-linode-status.json
+          jq -r '.[] | select(.cleanup_complete == false) | .run_id' \
+            /tmp/rustia-linode-status.json |
+            while read -r run_id; do
+              node tools/run-linode-benchmark.js destroy "$run_id"
+            done

@@ -155,7 +155,9 @@ function validateConfig(config) {
   integer(gate.wait_timeout_seconds, "host_gate.wait_timeout_seconds", 1);
   const publication = object(config.publication, "publication");
   exactKeys(publication, ["mode", "rows"], "publication");
-  if (publication.mode !== "memory") fail("publication.mode must be memory");
+  if (!["memory", "rustia_ci_memory"].includes(publication.mode)) {
+    fail("publication.mode must be memory or rustia_ci_memory");
+  }
   integer(publication.rows, "publication.rows", 1);
   return config;
 }
@@ -201,7 +203,7 @@ function installRust() {
   });
 }
 
-function build() {
+function build(config) {
   const cargo = "/root/.cargo/bin/cargo";
   const rootManifest = path.join(SOURCE, "Cargo.toml");
   const benchManifest = path.join(SOURCE, "bench/Cargo.toml");
@@ -215,6 +217,24 @@ function build() {
     env: environment(TARGET_ALL),
     capture: false,
   });
+  if (config.publication.mode === "rustia_ci_memory") {
+    run(cargo, [
+      "+1.95.0", "build", "--locked", "--offline", "--release", "--manifest-path", benchManifest,
+      "--bin", "script-bench", "--no-default-features", "--features", "rustia-engine",
+    ], { env: environment(TARGET_ALL), capture: false });
+    const all = path.join(TARGET_ALL, "release/script-bench");
+    fs.accessSync(all, fs.constants.X_OK);
+    const binarySha256 = sha256File(all);
+    return {
+      all,
+      // The Rustia-only matrix never selects the lua54 binary. Supplying the
+      // validated Rustia executable keeps the child interface uniform without
+      // compiling any competitor runtime.
+      lua54: all,
+      all_sha256: binarySha256,
+      lua54_sha256: binarySha256,
+    };
+  }
   run(cargo, [
     "+1.95.0", "build", "--locked", "--offline", "--release", "--manifest-path", benchManifest,
     "--bin", "script-bench", "--no-default-features", "--features", "all-engines",
@@ -335,7 +355,7 @@ async function execute(configFile, providerFile, bundle) {
     }
     verifySource(config, bundle);
     installRust();
-    const binaries = build();
+    const binaries = build(config);
     for (const unit of PACKAGE_ACTIVITY_UNITS) {
       run("systemctl", ["stop", unit], { allowFailure: true });
       run("systemctl", ["mask", unit], { allowFailure: true });

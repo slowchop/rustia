@@ -7,6 +7,7 @@ const path = require("path");
 const root = path.resolve(__dirname, "..");
 const workflowDir = path.join(root, ".github", "workflows");
 const ciPath = path.join(workflowDir, "ci.yml");
+const rustiaMemoryPath = path.join(workflowDir, "linode-rustia-memory.yml");
 const rustToolchainPath = path.join(root, "rust-toolchain.toml");
 
 function fail(message) {
@@ -134,8 +135,36 @@ function checkCi(text) {
   checkActionPins(text, label);
 }
 
+function checkRustiaMemory(text) {
+  const label = ".github/workflows/linode-rustia-memory.yml";
+  requireIncludes(text, "name: Rustia Linode Memory\n", label);
+  requireIncludes(text, "\"on\":\n  workflow_run:\n", label);
+  requireIncludes(text, "workflows:\n      - CI\n", label);
+  requireIncludes(text, "types:\n      - completed\n", label);
+  requireIncludes(text, "permissions:\n  contents: read\n", label);
+  requireIncludes(text, "cancel-in-progress: false\n", label);
+  requireIncludes(text, "github.event.workflow_run.conclusion == 'success'", label);
+  requireIncludes(text, "github.event.workflow_run.event == 'push'", label);
+  requireIncludes(text, "github.event.workflow_run.head_branch == 'main'", label);
+  requireIncludes(
+    text,
+    "github.event.workflow_run.head_repository.full_name == github.repository",
+    label,
+  );
+  requireIncludes(text, "ref: ${{ github.event.workflow_run.head_sha }}", label);
+  requireIncludes(text, "LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}", label);
+  requireIncludes(text, "node tools/create-rustia-ci-memory-config.js", label);
+  requireIncludes(text, "node tools/run-linode-benchmark.js bench", label);
+  requireIncludes(text, "node tools/summarize-rustia-ci-memory.js", label);
+  requireIncludes(text, "node tools/run-linode-benchmark.js destroy", label);
+  requireIncludes(text, "uses: actions/upload-artifact@v4", label);
+  forbidIncludes(text, "pull_request_target", label);
+  forbidIncludes(text, "contents: write", label);
+  checkActionPins(text, label);
+}
+
 const files = workflowFiles();
-for (const required of ["ci.yml"]) {
+for (const required of ["ci.yml", "linode-rustia-memory.yml"]) {
   if (!files.includes(required)) {
     fail(`missing .github/workflows/${required}`);
   }
@@ -145,5 +174,6 @@ if (files.includes("benchmarks.yml")) {
 }
 checkRunnerLabels(files);
 checkCi(readWorkflow(ciPath));
+checkRustiaMemory(readWorkflow(rustiaMemoryPath));
 
 console.log(`workflow policy ok for ${files.length} workflow file(s)`);

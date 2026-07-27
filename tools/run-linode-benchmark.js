@@ -135,6 +135,29 @@ const MEMORY_ROWS = MEMORY_GROUPS.reduce(
   (sum, group) => sum + group.engines.length * group.workloads.length,
   0,
 );
+const RUSTIA_CI_MEMORY_GROUPS = Object.freeze([
+  {
+    binary: "all",
+    engines: ["rustia"],
+    workloads: MATRIX_WORKLOADS.map((id) => ({ id, n: 128, epochs: 16 })),
+  },
+  {
+    binary: "all",
+    engines: ["rustia"],
+    workloads: [
+      { id: "memory_burst", n: 1, epochs: 16 },
+      { id: "memory_churn", n: 1, epochs: 40 },
+      { id: "memory_retained_control", n: 1, epochs: 40 },
+      { id: "todo_steady", n: 128, epochs: 40 },
+      { id: "todo_history", n: 128, epochs: 40 },
+      { id: "todo_retained_control", n: 128, epochs: 40 },
+    ],
+  },
+]);
+const RUSTIA_CI_MEMORY_ROWS = RUSTIA_CI_MEMORY_GROUPS.reduce(
+  (sum, group) => sum + group.engines.length * group.workloads.length,
+  0,
+);
 const VM_STRING_SCENARIOS = Object.freeze([
   "empty",
   "short_unloaded",
@@ -584,8 +607,15 @@ function validateConfig(value) {
     ) {
       fail("config.measurement sampling must remain frozen at 10 ms / 600000 ms");
     }
-    if (canonicalJson(measurement.groups) !== canonicalJson(MEMORY_GROUPS)) {
-      fail("config.measurement.groups does not match the frozen cross-engine memory matrix");
+    const memoryMode = requireObject(root.publication, "config.publication").mode;
+    const frozenGroups =
+      memoryMode === "rustia_ci_memory" ? RUSTIA_CI_MEMORY_GROUPS : MEMORY_GROUPS;
+    if (canonicalJson(measurement.groups) !== canonicalJson(frozenGroups)) {
+      fail(
+        `config.measurement.groups does not match the frozen ${
+          memoryMode === "rustia_ci_memory" ? "Rustia CI" : "cross-engine"
+        } memory matrix`,
+      );
     }
   } else if (kind === HISTORY_BACKFILL_PROTOCOL) {
     requireExactKeys(
@@ -839,11 +869,13 @@ function validateConfig(value) {
     }
   } else if (kind === CROSS_ENGINE_MEMORY_PROTOCOL) {
     requireExactKeys(publication, ["mode", "rows"], "config.publication");
-    if (publication.mode !== "memory") {
-      fail("cross_engine_memory_v1 publication.mode must be memory");
+    if (!["memory", "rustia_ci_memory"].includes(publication.mode)) {
+      fail("cross_engine_memory_v1 publication.mode must be memory or rustia_ci_memory");
     }
-    if (requireInteger(publication.rows, "config.publication.rows", 1) !== MEMORY_ROWS) {
-      fail(`config.publication.rows must remain frozen at ${MEMORY_ROWS}`);
+    const expectedRows =
+      publication.mode === "rustia_ci_memory" ? RUSTIA_CI_MEMORY_ROWS : MEMORY_ROWS;
+    if (requireInteger(publication.rows, "config.publication.rows", 1) !== expectedRows) {
+      fail(`config.publication.rows must remain frozen at ${expectedRows}`);
     }
   } else if (kind === HISTORY_BACKFILL_PROTOCOL) {
     requireExactKeys(publication, ["mode", "rows"], "config.publication");
@@ -6058,6 +6090,32 @@ async function selfTest(config) {
   assert.equal(benchmarkCommit(crossEngineMemoryConfig), crossEngineMemoryConfig.source.benchmark_commit);
   assert.equal(remoteRunnerForConfig(crossEngineMemoryConfig), MEMORY_REMOTE_RUNNER);
   assert.equal(MEMORY_ROWS, 110);
+  const rustiaCiMemoryConfig = {
+    ...crossEngineMemoryConfig,
+    measurement: {
+      ...crossEngineMemoryConfig.measurement,
+      cohort_id: "rustia-ci-fixture",
+      groups: RUSTIA_CI_MEMORY_GROUPS,
+    },
+    publication: { mode: "rustia_ci_memory", rows: RUSTIA_CI_MEMORY_ROWS },
+  };
+  assert.equal(validateConfig(rustiaCiMemoryConfig), rustiaCiMemoryConfig);
+  assert.equal(RUSTIA_CI_MEMORY_ROWS, 11);
+  assert.throws(() =>
+    validateConfig({
+      ...rustiaCiMemoryConfig,
+      measurement: {
+        ...rustiaCiMemoryConfig.measurement,
+        groups: MEMORY_GROUPS,
+      },
+    }),
+  );
+  assert.throws(() =>
+    validateConfig({
+      ...rustiaCiMemoryConfig,
+      publication: { mode: "rustia_ci_memory", rows: RUSTIA_CI_MEMORY_ROWS + 1 },
+    }),
+  );
   validateCrossEngineMemoryStatus({
     schema: "rustia.bench.cloud-run-status.v1",
     status: "memory_complete",
