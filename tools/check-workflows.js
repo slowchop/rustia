@@ -157,7 +157,8 @@ function checkRustiaMemory(text) {
   requireIncludes(text, "node tools/run-linode-benchmark.js bench", label);
   requireIncludes(text, "node tools/summarize-rustia-ci-memory.js", label);
   requireIncludes(text, "node tools/run-linode-benchmark.js destroy", label);
-  requireIncludes(text, "uses: actions/upload-artifact@v4", label);
+  forbidIncludes(text, "actions/upload-artifact", label);
+  forbidIncludes(text, "retention-days:", label);
   forbidIncludes(text, "pull_request_target", label);
   forbidIncludes(text, "contents: write", label);
   checkActionPins(text, label);

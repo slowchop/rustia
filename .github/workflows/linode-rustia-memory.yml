@@ -72,19 +72,6 @@ jobs:
             --output rustia-memory-summary.md
           cat rustia-memory-summary.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload reproducible evidence
-        uses: actions/upload-artifact@v4
-        with:
-          name: rustia-memory-${{ github.event.workflow_run.head_sha }}
-          retention-days: 30
-          if-no-files-found: error
-          path: |
-            rustia-memory-summary.md
-            ${{ env.RUSTIA_MEMORY_CONFIG }}
-            bench/memory/current-results.json
-            bench/memory/history/runs.jsonl
-            bench/memory/raw/${{ github.event.workflow_run.head_sha }}/${{ env.RUSTIA_MEMORY_COHORT }}
-
       - name: Confirm cloud cleanup
         if: always()
         run: |
