@@ -62,7 +62,7 @@ impl Function {
         )?;
         ensure_same_vm("function handle", &self.value, rustia.vm())?;
         let raw_args = args
-            .into_rustia_multi()
+            .into_rustia_multi()?
             .iter()
             .map(|value| load_owned_value(rustia.vm_mut(), value))
             .collect::<Result<Vec<_>>>()?;
@@ -401,7 +401,7 @@ where
     T: IntoRustiaMulti,
 {
     fn into_host_return(self) -> Result<Vec<OwnedValue>> {
-        Ok(self.into_rustia_multi())
+        self.into_rustia_multi()
     }
 
     fn rustia_type_names() -> Vec<&'static str> {
@@ -414,7 +414,7 @@ where
     T: IntoRustiaMulti,
 {
     fn into_host_return(self) -> Result<Vec<OwnedValue>> {
-        self.map(IntoRustiaMulti::into_rustia_multi)
+        self.and_then(IntoRustiaMulti::into_rustia_multi)
     }
 
     fn rustia_type_names() -> Vec<&'static str> {

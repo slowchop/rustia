@@ -284,7 +284,7 @@ where
     where
         T: IntoRustia,
     {
-        let value = value.into_rustia();
+        let value = value.into_rustia()?;
         let value = value::load_owned_value(&mut self.vm, &value)?;
         self.vm.set_global_value(name, value).map_err(Error::Vm)
     }
@@ -814,8 +814,8 @@ impl std::error::Error for Error {}
 #[cfg(test)]
 mod tests {
     use super::{
-        finish_entry_lifecycle, Error, FromRustia, GuestSurface, OpCapability, OwnedTable,
-        OwnedValue, Profile, Result, Rustia, RustiaBuilder, RustiaExecutionProfile,
+        finish_entry_lifecycle, Error, FromRustia, GuestSurface, IntoRustia, OpCapability,
+        OwnedTable, OwnedValue, Profile, Result, Rustia, RustiaBuilder, RustiaExecutionProfile,
         RustiaExtension, RustiaHostFunctionInfo, ServiceClock, ServiceEntropy, SourceSpan,
         VmErrorKind, VmSettings, RUSTIA_DECISION_RESET_ABI_VERSION,
         RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
@@ -975,14 +975,14 @@ return {
 
     #[test]
     fn owned_table_helpers_accept_typed_values_and_getters() {
-        let labels = OwnedTable::string_entries([("kind", "scout"), ("role", "ai")]);
+        let labels = OwnedTable::string_entries([("kind", "scout"), ("role", "ai")]).unwrap();
         assert_eq!(
             labels.get_string_as::<String>("kind").unwrap().as_deref(),
             Some("scout")
         );
         assert_eq!(labels.get_string_as::<String>("missing").unwrap(), None);
 
-        let stats = OwnedTable::string_entries([("hp", 5_i32), ("speed", 7_i32)]);
+        let stats = OwnedTable::string_entries([("hp", 5_i32), ("speed", 7_i32)]).unwrap();
         assert_eq!(stats.get_string_as::<i32>("hp").unwrap(), Some(5));
 
         let error = labels
@@ -994,7 +994,7 @@ return {
             "unexpected error: {error}"
         );
 
-        let array = OwnedTable::array_values([1_i32, 2, 3]);
+        let array = OwnedTable::array_values([1_i32, 2, 3]).unwrap();
         assert_eq!(
             array.array,
             vec![
@@ -1004,6 +1004,53 @@ return {
             ]
         );
         assert!(array.entries.is_empty());
+    }
+
+    #[test]
+    fn integer_embedding_rejects_silent_luau_number_rounding() {
+        let exact = (1_u64 << 53).into_rustia().unwrap();
+        assert_eq!(exact, OwnedValue::Number((1_u64 << 53) as f64));
+
+        for error in [
+            ((1_u64 << 53) + 1).into_rustia().unwrap_err(),
+            u64::MAX.into_rustia().unwrap_err(),
+            i64::MAX.into_rustia().unwrap_err(),
+        ] {
+            assert!(
+                error.to_string().contains("cannot be represented exactly"),
+                "unexpected error: {error}"
+            );
+        }
+
+        assert!(u64::from_rustia(OwnedValue::Number(2.0_f64.powi(64))).is_err());
+        assert!(i64::from_rustia(OwnedValue::Number(2.0_f64.powi(63))).is_err());
+
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        assert!(rustia.insert_global("too_wide", u64::MAX).is_err());
+    }
+
+    #[test]
+    fn serde_integer_conversion_is_exact_for_values_and_map_keys() {
+        assert_eq!(
+            OwnedValue::from_serialize(&(1_u64 << 53)).unwrap(),
+            OwnedValue::Number((1_u64 << 53) as f64)
+        );
+        assert!(OwnedValue::from_serialize(&((1_u64 << 53) + 1)).is_err());
+        assert!(OwnedValue::from_serialize(&u128::MAX).is_err());
+
+        let exact_wide = 1_i128 << 100;
+        let serialized = OwnedValue::from_serialize(&exact_wide).unwrap();
+        assert_eq!(serialized.deserialize::<i128>().unwrap(), exact_wide);
+
+        let rounded_key = BTreeMap::from([((1_u64 << 53) + 1, true)]);
+        assert!(OwnedValue::from_serialize(&rounded_key).is_err());
+
+        assert!(OwnedValue::Number(2.0_f64.powi(64))
+            .deserialize::<u64>()
+            .is_err());
+        assert!(OwnedValue::Number(2.0_f64.powi(128))
+            .deserialize::<u128>()
+            .is_err());
     }
 
     #[test]
@@ -1135,7 +1182,10 @@ return {
         rustia.insert_global("numbers", vec![1_i32, 2, 3]).unwrap();
         rustia.insert_global("named_map", named_map).unwrap();
         rustia
-            .insert_global("named", OwnedTable::string_entries([("kind", "scout")]))
+            .insert_global(
+                "named",
+                OwnedTable::string_entries([("kind", "scout")]).unwrap(),
+            )
             .unwrap();
 
         let value = rustia

@@ -1239,8 +1239,8 @@ where
         Return: FromRustiaMulti,
     {
         self.scoped(|invocation| {
-            let raw_args = args
-                .into_rustia_multi()
+            let owned_args = args.into_rustia_multi()?;
+            let raw_args = owned_args
                 .iter()
                 .map(|value| load_owned_value(invocation.vm, value))
                 .collect::<Result<Vec<_>>>()?;
