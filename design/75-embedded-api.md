@@ -281,6 +281,12 @@ Start with owned-value serde for correctness and ergonomics; `OwnedValue` plus s
 the surface is stable, matching the architecture note that zero-copy serde is faster by avoiding the deep-copy
 exports snapshot.
 
+Owned-value serde uses Serde's externally tagged enum model. A unit variant is a string, while a newtype,
+tuple, or struct variant is a single-entry string-keyed table whose value carries the variant content. Derived
+`rename` and `rename_all` rules apply to the string key exactly as they do for other Serde formats. Serialization
+produces those shapes and deserialization accepts them symmetrically; other table shapes and non-string variant
+keys fail explicitly.
+
 ### 4. Compiled module and hot-reload API
 
 Hot reload is part of the embedding goal, not tooling polish.

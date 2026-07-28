@@ -12,7 +12,8 @@ embedding facade from [`75-embedded-api.md`](75-embedded-api.md) is implemented 
 owned values with typed and nested table helpers, source-named run/compile helpers, typed host functions with
 fallible `rustia::Result<T>` returns, pre-install host signature/fuel ABI metadata, retained script function
 handles with freshness checks and current-generation accessors, public source-span/runtime-location error
-accessors, owned-value/table serde, deterministic extension registration, hot reload, and macro sugar. The
+accessors, owned-value/table serde with symmetric externally tagged enum support (including Serde rename
+rules), deterministic extension registration, hot reload, and macro sugar. The
 typed host transaction is now concrete: `HostSchema` keeps registration lifetime-independent while every
 `invoke`/`invoke_into` borrows a fresh, possibly block-local `HostContext`; capability-derived views expose
 input, slots, effects, slot writes, or profile-gated external mutation. Typed VMs execute guest code only through

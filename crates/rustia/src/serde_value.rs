@@ -311,8 +311,123 @@ impl<'de> Deserializer<'de> for OwnedDeserializer<'de> {
         visitor.visit_newtype_struct(self)
     }
 
+    fn deserialize_enum<V>(
+        self,
+        _name: &'static str,
+        _variants: &'static [&'static str],
+        visitor: V,
+    ) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        match self.value {
+            OwnedValue::String(variant) => visitor.visit_enum(OwnedEnumAccess {
+                variant,
+                content: None,
+            }),
+            OwnedValue::Table(table) if table.array.is_empty() && table.entries.len() == 1 => {
+                let (key, content) = &table.entries[0];
+                let OwnedKey::String(variant) = key else {
+                    return Err(SerdeValueError(
+                        "an enum variant key must be a string".to_owned(),
+                    ));
+                };
+                visitor.visit_enum(OwnedEnumAccess {
+                    variant,
+                    content: Some(content),
+                })
+            }
+            value => Err(SerdeValueError(format!(
+                "expected an enum string or single-entry table, got {}",
+                value.type_name()
+            ))),
+        }
+    }
+
     serde::forward_to_deserialize_any! {
-        char bytes byte_buf unit unit_struct tuple tuple_struct enum identifier ignored_any
+        char bytes byte_buf unit unit_struct tuple tuple_struct identifier ignored_any
+    }
+}
+
+struct OwnedEnumAccess<'de> {
+    variant: &'de str,
+    content: Option<&'de OwnedValue>,
+}
+
+impl<'de> de::EnumAccess<'de> for OwnedEnumAccess<'de> {
+    type Error = SerdeValueError;
+    type Variant = OwnedVariantAccess<'de>;
+
+    fn variant_seed<V>(self, seed: V) -> SerdeResult<(V::Value, Self::Variant)>
+    where
+        V: de::DeserializeSeed<'de>,
+    {
+        let variant = seed.deserialize(
+            de::value::BorrowedStrDeserializer::<SerdeValueError>::new(self.variant),
+        )?;
+        Ok((
+            variant,
+            OwnedVariantAccess {
+                content: self.content,
+            },
+        ))
+    }
+}
+
+struct OwnedVariantAccess<'de> {
+    content: Option<&'de OwnedValue>,
+}
+
+impl<'de> de::VariantAccess<'de> for OwnedVariantAccess<'de> {
+    type Error = SerdeValueError;
+
+    fn unit_variant(self) -> SerdeResult<()> {
+        match self.content {
+            None => Ok(()),
+            Some(_) => Err(SerdeValueError(
+                "unit enum variants must be represented by a string".to_owned(),
+            )),
+        }
+    }
+
+    fn newtype_variant_seed<T>(self, seed: T) -> SerdeResult<T::Value>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        let content = self.content.ok_or_else(|| {
+            SerdeValueError(
+                "newtype enum variants require a single-entry table with content".to_owned(),
+            )
+        })?;
+        seed.deserialize(OwnedDeserializer { value: content })
+    }
+
+    fn tuple_variant<V>(self, _len: usize, visitor: V) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        let content = self.content.ok_or_else(|| {
+            SerdeValueError(
+                "tuple enum variants require a single-entry table with content".to_owned(),
+            )
+        })?;
+        OwnedDeserializer { value: content }.deserialize_seq(visitor)
+    }
+
+    fn struct_variant<V>(
+        self,
+        _fields: &'static [&'static str],
+        visitor: V,
+    ) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        let content = self.content.ok_or_else(|| {
+            SerdeValueError(
+                "struct enum variants require a single-entry table with content".to_owned(),
+            )
+        })?;
+        OwnedDeserializer { value: content }.deserialize_map(visitor)
     }
 }
 
@@ -422,10 +537,29 @@ impl<'de> Deserializer<'de> for MapKeyDeserializer<'de> {
         }
     }
 
+    fn deserialize_enum<V>(
+        self,
+        _name: &'static str,
+        _variants: &'static [&'static str],
+        visitor: V,
+    ) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        match self {
+            Self::Owned(OwnedKey::String(variant)) => visitor.visit_enum(
+                de::value::BorrowedStrDeserializer::<SerdeValueError>::new(variant),
+            ),
+            _ => Err(SerdeValueError(
+                "an enum map key must be a string".to_owned(),
+            )),
+        }
+    }
+
     serde::forward_to_deserialize_any! {
         bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
         bytes byte_buf option unit unit_struct newtype_struct seq tuple tuple_struct
-        map struct enum ignored_any
+        map struct ignored_any
     }
 }
 
@@ -1031,4 +1165,126 @@ where
             std::any::type_name::<T>()
         ))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+    use std::collections::BTreeMap;
+
+    #[derive(Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+    #[serde(rename_all = "lowercase")]
+    enum TestEnum {
+        Ring,
+        Count(u8),
+        Pair(u8, u8),
+        Named { value: u8 },
+    }
+
+    #[test]
+    fn enum_unit_variant_deserializes_from_string_with_rename_all() {
+        let value = OwnedValue::String("ring".to_owned());
+
+        assert_eq!(value.deserialize::<TestEnum>().unwrap(), TestEnum::Ring);
+    }
+
+    #[test]
+    fn enum_variants_with_content_deserialize_from_single_entry_tables() {
+        let newtype = OwnedValue::Table(OwnedTable::entries([(
+            OwnedKey::String("count".to_owned()),
+            OwnedValue::Number(3.0),
+        )]));
+        let tuple = OwnedValue::Table(OwnedTable::entries([(
+            OwnedKey::String("pair".to_owned()),
+            OwnedValue::Table(OwnedTable::array([
+                OwnedValue::Number(4.0),
+                OwnedValue::Number(5.0),
+            ])),
+        )]));
+        let structure = OwnedValue::Table(OwnedTable::entries([(
+            OwnedKey::String("named".to_owned()),
+            OwnedValue::Table(OwnedTable::entries([(
+                OwnedKey::String("value".to_owned()),
+                OwnedValue::Number(6.0),
+            )])),
+        )]));
+
+        assert_eq!(
+            newtype.deserialize::<TestEnum>().unwrap(),
+            TestEnum::Count(3)
+        );
+        assert_eq!(
+            tuple.deserialize::<TestEnum>().unwrap(),
+            TestEnum::Pair(4, 5)
+        );
+        assert_eq!(
+            structure.deserialize::<TestEnum>().unwrap(),
+            TestEnum::Named { value: 6 }
+        );
+    }
+
+    #[test]
+    fn enum_round_trips_all_supported_variant_shapes() {
+        let values = [
+            TestEnum::Ring,
+            TestEnum::Count(3),
+            TestEnum::Pair(4, 5),
+            TestEnum::Named { value: 6 },
+        ];
+
+        for expected in values {
+            let owned = OwnedValue::from_serialize(&expected).unwrap();
+            assert_eq!(owned.deserialize::<TestEnum>().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn unit_enum_map_keys_round_trip() {
+        let expected = BTreeMap::from([(TestEnum::Ring, 7_u8)]);
+
+        let owned = OwnedValue::from_serialize(&expected).unwrap();
+
+        assert_eq!(
+            owned.deserialize::<BTreeMap<TestEnum, u8>>().unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn luau_owned_values_deserialize_external_enum_shapes() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct ScriptEnums {
+            choice: TestEnum,
+            payload: TestEnum,
+        }
+
+        let mut vm = crate::Rustia::builder().build().unwrap();
+        let owned = vm
+            .run_owned("return { choice = 'ring', payload = { count = 3 } }")
+            .unwrap();
+
+        assert_eq!(
+            owned.deserialize::<ScriptEnums>().unwrap(),
+            ScriptEnums {
+                choice: TestEnum::Ring,
+                payload: TestEnum::Count(3),
+            }
+        );
+    }
+
+    #[test]
+    fn malformed_and_unknown_enum_variants_fail() {
+        let malformed = OwnedValue::Table(OwnedTable::entries([
+            (
+                OwnedKey::String("count".to_owned()),
+                OwnedValue::Number(3.0),
+            ),
+            (OwnedKey::String("ring".to_owned()), OwnedValue::Nil),
+        ]));
+        let unknown = OwnedValue::String("unknown".to_owned());
+
+        assert!(malformed.deserialize::<TestEnum>().is_err());
+        assert!(unknown.deserialize::<TestEnum>().is_err());
+    }
 }
