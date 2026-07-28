@@ -132,6 +132,16 @@ impl RustiaBuilder {
         RustiaExecutionProfile::new(self.profile, self.settings.guest_surface)
     }
 
+    /// Returns the complete VM settings currently held by this builder.
+    ///
+    /// Embedders can use this readback to verify that separately versioned
+    /// package budgets and services match the values that will reach the VM.
+    /// The core profile and guest surface remain available as the stable,
+    /// compact [`RustiaExecutionProfile`] identity component.
+    pub const fn vm_settings(&self) -> &VmSettings {
+        &self.settings
+    }
+
     /// Reproducible-by-default preset: `Profile::ReproducibleStandard` plus a real stdout
     /// `print` sink on native targets (no sink on wasm32, where `print` stays a no-op).
     /// Clocks keep the VM's built-in deterministic defaults — real time is always an explicit
