@@ -363,26 +363,31 @@ Current unpublished workspace version: `0.0.1`.
   structs are non-exhaustive.
 - Release-readiness docs now cover package metadata, package file-list audits,
   semver policy, changelog validation, and publish ordering.
-- The VM now has a `VmServices` provider seam with shared stdout, wall-clock, and
-  monotonic-clock sockets. `print` composes `tostring` per argument (honoring
+- The VM now has a `VmServices` provider seam with shared stdout, wall-clock,
+  monotonic-clock, and entropy sockets. `print` composes `tostring` per argument (honoring
   `__tostring`), joins arguments with tabs, appends a trailing newline, and writes to
   the attached sink, staying a no-op without one. No-argument `os.time` and
   default-timestamp `os.date` read the wall-clock provider and otherwise fall back to
   the pinned epoch 1_700_000_000; `os.clock` reads the monotonic provider. The `os`
   table is always registered on non-Sim profiles with all four members; on
   `DeterministicSim` it is registered iff at least one clock provider is plugged, and
-  infallible VM constructors silently drop a nondeterministic clock provider.
+  infallible VM constructors silently drop nondeterministic input providers. Empty
+  entropy keeps the historical seed-zero `math.random` sequence; an entropy
+  provider selects the initial seed once during VM construction.
 - The public `rustia` facade gains environment presets: `RustiaBuilder::standard()`
   (ReproducibleStandard plus a real stdout print sink on native targets, and the new
   delegation target of `Rustia::builder()`), `deterministic()` (DeterministicSim, no
-  ambient services), and `live()` (real stdout, system clocks, and `loadstring`
-  enabled with the stock compiler). The `.stdout(...)`, `.wall_clock(...)`, and
-  `.monotonic_clock(...)` sockets take a sink closure or a `ServiceClock`
-  (`system()` nondeterministic, `fixed(t)` deterministic, `from_fn(f)` host-asserted),
-  and `build()` returns typed errors for a nondeterministic clock provider on
-  `DeterministicSim` and for `live()` on wasm32. `collectgarbage("count")`/`gcinfo`
-  stay canned until honest memory accounting lands, and `math.random` stays pinned in
-  every profile.
+  ambient services), and `live()` (host stdout, system wall/monotonic clocks,
+  system-seeded `math.random`, and `loadstring` enabled with the stock compiler).
+  The `.stdout(...)`, `.wall_clock(...)`, `.monotonic_clock(...)`, and
+  `.entropy(...)` sockets take a sink closure, `ServiceClock`, or
+  `ServiceEntropy`; fixed/host-asserted deterministic providers and explicitly
+  nondeterministic providers are distinct constructors. Native/WASI adapters are
+  automatic. The default `web-live` feature adapts browser/JavaScript Wasm to
+  `console`, `Date`, `performance`, and `crypto`; bare Wasm disables default
+  features and plugs its inputs. `build()` returns typed errors for live inputs
+  on `DeterministicSim` and for an incomplete requested live environment.
+  `collectgarbage("count")`/`gcinfo` stay compatibility values until the O(1) quota tracker backs them.
 - Provider-less `os.clock()` now reads a deterministic logical clock — executed
   instructions divided by 1_000_000 logical instructions per second — monotonically
   non-decreasing per VM and identical across peers and targets, so sandboxed scripts
@@ -412,9 +417,44 @@ Current unpublished workspace version: `0.0.1`.
   non-decreasing values derived from executed instructions; a plugged monotonic
   provider overrides it on any profile, and `DeterministicSim` keeps no ambient
   clock unless a provider is plugged.
+- `live()` now behaves like a conventional scripting runtime: it seeds the pinned
+  PCG32 generator from host entropy and backs `os.clock()` with a true monotonic
+  source. `standard()` and `deterministic()` retain the historical seed-zero
+  sequence unless a replay-stable entropy provider is explicitly supplied.
+- Rust-to-Luau conversion is now explicitly fallible: `IntoRustia`,
+  `IntoRustiaMulti`, and the typed `OwnedTable` constructors return `Result`.
+  Integer inputs and serde values/map keys are rejected when conversion to
+  Luau's `f64` number type would round, while exactly representable wide powers
+  remain accepted.
+- `rustia-cli` now follows script-runner output semantics: guest `print` reaches
+  stdout, ordinary chunk return values are ignored (including functions and
+  cyclic tables), regular REPL statements are silent, and only `=expression`
+  shorthand displays its value through Luau `tostring`.
 
 ### Fixed
 
+- Direct, tail, and stackless self-recursion now honor the configured VM
+  recursion limit instead of the Luau conformance harness's 20,000-call
+  compatibility ceiling. The pinned harness retains its oracle-specific frame
+  accounting behind a conformance-only setting.
+- Generic and generalized iterator calls can now yield through
+  `coroutine.resume`; resumption applies the iterator results and continues at
+  the correct loop edge.
+- Interpolated-string lowering now remaps tokens, lexer errors, AST spans, and
+  later runtime locations to the original source bytes, including nested
+  interpolation.
+- CLI file and stdin execution now accepts raw Luau bytes, preserves source
+  offsets while masking a leading shebang, and resolves REPL runtime diagnostics
+  against the chunk that defined the failing function.
+- Every timed benchmark repetition is checked against the first checksum, and
+  Linode promotion rejects any candidate ledger that changes or truncates the
+  frozen published-history prefix.
+- The `rustia-conformance` crate archive now contains the complete corpus,
+  defaults to that bundled repository, and is package-verified by inventory,
+  checksum, unpacked build, and full-manifest execution.
+- The standalone browser demo disables host-import features, carries a locked
+  dependency graph, and can be instantiated directly with an empty WebAssembly
+  import object as documented.
 - `os.time(table)` now defaults a missing `hour` field to 12 (noon) instead of 0,
   matching the pinned Luau 0.709 oracle (`VM/src/loslib.cpp` reads the field with
   `getfield(L, "hour", 12)`).

@@ -55,14 +55,17 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   environment with a mandatory memory limit. `RustiaExecutionProfile` constructs and reports a typed,
   byte-stable core profile/surface identity component, while `compile_entry`/`invoke_entry_into` provide a direct
   stateless decision path with record publication and reset across both success and failure; module resolution,
-  transactional installation/hot reload, rich graph values, and live zero-copy serde remain planned.
+  transactional installation/hot reload, rich graph values, and live zero-copy serde remain planned. The next
+  advanced layer keeps this concise facade while adding identity-safe values/tables/functions, globals and
+  constructors, a composable chunk builder, modules, and later optional userdata/scopes, async, and migration
+  compatibility.
 - Host services are host-pluggable through the facade: `RustiaBuilder::standard()`/`deterministic()`/`live()`
   environment presets, a `.stdout(...)` print sink with the real Luau composition (`tostring` honoring
   `__tostring`, tab-joined, trailing newline), and `.wall_clock(...)`/`.monotonic_clock(...)` sockets taking a
-  determinism-labeled `ServiceClock` (`system()`/`fixed(t)`/`from_fn(f)`). Provider-less defaults stay
-  deterministic: no-argument `os.time`/`os.date` read a pinned epoch, and `os.clock()` returns a logical clock
-  (executed instructions / 1_000_000); `DeterministicSim` registers `os` only when a deterministic clock
-  provider is plugged and rejects a nondeterministic one at `build()`.
+  determinism-labeled `ServiceClock`, plus `.entropy(...)` taking `ServiceEntropy` for the VM's initial
+  `math.random` seed. Provider-less defaults stay deterministic: no-argument `os.time`/`os.date` read a pinned
+  epoch, `os.clock()` returns a logical clock (executed instructions / 1_000_000), and random seed zero is
+  pinned. `DeterministicSim` admits only providers labeled replay-stable.
 
 ## Embedding presets
 
@@ -75,27 +78,37 @@ ceiling and its explicit `InvocationLimits::new(fuel)` budget.
 |---|---|---|---|---|
 | Profile | `DeterministicSim` + `HardenedLeaf` surface | `DeterministicSim` | `ReproducibleStandard` | `ReproducibleStandard` |
 | Memory limit | required explicitly | optional | optional | optional |
-| `print` | absent | registered; no-op unless a host sink is attached | real stdout on native; no-op on wasm | real stdout on native; no-op on wasm |
+| `print` | absent | registered; no-op unless a host sink is attached | real stdout on native/WASI; no-op on browser Wasm | real stdout on native/WASI; browser console with the default `web-live` adapter |
 | `os.time()` / `os.date()` | absent | `os` absent unless a deterministic clock provider is plugged | pinned epoch 1_700_000_000 unless a wall-clock provider is plugged | system wall clock |
 | `os.clock()` | absent | follows the `os` registration rule | logical clock (executed instructions / 1_000_000) unless a monotonic provider is plugged | system monotonic clock |
+| Initial `math.random` sequence | absent | pinned seed zero unless replay-stable entropy is plugged | pinned seed zero unless entropy is explicitly plugged | seeded from the host's random source |
 | Pure `os` fns (`os.time(t)`, `os.date(f, t)`, `os.difftime`) | absent | follow the `os` registration rule | always available | always available |
 | `collectgarbage("count")` / `gcinfo` | absent | not registered | registered; compatibility values pending O(1) incremental accounting | registered; same compatibility values |
 | `loadstring` | absent | opt-in host compiler only | opt-in host compiler only | enabled with the stock compiler |
-| Host-fn capabilities | five deterministic capabilities, through frozen modules installed before execution | the five deterministic capabilities; external-state/nondeterministic registrations and nondeterministic clock providers rejected | all seven capabilities | all seven |
+| Host-fn capabilities | five deterministic capabilities, through frozen modules installed before execution | the five deterministic capabilities; external-state/nondeterministic registrations and nondeterministic inputs rejected | all seven capabilities | all seven |
 | GC/reset | deterministic schedule; reset preserves sealed configuration and discards decision allocations | full collection on the deterministic instruction-count schedule | incremental/paced | incremental/paced |
-| Reproducibility | authoritative stateless replay surface | bit-identical replay on the tested matrix | replay-stable defaults; real time only by explicit provider choice | not reproducible (live IO) |
-| wasm32 | supported | supported | supported (same script-visible values; print no-op) | `build()` fails loudly — plug providers instead |
+| Reproducibility | authoritative stateless replay surface | bit-identical replay on the tested matrix | replay-stable defaults; live inputs only by explicit provider choice | intentionally no replay guarantee |
+| wasm32 | supported | supported | supported (same script-visible values; print no-op) | browser/JavaScript host works by default; bare Wasm disables default features and plugs clock/entropy providers |
 
-`math.random` stays pinned in every ordinary profile surface and is absent from `HardenedLeaf`. Clock providers carry a determinism label
-(`ServiceClock::system()` is nondeterministic; `fixed(t)`/`from_fn(f)` are host-asserted deterministic), and
-the facade `build()` rejects a nondeterministic clock on `deterministic()`.
+The PCG32 algorithm remains pinned in every ordinary preset and is absent from `HardenedLeaf`; what changes in
+`live()` is its initial seed.
+Clock and entropy providers carry a determinism label: `system()` and `from_nondeterministic_fn(...)` are live,
+while `fixed(...)` and `from_fn(...)` are host-asserted replay-stable. The facade rejects any live input on
+`deterministic()`. `ServiceClock::monotonic()` is the conventional elapsed-time source used by live
+`os.clock()`.
+
+These presets are user-selected contracts, not a ladder in which deterministic scripting limits every user.
+The planned advanced embedding API is shared by all three: `deterministic()` enforces lockstep restrictions,
+`standard()` has reproducible defaults but permits explicit nondeterministic providers/capabilities, and
+`live()` is the first-class ordinary embedding choice with no reproducibility guarantee.
 
 ## Project Pillars
 The canonical decision filter is [`design/02-pillars.md`](design/02-pillars.md). The short version:
 
 - **Pinned Standalone Luau Compatibility** — Luau 0.709 standalone runtime behavior, not Roblox/latest-Luau drift.
 - **Conformance and Provenance** — claims need fixtures, upstream links, audits, benchmarks, or explicit defers.
-- **Deterministic Profiles and Replay ABI** — reproducible public behavior plus a stricter lockstep profile.
+- **Selectable Environment Contracts and Replay ABI** — strict lockstep, reproducible-by-default, and
+  explicitly live/non-reproducible construction choices over one engine.
 - **Rollback-Safe Host Boundary** — hosts own authoritative state, rollback capture, and ordered effect commits.
 - **Layered Rust Embedding API** — small typed facade first; advanced interop stays layered.
 - **One Safe Native + Wasm Engine** — one semantic engine across native and `wasm32-unknown-unknown`.

@@ -1,6 +1,6 @@
 # rustia - embedded API goal and plan
 
-> **Status: [TYPED INVOCATION + DECISION RESET IMPLEMENTED - advanced interop pending] (updated 2026-07-28).**
+> **Status: [TYPED INVOCATION + DECISION RESET IMPLEMENTED - advanced interop pending] (updated 2026-07-29).**
 > This records the public Rust embedding API direction and its honest implementation boundary after comparing
 > rustia's constraints with current Rust scripting/runtime APIs. It refines the locked
 > architecture axis H in [`30-architecture.md`](30-architecture.md) and the grabby bridge contract in
@@ -12,14 +12,17 @@
 
 This is the API goal, not just a feature label. It means rustia must provide a general-purpose, public Rust
 embedding surface that is pleasant outside grabby, while also being strong enough for grabby's deterministic
-per-agent AI loop without leaking grabby-specific types into public rustia.
+per-agent AI loop without leaking grabby-specific types into public rustia. Deterministic simulation is one
+first-class builder contract, not a global restriction: ordinary applications can choose an explicitly live,
+fully non-reproducible environment at construction time.
 
 ## Current boundary
 
 Typed run/compile helpers, owned scalar and table values, typed host functions, extension metadata/capabilities,
 retained `Function`/`Exports` handles with install-generation checks, owned serde, hot reload, diagnostics,
-early declarative macro sugar, and the runtime output/time services slice (environment presets, a stdout sink,
-and determinism-labeled clock providers per [`72-host-services.md`](72-host-services.md)) are implemented.
+early declarative macro sugar, and the runtime host-services slice (environment presets, stdout,
+determinism-labeled clock/entropy providers, and native/WASI/browser adapters per
+[`72-host-services.md`](72-host-services.md)) are implemented.
 The concrete safe-Rust host seam is also implemented: `HostSchema` separates persistent registrations from a
 fresh, possibly borrowing `HostContext` for each typed invocation; callbacks receive capability-specific views;
 all guest calls in the invocation share fuel; and effects/slot writes stage into a bounded, ordered,
@@ -34,16 +37,23 @@ quota/atomic OOM path are now implemented and validated by the exact-commit `saf
 cohort plus its wasm32 512 KiB quota/recovery probe. The next release-critical slice is not more facade
 decoration: the epoch-safe decision reset is now implemented; remaining work is O(1) quota accounting, a cheap
 host-owned module resolver/cache, transactional installation/reload failures, rich graph-preserving values, and
-live zero-copy serde.
+live zero-copy serde. The consumer-facing plan is an additive advanced live-object layer, not replacement of
+the existing small typed facade. The ordered expansion is recorded in [Build Order](#build-order).
 
 ## Non-Negotiable Requirements
 
 - Koto-shaped migration path: construct VM, configure limits/fuel, register host functions, inject globals,
   compile/run chunks, read exports, call script functions from Rust.
+- Two additive public layers: preserve the concise typed command/data facade, then add an advanced live-object
+  layer for embedders that need identity, mutation, coroutines, userdata, and richer composition.
 - Luau-compatible script semantics remain the runtime contract.
 - Public API must not leak gc-arena lifetimes or internal `Value` representation.
 - Public rustia contains no `SimId`, `EffectRecord`, `ControlInput`, or grabby-specific enum.
 - DeterministicSim allows deterministic host seams, not arbitrary host mutation.
+- `RustiaBuilder::live()` is a first-class intentionally nondeterministic choice, not an unsupported escape
+  hatch. `standard()` keeps reproducible defaults while permitting explicit nondeterministic providers and
+  capabilities. Advanced interop must remain available in every preset; the selected preset changes policy
+  enforcement and defaults, not which general-purpose API layer exists.
 - Cross-tick authoritative state for grabby lives in host typed slots, never Lua globals/upvalues.
 - Rustia assigns one dense record sequence per successful invocation; the grabby bridge adds `emitter`, orders
   by `(emitter, seq)`, then commits.
@@ -68,6 +78,39 @@ The best existing Rust APIs converge on a few patterns:
 - **wasmtime/wasmi**: best linker pattern: named host imports, typed `func_wrap`, store data, reusable linker.
 - **deno_core**: most advanced op layer: macro-generated ops, fastcalls, fallible ops, async modes, typed
   conversion, extension packaging.
+
+## Public API End State: Two Additive Layers
+
+Rustia should not force every embedder to pay the conceptual cost of a full live object model, and it should
+not force advanced embedders to treat the VM as a sealed calculator. The target is two additive layers over
+one engine:
+
+1. **Typed command/data facade (existing and retained).** `insert_global`, `add_fn`, `run<T>`, `Exports`,
+   owned serde, extensions, fuel/capabilities, and hot reload remain the shortest route for deterministic
+   decisions, configuration, and simple applications.
+2. **Advanced live-object API (planned after safe lifetime foundations).** Identity-safe live `Value` and
+   `Table` handles, the existing rooted `Function` evolved into the same model, a public coroutine `Thread`
+   handle when a real host-side scheduling caller exists, `globals()`, table/function constructors, a
+   composable chunk builder, per-call host context, modules, rich values, and later optional
+   `UserData`/`Scope` and async.
+
+The advanced layer is not a raw Luau C stack API and must not expose internal GC lifetimes. Handles belong to
+one VM, are real GC roots while alive, fail safely when used with another VM, and carry an epoch contract:
+ordinary handles survive hot reload where documented, while explicit decision reset may invalidate them.
+Live tables preserve identity, shared/cyclic graphs, binary data, and mutation; `OwnedValue` remains the
+portable deep-copy boundary for callers that prefer isolation.
+
+The environment is chosen independently of the API layer:
+
+| builder | promise | advanced API policy |
+|---|---|---|
+| `deterministic()` | strict lockstep/replay contract | Same live-object surface, but nondeterministic providers and host capabilities are rejected. Reset/epoch and fuel rules are mechanically enforced. |
+| `standard()` | reproducible defaults | Same surface; callers may explicitly install external-state or nondeterministic functions and clocks, making that VM intentionally non-reproducible. |
+| `live()` | ordinary, intentionally non-reproducible embedding | Same surface with system services and runtime compilation enabled by default. No replay guarantee is claimed; normal safety, memory, and Luau-semantic contracts still apply. |
+
+This is an API-availability rule, not a promise that every feature is meaningful in every profile. For example,
+async host work and suspended cross-tick coroutines are unsuitable for `DeterministicSim`, but they must not be
+globally omitted merely because that profile exists.
 
 ## Best Five Implementation Shapes
 
@@ -108,12 +151,15 @@ Core pieces:
 Runtime services are part of the same builder (implemented per [`72-host-services.md`](72-host-services.md)):
 `RustiaBuilder::standard()` (= `Rustia::builder()`) adds a real stdout print sink on native targets while
 keeping deterministic clock defaults; `deterministic()` is the bare `DeterministicSim` world; `live()` is
-"normal Luau" with system clocks and the stock `loadstring` compiler, and fails loudly on wasm32. The
-`.stdout(...)`/`.wall_clock(...)`/`.monotonic_clock(...)` sockets take a sink closure or a `ServiceClock`
-(`system()` is nondeterministic, `fixed(t)` deterministic, `from_fn(f)` host-asserted); with no provider
-plugged, no-argument `os.time`/`os.date` read a pinned epoch and `os.clock()` reads a deterministic logical
-clock (executed instructions / 1_000_000). On `DeterministicSim` the `os` table is registered iff a
-deterministic clock provider is plugged, and `build()` rejects a nondeterministic one.
+"normal Luau" with host stdout, system wall/monotonic clocks, an ambient initial random seed, and the stock
+`loadstring` compiler. Native/WASI and default browser-Wasm platform adapters make that one-word preset work
+without plumbing; bare Wasm disables the adapter and supplies the input sockets explicitly. The
+`.stdout(...)`/`.wall_clock(...)`/`.monotonic_clock(...)`/`.entropy(...)` sockets take a sink closure,
+`ServiceClock`, or `ServiceEntropy`; `system()`/`monotonic()`/`from_nondeterministic_fn(...)` are live, while
+`fixed(...)`/`from_fn(...)` are replay-stable. With no provider plugged, no-argument `os.time`/`os.date` read a
+pinned epoch, `os.clock()` reads a deterministic logical clock (executed instructions / 1_000_000), and
+`math.random` begins at seed zero. On `DeterministicSim`, `build()` rejects every provider labeled
+nondeterministic.
 
 Reason: best fit for koto migration, grabby ergonomics, and public API clarity.
 
@@ -432,12 +478,13 @@ store authoritative state on the GC heap instead of in captured host slots.
 6. ✅ hot reload and diagnostics — first slice landed; reclamation and stack traces remain.
 7. ✅ early declarative macro sugar — landed; broader attribute/codegen expansion is deferred.
 8. ✅ runtime output/time services — landed per [`72-host-services.md`](72-host-services.md): environment
-   presets, `ServiceClock` provider sockets, real `print` composition, pinned-epoch and logical-clock
-   fallbacks; honest host-facing VM-owned telemetry (`Vm::memory_stats()`) is now implemented by the later
-   accounting tranche, while script-visible counters await the O(1) quota tracker.
+   presets, `ServiceClock`/`ServiceEntropy` provider sockets, real `print` composition, pinned-epoch and
+   logical-clock fallbacks, and native/WASI/browser adapters; honest host-facing VM-owned telemetry
+   (`Vm::memory_stats()`) is implemented, while script-visible counters await the O(1) quota tracker.
 9. ✅ logical-live quotas and atomic/catchable OOM — implemented through
    `VmSettings::memory_limit_bytes` / `RustiaBuilder::memory_limit_bytes`; exact-commit native Linode and wasm32
-   pressure validation is retained under `safe-memory-588b541`, while O(1) accounting remains an optimization.
+   pressure validation is retained under `safe-memory-588b541`; replacing quota-boundary census scans with
+   O(1) incremental accounting remains a release blocker.
 10. ✅ epoch-safe decision reset — `Vm::reset_decision()` / `Rustia::reset_decision()` preserve host
     configuration, discard all guest state, restart deterministic counters, invalidate every old retained
     handle clone, and plateau exactly in the 600-decision mixed lifecycle test.
@@ -446,8 +493,31 @@ store authoritative state on the GC heap instead of in captured host slots.
 12. ✅ hardened stateless action leaves — deterministic allowlisted/frozen guest surface, mandatory memory
     limit, bytecode policy validation, direct `CompiledEntry` invocation, failure-safe lifecycle helper,
     immutable-prefix decision reset, and native/wasm32 exact-plateau probes.
-13. ⏳ host-owned script module resolution, transactional install/reload of guest state, and rich/live values —
-    next.
+13. ⏳ **Add the advanced live-handle spine:** identity-safe live `Value` and `Table` handles; evolve the
+    existing rooted `Function` into the same VM/epoch model; add a public `Thread` handle only with a concrete
+    host-side scheduling caller. Preserve binary strings, buffers, vectors, rich keys, userdata identity, and
+    shared/cyclic table graphs without exposing GC lifetimes.
+14. ⏳ **Add the familiar ergonomic entry points:** `globals()`, `create_table()`, `create_function()`, and a
+    composable `load(source).name(...).environment(...).eval()/exec()` chunk builder. Keep `run<T>()`,
+    `add_fn`, and the source-named helpers as concise facade sugar rather than breaking them.
+15. ⏳ **Add host-owned modules:** script-visible `require`, deterministic module identity where promised,
+    execute-once caching, cycle diagnostics, and host-controlled resolution rather than an ambient core
+    filesystem API.
+16. ⏳ **Complete rich integration and failure semantics:** lifetime-safe live serde, transactional
+    extension/module/hot-reload installation, stack diagnostics, and explicit behavior for handles across
+    reload and reset.
+17. ⏳ **Add mlua-style `UserData`/`Scope` only after the live handle/context layer is stable and a real
+    host-object caller fixes the requirements.** Support methods, fields, metamethods, borrowed scoped
+    callbacks, and safe invalidation without weakening the owned facade.
+18. ⏳ **Make async an optional advanced layer, not a core assumption:** Rust futures may bridge to Luau
+    coroutines for tools and live applications; `DeterministicSim` may reject or narrowly constrain operations
+    that cannot satisfy its replay contract.
+19. ⏳ **Consider an mlua migration/compatibility layer after the native advanced API stabilizes.** Familiar
+    names and call shapes may be provided additively, but do not claim import-swap compatibility without a
+    dedicated compatibility suite, and do not let a shim erase Rustia's builder, capability, fuel, or reset
+    contracts.
 
-Defer mlua-style `UserData`/`Scope` until the above is stable. The first useful embedding target is typed
-owned values, retained script function handles, serde, and deterministic extension registration.
+Steps 13–16 are the ordered advanced embedding track. Steps 17–19 are later optional layers, not
+reasons to delay memory safety, the host boundary, or the first public release unless a concrete release
+consumer promotes them. Every step applies to the shared engine; `live()` users are not forced through
+`DeterministicSim` restrictions.

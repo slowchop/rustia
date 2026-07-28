@@ -1,8 +1,13 @@
 # Release Readiness Checklist
 
 This checklist tracks what must be true before any public rustia crate flips
-from `publish = false` to publishable. Updated 2026-07-28; the ordered runtime
+from `publish = false` to publishable. Updated 2026-07-29; the ordered runtime
 blockers below take precedence over packaging polish.
+
+These gates protect memory safety, lifecycle, compatibility, and the environment contract selected by the
+caller. They do not make deterministic execution universal: `standard()` permits explicit nondeterministic
+providers/capabilities, and `live()` is a first-class intentionally non-reproducible builder preset. The same
+general embedding API must remain available to those users.
 
 ## Current Release Blockers (Ordered)
 
@@ -13,10 +18,14 @@ blockers below take precedence over packaging polish.
    decision-reset ABI, and focused 600-decision plateau are implemented.
 2. Add a host-owned script-visible `require` resolver/cache with deterministic
    identity, execute-once behavior, and cycle diagnostics.
-3. Complete the release value surface for binary strings, buffers, vectors,
-   non-scalar/identity keys, opaque identity-safe userdata handles,
-   shared/cyclic table graphs, and a lifetime-safe live serde layer. Full
-   mlua-style `UserData`/`Scope` registration remains a later optional layer.
+3. Complete the release value and live-handle surface for binary strings,
+   buffers, vectors, non-scalar/identity keys, opaque identity-safe userdata
+   handles, shared/cyclic table graphs, VM/epoch-safe live `Value`/`Table`/
+   `Function` handles, globals/value constructors, a composable chunk builder,
+   and a lifetime-safe live serde layer. Preserve the small typed facade as the
+   simple layer. Full mlua-style `UserData`/`Scope`, async, and an mlua
+   migration shim remain later optional layers unless a concrete release
+   consumer promotes them.
 4. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
    transactional extension/module/hot-reload failure behavior, and
    differential/fuzz coverage before stabilizing and publishing the API.

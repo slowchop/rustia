@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-28.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-29.)
 
 ## One-paragraph state
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
@@ -51,7 +51,12 @@ three local 20,000-decision runs; this is workload-specific development evidence
 The host services bus from [`72-host-services.md`](72-host-services.md) is now implemented: facade presets
 `standard()`/`deterministic()`/`live()`, a host stdout sink giving `print` its real Luau composition,
 determinism-labeled wall/monotonic clock providers feeding `os.time`/`os.date`/`os.clock`, and a deterministic
-logical `os.clock` fallback (executed instructions / 1_000_000) replacing the former `0.0`.
+logical `os.clock` fallback (executed instructions / 1_000_000) replacing the former `0.0`. The same bus
+includes determinism-labeled entropy for the initial `math.random` seed: `standard()` and `deterministic()` keep
+seed zero unless a replay-stable provider is explicit, while `live()` takes system entropy, real clocks, stdout,
+and `loadstring`. Native/WASI adapters are automatic; browser `wasm32-unknown-unknown` uses the default
+`web-live` JavaScript adapter (`console`, `Date`, `performance`, `crypto`), and bare Wasm can disable it and
+inject the three input providers.
 The typed record journal assigns one dense sequence across effects and slot writes. A failed/panicking handler
 rolls back its own suffix; an error escaping the invocation publishes nothing; a completed host call remains
 complete if a later guest error is caught by `pcall`. Transactional fuel exhaustion, OOM, count/byte overflow,
@@ -218,7 +223,7 @@ rustia work and what should be deferred or marked out of scope:
 |---:|---|---|
 | 1 | Pinned Standalone Luau Compatibility | Luau 0.709 standalone runtime behavior: parser/compiler/VM/source-visible stdlib, vector-3, flags-off. |
 | 2 | Conformance and Provenance | Compatibility claims need fixtures, upstream links, generated audits, benchmark records, or explicit defer reasons. |
-| 3 | Deterministic Profiles and Replay ABI | `ReproducibleStandard` is reproducible-conformant; `DeterministicSim` is the stricter lockstep/replay subset. |
+| 3 | Selectable Environment Contracts and Replay ABI | `standard()` has reproducible defaults with explicit opt-in nondeterminism, `deterministic()` is the strict lockstep/replay subset, and `live()` intentionally makes no replay guarantee. |
 | 4 | Rollback-Safe Host Boundary | The host owns cross-tick authoritative state, typed slots, rollback capture, ordered effect queues, and commits. |
 | 5 | Layered Rust Embedding API | Small typed facade first; extensions, capabilities, fuel, retained handles, serde, and future interop are layered. |
 | 6 | One Safe Native + Wasm Engine | One semantic engine across native and `wasm32-unknown-unknown`, with no public unsafe-code or target-specific semantic fork. |
@@ -251,11 +256,12 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    best shared peak, and reduced the shared retained mean to 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. Still
    required before public release: O(1) accounting and broader mixed-heap/native/Wasm pressure coverage.
    GC interval tuning is not a substitute for those remaining policies.
-2. **Host-provided runtime services and modules.** The output/time provider slice is implemented
+2. **Host-provided runtime services and modules.** The output/clock/entropy provider slice is implemented
    ([`72-host-services.md`](72-host-services.md)): `print` composes `tostring` per argument (honoring
    `__tostring`), tab-joins, and writes to a host stdout sink when one is attached; no-argument
    `os.time`/`os.date` read a wall-clock provider with a pinned-epoch fallback; and `os.clock` reads a
-   monotonic-clock provider with a deterministic logical-clock fallback. The typed per-invocation context,
+   monotonic-clock provider with a deterministic logical-clock fallback. Entropy selects the initial
+   `math.random` seed, and native/WASI/browser adapters supply live providers. The typed per-invocation context,
    capability views, shared fuel, bounded ordered record journal, rollback/`pcall` contract, usage receipts,
    panic poisoning/reset, and atomic typed `HostModule` registration are implemented. Still open:
    Host-facing VM memory telemetry is now honest for the documented VM-owned logical allocation boundary;
@@ -266,8 +272,13 @@ production concern or host-facing facility is finished. The highest-impact gaps 
 3. **Complete public value interop.** `OwnedValue` intentionally starts small, but it cannot yet faithfully
    carry binary strings, buffers, vectors, opaque userdata identity, non-scalar/identity table keys,
    cyclic/shared table graphs, or zero-copy live values. Add the live-value serde path and identity-safe handles
-   before claiming a general rich embedding boundary; full mlua-style `UserData`/`Scope` registration and async
-   callbacks remain later, optional layers.
+   before claiming a general rich embedding boundary. The consumer target is two additive layers: retain the
+   concise typed command/data facade, then add VM/epoch-safe live `Value`/`Table`/`Function` handles,
+   `globals()` and value constructors, and a composable chunk builder. Full mlua-style `UserData`/`Scope`
+   registration, async callbacks, and any mlua migration shim remain later optional layers. These APIs serve
+   every builder preset: `deterministic()` enforces replay restrictions, `standard()` permits explicit
+   nondeterminism over reproducible defaults, and `live()` is a first-class intentionally non-reproducible
+   environment rather than a restricted or second-class mode.
 4. **Semantic-tail and diagnostics hardening.** Continue differential parser/compiler testing, keep valid
    runtime errors catchable at runtime rather than prematurely rejecting them at compile time, and finish
    public stack traces/source diagnostics. Module/extension installation and runtime-failing hot reload also need
@@ -291,11 +302,15 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    optimize quota accounting to O(1) and prove the complete memory path with broader long-lived churn, cyclic
    graphs, hot reload, retained handles, weak tables, native/wasm parity, and representative mixed-heap evidence
    before tuning final intervals.
-2. **Finish the remaining host-facing runtime boundary.** The typed schema/context, deterministic record
-   transaction, and hardened stateless-leaf layer are implemented. Add a host-owned module resolver/cache,
-   complete binary/rich-value interop, zero-copy live serde, and transactional
-   install/hot-reload/stack diagnostics. Keep these layered and public-clean; do not leak grabby-specific types
-   or a raw C API.
+2. **Finish the host-facing runtime boundary and ordered advanced API track.** Follow
+   [`75-embedded-api.md`](75-embedded-api.md#build-order): add identity-safe live values/tables/functions,
+   familiar globals/value constructors and a composable chunk builder, a host-owned module resolver/cache,
+   complete binary/rich-value interop, zero-copy live serde, and transactional install/hot-reload/stack
+   diagnostics. The worker-local/per-call host context is already implemented. Keep the existing typed facade
+   as the simple layer, keep the advanced layer available to all builder presets, and do not leak
+   grabby-specific types, internal GC lifetimes, or a raw C API. `live()` remains the explicit
+   no-reproducibility-guarantee environment; deterministic policy is enforced only by constructors that
+   promise it.
 3. **Harden the production engine** against the LOCKED decisions ([`30-architecture.md`](30-architecture.md) §1–§4):
    keep the 16-byte tagged `Value` firewall, portable `br_table`-friendly dispatch, instruction-count fuel,
    deterministic f64/libm behavior, table-key `-0` normalization, profile-specific GC behavior, and the public
@@ -403,16 +418,18 @@ tuning. Benchmark publication and the `LuauIntegerType2` watch remain ongoing ga
   The invocation makes fuel/OOM/record overflow/yield-boundary failure/missing dispatch/host callback panic
   hard, shares fuel across all nested calls, and publishes bounded records only after the outer operation
   succeeds. Deterministic
-  output/clock providers are admitted: a stdout
+  output/clock/entropy providers are admitted: a stdout
   sink may be attached on any profile, the `os` table (all four members) is registered iff at least one
-  deterministic clock provider is plugged, and a nondeterministic provider is rejected by the facade
-  `build()` and silently dropped by the infallible VM constructors. Weak tables remain supported and are
+  deterministic clock provider is plugged, and replay-stable entropy may select the initial random sequence.
+  A nondeterministic input provider is rejected by the facade `build()` and silently dropped by the infallible
+  VM constructors. Weak tables remain supported and are
   swept on the deterministic
   instruction-count schedule. A sandboxed subset designed for bit-identical replay and verified on the current
   tested matrix. (M2: the Standard modes use an
   **incremental/paced** collection schedule; only DeterministicSim
   uses the full-collect-on-instruction-count trigger.) Scheduling and weak sweeping are implemented; complete
-  ordinary-object/program reclamation, reuse, accounting, limits, and tuning remain open.
+  ordinary-object/program reclamation, reuse, telemetry, and limits are implemented; O(1) quota accounting,
+  script-visible memory counters, broader pressure evidence, and tuning remain open.
 
 `GuestSurface::HardenedLeaf` is a narrowing layer on `DeterministicSim`, not a fourth profile. It is the
 authoritative stateless-action contract: sealed allowlisted globals/libraries/host namespaces, no ambient or
@@ -430,7 +447,7 @@ invocation, and a separately versioned guest ABI.
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
 | [`56-performance-research.md`](56-performance-research.md) | no-unsafe SotA performance stack, top-10 ordered bets, C++ Luau estimates | current research note |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | typed invocation plus the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative + implemented generic seam** ✅ |
-| [`72-host-services.md`](72-host-services.md) | host services bus: stdout sink, determinism-labeled clock providers, facade presets, logical `os.clock` | **implemented** ✅ |
+| [`72-host-services.md`](72-host-services.md) | host services bus: stdout, determinism-labeled clocks and entropy, native/WASI/browser adapters, facade presets, logical `os.clock` | **implemented** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **typed invocation implemented; advanced interop pending** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |
 | [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen stateless authoritative guest surface, direct compiled entries, and fast isolated reset | **implemented v1** ✅ |
@@ -454,7 +471,7 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 | H2 | "~5× koto" too narrow | **RESOLVED** — drop the blanket number; state **per-workload** (below). |
 | H3 | wasm gate + Wasm 3.0 | **RESOLVED** — Wasm-3.0 assessed (br_table stays; wasm-GC rejected; relaxed-SIMD banned); V8 + Bun/JSC-family + SpiderMonkey production wasm and `call_ref` dispatch measured. |
 | M1 | three named modes | **RESOLVED** — one engine with concrete LuauCompat/ReproducibleStandard(default)/DeterministicSim runtime profiles. |
-| M2 | Standard incremental GC | **RESOLVED as a scheduling/profile decision** — paced/incremental for Standard, full-collect-on-instruction-count for DeterministicSim; complete ordinary-object reclamation/accounting/tuning remains open. |
+| M2 | Standard incremental GC | **RESOLVED as a scheduling/profile decision** — paced/incremental for Standard, full-collect-on-instruction-count for DeterministicSim; O(1) accounting and final tuning remain open. |
 | M3 | promote inline caches + hot/cold | **RESOLVED** — compact site-scoped live-slot caches plus `GETIMPORT`/`FASTCALL` and dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` landed; hot/cold remains P1. |
 
 ## What's next (the genuine remaining public-release gates)
@@ -465,11 +482,12 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
    cyclic graphs, hot reload, logical-live quotas, and atomic OOM have their first safety coverage. Decision
    reset now invalidates every prior retained-handle clone by epoch, restarts deterministic state, and plateaus
    exactly across 600 focused decisions; ordinary retained calls still survive hot reload outside a reset.
-2. **Complete the remaining host service and rich-value boundary:** the worker-local typed invocation seam is
-   implemented, including the hardened stateless leaf and direct compiled-entry path; finish O(1) quota
-   accounting, a host-owned deterministic module resolver/cache,
-   binary/rich/cyclic values, live-value serde, transactional extension/module/hot-reload failure behavior, and
-   stronger traceback diagnostics.
+2. **Complete the ordered advanced API boundary:** identity-safe live values/tables/functions; globals,
+   constructors, and a composable chunk builder; a host-owned module resolver/cache; binary/rich/cyclic values;
+   live-value serde; transactional extension/module/hot-reload failure behavior; and stronger traceback
+   diagnostics. The worker-local typed invocation seam, hardened stateless leaf, direct compiled-entry path,
+   memory telemetry, and quota enforcement are implemented. Preserve the concise typed facade and apply
+   determinism restrictions according to the selected builder: `live()` intentionally promises none.
 3. **Tune the GC intervals only after reclamation exists** (Deterministic instruction-count interval =
    determinism ABI; Standard paced-debt multiplier) on realistic long-lived and mixed heaps.
 4. **Harden compiler/runtime error-phase parity** with focused oracle fixtures plus differential/fuzz testing.

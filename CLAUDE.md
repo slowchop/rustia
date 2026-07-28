@@ -20,6 +20,10 @@ serves them.
    (never `RandomState`/`DefaultHasher`); instruction-fuel, never wall-clock; per-op NaN/`-0` canonicalisation;
    insertion-ordered maps. Every nondeterminism hazard is gated by the cross-arch golden and (for JIT'd code)
    the JIT≡interpreter equivalence oracle. A lint/test that *can't* be forgotten beats a sentence in a doc.
+   This guarantee is an explicitly selected contract, not a global ban on ordinary embedding:
+   `RustiaBuilder::live()` is a first-class, intentionally non-reproducible environment, and `standard()`
+   permits explicit nondeterministic providers and host capabilities. Only construction paths that promise
+   determinism must reject nondeterminism; do not cripple the shared advanced API for `live()` users.
 
 3. **Measure, don't assert — perf is a number or it didn't happen.** No "this should be faster." Perf claims
    come from the benchmark suite (a CI gate vs reference Luau + koto, per-workload). Add a tier/optimisation
@@ -49,8 +53,9 @@ serves them.
 8. **No unsafe code in the public workspace; invariants are documented and asserted.** Production crates and
    the benchmark harness inherit `unsafe_code = "forbid"`. Experimental spikes or standalone FFI demos may use
    `unsafe` only with an explicit local reason and `SAFETY:` comments. Use `debug_assert!` for cheap invariants.
-   The two profiles only *restrict* — a test asserts anything that runs under `DeterministicSim` produces
-   identical results under `ReproducibleStandard`.
+   `DeterministicSim` is a strict subset of `ReproducibleStandard` — a test asserts anything that runs under
+   the former produces identical results under the latter. `live()` deliberately adds nondeterministic
+   services without creating a separate semantic engine or weakening the stricter construction paths.
 
 9. **Never panic on guest input — errors are structured Results.** Script/compile errors → a typed
    `Result`/`ErrorKind` with source span + the byte-exact Luau message. `panic!`/`unwrap` are reserved for
