@@ -81,6 +81,14 @@ where
         RustiaExecutionProfile::from_vm(self.vm.profile(), self.vm.settings().guest_surface)
     }
 
+    /// Returns the complete settings read from this live VM.
+    ///
+    /// This lets an embedder attest separately versioned budgets and services
+    /// after construction rather than trusting only caller-side builder data.
+    pub const fn vm_settings(&self) -> &VmSettings {
+        self.vm.settings()
+    }
+
     /// Current decision epoch. Epoch zero begins at construction.
     pub fn decision_epoch(&self) -> u64 {
         self.vm.decision_epoch()
@@ -2128,8 +2136,12 @@ return ok and done and not protected and string.find(err, 'foo', 1, true) ~= nil
 
         let builder = RustiaBuilder::deterministic_leaf().memory_limit_bytes(512 * 1024);
         assert_eq!(builder.execution_profile(), expected);
+        assert_eq!(builder.vm_settings().memory_limit_bytes, Some(512 * 1024));
+        assert!(!builder.vm_settings().enable_memory_tracking);
         let rustia = builder.build_for_host::<()>().unwrap();
         assert_eq!(rustia.execution_profile(), expected);
+        assert_eq!(rustia.vm_settings().memory_limit_bytes, Some(512 * 1024));
+        assert!(!rustia.vm_settings().enable_memory_tracking);
 
         assert_eq!(
             RustiaBuilder::deterministic().execution_profile(),
