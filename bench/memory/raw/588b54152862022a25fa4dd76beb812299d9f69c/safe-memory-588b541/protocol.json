@@ -1,0 +1,91 @@
+{
+  "schema": "rustia.bench.memory-protocol.v1",
+  "cohort_id": "safe-memory-588b541",
+  "commit": "588b54152862022a25fa4dd76beb812299d9f69c",
+  "samples": 9,
+  "bootstrap_repetitions": 20000,
+  "bootstrap_seed": 1381323604,
+  "growth_thresholds": {
+    "absolute_kib_per_epoch": 4,
+    "proportional_percent_per_epoch": 0.05
+  },
+  "host": {
+    "benchmark_cpu": 3,
+    "supervisor_cpu": 2,
+    "sample_interval_ms": 10,
+    "timeout_ms": 600000
+  },
+  "groups": [
+    {
+      "binary": "all",
+      "engines": [
+        "rustia"
+      ],
+      "workloads": [
+        {
+          "id": "dense_tables",
+          "n": 128,
+          "epochs": 16
+        },
+        {
+          "id": "sparse_tables",
+          "n": 128,
+          "epochs": 16
+        },
+        {
+          "id": "closures_upvalues",
+          "n": 128,
+          "epochs": 16
+        },
+        {
+          "id": "generic_iteration",
+          "n": 128,
+          "epochs": 16
+        },
+        {
+          "id": "stdlib_math_table",
+          "n": 128,
+          "epochs": 16
+        }
+      ]
+    },
+    {
+      "binary": "all",
+      "engines": [
+        "rustia"
+      ],
+      "workloads": [
+        {
+          "id": "memory_burst",
+          "n": 1,
+          "epochs": 16
+        },
+        {
+          "id": "memory_churn",
+          "n": 1,
+          "epochs": 40
+        },
+        {
+          "id": "memory_retained_control",
+          "n": 1,
+          "epochs": 40
+        },
+        {
+          "id": "todo_steady",
+          "n": 128,
+          "epochs": 40
+        },
+        {
+          "id": "todo_history",
+          "n": 128,
+          "epochs": 40
+        },
+        {
+          "id": "todo_retained_control",
+          "n": 128,
+          "epochs": 40
+        }
+      ]
+    }
+  ]
+}

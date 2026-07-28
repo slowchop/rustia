@@ -8,6 +8,62 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- `GuestSurface::HardenedLeaf` and
+  `RustiaBuilder::deterministic_leaf()` add a fail-closed authoritative
+  action-leaf environment layered on `DeterministicSim`. It requires an
+  explicit logical-live memory limit, freezes globals/standard libraries/host
+  namespaces, and removes or rejects environment/debug/raw mutation,
+  output/clocks, VM RNG, buffers/vectors/coroutines, dynamic compilation,
+  legacy extensions, global writes, and captured upvalues. The guest contract
+  is versioned by `RUSTIA_HARDENED_LEAF_GUEST_ABI_VERSION`.
+- `Rustia::compile_entry()`, `Invocation::call_entry()`, and
+  `Rustia::invoke_entry_into()` execute a
+  precompiled top-level decision body without installing an exports table,
+  retaining a closure, or loading program metadata into the VM. Hardened reset
+  preserves the sealed immutable configuration prefix while discarding every
+  decision-local allocation; the lifecycle helper resets after both success
+  and failure. The checked-in semantically validated ABBA benchmark measured
+  the module control at 22.292–23.750 microseconds p95 and the hardened entry
+  at 6.625–6.958 microseconds p95 in three matched local runs; this is
+  workload-specific development evidence.
+- `HostSchema` and `RustiaBuilder::build_for_host::<H>()` now separate a typed
+  VM's lifetime-independent host API from the fresh `HostContext` borrowed by
+  each `invoke`/`invoke_into`. Contexts may contain block-local input and slot
+  borrows; callbacks receive only their
+  declared `Input`, `Slots`, `Effects`, `SlotWrites`, or profile-gated
+  `HostMut` view. Typed VMs execute guest modules and retained functions
+  through a lexical `Invocation`, whose calls share one fuel budget and one
+  bounded record-count/logical-byte journal. Records use a single dense
+  sequence per invocation. Callback failure or panic rolls back that
+  callback's suffix, while an error escaping the invocation rolls back all
+  staged records; completed calls survive a later guest error caught by
+  `pcall`. Transactional fuel exhaustion, OOM, record overflow, invalid
+  boundary yields, a missing typed-host dispatcher, and host panic cannot be
+  swallowed. Host panic poisons the VM; every later guest execution entry
+  point rejects until `reset_decision()` succeeds. Containment includes typed
+  and legacy callbacks, extension ops, stdout/clocks, and the `loadstring`
+  compiler. Panic containment requires `panic = "unwind"`; aborting builds
+  terminate or trap, so callbacks in those builds must not panic. Rollback is explicitly
+  record-only: it does not undo guest heap mutation, `HostMut`, captured
+  globals, or context interior mutation. Successful `invoke` outcomes expose
+  usage plus a borrowed reusable journal, while `invoke_into` pre-reserves and
+  publishes into a caller lane without allocation during the final append and
+  returns a non-borrowing usage receipt.
+- `Vm::reset_decision()` / `Rustia::reset_decision()` implement decision-reset
+  ABI v1. An idle reset reuses VM allocation containers while discarding guest
+  globals, objects, upvalues, coroutines, loaded programs/caches, tracebacks,
+  coverage, and retained roots; it restarts RNG, logical time, and deterministic
+  GC scheduling. Settings, services, extension operations, installed host
+  functions/modules, immutable compiled modules, and lifetime memory peaks
+  persist. `Function`/`Exports` handles now carry a checked decision epoch, and
+  a 600-decision mixed table/coroutine/program test proves an exact post-warmup
+  VM-memory plateau. The wasm32 Node/V8 lifecycle probe executes another 300
+  decisions and verifies the same compiled-module reuse, host-binding restore,
+  input clearing, RNG restart, handle invalidation, and exact plateau. A second
+  wasm32 probe executes two 300-decision typed hardened-entry cohorts and
+  verifies failed-entry rollback/reset, successful records and values, epoch
+  progression, the immutable-prefix memory plateau, and stable linear-memory
+  pages across the second cohort.
 - Runtime string atoms now use generation-checked reusable slots and ordinary
   tracing collections reclaim unreachable strings without allowing stale
   handles to alias replacements. `Vm::collect_garbage()` adds an explicit host
@@ -15,6 +71,28 @@ Current unpublished workspace version: `0.0.1`.
   state, and releases spare table, buffer, interner, and stack allocations to
   the process allocator while preserving retained values and compiled string
   constants.
+- Loaded programs now use generation-checked reusable handles. Explicit host
+  quiescence reclaims obsolete program bytecode, constants, inline caches, and
+  coverage rows after the last reachable closure/coroutine/retained value drops;
+  stale program handles cannot alias a replacement loaded into the reused slot.
+- `Vm::memory_stats()` and the public facade expose VM-owned live/reserved
+  allocation bytes plus opt-in instruction-boundary high-water marks. Heap
+  marking uses compact per-store generation arrays rather than tree-set nodes,
+  reducing temporary collection scratch while preserving the shared
+  weak-table/reclamation graph.
+- `VmSettings::memory_limit_bytes` and
+  `RustiaBuilder::memory_limit_bytes(...)` cap VM-owned logical live bytes with
+  identical native/wasm32 semantics. Limit pressure forces one collection,
+  then returns catchable `OutOfMemory`; large string/table/buffer allocations
+  are preflighted and growth writes stage a complete candidate before commit,
+  so rejection is recoverable without a partial table mutation.
+- The exact-commit `safe-memory-588b541` Sydney Linode cohort retained all 99
+  native samples after confirmed server deletion and also passed the wasm32
+  512 KiB quota/recovery probe. Against the frozen competitor cohort, Rustia
+  now ties the 256 KiB best shared-workload peak, ranks first for allocation
+  stress peak, second for stress retention, second for todo peak, and third for
+  todo retention. Its shared-workload retained mean is 14.4 KiB versus
+  mlua/Luau/JIT's 24.8 KiB.
 - Luau 0.709 conformance tracking is pending-free, with the current manifest at
   694 fixtures and 493 behavior refs.
 - VM strings and larger insertion-ordered table hash parts now use compact

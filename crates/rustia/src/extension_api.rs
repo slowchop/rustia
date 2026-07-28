@@ -1,13 +1,16 @@
 use crate::function::IntoHostFunction;
-use crate::{Error, Profile, Result, Rustia, VmError, VmErrorKind, VmSettings};
+use crate::{
+    Error, GuestSurface, HostSchema, Profile, Result, Rustia, VmError, VmErrorKind, VmSettings,
+};
 use rustia_compiler::{compile_with_options, CompileOptions};
 use rustia_vm::{ClockProvider, HostFunctionOp, OpCapability, Program, StdoutSink};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// Fluent builder for [`Rustia`]: start from a preset ([`standard`](Self::standard),
-/// [`deterministic`](Self::deterministic), [`live`](Self::live)), then override profile,
-/// settings, fuel, services, and extensions before [`build`](Self::build).
+/// [`deterministic`](Self::deterministic), [`deterministic_leaf`](Self::deterministic_leaf),
+/// [`live`](Self::live)), then override profile, settings, fuel, services, and extensions before
+/// [`build`](Self::build).
 pub struct RustiaBuilder {
     profile: Profile,
     settings: VmSettings,
@@ -43,6 +46,18 @@ impl RustiaBuilder {
         Self::new().profile(Profile::DeterministicSim)
     }
 
+    /// Authoritative stateless-leaf preset.
+    ///
+    /// This layers [`GuestSurface::HardenedLeaf`] on
+    /// [`Profile::DeterministicSim`]. A logical-live memory limit remains
+    /// mandatory and must be selected explicitly with
+    /// [`memory_limit_bytes`](Self::memory_limit_bytes).
+    pub fn deterministic_leaf() -> Self {
+        let mut builder = Self::deterministic();
+        builder.settings.guest_surface = GuestSurface::HardenedLeaf;
+        builder
+    }
+
     /// "Normal Luau" preset with `loadstring` enabled (runtime codegen — attack surface for
     /// hosts running untrusted scripts).
     ///
@@ -73,8 +88,28 @@ impl RustiaBuilder {
         self
     }
 
+    /// Sets the VM-wide execution fuel ceiling.
+    ///
+    /// Direct `Rustia<()>` entry points use this as their top-level budget. A
+    /// typed invocation uses the lower of this ceiling and its explicit
+    /// [`crate::InvocationLimits`] fuel, across every guest call in that
+    /// invocation.
     pub fn fuel(mut self, fuel: u64) -> Self {
         self.settings.initial_fuel = Some(fuel);
+        self
+    }
+
+    /// Caps VM-owned logical live bytes. The same value has deterministic
+    /// semantics on native and wasm32; process RSS and allocator capacity
+    /// remain separate host-level measurements.
+    pub fn memory_limit_bytes(mut self, bytes: usize) -> Self {
+        self.settings.memory_limit_bytes = Some(bytes);
+        self
+    }
+
+    /// Enables exact instruction-boundary live/reserved peak telemetry.
+    pub fn memory_tracking(mut self, enabled: bool) -> Self {
+        self.settings.enable_memory_tracking = enabled;
         self
     }
 
@@ -107,6 +142,46 @@ impl RustiaBuilder {
     }
 
     pub fn build(self) -> Result<Rustia> {
+        self.validate()?;
+        if self.settings.guest_surface.is_hardened_leaf() {
+            return Err(Error::Vm(VmError::new(
+                VmErrorKind::HardenedLeafViolation {
+                    feature: "context-free facade",
+                },
+            )));
+        }
+        let mut rustia = Rustia::with_settings(self.profile, self.settings);
+        for extension in self.extensions {
+            rustia.install_extension(extension)?;
+        }
+        Ok(rustia)
+    }
+
+    /// Builds a typed VM while preserving this builder's profile, settings,
+    /// and host services.
+    ///
+    /// Legacy [`RustiaExtension`] values deliberately do not cross into the
+    /// typed capability surface; install a [`crate::HostModule<H>`] after
+    /// building instead.
+    pub fn build_for_host<H>(self) -> Result<Rustia<H>>
+    where
+        H: HostSchema,
+    {
+        self.validate()?;
+        if !self.extensions.is_empty() {
+            return Err(Error::Embed(
+                "legacy RustiaExtension values cannot be installed into a typed VM; \
+                 use HostModule instead"
+                    .to_owned(),
+            ));
+        }
+        Ok(Rustia::for_host_with_settings::<H>(
+            self.profile,
+            self.settings,
+        ))
+    }
+
+    fn validate(&self) -> Result<()> {
         if cfg!(target_arch = "wasm32") && self.live_requested {
             return Err(Error::Vm(VmError::new(VmErrorKind::Unsupported {
                 feature: "live() preset on wasm32 (no system clock or stdout exists; plug \
@@ -127,16 +202,53 @@ impl RustiaBuilder {
                 if clock.as_ref().is_some_and(|clock| !clock.deterministic()) {
                     return Err(Error::Vm(VmError::new(VmErrorKind::CapabilityRemoved {
                         feature,
+                        operation: None,
                         profile: self.profile,
                     })));
                 }
             }
         }
-        let mut rustia = Rustia::with_settings(self.profile, self.settings);
-        for extension in self.extensions {
-            rustia.install_extension(extension)?;
+        if self.settings.guest_surface.is_hardened_leaf() {
+            if !self.profile.is_deterministic_sim() {
+                return Err(Error::Vm(VmError::new(
+                    VmErrorKind::HardenedLeafViolation {
+                        feature: "non-DeterministicSim profile",
+                    },
+                )));
+            }
+            if self.settings.memory_limit_bytes.is_none() {
+                return Err(Error::Vm(VmError::new(
+                    VmErrorKind::HardenedLeafViolation {
+                        feature: "missing logical-live memory limit",
+                    },
+                )));
+            }
+            if self.settings.services.stdout.is_some()
+                || self.settings.services.wall_clock.is_some()
+                || self.settings.services.monotonic_clock.is_some()
+            {
+                return Err(Error::Vm(VmError::new(
+                    VmErrorKind::HardenedLeafViolation {
+                        feature: "host output or clock services",
+                    },
+                )));
+            }
+            if self.settings.loadstring_compiler.is_some()
+                || self.settings.enable_conformance_coverage
+                || self.settings.enable_conformance_top_level_yield
+                || self.settings.enable_conformance_int64_userdata
+                || self.settings.enable_conformance_native_userdata
+                || self.settings.enable_conformance_native_type_checks
+                || self.settings.enable_conformance_pcall_helpers
+            {
+                return Err(Error::Vm(VmError::new(
+                    VmErrorKind::HardenedLeafViolation {
+                        feature: "dynamic-code or conformance-only facilities",
+                    },
+                )));
+            }
         }
-        Ok(rustia)
+        Ok(())
     }
 }
 
@@ -429,22 +541,9 @@ impl RustiaExtension {
             return Ok(());
         };
 
-        let table = rustia.vm_mut().empty_table();
-        for function in self.functions {
-            let name = function.name.clone();
-            let value = rustia
-                .vm_mut()
-                .register_host_function(function)
-                .map_err(Error::Vm)?;
-            let key = rustia.vm_mut().string(&name);
-            rustia
-                .vm_mut()
-                .raw_table_set_value(table, key, value)
-                .map_err(Error::Vm)?;
-        }
         rustia
             .vm_mut()
-            .set_global_value(namespace, table)
+            .install_host_module(namespace, self.functions)
             .map_err(Error::Vm)
     }
 }

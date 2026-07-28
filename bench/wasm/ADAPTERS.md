@@ -15,6 +15,11 @@ Bun/JavaScriptCore-family, and SpiderMonkey `js` shell measurements are kept in
 [`history/`](history/) as portability evidence instead of being repeated in
 every public benchmark run.
 
+The rustia wasm32 quota/recovery check also executes a 300-decision reset
+lifecycle. It verifies reusable compiled modules, restored host bindings,
+cleared decision inputs, deterministic RNG restart, epoch-stale handles, and an
+exact post-warmup VM-owned-memory plateau inside Node/V8.
+
 Not currently measured:
 
 - `boa` - compile probe reaches `getrandom`'s wasm support gate.

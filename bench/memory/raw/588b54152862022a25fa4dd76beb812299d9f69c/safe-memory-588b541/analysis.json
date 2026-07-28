@@ -1,0 +1,1623 @@
+{
+  "schema_version": 1,
+  "schema": "rustia.bench.memory-analysis.v1",
+  "generated_at": "2026-07-27T04:39:23.334Z",
+  "method": {
+    "primary_phase_memory": "smaps_rollup Anonymous KiB",
+    "primary_short_spike_memory": "resettable cgroup-v2 phase memory.peak when available; whole-sample memory.peak fallback",
+    "independent_unit": "fresh process/cgroup sample",
+    "tail_window": "last half of epoch markers",
+    "tail_estimator": "Theil-Sen within sample; median across samples",
+    "confidence_interval": "seeded fresh-process percentile bootstrap of the median",
+    "bootstrap_repetitions": 20000,
+    "bootstrap_seed_uint32": 1381323604,
+    "absolute_growth_kib_per_epoch": 4,
+    "proportional_growth_percent_per_epoch": 0.05,
+    "rss_hwm_role": "diagnostic only"
+  },
+  "raw_sample_count": 99,
+  "row_count": 11,
+  "detector_coverage": [
+    {
+      "commit": "588b54152862022a25fa4dd76beb812299d9f69c",
+      "target": "linux-x86_64",
+      "engine": "rustia",
+      "retained_controls": [
+        {
+          "workload": "memory_retained_control",
+          "classification": "expected_retention"
+        },
+        {
+          "workload": "todo_retained_control",
+          "classification": "expected_retention"
+        }
+      ],
+      "detector_validated": true
+    }
+  ],
+  "rows": [
+    {
+      "commit": "588b54152862022a25fa4dd76beb812299d9f69c",
+      "target": "linux-x86_64",
+      "engine": "rustia",
+      "dialect": "luau",
+      "execution_mode": "interpreter",
+      "workload": "closures_upvalues",
+      "n": 128,
+      "epochs": 16,
+      "sample_ids": [
+        "round-01-rustia-closures_upvalues",
+        "round-02-rustia-closures_upvalues",
+        "round-03-rustia-closures_upvalues",
+        "round-04-rustia-closures_upvalues",
+        "round-05-rustia-closures_upvalues",
+        "round-06-rustia-closures_upvalues",
+        "round-07-rustia-closures_upvalues",
+        "round-08-rustia-closures_upvalues",
+        "round-09-rustia-closures_upvalues"
+      ],
+      "checksum_sequence": [
+        "integer:5472",
+        "integer:5472",
+        "integer:5472",
+        "integer:5472",
+        "integer:5472",
+        "integer:5472",
+        "integer:5472",
+        "integer:5472",
+        "integer:5472",
+        "integer:5472",
+        "integer:5472",
+        "integer:5472",
+        "integer:5472",
+        "integer:5472",
+        "integer:5472",
+        "integer:5472",
+        "integer:5472"
+      ],
+      "metrics": {
+        "spawned_anon_kib": {
+          "sample_count": 9,
+          "min": 152,
+          "q1": 156,
+          "median": 160,
+          "q3": 160,
+          "max": 160
+        },
+        "spawned_pss_kib": {
+          "sample_count": 9,
+          "min": 1035,
+          "q1": 1047,
+          "median": 1079,
+          "q3": 1127,
+          "max": 1139
+        },
+        "prepared_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 128,
+          "q1": 132,
+          "median": 132,
+          "q3": 132,
+          "max": 132
+        },
+        "peak_delta_kib": {
+          "sample_count": 9,
+          "min": 256,
+          "q1": 256,
+          "median": 256,
+          "q3": 256,
+          "max": 256
+        },
+        "quiescent_retained_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 4,
+          "q1": 4,
+          "median": 4,
+          "q3": 4,
+          "max": 4
+        },
+        "dropped_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 160,
+          "q1": 160,
+          "median": 160,
+          "q3": 164,
+          "max": 164
+        },
+        "recovery_ratio": {
+          "sample_count": 9,
+          "min": 0.984375,
+          "q1": 0.984375,
+          "median": 0.984375,
+          "q3": 0.984375,
+          "max": 0.984375
+        },
+        "tail_growth_kib_per_epoch": {
+          "sample_count": 9,
+          "min": 0.6666666666666666,
+          "q1": 0.6666666666666666,
+          "median": 0.6666666666666666,
+          "q3": 0.6666666666666666,
+          "max": 0.6666666666666666
+        },
+        "tail_growth_percent_per_epoch": {
+          "sample_count": 9,
+          "min": 0.21097046413502107,
+          "q1": 0.21097046413502107,
+          "median": 0.21097046413502107,
+          "q3": 0.21097046413502107,
+          "max": 0.21367521367521367
+        },
+        "memory_area_kib_seconds_per_unit": {
+          "sample_count": 9,
+          "min": 0.0012185371250000002,
+          "q1": 0.0012285083749999997,
+          "median": 0.0012491721250000004,
+          "q3": 0.00125939975,
+          "max": 0.0016106933750000003
+        }
+      },
+      "tail_growth_ci_95": {
+        "kib_per_epoch": {
+          "lower": 0.6666666666666666,
+          "upper": 0.6666666666666666
+        },
+        "percent_per_epoch": {
+          "lower": 0.21097046413502107,
+          "upper": 0.21097046413502107
+        }
+      },
+      "classification": "growth_signal"
+    },
+    {
+      "commit": "588b54152862022a25fa4dd76beb812299d9f69c",
+      "target": "linux-x86_64",
+      "engine": "rustia",
+      "dialect": "luau",
+      "execution_mode": "interpreter",
+      "workload": "dense_tables",
+      "n": 128,
+      "epochs": 16,
+      "sample_ids": [
+        "round-01-rustia-dense_tables",
+        "round-02-rustia-dense_tables",
+        "round-03-rustia-dense_tables",
+        "round-04-rustia-dense_tables",
+        "round-05-rustia-dense_tables",
+        "round-06-rustia-dense_tables",
+        "round-07-rustia-dense_tables",
+        "round-08-rustia-dense_tables",
+        "round-09-rustia-dense_tables"
+      ],
+      "checksum_sequence": [
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968",
+        "integer:16527968"
+      ],
+      "metrics": {
+        "spawned_anon_kib": {
+          "sample_count": 9,
+          "min": 156,
+          "q1": 156,
+          "median": 156,
+          "q3": 156,
+          "max": 160
+        },
+        "spawned_pss_kib": {
+          "sample_count": 9,
+          "min": 1031,
+          "q1": 1039,
+          "median": 1043,
+          "q3": 1091,
+          "max": 1139
+        },
+        "prepared_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 128,
+          "q1": 132,
+          "median": 132,
+          "q3": 132,
+          "max": 132
+        },
+        "peak_delta_kib": {
+          "sample_count": 9,
+          "min": 256,
+          "q1": 256,
+          "median": 256,
+          "q3": 256,
+          "max": 256
+        },
+        "quiescent_retained_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 16,
+          "q1": 16,
+          "median": 16,
+          "q3": 16,
+          "max": 16
+        },
+        "dropped_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 160,
+          "q1": 164,
+          "median": 164,
+          "q3": 164,
+          "max": 164
+        },
+        "recovery_ratio": {
+          "sample_count": 9,
+          "min": 0.9375,
+          "q1": 0.9375,
+          "median": 0.9375,
+          "q3": 0.9375,
+          "max": 0.9375
+        },
+        "tail_growth_kib_per_epoch": {
+          "sample_count": 9,
+          "min": 1.2380952380952381,
+          "q1": 1.2380952380952381,
+          "median": 1.2380952380952381,
+          "q3": 1.2380952380952381,
+          "max": 1.2380952380952381
+        },
+        "tail_growth_percent_per_epoch": {
+          "sample_count": 9,
+          "min": 0.4019789734075448,
+          "q1": 0.4072681704260651,
+          "median": 0.4072681704260651,
+          "q3": 0.4072681704260651,
+          "max": 0.41269841269841273
+        },
+        "memory_area_kib_seconds_per_unit": {
+          "sample_count": 9,
+          "min": 0.011524659125,
+          "q1": 0.0116290995,
+          "median": 0.011753398625000003,
+          "q3": 0.012817556375,
+          "max": 0.013065159875
+        }
+      },
+      "tail_growth_ci_95": {
+        "kib_per_epoch": {
+          "lower": 1.2380952380952381,
+          "upper": 1.2380952380952381
+        },
+        "percent_per_epoch": {
+          "lower": 0.4072681704260651,
+          "upper": 0.4072681704260651
+        }
+      },
+      "classification": "growth_signal"
+    },
+    {
+      "commit": "588b54152862022a25fa4dd76beb812299d9f69c",
+      "target": "linux-x86_64",
+      "engine": "rustia",
+      "dialect": "luau",
+      "execution_mode": "interpreter",
+      "workload": "generic_iteration",
+      "n": 128,
+      "epochs": 16,
+      "sample_ids": [
+        "round-01-rustia-generic_iteration",
+        "round-02-rustia-generic_iteration",
+        "round-03-rustia-generic_iteration",
+        "round-04-rustia-generic_iteration",
+        "round-05-rustia-generic_iteration",
+        "round-06-rustia-generic_iteration",
+        "round-07-rustia-generic_iteration",
+        "round-08-rustia-generic_iteration",
+        "round-09-rustia-generic_iteration"
+      ],
+      "checksum_sequence": [
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560",
+        "integer:2930560"
+      ],
+      "metrics": {
+        "spawned_anon_kib": {
+          "sample_count": 9,
+          "min": 152,
+          "q1": 156,
+          "median": 160,
+          "q3": 160,
+          "max": 160
+        },
+        "spawned_pss_kib": {
+          "sample_count": 9,
+          "min": 1035,
+          "q1": 1067,
+          "median": 1079,
+          "q3": 1123,
+          "max": 1127
+        },
+        "prepared_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 160,
+          "q1": 160,
+          "median": 160,
+          "q3": 160,
+          "max": 160
+        },
+        "peak_delta_kib": {
+          "sample_count": 9,
+          "min": 256,
+          "q1": 256,
+          "median": 256,
+          "q3": 256,
+          "max": 256
+        },
+        "quiescent_retained_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
+        },
+        "dropped_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 184,
+          "q1": 184,
+          "median": 184,
+          "q3": 188,
+          "max": 188
+        },
+        "recovery_ratio": {
+          "sample_count": 9,
+          "min": 1,
+          "q1": 1,
+          "median": 1,
+          "q3": 1,
+          "max": 1
+        },
+        "tail_growth_kib_per_epoch": {
+          "sample_count": 9,
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
+        },
+        "tail_growth_percent_per_epoch": {
+          "sample_count": 9,
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
+        },
+        "memory_area_kib_seconds_per_unit": {
+          "sample_count": 9,
+          "min": 0.005108994125,
+          "q1": 0.005517478000000001,
+          "median": 0.005737257625,
+          "q3": 0.006251229500000001,
+          "max": 0.0074024600000000005
+        }
+      },
+      "tail_growth_ci_95": {
+        "kib_per_epoch": {
+          "lower": 0,
+          "upper": 0
+        },
+        "percent_per_epoch": {
+          "lower": 0,
+          "upper": 0
+        }
+      },
+      "classification": "stable_in_tested_window"
+    },
+    {
+      "commit": "588b54152862022a25fa4dd76beb812299d9f69c",
+      "target": "linux-x86_64",
+      "engine": "rustia",
+      "dialect": "luau",
+      "execution_mode": "interpreter",
+      "workload": "memory_burst",
+      "n": 1,
+      "epochs": 16,
+      "sample_ids": [
+        "round-01-rustia-memory_burst",
+        "round-02-rustia-memory_burst",
+        "round-03-rustia-memory_burst",
+        "round-04-rustia-memory_burst",
+        "round-05-rustia-memory_burst",
+        "round-06-rustia-memory_burst",
+        "round-07-rustia-memory_burst",
+        "round-08-rustia-memory_burst",
+        "round-09-rustia-memory_burst"
+      ],
+      "checksum_sequence": [
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768",
+        "integer:4832768"
+      ],
+      "metrics": {
+        "spawned_anon_kib": {
+          "sample_count": 9,
+          "min": 152,
+          "q1": 156,
+          "median": 156,
+          "q3": 156,
+          "max": 160
+        },
+        "spawned_pss_kib": {
+          "sample_count": 9,
+          "min": 1039,
+          "q1": 1043,
+          "median": 1075,
+          "q3": 1088,
+          "max": 1135
+        },
+        "prepared_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 132,
+          "q1": 136,
+          "median": 136,
+          "q3": 136,
+          "max": 136
+        },
+        "peak_delta_kib": {
+          "sample_count": 9,
+          "min": 1024,
+          "q1": 1024,
+          "median": 1024,
+          "q3": 1024,
+          "max": 1024
+        },
+        "quiescent_retained_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 16,
+          "q1": 16,
+          "median": 16,
+          "q3": 16,
+          "max": 16
+        },
+        "dropped_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 804,
+          "q1": 808,
+          "median": 808,
+          "q3": 808,
+          "max": 808
+        },
+        "recovery_ratio": {
+          "sample_count": 9,
+          "min": 0.984375,
+          "q1": 0.984375,
+          "median": 0.984375,
+          "q3": 0.984375,
+          "max": 0.984375
+        },
+        "tail_growth_kib_per_epoch": {
+          "sample_count": 9,
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
+        },
+        "tail_growth_percent_per_epoch": {
+          "sample_count": 9,
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
+        },
+        "memory_area_kib_seconds_per_unit": {
+          "sample_count": 9,
+          "min": 6.718131264,
+          "q1": 7.109384512,
+          "median": 7.254793663999999,
+          "q3": 7.39211392,
+          "max": 8.456467264
+        }
+      },
+      "tail_growth_ci_95": {
+        "kib_per_epoch": {
+          "lower": 0,
+          "upper": 0
+        },
+        "percent_per_epoch": {
+          "lower": 0,
+          "upper": 0
+        }
+      },
+      "classification": "stable_in_tested_window"
+    },
+    {
+      "commit": "588b54152862022a25fa4dd76beb812299d9f69c",
+      "target": "linux-x86_64",
+      "engine": "rustia",
+      "dialect": "luau",
+      "execution_mode": "interpreter",
+      "workload": "memory_churn",
+      "n": 1,
+      "epochs": 40,
+      "sample_ids": [
+        "round-01-rustia-memory_churn",
+        "round-02-rustia-memory_churn",
+        "round-03-rustia-memory_churn",
+        "round-04-rustia-memory_churn",
+        "round-05-rustia-memory_churn",
+        "round-06-rustia-memory_churn",
+        "round-07-rustia-memory_churn",
+        "round-08-rustia-memory_churn",
+        "round-09-rustia-memory_churn"
+      ],
+      "checksum_sequence": [
+        "integer:343810",
+        "integer:377348",
+        "integer:410886",
+        "integer:444424",
+        "integer:477962",
+        "integer:511500",
+        "integer:545038",
+        "integer:578576",
+        "integer:612113",
+        "integer:645650",
+        "integer:679187",
+        "integer:712724",
+        "integer:746261",
+        "integer:779798",
+        "integer:813335",
+        "integer:846872",
+        "integer:880409",
+        "integer:913946",
+        "integer:947483",
+        "integer:981020",
+        "integer:1014557",
+        "integer:1048094",
+        "integer:1081631",
+        "integer:1115168",
+        "integer:1148705",
+        "integer:1182242",
+        "integer:1215779",
+        "integer:1249316",
+        "integer:1282853",
+        "integer:1316390",
+        "integer:1349927",
+        "integer:1383464",
+        "integer:1417001",
+        "integer:1450538",
+        "integer:1484075",
+        "integer:1517612",
+        "integer:1551149",
+        "integer:1584686",
+        "integer:1618223",
+        "integer:1651760",
+        "integer:1685297"
+      ],
+      "metrics": {
+        "spawned_anon_kib": {
+          "sample_count": 9,
+          "min": 152,
+          "q1": 156,
+          "median": 156,
+          "q3": 160,
+          "max": 160
+        },
+        "spawned_pss_kib": {
+          "sample_count": 9,
+          "min": 1035,
+          "q1": 1043,
+          "median": 1079,
+          "q3": 1091,
+          "max": 1127
+        },
+        "prepared_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 140,
+          "q1": 144,
+          "median": 144,
+          "q3": 144,
+          "max": 144
+        },
+        "peak_delta_kib": {
+          "sample_count": 9,
+          "min": 1024,
+          "q1": 1024,
+          "median": 1024,
+          "q3": 1024,
+          "max": 1024
+        },
+        "quiescent_retained_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 732,
+          "q1": 732,
+          "median": 732,
+          "q3": 732,
+          "max": 732
+        },
+        "dropped_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 868,
+          "q1": 868,
+          "median": 868,
+          "q3": 868,
+          "max": 872
+        },
+        "recovery_ratio": {
+          "sample_count": 9,
+          "min": 0.28515625,
+          "q1": 0.28515625,
+          "median": 0.28515625,
+          "q3": 0.28515625,
+          "max": 0.28515625
+        },
+        "tail_growth_kib_per_epoch": {
+          "sample_count": 9,
+          "min": 0.8888888888888888,
+          "q1": 0.8888888888888888,
+          "median": 0.8888888888888888,
+          "q3": 0.8888888888888888,
+          "max": 0.8888888888888888
+        },
+        "tail_growth_percent_per_epoch": {
+          "sample_count": 9,
+          "min": 0.2116402116402116,
+          "q1": 0.2116402116402116,
+          "median": 0.2116402116402116,
+          "q3": 0.21367521367521367,
+          "max": 0.21367521367521367
+        },
+        "memory_area_kib_seconds_per_unit": {
+          "sample_count": 9,
+          "min": 2.1428848479999996,
+          "q1": 2.1821051808000003,
+          "median": 2.3166982656000004,
+          "q3": 2.350151264,
+          "max": 2.7437407872
+        }
+      },
+      "tail_growth_ci_95": {
+        "kib_per_epoch": {
+          "lower": 0.8888888888888888,
+          "upper": 0.8888888888888888
+        },
+        "percent_per_epoch": {
+          "lower": 0.2116402116402116,
+          "upper": 0.21367521367521367
+        }
+      },
+      "classification": "growth_signal"
+    },
+    {
+      "commit": "588b54152862022a25fa4dd76beb812299d9f69c",
+      "target": "linux-x86_64",
+      "engine": "rustia",
+      "dialect": "luau",
+      "execution_mode": "interpreter",
+      "workload": "memory_retained_control",
+      "n": 1,
+      "epochs": 40,
+      "sample_ids": [
+        "round-01-rustia-memory_retained_control",
+        "round-02-rustia-memory_retained_control",
+        "round-03-rustia-memory_retained_control",
+        "round-04-rustia-memory_retained_control",
+        "round-05-rustia-memory_retained_control",
+        "round-06-rustia-memory_retained_control",
+        "round-07-rustia-memory_retained_control",
+        "round-08-rustia-memory_retained_control",
+        "round-09-rustia-memory_retained_control"
+      ],
+      "checksum_sequence": [
+        "integer:343810",
+        "integer:377348",
+        "integer:410886",
+        "integer:444424",
+        "integer:477962",
+        "integer:511500",
+        "integer:545038",
+        "integer:578576",
+        "integer:612114",
+        "integer:645652",
+        "integer:679190",
+        "integer:712728",
+        "integer:746266",
+        "integer:779804",
+        "integer:813342",
+        "integer:846880",
+        "integer:880418",
+        "integer:913956",
+        "integer:947494",
+        "integer:981032",
+        "integer:1014570",
+        "integer:1048108",
+        "integer:1081646",
+        "integer:1115184",
+        "integer:1148722",
+        "integer:1182260",
+        "integer:1215798",
+        "integer:1249336",
+        "integer:1282874",
+        "integer:1316412",
+        "integer:1349950",
+        "integer:1383488",
+        "integer:1417026",
+        "integer:1450564",
+        "integer:1484102",
+        "integer:1517640",
+        "integer:1551178",
+        "integer:1584716",
+        "integer:1618254",
+        "integer:1651792",
+        "integer:1685330"
+      ],
+      "metrics": {
+        "spawned_anon_kib": {
+          "sample_count": 9,
+          "min": 152,
+          "q1": 156,
+          "median": 156,
+          "q3": 160,
+          "max": 160
+        },
+        "spawned_pss_kib": {
+          "sample_count": 9,
+          "min": 1035,
+          "q1": 1043,
+          "median": 1047,
+          "q3": 1119,
+          "max": 1135
+        },
+        "prepared_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 144,
+          "q1": 144,
+          "median": 144,
+          "q3": 144,
+          "max": 144
+        },
+        "peak_delta_kib": {
+          "sample_count": 9,
+          "min": 3584,
+          "q1": 3584,
+          "median": 3584,
+          "q3": 3584,
+          "max": 3644
+        },
+        "quiescent_retained_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 3300,
+          "q1": 3300,
+          "median": 3300,
+          "q3": 3300,
+          "max": 3300
+        },
+        "dropped_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 792,
+          "q1": 792,
+          "median": 792,
+          "q3": 796,
+          "max": 796
+        },
+        "recovery_ratio": {
+          "sample_count": 9,
+          "min": 0.07924107142857142,
+          "q1": 0.07924107142857142,
+          "median": 0.07924107142857142,
+          "q3": 0.07924107142857142,
+          "max": 0.09440175631174534
+        },
+        "tail_growth_kib_per_epoch": {
+          "sample_count": 9,
+          "min": 82,
+          "q1": 82,
+          "median": 82,
+          "q3": 82,
+          "max": 82
+        },
+        "tail_growth_percent_per_epoch": {
+          "sample_count": 9,
+          "min": 19.523809523809526,
+          "q1": 19.523809523809526,
+          "median": 19.523809523809526,
+          "q3": 19.71153846153846,
+          "max": 19.71153846153846
+        },
+        "memory_area_kib_seconds_per_unit": {
+          "sample_count": 9,
+          "min": 7.1398037151999985,
+          "q1": 7.159219081600002,
+          "median": 7.195617065599999,
+          "q3": 7.4675643296,
+          "max": 7.876200848299999
+        }
+      },
+      "tail_growth_ci_95": {
+        "kib_per_epoch": {
+          "lower": 82,
+          "upper": 82
+        },
+        "percent_per_epoch": {
+          "lower": 19.523809523809526,
+          "upper": 19.71153846153846
+        }
+      },
+      "classification": "expected_retention"
+    },
+    {
+      "commit": "588b54152862022a25fa4dd76beb812299d9f69c",
+      "target": "linux-x86_64",
+      "engine": "rustia",
+      "dialect": "luau",
+      "execution_mode": "interpreter",
+      "workload": "sparse_tables",
+      "n": 128,
+      "epochs": 16,
+      "sample_ids": [
+        "round-01-rustia-sparse_tables",
+        "round-02-rustia-sparse_tables",
+        "round-03-rustia-sparse_tables",
+        "round-04-rustia-sparse_tables",
+        "round-05-rustia-sparse_tables",
+        "round-06-rustia-sparse_tables",
+        "round-07-rustia-sparse_tables",
+        "round-08-rustia-sparse_tables",
+        "round-09-rustia-sparse_tables"
+      ],
+      "checksum_sequence": [
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720",
+        "integer:17438720"
+      ],
+      "metrics": {
+        "spawned_anon_kib": {
+          "sample_count": 9,
+          "min": 152,
+          "q1": 156,
+          "median": 156,
+          "q3": 156,
+          "max": 160
+        },
+        "spawned_pss_kib": {
+          "sample_count": 9,
+          "min": 1039,
+          "q1": 1041,
+          "median": 1079,
+          "q3": 1131,
+          "max": 1135
+        },
+        "prepared_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 128,
+          "q1": 128,
+          "median": 128,
+          "q3": 132,
+          "max": 132
+        },
+        "peak_delta_kib": {
+          "sample_count": 9,
+          "min": 256,
+          "q1": 256,
+          "median": 256,
+          "q3": 256,
+          "max": 256
+        },
+        "quiescent_retained_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 48,
+          "q1": 48,
+          "median": 48,
+          "q3": 48,
+          "max": 48
+        },
+        "dropped_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 228,
+          "q1": 228,
+          "median": 228,
+          "q3": 232,
+          "max": 232
+        },
+        "recovery_ratio": {
+          "sample_count": 9,
+          "min": 0.8125,
+          "q1": 0.8125,
+          "median": 0.8125,
+          "q3": 0.8125,
+          "max": 0.8125
+        },
+        "tail_growth_kib_per_epoch": {
+          "sample_count": 9,
+          "min": 3.666666666666667,
+          "q1": 3.666666666666667,
+          "median": 3.666666666666667,
+          "q3": 3.666666666666667,
+          "max": 3.666666666666667
+        },
+        "tail_growth_percent_per_epoch": {
+          "sample_count": 9,
+          "min": 1.0784313725490198,
+          "q1": 1.0784313725490198,
+          "median": 1.0784313725490198,
+          "q3": 1.0912698412698414,
+          "max": 1.0912698412698414
+        },
+        "memory_area_kib_seconds_per_unit": {
+          "sample_count": 9,
+          "min": 0.024031654375000003,
+          "q1": 0.024298279,
+          "median": 0.024541773749999996,
+          "q3": 0.025498604874999997,
+          "max": 0.026771160750000002
+        }
+      },
+      "tail_growth_ci_95": {
+        "kib_per_epoch": {
+          "lower": 3.666666666666667,
+          "upper": 3.666666666666667
+        },
+        "percent_per_epoch": {
+          "lower": 1.0784313725490198,
+          "upper": 1.0912698412698414
+        }
+      },
+      "classification": "growth_signal"
+    },
+    {
+      "commit": "588b54152862022a25fa4dd76beb812299d9f69c",
+      "target": "linux-x86_64",
+      "engine": "rustia",
+      "dialect": "luau",
+      "execution_mode": "interpreter",
+      "workload": "stdlib_math_table",
+      "n": 128,
+      "epochs": 16,
+      "sample_ids": [
+        "round-01-rustia-stdlib_math_table",
+        "round-02-rustia-stdlib_math_table",
+        "round-03-rustia-stdlib_math_table",
+        "round-04-rustia-stdlib_math_table",
+        "round-05-rustia-stdlib_math_table",
+        "round-06-rustia-stdlib_math_table",
+        "round-07-rustia-stdlib_math_table",
+        "round-08-rustia-stdlib_math_table",
+        "round-09-rustia-stdlib_math_table"
+      ],
+      "checksum_sequence": [
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590",
+        "number:51.91286831116262590"
+      ],
+      "metrics": {
+        "spawned_anon_kib": {
+          "sample_count": 9,
+          "min": 152,
+          "q1": 156,
+          "median": 156,
+          "q3": 156,
+          "max": 160
+        },
+        "spawned_pss_kib": {
+          "sample_count": 9,
+          "min": 1031,
+          "q1": 1035,
+          "median": 1075,
+          "q3": 1075,
+          "max": 1135
+        },
+        "prepared_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 140,
+          "q1": 144,
+          "median": 144,
+          "q3": 144,
+          "max": 144
+        },
+        "peak_delta_kib": {
+          "sample_count": 9,
+          "min": 256,
+          "q1": 256,
+          "median": 256,
+          "q3": 256,
+          "max": 256
+        },
+        "quiescent_retained_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 4,
+          "q1": 4,
+          "median": 4,
+          "q3": 4,
+          "max": 4
+        },
+        "dropped_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 144,
+          "q1": 148,
+          "median": 148,
+          "q3": 148,
+          "max": 148
+        },
+        "recovery_ratio": {
+          "sample_count": 9,
+          "min": 0.984375,
+          "q1": 0.984375,
+          "median": 0.984375,
+          "q3": 0.984375,
+          "max": 0.984375
+        },
+        "tail_growth_kib_per_epoch": {
+          "sample_count": 9,
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
+        },
+        "tail_growth_percent_per_epoch": {
+          "sample_count": 9,
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
+        },
+        "memory_area_kib_seconds_per_unit": {
+          "sample_count": 9,
+          "min": 0.0012086082499999993,
+          "q1": 0.0012612472499999993,
+          "median": 0.0013127773749999996,
+          "q3": 0.0026314196250000004,
+          "max": 0.0031710917499999996
+        }
+      },
+      "tail_growth_ci_95": {
+        "kib_per_epoch": {
+          "lower": 0,
+          "upper": 0
+        },
+        "percent_per_epoch": {
+          "lower": 0,
+          "upper": 0
+        }
+      },
+      "classification": "stable_in_tested_window"
+    },
+    {
+      "commit": "588b54152862022a25fa4dd76beb812299d9f69c",
+      "target": "linux-x86_64",
+      "engine": "rustia",
+      "dialect": "luau",
+      "execution_mode": "interpreter",
+      "workload": "todo_history",
+      "n": 128,
+      "epochs": 40,
+      "sample_ids": [
+        "round-01-rustia-todo_history",
+        "round-02-rustia-todo_history",
+        "round-03-rustia-todo_history",
+        "round-04-rustia-todo_history",
+        "round-05-rustia-todo_history",
+        "round-06-rustia-todo_history",
+        "round-07-rustia-todo_history",
+        "round-08-rustia-todo_history",
+        "round-09-rustia-todo_history"
+      ],
+      "checksum_sequence": [
+        "integer:1391991628",
+        "integer:1358367172",
+        "integer:912476259",
+        "integer:898679539",
+        "integer:1711673459",
+        "integer:406145514",
+        "integer:508707395",
+        "integer:1489345840",
+        "integer:962773346",
+        "integer:384949558",
+        "integer:186388557",
+        "integer:715147877",
+        "integer:900222743",
+        "integer:1422933256",
+        "integer:112668180",
+        "integer:975176192",
+        "integer:1594427182",
+        "integer:1995064514",
+        "integer:1127723356",
+        "integer:491501523",
+        "integer:362325689",
+        "integer:1033000682",
+        "integer:1403643559",
+        "integer:1079814713",
+        "integer:885016990",
+        "integer:1928277840",
+        "integer:935509880",
+        "integer:1819805544",
+        "integer:2057825109",
+        "integer:1705883604",
+        "integer:1918066192",
+        "integer:240955969",
+        "integer:1047567820",
+        "integer:238856517",
+        "integer:1561971197",
+        "integer:1886785980",
+        "integer:233393791",
+        "integer:1167756930",
+        "integer:1489975830",
+        "integer:360478425",
+        "integer:663810017"
+      ],
+      "metrics": {
+        "spawned_anon_kib": {
+          "sample_count": 9,
+          "min": 156,
+          "q1": 156,
+          "median": 156,
+          "q3": 156,
+          "max": 160
+        },
+        "spawned_pss_kib": {
+          "sample_count": 9,
+          "min": 1029,
+          "q1": 1043,
+          "median": 1054,
+          "q3": 1087,
+          "max": 1127
+        },
+        "prepared_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 208,
+          "q1": 212,
+          "median": 212,
+          "q3": 212,
+          "max": 212
+        },
+        "peak_delta_kib": {
+          "sample_count": 9,
+          "min": 512,
+          "q1": 512,
+          "median": 512,
+          "q3": 512,
+          "max": 540
+        },
+        "quiescent_retained_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 116,
+          "q1": 116,
+          "median": 116,
+          "q3": 116,
+          "max": 116
+        },
+        "dropped_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 372,
+          "q1": 372,
+          "median": 372,
+          "q3": 376,
+          "max": 376
+        },
+        "recovery_ratio": {
+          "sample_count": 9,
+          "min": 0.7734375,
+          "q1": 0.7734375,
+          "median": 0.7734375,
+          "q3": 0.7734375,
+          "max": 0.7851851851851852
+        },
+        "tail_growth_kib_per_epoch": {
+          "sample_count": 9,
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
+        },
+        "tail_growth_percent_per_epoch": {
+          "sample_count": 9,
+          "min": 0,
+          "q1": 0,
+          "median": 0,
+          "q3": 0,
+          "max": 0
+        },
+        "memory_area_kib_seconds_per_unit": {
+          "sample_count": 9,
+          "min": 0.010875897499999999,
+          "q1": 0.0109737069,
+          "median": 0.011349208099999997,
+          "q3": 0.0117985678,
+          "max": 0.013624287700000001
+        }
+      },
+      "tail_growth_ci_95": {
+        "kib_per_epoch": {
+          "lower": 0,
+          "upper": 0
+        },
+        "percent_per_epoch": {
+          "lower": 0,
+          "upper": 0
+        }
+      },
+      "classification": "stable_in_tested_window"
+    },
+    {
+      "commit": "588b54152862022a25fa4dd76beb812299d9f69c",
+      "target": "linux-x86_64",
+      "engine": "rustia",
+      "dialect": "luau",
+      "execution_mode": "interpreter",
+      "workload": "todo_retained_control",
+      "n": 128,
+      "epochs": 40,
+      "sample_ids": [
+        "round-01-rustia-todo_retained_control",
+        "round-02-rustia-todo_retained_control",
+        "round-03-rustia-todo_retained_control",
+        "round-04-rustia-todo_retained_control",
+        "round-05-rustia-todo_retained_control",
+        "round-06-rustia-todo_retained_control",
+        "round-07-rustia-todo_retained_control",
+        "round-08-rustia-todo_retained_control",
+        "round-09-rustia-todo_retained_control"
+      ],
+      "checksum_sequence": [
+        "integer:1391993005",
+        "integer:1358370436",
+        "integer:912481699",
+        "integer:898687155",
+        "integer:1711683251",
+        "integer:406157482",
+        "integer:508721539",
+        "integer:1489362160",
+        "integer:962791842",
+        "integer:384970230",
+        "integer:186411405",
+        "integer:715172901",
+        "integer:900249943",
+        "integer:1422962632",
+        "integer:112699732",
+        "integer:975209920",
+        "integer:1594463086",
+        "integer:1995102594",
+        "integer:1127763612",
+        "integer:491543955",
+        "integer:362370297",
+        "integer:1033047466",
+        "integer:1403692519",
+        "integer:1079865849",
+        "integer:885070302",
+        "integer:1928333328",
+        "integer:935567544",
+        "integer:1819865384",
+        "integer:2057887125",
+        "integer:1705947796",
+        "integer:1918132560",
+        "integer:241024513",
+        "integer:1047638540",
+        "integer:238929413",
+        "integer:1562046269",
+        "integer:1886863228",
+        "integer:233473215",
+        "integer:1167838530",
+        "integer:1490059606",
+        "integer:360564377",
+        "integer:663898145"
+      ],
+      "metrics": {
+        "spawned_anon_kib": {
+          "sample_count": 9,
+          "min": 152,
+          "q1": 156,
+          "median": 156,
+          "q3": 156,
+          "max": 160
+        },
+        "spawned_pss_kib": {
+          "sample_count": 9,
+          "min": 1043,
+          "q1": 1047,
+          "median": 1075,
+          "q3": 1127,
+          "max": 1139
+        },
+        "prepared_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 216,
+          "q1": 216,
+          "median": 220,
+          "q3": 220,
+          "max": 220
+        },
+        "peak_delta_kib": {
+          "sample_count": 9,
+          "min": 2048,
+          "q1": 2048,
+          "median": 2048,
+          "q3": 2048,
+          "max": 2048
+        },
+        "quiescent_retained_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 1668,
+          "q1": 1668,
+          "median": 1668,
+          "q3": 1668,
+          "max": 1668
+        },
+        "dropped_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 1144,
+          "q1": 1144,
+          "median": 1148,
+          "q3": 1148,
+          "max": 1148
+        },
+        "recovery_ratio": {
+          "sample_count": 9,
+          "min": 0.185546875,
+          "q1": 0.185546875,
+          "median": 0.185546875,
+          "q3": 0.185546875,
+          "max": 0.185546875
+        },
+        "tail_growth_kib_per_epoch": {
+          "sample_count": 9,
+          "min": 42,
+          "q1": 42,
+          "median": 42,
+          "q3": 42,
+          "max": 42
+        },
+        "tail_growth_percent_per_epoch": {
+          "sample_count": 9,
+          "min": 9.90566037735849,
+          "q1": 9.90566037735849,
+          "median": 9.90566037735849,
+          "q3": 10,
+          "max": 10
+        },
+        "memory_area_kib_seconds_per_unit": {
+          "sample_count": 9,
+          "min": 0.0419598708,
+          "q1": 0.043129025349999996,
+          "median": 0.043199466425,
+          "q3": 0.044144073874999995,
+          "max": 0.044918713275
+        }
+      },
+      "tail_growth_ci_95": {
+        "kib_per_epoch": {
+          "lower": 42,
+          "upper": 42
+        },
+        "percent_per_epoch": {
+          "lower": 9.90566037735849,
+          "upper": 10
+        }
+      },
+      "classification": "expected_retention"
+    },
+    {
+      "commit": "588b54152862022a25fa4dd76beb812299d9f69c",
+      "target": "linux-x86_64",
+      "engine": "rustia",
+      "dialect": "luau",
+      "execution_mode": "interpreter",
+      "workload": "todo_steady",
+      "n": 128,
+      "epochs": 40,
+      "sample_ids": [
+        "round-01-rustia-todo_steady",
+        "round-02-rustia-todo_steady",
+        "round-03-rustia-todo_steady",
+        "round-04-rustia-todo_steady",
+        "round-05-rustia-todo_steady",
+        "round-06-rustia-todo_steady",
+        "round-07-rustia-todo_steady",
+        "round-08-rustia-todo_steady",
+        "round-09-rustia-todo_steady"
+      ],
+      "checksum_sequence": [
+        "integer:1391990829",
+        "integer:1358366084",
+        "integer:912475171",
+        "integer:898678451",
+        "integer:1711672371",
+        "integer:406144426",
+        "integer:508706307",
+        "integer:1489344752",
+        "integer:962772258",
+        "integer:384948470",
+        "integer:186387469",
+        "integer:715146789",
+        "integer:900221655",
+        "integer:1422932168",
+        "integer:112667092",
+        "integer:975175104",
+        "integer:1594426094",
+        "integer:1995063426",
+        "integer:1127722268",
+        "integer:491500435",
+        "integer:362324601",
+        "integer:1032999594",
+        "integer:1403642471",
+        "integer:1079813625",
+        "integer:885015902",
+        "integer:1928276752",
+        "integer:935508792",
+        "integer:1819804456",
+        "integer:2057824021",
+        "integer:1705882516",
+        "integer:1918065104",
+        "integer:240954881",
+        "integer:1047566732",
+        "integer:238855429",
+        "integer:1561970109",
+        "integer:1886784892",
+        "integer:233392703",
+        "integer:1167755842",
+        "integer:1489974742",
+        "integer:360477337",
+        "integer:663808929"
+      ],
+      "metrics": {
+        "spawned_anon_kib": {
+          "sample_count": 9,
+          "min": 152,
+          "q1": 152,
+          "median": 156,
+          "q3": 160,
+          "max": 160
+        },
+        "spawned_pss_kib": {
+          "sample_count": 9,
+          "min": 1027,
+          "q1": 1087,
+          "median": 1091,
+          "q3": 1135,
+          "max": 1139
+        },
+        "prepared_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 204,
+          "q1": 208,
+          "median": 208,
+          "q3": 208,
+          "max": 208
+        },
+        "peak_delta_kib": {
+          "sample_count": 9,
+          "min": 512,
+          "q1": 512,
+          "median": 512,
+          "q3": 512,
+          "max": 512
+        },
+        "quiescent_retained_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 88,
+          "q1": 88,
+          "median": 88,
+          "q3": 88,
+          "max": 92
+        },
+        "dropped_delta_anon_kib": {
+          "sample_count": 9,
+          "min": 324,
+          "q1": 324,
+          "median": 324,
+          "q3": 328,
+          "max": 328
+        },
+        "recovery_ratio": {
+          "sample_count": 9,
+          "min": 0.8203125,
+          "q1": 0.828125,
+          "median": 0.828125,
+          "q3": 0.828125,
+          "max": 0.828125
+        },
+        "tail_growth_kib_per_epoch": {
+          "sample_count": 9,
+          "min": 0.26666666666666666,
+          "q1": 0.26666666666666666,
+          "median": 0.26666666666666666,
+          "q3": 0.26666666666666666,
+          "max": 0.26666666666666666
+        },
+        "tail_growth_percent_per_epoch": {
+          "sample_count": 9,
+          "min": 0.06734006734006734,
+          "q1": 0.06734006734006734,
+          "median": 0.06802721088435373,
+          "q3": 0.06802721088435373,
+          "max": 0.06802721088435373
+        },
+        "memory_area_kib_seconds_per_unit": {
+          "sample_count": 9,
+          "min": 0.0101477438,
+          "q1": 0.010457008050000001,
+          "median": 0.010563574825000002,
+          "q3": 0.0110591073,
+          "max": 0.011342655599999998
+        }
+      },
+      "tail_growth_ci_95": {
+        "kib_per_epoch": {
+          "lower": 0.26666666666666666,
+          "upper": 0.26666666666666666
+        },
+        "percent_per_epoch": {
+          "lower": 0.06734006734006734,
+          "upper": 0.06802721088435373
+        }
+      },
+      "classification": "growth_signal"
+    }
+  ]
+}

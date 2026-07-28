@@ -2,7 +2,9 @@
 
 > **Status: [IMPLEMENTED v1] (2026-07-25).** The provider
 > seam that replaces four faked environment-dependent stdlib functions with host-pluggable sockets
-> (`collectgarbage("count")`/`gcinfo` stay canned until the reclamation arc gives them honest values).
+> The later reclamation/accounting tranche now gives hosts an honest `Vm::memory_stats()` census.
+> `collectgarbage("count")`/`gcinfo` remain compatibility values until the quota tracker supplies an O(1)
+> incremental counter; the provider design below remains the historical scope of this slice.
 > Implements the provider slice of [`CURRENT.md`](CURRENT.md) known-gap #3. v2 incorporates a six-lens
 > adversarial review (VM internals, conformance/oracle, public API, determinism/lockstep, KISS/pillars,
 > docs coherence); v2.1 adds the `live()` preset; v2.2 replaces the `0.0` `os.clock` fallback with a
@@ -22,8 +24,8 @@ exists for Standard hosts to install real ones:
 | `os.time()` no-arg | fixed `OS_TIME_NOW_SECONDS` (`native_os_time`, 11536–11543) |
 | `os.date()` no-timestamp | same fixed constant (`native_os_date`, 11520–11523) |
 
-Deferred (this slice does **not** touch): `collectgarbage("count")` → `0.0` (11445) and `gcinfo`
-synthetic counter (11490–11501); honest values need heap accounting from the bounded-lifetime arc.
+Deferred by this historical slice: public `Vm::memory_stats()` is now implemented by the bounded-lifetime
+tranche; `collectgarbage("count")`/`gcinfo` await the O(1) quota counter.
 Everything else in the Luau 0.709 stdlib is real. In `DeterministicSim`, `os.*`/`collectgarbage`/
 `gcinfo` are not registered at all (16176–16196 + RTTI mirror 16496–16500).
 

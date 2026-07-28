@@ -1,14 +1,17 @@
 mod extension_api;
 mod function;
+mod invocation;
 mod macros;
 mod serde_value;
 mod value;
 
 use function::IntoHostFunction;
+use invocation::{HostBindings, TypedHostDispatcher};
 use rustia_compiler::{compile_with_options, CompileError, CompileOptions};
 use rustia_parser::SourceError;
-use rustia_vm::{Program, Vm};
+use rustia_vm::{HardenedLeafProgram, Program, Vm};
 use std::fmt;
+use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
 pub use extension_api::{
     RustiaBuilder, RustiaExtension, RustiaHostFuelPolicy, RustiaHostFunctionInfo, ServiceClock,
@@ -16,45 +19,511 @@ pub use extension_api::{
     RUSTIA_MIN_HOST_FUNCTION_FUEL,
 };
 pub use function::{Exports, Function};
+pub use invocation::{
+    Effects, HostContext, HostModule, HostMut, HostSchema, Input, IntoEffectFunction,
+    IntoExternalFunction, IntoInputFunction, IntoSlotReadFunction, IntoSlotWriteFunction,
+    Invocation, InvocationLimits, InvocationOutcome, InvocationReceipt, InvocationUsage,
+    SlotWrites, Slots,
+};
 pub use rustia_vm::{
-    Error as VmError, ErrorKind as VmErrorKind, OpCapability, Profile, VmSettings,
+    Error as VmError, ErrorKind as VmErrorKind, GuestSurface, OpCapability, Profile, VmMemoryStats,
+    VmSettings, DECISION_RESET_ABI_VERSION as RUSTIA_DECISION_RESET_ABI_VERSION,
+    HARDENED_LEAF_GUEST_ABI_VERSION as RUSTIA_HARDENED_LEAF_GUEST_ABI_VERSION,
 };
 pub use serde_value::SerdeValueError;
 pub use value::{
     FromRustia, FromRustiaMulti, IntoRustia, IntoRustiaMulti, OwnedKey, OwnedTable, OwnedValue,
 };
 
-pub struct Rustia {
+/// Safe Rust facade over one Luau VM.
+///
+/// `Rustia<()>` is the context-free compatibility surface. `Rustia<H>` stores
+/// only the lifetime-independent [`HostSchema`] and registered callbacks; each
+/// guest execution borrows a fresh [`HostContext<H>`] through
+/// [`invoke`](Self::invoke) or [`invoke_into`](Self::invoke_into).
+pub struct Rustia<C: HostSchema = ()> {
     vm: Vm,
     generation: u64,
+    bindings: HostBindings<C>,
+    journal: Vec<C::Record>,
 }
 
-impl Rustia {
-    /// Returns the [`standard`](RustiaBuilder::standard) preset: reproducible-by-default,
-    /// with a real stdout `print` sink on native targets. [`Rustia::new`] and
-    /// [`Rustia::with_settings`] remain the service-free construction paths.
+impl<C> Rustia<C>
+where
+    C: HostSchema,
+{
+    fn from_profile(profile: Profile) -> Self {
+        Self {
+            vm: Vm::new(profile),
+            generation: 0,
+            bindings: HostBindings::default(),
+            journal: Vec::new(),
+        }
+    }
+
+    fn from_settings(profile: Profile, settings: VmSettings) -> Self {
+        Self {
+            vm: Vm::with_settings(profile, settings),
+            generation: 0,
+            bindings: HostBindings::default(),
+            journal: Vec::new(),
+        }
+    }
+
+    /// Returns the VM-owned logical live/reserved memory census and optional
+    /// instruction-boundary peaks.
+    pub fn memory_stats(&mut self) -> VmMemoryStats {
+        self.vm.memory_stats()
+    }
+
+    /// Current decision epoch. Epoch zero begins at construction.
+    pub fn decision_epoch(&self) -> u64 {
+        self.vm.decision_epoch()
+    }
+
+    /// Discards all guest state and begins a fresh decision epoch.
+    ///
+    /// VM configuration, services, extensions, and installed host functions
+    /// persist. Globals inserted with [`insert_global`](Self::insert_global)
+    /// and [`insert_serde`](Self::insert_serde) are decision inputs and must be
+    /// rebound afterward. Every prior [`Function`] and [`Exports`] handle is
+    /// invalidated, while host-owned [`CompiledModule`] and [`CompiledEntry`]
+    /// values remain reusable. A hardened-leaf VM preserves its sealed
+    /// immutable environment in place and discards every decision-local
+    /// allocation after that seal.
+    ///
+    /// Replay protocols must record
+    /// [`RUSTIA_DECISION_RESET_ABI_VERSION`].
+    pub fn reset_decision(&mut self) -> Result<()> {
+        self.vm.reset_decision().map_err(Error::Vm)?;
+        self.journal.clear();
+        Ok(())
+    }
+
+    /// Runs one typed, fuel-bounded host invocation and exposes its committed
+    /// deterministic records from Rustia's reusable journal.
+    ///
+    /// Failure rolls back staged records, not ordinary guest heap/global
+    /// mutation. Call [`reset_decision`](Self::reset_decision) when the host
+    /// requires a fresh guest-state decision boundary.
+    ///
+    /// A panic in `operation` itself is ordinary caller-side Rust control
+    /// flow: the private journal is dropped without publication and the panic
+    /// continues unwinding; it is not translated into `HostPanicked` or VM
+    /// poisoning. Panics from callbacks invoked by the VM are contained and
+    /// poison the VM.
+    pub fn invoke<'rustia, Return, Func>(
+        &'rustia mut self,
+        context: &mut dyn HostContext<C>,
+        limits: InvocationLimits,
+        operation: Func,
+    ) -> Result<InvocationOutcome<'rustia, Return, C::Record>>
+    where
+        Func: for<'call> FnOnce(&mut Invocation<'call, C>) -> Result<Return>,
+    {
+        let (value, usage) = self.invoke_core(context, limits, operation)?;
+        Ok(InvocationOutcome {
+            value,
+            records: &self.journal,
+            usage,
+        })
+    }
+
+    /// Runs one typed invocation and publishes its committed records into a
+    /// caller-owned lane. Capacity is reserved before guest execution, so the
+    /// final append cannot fail or allocate.
+    pub fn invoke_into<Return, Func>(
+        &mut self,
+        context: &mut dyn HostContext<C>,
+        limits: InvocationLimits,
+        records: &mut Vec<C::Record>,
+        operation: Func,
+    ) -> Result<InvocationReceipt<Return>>
+    where
+        Func: for<'call> FnOnce(&mut Invocation<'call, C>) -> Result<Return>,
+    {
+        self.ensure_healthy()?;
+        let reserve = usize::try_from(limits.max_records()).map_err(|_| {
+            Error::Vm(VmError::new(VmErrorKind::HostResourceExhausted {
+                resource: "effect-record count",
+                limit: u64::from(limits.max_records()),
+            }))
+        })?;
+        records
+            .try_reserve(reserve)
+            .map_err(|_| Error::Vm(VmError::new(VmErrorKind::OutOfMemory)))?;
+        let (value, usage) = self.invoke_core(context, limits, operation)?;
+        records.append(&mut self.journal);
+        Ok(InvocationReceipt { value, usage })
+    }
+
+    /// Executes one precompiled stateless entry, publishes its committed
+    /// records, and resets the decision epoch before returning.
+    ///
+    /// Reset runs after success, returned failure, and an unwinding panic from
+    /// guest-value conversion or a contained host callback. The original panic
+    /// resumes after reset. If reset itself fails after a normal return, any
+    /// records published by the invocation are removed from the caller lane
+    /// and the reset error wins. `panic = "abort"` builds cannot unwind and
+    /// therefore cannot provide panic containment. This is the complete
+    /// authoritative-leaf lifecycle used by worker lanes.
+    pub fn invoke_entry_into<Return>(
+        &mut self,
+        context: &mut dyn HostContext<C>,
+        limits: InvocationLimits,
+        records: &mut Vec<C::Record>,
+        entry: &CompiledEntry,
+    ) -> Result<InvocationReceipt<Return>>
+    where
+        Return: FromRustia,
+    {
+        let records_checkpoint = records.len();
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            self.invoke_into(context, limits, records, |invocation| {
+                invocation.call_entry::<Return>(entry)
+            })
+        }));
+        let reset = self.reset_decision();
+        finish_entry_lifecycle(records, records_checkpoint, outcome, reset)
+    }
+
+    fn invoke_core<Return, Func>(
+        &mut self,
+        context: &mut dyn HostContext<C>,
+        limits: InvocationLimits,
+        operation: Func,
+    ) -> Result<(Return, InvocationUsage)>
+    where
+        Func: for<'call> FnOnce(&mut Invocation<'call, C>) -> Result<Return>,
+    {
+        self.ensure_healthy()?;
+        self.journal.clear();
+        let reserve = usize::try_from(limits.max_records()).map_err(|_| {
+            Error::Vm(VmError::new(VmErrorKind::HostResourceExhausted {
+                resource: "effect-record count",
+                limit: u64::from(limits.max_records()),
+            }))
+        })?;
+        self.journal
+            .try_reserve(reserve)
+            .map_err(|_| Error::Vm(VmError::new(VmErrorKind::OutOfMemory)))?;
+
+        let journal = std::mem::take(&mut self.journal);
+        let dispatcher =
+            TypedHostDispatcher::new(&self.bindings.handlers, context, journal, limits);
+        let mut invocation =
+            Invocation::new(&mut self.vm, &mut self.generation, dispatcher, limits);
+        let result = operation(&mut invocation);
+        let (dispatcher, fuel_used) = invocation.finish();
+        let (journal, record_bytes, hard_error) = dispatcher.finish();
+        self.journal = journal;
+        if let Some(error) = hard_error {
+            self.journal.clear();
+            return Err(Error::Vm(error));
+        }
+        match result {
+            Ok(value) => {
+                let record_count = u32::try_from(self.journal.len()).unwrap_or(u32::MAX);
+                Ok((
+                    value,
+                    InvocationUsage {
+                        fuel_used,
+                        record_count,
+                        record_bytes,
+                    },
+                ))
+            }
+            Err(error) => {
+                self.journal.clear();
+                Err(error)
+            }
+        }
+    }
+
+    fn ensure_healthy(&self) -> Result<()> {
+        if self.vm.is_poisoned() {
+            Err(Error::Vm(VmError::new(VmErrorKind::VmPoisoned)))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn compile_and_run_raw(&mut self, source: &str) -> Result<rustia_vm::Value> {
+        let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
+        let program = rustia_compiler::compile(&chunk).map_err(Error::Compile)?;
+        let value = self.vm.run(&program).map_err(Error::Vm)?;
+        self.advance_generation();
+        Ok(value)
+    }
+
+    pub(crate) fn compile_and_run_raw_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &str,
+    ) -> Result<rustia_vm::Value> {
+        let module = Self::compile_module(source_name, source)?;
+        let value = self.vm.run(&module.program).map_err(Error::Vm)?;
+        self.advance_generation();
+        Ok(value)
+    }
+
+    pub fn insert_global<T>(&mut self, name: impl AsRef<str>, value: T) -> Result<()>
+    where
+        T: IntoRustia,
+    {
+        let value = value.into_rustia();
+        let value = value::load_owned_value(&mut self.vm, &value)?;
+        self.vm.set_global_value(name, value).map_err(Error::Vm)
+    }
+
+    pub fn insert_serde<T>(&mut self, name: impl AsRef<str>, value: &T) -> Result<()>
+    where
+        T: serde::Serialize + ?Sized,
+    {
+        let value = OwnedValue::from_serialize(value)?;
+        let value = value::load_owned_value(&mut self.vm, &value)?;
+        self.vm.set_global_value(name, value).map_err(Error::Vm)
+    }
+
+    /// Registers a context-free `Fn(A, B, ...) -> R` with an explicit fuel
+    /// charge. The registration method fixes the capability to `Pure`;
+    /// `Result<R>` creates a fallible host call.
+    pub fn add_pure<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        fuel_cost: u32,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoHostFunction<Args, Return>,
+    {
+        let name = name.into();
+        if name.is_empty() {
+            return Err(Error::Embed(
+                "typed host function name must not be empty".to_owned(),
+            ));
+        }
+        let op = function.into_host_function(name, fuel_cost, OpCapability::Pure);
+        self.vm.install_host_function(op).map_err(Error::Vm)
+    }
+
+    /// Registers a deterministic input reader with closure shape
+    /// `for<'a> Fn(Input<'a, C>, A, B, ...) -> R`.
+    pub fn add_input<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        fuel_cost: u32,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoInputFunction<C, Args, Return>,
+    {
+        let function = function.into_input_function(name.into(), fuel_cost);
+        self.bindings.install(&mut self.vm, function)
+    }
+
+    /// Registers a deterministic slot reader with closure shape
+    /// `for<'a> Fn(Slots<'a, C>, A, B, ...) -> R`.
+    pub fn add_slot_read<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        fuel_cost: u32,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoSlotReadFunction<C, Args, Return>,
+    {
+        let function = function.into_slot_read_function(name.into(), fuel_cost);
+        self.bindings.install(&mut self.vm, function)
+    }
+
+    /// Registers a deterministic effect recorder with closure shape
+    /// `for<'a> Fn(Effects<'a, C>, A, B, ...) -> R`.
+    pub fn add_effect<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        fuel_cost: u32,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoEffectFunction<C, Args, Return>,
+    {
+        let function = function.into_effect_function(name.into(), fuel_cost);
+        self.bindings.install(&mut self.vm, function)
+    }
+
+    /// Registers a deterministic slot-write recorder with closure shape
+    /// `for<'a> Fn(SlotWrites<'a, C>, A, B, ...) -> R`.
+    pub fn add_slot_write<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        fuel_cost: u32,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoSlotWriteFunction<C, Args, Return>,
+    {
+        let function = function.into_slot_write_function(name.into(), fuel_cost);
+        self.bindings.install(&mut self.vm, function)
+    }
+
+    /// Registers an external-state callback with closure shape
+    /// `for<'a> Fn(HostMut<'a, C>, A, B, ...) -> R`.
+    ///
+    /// Deterministic profiles reject it before installation, and mutations
+    /// through `HostMut` are outside Rustia's record rollback.
+    pub fn add_external<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        fuel_cost: u32,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoExternalFunction<C, Args, Return>,
+    {
+        let function = function.into_external_function(
+            name.into(),
+            fuel_cost,
+            OpCapability::ReadsExternalMutableState,
+        );
+        self.bindings.install(&mut self.vm, function)
+    }
+
+    /// Registers an explicitly nondeterministic `HostMut` callback.
+    ///
+    /// Deterministic profiles reject it before installation.
+    pub fn add_nondeterministic<Func, Args, Return>(
+        &mut self,
+        name: impl Into<String>,
+        fuel_cost: u32,
+        function: Func,
+    ) -> Result<()>
+    where
+        Func: IntoExternalFunction<C, Args, Return>,
+    {
+        let function = function.into_external_function(
+            name.into(),
+            fuel_cost,
+            OpCapability::NondeterministicEffect,
+        );
+        self.bindings.install(&mut self.vm, function)
+    }
+
+    /// Installs a namespaced collection of capability-checked host functions.
+    ///
+    /// Installation is fail-closed: if validation or VM binding fails, no
+    /// callable namespace or typed dispatcher bindings are retained.
+    pub fn install_host_module(&mut self, module: HostModule<C>) -> Result<()> {
+        module.install(&mut self.vm, &mut self.bindings)
+    }
+
+    pub fn compile_module(source_name: impl Into<String>, source: &str) -> Result<CompiledModule> {
+        let source_name = source_name.into();
+        let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
+        let options = CompileOptions::default().with_source(source_name.clone(), source);
+        let program = compile_with_options(&chunk, options).map_err(Error::Compile)?;
+        Ok(CompiledModule {
+            source_name,
+            program,
+        })
+    }
+
+    /// Compiles a chunk whose top-level body is invoked directly on each
+    /// decision without installing exports or retaining bytecode in the VM.
+    ///
+    /// Stateless entries cannot contain nested function prototypes. Inputs and
+    /// outputs should cross the typed host context, and the source should
+    /// return its decision value directly.
+    pub fn compile_entry(source_name: impl Into<String>, source: &str) -> Result<CompiledEntry> {
+        let source_name = source_name.into();
+        let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
+        let options = CompileOptions::default().with_source(source_name.clone(), source);
+        let program = compile_with_options(&chunk, options).map_err(Error::Compile)?;
+        let program = HardenedLeafProgram::new(program).map_err(Error::Vm)?;
+        Ok(CompiledEntry {
+            source_name,
+            program,
+        })
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    fn advance_generation(&mut self) {
+        self.generation = self.generation.saturating_add(1);
+    }
+
+    #[inline]
+    pub(crate) fn vm_mut(&mut self) -> &mut Vm {
+        &mut self.vm
+    }
+
+    #[inline]
+    pub(crate) fn vm(&self) -> &Vm {
+        &self.vm
+    }
+}
+
+fn finish_entry_lifecycle<T, Record>(
+    records: &mut Vec<Record>,
+    records_checkpoint: usize,
+    outcome: std::thread::Result<Result<T>>,
+    reset: Result<()>,
+) -> Result<T> {
+    match (outcome, reset) {
+        (Ok(outcome), Ok(())) => outcome,
+        (Ok(_), Err(reset_error)) => {
+            records.truncate(records_checkpoint);
+            Err(reset_error)
+        }
+        (Err(payload), _) => {
+            records.truncate(records_checkpoint);
+            resume_unwind(payload)
+        }
+    }
+}
+
+impl Rustia<()> {
+    /// Returns the [`standard`](RustiaBuilder::standard) preset:
+    /// reproducible-by-default, with a real stdout `print` sink on native
+    /// targets.
     pub fn builder() -> RustiaBuilder {
         RustiaBuilder::standard()
     }
 
     pub fn new(profile: Profile) -> Self {
-        Self {
-            vm: Vm::new(profile),
-            generation: 0,
-        }
+        Self::from_profile(profile)
     }
 
     pub fn with_settings(profile: Profile, settings: VmSettings) -> Self {
-        Self {
-            vm: Vm::with_settings(profile, settings),
-            generation: 0,
-        }
+        Self::from_settings(profile, settings)
+    }
+
+    /// Creates a typed VM for host schema `H`.
+    pub fn for_host<H>(profile: Profile) -> Rustia<H>
+    where
+        H: HostSchema,
+    {
+        Rustia::<H>::from_profile(profile)
+    }
+
+    /// Creates a typed VM for host schema `H` with explicit VM settings.
+    pub fn for_host_with_settings<H>(profile: Profile, settings: VmSettings) -> Rustia<H>
+    where
+        H: HostSchema,
+    {
+        Rustia::<H>::from_settings(profile, settings)
+    }
+
+    pub fn compile(source_name: impl Into<String>, source: &str) -> Result<CompiledModule> {
+        Self::compile_module(source_name, source)
     }
 
     pub fn compile_and_run(&mut self, source: &str) -> Result<Exports> {
         let value = self.compile_and_run_raw(source)?;
         let value = self.vm.retain_value(value);
-        Ok(Exports::new(value, self.generation))
+        Ok(Exports::new(value, self.generation, self.decision_epoch()))
     }
 
     pub fn compile_and_run_named(
@@ -64,7 +533,7 @@ impl Rustia {
     ) -> Result<Exports> {
         let value = self.compile_and_run_raw_named(source_name, source)?;
         let value = self.vm.retain_value(value);
-        Ok(Exports::new(value, self.generation))
+        Ok(Exports::new(value, self.generation, self.decision_epoch()))
     }
 
     pub fn compile_and_run_exports(&mut self, source: &str) -> Result<Exports> {
@@ -109,41 +578,16 @@ impl Rustia {
         T::from_rustia(value)
     }
 
-    pub(crate) fn compile_and_run_raw(&mut self, source: &str) -> Result<rustia_vm::Value> {
-        let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
-        let program = rustia_compiler::compile(&chunk).map_err(Error::Compile)?;
-        let value = self.vm.run(&program).map_err(Error::Vm)?;
-        self.advance_generation();
-        Ok(value)
-    }
-
-    pub(crate) fn compile_and_run_raw_named(
-        &mut self,
-        source_name: impl Into<String>,
-        source: &str,
-    ) -> Result<rustia_vm::Value> {
-        let module = Self::compile(source_name, source)?;
+    pub fn install(&mut self, module: CompiledModule) -> Result<Exports> {
         let value = self.vm.run(&module.program).map_err(Error::Vm)?;
         self.advance_generation();
-        Ok(value)
+        let value = self.vm.retain_value(value);
+        Ok(Exports::new(value, self.generation, self.decision_epoch()))
     }
 
-    pub fn insert_global<T>(&mut self, name: impl AsRef<str>, value: T) -> Result<()>
-    where
-        T: IntoRustia,
-    {
-        let value = value.into_rustia();
-        let value = value::load_owned_value(&mut self.vm, &value)?;
-        self.vm.set_global_value(name, value).map_err(Error::Vm)
-    }
-
-    pub fn insert_serde<T>(&mut self, name: impl AsRef<str>, value: &T) -> Result<()>
-    where
-        T: serde::Serialize + ?Sized,
-    {
-        let value = OwnedValue::from_serialize(value)?;
-        let value = value::load_owned_value(&mut self.vm, &value)?;
-        self.vm.set_global_value(name, value).map_err(Error::Vm)
+    pub fn hot_reload(&mut self, source_name: impl Into<String>, source: &str) -> Result<Exports> {
+        let module = Self::compile_module(source_name, source)?;
+        self.install(module)
     }
 
     pub fn add_fn<Func, Args, Return>(
@@ -251,47 +695,6 @@ impl Rustia {
     pub fn install_extension(&mut self, extension: RustiaExtension) -> Result<()> {
         extension.install(self)
     }
-
-    pub fn compile(source_name: impl Into<String>, source: &str) -> Result<CompiledModule> {
-        let source_name = source_name.into();
-        let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
-        let options = CompileOptions::default().with_source(source_name.clone(), source);
-        let program = compile_with_options(&chunk, options).map_err(Error::Compile)?;
-        Ok(CompiledModule {
-            source_name,
-            program,
-        })
-    }
-
-    pub fn install(&mut self, module: CompiledModule) -> Result<Exports> {
-        let value = self.vm.run(&module.program).map_err(Error::Vm)?;
-        self.advance_generation();
-        let value = self.vm.retain_value(value);
-        Ok(Exports::new(value, self.generation))
-    }
-
-    pub fn hot_reload(&mut self, source_name: impl Into<String>, source: &str) -> Result<Exports> {
-        let module = Self::compile(source_name, source)?;
-        self.install(module)
-    }
-
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-
-    fn advance_generation(&mut self) {
-        self.generation = self.generation.saturating_add(1);
-    }
-
-    #[inline]
-    pub(crate) fn vm_mut(&mut self) -> &mut Vm {
-        &mut self.vm
-    }
-
-    #[inline]
-    pub(crate) fn vm(&self) -> &Vm {
-        &self.vm
-    }
 }
 
 impl Default for Rustia {
@@ -313,6 +716,20 @@ pub struct CompiledModule {
 }
 
 impl CompiledModule {
+    pub fn source_name(&self) -> &str {
+        &self.source_name
+    }
+}
+
+/// Precompiled top-level decision body for allocation-light repeated
+/// invocation through [`Invocation::call_entry`].
+#[derive(Clone)]
+pub struct CompiledEntry {
+    source_name: String,
+    program: HardenedLeafProgram,
+}
+
+impl CompiledEntry {
     pub fn source_name(&self) -> &str {
         &self.source_name
     }
@@ -384,10 +801,11 @@ impl std::error::Error for Error {}
 #[cfg(test)]
 mod tests {
     use super::{
-        Error, FromRustia, OpCapability, OwnedTable, OwnedValue, Profile, Result, Rustia,
-        RustiaBuilder, RustiaExtension, RustiaHostFunctionInfo, ServiceClock, SourceSpan,
-        VmErrorKind, VmSettings, RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION,
-        RUSTIA_HOST_FUEL_POLICY, RUSTIA_MIN_HOST_FUNCTION_FUEL,
+        finish_entry_lifecycle, Error, FromRustia, OpCapability, OwnedTable, OwnedValue, Profile,
+        Result, Rustia, RustiaBuilder, RustiaExtension, RustiaHostFunctionInfo, ServiceClock,
+        SourceSpan, VmErrorKind, VmSettings, RUSTIA_DECISION_RESET_ABI_VERSION,
+        RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
+        RUSTIA_MIN_HOST_FUNCTION_FUEL,
     };
     use rustia_compiler::{compile_with_options, CompileOptions};
     use rustia_parser::parse_source;
@@ -395,6 +813,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use std::cell::RefCell;
     use std::collections::BTreeMap;
+    use std::num::NonZeroU64;
     use std::rc::Rc;
 
     #[test]
@@ -404,6 +823,19 @@ mod tests {
             .run_owned("local x: number = 6 * 7; return x")
             .unwrap();
         assert_eq!(f64::from_rustia(result).unwrap(), 42.0);
+    }
+
+    #[test]
+    fn entry_lifecycle_removes_new_records_when_reset_fails() {
+        let mut records = vec![1, 2, 3];
+        let result = finish_entry_lifecycle(
+            &mut records,
+            2,
+            Ok(Ok(42)),
+            Err(Error::Embed("reset failed".to_owned())),
+        );
+        assert!(matches!(result, Err(Error::Embed(ref message)) if message == "reset failed"));
+        assert_eq!(records, [1, 2]);
     }
 
     #[test]
@@ -1055,7 +1487,7 @@ return {
         let VmErrorKind::InvalidProgram { reason } = error.kind else {
             panic!("expected invalid-program error, got {error:?}");
         };
-        assert_eq!(reason, "extension op fuel cost must be non-zero");
+        assert_eq!(reason, "host operation fuel cost must be non-zero");
     }
 
     #[test]
@@ -1697,6 +2129,148 @@ return first >= 0 and second >= first
             )
             .unwrap();
         assert!(logical);
+    }
+
+    #[test]
+    fn decision_reset_invalidates_every_retained_facade_handle() {
+        assert_eq!(RUSTIA_DECISION_RESET_ABI_VERSION, 1);
+        let module = Rustia::compile(
+            "decision.luau",
+            "return { answer = 42, decide = function(x) return x + 1 end }",
+        )
+        .unwrap();
+        let mut rustia = RustiaBuilder::deterministic().build().unwrap();
+        let exports = rustia.install(module.clone()).unwrap();
+        let decide = exports.function(&mut rustia, "decide").unwrap();
+        let exports_clone = exports.clone();
+        let decide_clone = decide.clone();
+
+        assert_eq!(exports.decision_epoch(), 0);
+        assert_eq!(decide.decision_epoch(), 0);
+        assert_eq!(decide.call::<_, f64>(&mut rustia, (4.0,)).unwrap(), 5.0);
+
+        rustia.reset_decision().unwrap();
+        assert_eq!(rustia.decision_epoch(), 1);
+        assert!(!exports.is_current(&rustia));
+        assert!(!decide.is_current(&rustia));
+        for result in [
+            exports.get::<f64>(&mut rustia, "answer").map(|_| ()),
+            exports_clone.get::<f64>(&mut rustia, "answer").map(|_| ()),
+            decide.call::<_, f64>(&mut rustia, ()).map(|_| ()),
+            decide_clone.call::<_, f64>(&mut rustia, ()).map(|_| ()),
+        ] {
+            let error = result.expect_err("pre-reset handle must be stale");
+            assert!(
+                error.to_string().contains("decision epoch 0"),
+                "unexpected stale-handle error: {error}"
+            );
+        }
+
+        let fresh = rustia.install(module).unwrap();
+        let fresh_decide = fresh.function(&mut rustia, "decide").unwrap();
+        assert_eq!(fresh.decision_epoch(), 1);
+        assert_eq!(
+            fresh_decide.call::<_, f64>(&mut rustia, (9.0,)).unwrap(),
+            10.0
+        );
+    }
+
+    #[test]
+    fn decision_reset_discards_guest_state_and_restores_host_configuration_and_rng() {
+        let settings = VmSettings {
+            deterministic_gc_interval: NonZeroU64::new(8).unwrap(),
+            enable_memory_tracking: true,
+            ..VmSettings::default()
+        };
+        let extension = RustiaExtension::new("host").fn_pure("bias", || -> f64 { 7.0 });
+        let mut rustia = RustiaBuilder::deterministic()
+            .settings(settings)
+            .wall_clock(ServiceClock::fixed(1_234.0))
+            .extension(extension)
+            .build()
+            .unwrap();
+        rustia
+            .add_pure_fn("double", |value: f64| value * 2.0)
+            .unwrap();
+        rustia.insert_global("input", 5.0).unwrap();
+
+        let configured: bool = rustia
+            .run(
+                "\
+decision_global = (decision_global or 0) + 1
+return input == 5 and decision_global == 1
+    and host.bias() == 7 and double(3) == 6 and os.time() == 1234
+",
+            )
+            .unwrap();
+        assert!(configured);
+        let first_random: Vec<f64> = rustia
+            .run("return { math.random(), math.random(), math.random() }")
+            .unwrap();
+        assert!(rustia.vm().deterministic_collection_count() > 0);
+        let peak_before_reset = rustia.memory_stats().peak_live_bytes.unwrap();
+
+        rustia.reset_decision().unwrap();
+        assert_eq!(rustia.vm().deterministic_collection_count(), 0);
+        assert_eq!(
+            rustia.memory_stats().peak_live_bytes,
+            Some(peak_before_reset),
+            "lifetime peak telemetry must survive a decision reset"
+        );
+        let clean_and_configured: bool = rustia
+            .run(
+                "\
+return input == nil and decision_global == nil
+    and host.bias() == 7 and double(3) == 6 and os.time() == 1234
+",
+            )
+            .unwrap();
+        assert!(clean_and_configured);
+        let second_random: Vec<f64> = rustia
+            .run("return { math.random(), math.random(), math.random() }")
+            .unwrap();
+        assert_eq!(first_random, second_random);
+        assert!(rustia.vm().deterministic_collection_count() > 0);
+    }
+
+    #[test]
+    fn decision_reset_reaches_a_many_decision_memory_plateau() {
+        let module = Rustia::compile(
+            "plateau.luau",
+            "\
+decision_global = {}
+for i = 1, 64 do
+    decision_global[i] = { value = i, label = 'temporary-' .. i }
+end
+local thread = coroutine.create(function()
+    coroutine.yield(decision_global)
+end)
+coroutine.resume(thread)
+return { count = #decision_global }
+",
+        )
+        .unwrap();
+        let mut rustia = RustiaBuilder::deterministic().build().unwrap();
+        let mut plateau = None;
+
+        for decision in 0..600 {
+            let exports = rustia.install(module.clone()).unwrap();
+            assert_eq!(exports.get::<usize>(&mut rustia, "count").unwrap(), 64);
+            rustia.reset_decision().unwrap();
+            let stats = rustia.memory_stats();
+            if decision == 49 {
+                plateau = Some(stats);
+            } else if decision > 49 {
+                assert_eq!(
+                    Some(stats),
+                    plateau,
+                    "VM memory changed after the warm plateau at decision {decision}"
+                );
+            }
+        }
+        assert_eq!(rustia.decision_epoch(), 600);
+        let clean: bool = rustia.run("return decision_global == nil").unwrap();
+        assert!(clean);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

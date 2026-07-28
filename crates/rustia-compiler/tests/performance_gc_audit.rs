@@ -135,17 +135,13 @@ fn quiescent_collection_preserves_bounded_todo_application_state() {
         let natural_function = natural.retain_value(natural_function);
 
         for _ in 0..40 {
+            let collected_value = collected_function.value(&collected).unwrap();
             let collected_result = collected
-                .call_retained_function(
-                    collected_function.value(),
-                    &[rustia_vm::Value::number(128.0)],
-                )
+                .call_retained_function(collected_value, &[rustia_vm::Value::number(128.0)])
                 .unwrap();
+            let natural_value = natural_function.value(&natural).unwrap();
             let natural_result = natural
-                .call_retained_function(
-                    natural_function.value(),
-                    &[rustia_vm::Value::number(128.0)],
-                )
+                .call_retained_function(natural_value, &[rustia_vm::Value::number(128.0)])
                 .unwrap();
             assert_eq!(
                 collected_result[0].as_number(),
@@ -154,15 +150,50 @@ fn quiescent_collection_preserves_bounded_todo_application_state() {
         }
 
         collected.collect_garbage();
+        let collected_value = collected_function.value(&collected).unwrap();
         let after_collection = collected
-            .call_retained_function(
-                collected_function.value(),
-                &[rustia_vm::Value::number(128.0)],
-            )
+            .call_retained_function(collected_value, &[rustia_vm::Value::number(128.0)])
             .unwrap();
+        let natural_value = natural_function.value(&natural).unwrap();
         let natural_next = natural
-            .call_retained_function(natural_function.value(), &[rustia_vm::Value::number(128.0)])
+            .call_retained_function(natural_value, &[rustia_vm::Value::number(128.0)])
             .unwrap();
         assert_eq!(after_collection[0].as_number(), natural_next[0].as_number());
     }
+}
+
+#[test]
+fn configured_memory_limit_is_catchable_atomic_and_recoverable() {
+    let program = compile_source(
+        r#"
+            local state = {}
+            local ok, message = pcall(function()
+                state[1] = string.rep("x", 1_000_000)
+            end)
+            if ok then return 1 end
+            if type(message) ~= "string" then return 2 end
+            if state[1] ~= nil then return 3 end
+            if pcall(function() return table.create(100_000, 1) end) then
+                return 4
+            end
+            if pcall(function() return buffer.create(1_000_000) end) then
+                return 5
+            end
+            state[2] = 42
+            if state[2] ~= 42 then return 6 end
+            return 0
+        "#,
+    );
+    let mut vm = Vm::with_settings(
+        Profile::ReproducibleStandard,
+        VmSettings {
+            memory_limit_bytes: Some(512 * 1024),
+            enable_memory_tracking: true,
+            ..VmSettings::default()
+        },
+    );
+    assert_eq!(vm.run(&program).unwrap().as_number(), Some(0.0));
+    let stats = vm.memory_stats();
+    assert!(stats.live_bytes <= 512 * 1024);
+    assert!(stats.peak_live_bytes <= Some(512 * 1024));
 }

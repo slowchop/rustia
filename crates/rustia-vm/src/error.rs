@@ -38,6 +38,25 @@ pub enum ErrorKind {
         expected: &'static str,
     },
     OutOfMemory,
+    HostDispatcherUnavailable {
+        key: u32,
+    },
+    HostResourceExhausted {
+        resource: &'static str,
+        limit: u64,
+    },
+    HostPanicked {
+        function: String,
+    },
+    VmPoisoned,
+    YieldAcrossBoundary,
+    DecisionResetWhileRunning,
+    DecisionEpochExhausted,
+    StaleRetainedValue {
+        retained_epoch: u64,
+        current_epoch: u64,
+    },
+    RetainedValueFromDifferentVm,
     TableIndexNil,
     TableIndexNaN,
     InvalidKeyToNext,
@@ -56,8 +75,13 @@ pub enum ErrorKind {
     },
     CapabilityRemoved {
         feature: &'static str,
+        operation: Option<String>,
         profile: Profile,
     },
+    HardenedLeafViolation {
+        feature: &'static str,
+    },
+    GuestEnvironmentSealed,
     InvalidProgram {
         reason: &'static str,
     },
@@ -99,6 +123,29 @@ impl Error {
         self.location_suppressed = true;
         self
     }
+
+    /// Whether this failure must abort a transactional host invocation.
+    #[doc(hidden)]
+    #[inline]
+    pub fn is_transaction_abort(&self) -> bool {
+        self.is_always_hard_abort()
+            || matches!(
+                self.kind,
+                ErrorKind::OutOfMemory | ErrorKind::YieldAcrossBoundary
+            )
+    }
+
+    #[inline]
+    pub(crate) fn is_always_hard_abort(&self) -> bool {
+        matches!(
+            self.kind,
+            ErrorKind::FuelExhausted { .. }
+                | ErrorKind::HostDispatcherUnavailable { .. }
+                | ErrorKind::HostResourceExhausted { .. }
+                | ErrorKind::HostPanicked { .. }
+                | ErrorKind::VmPoisoned
+        )
+    }
 }
 
 impl fmt::Display for Error {
@@ -137,6 +184,37 @@ impl fmt::Display for Error {
                 write!(formatter, "type error: expected {expected}")
             }
             ErrorKind::OutOfMemory => formatter.write_str("not enough memory"),
+            ErrorKind::HostDispatcherUnavailable { key } => {
+                write!(formatter, "host dispatcher has no binding for key {key}")
+            }
+            ErrorKind::HostResourceExhausted { resource, limit } => {
+                write!(formatter, "host {resource} limit exhausted at {limit}")
+            }
+            ErrorKind::HostPanicked { function } => {
+                write!(formatter, "host callback `{function}` panicked")
+            }
+            ErrorKind::VmPoisoned => {
+                formatter.write_str("VM is poisoned by a prior host panic; reset it before reuse")
+            }
+            ErrorKind::YieldAcrossBoundary => {
+                formatter.write_str("attempt to yield across metamethod/C-call boundary")
+            }
+            ErrorKind::DecisionResetWhileRunning => {
+                formatter.write_str("decision reset requires an idle VM")
+            }
+            ErrorKind::DecisionEpochExhausted => {
+                formatter.write_str("decision epoch counter exhausted")
+            }
+            ErrorKind::StaleRetainedValue {
+                retained_epoch,
+                current_epoch,
+            } => write!(
+                formatter,
+                "retained value from decision epoch {retained_epoch} is stale; current decision epoch is {current_epoch}"
+            ),
+            ErrorKind::RetainedValueFromDifferentVm => {
+                formatter.write_str("retained value belongs to a different VM")
+            }
             ErrorKind::TableIndexNil => formatter.write_str("table index is nil"),
             ErrorKind::TableIndexNaN => formatter.write_str("table index is NaN"),
             ErrorKind::InvalidKeyToNext => formatter.write_str("invalid key to 'next'"),
@@ -146,8 +224,24 @@ impl fmt::Display for Error {
             ErrorKind::Unsupported { feature } => {
                 write!(formatter, "unsupported feature: {feature}")
             }
-            ErrorKind::CapabilityRemoved { feature, profile } => {
-                write!(formatter, "{feature} is not available in {profile:?}")
+            ErrorKind::CapabilityRemoved {
+                feature,
+                operation,
+                profile,
+            } => match operation {
+                Some(operation) => {
+                    write!(
+                        formatter,
+                        "{feature} `{operation}` is not available in {profile:?}"
+                    )
+                }
+                None => write!(formatter, "{feature} is not available in {profile:?}"),
+            },
+            ErrorKind::HardenedLeafViolation { feature } => {
+                write!(formatter, "{feature} is not available in the hardened leaf guest surface")
+            }
+            ErrorKind::GuestEnvironmentSealed => {
+                formatter.write_str("hardened leaf guest environment is sealed")
             }
             ErrorKind::InvalidProgram { reason } => write!(formatter, "invalid bytecode: {reason}"),
         }

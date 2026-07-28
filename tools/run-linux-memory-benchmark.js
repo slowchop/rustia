@@ -250,6 +250,26 @@ function build(config) {
   return { all, lua54, all_sha256: sha256File(all), lua54_sha256: sha256File(lua54) };
 }
 
+function validateRustiaWasmQuota(config) {
+  if (config.publication.mode !== "rustia_ci_memory") return;
+  const cargo = "/root/.cargo/bin/cargo";
+  run("/root/.cargo/bin/rustup", [
+    "target", "add", "--toolchain", "1.95.0", "wasm32-unknown-unknown",
+  ], { capture: false });
+  run(cargo, [
+    "+1.95.0", "build", "--locked", "--release",
+    "--manifest-path", path.join(SOURCE, "bench/wasm/adapter-runner/Cargo.toml"),
+    "--target", "wasm32-unknown-unknown",
+  ], { capture: false, env: { ...process.env, RUSTC_WRAPPER: "" } });
+  run("node", [
+    path.join(SOURCE, "bench/wasm/test-rustia-memory-limit.mjs"),
+    path.join(
+      SOURCE,
+      "bench/wasm/adapter-runner/target/wasm32-unknown-unknown/release/script_bench_wasm_adapter.wasm",
+    ),
+  ], { cwd: SOURCE, capture: false });
+}
+
 function readCpu(cpu) {
   const line = fs.readFileSync("/proc/stat", "utf8").split("\n").find((entry) => entry.startsWith(`cpu${cpu} `));
   if (!line) fail(`cannot read CPU ${cpu}`);
@@ -356,6 +376,7 @@ async function execute(configFile, providerFile, bundle) {
     verifySource(config, bundle);
     installRust();
     const binaries = build(config);
+    validateRustiaWasmQuota(config);
     for (const unit of PACKAGE_ACTIVITY_UNITS) {
       run("systemctl", ["stop", unit], { allowFailure: true });
       run("systemctl", ["mask", unit], { allowFailure: true });

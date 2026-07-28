@@ -135,7 +135,8 @@ The declared behavior-topic catalog is `REFS.tsv`.
   expansion, in addition to scalar values. Base stdlib coverage now includes the upstream-facing
   `collectgarbage()`/`collectgarbage("collect")` no-op collection path, `collectgarbage("count")`,
   `collectgarbage("stop")`/`collectgarbage("restart")`, and `collectgarbage("step", size)`
-  with numeric/boolean harness results, and `gcinfo()` numeric count results that can drop for legacy GC polling loops, plus native-function `getfenv`/`setfenv` behavior and `setfenv`
+  with numeric/boolean harness results, and compatibility `gcinfo()` numeric count results that can drop for
+  legacy GC polling loops, plus native-function `getfenv`/`setfenv` behavior and `setfenv`
   for function, the currently running function frame, active stack-level, zero-result level-0 calls,
   and loadstring thread environments.
 - Stdlib coroutine coverage now executes the whole upstream `coroutine.luau` script: resumable

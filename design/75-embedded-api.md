@@ -1,6 +1,6 @@
 # rustia - embedded API goal and plan
 
-> **Status: [IMPLEMENTED FIRST SLICE - stabilization and advanced interop pending] (updated 2026-07-25).**
+> **Status: [TYPED INVOCATION + DECISION RESET IMPLEMENTED - advanced interop pending] (updated 2026-07-28).**
 > This records the public Rust embedding API direction and its honest implementation boundary after comparing
 > rustia's constraints with current Rust scripting/runtime APIs. It refines the locked
 > architecture axis H in [`30-architecture.md`](30-architecture.md) and the grabby bridge contract in
@@ -20,10 +20,21 @@ Typed run/compile helpers, owned scalar and table values, typed host functions, 
 retained `Function`/`Exports` handles with install-generation checks, owned serde, hot reload, diagnostics,
 early declarative macro sugar, and the runtime output/time services slice (environment presets, a stdout sink,
 and determinism-labeled clock providers per [`72-host-services.md`](72-host-services.md)) are implemented.
-The next release-critical slice is not more facade decoration:
-it is complete object/program reclamation and quotas, epoch-safe decision reset, real
-VM memory telemetry, a cheap worker-local/per-call host context, a host-owned module resolver/cache,
-transactional installation/reload failures, rich graph-preserving values, and live zero-copy serde.
+The concrete safe-Rust host seam is also implemented: `HostSchema` separates persistent registrations from a
+fresh, possibly borrowing `HostContext` for each typed invocation; callbacks receive capability-specific views;
+all guest calls in the invocation share fuel; and effects/slot writes stage into a bounded, ordered,
+record-transactional journal.
+The authoritative-leaf layer from
+[`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) is also implemented:
+`RustiaBuilder::deterministic_leaf()` selects a fail-closed `DeterministicSim` guest allowlist,
+`Rustia::compile_entry`/`Invocation::call_entry` avoid retained module/export state in the hot path, and the
+specialized hardened reset preserves only the sealed immutable configuration prefix.
+Object/program reclamation, real VM-owned live/reserved/peak telemetry, and the correctness-first logical-live
+quota/atomic OOM path are now implemented and validated by the exact-commit `safe-memory-588b541` native Linode
+cohort plus its wasm32 512 KiB quota/recovery probe. The next release-critical slice is not more facade
+decoration: the epoch-safe decision reset is now implemented; remaining work is O(1) quota accounting, a cheap
+host-owned module resolver/cache, transactional installation/reload failures, rich graph-preserving values, and
+live zero-copy serde.
 
 ## Non-Negotiable Requirements
 
@@ -34,7 +45,8 @@ transactional installation/reload failures, rich graph-preserving values, and li
 - Public rustia contains no `SimId`, `EffectRecord`, `ControlInput`, or grabby-specific enum.
 - DeterministicSim allows deterministic host seams, not arbitrary host mutation.
 - Cross-tick authoritative state for grabby lives in host typed slots, never Lua globals/upvalues.
-- Host-effect output is ordered by the grabby bridge using `(emitter, seq)`, then committed by the host.
+- Rustia assigns one dense record sequence per successful invocation; the grabby bridge adds `emitter`, orders
+  by `(emitter, seq)`, then commits.
 - Q16.16/int boundary is the deterministic host boundary; public rustia should make this ergonomic but generic.
 
 ## API Research Summary
@@ -110,17 +122,40 @@ Reason: best fit for koto migration, grabby ergonomics, and public API clarity.
 This is the grabby integration point and the scalable public host-module API.
 
 ```rust
-let bridge = RustiaExtension::new("grabby")
-    .fn_pure("fixed_mul", fixed_mul)
-    .fn_slot_read("slot", read_slot)
-    .fn_slot_write("set_slot", enqueue_set_slot)
-    .fn_effect("move", enqueue_move)
-    .fn_effect("fire", enqueue_fire);
+struct GrabbyHost;
 
-let mut vm = Rustia::builder()
-    .profile(Profile::DeterministicSim)
-    .extension(bridge)
-    .build()?;
+impl HostSchema for GrabbyHost {
+    type Input = AgentInput;
+    type Slots = [i64];
+    type External = ();
+    type Effect = Effect;
+    type SlotWrite = (u8, i64);
+    type Record = EffectRecord;
+}
+
+let bridge = HostModule::<GrabbyHost>::new("grabby")
+    .pure("fixed_mul", 2, fixed_mul)
+    .input("target_x", 2, |input: Input<'_, GrabbyHost>| input.get().target_x)
+    .slot_read("slot", 2, |slots: Slots<'_, GrabbyHost>, slot: usize| {
+        slots.get()[slot]
+    })
+    .slot_write(
+        "set_slot",
+        3,
+        |mut writes: SlotWrites<'_, GrabbyHost>, slot: u8, value: i64| {
+            writes.write((slot, value))
+        },
+    )
+    .effect(
+        "move",
+        3,
+        |mut effects: Effects<'_, GrabbyHost>, dx: i32, dy: i32| {
+            effects.emit(Effect::Move { dir: [dx, dy] })
+        },
+    );
+
+let mut vm = RustiaBuilder::deterministic().build_for_host::<GrabbyHost>()?;
+vm.install_host_module(bridge)?;
 ```
 
 Each registration carries:
@@ -142,19 +177,80 @@ The current VM capability set is:
 
 `DeterministicSim` allows the first five and rejects the last two; the Standard profiles allow all seven.
 
-Current implementation slice: `Rustia::add_pure_fn`, `add_input_fn`, `add_slot_read_fn`, `add_slot_write_fn`,
-`add_effect_fn`, `add_external_state_fn`, and `add_nondeterministic_fn` expose the same capability vocabulary on
-the global facade. `RustiaExtension::fn_external_state` fills the remaining named extension helper.
-`DeterministicSim` rejects external mutable-state reads and nondeterministic effects at registration time.
-`RustiaExtension::namespace()` and `functions()` expose pre-install metadata for namespace, function name, fuel
-ABI version, fuel cost, capability, parameter count, parameter Rust type names, return Rust type names, and
-whether the callback is fallible. `RustiaExtension::fuel_policy()` exposes the host-function fuel ABI version,
-default helper cost, and minimum accepted cost so hosts can snapshot their extension cost schedule.
+The typed surface derives capability from the registration method and callback's first parameter:
 
-Current limitation: callbacks are `Fn + Send + Sync + 'static` and receive typed script arguments but no
-per-VM/per-call host context. Mutable worker-local slot/effect state therefore requires captured synchronization
-or interior mutability today. Add an explicit context/state seam before treating the conceptual grabby sketch as
-a cheap production bridge.
+| registration | callback shape |
+|---|---|
+| `pure` | `|args...| -> T` or `rustia::Result<T>`; no context authority |
+| `input` | `|input: Input<'_, H>, args...| -> T` or `rustia::Result<T>` |
+| `slot_read` | `|slots: Slots<'_, H>, args...| -> T` or `rustia::Result<T>` |
+| `effect` | `|effects: Effects<'_, H>, args...| -> T` or `rustia::Result<T>` |
+| `slot_write` | `|writes: SlotWrites<'_, H>, args...| -> T` or `rustia::Result<T>` |
+| `external` / `nondeterministic` | `|host: HostMut<'_, H>, args...| -> T` or `rustia::Result<T>` |
+
+The last two are rejected by `DeterministicSim`. `HostModule::namespace()`, `functions()`, and `fuel_policy()`
+expose pre-install namespace/signature/capability/fuel metadata, and namespaced installation is prevalidated so
+a rejected module retains no typed dispatcher bindings. The context-free `Rustia<()>` facade and
+`RustiaExtension` remain the convenient legacy surface; `Rustia<H>` is the concrete context-bearing surface.
+
+`HostSchema` is `'static` because the VM stores functions against it. `HostContext<H>` is a separate trait
+object borrowed only for one call to `invoke`/`invoke_into`, so its concrete implementation may carry unrelated
+block-local lifetimes on successive ticks. Callback closures are still `Fn + Send + Sync + 'static`; the
+capability views themselves are short-lived and cannot escape. This removes the need to capture worker state,
+but it does not prove semantic purity: a callback can still read globals or mutate captured/interior state.
+That capture behavior is a documented embedding trust boundary.
+
+The schema's associated types have narrow roles: `Input` is immutable decision input, `Slots` is the immutable
+persistent-slot snapshot, `External` is mutable live authority available only through `HostMut`, `Effect` and
+`SlotWrite` are callback-produced commands, and `Record` is their common ordered publication type.
+`HostContext::input`/`slots` project the first two, `external_mut` projects the third,
+`record_effect`/`record_slot_write` add the supplied dense sequence, and `record_bytes` returns the stable
+logical protocol size charged to the byte budget.
+
+#### Concrete invocation and record transaction
+
+Typed VMs run guest module top-level code and retained functions only through `Invocation<'call, H>`.
+`InvocationLimits::new(fuel).with_max_records(max_records).with_max_record_bytes(max_record_bytes)` names the
+three limits and creates one monotonic budget shared by every `Invocation::install`/`run`,
+`Function::call_in`, nested guest/metamethod call, and host dispatch performed by the outer Rust closure. The
+builder/`VmSettings` initial fuel, when configured, is a VM-wide ceiling; the effective typed budget is the
+lower of that ceiling and `InvocationLimits::fuel()`. The
+output bounds are checked before a record enters the journal; effects and slot writes share a single dense
+sequence starting at zero. `HostContext::record_bytes` defines the deterministic logical payload charge.
+
+There are two record checkpoints. Each host handler rolls back only the suffix it appended when it returns an
+error or panics. The outer `invoke`/`invoke_into` rolls back every record when its operation returns an error,
+including a guest failure or Rust result-conversion failure. Guest protection follows normal `pcall` structure:
+a completed host call survives a later guest error caught by `pcall`; a failing handler's own partial suffix
+does not.
+
+Fuel exhaustion, OOM, record-count or record-byte overflow, an invalid boundary yield, a missing typed-host
+dispatcher, and host panic are hard transaction aborts: guest `pcall` and callbacks cannot turn them into a
+successful publication. The extra hard OOM/yield treatment is local to typed transactional execution, rather
+than a global change to ordinary legacy execution. Host panics are caught at the VM host-call boundary; records
+roll back and every later guest execution entry point rejects until `reset_decision()` succeeds.
+Containment covers typed/context-free host functions, extension ops, stdout and clock providers, and the
+configured `loadstring` compiler. This requires `panic = "unwind"`; an
+aborting build terminates or traps before Rustia can intervene, so callbacks in
+that configuration must not panic.
+
+The outer closure passed to `invoke` is ordinary caller-side Rust control flow. Its panic (or one from a
+caller-side argument/result conversion) continues unwinding after dropping the unpublished journal; it is not
+converted to `HostPanicked` and does not poison an otherwise idle VM. Conversions performed inside a
+guest-invoked host callback are inside the containment boundary and do poison on panic.
+The hardened `invoke_entry_into` lifecycle catches a caller-side conversion
+unwind, resets the decision, and resumes the same panic.
+
+This is intentionally a **record transaction**, not a heap/context transaction. It does not undo guest
+globals/tables, mutation through profile-gated `HostMut`, callback captures, or `HostContext` state modified
+through interior mutability. Embedders that need a fresh guest-state boundary pair the operation with
+`reset_decision()` and keep authoritative state in host slots.
+
+Successful `invoke` returns `InvocationOutcome { value, records, usage }`; its record slice borrows Rustia's
+reusable journal until the next mutable use. `invoke_into` reserves the caller-owned record lane before guest
+execution and makes the final append allocation-free and infallible, returning `InvocationReceipt` with the
+value plus fuel/count/byte usage. See the compile-checked
+[`typed_invocation.rs`](../crates/rustia/examples/typed_invocation.rs).
 
 ### 3. Serde-first data bridge
 
@@ -184,6 +280,12 @@ Start with owned-value serde for correctness and ergonomics; `OwnedValue` plus s
 `OwnedTable` deserialization helpers are the first public slice. Add the zero-copy live-value deserializer after
 the surface is stable, matching the architecture note that zero-copy serde is faster by avoiding the deep-copy
 exports snapshot.
+
+Owned-value serde uses Serde's externally tagged enum model. A unit variant is a string, while a newtype,
+tuple, or struct variant is a single-entry string-keyed table whose value carries the variant content. Derived
+`rename` and `rename_all` rules apply to the string key exactly as they do for other Serde formats. Serialization
+produces those shapes and deserialization accepts them symmetrically; other table shapes and non-string variant
+keys fail explicitly.
 
 ### 4. Compiled module and hot-reload API
 
@@ -247,36 +349,63 @@ model and Deno's extension/op system. Do not start here; macros freeze mistakes.
 
 ## Grabby Fit
 
-The public API works for grabby if grabby uses the extension/linker layer as the integration point. This is a
-conceptual host-side sketch: `agent_input`, `slot_snapshot`, and effect-buffer ownership are grabby-side types,
-not compile-checked public rustia API.
+The public API works for grabby with `HostModule<GrabbyHost>` as the persistent registration layer, a
+`CompiledEntry` as the host-owned decision artifact, and a fresh borrowing `TickContext` as the invocation
+authority. Setup constructs the hardened VM and compiles the direct decision body:
 
 ```rust
-let ai = Rustia::compile("alien_ai.luau", source)?;
-let exports = vm.install(ai)?;
-let decide = exports.function(&mut vm, "decide")?;
+let mut vm = RustiaBuilder::deterministic_leaf()
+    .memory_limit_bytes(memory_limit)
+    .build_for_host::<GrabbyHost>()?;
+vm.install_host_module(bridge)?;
+let decide = Rustia::<GrabbyHost>::compile_entry("decide.luau", source)?;
+```
 
-decide.call(&mut vm, (agent_input, slot_snapshot))?;
-let effects = bridge.take_effects();
+The worker hot path is:
+
+```rust
+let mut context = TickContext {
+    emitter,
+    input: &agent_input,
+    slots: &slot_snapshot,
+};
+let receipt = vm.invoke_entry_into::<Decision>(
+    &mut context,
+    InvocationLimits::new(fuel)
+        .with_max_records(max_records)
+        .with_max_record_bytes(max_record_bytes),
+    &mut worker_lane,
+    &decide,
+)?;
 ```
 
 The grabby bridge owns:
 
 - current `emitter: SimId`.
-- intra-agent `seq`.
-- conversion between typed host functions and `EffectRecord`.
+- each tick/phase's block-local input and captured slot projections.
+- conversion from typed effects/slot writes to the shared `EffectRecord`.
 - local lane effect buffers.
+- the rule that at most one invocation succeeds per `(tick, phase, emitter)`; a failed transaction may retry.
 - stable-sort commit by `(emitter, seq)`.
 - `SetSlot` writeback to captured columnar slot arrays.
 
 rustia owns:
 
-- deterministic execution and fuel.
+- one shared fuel budget for the full invocation and its nested calls.
 - typed argument/result conversion.
-- capability enforcement.
-- a future scratch-heap reset operation for per-decision DeterministicSim leaves; reconstruct the VM per
-  decision until that operation and epoch-safe retained-handle invalidation land.
-- current generation/freshness checks, plus planned true-root handle ownership and transactional hot reload.
+- capability views and profile enforcement.
+- bounded record count/logical bytes, one dense sequence across effects and slot writes, callback savepoints,
+  and all-or-nothing outer record publication.
+- usage receipts; `invoke_entry_into` reserves before execution, appends to the lane without allocating at
+  commit, and resets after both success and failure.
+- `reset_decision()` for per-decision `DeterministicSim` leaves, with decision-reset ABI v1, idle-only execution,
+  sealed immutable-environment reuse, decision-local allocation discard, deterministic
+  RNG/GC/logical-time restart, and epoch invalidation of every retained handle.
+- the hardened guest-surface ABI, frozen allowlisted environment, mandatory memory limit, and rejection of
+  guest globals/upvalues/raw access/dynamic authority.
+- stateless compiled-entry execution without an exports table, retained closure, or loaded-program installation.
+- install-generation/freshness checks plus VM/epoch-rooted handle ownership; transactional hot reload remains
+  planned.
 
 The hot AI leaf remains a per-decision pure function. Coroutines are still valid inside one decision and in
 scenario/console paths, but a coroutine must not persist across ticks in DeterministicSim because that would
@@ -293,9 +422,21 @@ store authoritative state on the GC heap instead of in captured host slots.
 7. ✅ early declarative macro sugar — landed; broader attribute/codegen expansion is deferred.
 8. ✅ runtime output/time services — landed per [`72-host-services.md`](72-host-services.md): environment
    presets, `ServiceClock` provider sockets, real `print` composition, pinned-epoch and logical-clock
-   fallbacks; honest memory telemetry (`collectgarbage("count")`/`gcinfo`) remains.
-9. ⏳ bounded memory, true-root/epoch-safe reset, per-call host context, modules,
-   transactional install/reload, and rich/live values — next.
+   fallbacks; honest host-facing VM-owned telemetry (`Vm::memory_stats()`) is now implemented by the later
+   accounting tranche, while script-visible counters await the O(1) quota tracker.
+9. ✅ logical-live quotas and atomic/catchable OOM — implemented through
+   `VmSettings::memory_limit_bytes` / `RustiaBuilder::memory_limit_bytes`; exact-commit native Linode and wasm32
+   pressure validation is retained under `safe-memory-588b541`, while O(1) accounting remains an optimization.
+10. ✅ epoch-safe decision reset — `Vm::reset_decision()` / `Rustia::reset_decision()` preserve host
+    configuration, discard all guest state, restart deterministic counters, invalidate every old retained
+    handle clone, and plateau exactly in the 600-decision mixed lifecycle test.
+11. ✅ typed host schema/context, capability views, typed modules, shared invocation fuel, bounded ordered
+    records, handler savepoints, outer publication rollback, usage receipts, and host-panic poisoning/reset.
+12. ✅ hardened stateless action leaves — deterministic allowlisted/frozen guest surface, mandatory memory
+    limit, bytecode policy validation, direct `CompiledEntry` invocation, failure-safe lifecycle helper,
+    immutable-prefix decision reset, and native/wasm32 exact-plateau probes.
+13. ⏳ host-owned script module resolution, transactional install/reload of guest state, and rich/live values —
+    next.
 
 Defer mlua-style `UserData`/`Scope` until the above is stable. The first useful embedding target is typed
 owned values, retained script function handles, serde, and deterministic extension registration.

@@ -20,9 +20,9 @@ Linode was confirmed deleted before promotion. Exact same-engine Linux A/B evide
 retained separately; none of these results turns into a blanket cross-engine headline. This remains a catch-up
 project first.
 
-Performance work now has a production prerequisite: collection scheduling and weak sweeping exist, but ordinary
-object/program stores are retained in append-only slots until VM drop. Complete reclamation/reuse, accounting,
-quotas/OOM semantics, and epoch-safe decision reset should land before final GC tuning or broad release claims.
+Performance work now has a production prerequisite: complete object/program reclamation/reuse, quotas/OOM, and
+epoch-safe decision-reset ABI v1 are implemented. O(1) incremental accounting and broader mixed-heap
+native/Wasm pressure evidence must land before final GC tuning or broad release claims.
 
 The hardened safe table/atom/cache foundation is now in-tree. VM-local byte atoms and insertion-ordered table
 hash parts at 16+ entries use deterministic open-addressed `Vec<u32>` side indices at no more than 50% load.
@@ -179,12 +179,11 @@ Use per-program intern pools, short-string storage, shared frozen stdlib state, 
 scheduling: allocation-debt pacing for Standard/LuauCompat, instruction-count boundaries for DeterministicSim.
 Keep non-moving handles friendly to inline caches, but keep the VM thread-affine and safe.
 Current plan delta: VM-local indexed atoms and per-loaded-program constant caches have landed. Shared cross-VM
-compiled constant storage and the 13-byte inline literal/runtime-string form have now landed too. Lookup-only short-key
-misses avoid permanent atom growth. However, table/function/upvalue/coroutine slots, rooted atomized and
-non-inline runtime strings/userdata/buffers/vectors, and loaded programs are still append-only until VM drop.
-Before tuning pacing, implement complete reachability/sweep, true public-handle roots or an ownership redesign,
-generation-safe reuse, honest live/peak accounting, aggregate quotas and atomic OOM behavior, plus epoch-safe
-reset and native/wasm plateau tests. Shared frozen stdlib state follows.
+compiled constant storage and the 13-byte inline literal/runtime-string form have now landed too. Lookup-only
+short-key misses avoid permanent atom growth. Complete reachability/sweep, public retained roots,
+generation-safe object/program reuse, live/peak accounting, aggregate quotas and atomic OOM, plus epoch-safe
+decision reset are implemented. Before tuning pacing, replace quota boundary scans with O(1) accounting and
+extend the mixed-heap native/Wasm pressure matrix. Shared frozen stdlib state follows.
 Expected gain: 1.2x-3x speed plus large RSS/startup wins for many-VM usage.
 
 **10. Typed lanes for vectors, buffers, and deterministic extension kernels.**

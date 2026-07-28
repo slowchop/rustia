@@ -19,9 +19,10 @@ pub use error::{Error, ErrorKind, Result};
 pub use extension::{
     ExtensionHandler, ExtensionOp, HostFunctionHandler, HostFunctionOp, OpCapability,
 };
-pub use profile::Profile;
+pub use profile::{GuestSurface, Profile};
 pub use value::{Value, ValueKind};
 pub use vm::{
-    ClockProvider, LoadStringCompiler, RetainedValue, StdoutSink, Vm, VmServices, VmSettings,
-    MAX_RECURSION_LIMIT,
+    ClockProvider, HardenedLeafProgram, LoadStringCompiler, RetainedValue, StdoutSink, Vm,
+    VmExecution, VmMemoryStats, VmServices, VmSettings, DECISION_RESET_ABI_VERSION,
+    HARDENED_LEAF_GUEST_ABI_VERSION, MAX_RECURSION_LIMIT,
 };

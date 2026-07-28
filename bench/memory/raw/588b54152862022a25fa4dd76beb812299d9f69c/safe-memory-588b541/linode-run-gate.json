@@ -1,0 +1,28 @@
+{
+  "schema": "rustia.bench.memory-linode-gate.v1",
+  "pre_run": {
+    "captured_at": "2026-07-27T04:38:50.763Z",
+    "load_1m": 0.08,
+    "total_ticks": 1001,
+    "idle_ticks": 1001,
+    "steal_ticks": 0,
+    "idle_percent": 100,
+    "steal_percent": 0
+  },
+  "run": {
+    "benchmark_cpu": {
+      "total_ticks": 3254,
+      "idle_ticks": 2437,
+      "steal_ticks": 0,
+      "idle_percent": 74.89244007375538,
+      "steal_percent": 0
+    },
+    "supervisor_cpu": {
+      "total_ticks": 3245,
+      "idle_ticks": 790,
+      "steal_ticks": 0,
+      "idle_percent": 24.345146379044685,
+      "steal_percent": 0
+    }
+  }
+}

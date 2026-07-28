@@ -2,7 +2,7 @@ use crate::value::{
     embed_to_vm_error, load_owned_value, snapshot_value, FromRustia, FromRustiaMulti,
     IntoRustiaMulti, OwnedValue,
 };
-use crate::{Error, Result, Rustia};
+use crate::{Error, HostSchema, Invocation, Result, Rustia};
 use rustia_vm::{HostFunctionOp, OpCapability, RetainedValue, Value as RawValue, ValueKind, Vm};
 use std::any::type_name;
 use std::sync::Arc;
@@ -11,22 +11,42 @@ use std::sync::Arc;
 pub struct Function {
     value: RetainedValue,
     generation: u64,
+    decision_epoch: u64,
 }
 
 impl Function {
-    pub(crate) fn new(value: RetainedValue, generation: u64) -> Self {
-        Self { value, generation }
+    pub(crate) fn new(value: RetainedValue, generation: u64, decision_epoch: u64) -> Self {
+        Self {
+            value,
+            generation,
+            decision_epoch,
+        }
     }
 
     pub fn generation(&self) -> u64 {
         self.generation
     }
 
-    pub fn is_current(&self, rustia: &Rustia) -> bool {
-        self.generation == rustia.generation()
+    pub fn decision_epoch(&self) -> u64 {
+        self.decision_epoch
     }
 
-    pub fn ensure_current(&self, rustia: &Rustia) -> Result<()> {
+    pub fn is_current<C>(&self, rustia: &Rustia<C>) -> bool
+    where
+        C: HostSchema,
+    {
+        self.decision_epoch == rustia.decision_epoch() && self.generation == rustia.generation()
+    }
+
+    pub fn ensure_current<C>(&self, rustia: &Rustia<C>) -> Result<()>
+    where
+        C: HostSchema,
+    {
+        ensure_current_epoch(
+            "function handle",
+            self.decision_epoch,
+            rustia.decision_epoch(),
+        )?;
         ensure_current_generation("function handle", self.generation, rustia.generation())
     }
 
@@ -35,15 +55,21 @@ impl Function {
         Args: IntoRustiaMulti,
         Return: FromRustiaMulti,
     {
-        ensure_same_vm("function handle", &self.value, rustia)?;
+        ensure_current_epoch(
+            "function handle",
+            self.decision_epoch,
+            rustia.decision_epoch(),
+        )?;
+        ensure_same_vm("function handle", &self.value, rustia.vm())?;
         let raw_args = args
             .into_rustia_multi()
             .iter()
             .map(|value| load_owned_value(rustia.vm_mut(), value))
             .collect::<Result<Vec<_>>>()?;
+        let function = self.value.value(rustia.vm()).map_err(Error::Vm)?;
         let raw_results = rustia
             .vm_mut()
-            .call_retained_function(self.value.value(), &raw_args)
+            .call_retained_function(function, &raw_args)
             .map_err(Error::Vm)?;
         let results = raw_results
             .into_iter()
@@ -60,39 +86,131 @@ impl Function {
         self.ensure_current(rustia)?;
         self.call(rustia, args)
     }
+
+    /// Calls this guest function inside a typed host invocation. Argument
+    /// loading, guest execution, result snapshotting, and typed conversion are
+    /// one effect-transaction scope.
+    pub fn call_in<C, Args, Return>(
+        &self,
+        invocation: &mut Invocation<'_, C>,
+        args: Args,
+    ) -> Result<Return>
+    where
+        C: HostSchema,
+        Args: IntoRustiaMulti,
+        Return: FromRustiaMulti,
+    {
+        ensure_current_epoch(
+            "function handle",
+            self.decision_epoch,
+            invocation.vm.decision_epoch(),
+        )?;
+        ensure_same_vm("function handle", &self.value, invocation.vm)?;
+        let function = self.value.value(invocation.vm).map_err(Error::Vm)?;
+        invocation.convert_call(function, args)
+    }
+
+    pub fn call_current_in<C, Args, Return>(
+        &self,
+        invocation: &mut Invocation<'_, C>,
+        args: Args,
+    ) -> Result<Return>
+    where
+        C: HostSchema,
+        Args: IntoRustiaMulti,
+        Return: FromRustiaMulti,
+    {
+        ensure_current_epoch(
+            "function handle",
+            self.decision_epoch,
+            invocation.vm.decision_epoch(),
+        )?;
+        ensure_current_generation("function handle", self.generation, *invocation.generation)?;
+        self.call_in(invocation, args)
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct Exports {
     value: RetainedValue,
     generation: u64,
+    decision_epoch: u64,
 }
 
 impl Exports {
-    pub(crate) fn new(value: RetainedValue, generation: u64) -> Self {
-        Self { value, generation }
+    pub(crate) fn new(value: RetainedValue, generation: u64, decision_epoch: u64) -> Self {
+        Self {
+            value,
+            generation,
+            decision_epoch,
+        }
     }
 
     pub fn generation(&self) -> u64 {
         self.generation
     }
 
-    pub fn is_current(&self, rustia: &Rustia) -> bool {
-        self.generation == rustia.generation()
+    pub fn decision_epoch(&self) -> u64 {
+        self.decision_epoch
     }
 
-    pub fn ensure_current(&self, rustia: &Rustia) -> Result<()> {
+    pub fn is_current<C>(&self, rustia: &Rustia<C>) -> bool
+    where
+        C: HostSchema,
+    {
+        self.decision_epoch == rustia.decision_epoch() && self.generation == rustia.generation()
+    }
+
+    pub fn ensure_current<C>(&self, rustia: &Rustia<C>) -> Result<()>
+    where
+        C: HostSchema,
+    {
+        ensure_current_epoch(
+            "exports handle",
+            self.decision_epoch,
+            rustia.decision_epoch(),
+        )?;
         ensure_current_generation("exports handle", self.generation, rustia.generation())
     }
 
     pub fn value(&self, rustia: &mut Rustia) -> Result<OwnedValue> {
-        ensure_same_vm("exports handle", &self.value, rustia)?;
-        snapshot_value(rustia.vm_mut(), self.value.value())
+        ensure_current_epoch(
+            "exports handle",
+            self.decision_epoch,
+            rustia.decision_epoch(),
+        )?;
+        ensure_same_vm("exports handle", &self.value, rustia.vm())?;
+        let value = self.value.value(rustia.vm()).map_err(Error::Vm)?;
+        snapshot_value(rustia.vm_mut(), value)
     }
 
     pub fn value_current(&self, rustia: &mut Rustia) -> Result<OwnedValue> {
         self.ensure_current(rustia)?;
         self.value(rustia)
+    }
+
+    pub fn value_in<C>(&self, invocation: &mut Invocation<'_, C>) -> Result<OwnedValue>
+    where
+        C: HostSchema,
+    {
+        ensure_current_epoch(
+            "exports handle",
+            self.decision_epoch,
+            invocation.vm.decision_epoch(),
+        )?;
+        ensure_same_vm("exports handle", &self.value, invocation.vm)?;
+        invocation.scoped(|invocation| {
+            let value = self.value.value(invocation.vm).map_err(Error::Vm)?;
+            snapshot_value(invocation.vm, value)
+        })
+    }
+
+    pub fn value_current_in<C>(&self, invocation: &mut Invocation<'_, C>) -> Result<OwnedValue>
+    where
+        C: HostSchema,
+    {
+        ensure_current_generation("exports handle", self.generation, *invocation.generation)?;
+        self.value_in(invocation)
     }
 
     pub fn deserialize<T>(&self, rustia: &mut Rustia) -> Result<T>
@@ -128,13 +246,34 @@ impl Exports {
         self.get(rustia, name)
     }
 
+    pub fn get_in<C, T>(&self, invocation: &mut Invocation<'_, C>, name: &str) -> Result<T>
+    where
+        C: HostSchema,
+        T: FromRustia,
+    {
+        invocation.scoped(|invocation| {
+            let value = self.raw_get_in(invocation, name)?;
+            let value = snapshot_value(invocation.vm, value)?;
+            T::from_rustia(value)
+        })
+    }
+
+    pub fn get_current_in<C, T>(&self, invocation: &mut Invocation<'_, C>, name: &str) -> Result<T>
+    where
+        C: HostSchema,
+        T: FromRustia,
+    {
+        ensure_current_generation("exports handle", self.generation, *invocation.generation)?;
+        self.get_in(invocation, name)
+    }
+
     pub fn function(&self, rustia: &mut Rustia, name: &str) -> Result<Function> {
         let value = self.raw_get(rustia, name)?;
         if value.kind() != ValueKind::Function {
             return Err(Error::Embed(format!("export `{name}` is not a function")));
         }
         let value = rustia.vm_mut().retain_value(value);
-        Ok(Function::new(value, self.generation))
+        Ok(Function::new(value, self.generation, self.decision_epoch))
     }
 
     pub fn function_current(&self, rustia: &mut Rustia, name: &str) -> Result<Function> {
@@ -142,18 +281,77 @@ impl Exports {
         self.function(rustia, name)
     }
 
+    pub fn function_in<C>(&self, invocation: &mut Invocation<'_, C>, name: &str) -> Result<Function>
+    where
+        C: HostSchema,
+    {
+        invocation.scoped(|invocation| {
+            let value = self.raw_get_in(invocation, name)?;
+            if value.kind() != ValueKind::Function {
+                return Err(Error::Embed(format!("export `{name}` is not a function")));
+            }
+            let value = invocation.vm.retain_value(value);
+            Ok(Function::new(value, self.generation, self.decision_epoch))
+        })
+    }
+
+    pub fn function_current_in<C>(
+        &self,
+        invocation: &mut Invocation<'_, C>,
+        name: &str,
+    ) -> Result<Function>
+    where
+        C: HostSchema,
+    {
+        ensure_current_generation("exports handle", self.generation, *invocation.generation)?;
+        self.function_in(invocation, name)
+    }
+
     fn raw_get(&self, rustia: &mut Rustia, name: &str) -> Result<RawValue> {
-        ensure_same_vm("exports handle", &self.value, rustia)?;
+        ensure_current_epoch(
+            "exports handle",
+            self.decision_epoch,
+            rustia.decision_epoch(),
+        )?;
+        ensure_same_vm("exports handle", &self.value, rustia.vm())?;
         let key = rustia.vm_mut().string(name);
+        let table = self.value.value(rustia.vm()).map_err(Error::Vm)?;
         rustia
             .vm_mut()
-            .raw_table_get_value(self.value.value(), key)
+            .raw_table_get_value(table, key)
+            .map_err(Error::Vm)
+    }
+
+    fn raw_get_in<C>(&self, invocation: &mut Invocation<'_, C>, name: &str) -> Result<RawValue>
+    where
+        C: HostSchema,
+    {
+        ensure_current_epoch(
+            "exports handle",
+            self.decision_epoch,
+            invocation.vm.decision_epoch(),
+        )?;
+        ensure_same_vm("exports handle", &self.value, invocation.vm)?;
+        let key = invocation.vm.string(name);
+        let table = self.value.value(invocation.vm).map_err(Error::Vm)?;
+        invocation
+            .vm
+            .raw_table_get_value(table, key)
             .map_err(Error::Vm)
     }
 }
 
-fn ensure_same_vm(label: &str, value: &RetainedValue, rustia: &Rustia) -> Result<()> {
-    if value.belongs_to(rustia.vm()) {
+fn ensure_current_epoch(label: &str, handle_epoch: u64, current_epoch: u64) -> Result<()> {
+    if handle_epoch == current_epoch {
+        return Ok(());
+    }
+    Err(Error::Embed(format!(
+        "stale {label} from decision epoch {handle_epoch}; current decision epoch is {current_epoch}"
+    )))
+}
+
+fn ensure_same_vm(label: &str, value: &RetainedValue, vm: &Vm) -> Result<()> {
+    if value.belongs_to(vm) {
         return Ok(());
     }
     Err(Error::Embed(format!(
@@ -305,7 +503,7 @@ impl_host_function!(6; A, B, C, D, E, F);
 impl_host_function!(7; A, B, C, D, E, F, G);
 impl_host_function!(8; A, B, C, D, E, F, G, H);
 
-fn host_arg_from_raw<T>(
+pub(crate) fn host_arg_from_raw<T>(
     vm: &mut Vm,
     args: &[RawValue],
     index: usize,
@@ -322,7 +520,7 @@ where
         .map_err(|error| host_embed_error(function_name, format!("argument {}", index + 1), error))
 }
 
-fn host_return_to_raw<Return>(
+pub(crate) fn host_return_to_raw<Return>(
     vm: &mut Vm,
     function_name: &str,
     value: Return,
@@ -344,8 +542,11 @@ where
 }
 
 fn host_embed_error(function_name: &str, slot: impl AsRef<str>, error: Error) -> rustia_vm::Error {
-    embed_to_vm_error(Error::Embed(format!(
-        "host function `{function_name}` {}: {error}",
-        slot.as_ref()
-    )))
+    match error {
+        Error::Vm(error) => error,
+        error => embed_to_vm_error(Error::Embed(format!(
+            "host function `{function_name}` {}: {error}",
+            slot.as_ref()
+        ))),
+    }
 }
