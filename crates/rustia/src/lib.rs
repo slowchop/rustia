@@ -280,6 +280,17 @@ where
         Ok(value)
     }
 
+    pub(crate) fn compile_and_run_raw_bytes_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &[u8],
+    ) -> Result<rustia_vm::Value> {
+        let module = Self::compile_module_bytes(source_name, source)?;
+        let value = self.vm.run(&module.program).map_err(Error::Vm)?;
+        self.advance_generation();
+        Ok(value)
+    }
+
     pub fn insert_global<T>(&mut self, name: impl AsRef<str>, value: T) -> Result<()>
     where
         T: IntoRustia,
@@ -431,9 +442,16 @@ where
     }
 
     pub fn compile_module(source_name: impl Into<String>, source: &str) -> Result<CompiledModule> {
+        Self::compile_module_bytes(source_name, source.as_bytes())
+    }
+
+    pub fn compile_module_bytes(
+        source_name: impl Into<String>,
+        source: &[u8],
+    ) -> Result<CompiledModule> {
         let source_name = source_name.into();
-        let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
-        let options = CompileOptions::default().with_source(source_name.clone(), source);
+        let chunk = rustia_parser::parse_source_bytes(source).map_err(Error::Source)?;
+        let options = CompileOptions::default().with_source_bytes(source_name.clone(), source);
         let program = compile_with_options(&chunk, options).map_err(Error::Compile)?;
         Ok(CompiledModule {
             source_name,
@@ -533,6 +551,10 @@ impl Rustia<()> {
         Self::compile_module(source_name, source)
     }
 
+    pub fn compile_bytes(source_name: impl Into<String>, source: &[u8]) -> Result<CompiledModule> {
+        Self::compile_module_bytes(source_name, source)
+    }
+
     pub fn compile_and_run(&mut self, source: &str) -> Result<Exports> {
         let value = self.compile_and_run_raw(source)?;
         let value = self.vm.retain_value(value);
@@ -545,6 +567,16 @@ impl Rustia<()> {
         source: &str,
     ) -> Result<Exports> {
         let value = self.compile_and_run_raw_named(source_name, source)?;
+        let value = self.vm.retain_value(value);
+        Ok(Exports::new(value, self.generation, self.decision_epoch()))
+    }
+
+    pub fn compile_and_run_bytes_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &[u8],
+    ) -> Result<Exports> {
+        let value = self.compile_and_run_raw_bytes_named(source_name, source)?;
         let value = self.vm.retain_value(value);
         Ok(Exports::new(value, self.generation, self.decision_epoch()))
     }
@@ -572,6 +604,15 @@ impl Rustia<()> {
         source: &str,
     ) -> Result<OwnedValue> {
         let value = self.compile_and_run_raw_named(source_name, source)?;
+        value::snapshot_value(&mut self.vm, value)
+    }
+
+    pub fn run_owned_bytes_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &[u8],
+    ) -> Result<OwnedValue> {
+        let value = self.compile_and_run_raw_bytes_named(source_name, source)?;
         value::snapshot_value(&mut self.vm, value)
     }
 
