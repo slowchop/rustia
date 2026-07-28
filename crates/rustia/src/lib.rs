@@ -14,9 +14,9 @@ use std::fmt;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
 pub use extension_api::{
-    RustiaBuilder, RustiaExtension, RustiaHostFuelPolicy, RustiaHostFunctionInfo, ServiceClock,
-    RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
-    RUSTIA_MIN_HOST_FUNCTION_FUEL,
+    RustiaBuilder, RustiaExecutionProfile, RustiaExtension, RustiaHostFuelPolicy,
+    RustiaHostFunctionInfo, ServiceClock, RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
+    RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY, RUSTIA_MIN_HOST_FUNCTION_FUEL,
 };
 pub use function::{Exports, Function};
 pub use invocation::{
@@ -74,6 +74,11 @@ where
     /// instruction-boundary peaks.
     pub fn memory_stats(&mut self) -> VmMemoryStats {
         self.vm.memory_stats()
+    }
+
+    /// Returns the typed core execution semantics read from this live VM.
+    pub fn execution_profile(&self) -> RustiaExecutionProfile {
+        RustiaExecutionProfile::from_vm(self.vm.profile(), self.vm.settings().guest_surface)
     }
 
     /// Current decision epoch. Epoch zero begins at construction.
@@ -801,11 +806,11 @@ impl std::error::Error for Error {}
 #[cfg(test)]
 mod tests {
     use super::{
-        finish_entry_lifecycle, Error, FromRustia, OpCapability, OwnedTable, OwnedValue, Profile,
-        Result, Rustia, RustiaBuilder, RustiaExtension, RustiaHostFunctionInfo, ServiceClock,
-        SourceSpan, VmErrorKind, VmSettings, RUSTIA_DECISION_RESET_ABI_VERSION,
-        RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
-        RUSTIA_MIN_HOST_FUNCTION_FUEL,
+        finish_entry_lifecycle, Error, FromRustia, GuestSurface, OpCapability, OwnedTable,
+        OwnedValue, Profile, Result, Rustia, RustiaBuilder, RustiaExecutionProfile,
+        RustiaExtension, RustiaHostFunctionInfo, ServiceClock, SourceSpan, VmErrorKind, VmSettings,
+        RUSTIA_DECISION_RESET_ABI_VERSION, RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
+        RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY, RUSTIA_MIN_HOST_FUNCTION_FUEL,
     };
     use rustia_compiler::{compile_with_options, CompileOptions};
     use rustia_parser::parse_source;
@@ -2068,6 +2073,92 @@ return ok and done and not protected and string.find(err, 'foo', 1, true) ~= nil
 
         rustia.run_owned("print('hello', 42)").unwrap();
         assert_eq!(captured.borrow().as_str(), "hello\t42\n");
+    }
+
+    #[test]
+    fn execution_profiles_have_stable_unique_encodings() {
+        let profiles = [
+            (
+                RustiaExecutionProfile::new(Profile::DeterministicSim, GuestSurface::HardenedLeaf),
+                1,
+                [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0],
+            ),
+            (
+                RustiaExecutionProfile::new(Profile::LuauCompat, GuestSurface::Standard),
+                2,
+                [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+            ),
+            (
+                RustiaExecutionProfile::new(Profile::ReproducibleStandard, GuestSurface::Standard),
+                3,
+                [1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0],
+            ),
+            (
+                RustiaExecutionProfile::new(Profile::DeterministicSim, GuestSurface::Standard),
+                4,
+                [1, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0],
+            ),
+            (
+                RustiaExecutionProfile::new(Profile::LuauCompat, GuestSurface::HardenedLeaf),
+                5,
+                [1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0],
+            ),
+            (
+                RustiaExecutionProfile::new(
+                    Profile::ReproducibleStandard,
+                    GuestSurface::HardenedLeaf,
+                ),
+                6,
+                [1, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0],
+            ),
+        ];
+        for (index, (profile, compatibility_id, identity_bytes)) in profiles.iter().enumerate() {
+            assert_eq!(profile.compatibility_id(), *compatibility_id);
+            assert_eq!(profile.identity_bytes(), *identity_bytes);
+            for (other_profile, _, _) in &profiles[index + 1..] {
+                assert_ne!(profile.compatibility_id(), other_profile.compatibility_id());
+                assert_ne!(profile.identity_bytes(), other_profile.identity_bytes());
+            }
+        }
+    }
+
+    #[test]
+    fn hardened_execution_profile_transfers_to_the_live_vm() {
+        let expected = RustiaExecutionProfile::DETERMINISTIC_HARDENED_LEAF;
+
+        let builder = RustiaBuilder::deterministic_leaf().memory_limit_bytes(512 * 1024);
+        assert_eq!(builder.execution_profile(), expected);
+        let rustia = builder.build_for_host::<()>().unwrap();
+        assert_eq!(rustia.execution_profile(), expected);
+
+        assert_eq!(
+            RustiaBuilder::deterministic().execution_profile(),
+            RustiaExecutionProfile::DETERMINISTIC_STANDARD
+        );
+        assert_ne!(
+            RustiaExecutionProfile::DETERMINISTIC_STANDARD.identity_bytes(),
+            expected.identity_bytes()
+        );
+
+        assert_eq!(
+            RustiaBuilder::standard().execution_profile(),
+            RustiaBuilder::live().execution_profile(),
+            "services and dynamic-code settings are identity inputs owned by the embedder"
+        );
+
+        let normalized = Rustia::with_settings(
+            Profile::ReproducibleStandard,
+            VmSettings {
+                guest_surface: GuestSurface::HardenedLeaf,
+                memory_limit_bytes: Some(512 * 1024),
+                ..VmSettings::default()
+            },
+        );
+        assert_eq!(
+            normalized.execution_profile(),
+            RustiaExecutionProfile::DETERMINISTIC_HARDENED_LEAF,
+            "live attestation must report the VM-normalized profile, not requested metadata"
+        );
     }
 
     #[test]
