@@ -318,6 +318,9 @@ Current unpublished workspace version: `0.0.1`.
   result freshness, and workspace tests.
 - Release preflight and hosted CI now enforce formatting plus strict Clippy on
   the pinned Rust toolchain.
+- Hosted CI now cross-compiles the portable engine library for the declared
+  macOS, Linux, Windows, iOS, Android, and browser-Wasm triples; real-host and
+  browser correctness goldens remain a separate release gate.
 - Crate publishability blockers are generated from cargo metadata and package
   file audits into `design/publishability.json`.
 - GitHub Actions keeps benchmark work validation-only; fresh timing data comes

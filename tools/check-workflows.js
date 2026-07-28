@@ -119,6 +119,31 @@ function checkCi(text) {
   forbidIncludes(text, "cargo test --workspace", label);
   forbidIncludes(text, "node tools/check-package-files.js", label);
   forbidIncludes(text, "cargo run -p script-bench-harness", label);
+  requireIncludes(text, "portable-engine-build:\n", label);
+  requireIncludes(text, "name: Engine build (${{ matrix.target }})", label);
+  requireIncludes(text, "fail-fast: false\n", label);
+  for (const target of [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-ios",
+    "aarch64-linux-android",
+    "wasm32-unknown-unknown",
+  ]) {
+    requireIncludes(text, `          - ${target}\n`, label);
+  }
+  requireIncludes(
+    text,
+    `rustup toolchain install ${rustChannel} --profile minimal --target \${{ matrix.target }}`,
+    label,
+  );
+  requireIncludes(
+    text,
+    "cargo check --locked -p rustia --lib --target ${{ matrix.target }}",
+    label,
+  );
   checkActionPins(text, label);
 }
 

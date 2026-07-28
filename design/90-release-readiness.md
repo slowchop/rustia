@@ -227,6 +227,10 @@ output/time providers and VM-owned telemetry are also implemented.
 - `.github/workflows/ci.yml` mirrors the release-preflight gate on hosted Linux
   CI, including example compilation, without running fresh benchmark
   measurements.
+- Hosted CI separately cross-compiles the portable `rustia` engine library for
+  macOS arm64/x86_64, Linux x86_64/arm64, Windows x86_64 MSVC, iOS arm64,
+  Android arm64, and `wasm32-unknown-unknown`. These build checks do not replace
+  the still-open real-host and browser correctness/golden gate.
 - The explicit Linode matrix command provisions, measures, validates, deletes,
   and only then promotes a coherent native-plus-wasm Linux result set. Hosted
   workflows do not provision billed resources or publish timings.

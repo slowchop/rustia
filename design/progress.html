@@ -513,7 +513,7 @@
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 93%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 79%</a><a href="#determinism">Determinism 80%</a><a href="#embedded-api">Embedded API 72%</a><a href="#benchmarks">Benchmarks 88%</a><a href="#wasm-perf">Wasm/perf 62%</a><a href="#tooling">Tooling 65%</a><a href="#packaging">Packaging 62%</a>
+      <a href="#design">Design 93%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 79%</a><a href="#determinism">Determinism 82%</a><a href="#embedded-api">Embedded API 72%</a><a href="#benchmarks">Benchmarks 88%</a><a href="#wasm-perf">Wasm/perf 62%</a><a href="#tooling">Tooling 65%</a><a href="#packaging">Packaging 62%</a>
     </nav>
 
 
@@ -984,8 +984,8 @@
           <p>5 tracked items</p>
         </div>
         <div class="area-score">
-          <span>80% avg complete</span>
-          <span>84% avg confidence</span>
+          <span>82% avg complete</span>
+          <span>85% avg confidence</span>
         </div>
       </div>
       <div class="entries">
@@ -1070,19 +1070,19 @@
       <div class="entry-top">
         <div>
           <h4>Full target correctness and golden matrix</h4>
-          <p>Linux x86_64, macOS arm64, and wasm/V8 golden evidence exists, with retained JavaScriptCore-family and SpiderMonkey shell portability measurements. Hosted CI is Linux-only; Intel macOS, Windows, Linux arm64, mobile native, and real Firefox/Safari browser goldens are not all continuously covered.</p>
+          <p>Linux x86_64, macOS arm64, and wasm/V8 golden evidence exists, with retained JavaScriptCore-family and SpiderMonkey shell portability measurements. Hosted CI cross-compiles the portable engine library for the full declared native triple set plus wasm32. Real Intel Mac, Windows, Linux arm64, mobile-native, Firefox, and Safari execution/goldens are not all continuously covered.</p>
         </div>
         <div class="entry-score">
-          <strong>55%</strong>
-          <span class="chip high">88% confidence</span>
+          <strong>65%</strong>
+          <span class="chip high">90% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Full target correctness and golden matrix: 55% complete">
-      <div class="meter-fill" style="width: 55%"></div>
+    <div class="meter" aria-label="Full target correctness and golden matrix: 65% complete">
+      <div class="meter-fill" style="width: 65%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add reproducible cross-target builds and goldens for the full design/00-constraints.md matrix without mixing non-dedicated macOS/Windows timings into the benchmark history.</p>
+      <p class="plan"><strong>Future plan:</strong> Execute reproducible cross-target goldens on real hosts and browsers for the full design/00-constraints.md matrix without mixing non-dedicated macOS/Windows timings into benchmark history.</p>
     </article>
 
       </div>

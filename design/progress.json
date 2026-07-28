@@ -337,10 +337,10 @@
         },
         {
           "name": "Full target correctness and golden matrix",
-          "complete": 55,
-          "confidence": 88,
-          "state": "Linux x86_64, macOS arm64, and wasm/V8 golden evidence exists, with retained JavaScriptCore-family and SpiderMonkey shell portability measurements. Hosted CI is Linux-only; Intel macOS, Windows, Linux arm64, mobile native, and real Firefox/Safari browser goldens are not all continuously covered.",
-          "future_plan": "Add reproducible cross-target builds and goldens for the full design/00-constraints.md matrix without mixing non-dedicated macOS/Windows timings into the benchmark history."
+          "complete": 65,
+          "confidence": 90,
+          "state": "Linux x86_64, macOS arm64, and wasm/V8 golden evidence exists, with retained JavaScriptCore-family and SpiderMonkey shell portability measurements. Hosted CI cross-compiles the portable engine library for the full declared native triple set plus wasm32. Real Intel Mac, Windows, Linux arm64, mobile-native, Firefox, and Safari execution/goldens are not all continuously covered.",
+          "future_plan": "Execute reproducible cross-target goldens on real hosts and browsers for the full design/00-constraints.md matrix without mixing non-dedicated macOS/Windows timings into benchmark history."
         }
       ]
     },

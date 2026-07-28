@@ -31,18 +31,19 @@ These come from reading `ai_bakeoff/`, `scenario/src/lib.rs`, `view/src/console.
 `design/console-scripting-plan.md`. They are ADR-locked in grabby (determinism is ADR-001).
 
 ### C0 — Target & test matrix (gak, 2026-06-30: "Mac, Intel, arm, etc." + Firefox)
-Determinism + correctness must ultimately hold across this FULL matrix. Hosted CI is currently Linux-only and
-does not yet run the whole cross-target golden; macOS/Windows remain correctness/build targets, not timing
-sources, until dedicated measurement hosts exist.
+Determinism + correctness must ultimately hold across this FULL matrix. Hosted CI cross-compiles the portable
+`rustia` engine library for every native triple below plus `wasm32-unknown-unknown`, but does not yet execute
+the whole cross-target golden. macOS/Windows remain correctness/build targets, not timing sources, until
+dedicated measurement hosts exist.
 
 | native (OS × arch) | browser/wasm engine |
 |---|---|
 | macOS **arm64** (Apple Silicon — dev machine) ✅ | **V8** — Chrome/Edge/Node/Deno ✅ measured |
-| macOS **x86_64** (Intel Mac) — TODO | **SpiderMonkey** — Firefox-family shell ✅ measured; browser golden still TODO |
+| macOS **x86_64** (Intel Mac) — build ✅ / runtime TODO | **SpiderMonkey** — Firefox-family shell ✅ measured; browser golden still TODO |
 | Linux **x86_64** ✅ (Spike C + dedicated matrices) | **JavaScriptCore family** — Bun ✅ measured; real Safari/iOS JSC golden still TODO |
-| Linux **arm64** — TODO | |
-| Windows **x86_64** (msvc) — TODO | |
-| iOS **arm64** (native) + Android **arm64** (native) — TODO | |
+| Linux **arm64** — build ✅ / runtime TODO | |
+| Windows **x86_64** (msvc) — build ✅ / runtime TODO | |
+| iOS **arm64** + Android **arm64** — build ✅ / runtime TODO | |
 
 Measured so far: the triple x86_64-linux + aarch64-mac + wasm32-in-V8 is bit-identical, and retained wasm
 portability evidence covers V8, JavaScriptCore-family, and SpiderMonkey shells. The remaining native arches,
