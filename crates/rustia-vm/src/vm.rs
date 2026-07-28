@@ -57,7 +57,7 @@ pub const DECISION_RESET_ABI_VERSION: u32 = 1;
 /// Replay and content protocols that depend on this surface must record the
 /// value alongside [`DECISION_RESET_ABI_VERSION`].
 pub const HARDENED_LEAF_GUEST_ABI_VERSION: u32 = 1;
-const LUAU_TAIL_CALL_LIMIT: usize = 20_000;
+const LUAU_CONFORMANCE_CALL_LIMIT: usize = 20_000;
 const CONSTANT_ATOM_EMPTY: u32 = 0;
 const SITE_CACHE_CLOSURE_CALL_EMPTY: u32 = u32::MAX - 4;
 const SITE_CACHE_FAST_CALL_EMPTY: u32 = u32::MAX - 3;
@@ -247,6 +247,7 @@ pub struct VmSettings {
     pub enable_conformance_native_userdata: bool,
     pub enable_conformance_native_type_checks: bool,
     pub enable_conformance_pcall_helpers: bool,
+    pub enable_conformance_luau_call_limit: bool,
     /// Records exact VM-owned logical live/reserved high-water marks at every
     /// instruction boundary. Disabled by default so benchmark timings do not
     /// include telemetry scans.
@@ -275,6 +276,7 @@ impl Default for VmSettings {
             enable_conformance_native_userdata: false,
             enable_conformance_native_type_checks: false,
             enable_conformance_pcall_helpers: false,
+            enable_conformance_luau_call_limit: false,
             enable_memory_tracking: false,
             memory_limit_bytes: None,
             guest_surface: GuestSurface::Standard,
@@ -1852,6 +1854,12 @@ enum BytecodeContinuation {
         table: u32,
         start_index: usize,
     },
+    IteratorStep {
+        window: CallIteratorRegisters,
+        jump_target: usize,
+        jump_if_advanced: bool,
+        error_pc: usize,
+    },
 }
 
 impl Vm {
@@ -2983,6 +2991,7 @@ impl Vm {
             }
 
             let allow_stackless_self_calls = resumed.is_none();
+            let stackless_recursion_limit = self.stackless_recursion_limit();
             let mut stackless_self_calls;
             let mut tail_call_count;
             let (
@@ -3067,7 +3076,9 @@ impl Vm {
                         );
                         let continuation_result = self.apply_bytecode_continuation(
                             program,
+                            &mut pc,
                             &mut registers,
+                            &mut register_cells,
                             &mut pending_return_prefixes,
                             continuation,
                             returned.into_vec(),
@@ -3164,7 +3175,9 @@ impl Vm {
                         self.push_bytecode_continuation_roots(&continuation);
                     let continuation_result = self.apply_bytecode_continuation(
                         program,
+                        &mut pc,
                         &mut registers,
+                        &mut register_cells,
                         &mut pending_return_prefixes,
                         continuation,
                         resume_results,
@@ -3702,9 +3715,10 @@ impl Vm {
                                     .as_function()
                                         == current_function
                                 {
-                                    let result_count =
-                                        (LUAU_TAIL_CALL_LIMIT.saturating_sub(context.depth) / 2)
-                                            .max(2);
+                                    let result_count = (stackless_recursion_limit
+                                        .saturating_sub(context.depth)
+                                        / 2)
+                                    .max(2);
                                     let mut results = Vec::with_capacity(result_count);
                                     results.resize(result_count - 2, Value::boolean(true));
                                     results.push(Value::boolean(false));
@@ -3713,7 +3727,7 @@ impl Vm {
                                         function,
                                         pc - 1,
                                         Error::new(ErrorKind::RecursionLimit {
-                                            limit: LUAU_TAIL_CALL_LIMIT,
+                                            limit: stackless_recursion_limit,
                                         }),
                                     );
                                     let error = self.error_object(error);
@@ -3727,15 +3741,15 @@ impl Vm {
                                     && current_function == callee.as_function()
                                 {
                                     tail_call_count = tail_call_count.saturating_add(1);
-                                    if context.depth.saturating_add(tail_call_count)
-                                        > LUAU_TAIL_CALL_LIMIT
-                                    {
+                                    if self.recursion_depth_exceeded(
+                                        context.depth.saturating_add(tail_call_count),
+                                    ) {
                                         return Err(attach_instruction_source(
                                             program,
                                             function,
                                             pc - 1,
                                             Error::new(ErrorKind::RecursionLimit {
-                                                limit: LUAU_TAIL_CALL_LIMIT,
+                                                limit: stackless_recursion_limit,
                                             }),
                                         ));
                                     }
@@ -4038,7 +4052,7 @@ impl Vm {
                                 }
                             }
                             Opcode::GenericCallPrep => {
-                                if !self
+                                let step = self
                                     .generic_call_iterator_step(
                                         program,
                                         &mut registers,
@@ -4047,14 +4061,43 @@ impl Vm {
                                         context.depth,
                                         fuel,
                                     )
-                                    .map_err(|e| e.at_pc(pc - 1))?
-                                {
-                                    pc = checked_jump(instruction.aux)
-                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                match step {
+                                    CallIteratorStep::Complete(false) => {
+                                        pc = checked_jump(instruction.aux)
+                                            .map_err(|e| e.at_pc(pc - 1))?;
+                                    }
+                                    CallIteratorStep::Complete(true) => {}
+                                    CallIteratorStep::Yield(suspension) => {
+                                        let continuation = BytecodeContinuation::IteratorStep {
+                                            window: CallIteratorRegisters::generic(
+                                                instruction.a,
+                                                instruction.c,
+                                            )
+                                            .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_target: checked_jump(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_if_advanced: false,
+                                            error_pc: pc - 1,
+                                        };
+                                        return self.suspend_bytecode_frame(
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            continuation,
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            suspension,
+                                        );
+                                    }
                                 }
                             }
                             Opcode::GenericCallLoop => {
-                                if self
+                                let step = self
                                     .generic_call_iterator_step(
                                         program,
                                         &mut registers,
@@ -4063,14 +4106,43 @@ impl Vm {
                                         context.depth,
                                         fuel,
                                     )
-                                    .map_err(|e| e.at_pc(pc - 1))?
-                                {
-                                    pc = checked_jump(instruction.aux)
-                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                match step {
+                                    CallIteratorStep::Complete(true) => {
+                                        pc = checked_jump(instruction.aux)
+                                            .map_err(|e| e.at_pc(pc - 1))?;
+                                    }
+                                    CallIteratorStep::Complete(false) => {}
+                                    CallIteratorStep::Yield(suspension) => {
+                                        let continuation = BytecodeContinuation::IteratorStep {
+                                            window: CallIteratorRegisters::generic(
+                                                instruction.a,
+                                                instruction.c,
+                                            )
+                                            .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_target: checked_jump(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_if_advanced: true,
+                                            error_pc: pc - 1,
+                                        };
+                                        return self.suspend_bytecode_frame(
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            continuation,
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            suspension,
+                                        );
+                                    }
                                 }
                             }
                             Opcode::GeneralizedIterPrep => {
-                                if !self
+                                let step = self
                                     .generalized_iterator_prepare(
                                         program,
                                         &mut registers,
@@ -4079,14 +4151,44 @@ impl Vm {
                                         context.depth,
                                         fuel,
                                     )
-                                    .map_err(|e| e.at_pc(pc - 1))?
-                                {
-                                    pc = checked_jump(instruction.aux)
-                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                match step {
+                                    CallIteratorStep::Complete(false) => {
+                                        pc = checked_jump(instruction.aux)
+                                            .map_err(|e| e.at_pc(pc - 1))?;
+                                    }
+                                    CallIteratorStep::Complete(true) => {}
+                                    CallIteratorStep::Yield(suspension) => {
+                                        let continuation = BytecodeContinuation::IteratorStep {
+                                            window: GeneralizedIteratorRegisters::new(
+                                                instruction.a,
+                                                instruction.c,
+                                            )
+                                            .map_err(|e| e.at_pc(pc - 1))?
+                                            .call,
+                                            jump_target: checked_jump(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_if_advanced: false,
+                                            error_pc: pc - 1,
+                                        };
+                                        return self.suspend_bytecode_frame(
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            continuation,
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            suspension,
+                                        );
+                                    }
                                 }
                             }
                             Opcode::GeneralizedIterLoop => {
-                                if self
+                                let step = self
                                     .generalized_iterator_loop(
                                         program,
                                         &mut registers,
@@ -4095,10 +4197,40 @@ impl Vm {
                                         context.depth,
                                         fuel,
                                     )
-                                    .map_err(|e| e.at_pc(pc - 1))?
-                                {
-                                    pc = checked_jump(instruction.aux)
-                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                match step {
+                                    CallIteratorStep::Complete(true) => {
+                                        pc = checked_jump(instruction.aux)
+                                            .map_err(|e| e.at_pc(pc - 1))?;
+                                    }
+                                    CallIteratorStep::Complete(false) => {}
+                                    CallIteratorStep::Yield(suspension) => {
+                                        let continuation = BytecodeContinuation::IteratorStep {
+                                            window: GeneralizedIteratorRegisters::new(
+                                                instruction.a,
+                                                instruction.c,
+                                            )
+                                            .map_err(|e| e.at_pc(pc - 1))?
+                                            .call,
+                                            jump_target: checked_jump(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_if_advanced: true,
+                                            error_pc: pc - 1,
+                                        };
+                                        return self.suspend_bytecode_frame(
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            continuation,
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            suspension,
+                                        );
+                                    }
                                 }
                             }
                             Opcode::Len => {
@@ -4628,6 +4760,19 @@ impl Vm {
                                         && current_function.is_some()
                                         && current_function == callee.as_function()
                                     {
+                                        tail_call_count = tail_call_count.saturating_add(1);
+                                        if self.recursion_depth_exceeded(
+                                            context.depth.saturating_add(tail_call_count),
+                                        ) {
+                                            return Err(attach_instruction_source(
+                                                program,
+                                                function,
+                                                pc - 1,
+                                                Error::new(ErrorKind::RecursionLimit {
+                                                    limit: stackless_recursion_limit,
+                                                }),
+                                            ));
+                                        }
                                         if instruction.aux < 0
                                             || instruction.aux > i32::from(u8::MAX)
                                         {
@@ -4705,13 +4850,13 @@ impl Vm {
                                         .depth
                                         .saturating_add(stackless_self_calls.len())
                                         .saturating_add(1);
-                                    if next_depth >= LUAU_TAIL_CALL_LIMIT.saturating_sub(1) {
+                                    if self.recursion_depth_exceeded(next_depth) {
                                         return Err(attach_instruction_source(
                                             program,
                                             function,
                                             pc - 1,
                                             Error::new(ErrorKind::RecursionLimit {
-                                                limit: LUAU_TAIL_CALL_LIMIT,
+                                                limit: stackless_recursion_limit,
                                             }),
                                         ));
                                     }
@@ -4936,13 +5081,13 @@ impl Vm {
                                         .depth
                                         .saturating_add(stackless_self_calls.len())
                                         .saturating_add(2);
-                                    if next_depth >= LUAU_TAIL_CALL_LIMIT.saturating_sub(1) {
+                                    if self.recursion_depth_exceeded(next_depth) {
                                         let error = attach_instruction_source(
                                             program,
                                             function,
                                             pc - 1,
                                             Error::new(ErrorKind::RecursionLimit {
-                                                limit: LUAU_TAIL_CALL_LIMIT,
+                                                limit: stackless_recursion_limit,
                                             }),
                                         );
                                         let error = self.error_object(error);
@@ -6358,7 +6503,9 @@ impl Vm {
     fn apply_bytecode_continuation(
         &mut self,
         program: &Program,
+        pc: &mut usize,
         registers: &mut [Value],
+        register_cells: &mut [Option<u32>],
         pending_return_prefixes: &mut Vec<Value>,
         continuation: BytecodeContinuation,
         mut results: Vec<Value>,
@@ -6409,6 +6556,20 @@ impl Vm {
             }
             BytecodeContinuation::AppendToTable { table, start_index } => {
                 self.append_call_results_to_table(table, start_index, &results)?;
+                Ok(None)
+            }
+            BytecodeContinuation::IteratorStep {
+                window,
+                jump_target,
+                jump_if_advanced,
+                error_pc,
+            } => {
+                let advanced =
+                    apply_call_iterator_results(registers, register_cells, window, &results)
+                        .map_err(|error| error.at_pc(error_pc))?;
+                if advanced == jump_if_advanced {
+                    *pc = jump_target;
+                }
                 Ok(None)
             }
         }
@@ -9495,7 +9656,7 @@ impl Vm {
             || self.settings.enable_conformance_coverage
             || self.heap.has_allocation_debt()
             || self.weak_collection_due_within(plan.maximum_instruction_count())
-            || depth.saturating_add(1) > self.settings.recursion_limit
+            || self.recursion_depth_exceeded(depth.saturating_add(1))
         {
             return Ok(None);
         }
@@ -10398,12 +10559,28 @@ impl Vm {
     }
 
     fn check_recursion_depth(&self, depth: usize) -> Result<()> {
-        if depth > self.settings.recursion_limit {
+        if self.recursion_depth_exceeded(depth) {
             return Err(Error::new(ErrorKind::RecursionLimit {
-                limit: self.settings.recursion_limit,
+                limit: self.stackless_recursion_limit(),
             }));
         }
         Ok(())
+    }
+
+    fn recursion_depth_exceeded(&self, depth: usize) -> bool {
+        if self.settings.enable_conformance_luau_call_limit {
+            depth >= LUAU_CONFORMANCE_CALL_LIMIT.saturating_sub(1)
+        } else {
+            depth > self.settings.recursion_limit
+        }
+    }
+
+    fn stackless_recursion_limit(&self) -> usize {
+        if self.settings.enable_conformance_luau_call_limit {
+            LUAU_CONFORMANCE_CALL_LIMIT
+        } else {
+            self.settings.recursion_limit
+        }
     }
 
     fn call_native_scalar_function(
@@ -17223,7 +17400,7 @@ impl Vm {
         instruction: Instruction,
         depth: usize,
         fuel: &mut Execution<'_>,
-    ) -> Result<bool> {
+    ) -> Result<CallIteratorStep> {
         let window = CallIteratorRegisters::generic(instruction.a, instruction.c)?;
         window.validate(registers.len(), "generic call iterator")?;
         self.call_iterator_step(CallIteratorStepContext {
@@ -17245,7 +17422,7 @@ impl Vm {
         instruction: Instruction,
         depth: usize,
         fuel: &mut Execution<'_>,
-    ) -> Result<bool> {
+    ) -> Result<CallIteratorStep> {
         let window = GeneralizedIteratorRegisters::new(instruction.a, instruction.c)?;
         window.validate(registers.len())?;
 
@@ -17274,7 +17451,9 @@ impl Vm {
                     )?;
                     set_register(registers, window.call.state, subject)?;
                     set_register(registers, window.call.control, Value::nil())?;
-                    return self.table_iterator_step(registers, register_cells, window.call);
+                    return self
+                        .table_iterator_step(registers, register_cells, window.call)
+                        .map(CallIteratorStep::Complete);
                 }
                 Err(iteration_error(subject))
             }
@@ -17309,7 +17488,7 @@ impl Vm {
         instruction: Instruction,
         depth: usize,
         fuel: &mut Execution<'_>,
-    ) -> Result<bool> {
+    ) -> Result<CallIteratorStep> {
         let window = GeneralizedIteratorRegisters::new(instruction.a, instruction.c)?;
         window.validate(registers.len())?;
         let mode = get_number(registers, window.mode)?;
@@ -17325,6 +17504,7 @@ impl Vm {
             })
         } else if mode == GENERALIZED_ITERATOR_MODE_TABLE {
             self.table_iterator_step(registers, register_cells, window.call)
+                .map(CallIteratorStep::Complete)
         } else {
             Err(Error::new(ErrorKind::InvalidProgram {
                 reason: "generalized iterator mode is invalid",
@@ -17360,7 +17540,10 @@ impl Vm {
         )
     }
 
-    fn call_iterator_step(&mut self, context: CallIteratorStepContext<'_, '_>) -> Result<bool> {
+    fn call_iterator_step(
+        &mut self,
+        context: CallIteratorStepContext<'_, '_>,
+    ) -> Result<CallIteratorStep> {
         let CallIteratorStepContext {
             program,
             registers,
@@ -17388,7 +17571,7 @@ impl Vm {
             depth,
             fuel,
         )? {
-            return Ok(advanced);
+            return Ok(CallIteratorStep::Complete(advanced));
         }
         let results = match self.call_value_with_site_resumable(
             program,
@@ -17399,26 +17582,11 @@ impl Vm {
             fuel,
         )? {
             VmFlow::Return(results) => results,
-            VmFlow::Yield(_) => return Err(non_yieldable_boundary_error()),
+            VmFlow::Yield(suspension) => return Ok(CallIteratorStep::Yield(suspension)),
         };
         self.sync_register_cells(registers, register_cells)?;
-
-        let first = results.first().copied().unwrap_or_else(Value::nil);
-        if first.kind() == ValueKind::Nil {
-            return Ok(false);
-        }
-
-        set_register(registers, window.control, first)?;
-        for index in 0..window.visible_count {
-            let value = results
-                .get(usize::from(index))
-                .copied()
-                .unwrap_or_else(Value::nil);
-            let register = window.visible_register(index)?;
-            set_register(registers, register, value)?;
-            clear_register_cell(register_cells, register)?;
-        }
-        Ok(true)
+        apply_call_iterator_results(registers, register_cells, window, &results)
+            .map(CallIteratorStep::Complete)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -20329,7 +20497,8 @@ fn shrink_bytecode_continuation_capacity(continuation: &mut BytecodeContinuation
         BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
         | BytecodeContinuation::PCallWriteFixed { .. }
-        | BytecodeContinuation::AppendToTable { .. } => {}
+        | BytecodeContinuation::AppendToTable { .. }
+        | BytecodeContinuation::IteratorStep { .. } => {}
     }
 }
 
@@ -20549,7 +20718,8 @@ fn add_continuation_memory(continuation: &BytecodeContinuation, usage: &mut Memo
         BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
         | BytecodeContinuation::PCallWriteFixed { .. }
-        | BytecodeContinuation::AppendToTable { .. } => {}
+        | BytecodeContinuation::AppendToTable { .. }
+        | BytecodeContinuation::IteratorStep { .. } => {}
     }
 }
 
@@ -21534,6 +21704,11 @@ enum InvalidIteratorCallee {
     Iterate,
 }
 
+enum CallIteratorStep {
+    Complete(bool),
+    Yield(CoroutineYield),
+}
+
 struct CallIteratorStepContext<'a, 'call> {
     program: &'a Program,
     registers: &'a mut [Value],
@@ -21628,6 +21803,30 @@ impl CallIteratorRegisters {
             })
         })
     }
+}
+
+fn apply_call_iterator_results(
+    registers: &mut [Value],
+    register_cells: &mut [Option<u32>],
+    window: CallIteratorRegisters,
+    results: &[Value],
+) -> Result<bool> {
+    let first = results.first().copied().unwrap_or_else(Value::nil);
+    if first.kind() == ValueKind::Nil {
+        return Ok(false);
+    }
+
+    set_register(registers, window.control, first)?;
+    for index in 0..window.visible_count {
+        let value = results
+            .get(usize::from(index))
+            .copied()
+            .unwrap_or_else(Value::nil);
+        let register = window.visible_register(index)?;
+        set_register(registers, register, value)?;
+        clear_register_cell(register_cells, register)?;
+    }
+    Ok(true)
 }
 
 struct GeneralizedIteratorRegisters {
@@ -22201,7 +22400,8 @@ fn extend_bytecode_continuation_roots(roots: &mut Vec<Value>, continuation: &Byt
         BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
         | BytecodeContinuation::PCallWriteFixed { .. }
-        | BytecodeContinuation::AppendToTable { .. } => {}
+        | BytecodeContinuation::AppendToTable { .. }
+        | BytecodeContinuation::IteratorStep { .. } => {}
     }
 }
 
@@ -22222,7 +22422,8 @@ fn extend_bytecode_continuation_heap_roots(
         BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
         | BytecodeContinuation::PCallWriteFixed { .. }
-        | BytecodeContinuation::AppendToTable { .. } => {}
+        | BytecodeContinuation::AppendToTable { .. }
+        | BytecodeContinuation::IteratorStep { .. } => {}
     }
 }
 

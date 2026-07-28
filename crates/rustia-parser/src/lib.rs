@@ -350,35 +350,106 @@ impl std::error::Error for SourceError {}
 pub type Result<T> = std::result::Result<T, ParseError>;
 
 pub fn parse_source(source: &str) -> std::result::Result<Chunk, SourceError> {
-    let lowered = lower_interpolated_strings(source.as_bytes()).map_err(SourceError::Lex)?;
-    let (parse_source, interpolations) = lowered
-        .as_ref()
-        .map_or((source.as_bytes(), BTreeMap::new()), |lowered| {
-            (lowered.source.as_slice(), lowered.interpolations.clone())
-        });
-    let tokens = lex_bytes(parse_source).map_err(SourceError::Lex)?;
-    Parser::new_with_source_and_interpolations(tokens, parse_source, interpolations)
-        .parse_chunk()
-        .map_err(SourceError::Parse)
+    parse_source_bytes(source.as_bytes())
 }
 
 pub fn parse_source_bytes(source: &[u8]) -> std::result::Result<Chunk, SourceError> {
     let lowered = lower_interpolated_strings(source).map_err(SourceError::Lex)?;
-    let (parse_source, interpolations) = lowered
-        .as_ref()
-        .map_or((source, BTreeMap::new()), |lowered| {
-            (lowered.source.as_slice(), lowered.interpolations.clone())
-        });
-    let tokens = lex_bytes(parse_source).map_err(SourceError::Lex)?;
-    Parser::new_with_source_and_interpolations(tokens, parse_source, interpolations)
-        .parse_chunk()
-        .map_err(SourceError::Parse)
+    if let Some(mut lowered) = lowered {
+        let mut tokens = lex_bytes(&lowered.source)
+            .map_err(|error| SourceError::Lex(lowered.remap_lex_error(error)))?;
+        let newlines_before = token_newlines_before(&tokens, &lowered.source);
+        for token in &mut tokens {
+            token.span = lowered.remap_span(token.span);
+        }
+        let pending_interpolations = std::mem::take(&mut lowered.interpolations);
+        let interpolations = pending_interpolations
+            .into_iter()
+            .map(|(offset, interpolation)| (lowered.remap_start(offset), interpolation))
+            .collect();
+        Parser::new_with_newlines_and_interpolations(tokens, newlines_before, interpolations)
+            .parse_chunk()
+            .map_err(SourceError::Parse)
+    } else {
+        let tokens = lex_bytes(source).map_err(SourceError::Lex)?;
+        Parser::new_with_source_and_interpolations(tokens, source, BTreeMap::new())
+            .parse_chunk()
+            .map_err(SourceError::Parse)
+    }
 }
 
 #[derive(Clone, Debug)]
 struct LoweredSource {
     source: Vec<u8>,
+    origins: Vec<Span>,
+    original_len: usize,
     interpolations: BTreeMap<usize, PendingInterpolatedString>,
+}
+
+impl LoweredSource {
+    fn remap_start(&self, offset: usize) -> usize {
+        self.origins
+            .get(offset)
+            .map_or(self.original_len, |origin| origin.start)
+    }
+
+    fn remap_span(&self, span: Span) -> Span {
+        let start = self.remap_start(span.start);
+        let end = if span.end > span.start {
+            self.origins
+                .get(span.end.saturating_sub(1))
+                .map_or(self.original_len, |origin| origin.end)
+        } else {
+            start
+        };
+        Span::new(start, end.max(start))
+    }
+
+    fn remap_lex_error(&self, mut error: LexError) -> LexError {
+        error.span = self.remap_span(error.span);
+        error
+    }
+}
+
+#[derive(Clone, Debug)]
+struct LoweredOutput {
+    source: Vec<u8>,
+    origins: Vec<Span>,
+}
+
+impl LoweredOutput {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            source: Vec::with_capacity(capacity),
+            origins: Vec::with_capacity(capacity),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.source.len()
+    }
+
+    fn push_original(&mut self, byte: u8, offset: usize) {
+        self.source.push(byte);
+        self.origins.push(Span::new(offset, offset + 1));
+    }
+
+    fn extend_original(&mut self, source: &[u8], start: usize, end: usize) {
+        for (offset, byte) in source[start..end].iter().copied().enumerate() {
+            self.push_original(byte, start + offset);
+        }
+    }
+
+    fn push_synthetic(&mut self, byte: u8, origin: Span) {
+        self.source.push(byte);
+        self.origins.push(origin);
+    }
+
+    fn extend_synthetic(&mut self, bytes: &[u8], origin: Span) {
+        self.source.extend_from_slice(bytes);
+        self.origins
+            .extend(std::iter::repeat_n(origin, bytes.len()));
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -395,7 +466,7 @@ fn lower_interpolated_strings(
         return Ok(None);
     }
     let mut cursor = 0;
-    let mut output = Vec::with_capacity(source.len());
+    let mut output = LoweredOutput::with_capacity(source.len());
     let mut interpolations = BTreeMap::new();
     let mut next_interpolation_id = 0usize;
     while cursor < source.len() {
@@ -413,12 +484,14 @@ fn lower_interpolated_strings(
         } else if source[cursor] == b'-' && source.get(cursor + 1) == Some(&b'-') {
             copy_comment(source, &mut cursor, &mut output)?;
         } else {
-            output.push(source[cursor]);
+            output.push_original(source[cursor], cursor);
             cursor += 1;
         }
     }
     Ok(Some(LoweredSource {
-        source: output,
+        source: output.source,
+        origins: output.origins,
+        original_len: source.len(),
         interpolations,
     }))
 }
@@ -426,13 +499,16 @@ fn lower_interpolated_strings(
 fn lower_interpolated_string(
     source: &[u8],
     start: usize,
-    output: &mut Vec<u8>,
+    output: &mut LoweredOutput,
     interpolations: &mut BTreeMap<usize, PendingInterpolatedString>,
     next_interpolation_id: &mut usize,
 ) -> std::result::Result<usize, LexError> {
-    output.push(b' ');
+    output.push_synthetic(b' ', Span::new(start, start));
     let placeholder_start = output.len();
-    output.extend_from_slice(format!("__rustia_interp_{next_interpolation_id}(").as_bytes());
+    output.extend_synthetic(
+        format!("__rustia_interp_{next_interpolation_id}(").as_bytes(),
+        Span::new(start, start),
+    );
     *next_interpolation_id += 1;
     let mut expression_count = 0usize;
     let mut cursor = start + 1;
@@ -448,7 +524,7 @@ fn lower_interpolated_string(
                 if parts.is_empty() {
                     parts.push(InterpolatedStringPart::Text(Vec::new()));
                 }
-                output.push(b')');
+                output.push_synthetic(b')', Span::new(cursor - 1, cursor));
                 interpolations.insert(
                     placeholder_start,
                     PendingInterpolatedString {
@@ -470,9 +546,9 @@ fn lower_interpolated_string(
                     parts.push(InterpolatedStringPart::Text(std::mem::take(&mut text)));
                 }
                 if expression_count > 0 {
-                    output.push(b',');
+                    output.push_synthetic(b',', Span::new(cursor, cursor));
                 }
-                output.push(b'(');
+                output.push_synthetic(b'(', Span::new(cursor, cursor + 1));
                 cursor = lower_interpolated_expression(
                     source,
                     cursor + 1,
@@ -480,7 +556,7 @@ fn lower_interpolated_string(
                     interpolations,
                     next_interpolation_id,
                 )?;
-                output.push(b')');
+                output.push_synthetic(b')', Span::new(cursor - 1, cursor));
                 parts.push(InterpolatedStringPart::Expr(expression_count));
                 expression_count += 1;
             }
@@ -582,7 +658,7 @@ fn lower_interpolated_string(
 fn lower_interpolated_expression(
     source: &[u8],
     mut cursor: usize,
-    output: &mut Vec<u8>,
+    output: &mut LoweredOutput,
     interpolations: &mut BTreeMap<usize, PendingInterpolatedString>,
     next_interpolation_id: &mut usize,
 ) -> std::result::Result<usize, LexError> {
@@ -608,7 +684,7 @@ fn lower_interpolated_expression(
             }
             b'{' => {
                 depth += 1;
-                output.push(b'{');
+                output.push_original(b'{', cursor);
                 cursor += 1;
             }
             b'}' => {
@@ -616,11 +692,11 @@ fn lower_interpolated_expression(
                 if depth == 0 {
                     return Ok(cursor + 1);
                 }
-                output.push(b'}');
+                output.push_original(b'}', cursor);
                 cursor += 1;
             }
             byte => {
-                output.push(byte);
+                output.push_original(byte, cursor);
                 cursor += 1;
             }
         }
@@ -777,14 +853,14 @@ fn hex_value(byte: u8) -> Option<u8> {
 fn copy_short_string(
     source: &[u8],
     cursor: &mut usize,
-    output: &mut Vec<u8>,
+    output: &mut LoweredOutput,
 ) -> std::result::Result<(), LexError> {
     let start = *cursor;
     let quote = source[*cursor];
-    output.push(quote);
+    output.push_original(quote, *cursor);
     *cursor += 1;
     while let Some(byte) = source.get(*cursor).copied() {
-        output.push(byte);
+        output.push_original(byte, *cursor);
         *cursor += 1;
         if byte == b'\\' {
             let Some(escaped) = source.get(*cursor).copied() else {
@@ -793,7 +869,7 @@ fn copy_short_string(
                     message: "unterminated escape sequence".to_owned(),
                 });
             };
-            output.push(escaped);
+            output.push_original(escaped, *cursor);
             *cursor += 1;
         } else if byte == quote {
             return Ok(());
@@ -808,12 +884,12 @@ fn copy_short_string(
 fn copy_comment(
     source: &[u8],
     cursor: &mut usize,
-    output: &mut Vec<u8>,
+    output: &mut LoweredOutput,
 ) -> std::result::Result<(), LexError> {
     let start = *cursor;
     debug_assert_eq!(source.get(*cursor), Some(&b'-'));
     debug_assert_eq!(source.get(*cursor + 1), Some(&b'-'));
-    output.extend_from_slice(b"--");
+    output.extend_original(source, *cursor, *cursor + 2);
     *cursor += 2;
     if copy_long_bracket(source, cursor, output)? {
         return Ok(());
@@ -822,7 +898,7 @@ fn copy_comment(
         if matches!(byte, b'\n' | b'\r') {
             break;
         }
-        output.push(byte);
+        output.push_original(byte, *cursor);
         *cursor += 1;
     }
     debug_assert!(*cursor >= start + 2);
@@ -832,22 +908,22 @@ fn copy_comment(
 fn copy_long_bracket(
     source: &[u8],
     cursor: &mut usize,
-    output: &mut Vec<u8>,
+    output: &mut LoweredOutput,
 ) -> std::result::Result<bool, LexError> {
     let start = *cursor;
     let Some((level, after_opener)) = long_bracket_opener_at(source, start) else {
         return Ok(false);
     };
-    output.extend_from_slice(&source[start..after_opener]);
+    output.extend_original(source, start, after_opener);
     *cursor = after_opener;
     while *cursor < source.len() {
         if long_bracket_closer_matches(source, *cursor, level) {
             let end = *cursor + level + 2;
-            output.extend_from_slice(&source[*cursor..end]);
+            output.extend_original(source, *cursor, end);
             *cursor = end;
             return Ok(true);
         }
-        output.push(source[*cursor]);
+        output.push_original(source[*cursor], *cursor);
         *cursor += 1;
     }
     Err(LexError {
@@ -908,16 +984,15 @@ impl Parser {
         source: &[u8],
         interpolations: BTreeMap<usize, PendingInterpolatedString>,
     ) -> Self {
-        let mut newlines_before = Vec::with_capacity(tokens.len());
-        let mut previous_end = 0;
-        for token in &tokens {
-            newlines_before.push(source_contains_newline(
-                source,
-                previous_end,
-                token.span.start,
-            ));
-            previous_end = token.span.end;
-        }
+        let newlines_before = token_newlines_before(&tokens, source);
+        Self::new_with_newlines_and_interpolations(tokens, newlines_before, interpolations)
+    }
+
+    fn new_with_newlines_and_interpolations(
+        tokens: Vec<Token>,
+        newlines_before: Vec<bool>,
+        interpolations: BTreeMap<usize, PendingInterpolatedString>,
+    ) -> Self {
         Self {
             tokens,
             newlines_before,
@@ -2223,6 +2298,20 @@ enum SimpleToken {
     Arrow,
 }
 
+fn token_newlines_before(tokens: &[Token], source: &[u8]) -> Vec<bool> {
+    let mut newlines_before = Vec::with_capacity(tokens.len());
+    let mut previous_end = 0;
+    for token in tokens {
+        newlines_before.push(source_contains_newline(
+            source,
+            previous_end,
+            token.span.start,
+        ));
+        previous_end = token.span.end;
+    }
+    newlines_before
+}
+
 fn source_contains_newline(source: &[u8], start: usize, end: usize) -> bool {
     let start = start.min(source.len());
     let end = end.min(source.len());
@@ -2494,6 +2583,100 @@ mod tests {
         )
         .unwrap();
         parse_source("return `{(function() -- } ` ignored\n return 'ok' end)()}`").unwrap();
+    }
+
+    #[test]
+    fn interpolation_lowering_preserves_original_expression_and_following_spans() {
+        let source = "local first = `x {foo + 1}`\nlocal after = bar";
+        let chunk = parse_source(source).unwrap();
+        let [Stmt::Local {
+            init: first_init, ..
+        }, Stmt::Local {
+            bindings,
+            init: after_init,
+            ..
+        }] = chunk.statements.as_slice()
+        else {
+            panic!("expected two local statements");
+        };
+
+        let [Expr::InterpolatedString {
+            expressions, span, ..
+        }] = first_init.as_slice()
+        else {
+            panic!("expected interpolated string initializer");
+        };
+        assert_eq!(*span, rustia_lexer::Span::new(14, 27));
+        let [Expr::Paren { expr, .. }] = expressions.as_slice() else {
+            panic!("expected lowered interpolation expression wrapper");
+        };
+        let Expr::Binary { lhs, .. } = expr.as_ref() else {
+            panic!("expected binary interpolation expression");
+        };
+        assert!(matches!(
+            lhs.as_ref(),
+            Expr::Name(name, span)
+                if name == "foo"
+                    && *span == rustia_lexer::Span::new(
+                        source.find("foo").unwrap(),
+                        source.find("foo").unwrap() + 3,
+                    )
+        ));
+
+        assert_eq!(
+            bindings[0].span,
+            rustia_lexer::Span::new(
+                source.find("after").unwrap(),
+                source.find("after").unwrap() + 5,
+            )
+        );
+        assert!(matches!(
+            after_init.as_slice(),
+            [Expr::Name(name, span)]
+                if name == "bar"
+                    && *span == rustia_lexer::Span::new(
+                        source.rfind("bar").unwrap(),
+                        source.rfind("bar").unwrap() + 3,
+                    )
+        ));
+    }
+
+    #[test]
+    fn nested_interpolation_preserves_spans_after_the_outer_rewrite() {
+        let source = "local outer = `outer {`inner {needle}`}`\nlocal after = value";
+        let chunk = parse_source(source).unwrap();
+        let [Stmt::Local { init: outer, .. }, Stmt::Local { bindings, init, .. }] =
+            chunk.statements.as_slice()
+        else {
+            panic!("expected two locals");
+        };
+        let [Expr::InterpolatedString { expressions, .. }] = outer.as_slice() else {
+            panic!("expected outer interpolation");
+        };
+        let [Expr::Paren { expr, .. }] = expressions.as_slice() else {
+            panic!("expected outer expression wrapper");
+        };
+        let Expr::InterpolatedString { expressions, .. } = expr.as_ref() else {
+            panic!("expected nested interpolation");
+        };
+        let [Expr::Paren { expr, .. }] = expressions.as_slice() else {
+            panic!("expected nested expression wrapper");
+        };
+        assert!(matches!(
+            expr.as_ref(),
+            Expr::Name(name, span)
+                if name == "needle"
+                    && *span == rustia_lexer::Span::new(
+                        source.find("needle").unwrap(),
+                        source.find("needle").unwrap() + 6,
+                    )
+        ));
+        assert_eq!(bindings[0].span.start, source.find("after").unwrap());
+        assert!(matches!(
+            init.as_slice(),
+            [Expr::Name(name, span)]
+                if name == "value" && span.start == source.rfind("value").unwrap()
+        ));
     }
 
     #[test]

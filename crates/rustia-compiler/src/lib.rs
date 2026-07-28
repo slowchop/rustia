@@ -8011,6 +8011,142 @@ return lineerror("function a.x.y ()\na=a+1\nend")
     }
 
     #[test]
+    fn direct_self_recursion_obeys_vm_recursion_limit() {
+        for source in [
+            r#"
+local function deep(n)
+    if n > 0 then
+        deep(n - 1)
+    end
+end
+local ok, err = pcall(deep, 100)
+return not ok and err:find("stack overflow") ~= nil
+"#,
+            r#"
+local function deep(n)
+    if n == 0 then
+        return 0
+    end
+    return deep(n - 1)
+end
+local ok, err = pcall(deep, 100)
+return not ok and err:find("stack overflow") ~= nil
+"#,
+        ] {
+            let chunk = parse_source(source).unwrap();
+            let program = compile(&chunk).unwrap();
+            let settings = VmSettings {
+                recursion_limit: 8,
+                ..VmSettings::default()
+            };
+            let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+            let result = vm.run(&program).unwrap();
+            assert_eq!(result.as_bool(), Some(true), "{source}");
+        }
+    }
+
+    #[test]
+    fn conformance_call_limit_preserves_luau_protected_call_shape() {
+        for source in [
+            r#"
+local function infinite()
+    return infinite()
+end
+local ok, err = pcall(infinite)
+return not ok and type(err) == "string"
+"#,
+            r#"
+local function stackover()
+    return pcall(stackover)
+end
+local results = { pcall(stackover) }
+return #results == 10000
+"#,
+        ] {
+            let chunk = parse_source(source).unwrap();
+            let program = compile(&chunk).unwrap();
+            let settings = VmSettings {
+                enable_conformance_luau_call_limit: true,
+                ..VmSettings::default()
+            };
+            let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+            let result = vm.run(&program).unwrap();
+            assert_eq!(result.as_bool(), Some(true), "{source}");
+        }
+    }
+
+    #[test]
+    fn generic_iterator_calls_can_yield_and_resume() {
+        for loop_source in [
+            "for key, value in iterator, nil, nil do output = output .. key .. ':' .. value .. ';' end",
+            "for key, value in iterator do output = output .. key .. ':' .. value .. ';' end",
+            "for key, value in subject do output = output .. key .. ':' .. value .. ';' end",
+        ] {
+            let source = format!(
+                r#"
+local step = 0
+local function iterator(_state, _control)
+    local resumed = coroutine.yield("pause")
+    step += 1
+    if step > 2 then
+        return nil
+    end
+    return step, resumed
+end
+local subject = setmetatable({{}}, {{
+    __iter = function()
+        return iterator, nil, nil
+    end,
+}})
+
+local thread = coroutine.create(function()
+    local output = ""
+    {loop_source}
+    return output
+end)
+
+local ok1, pause1 = coroutine.resume(thread)
+local ok2, pause2 = coroutine.resume(thread, "a")
+local ok3, pause3 = coroutine.resume(thread, "b")
+local ok4, output = coroutine.resume(thread, "done")
+return ok1 and pause1 == "pause"
+    and ok2 and pause2 == "pause"
+    and ok3 and pause3 == "pause"
+    and ok4 and output == "1:a;2:b;"
+"#
+            );
+            let chunk = parse_source(&source).unwrap();
+            let program = compile(&chunk).unwrap();
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            let result = vm.run(&program).unwrap();
+            assert_eq!(result.as_bool(), Some(true), "{source}");
+        }
+
+        let chunk = parse_source(
+            r#"
+local thread = coroutine.create(function()
+    local marker = "before"
+    local function iterator()
+        marker = "after"
+        coroutine.yield("pause")
+        return nil
+    end
+    for _ in iterator do end
+    return marker
+end)
+local ok1, pause = coroutine.resume(thread)
+local ok2, marker = coroutine.resume(thread)
+return ok1 and pause == "pause" and ok2 and marker == "after"
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_bool(), Some(true));
+    }
+
+    #[test]
     fn tostring_metamethod_recursion_obeys_vm_recursion_limit() {
         let chunk = parse_source(
             "local t = {} setmetatable(t, { __tostring = tostring }) return tostring(t)",
@@ -8697,6 +8833,24 @@ return `x {s}`"#,
                 "{source}"
             );
         }
+    }
+
+    #[test]
+    fn interpolation_rewrite_keeps_runtime_locations_on_original_lines() {
+        let source = "local text = `hello {1 + 2}`\nlocal missing = nil\nreturn missing.field";
+        let chunk = parse_source(source).unwrap();
+        let program = compile_with_options(
+            &chunk,
+            CompileOptions::default().with_source("interpolation.luau", source),
+        )
+        .unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let error = vm.run(&program).unwrap_err();
+        let location = error
+            .location
+            .expect("runtime error should have a source location");
+        assert_eq!(location.source.as_ref(), "interpolation.luau");
+        assert_eq!(location.line, 3);
     }
 
     #[test]
