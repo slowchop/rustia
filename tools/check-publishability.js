@@ -140,7 +140,9 @@ function topologicalOrder(packagesByName) {
 }
 
 function buildReport() {
-  const metadata = JSON.parse(runCargo(["metadata", "--no-deps", "--format-version", "1"]));
+  const metadata = JSON.parse(
+    runCargo(["metadata", "--locked", "--no-deps", "--format-version", "1"]),
+  );
   const packageFiles = readJson(packageFilesPath);
   if (packageFiles.schema_version !== 1 || !Array.isArray(packageFiles.packages)) {
     fail("design/package-files.json must be a schema_version 1 package-file report");

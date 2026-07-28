@@ -64,6 +64,8 @@ output/time providers and VM-owned telemetry are also implemented.
   review artifact is [`crate-metadata.json`](crate-metadata.json).
 - Package file lists must not include private design scratch, `private/`, local
   caches, or generated target output.
+- Every package archive contains `LICENSE-APACHE` and `LICENSE-MIT`; README
+  links are either absolute or resolve to files/directories in that archive.
 - Package file lists are audited by `tools/check-package-files.js`; the
   committed review artifact is [`package-files.json`](package-files.json).
 - Publishability blockers are audited by `tools/check-publishability.js`; the
@@ -207,13 +209,17 @@ output/time providers and VM-owned telemetry are also implemented.
 
 ## Release Process Gate
 
-- `just release-preflight` passes before any publishability flip. It checks
+- `just release-preflight` and hosted CI invoke the same
+  `tools/run-release-preflight.js` driver before any publishability flip. It checks
   formatting, strict workspace Clippy, release notes, package file lists,
   generated progress HTML, benchmark result freshness, crate metadata, workflow
   policy, example compilation, and the workspace test suite.
 - Hosted CI installs the exact channel from `rust-toolchain.toml` and runs
   `cargo fmt --all -- --check` plus
-  `cargo clippy --workspace --all-targets -- -D warnings`.
+  locked strict workspace Clippy.
+- Every third-party GitHub Action is pinned to a full commit SHA.
+- Cargo metadata, Clippy, examples, tests, and package checks use `--locked`;
+  preflight rejects a dirty `Cargo.lock` before validation.
 - `just check-crate-metadata` passes and `design/crate-metadata.json` is
   current.
 - `just check-workflows` passes and keeps hosted CI validation-only: it pins the

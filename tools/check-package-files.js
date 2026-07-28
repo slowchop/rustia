@@ -49,7 +49,7 @@ function workspacePackages(metadata) {
 }
 
 function packageFiles(packageName) {
-  return runCargo(["package", "-p", packageName, "--allow-dirty", "--list"])
+  return runCargo(["package", "-p", packageName, "--allow-dirty", "--locked", "--list"])
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
@@ -57,7 +57,14 @@ function packageFiles(packageName) {
 
 function validateFiles(pkg, files) {
   const violations = [];
-  const required = new Set([".cargo_vcs_info.json", "Cargo.toml", "Cargo.toml.orig", "README.md"]);
+  const required = new Set([
+    ".cargo_vcs_info.json",
+    "Cargo.toml",
+    "Cargo.toml.orig",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+    "README.md",
+  ]);
 
   for (const file of files) {
     if (path.isAbsolute(file)) {
@@ -85,12 +92,38 @@ function validateFiles(pkg, files) {
   if (!files.some((file) => file === "src/main.rs" || file === "src/lib.rs")) {
     violations.push(`${pkg.name}: missing src/main.rs or src/lib.rs`);
   }
+  validateReadmeLinks(pkg, files, violations);
 
   return violations;
 }
 
+function validateReadmeLinks(pkg, files, violations) {
+  if (!pkg.readme) {
+    violations.push(`${pkg.name}: cargo metadata does not declare a README`);
+    return;
+  }
+  const readmePath = path.resolve(path.dirname(pkg.manifest_path), pkg.readme);
+  const readme = fs.readFileSync(readmePath, "utf8");
+  const packaged = new Set(files);
+  const links = readme.matchAll(/\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g);
+  for (const match of links) {
+    const target = match[1];
+    if (/^(?:https?:|mailto:|#)/.test(target)) {
+      continue;
+    }
+    const relative = target.split("#", 1)[0].split("?", 1)[0];
+    const directoryPrefix = relative.endsWith("/") ? relative : `${relative}/`;
+    const directoryIsPackaged = files.some((file) => file.startsWith(directoryPrefix));
+    if (relative !== "" && !packaged.has(relative) && !directoryIsPackaged) {
+      violations.push(`${pkg.name}: README link target is absent from the package: ${target}`);
+    }
+  }
+}
+
 function buildReport() {
-  const metadata = JSON.parse(runCargo(["metadata", "--no-deps", "--format-version", "1"]));
+  const metadata = JSON.parse(
+    runCargo(["metadata", "--locked", "--no-deps", "--format-version", "1"]),
+  );
   const packages = workspacePackages(metadata).map((pkg) => {
     const files = packageFiles(pkg.name);
     const violations = validateFiles(pkg, files);

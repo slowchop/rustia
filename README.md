@@ -10,8 +10,8 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
 > implemented. The next release-critical work is O(1) accounting, broader mixed-heap pressure evidence, and the
 > remaining module/value boundary.
 > `spikes/` are throwaway prototypes that validated the design.
-> Read **[`design/CURRENT.md`](design/CURRENT.md)** for the canonical state, then
-> [`design/README.md`](design/README.md) for the full doc map.
+> Read **[`design/CURRENT.md`](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md)** for the canonical state, then
+> [`design/README.md`](https://github.com/slowchop/rustia/blob/main/design/README.md) for the full doc map.
 
 ## Highlights (spikes validated the direction; production gates are now in-tree)
 - Performance claims are benchmark-gated per workload and target; no global speed headline is published until
@@ -103,7 +103,7 @@ The planned advanced embedding API is shared by all three: `deterministic()` enf
 `live()` is the first-class ordinary embedding choice with no reproducibility guarantee.
 
 ## Project Pillars
-The canonical decision filter is [`design/02-pillars.md`](design/02-pillars.md). The short version:
+The canonical decision filter is [`design/02-pillars.md`](https://github.com/slowchop/rustia/blob/main/design/02-pillars.md). The short version:
 
 - **Pinned Standalone Luau Compatibility** — Luau 0.709 standalone runtime behavior, not Roblox/latest-Luau drift.
 - **Conformance and Provenance** — claims need fixtures, upstream links, audits, benchmarks, or explicit defers.
@@ -116,8 +116,8 @@ The canonical decision filter is [`design/02-pillars.md`](design/02-pillars.md).
 - **Public-Clean OSS Consumer Contract** — generic crates, docs, semver, CI, packaging, and no grabby-specific API.
 
 ## Project Progress
-The detailed progress view is generated from [`design/progress.json`](design/progress.json) into
-[`design/progress.html`](design/progress.html). These are rough engineering estimates as of 2026-07-28 for the
+The detailed progress view is generated from [`design/progress.json`](https://github.com/slowchop/rustia/blob/main/design/progress.json) into
+[`design/progress.html`](https://github.com/slowchop/rustia/blob/main/design/progress.html). These are rough engineering estimates as of 2026-07-28 for the
 public rustia project; actual grabby integration work is explicitly out of scope.
 
 | goal | complete | confidence |
@@ -132,7 +132,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
 - The benchmark harness has all 12 requested adapters, an explicit verified `mlua-luau-jit` mode, and a
   non-default `string_building` workload source set across them; Lua 5.4 runs separately from Luau because
   `mlua-sys` cannot link both in one binary.
-- Current benchmark claim posture is generated at [`bench/CLAIMS.md`](bench/CLAIMS.md); it approves no blanket
+- Current benchmark claim posture is generated at [`bench/CLAIMS.md`](https://github.com/slowchop/rustia/blob/main/bench/CLAIMS.md); it approves no blanket
   speed headline from the current snapshot.
 - The committed benchmark protocol keeps raw samples, fixed-work evidence, process/steal gates, exact source and
   toolchain identity, and fail-closed promotion after VM deletion. The current clean `83bc2f3` Linux snapshot has
@@ -140,7 +140,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
   interpreter-only minimum-time gaps are 3.483x to `mlua-luau` and 3.833x to Luaur; verified JIT mode is 4.283x
   rustia overall and 8.036x on closures, with its compile/first-call costs reported separately. Earlier
   dense/OOP/string/HotIR cohorts remain traceable historical evidence. Every result is specific to its workload,
-  target, and protocol; details are in [`design/56-performance-research.md`](design/56-performance-research.md).
+  target, and protocol; details are in [`design/56-performance-research.md`](https://github.com/slowchop/rustia/blob/main/design/56-performance-research.md).
 - Exact-commit cohort `safe-memory-588b541` now supplies the first dedicated-Linode native pressure evidence
   for reclamation/telemetry/quota work and passes the wasm32 512 KiB quota/recovery probe. Rustia ties the best
   shared peak at 256 KiB and retains 14.4 KiB across the shared set versus mlua/Luau/JIT's 24.8 KiB.
@@ -149,12 +149,12 @@ public rustia project; actual grabby integration work is explicitly out of scope
   mixed-heap/native/Wasm pressure coverage; module loading, rich values, and transactional installation,
   compiler/runtime semantic-tail
   hardening, the full cross-target correctness/golden matrix, broader benchmark history, and release packaging.
-  Semver policy is tracked in [`design/91-semver-policy.md`](design/91-semver-policy.md),
-  release notes in [`CHANGELOG.md`](CHANGELOG.md), koto migration guidance in
-  [`design/76-koto-migration.md`](design/76-koto-migration.md), crate metadata audit in
-  [`design/crate-metadata.json`](design/crate-metadata.json), and package file-list review in
-  [`design/package-files.json`](design/package-files.json). Current publish blockers are generated at
-  [`design/publishability.json`](design/publishability.json).
+  Semver policy is tracked in [`design/91-semver-policy.md`](https://github.com/slowchop/rustia/blob/main/design/91-semver-policy.md),
+  release notes in [`CHANGELOG.md`](https://github.com/slowchop/rustia/blob/main/CHANGELOG.md), koto migration guidance in
+  [`design/76-koto-migration.md`](https://github.com/slowchop/rustia/blob/main/design/76-koto-migration.md), crate metadata audit in
+  [`design/crate-metadata.json`](https://github.com/slowchop/rustia/blob/main/design/crate-metadata.json), and package file-list review in
+  [`design/package-files.json`](https://github.com/slowchop/rustia/blob/main/design/package-files.json). Current publish blockers are generated at
+  [`design/publishability.json`](https://github.com/slowchop/rustia/blob/main/design/publishability.json).
 - `just release-preflight` validates formatting, strict Clippy, release notes, package files, generated leaf
   package dry-runs, progress/project status, benchmark results, crate metadata, workflow policy, examples, and
   workspace tests without running fresh benchmark measurements; `.github/workflows/ci.yml` mirrors that gate on
@@ -223,7 +223,7 @@ span or runtime-line evidence.
 Built design-first with Claude Code.
 
 ## License
-Licensed under either of **[Apache License, Version 2.0](LICENSE-APACHE)** or **[MIT license](LICENSE-MIT)**
+Licensed under either of **[Apache License, Version 2.0](https://github.com/slowchop/rustia/blob/main/LICENSE-APACHE)** or **[MIT license](https://github.com/slowchop/rustia/blob/main/LICENSE-MIT)**
 at your option. Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion
 in this work, as defined in the Apache-2.0 license, shall be dual-licensed as above, without any additional
 terms or conditions.

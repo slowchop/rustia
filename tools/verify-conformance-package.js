@@ -42,7 +42,7 @@ function cargoMetadata() {
     return JSON.parse(
       childProcess.execFileSync(
         "cargo",
-        ["metadata", "--no-deps", "--format-version", "1"],
+        ["metadata", "--locked", "--no-deps", "--format-version", "1"],
         { cwd: root, encoding: "utf8" },
       ),
     );
@@ -85,6 +85,7 @@ if (!packageMetadata) fail(`${packageName} is missing from cargo metadata`);
 const patches = patchArguments();
 runCargo([
   "package",
+  "--locked",
   "-p",
   packageName,
   "--allow-dirty",
@@ -122,6 +123,7 @@ for (const file of sourceFiles) {
 
 runCargo([
   "test",
+  "--locked",
   "--offline",
   "--manifest-path",
   path.join(unpacked, "Cargo.toml"),

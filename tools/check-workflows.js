@@ -9,6 +9,7 @@ const workflowDir = path.join(root, ".github", "workflows");
 const ciPath = path.join(workflowDir, "ci.yml");
 const rustiaMemoryPath = path.join(workflowDir, "linode-rustia-memory.yml");
 const rustToolchainPath = path.join(root, "rust-toolchain.toml");
+const releasePreflightPath = path.join(root, "tools", "run-release-preflight.js");
 
 function fail(message) {
   console.error(`check-workflows: ${message}`);
@@ -63,9 +64,9 @@ function usesLines(text) {
 
 function checkActionPins(text, label) {
   for (const line of usesLines(text)) {
-    const action = line.slice("uses: ".length);
-    if (!/^actions\/[a-z0-9-]+@v\d+$/.test(action)) {
-      fail(`${label} action must be pinned to an actions/* major version: ${line}`);
+    const action = line.slice("uses: ".length).split(/\s+/, 1)[0];
+    if (!/^actions\/[a-z0-9-]+@[0-9a-f]{40}$/.test(action)) {
+      fail(`${label} action must be pinned to a full actions/* commit SHA: ${line}`);
     }
   }
 }
@@ -111,30 +112,56 @@ function checkCi(text) {
     label,
   );
   requireIncludes(text, `rustup default ${rustChannel}`, label);
-  requireIncludes(text, "cargo fmt --all -- --check", label);
-  requireIncludes(text, "cargo clippy --workspace --all-targets -- -D warnings", label);
   forbidIncludes(text, "rustup toolchain install stable", label);
   forbidIncludes(text, "rustup default stable", label);
-  requireIncludes(text, "node tools/check-release-notes.js", label);
-  requireIncludes(text, "node tools/check-crate-metadata.js --check", label);
-  requireIncludes(text, "node tools/check-package-files.js --check", label);
-  requireIncludes(text, "node tools/check-publishability.js --check", label);
-  requireIncludes(text, "node tools/check-package-dry-runs.js", label);
-  requireIncludes(text, "node tools/verify-conformance-package.js", label);
-  requireIncludes(text, "node tools/check-workflows.js", label);
-  requireIncludes(text, "node design/render-progress.js --check", label);
-  requireIncludes(text, "node tools/check-project-status.js", label);
-  requireIncludes(text, "node bench/analyze-fixed-samples.js --self-test", label);
-  requireIncludes(text, "node tools/check-benchmark-results.js", label);
-  requireIncludes(text, "node tools/check-wasm-gate-results.js", label);
-  requireIncludes(text, "node tools/check-current-report-summary.js", label);
-  requireIncludes(text, "node tools/merge-rustia-ci-memory-data.js self-test", label);
-  requireIncludes(text, "node bench/render-current-results.js --check", label);
-  requireIncludes(text, "node bench/render-claims.js --check", label);
-  requireIncludes(text, "cargo test -p rustia --examples --no-run", label);
-  requireIncludes(text, "cargo test --workspace", label);
+  requireIncludes(text, "node tools/run-release-preflight.js", label);
+  forbidIncludes(text, "cargo clippy --workspace", label);
+  forbidIncludes(text, "cargo test --workspace", label);
+  forbidIncludes(text, "node tools/check-package-files.js", label);
   forbidIncludes(text, "cargo run -p script-bench-harness", label);
   checkActionPins(text, label);
+}
+
+function checkReleasePreflight(text) {
+  const label = "tools/run-release-preflight.js";
+  for (const needle of [
+    '"git", ["diff", "--quiet", "--", "Cargo.lock"]',
+    '"cargo", ["metadata", "--locked"',
+    '"cargo", ["fmt", "--all"',
+    '"cargo", ["clippy", "--locked", "--workspace", "--all-targets"',
+    '"tools/check-release-notes.js"',
+    '"tools/check-crate-metadata.js"',
+    '"tools/check-workflows.js"',
+    '"tools/check-package-files.js"',
+    '"tools/check-publishability.js"',
+    '"tools/check-package-dry-runs.js"',
+    '"tools/verify-conformance-package.js"',
+    '"design/render-progress.js"',
+    '"tools/check-project-status.js"',
+    '"bench/analyze-fixed-samples.js"',
+    '"tools/run-digitalocean-benchmark.js"',
+    '"tools/run-linode-benchmark.js"',
+    '"tools/run-linux-matrix-benchmark.js"',
+    '"bench/run-memory-supervisor.js"',
+    '"bench/analyze-memory-samples.js"',
+    '"bench/run-memory-cohort.js"',
+    '"bench/publish-memory-analysis.js"',
+    '"tools/run-linux-memory-benchmark.js"',
+    '"tools/run-vultr-benchmark.js"',
+    '"tools/run-scaleway-benchmark.js"',
+    '"tools/run-wasm-gate.js"',
+    '"tools/run-wasm-dispatch-gate.js"',
+    '"tools/merge-rustia-ci-memory-data.js"',
+    '"tools/check-benchmark-results.js"',
+    '"tools/check-wasm-gate-results.js"',
+    '"tools/check-current-report-summary.js"',
+    '"bench/render-current-results.js"',
+    '"bench/render-claims.js"',
+    '"fuzz/Cargo.toml"',
+    '"cargo", ["test", "--locked", "--workspace"]',
+  ]) {
+    requireIncludes(text, needle, label);
+  }
 }
 
 function checkRustiaMemory(text) {
@@ -183,5 +210,6 @@ if (files.includes("benchmarks.yml")) {
 checkRunnerLabels(files);
 checkCi(readWorkflow(ciPath));
 checkRustiaMemory(readWorkflow(rustiaMemoryPath));
+checkReleasePreflight(readWorkflow(releasePreflightPath));
 
 console.log(`workflow policy ok for ${files.length} workflow file(s)`);

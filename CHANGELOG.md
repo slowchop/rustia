@@ -452,6 +452,11 @@ Current unpublished workspace version: `0.0.1`.
 - The `rustia-conformance` crate archive now contains the complete corpus,
   defaults to that bundled repository, and is package-verified by inventory,
   checksum, unpacked build, and full-manifest execution.
+- Release preflight and hosted CI now invoke one canonical validation driver,
+  Cargo metadata/build/test/package commands are locked, and the lockfile must
+  begin clean. GitHub Actions are pinned to full commit SHAs.
+- Every package archive now carries both license texts, and the package audit
+  rejects README links whose relative targets are absent from the archive.
 - The standalone browser demo disables host-import features, carries a locked
   dependency graph, and can be instantiated directly with an empty WebAssembly
   import object as documented.

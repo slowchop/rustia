@@ -1,6 +1,6 @@
 check-style:
     cargo fmt --all -- --check
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --locked --workspace --all-targets -- -D warnings
 
 gen-progress:
     node design/render-progress.js
@@ -60,25 +60,14 @@ check-benchmark-results:
 
 # Build the wasm adapter and prove quota/OOM catchability plus decision reset.
 test-wasm-memory-limit:
-    cargo build --manifest-path bench/wasm/adapter-runner/Cargo.toml --target wasm32-unknown-unknown --release
+    cargo build --locked --manifest-path bench/wasm/adapter-runner/Cargo.toml --target wasm32-unknown-unknown --release
     node bench/wasm/test-rustia-memory-limit.mjs
 
 check-examples:
-    cargo test -p rustia --examples --no-run
+    cargo test --locked -p rustia --examples --no-run
 
 release-preflight:
-    just check-style
-    just check-release-notes
-    just check-crate-metadata
-    just check-workflows
-    just check-package-files
-    just check-publishability
-    just check-package-dry-runs
-    just check-progress
-    just check-project-status
-    just check-benchmark-results
-    just check-examples
-    cargo test --workspace
+    node tools/run-release-preflight.js
 
 benchmarks:
     @node -e 'console.error("Local benchmark publication is disabled: use just bench-linode-matrix-plan CONFIG and just bench-linode-matrix CONFIG."); process.exit(2)'

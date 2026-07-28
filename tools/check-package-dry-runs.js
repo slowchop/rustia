@@ -95,7 +95,7 @@ checkPublishabilityCurrent();
 const report = readJson(publishabilityPath);
 const candidates = publishCandidates(report);
 for (const name of candidates) {
-  runCargo(["package", "--no-verify", "--allow-dirty", "-p", name]);
+  runCargo(["package", "--locked", "--no-verify", "--allow-dirty", "-p", name]);
 }
 
 console.log(`leaf package dry-runs ok for ${candidates.join(", ")}`);

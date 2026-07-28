@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal --component clippy --component rustfmt
@@ -30,7 +30,7 @@ jobs:
         run: rustup default 1.95.0
 
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
 
@@ -40,51 +40,5 @@ jobs:
           cargo --version
           node --version
 
-      - name: Check Rust formatting
-        run: cargo fmt --all -- --check
-
-      - name: Check Rust lints
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Check release notes
-        run: node tools/check-release-notes.js
-
-      - name: Check crate metadata audit
-        run: node tools/check-crate-metadata.js --check
-
-      - name: Check workflow policy
-        run: node tools/check-workflows.js
-
-      - name: Check package file audit
-        run: node tools/check-package-files.js --check
-
-      - name: Check publishability audit
-        run: node tools/check-publishability.js --check
-
-      - name: Check leaf package dry runs
-        run: node tools/check-package-dry-runs.js
-
-      - name: Verify self-contained conformance package
-        run: node tools/verify-conformance-package.js
-
-      - name: Check progress dashboard
-        run: node design/render-progress.js --check
-
-      - name: Check project status alignment
-        run: node tools/check-project-status.js
-
-      - name: Check benchmark generated artifacts
-        run: |
-          node bench/analyze-fixed-samples.js --self-test
-          node tools/check-benchmark-results.js
-          node tools/check-wasm-gate-results.js
-          node tools/check-current-report-summary.js
-          node tools/merge-rustia-ci-memory-data.js self-test
-          node bench/render-current-results.js --check
-          node bench/render-claims.js --check
-
-      - name: Check rustia examples
-        run: cargo test -p rustia --examples --no-run
-
-      - name: Run workspace tests
-        run: cargo test --workspace
+      - name: Run canonical release preflight
+        run: node tools/run-release-preflight.js
