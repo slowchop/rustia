@@ -145,12 +145,27 @@ pub fn list_repository_pending(repo: impl AsRef<Path>) -> Result<Vec<PendingCase
 }
 
 pub fn repository_from_crate_manifest(crate_manifest_dir: impl AsRef<Path>) -> Result<PathBuf> {
+    let crate_manifest_dir = crate_manifest_dir.as_ref();
+    let bundled = crate_manifest_dir.join("corpus");
+    if bundled.join("conformance/MANIFEST.tsv").is_file()
+        && bundled.join("conformance/REFS.tsv").is_file()
+    {
+        return Ok(bundled);
+    }
     crate_manifest_dir
-        .as_ref()
         .parent()
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .ok_or_else(|| Error::new("crate must live under <repo>/crates/<crate>"))
+}
+
+/// Returns the conformance repository bundled into this crate package.
+///
+/// In the workspace `corpus` is a link to the canonical top-level corpus. Cargo follows that link
+/// when assembling the crate archive, so an unpacked package retains the same manifest, refs,
+/// fixtures, and provenance without depending on a surrounding Rustia checkout.
+pub fn bundled_repository() -> Result<PathBuf> {
+    repository_from_crate_manifest(env!("CARGO_MANIFEST_DIR"))
 }
 
 fn load_manifest_text(repo: &Path) -> Result<String> {
@@ -558,6 +573,7 @@ fn compile_and_run_luau_conformance(
     let mut vm = Vm::with_settings(
         profile,
         VmSettings {
+            enable_conformance_luau_call_limit: true,
             loadstring_compiler: Some(compile_luau_loadstring),
             enable_conformance_coverage: is_upstream_0709_fixture(harness_path, "coverage.luau"),
             enable_conformance_top_level_yield: is_upstream_0709_fixture(

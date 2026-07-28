@@ -120,6 +120,7 @@ function checkCi(text) {
   requireIncludes(text, "node tools/check-package-files.js --check", label);
   requireIncludes(text, "node tools/check-publishability.js --check", label);
   requireIncludes(text, "node tools/check-package-dry-runs.js", label);
+  requireIncludes(text, "node tools/verify-conformance-package.js", label);
   requireIncludes(text, "node tools/check-workflows.js", label);
   requireIncludes(text, "node design/render-progress.js --check", label);
   requireIncludes(text, "node tools/check-project-status.js", label);

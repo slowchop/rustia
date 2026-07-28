@@ -64,6 +64,9 @@ jobs:
       - name: Check leaf package dry runs
         run: node tools/check-package-dry-runs.js
 
+      - name: Verify self-contained conformance package
+        run: node tools/verify-conformance-package.js
+
       - name: Check progress dashboard
         run: node design/render-progress.js --check
 
