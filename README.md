@@ -52,7 +52,8 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   input, slots, ordered effects, slot writes, or profile-gated external mutation. Typed invocations share one
   fuel budget and stage a bounded count/byte record transaction. Ordinary object/program reclamation and the
   epoch-safe decision-reset ABI are implemented. `deterministic_leaf()` adds a frozen allowlisted guest
-  environment with a mandatory memory limit, while `compile_entry`/`invoke_entry_into` provide a direct
+  environment with a mandatory memory limit. `RustiaExecutionProfile` constructs and reports a typed,
+  byte-stable core profile/surface identity component, while `compile_entry`/`invoke_entry_into` provide a direct
   stateless decision path with record publication and reset across both success and failure; module resolution,
   transactional installation/hot reload, rich graph values, and live zero-copy serde remain planned.
 - Host services are host-pluggable through the facade: `RustiaBuilder::standard()`/`deterministic()`/`live()`

@@ -37,7 +37,11 @@ The generic authoritative-leaf layer is now implemented
 `RustiaBuilder::deterministic_leaf()` layers a frozen, allowlisted
 `GuestSurface::HardenedLeaf` on `DeterministicSim`, requires an explicit logical-live memory limit, and excludes
 environment/debug/raw mutation, output/clocks, VM RNG, buffers/vectors/coroutines, dynamic compilation, and
-captured upvalues. `Rustia::compile_entry` plus `Rustia::invoke_entry_into` execute a host-owned top-level
+captured upvalues. `RustiaExecutionProfile::DETERMINISTIC_HARDENED_LEAF` is now the single typed source for
+constructing that preset, its canonical profile/surface identity-component bytes, and its compact compatibility
+ID; both the builder and live VM expose the selected descriptor so embedders can attest those core semantics
+instead of mirroring them in a label. Settings, budgets, services, dependencies, and host ABI remain separate
+embedder-owned identity inputs. `Rustia::compile_entry` plus `Rustia::invoke_entry_into` execute a host-owned top-level
 decision body without exports-table, retained-closure, or loaded-program setup and reset after success or
 failure. Hardened reset preserves only the checked immutable pre-guest heap prefix and discards all
 decision-local allocations; sealing rejects both prefix holes and pre-seal external roots. The checked-in,

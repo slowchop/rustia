@@ -35,6 +35,17 @@ vm.install_host_module(game_module)?;
 - `GuestSurface::HardenedLeaf`;
 - no stdout, clocks, dynamic compiler, or conformance-only facilities.
 
+`RustiaExecutionProfile::DETERMINISTIC_HARDENED_LEAF` is the typed,
+byte-stable description of the first two choices. It constructs the preset,
+provides canonical identity-component bytes and a compact compatibility ID,
+and can be read back from both `RustiaBuilder::execution_profile()` and the
+built `Rustia::execution_profile()`. The descriptor is not a complete runtime
+identity: embedders must bind budgets, host ABI, dependency/features, settings,
+and any permitted services separately. Hardened-leaf validation forbids
+services and dynamic-code facilities, so this descriptor plus Grabby's
+separately bound budgets and host ABI closes that narrower use without a
+parallel caller-maintained profile label.
+
 A logical-live memory limit is mandatory and must be selected explicitly by the
 embedder. Builder validation fails loudly when the hardened surface is combined
 with another profile, a missing memory limit, host output/time services, dynamic

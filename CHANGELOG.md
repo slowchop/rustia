@@ -8,6 +8,11 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- `RustiaExecutionProfile` provides canonical identity-component bytes and
+  compact compatibility IDs for the selected core profile and guest surface,
+  constructs the deterministic presets, and can be read back from both a
+  builder and live VM. Embedders continue to bind settings, budgets, services,
+  dependencies, and host ABI separately.
 - `GuestSurface::HardenedLeaf` and
   `RustiaBuilder::deterministic_leaf()` add a fail-closed authoritative
   action-leaf environment layered on `DeterministicSim`. It requires an

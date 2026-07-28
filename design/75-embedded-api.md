@@ -357,9 +357,20 @@ authority. Setup constructs the hardened VM and compiles the direct decision bod
 let mut vm = RustiaBuilder::deterministic_leaf()
     .memory_limit_bytes(memory_limit)
     .build_for_host::<GrabbyHost>()?;
+assert_eq!(
+    vm.execution_profile(),
+    RustiaExecutionProfile::DETERMINISTIC_HARDENED_LEAF,
+);
 vm.install_host_module(bridge)?;
 let decide = Rustia::<GrabbyHost>::compile_entry("decide.luau", source)?;
 ```
+
+The typed execution profile above is also available from the builder. Its
+versioned canonical bytes and compact compatibility ID let Grabby bind the
+actual selected `Profile` plus `GuestSurface` component into its package
+identity without duplicating a string label. It does not encode settings,
+budgets, services, dependency features, or host ABI; an embedder must bind
+those separately.
 
 The worker hot path is:
 

@@ -18,6 +18,97 @@ pub struct RustiaBuilder {
     live_requested: bool,
 }
 
+/// Stable, typed description of the core profile and guest surface selected by
+/// a builder.
+///
+/// The descriptor deliberately covers the core [`Profile`] and guest-visible
+/// [`GuestSurface`] together. Its canonical bytes are one component of an
+/// embedder's package or replay identity; settings, budgets, host ABI, and any
+/// permitted services must be bound separately. Unlike a caller-maintained
+/// label, the value can also be read back from the built [`Rustia`] VM.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RustiaExecutionProfile {
+    profile: Profile,
+    guest_surface: GuestSurface,
+}
+
+impl RustiaExecutionProfile {
+    /// Ordinary sealed deterministic execution.
+    pub const DETERMINISTIC_STANDARD: Self =
+        Self::new(Profile::DeterministicSim, GuestSurface::Standard);
+
+    /// Stateless authoritative-leaf execution.
+    pub const DETERMINISTIC_HARDENED_LEAF: Self =
+        Self::new(Profile::DeterministicSim, GuestSurface::HardenedLeaf);
+
+    pub(crate) const fn new(profile: Profile, guest_surface: GuestSurface) -> Self {
+        Self {
+            profile,
+            guest_surface,
+        }
+    }
+
+    pub(crate) const fn from_vm(profile: Profile, guest_surface: GuestSurface) -> Self {
+        Self::new(profile, guest_surface)
+    }
+
+    /// Constructs a builder whose core VM semantics exactly match this
+    /// descriptor. Further builder methods may add budgets or services; the
+    /// final descriptor remains readable through
+    /// [`RustiaBuilder::execution_profile`].
+    pub fn builder(self) -> RustiaBuilder {
+        RustiaBuilder::from_execution_profile(self)
+    }
+
+    /// Stable compact code for fixed-width host protocol fields.
+    ///
+    /// Codes name the complete `(Profile, GuestSurface)` pair rather than
+    /// relying on Rust enum discriminants.
+    pub const fn compatibility_id(self) -> u32 {
+        match (self.profile, self.guest_surface) {
+            (Profile::DeterministicSim, GuestSurface::HardenedLeaf) => 1,
+            (Profile::LuauCompat, GuestSurface::Standard) => 2,
+            (Profile::ReproducibleStandard, GuestSurface::Standard) => 3,
+            (Profile::DeterministicSim, GuestSurface::Standard) => 4,
+            (Profile::LuauCompat, GuestSurface::HardenedLeaf) => 5,
+            (Profile::ReproducibleStandard, GuestSurface::HardenedLeaf) => 6,
+        }
+    }
+
+    /// Canonical versioned bytes for package and replay identity components.
+    ///
+    /// Each field is an explicitly assigned little-endian `u32`: encoding
+    /// version, core-profile tag, then guest-surface tag.
+    pub const fn identity_bytes(self) -> [u8; 12] {
+        let encoding = 1u32.to_le_bytes();
+        let profile = match self.profile {
+            Profile::LuauCompat => 1u32,
+            Profile::ReproducibleStandard => 2,
+            Profile::DeterministicSim => 3,
+        }
+        .to_le_bytes();
+        let surface = match self.guest_surface {
+            GuestSurface::Standard => 1u32,
+            GuestSurface::HardenedLeaf => 2,
+        }
+        .to_le_bytes();
+        [
+            encoding[0],
+            encoding[1],
+            encoding[2],
+            encoding[3],
+            profile[0],
+            profile[1],
+            profile[2],
+            profile[3],
+            surface[0],
+            surface[1],
+            surface[2],
+            surface[3],
+        ]
+    }
+}
+
 impl RustiaBuilder {
     pub(crate) fn new() -> Self {
         Self {
@@ -26,6 +117,19 @@ impl RustiaBuilder {
             extensions: Vec::new(),
             live_requested: false,
         }
+    }
+
+    fn from_execution_profile(execution_profile: RustiaExecutionProfile) -> Self {
+        let mut builder = Self::new();
+        builder.profile = execution_profile.profile;
+        builder.settings.guest_surface = execution_profile.guest_surface;
+        builder
+    }
+
+    /// Returns the typed core execution semantics currently selected by this
+    /// builder.
+    pub const fn execution_profile(&self) -> RustiaExecutionProfile {
+        RustiaExecutionProfile::new(self.profile, self.settings.guest_surface)
     }
 
     /// Reproducible-by-default preset: `Profile::ReproducibleStandard` plus a real stdout
@@ -43,7 +147,7 @@ impl RustiaBuilder {
     /// Sealed-box preset: `Profile::DeterministicSim`, no services. Deterministic providers
     /// can still be plugged explicitly via the service sockets.
     pub fn deterministic() -> Self {
-        Self::new().profile(Profile::DeterministicSim)
+        RustiaExecutionProfile::DETERMINISTIC_STANDARD.builder()
     }
 
     /// Authoritative stateless-leaf preset.
@@ -53,9 +157,7 @@ impl RustiaBuilder {
     /// mandatory and must be selected explicitly with
     /// [`memory_limit_bytes`](Self::memory_limit_bytes).
     pub fn deterministic_leaf() -> Self {
-        let mut builder = Self::deterministic();
-        builder.settings.guest_surface = GuestSurface::HardenedLeaf;
-        builder
+        RustiaExecutionProfile::DETERMINISTIC_HARDENED_LEAF.builder()
     }
 
     /// "Normal Luau" preset with `loadstring` enabled (runtime codegen — attack surface for
