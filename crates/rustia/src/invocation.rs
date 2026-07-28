@@ -15,60 +15,155 @@ use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-/// The lifetime-independent schema of a typed host boundary.
+/// Defines the kinds of data Rustia can exchange with your application.
 ///
-/// A `Rustia<H>` stores functions typed against this schema, while each
-/// invocation borrows a fresh [`HostContext<H>`]. Keeping the schema separate
-/// lets one VM accept context values containing unrelated tick-local borrows.
+/// Implement this trait once for an application integration. It contains no
+/// runtime data and has no methods; it only names the Rust types passed between
+/// your application and its scripts.
+///
+/// Here, an *invocation* means one [`Rustia::invoke`](crate::Rustia::invoke)
+/// operation: the period in which your application lends data to guest code
+/// and collects its outputs.
+///
+/// A useful way to read the two host traits is:
+///
+/// - `HostSchema` says **which types** the integration uses.
+/// - [`HostContext<H>`](HostContext) supplies **the actual values** for one
+///   invocation.
+///
+/// For example, a game might define its integration like this:
+///
+/// ```
+/// # use rustia::HostSchema;
+/// # struct SensorSnapshot;
+/// # struct SavedMemory;
+/// # struct DebugState;
+/// # struct Action;
+/// # struct MemoryChange;
+/// # struct OutputRecord;
+/// struct GameAi;
+///
+/// impl HostSchema for GameAi {
+///     type Input = SensorSnapshot;
+///     type Slots = SavedMemory;
+///     type External = DebugState;
+///     type Effect = Action;
+///     type SlotWrite = MemoryChange;
+///     type Record = OutputRecord;
+/// }
+/// ```
+///
+/// Rust functions exposed to scripts—called *host callbacks*—can request only
+/// the part of this schema they are allowed to use. For example, an input
+/// callback can read `Input`, while an effect callback can only stage an
+/// `Effect`.
+///
+/// # Why the types and values are separate
+///
+/// A [`Rustia<H>`](crate::Rustia) VM and its registered functions can live for
+/// a long time. The [`HostContext`] passed to [`Rustia::invoke`](crate::Rustia::invoke)
+/// is borrowed only while that invocation runs. Keeping them separate means a
+/// short-lived context can safely borrow data from the current frame, tick, or
+/// request; Rustia never stores those borrowed values.
 pub trait HostSchema: Sized + 'static {
-    /// Immutable data supplied afresh for each invocation.
+    /// Read-only input for the current invocation, such as a sensor snapshot
+    /// or request data.
     type Input: ?Sized;
-    /// Immutable persistent state visible to slot-read callbacks.
+    /// Read-only saved state, or "slots", that persists between invocations.
     type Slots: ?Sized;
-    /// Mutable state available only to callbacks rejected by
-    /// [`Profile::DeterministicSim`](crate::Profile::DeterministicSim).
+    /// Mutable application state for explicitly external or nondeterministic
+    /// callbacks.
+    ///
+    /// [`Profile::DeterministicSim`](crate::Profile::DeterministicSim) rejects
+    /// callbacks with this access before installing them.
     type External: ?Sized;
-    /// Payload accepted by [`Effects::emit`].
+    /// An action or event that a script may stage with [`Effects::emit`].
     type Effect;
-    /// Payload accepted by [`SlotWrites::write`].
+    /// A proposed change to saved slot state that a script may stage with
+    /// [`SlotWrites::write`].
     type SlotWrite;
-    /// Host-owned committed record type produced from effects and slot writes.
+    /// One output item returned to the application after a successful
+    /// invocation.
+    ///
+    /// [`HostContext::record_effect`] and [`HostContext::record_slot_write`]
+    /// convert effects and slot writes into this common type.
     type Record;
 }
 
-/// The concrete authority borrowed for one invocation of host schema `H`.
+/// Supplies the actual host data used by one Rustia invocation.
 ///
-/// Implementations should treat `input`, `slots`, record construction, and
-/// `record_bytes` as pure projections. Rustia can roll back its private
-/// journal, but it cannot undo mutation hidden behind interior mutability or
-/// mutation performed through [`HostMut`].
+/// This is usually implemented for a small, short-lived struct containing
+/// references to your application's current data:
+///
+/// ```
+/// # struct SensorSnapshot;
+/// # struct SavedMemory;
+/// # struct DebugState;
+/// struct CurrentTurn<'a> {
+///     sensors: &'a SensorSnapshot,
+///     memory: &'a SavedMemory,
+///     debug: &'a mut DebugState,
+/// }
+/// ```
+///
+/// Pass a value like `CurrentTurn` to [`Rustia::invoke`](crate::Rustia::invoke).
+/// Rustia borrows it only until that invocation finishes and never stores it.
+/// A later invocation may use a completely different context value, borrowing
+/// different application data.
+///
+/// The accessor methods determine what registered host callbacks can see.
+/// Effect and slot-write callbacks do not modify application state directly;
+/// they create `Record` values in Rustia's private staging area. Rustia returns
+/// those records only if the complete invocation succeeds.
+///
+/// # What Rustia can roll back
+///
+/// Rustia can discard staged records, but it cannot undo other mutations.
+/// Implementations should therefore make [`HostContext::input`],
+/// [`HostContext::slots`], the two `record_*` methods, and
+/// [`HostContext::record_bytes`] behave like read-only calculations. Mutation
+/// performed through [`HostMut`]—or hidden behind interior mutability—is
+/// immediate and is not part of the record transaction.
 pub trait HostContext<H>
 where
     H: HostSchema,
 {
-    /// Returns the immutable input for this invocation.
+    /// Returns the read-only input for this invocation.
     fn input(&self) -> &H::Input;
 
-    /// Returns the immutable persistent-slot projection for this invocation.
+    /// Returns the read-only persistent state visible to slot-reading
+    /// callbacks.
     fn slots(&self) -> &H::Slots;
 
-    /// Returns mutable external state.
+    /// Returns mutable application state for external or nondeterministic
+    /// callbacks.
     ///
     /// Rustia calls this only for functions registered through
     /// [`HostModule::external`] or [`HostModule::nondeterministic`], which
-    /// deterministic profiles reject before installation.
+    /// deterministic profiles reject before installation. Changes made through
+    /// this method take effect immediately and cannot be rolled back by Rustia.
     fn external_mut(&mut self) -> &mut H::External;
 
-    /// Converts an emitted effect and its dense invocation-local sequence
-    /// number into the host's committed record type.
+    /// Wraps an emitted effect in the application's common output-record type.
+    ///
+    /// `sequence` starts at zero and increases for each effect or slot write
+    /// staged during this invocation. It can be used to preserve the exact
+    /// order in which the script produced its outputs.
     fn record_effect(&self, sequence: u32, effect: H::Effect) -> H::Record;
 
-    /// Converts a staged slot write and its dense invocation-local sequence
-    /// number into the host's committed record type.
+    /// Wraps a staged slot write in the application's common output-record
+    /// type.
+    ///
+    /// Effects and slot writes share the same increasing `sequence`, so their
+    /// relative order is preserved.
     fn record_slot_write(&self, sequence: u32, write: H::SlotWrite) -> H::Record;
 
-    /// Returns the deterministic logical payload size charged to the
-    /// invocation output budget.
+    /// Reports how many logical bytes this record should consume from the
+    /// invocation's output budget.
+    ///
+    /// This is application-defined accounting rather than Rust's in-memory
+    /// object size. It must return the same answer for the same record when
+    /// deterministic execution is required.
     fn record_bytes(&self, record: &H::Record) -> u64;
 }
 
