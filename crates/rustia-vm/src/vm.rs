@@ -89,6 +89,7 @@ pub type LoadStringCompiler =
     fn(source: &[u8], source_name: Option<&[u8]>) -> std::result::Result<Program, String>;
 
 type SharedStdoutSink = Rc<RefCell<dyn FnMut(&str)>>;
+type SharedEntropyProvider = Rc<RefCell<dyn FnMut() -> u64>>;
 
 /// Shared host sink for composed `print` output. Cloning shares the underlying sink.
 #[derive(Clone)]
@@ -150,20 +151,58 @@ impl fmt::Debug for ClockProvider {
     }
 }
 
+/// Shared host entropy provider used to choose the VM's initial `math.random` seed.
+/// `deterministic` marks the supplied seed as replay-stable. Cloning shares the
+/// underlying provider.
+#[derive(Clone)]
+pub struct EntropyProvider {
+    entropy: SharedEntropyProvider,
+    deterministic: bool,
+}
+
+impl EntropyProvider {
+    pub fn new(entropy: impl FnMut() -> u64 + 'static, deterministic: bool) -> Self {
+        Self {
+            entropy: Rc::new(RefCell::new(entropy)),
+            deterministic,
+        }
+    }
+
+    #[inline]
+    pub const fn deterministic(&self) -> bool {
+        self.deterministic
+    }
+
+    fn read(&self) -> u64 {
+        (self.entropy.borrow_mut())()
+    }
+}
+
+impl fmt::Debug for EntropyProvider {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("EntropyProvider")
+            .field("deterministic", &self.deterministic)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Host-pluggable service sockets (design/72-host-services.md). The default is empty: every
 /// socket falls back to the VM's built-in deterministic default (`print` no-op, the pinned
-/// epoch for `os.time`/`os.date`, the logical clock for `os.clock`).
+/// epoch for `os.time`/`os.date`, the logical clock for `os.clock`, seed zero for
+/// `math.random`).
 #[derive(Clone, Debug, Default)]
 pub struct VmServices {
     pub stdout: Option<StdoutSink>,
     pub wall_clock: Option<ClockProvider>,
     pub monotonic_clock: Option<ClockProvider>,
+    pub entropy: Option<EntropyProvider>,
 }
 
 impl VmServices {
-    /// `DeterministicSim` admits only deterministic providers; nondeterministic clocks are
+    /// `DeterministicSim` admits only deterministic providers; nondeterministic inputs are
     /// silently dropped (same rule as `loadstring_compiler`).
-    fn retain_deterministic_clocks(&mut self) {
+    fn retain_deterministic_inputs(&mut self) {
         if self
             .wall_clock
             .as_ref()
@@ -178,10 +217,21 @@ impl VmServices {
         {
             self.monotonic_clock = None;
         }
+        if self
+            .entropy
+            .as_ref()
+            .is_some_and(|entropy| !entropy.deterministic())
+        {
+            self.entropy = None;
+        }
     }
 
     fn has_clock_provider(&self) -> bool {
         self.wall_clock.is_some() || self.monotonic_clock.is_some()
+    }
+
+    fn initial_random_seed(&self) -> u64 {
+        self.entropy.as_ref().map_or(0, EntropyProvider::read)
     }
 }
 
@@ -1825,7 +1875,7 @@ impl Vm {
             ..settings
         };
         if profile.is_deterministic_sim() {
-            settings.services.retain_deterministic_clocks();
+            settings.services.retain_deterministic_inputs();
         }
         if settings.guest_surface.is_hardened_leaf() {
             if hardened_configuration_error.is_some() {
@@ -1861,7 +1911,7 @@ impl Vm {
             settings.enable_conformance_native_type_checks,
             settings.enable_conformance_pcall_helpers,
         );
-        let initial_rng_state = pcg32_seed(0);
+        let initial_rng_state = pcg32_seed(settings.services.initial_random_seed());
         let rng_state = initial_rng_state;
         let next_weak_collection_instruction = settings.deterministic_gc_interval.get();
         let mut vm = Self {

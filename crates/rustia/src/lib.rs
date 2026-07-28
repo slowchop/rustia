@@ -15,7 +15,7 @@ use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
 pub use extension_api::{
     RustiaBuilder, RustiaExecutionProfile, RustiaExtension, RustiaHostFuelPolicy,
-    RustiaHostFunctionInfo, ServiceClock, RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
+    RustiaHostFunctionInfo, ServiceClock, ServiceEntropy, RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
     RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY, RUSTIA_MIN_HOST_FUNCTION_FUEL,
 };
 pub use function::{Exports, Function};
@@ -816,9 +816,10 @@ mod tests {
     use super::{
         finish_entry_lifecycle, Error, FromRustia, GuestSurface, OpCapability, OwnedTable,
         OwnedValue, Profile, Result, Rustia, RustiaBuilder, RustiaExecutionProfile,
-        RustiaExtension, RustiaHostFunctionInfo, ServiceClock, SourceSpan, VmErrorKind, VmSettings,
-        RUSTIA_DECISION_RESET_ABI_VERSION, RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
-        RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY, RUSTIA_MIN_HOST_FUNCTION_FUEL,
+        RustiaExtension, RustiaHostFunctionInfo, ServiceClock, ServiceEntropy, SourceSpan,
+        VmErrorKind, VmSettings, RUSTIA_DECISION_RESET_ABI_VERSION,
+        RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
+        RUSTIA_MIN_HOST_FUNCTION_FUEL,
     };
     use rustia_compiler::{compile_with_options, CompileOptions};
     use rustia_parser::parse_source;
@@ -2208,12 +2209,44 @@ return type(os) == 'table'
         assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
 
         let result = RustiaBuilder::deterministic()
-            .monotonic_clock(ServiceClock::system())
+            .monotonic_clock(ServiceClock::monotonic())
             .build();
         let Err(Error::Vm(error)) = result else {
             panic!("expected deterministic profile to reject a nondeterministic monotonic clock");
         };
         assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
+
+        let result = RustiaBuilder::deterministic()
+            .entropy(ServiceEntropy::system())
+            .build();
+        let Err(Error::Vm(error)) = result else {
+            panic!("expected deterministic profile to reject nondeterministic entropy");
+        };
+        assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
+    }
+
+    #[test]
+    fn fixed_entropy_is_reproducible_and_changes_the_initial_random_sequence() {
+        let sequence = |seed| {
+            let mut rustia = RustiaBuilder::standard()
+                .entropy(ServiceEntropy::fixed(seed))
+                .build()
+                .unwrap();
+            [
+                rustia.run::<f64>("return math.random()").unwrap(),
+                rustia.run::<f64>("return math.random()").unwrap(),
+            ]
+        };
+
+        assert_eq!(sequence(42), sequence(42));
+        assert_ne!(sequence(42), sequence(43));
+        assert_eq!(sequence(0), {
+            let mut rustia = RustiaBuilder::standard().build().unwrap();
+            [
+                rustia.run::<f64>("return math.random()").unwrap(),
+                rustia.run::<f64>("return math.random()").unwrap(),
+            ]
+        });
     }
 
     #[test]
@@ -2395,15 +2428,5 @@ return { count = #decision_global }
         assert_eq!(answer, 42.0);
         // print goes to real process stdout via `print!`, which a test cannot read back from
         // inside the process; sink delivery is covered by the VM-level capture tests.
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    #[test]
-    fn live_preset_fails_loudly_on_wasm32() {
-        let result = RustiaBuilder::live().build();
-        let Err(Error::Vm(error)) = result else {
-            panic!("expected live() to fail on wasm32");
-        };
-        assert!(matches!(error.kind, VmErrorKind::Unsupported { .. }));
     }
 }
