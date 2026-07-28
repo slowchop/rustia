@@ -102,6 +102,7 @@ function checkRunnerLabels(files) {
 function checkCi(text) {
   const label = ".github/workflows/ci.yml";
   const rustChannel = pinnedRustChannel();
+  const releasePreflightJob = text.split("\n  portable-engine-build:\n", 1)[0];
   requireIncludes(text, "name: CI\n", label);
   requireIncludes(text, "\"on\":\n  pull_request:\n  push:\n", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
@@ -115,6 +116,7 @@ function checkCi(text) {
   forbidIncludes(text, "rustup toolchain install stable", label);
   forbidIncludes(text, "rustup default stable", label);
   requireIncludes(text, "node tools/run-release-preflight.js", label);
+  requireIncludes(releasePreflightJob, "fetch-depth: 0", `${label} release-preflight job`);
   forbidIncludes(text, "cargo clippy --workspace", label);
   forbidIncludes(text, "cargo test --workspace", label);
   forbidIncludes(text, "node tools/check-package-files.js", label);
