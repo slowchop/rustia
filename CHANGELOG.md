@@ -323,6 +323,9 @@ Current unpublished workspace version: `0.0.1`.
 - GitHub Actions keeps benchmark work validation-only; fresh timing data comes
   from the explicit ephemeral Linode Linux lifecycle instead of an arbitrary
   self-hosted runner.
+- The billed Linode lifecycle is now operator-started, accepts only an exact
+  commit already present on `main`, and validates that ancestry before exposing
+  credentials or running repository code.
 - Workflow policy is checked in release preflight so hosted CI cannot record or
   publish fresh benchmark timings.
 - Release preflight and hosted CI now compile the public `rustia` examples

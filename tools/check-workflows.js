@@ -167,20 +167,19 @@ function checkReleasePreflight(text) {
 function checkRustiaMemory(text) {
   const label = ".github/workflows/linode-rustia-memory.yml";
   requireIncludes(text, "name: Rustia Linode Memory\n", label);
-  requireIncludes(text, "\"on\":\n  workflow_run:\n", label);
-  requireIncludes(text, "workflows:\n      - CI\n", label);
-  requireIncludes(text, "types:\n      - completed\n", label);
+  requireIncludes(text, "\"on\":\n  workflow_dispatch:\n", label);
+  requireIncludes(text, "commit_sha:\n", label);
+  requireIncludes(text, "required: true\n", label);
+  requireIncludes(text, "type: string\n", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
   requireIncludes(text, "cancel-in-progress: false\n", label);
-  requireIncludes(text, "github.event.workflow_run.conclusion == 'success'", label);
-  requireIncludes(text, "github.event.workflow_run.event == 'push'", label);
-  requireIncludes(text, "github.event.workflow_run.head_branch == 'main'", label);
-  requireIncludes(
-    text,
-    "github.event.workflow_run.head_repository.full_name == github.repository",
-    label,
-  );
-  requireIncludes(text, "ref: ${{ github.event.workflow_run.head_sha }}", label);
+  requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
+  requireIncludes(text, "ref: main", label);
+  requireIncludes(text, "BENCHMARK_COMMIT: ${{ inputs.commit_sha }}", label);
+  requireIncludes(text, "^[0-9a-f]{40}$", label);
+  requireIncludes(text, 'git cat-file -e "${BENCHMARK_COMMIT}^{commit}"', label);
+  requireIncludes(text, 'git merge-base --is-ancestor "$BENCHMARK_COMMIT" origin/main', label);
+  requireIncludes(text, 'test "$(git rev-parse HEAD)" = "$BENCHMARK_COMMIT"', label);
   requireIncludes(text, "LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}", label);
   requireIncludes(text, "node tools/create-rustia-ci-memory-config.js", label);
   requireIncludes(text, "node tools/run-linode-benchmark.js bench", label);
@@ -194,6 +193,7 @@ function checkRustiaMemory(text) {
   forbidIncludes(text, "actions/upload-artifact", label);
   forbidIncludes(text, "retention-days:", label);
   forbidIncludes(text, "pull_request_target", label);
+  forbidIncludes(text, "workflow_run", label);
   forbidIncludes(text, "contents: write", label);
   checkActionPins(text, label);
 }

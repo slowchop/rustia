@@ -461,7 +461,7 @@
           "name": "Benchmark operations",
           "complete": 85,
           "confidence": 92,
-          "state": "Hosted CI validates committed artifacts and successful main CI can trigger a Rustia-only Linode memory cohort. The explicit bounded Linode lifecycle promotes only complete evidence after confirmed instance deletion. The cgroup-v2 memory supervisor/analyzer, current/history merge, dashboard, frozen 990-process cross-engine baseline, 99-sample safe-memory Rustia refresh, and wasm32 quota probe are implemented.",
+          "state": "Hosted CI validates committed artifacts without provisioning billed infrastructure. An operator can manually start a Rustia-only Linode memory cohort for an exact commit already present on main. The explicit bounded Linode lifecycle promotes only complete evidence after confirmed instance deletion. The cgroup-v2 memory supervisor/analyzer, current/history merge, dashboard, frozen 990-process cross-engine baseline, 99-sample safe-memory Rustia refresh, and wasm32 quota probe are implemented.",
           "future_plan": "Keep the Linode lifecycle reproducible, accumulate coherent history, broaden mixed-heap pressure, and add regression alerts without mixing developer-machine timings."
         }
       ]
