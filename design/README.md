@@ -6,7 +6,8 @@
 > corpus, 12-adapter Linux benchmark snapshot, cross-engine wasm pre-lock gate, and host output/time services
 > slice are in-tree. Historical spike
 > multipliers are not current product claims. Bounded object/program lifetimes, quotas/OOM, and deterministic
-> reset are implemented, as is the typed schema/context invocation with bounded record transactions. The next
+> reset are implemented, as is the typed schema/context invocation with bounded record transactions. The
+> hardened stateless action-leaf guest surface and direct compiled-entry path are also implemented. The next
 > release gates are O(1) accounting, broader pressure evidence, and the remaining module/value boundary — see
 > `CURRENT.md`.
 
@@ -39,6 +40,7 @@ docs are design intent.
 | [`72-host-services.md`](72-host-services.md) | **host services bus** — stdout sink, determinism-labeled `ServiceClock` providers, `standard()`/`deterministic()`/`live()` presets, logical `os.clock` | **[IMPLEMENTED v1]** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | **Grabby-Compatible Embedded API** — facade, typed schema/context transaction, serde, hot reload, extension/linker | **[TYPED INVOCATION IMPLEMENTED]** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public koto-to-rustia migration guide for the implemented embedding facade | **[GUIDE]** |
+| [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen authoritative guest surface, stateless compiled entries, and fast isolated reset | **[IMPLEMENTED v1]** ✅ |
 | [`80-bench-suite.md`](80-bench-suite.md) | 12-adapter Linux/wasm benchmark product, evidence protocol, generated report, and standalone split plan | **[IMPLEMENTED; SPLIT PENDING]** |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **[CHECKLIST]** |
 | [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **[POLICY]** |

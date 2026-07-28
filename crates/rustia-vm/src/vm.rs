@@ -1,5 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 
+#[cfg(test)]
+use crate::bytecode::InstructionSource;
 use crate::bytecode::{
     Constant, Function, Instruction, Opcode, Program, RuntimeType, UpvalueDescriptor,
     ASSERT_MESSAGE_MISSING_ARGUMENT, ASSERT_MESSAGE_NONE,
@@ -7,17 +9,18 @@ use crate::bytecode::{
 use crate::error::{Error, ErrorKind, ErrorLocation, Result};
 use crate::extension::{
     validate_registered_op, ExtensionOp, ExtensionRegistry, HostFunctionOp, HostFunctionTarget,
+    OpCapability,
 };
 use crate::heap::{
-    FunctionCapture, FunctionKind, NativeFunction, QuotaTableWrite, TableIterationOrder, TableNext,
-    TableNumericArrayWrite, TableStringHashSlot, TableStringHashWrite, UserdataPayload, VectorData,
-    VmCell,
+    FunctionCapture, FunctionKind, HeapCheckpoint, NativeFunction, QuotaTableWrite,
+    TableIterationOrder, TableNext, TableNumericArrayWrite, TableStringHashSlot,
+    TableStringHashWrite, UserdataPayload, VectorData, VmCell,
 };
 use crate::hot_ir::{recognize_hot_ir_loops, HotIr, HotIrNumber, HotIrOpKind, HotIrValue};
 #[cfg(test)]
 use crate::hot_ir::{HotIrArrayWrite, HotIrCellClear, HotIrNumberId, HotIrOp, HotIrRegisterWrite};
 use crate::number::{binary, canonicalize_number, NumericOp};
-use crate::profile::Profile;
+use crate::profile::{GuestSurface, Profile};
 use crate::value::{Value, ValueKind};
 use smallvec::SmallVec;
 use std::cell::RefCell;
@@ -48,6 +51,12 @@ pub const MAX_RECURSION_LIMIT: usize = 512;
 /// restarts RNG and deterministic collection scheduling from their initial
 /// state.
 pub const DECISION_RESET_ABI_VERSION: u32 = 1;
+/// Version of the guest-language restrictions selected by
+/// [`GuestSurface::HardenedLeaf`].
+///
+/// Replay and content protocols that depend on this surface must record the
+/// value alongside [`DECISION_RESET_ABI_VERSION`].
+pub const HARDENED_LEAF_GUEST_ABI_VERSION: u32 = 1;
 const LUAU_TAIL_CALL_LIMIT: usize = 20_000;
 const CONSTANT_ATOM_EMPTY: u32 = 0;
 const SITE_CACHE_CLOSURE_CALL_EMPTY: u32 = u32::MAX - 4;
@@ -197,6 +206,8 @@ pub struct VmSettings {
     /// catchable `OutOfMemory` error. Reserved allocator capacity is telemetry
     /// only and is not part of this deterministic native/Wasm limit.
     pub memory_limit_bytes: Option<usize>,
+    /// Guest-visible language and standard-library surface.
+    pub guest_surface: GuestSurface,
     pub services: VmServices,
 }
 
@@ -216,6 +227,7 @@ impl Default for VmSettings {
             enable_conformance_pcall_helpers: false,
             enable_memory_tracking: false,
             memory_limit_bytes: None,
+            guest_surface: GuestSurface::Standard,
             services: VmServices::default(),
         }
     }
@@ -245,6 +257,29 @@ pub struct VmExecution {
     hard_resource_errors: bool,
 }
 
+/// Opaque stateless program that has passed the complete hardened-leaf policy
+/// validation.
+///
+/// The wrapper makes repeated entry calls O(executed work): validation scans
+/// the bytecode once when the artifact is constructed rather than outside the
+/// invocation fuel budget on every decision.
+#[doc(hidden)]
+#[derive(Clone, Debug)]
+pub struct HardenedLeafProgram {
+    program: Arc<Program>,
+}
+
+impl HardenedLeafProgram {
+    #[doc(hidden)]
+    pub fn new(program: Program) -> Result<Self> {
+        validate_stateless_entry_program(&program)?;
+        validate_hardened_leaf_program(&program)?;
+        Ok(Self {
+            program: Arc::new(program),
+        })
+    }
+}
+
 impl VmExecution {
     /// Fuel remaining in this shared execution, or `None` when unmetered.
     #[doc(hidden)]
@@ -266,6 +301,9 @@ pub struct Vm {
     profile: Profile,
     settings: VmSettings,
     poisoned: bool,
+    hardened_configuration_error: Option<&'static str>,
+    guest_environment_sealed: bool,
+    hardened_heap_checkpoint: Option<HeapCheckpoint>,
     heap: VmCell,
     globals: u32,
     standard_globals: u32,
@@ -1772,12 +1810,38 @@ impl Vm {
     }
 
     pub fn with_settings(profile: Profile, settings: VmSettings) -> Self {
+        let hardened_configuration_error = settings
+            .guest_surface
+            .is_hardened_leaf()
+            .then_some("missing logical-live memory limit")
+            .filter(|_| settings.memory_limit_bytes.is_none());
+        let profile = if settings.guest_surface.is_hardened_leaf() {
+            Profile::DeterministicSim
+        } else {
+            profile
+        };
         let mut settings = VmSettings {
             recursion_limit: settings.recursion_limit.min(MAX_RECURSION_LIMIT),
             ..settings
         };
         if profile.is_deterministic_sim() {
             settings.services.retain_deterministic_clocks();
+        }
+        if settings.guest_surface.is_hardened_leaf() {
+            if hardened_configuration_error.is_some() {
+                // Infallible low-level constructors cannot return the invalid
+                // configuration. A zero ceiling prevents further unbounded
+                // growth, while guest execution reports the explicit error.
+                settings.memory_limit_bytes = Some(0);
+            }
+            settings.loadstring_compiler = None;
+            settings.enable_conformance_coverage = false;
+            settings.enable_conformance_top_level_yield = false;
+            settings.enable_conformance_int64_userdata = false;
+            settings.enable_conformance_native_userdata = false;
+            settings.enable_conformance_native_type_checks = false;
+            settings.enable_conformance_pcall_helpers = false;
+            settings.services = VmServices::default();
         }
         let mut heap = VmCell::new();
         let globals = heap.alloc_array_table(&[]);
@@ -1788,6 +1852,7 @@ impl Vm {
             &mut heap,
             globals,
             profile,
+            settings.guest_surface,
             enable_loadstring,
             register_os,
             settings.enable_conformance_coverage,
@@ -1803,6 +1868,9 @@ impl Vm {
             profile,
             settings,
             poisoned: false,
+            hardened_configuration_error,
+            guest_environment_sealed: false,
+            hardened_heap_checkpoint: None,
             heap,
             globals,
             standard_globals: standard_globals.standard_globals,
@@ -1927,14 +1995,16 @@ impl Vm {
     }
 
     /// Starts a fresh decision epoch while reusing this VM's allocation
-    /// containers.
+    /// containers. A hardened-leaf VM preserves its sealed immutable
+    /// environment prefix and discards every allocation made after sealing;
+    /// ordinary surfaces rebuild their configured environment.
     ///
     /// Reset ABI version [`DECISION_RESET_ABI_VERSION`] preserves the profile,
     /// settings, service providers, extension operations, installed global
     /// host functions, installed host modules, and lifetime memory peaks. It
-    /// discards guest globals, tables, functions/upvalues, coroutines, loaded
-    /// programs and caches, tracebacks, coverage counters, and public retained
-    /// roots. RNG, logical time, compatibility GC state, and deterministic
+    /// discards decision-local guest globals, tables, functions/upvalues,
+    /// coroutines, loaded programs and caches, tracebacks, coverage counters,
+    /// and public retained roots. RNG, logical time, compatibility GC state, and deterministic
     /// collection scheduling restart from their construction values.
     ///
     /// Ordinary values inserted with `set_global_value` are decision inputs,
@@ -1960,6 +2030,10 @@ impl Vm {
         let next_epoch = self.decision_epoch.checked_add(1).ok_or_else(|| {
             Error::new(ErrorKind::DecisionEpochExhausted).without_source_location()
         })?;
+        let hardened_leaf = self.settings.guest_surface.is_hardened_leaf();
+        if hardened_leaf {
+            self.seal_hardened_guest_environment()?;
+        }
 
         self.coroutines.clear();
         self.last_error_traceback = None;
@@ -1972,30 +2046,48 @@ impl Vm {
             values: BTreeMap::new(),
         }));
 
-        self.heap.reset_decision_epoch();
-        let globals = self.heap.alloc_array_table(&[]);
-        let enable_loadstring =
-            self.settings.loadstring_compiler.is_some() && !self.profile.is_deterministic_sim();
-        let register_os =
-            !self.profile.is_deterministic_sim() || self.settings.services.has_clock_provider();
-        let standard_globals = initialize_standard_globals(
-            &mut self.heap,
-            globals,
-            self.profile,
-            enable_loadstring,
-            register_os,
-            self.settings.enable_conformance_coverage,
-            self.settings.enable_conformance_int64_userdata,
-            self.settings.enable_conformance_native_userdata,
-            self.settings.enable_conformance_native_type_checks,
-            self.settings.enable_conformance_pcall_helpers,
-        );
-        self.globals = globals;
-        self.standard_globals = standard_globals.standard_globals;
-        self.conformance_int64_metatable = standard_globals.conformance_int64_metatable;
-        self.conformance_vec2_metatable = standard_globals.conformance_vec2_metatable;
-        self.conformance_vertex_metatable = standard_globals.conformance_vertex_metatable;
-        self.restore_host_function_bindings();
+        if hardened_leaf {
+            let checkpoint = self.hardened_heap_checkpoint.ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "hardened guest heap checkpoint is missing",
+                })
+                .without_source_location()
+            })?;
+            if !self.heap.has_table(self.globals) {
+                return Err(Error::new(ErrorKind::InvalidProgram {
+                    reason: "hardened guest globals table is missing",
+                })
+                .without_source_location());
+            }
+            self.heap.reset_hardened_decision_epoch(checkpoint);
+        } else {
+            self.heap.reset_decision_epoch();
+            let globals = self.heap.alloc_array_table(&[]);
+            let enable_loadstring =
+                self.settings.loadstring_compiler.is_some() && !self.profile.is_deterministic_sim();
+            let register_os =
+                !self.profile.is_deterministic_sim() || self.settings.services.has_clock_provider();
+            let standard_globals = initialize_standard_globals(
+                &mut self.heap,
+                globals,
+                self.profile,
+                self.settings.guest_surface,
+                enable_loadstring,
+                register_os,
+                self.settings.enable_conformance_coverage,
+                self.settings.enable_conformance_int64_userdata,
+                self.settings.enable_conformance_native_userdata,
+                self.settings.enable_conformance_native_type_checks,
+                self.settings.enable_conformance_pcall_helpers,
+            );
+            self.globals = globals;
+            self.standard_globals = standard_globals.standard_globals;
+            self.conformance_int64_metatable = standard_globals.conformance_int64_metatable;
+            self.conformance_vec2_metatable = standard_globals.conformance_vec2_metatable;
+            self.conformance_vertex_metatable = standard_globals.conformance_vertex_metatable;
+            self.guest_environment_sealed = false;
+            self.restore_host_function_bindings();
+        }
 
         self.rng_state = self.initial_rng_state;
         self.gcinfo_counter = 0;
@@ -2011,11 +2103,79 @@ impl Vm {
     }
 
     fn ensure_healthy(&self) -> Result<()> {
-        if self.poisoned {
+        if let Some(feature) = self.hardened_configuration_error {
+            Err(Error::new(ErrorKind::HardenedLeafViolation { feature }).without_source_location())
+        } else if self.poisoned {
             Err(Error::new(ErrorKind::VmPoisoned).without_source_location())
         } else {
             Ok(())
         }
+    }
+
+    fn ensure_hardened_transaction(&self, state: &VmExecution) -> Result<()> {
+        if !self.settings.guest_surface.is_hardened_leaf() {
+            return Ok(());
+        }
+        if !state.hard_resource_errors {
+            return Err(Error::new(ErrorKind::HardenedLeafViolation {
+                feature: "non-transactional execution",
+            })
+            .without_source_location());
+        }
+        if state.fuel_limit.is_none() {
+            return Err(Error::new(ErrorKind::HardenedLeafViolation {
+                feature: "unmetered execution",
+            })
+            .without_source_location());
+        }
+        Ok(())
+    }
+
+    fn seal_hardened_guest_environment(&mut self) -> Result<()> {
+        if !self.settings.guest_surface.is_hardened_leaf() || self.guest_environment_sealed {
+            return Ok(());
+        }
+        // External roots are decision-local handles, not immutable host
+        // configuration. Letting one participate in the pre-seal collection
+        // would make an arbitrary mutable value look like part of the
+        // preserved prefix. Reset then invalidates the root registry, so a
+        // later collection could free and reuse that prefix slot.
+        if !self.external_roots.borrow().values.is_empty() {
+            return Err(Error::new(ErrorKind::HardenedLeafViolation {
+                feature: "pre-seal retained values",
+            })
+            .without_source_location());
+        }
+        // A length checkpoint is safe only when every reusable prefix slot is
+        // live configuration. Collect first so unreachable pre-seal
+        // allocations become explicit holes; `hardened_checkpoint` then
+        // rejects rather than allowing guest allocations to reuse a prefix
+        // slot that reset would preserve.
+        self.collect_garbage();
+        let checkpoint = self.heap.hardened_checkpoint().ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "hardened guest heap is not append-only before sealing",
+            })
+            .without_source_location()
+        })?;
+        self.heap.table_freeze(self.globals).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "guest globals table is missing",
+            })
+            .without_source_location()
+        })?;
+        self.hardened_heap_checkpoint = Some(checkpoint);
+        self.guest_environment_sealed = true;
+        Ok(())
+    }
+
+    fn prepare_guest_execution(&mut self, program: &Program) -> Result<()> {
+        self.ensure_healthy()?;
+        if self.settings.guest_surface.is_hardened_leaf() {
+            validate_hardened_leaf_program(program)?;
+            self.seal_hardened_guest_environment()?;
+        }
+        Ok(())
     }
 
     fn catch_host_callback<T>(
@@ -2044,7 +2204,7 @@ impl Vm {
                         .heap
                         .alloc_host_function(host, self.globals)
                         .expect("persisted host function handle must remain representable");
-                    self.set_global_value(name, Value::function(handle))
+                    self.set_host_configuration_global(name, Value::function(handle))
                         .expect("fresh globals must accept a persisted host function");
                 }
                 HostFunctionBinding::Module {
@@ -2062,7 +2222,15 @@ impl Vm {
                         self.raw_table_set_value(table, key, Value::function(handle))
                             .expect("fresh module table must accept a persisted host function");
                     }
-                    self.set_global_value(namespace, table)
+                    if self.settings.guest_surface.is_hardened_leaf() {
+                        let module = table
+                            .as_table()
+                            .expect("host module binding must remain a table");
+                        self.heap
+                            .table_freeze(module)
+                            .expect("fresh host module table must be valid");
+                    }
+                    self.set_host_configuration_global(namespace, table)
                         .expect("fresh globals must accept a persisted host module");
                 }
             }
@@ -2141,10 +2309,17 @@ impl Vm {
     }
 
     pub fn register_extension_op(&mut self, op: ExtensionOp) -> Result<u16> {
+        if self.settings.guest_surface.is_hardened_leaf() {
+            return Err(Error::new(ErrorKind::HardenedLeafViolation {
+                feature: "legacy extension operations",
+            })
+            .without_source_location());
+        }
         self.extensions.register(self.profile, op)
     }
 
     pub fn register_host_function(&mut self, op: HostFunctionOp) -> Result<Value> {
+        self.validate_hardened_host_function(&op)?;
         validate_registered_op(self.profile, &op.name, op.fuel_cost, op.capability)?;
         let id = u32::try_from(self.host_functions.len()).map_err(|_| {
             Error::new(ErrorKind::InvalidProgram {
@@ -2164,6 +2339,9 @@ impl Vm {
     }
 
     pub fn install_host_function(&mut self, op: HostFunctionOp) -> Result<()> {
+        if self.guest_environment_sealed {
+            return Err(Error::new(ErrorKind::GuestEnvironmentSealed).without_source_location());
+        }
         validate_registered_op(self.profile, &op.name, op.fuel_cost, op.capability)?;
         self.host_functions
             .try_reserve(1)
@@ -2179,7 +2357,7 @@ impl Vm {
         })?;
         let host_functions_checkpoint = self.host_functions.len();
         let value = self.register_host_function(op)?;
-        if let Err(error) = self.set_global_value(&name, value) {
+        if let Err(error) = self.set_host_configuration_global(&name, value) {
             self.host_functions.truncate(host_functions_checkpoint);
             return Err(error);
         }
@@ -2197,8 +2375,12 @@ impl Vm {
         namespace: impl Into<String>,
         functions: Vec<HostFunctionOp>,
     ) -> Result<()> {
+        if self.guest_environment_sealed {
+            return Err(Error::new(ErrorKind::GuestEnvironmentSealed).without_source_location());
+        }
         let namespace = namespace.into();
         for function in &functions {
+            self.validate_hardened_host_function(function)?;
             let qualified_name = format!("{namespace}.{}", function.name);
             validate_registered_op(
                 self.profile,
@@ -2232,7 +2414,15 @@ impl Vm {
                 self.raw_table_set_value(table, key, value)?;
                 bindings.push((name, host));
             }
-            self.set_global_value(&namespace, table)
+            if self.settings.guest_surface.is_hardened_leaf() {
+                let module = table
+                    .as_table()
+                    .expect("host module binding must be a table");
+                self.heap
+                    .table_freeze(module)
+                    .expect("new host module table must be valid");
+            }
+            self.set_host_configuration_global(&namespace, table)
         })();
         if let Err(error) = install {
             self.host_functions.truncate(host_functions_checkpoint);
@@ -2243,6 +2433,19 @@ impl Vm {
                 namespace,
                 functions: bindings,
             });
+        Ok(())
+    }
+
+    fn validate_hardened_host_function(&self, op: &HostFunctionOp) -> Result<()> {
+        if self.settings.guest_surface.is_hardened_leaf()
+            && op.capability != OpCapability::Pure
+            && matches!(op.target, HostFunctionTarget::Inline(_))
+        {
+            return Err(Error::new(ErrorKind::HardenedLeafViolation {
+                feature: "untransactional host capability",
+            })
+            .without_source_location());
+        }
         Ok(())
     }
 
@@ -2268,6 +2471,16 @@ impl Vm {
     }
 
     pub fn set_global_value(&mut self, name: impl AsRef<str>, value: Value) -> Result<()> {
+        if self.settings.guest_surface.is_hardened_leaf() {
+            return Err(Error::new(ErrorKind::HardenedLeafViolation {
+                feature: "ordinary global inputs",
+            })
+            .without_source_location());
+        }
+        self.set_host_configuration_global(name, value)
+    }
+
+    fn set_host_configuration_global(&mut self, name: impl AsRef<str>, value: Value) -> Result<()> {
         let key = self.string(name);
         self.set_table_index(self.globals, key, value)
     }
@@ -2413,6 +2626,8 @@ impl Vm {
         execution: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         self.ensure_healthy()?;
+        self.ensure_hardened_transaction(execution.state)?;
+        self.seal_hardened_guest_environment()?;
         let program = Program::new(
             Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
             Vec::new(),
@@ -2421,6 +2636,10 @@ impl Vm {
     }
 
     /// Retains a value as an embedder-owned collector root.
+    ///
+    /// Hardened-leaf roots are decision-local. Retaining a value before the
+    /// first hardened environment seal causes that seal to fail; the host must
+    /// drop the handle and retry after making the heap append-only.
     pub fn retain_value(&mut self, value: Value) -> RetainedValue {
         let (id, decision_epoch) = {
             let mut roots = self.external_roots.borrow_mut();
@@ -2474,12 +2693,97 @@ impl Vm {
         self.run_with_execution(program, &mut execution)
     }
 
+    /// Executes a top-level program without retaining it in the VM.
+    ///
+    /// The caller must keep `program` alive for the call. Nested function
+    /// prototypes are rejected because they would require retained program
+    /// identity after closure construction.
+    #[doc(hidden)]
+    pub fn run_stateless_entry_in<F>(
+        &mut self,
+        program: &Program,
+        state: &mut VmExecution,
+        host: &mut F,
+    ) -> Result<Value>
+    where
+        F: FnMut(&mut Vm, u32, &[Value]) -> Result<Vec<Value>>,
+    {
+        validate_stateless_entry_program(program)?;
+        self.ensure_hardened_transaction(state)?;
+        let mut hosts = CallbackHostDispatcher(host);
+        let mut execution = Execution {
+            state,
+            hosts: &mut hosts,
+        };
+        self.prepare_guest_execution(program)?;
+        self.run_stateless_entry_with_execution(program, &mut execution)
+    }
+
+    /// Executes an opaque stateless program whose hardened bytecode policy was
+    /// validated when it was compiled.
+    #[doc(hidden)]
+    pub fn run_hardened_leaf_entry_in<F>(
+        &mut self,
+        entry: &HardenedLeafProgram,
+        state: &mut VmExecution,
+        host: &mut F,
+    ) -> Result<Value>
+    where
+        F: FnMut(&mut Vm, u32, &[Value]) -> Result<Vec<Value>>,
+    {
+        if !self.settings.guest_surface.is_hardened_leaf() {
+            return Err(Error::new(ErrorKind::HardenedLeafViolation {
+                feature: "non-hardened guest surface",
+            })
+            .without_source_location());
+        }
+        self.ensure_hardened_transaction(state)?;
+        let mut hosts = CallbackHostDispatcher(host);
+        let mut execution = Execution {
+            state,
+            hosts: &mut hosts,
+        };
+        self.ensure_healthy()?;
+        self.seal_hardened_guest_environment()?;
+        self.run_stateless_entry_with_execution(&entry.program, &mut execution)
+    }
+
+    fn run_stateless_entry_with_execution(
+        &mut self,
+        program: &Program,
+        execution: &mut Execution<'_>,
+    ) -> Result<Value> {
+        let results = self
+            .run_function(
+                program,
+                None,
+                &program.main,
+                &[],
+                FunctionCallContext {
+                    current_function: None,
+                    captures: &[],
+                    depth: 0,
+                    environment: self.globals,
+                    call_site: None,
+                    prototype: None,
+                },
+                None,
+                execution,
+            )
+            .map_err(|error| attach_existing_instruction_source(program, &program.main, error))?;
+        let VmFlow::Return(results) = results else {
+            return Err(non_yieldable_boundary_error());
+        };
+        Ok(first_result_or_nil(results))
+    }
+
     fn run_with_execution(
         &mut self,
         program: &Program,
         execution: &mut Execution<'_>,
     ) -> Result<Value> {
-        self.ensure_healthy()?;
+        self.ensure_hardened_transaction(execution.state)?;
+        self.prepare_guest_execution(program)?;
         let program_id = self.retain_dynamic_program_ref(program)?;
         let results = self
             .run_function(
@@ -2511,8 +2815,9 @@ impl Vm {
         function: Value,
         args: &[Value],
     ) -> Result<Value> {
-        self.ensure_healthy()?;
         let mut state = self.begin_execution();
+        self.ensure_hardened_transaction(&state)?;
+        self.prepare_guest_execution(program)?;
         let mut hosts = RejectHostDispatcher;
         let mut execution = Execution {
             state: &mut state,
@@ -2536,7 +2841,8 @@ impl Vm {
     where
         F: FnMut(&mut Vm, u32, &[Value]) -> Result<Vec<Value>>,
     {
-        self.ensure_healthy()?;
+        self.ensure_hardened_transaction(state)?;
+        self.prepare_guest_execution(program)?;
         let mut hosts = CallbackHostDispatcher(host);
         let mut execution = Execution {
             state,
@@ -17384,10 +17690,289 @@ impl Vm {
     }
 }
 
+fn validate_hardened_leaf_program(program: &Program) -> Result<()> {
+    for function in std::iter::once(&program.main).chain(program.functions.iter()) {
+        if !function.upvalues.is_empty() {
+            return Err(attach_instruction_source(
+                program,
+                function,
+                0,
+                Error::new(ErrorKind::HardenedLeafViolation {
+                    feature: "captured upvalues",
+                }),
+            ));
+        }
+        for (pc, instruction) in function.code.iter().enumerate() {
+            let feature = match instruction.op {
+                Opcode::SetGlobal => Some("global mutation"),
+                Opcode::SetUpvalue => Some("captured upvalue mutation"),
+                Opcode::RawGet | Opcode::RawSet | Opcode::RawLen => Some("raw table access"),
+                Opcode::CallExtension => Some("legacy extension operations"),
+                _ => None,
+            };
+            if let Some(feature) = feature {
+                return Err(attach_instruction_source(
+                    program,
+                    function,
+                    pc,
+                    Error::new(ErrorKind::HardenedLeafViolation { feature }),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_stateless_entry_program(program: &Program) -> Result<()> {
+    if !program.functions.is_empty()
+        || !program.main.upvalues.is_empty()
+        || !program.main.captured_registers.is_empty()
+    {
+        let pc = if program.functions.is_empty() {
+            0
+        } else {
+            program
+                .main
+                .code
+                .iter()
+                .position(|instruction| instruction.op == Opcode::LoadFunction)
+                .unwrap_or(0)
+        };
+        return Err(attach_instruction_source(
+            program,
+            &program.main,
+            pc,
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "stateless entry contains nested functions or captured upvalues",
+            }),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod hardened_leaf_validation_tests {
+    use super::*;
+
+    fn hardened_settings() -> VmSettings {
+        VmSettings {
+            initial_fuel: Some(100),
+            memory_limit_bytes: Some(1024 * 1024),
+            guest_surface: GuestSurface::HardenedLeaf,
+            ..VmSettings::default()
+        }
+    }
+
+    fn visible_global_snapshot(vm: &mut Vm) -> BTreeMap<String, ValueKind> {
+        let mut snapshot = BTreeMap::new();
+        for table in [vm.globals, vm.standard_globals] {
+            let entries = vm
+                .raw_table_entries_value(Value::table(table))
+                .expect("global table entries");
+            for (key, value) in entries {
+                let key = String::from_utf8(
+                    vm.string_value_bytes(key)
+                        .expect("string key lookup")
+                        .expect("global keys are strings"),
+                )
+                .expect("global keys are UTF-8");
+                if let Some(prior) = snapshot.insert(key.clone(), value.kind()) {
+                    assert_eq!(prior, value.kind(), "global `{key}` changed type");
+                }
+            }
+        }
+        snapshot
+    }
+
+    #[test]
+    fn hardened_leaf_validator_rejects_every_forbidden_opcode() {
+        for (opcode, feature) in [
+            (Opcode::SetGlobal, "global mutation"),
+            (Opcode::SetUpvalue, "captured upvalue mutation"),
+            (Opcode::RawGet, "raw table access"),
+            (Opcode::RawSet, "raw table access"),
+            (Opcode::RawLen, "raw table access"),
+            (Opcode::CallExtension, "legacy extension operations"),
+        ] {
+            let program = Program::new(
+                Function::new(vec![Instruction::new(opcode, 0, 0, 0)], 1),
+                Vec::new(),
+            );
+            let error = validate_hardened_leaf_program(&program)
+                .expect_err("forbidden opcode must fail validation");
+            assert!(matches!(
+                &error.kind,
+                ErrorKind::HardenedLeafViolation { feature: actual }
+                    if *actual == feature
+            ));
+        }
+    }
+
+    #[test]
+    fn hardened_leaf_validator_rejects_captured_upvalues_in_nested_functions() {
+        let nested = Function::with_params_and_upvalues(
+            vec![Instruction::new(Opcode::Return, 0, 0, 0)],
+            1,
+            0,
+            vec![UpvalueDescriptor::ParentLocal(0)],
+            Vec::new(),
+        );
+        let program = Program::with_functions(
+            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            Vec::new(),
+            vec![nested],
+        );
+        let error = validate_hardened_leaf_program(&program)
+            .expect_err("captured upvalue must fail validation");
+        assert!(matches!(
+            &error.kind,
+            ErrorKind::HardenedLeafViolation {
+                feature: "captured upvalues"
+            }
+        ));
+    }
+
+    #[test]
+    fn hardened_leaf_validator_preserves_the_forbidden_instruction_location() {
+        let main = Function::new(vec![Instruction::new(Opcode::SetGlobal, 0, 0, 0)], 1)
+            .with_source_map(vec![InstructionSource { pc: 0, line: 27 }]);
+        let program =
+            Program::new(main, Vec::new()).with_source_name(Some("policy-source.luau".to_owned()));
+        let error = validate_hardened_leaf_program(&program)
+            .expect_err("forbidden opcode must carry its source location");
+        assert_eq!(
+            error.to_string(),
+            "policy-source.luau:27: global mutation is not available in the hardened leaf guest surface"
+        );
+    }
+
+    #[test]
+    fn low_level_hardened_execution_requires_a_metered_transaction() {
+        let program = Program::new(
+            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            Vec::new(),
+        );
+        let mut vm = Vm::with_settings(Profile::DeterministicSim, hardened_settings());
+        let error = vm
+            .run(&program)
+            .expect_err("ordinary low-level execution is not transactional");
+        assert!(matches!(
+            error.kind,
+            ErrorKind::HardenedLeafViolation {
+                feature: "non-transactional execution"
+            }
+        ));
+
+        let entry = HardenedLeafProgram::new(program).expect("valid hardened entry");
+        let mut execution = vm.begin_transactional_execution_with_fuel(None);
+        let mut host = |_vm: &mut Vm, _key: u32, _args: &[Value]| Ok(Vec::new());
+        let error = vm
+            .run_hardened_leaf_entry_in(&entry, &mut execution, &mut host)
+            .expect_err("a hardened transaction must have an explicit fuel budget");
+        assert!(matches!(
+            error.kind,
+            ErrorKind::HardenedLeafViolation {
+                feature: "unmetered execution"
+            }
+        ));
+    }
+
+    #[test]
+    fn hardened_seal_rejects_unreachable_preseal_prefix_slots() {
+        let mut vm = Vm::with_settings(Profile::DeterministicSim, hardened_settings());
+        let _unbound_table = vm.empty_table();
+        let error = vm
+            .reset_decision()
+            .expect_err("an unreachable pre-seal allocation must prevent checkpointing");
+        assert!(matches!(
+            error.kind,
+            ErrorKind::InvalidProgram {
+                reason: "hardened guest heap is not append-only before sealing"
+            }
+        ));
+        assert_eq!(vm.decision_epoch(), 0);
+        vm.install_host_module("recovered", Vec::new())
+            .expect("failed sealing must not freeze configuration");
+        vm.reset_decision()
+            .expect("reachable configuration may fill the rejected hole");
+        assert_eq!(vm.decision_epoch(), 1);
+    }
+
+    #[test]
+    fn hardened_seal_rejects_preseal_retained_values_and_recovers() {
+        let mut vm = Vm::with_settings(Profile::DeterministicSim, hardened_settings());
+        let table = vm.empty_table();
+        let retained = vm.retain_value(table);
+
+        let error = vm
+            .reset_decision()
+            .expect_err("a retained mutable value must not enter the immutable prefix");
+        assert!(matches!(
+            error.kind,
+            ErrorKind::HardenedLeafViolation {
+                feature: "pre-seal retained values"
+            }
+        ));
+        assert_eq!(vm.decision_epoch(), 0);
+        assert_eq!(
+            retained
+                .value(&vm)
+                .expect("failed seal preserves the root")
+                .as_table(),
+            table.as_table()
+        );
+
+        drop(retained);
+        vm.collect_garbage();
+        vm.install_host_module("recovered", Vec::new())
+            .expect("failed sealing must not freeze configuration");
+        vm.reset_decision()
+            .expect("configuration may fill the reclaimed prefix slot");
+        assert_eq!(vm.decision_epoch(), 1);
+    }
+
+    #[test]
+    fn hardened_leaf_abi_v1_has_an_exact_global_surface() {
+        let mut vm = Vm::with_settings(Profile::DeterministicSim, hardened_settings());
+        let expected = BTreeMap::from([
+            ("assert".to_owned(), ValueKind::Function),
+            ("bit32".to_owned(), ValueKind::Table),
+            ("error".to_owned(), ValueKind::Function),
+            ("ipairs".to_owned(), ValueKind::Function),
+            ("math".to_owned(), ValueKind::Table),
+            ("next".to_owned(), ValueKind::Function),
+            ("pairs".to_owned(), ValueKind::Function),
+            ("pcall".to_owned(), ValueKind::Function),
+            ("select".to_owned(), ValueKind::Function),
+            ("string".to_owned(), ValueKind::Table),
+            ("table".to_owned(), ValueKind::Table),
+            ("tonumber".to_owned(), ValueKind::Function),
+            ("tostring".to_owned(), ValueKind::Function),
+            ("type".to_owned(), ValueKind::Function),
+            ("typeof".to_owned(), ValueKind::Function),
+            ("unpack".to_owned(), ValueKind::Function),
+            ("utf8".to_owned(), ValueKind::Table),
+            ("xpcall".to_owned(), ValueKind::Function),
+        ]);
+        assert_eq!(visible_global_snapshot(&mut vm), expected);
+
+        vm.install_host_module("probe", Vec::new())
+            .expect("host namespace");
+        let mut expected_with_host = expected.clone();
+        expected_with_host.insert("probe".to_owned(), ValueKind::Table);
+        assert_eq!(visible_global_snapshot(&mut vm), expected_with_host);
+
+        vm.reset_decision().expect("seal and reset");
+        assert_eq!(visible_global_snapshot(&mut vm), expected_with_host);
+        assert_eq!(HARDENED_LEAF_GUEST_ABI_VERSION, 1);
+    }
+}
+
 fn initialize_standard_globals(
     heap: &mut VmCell,
     globals: u32,
     profile: Profile,
+    guest_surface: GuestSurface,
     enable_loadstring: bool,
     register_os: bool,
     enable_conformance_coverage: bool,
@@ -17397,11 +17982,14 @@ fn initialize_standard_globals(
     enable_conformance_pcall_helpers: bool,
 ) -> StandardGlobalHandles {
     let standard_globals = heap.alloc_array_table(&[]);
+    let hardened_leaf = guest_surface.is_hardened_leaf();
     let mut conformance_int64_metatable = None;
     let mut conformance_vec2_metatable = None;
     let mut conformance_vertex_metatable = None;
 
-    set_standard_field(heap, globals, standard_globals, "_G", Value::table(globals));
+    if !hardened_leaf {
+        set_standard_field(heap, globals, standard_globals, "_G", Value::table(globals));
+    }
     set_standard_native_field(
         heap,
         globals,
@@ -17430,13 +18018,15 @@ fn initialize_standard_globals(
         "xpcall",
         NativeFunction::XPCall,
     );
-    set_standard_native_field(
-        heap,
-        globals,
-        standard_globals,
-        "print",
-        NativeFunction::Print,
-    );
+    if !hardened_leaf {
+        set_standard_native_field(
+            heap,
+            globals,
+            standard_globals,
+            "print",
+            NativeFunction::Print,
+        );
+    }
     set_standard_native_field(
         heap,
         globals,
@@ -17491,42 +18081,44 @@ fn initialize_standard_globals(
     let type_value = native_function_value(heap, NativeFunction::TypeOf, globals);
     set_standard_field(heap, globals, standard_globals, "type", type_value);
     set_standard_field(heap, globals, standard_globals, "typeof", type_value);
-    set_standard_native_field(
-        heap,
-        globals,
-        standard_globals,
-        "getfenv",
-        NativeFunction::GetFEnv,
-    );
-    set_standard_native_field(
-        heap,
-        globals,
-        standard_globals,
-        "setfenv",
-        NativeFunction::SetFEnv,
-    );
-    set_standard_native_field(
-        heap,
-        globals,
-        standard_globals,
-        "setmetatable",
-        NativeFunction::SetMetatable,
-    );
-    set_standard_native_field(
-        heap,
-        globals,
-        standard_globals,
-        "getmetatable",
-        NativeFunction::GetMetatable,
-    );
-    set_standard_native_field(
-        heap,
-        globals,
-        standard_globals,
-        "newproxy",
-        NativeFunction::NewProxy,
-    );
-    if !profile.is_deterministic_sim() {
+    if !hardened_leaf {
+        set_standard_native_field(
+            heap,
+            globals,
+            standard_globals,
+            "getfenv",
+            NativeFunction::GetFEnv,
+        );
+        set_standard_native_field(
+            heap,
+            globals,
+            standard_globals,
+            "setfenv",
+            NativeFunction::SetFEnv,
+        );
+        set_standard_native_field(
+            heap,
+            globals,
+            standard_globals,
+            "setmetatable",
+            NativeFunction::SetMetatable,
+        );
+        set_standard_native_field(
+            heap,
+            globals,
+            standard_globals,
+            "getmetatable",
+            NativeFunction::GetMetatable,
+        );
+        set_standard_native_field(
+            heap,
+            globals,
+            standard_globals,
+            "newproxy",
+            NativeFunction::NewProxy,
+        );
+    }
+    if !hardened_leaf && !profile.is_deterministic_sim() {
         set_standard_native_field(
             heap,
             globals,
@@ -17542,52 +18134,54 @@ fn initialize_standard_globals(
             NativeFunction::GcInfo,
         );
     }
-    if register_os {
+    if !hardened_leaf && register_os {
         let os = heap.alloc_array_table(&[]);
         for (name, native) in OS_NATIVE_FUNCTIONS {
             set_native_table_field(heap, os, name, *native);
         }
         set_standard_field(heap, globals, standard_globals, "os", Value::table(os));
     }
-    let debug = heap.alloc_array_table(&[]);
-    for (name, native) in DEBUG_NATIVE_FUNCTIONS {
-        set_native_table_field(heap, debug, name, *native);
+    if !hardened_leaf {
+        let debug = heap.alloc_array_table(&[]);
+        for (name, native) in DEBUG_NATIVE_FUNCTIONS {
+            set_native_table_field(heap, debug, name, *native);
+        }
+        set_standard_field(
+            heap,
+            globals,
+            standard_globals,
+            "debug",
+            Value::table(debug),
+        );
+        set_standard_native_field(
+            heap,
+            globals,
+            standard_globals,
+            "rawequal",
+            NativeFunction::RawEqual,
+        );
+        set_standard_native_field(
+            heap,
+            globals,
+            standard_globals,
+            "rawget",
+            NativeFunction::RawGet,
+        );
+        set_standard_native_field(
+            heap,
+            globals,
+            standard_globals,
+            "rawset",
+            NativeFunction::RawSet,
+        );
+        set_standard_native_field(
+            heap,
+            globals,
+            standard_globals,
+            "rawlen",
+            NativeFunction::RawLen,
+        );
     }
-    set_standard_field(
-        heap,
-        globals,
-        standard_globals,
-        "debug",
-        Value::table(debug),
-    );
-    set_standard_native_field(
-        heap,
-        globals,
-        standard_globals,
-        "rawequal",
-        NativeFunction::RawEqual,
-    );
-    set_standard_native_field(
-        heap,
-        globals,
-        standard_globals,
-        "rawget",
-        NativeFunction::RawGet,
-    );
-    set_standard_native_field(
-        heap,
-        globals,
-        standard_globals,
-        "rawset",
-        NativeFunction::RawSet,
-    );
-    set_standard_native_field(
-        heap,
-        globals,
-        standard_globals,
-        "rawlen",
-        NativeFunction::RawLen,
-    );
     set_standard_native_field(
         heap,
         globals,
@@ -17670,13 +18264,24 @@ fn initialize_standard_globals(
         Value::number(f64::from_bits(0x4009_21fb_5444_2d18)),
     );
     for (name, native) in MATH_NATIVE_FUNCTIONS {
+        if hardened_leaf && matches!(*name, "random" | "randomseed") {
+            continue;
+        }
         set_native_table_field(heap, math, name, *native);
+    }
+    if hardened_leaf {
+        heap.table_freeze(math)
+            .expect("hardened math table handle is valid");
     }
     set_standard_field(heap, globals, standard_globals, "math", Value::table(math));
 
     let string = heap.alloc_array_table(&[]);
     for (name, native) in STRING_NATIVE_FUNCTIONS {
         set_native_table_field(heap, string, name, *native);
+    }
+    if hardened_leaf {
+        heap.table_freeze(string)
+            .expect("hardened string table handle is valid");
     }
     set_standard_field(
         heap,
@@ -17692,44 +18297,58 @@ fn initialize_standard_globals(
     }
     let charpattern = heap.intern_string_value_bytes(LUAU_UTF8_CHARPATTERN);
     set_table_field(heap, utf8, "charpattern", charpattern);
+    if hardened_leaf {
+        heap.table_freeze(utf8)
+            .expect("hardened utf8 table handle is valid");
+    }
     set_standard_index_field(heap, standard_globals, "utf8", Value::table(utf8));
 
     let bit32 = heap.alloc_array_table(&[]);
     for (name, native) in BIT32_NATIVE_FUNCTIONS {
         set_native_table_field(heap, bit32, name, *native);
     }
+    if hardened_leaf {
+        heap.table_freeze(bit32)
+            .expect("hardened bit32 table handle is valid");
+    }
     set_standard_index_field(heap, standard_globals, "bit32", Value::table(bit32));
 
-    let buffer = heap.alloc_array_table(&[]);
-    for (name, native) in BUFFER_NATIVE_FUNCTIONS {
-        set_native_table_field(heap, buffer, name, *native);
-    }
-    set_standard_index_field(heap, standard_globals, "buffer", Value::table(buffer));
+    if !hardened_leaf {
+        let buffer = heap.alloc_array_table(&[]);
+        for (name, native) in BUFFER_NATIVE_FUNCTIONS {
+            set_native_table_field(heap, buffer, name, *native);
+        }
+        set_standard_index_field(heap, standard_globals, "buffer", Value::table(buffer));
 
-    let vector = heap.alloc_array_table(&[]);
-    for (name, native) in VECTOR_NATIVE_FUNCTIONS {
-        set_native_table_field(heap, vector, name, *native);
+        let vector = heap.alloc_array_table(&[]);
+        for (name, native) in VECTOR_NATIVE_FUNCTIONS {
+            set_native_table_field(heap, vector, name, *native);
+        }
+        let vector_zero = Value::vector(
+            heap.alloc_vector(VectorData::new(0.0, 0.0, 0.0))
+                .expect("standard vector handle fits in u32"),
+        );
+        let vector_one = Value::vector(
+            heap.alloc_vector(VectorData::new(1.0, 1.0, 1.0))
+                .expect("standard vector handle fits in u32"),
+        );
+        set_table_field(heap, vector, "zero", vector_zero);
+        set_table_field(heap, vector, "one", vector_one);
+        let vector_metatable = heap.alloc_array_table(&[]);
+        let vector_call = native_function_value(heap, NativeFunction::VectorCall, vector);
+        set_table_field(heap, vector_metatable, "__call", vector_call);
+        heap.table_set_metatable(vector, Some(vector_metatable))
+            .expect("standard vector table and metatable handles are valid");
+        set_standard_index_field(heap, standard_globals, "vector", Value::table(vector));
     }
-    let vector_zero = Value::vector(
-        heap.alloc_vector(VectorData::new(0.0, 0.0, 0.0))
-            .expect("standard vector handle fits in u32"),
-    );
-    let vector_one = Value::vector(
-        heap.alloc_vector(VectorData::new(1.0, 1.0, 1.0))
-            .expect("standard vector handle fits in u32"),
-    );
-    set_table_field(heap, vector, "zero", vector_zero);
-    set_table_field(heap, vector, "one", vector_one);
-    let vector_metatable = heap.alloc_array_table(&[]);
-    let vector_call = native_function_value(heap, NativeFunction::VectorCall, vector);
-    set_table_field(heap, vector_metatable, "__call", vector_call);
-    heap.table_set_metatable(vector, Some(vector_metatable))
-        .expect("standard vector table and metatable handles are valid");
-    set_standard_index_field(heap, standard_globals, "vector", Value::table(vector));
 
     let table = heap.alloc_array_table(&[]);
     for (name, native) in TABLE_NATIVE_FUNCTIONS {
         set_native_table_field(heap, table, name, *native);
+    }
+    if hardened_leaf {
+        heap.table_freeze(table)
+            .expect("hardened table library handle is valid");
     }
     set_standard_field(
         heap,
@@ -17739,20 +18358,22 @@ fn initialize_standard_globals(
         Value::table(table),
     );
 
-    let coroutine = heap.alloc_array_table(&[]);
-    for (name, native) in COROUTINE_NATIVE_FUNCTIONS {
-        set_native_table_field(heap, coroutine, name, *native);
-    }
-    set_standard_field(
-        heap,
-        globals,
-        standard_globals,
-        "coroutine",
-        Value::table(coroutine),
-    );
+    if !hardened_leaf {
+        let coroutine = heap.alloc_array_table(&[]);
+        for (name, native) in COROUTINE_NATIVE_FUNCTIONS {
+            set_native_table_field(heap, coroutine, name, *native);
+        }
+        set_standard_field(
+            heap,
+            globals,
+            standard_globals,
+            "coroutine",
+            Value::table(coroutine),
+        );
 
-    let rtti = build_standard_global_rtti(heap, profile, enable_loadstring, register_os);
-    set_standard_index_field(heap, standard_globals, "RTTI", Value::table(rtti));
+        let rtti = build_standard_global_rtti(heap, profile, enable_loadstring, register_os);
+        set_standard_index_field(heap, standard_globals, "RTTI", Value::table(rtti));
+    }
 
     let metatable = heap.alloc_array_table(&[]);
     set_table_field(heap, metatable, "__index", Value::table(standard_globals));

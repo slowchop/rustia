@@ -202,8 +202,12 @@ wrappers snapshot/convert guest values and load owned returns. **Zero-copy serde
 faster** than the literal `exports().clone()`-then-serde (1.01 vs 1.47 µs; the snapshot deep-copy is the cost,
 not serde at 0.065 µs). **`exports()` = "the table the chunk returns"** (Luau has no `export{…}`). **0 lines of
 embedder-side unsafe** for the spike heap/serde path. Production currently exposes owned-value/table serde;
-live-value zero-copy serde remains a release-roadmap item. **Batched decide-N demoted to optional P4** (FFI is ~4%;
-contradicts the per-agent `Selector` shape).
+live-value zero-copy serde remains a release-roadmap item. Authoritative action leaves use the generic
+`GuestSurface::HardenedLeaf` layer plus a borrowed `CompiledEntry`: the top-level decision body runs directly
+without retained exports or loaded-program installation, while inputs/effects remain in the typed invocation
+transaction. `invoke_entry_into` couples successful lane publication with an unconditional decision reset, so
+the same lifecycle also recovers from failed actions and contained host panics. **Batched decide-N demoted to
+optional P4** (FFI is ~4%; contradicts the per-agent `Selector` shape).
 
 ## 3. Determinism: one engine, three runtime profiles (implementation-corrected 2026-07-23)
 
@@ -234,6 +238,14 @@ Determinism work splits in two, and only the second part needs a flag:
   being implied by the name.
 Mechanism: a per-VM runtime setting. There is no separate engine build or current Cargo feature that hard-strips
 the restricted globals.
+
+The three profiles are still the complete semantic profile set. A separate `GuestSurface` setting narrows what
+compatible language environment a particular embedding exposes. `GuestSurface::HardenedLeaf`, selected by
+`RustiaBuilder::deterministic_leaf()`, layers on `DeterministicSim` for authoritative stateless actions: globals,
+standard libraries, and host namespaces are frozen; environment/debug/raw mutation, RNG, clocks/output,
+buffers/vectors/coroutines, dynamic compilation, and captured upvalues are absent or rejected. A mandatory
+logical-live memory limit and a versioned guest-surface ABI make this a fail-closed embedding contract without
+inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md).
 
 **GC scheduling per profile (review M2): two triggers over the current hybrid heap.**
 - **ReproducibleStandard/LuauCompat:** allocation-debt-driven gc-arena pacing and weak sweeping are implemented.

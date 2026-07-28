@@ -1,6 +1,6 @@
 # rustia — host-bridge / effect-queue contract (grabby integration)
 
-> **Status: [CONTRACT + TYPED INVOCATION + RESET IMPLEMENTED] (updated 2026-07-28).** The deterministic seam
+> **Status: [CONTRACT + TYPED INVOCATION + HARDENED LEAF IMPLEMENTED] (updated 2026-07-28).** The deterministic seam
 > between rustia scripts and grabby's (parallel, rollback) sim, agreed with the grabby parallelism agent.
 > grabby's threading is design-stage/parked, so the **envelope is stable** (grounded in grabby's existing
 > `ControlInput`/`host_discrete`/`SimId` model); only the `Effect` variant set grows. See
@@ -59,6 +59,13 @@ callback itself is nevertheless a semantic trust boundary: safe Rust cannot stop
 reading a captured global or mutating captured/interior state. Grabby must keep deterministic registrations
 capture-free (or capture only audited immutable data).
 
+Authoritative leaves use `RustiaBuilder::deterministic_leaf()` and a host-owned `CompiledEntry`. This guest
+surface layers on `DeterministicSim`: its globals, standard libraries, and host namespaces are sealed and
+frozen; environment/debug/raw mutation, VM RNG, clocks/output, buffers/vectors/coroutines, dynamic compilation,
+and captured upvalues are absent or rejected. `Invocation::call_entry` executes the top-level decision body
+directly, avoiding a retained module/export/closure path. The complete generic contract is
+[`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md).
+
 grabby's host-bridge maps rustia host-fn calls → `EffectRecord`/`Effect` and performs the `(emitter, seq)`
 commit + `SetSlot`↔columnar writeback.
 
@@ -88,13 +95,18 @@ This hard-transaction treatment is scoped to typed transactional execution; it d
 ordinary legacy execution's catchable OOM/yield behavior. Rustia catches a host panic, rolls back records, and
 marks the VM poisoned; every later guest execution entry point rejects until `reset_decision()` succeeds.
 The VM-wide containment layer covers typed and context-free host functions, low-level extension ops, stdout and
-clock providers, and the configured `loadstring` compiler.
+clock providers, and the configured `loadstring` compiler. Containment requires
+`panic = "unwind"`; an aborting build terminates or traps before
+`catch_unwind` can translate the panic, so its host callbacks must not panic.
 
 The outer Rust closure passed to `invoke`/`invoke_into` is caller control flow, not a VM callback. If it or a
 caller-side value conversion panics, normal Rust unwinding drops the private journal without publication and
 ends the VM/context borrows; Rustia does not translate or poison on that path. VM stacks are already idle
 between lexical guest calls, so the facade remains reusable. Guest heap/context/service mutations completed
 before the panic remain, matching the record-only transaction rule.
+`invoke_entry_into` is stronger than the general helpers: it catches such an
+unwind, performs the hardened decision reset, and then resumes the original
+panic.
 
 The guarantee is **record-transactional, not a general state transaction**. Rustia does not undo ordinary guest
 heap/global writes, mutation through `HostMut`, captured callback state, or `HostContext` mutation hidden behind
@@ -105,12 +117,15 @@ On success, `invoke` returns an `InvocationOutcome` containing the value, a slic
 and usage (fuel, record count, logical bytes); the slice lasts until the next mutable VM use. `invoke_into`
 reserves the caller's lane before guest execution, moves committed records into it without an allocation or
 fallible step during the final append, and returns a non-borrowing `InvocationReceipt`. This is the intended
-grabby worker-lane path.
+general worker-lane path. Hardened authoritative leaves use `invoke_entry_into`, which performs the same
+publication and then resets the decision epoch after either success or failure. If reset itself fails, it
+removes any records just published and returns the reset error.
 
 ## Mechanical enforcement of the cross-tick invariant
 **Implemented:** `Vm::reset_decision()` / `Rustia::reset_decision()` provide the **scratch heap reset between
-decisions** required by `DeterministicSim`, so a global/upvalue/coroutine physically cannot survive to influence
-a future tick; the only sanctioned cross-tick channel is `SetSlot`↔host columnar slots. Decision-reset ABI v1
+decisions** required by authoritative `DeterministicSim` leaves, so a global/upvalue/coroutine physically cannot
+survive to influence a future tick; the only sanctioned cross-tick channel is `SetSlot`↔host columnar slots.
+Decision-reset ABI v1
 preserves the profile, settings, service providers, extension operations, installed global host functions and
 host modules, host-owned immutable compiled modules, and lifetime memory peaks. It discards guest globals,
 tables/functions/upvalues, coroutines, loaded programs/caches, tracebacks, coverage rows, and retained roots;
@@ -129,6 +144,12 @@ Replay/golden protocols must record
 `RUSTIA_DECISION_RESET_ABI_VERSION` (currently 1). Outside an explicit reset epoch, ordinary retained function
 calls retain their documented survival across successful hot reload.
 (Scenario run-once + console use are separate paths, not this hot loop.)
+
+For `GuestSurface::HardenedLeaf`, the sealed globals and their reachable standard-library/host configuration
+are immutable rather than guest state. Reset preserves that checked allocation prefix in place and discards
+every post-seal allocation, loaded program, and retained root. This keeps the same isolation boundary without
+reconstructing identical library/module tables on every decision. The guest contract is separately versioned by
+`RUSTIA_HARDENED_LEAF_GUEST_ABI_VERSION` (currently 1).
 
 ## Illustrative catalog (grows on grabby's side)
 `SetNavGoal{target:FixedVec2}` · `Move{dir:FixedVec2}` · `Fire{weapon:u8, aim:i32}` ·

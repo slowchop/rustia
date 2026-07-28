@@ -6,8 +6,9 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
 
 > **Status: P1 engine implementation is substantial but not release-complete.** The locked design has a broad
 > production VM/compiler/API/conformance slice; bounded object/program reclamation, quotas/OOM, deterministic
-> decision reset, and the typed per-invocation host transaction are implemented. The next release-critical work
-> is O(1) accounting, broader mixed-heap pressure evidence, and the remaining module/value boundary.
+> decision reset, the typed per-invocation host transaction, and the hardened stateless action-leaf surface are
+> implemented. The next release-critical work is O(1) accounting, broader mixed-heap pressure evidence, and the
+> remaining module/value boundary.
 > `spikes/` are throwaway prototypes that validated the design.
 > Read **[`design/CURRENT.md`](design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](design/README.md) for the full doc map.
@@ -50,8 +51,10 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   separates persistent function registration from a block-local `HostContext`; capability-specific views expose
   input, slots, ordered effects, slot writes, or profile-gated external mutation. Typed invocations share one
   fuel budget and stage a bounded count/byte record transaction. Ordinary object/program reclamation and the
-  epoch-safe decision-reset ABI are implemented; module resolution, transactional installation/hot reload,
-  rich graph values, and live zero-copy serde remain planned.
+  epoch-safe decision-reset ABI are implemented. `deterministic_leaf()` adds a frozen allowlisted guest
+  environment with a mandatory memory limit, while `compile_entry`/`invoke_entry_into` provide a direct
+  stateless decision path with record publication and reset across both success and failure; module resolution,
+  transactional installation/hot reload, rich graph values, and live zero-copy serde remain planned.
 - Host services are host-pluggable through the facade: `RustiaBuilder::standard()`/`deterministic()`/`live()`
   environment presets, a `.stdout(...)` print sink with the real Luau composition (`tostring` honoring
   `__tostring`, tab-joined, trailing newline), and `.wall_clock(...)`/`.monotonic_clock(...)` sockets taking a
@@ -67,21 +70,22 @@ The facade picks an environment in one word; `Rustia::builder()` delegates to `s
 constructing a typed `Rustia<H>`. Builder `.fuel(n)` is a VM-wide ceiling; a typed call uses the lower of that
 ceiling and its explicit `InvocationLimits::new(fuel)` budget.
 
-| | `deterministic()` | `standard()` (default) | `live()` |
-|---|---|---|---|
-| Profile | `DeterministicSim` | `ReproducibleStandard` | `ReproducibleStandard` |
-| `print` | registered; no-op unless a host sink is attached | real stdout on native; no-op on wasm | real stdout on native; no-op on wasm |
-| `os.time()` / `os.date()` | `os` absent unless a deterministic clock provider is plugged | pinned epoch 1_700_000_000 unless a wall-clock provider is plugged | system wall clock |
-| `os.clock()` | follows the `os` registration rule | logical clock (executed instructions / 1_000_000) unless a monotonic provider is plugged | system monotonic clock |
-| Pure `os` fns (`os.time(t)`, `os.date(f, t)`, `os.difftime`) | follow the `os` registration rule | always available | always available |
-| `collectgarbage("count")` / `gcinfo` | not registered | registered; compatibility values pending O(1) incremental accounting | registered; same compatibility values |
-| `loadstring` | opt-in host compiler only | opt-in host compiler only | enabled with the stock compiler |
-| Host-fn capabilities | the five deterministic capabilities; external-state/nondeterministic registrations and nondeterministic clock providers rejected | all seven capabilities | all seven |
-| GC | full collection on the deterministic instruction-count schedule | incremental/paced | incremental/paced |
-| Reproducibility | bit-identical replay on the tested matrix | replay-stable defaults; real time only by explicit provider choice | not reproducible (live IO) |
-| wasm32 | supported | supported (same script-visible values; print no-op) | `build()` fails loudly — plug providers instead |
+| | `deterministic_leaf()` | `deterministic()` | `standard()` (default) | `live()` |
+|---|---|---|---|---|
+| Profile | `DeterministicSim` + `HardenedLeaf` surface | `DeterministicSim` | `ReproducibleStandard` | `ReproducibleStandard` |
+| Memory limit | required explicitly | optional | optional | optional |
+| `print` | absent | registered; no-op unless a host sink is attached | real stdout on native; no-op on wasm | real stdout on native; no-op on wasm |
+| `os.time()` / `os.date()` | absent | `os` absent unless a deterministic clock provider is plugged | pinned epoch 1_700_000_000 unless a wall-clock provider is plugged | system wall clock |
+| `os.clock()` | absent | follows the `os` registration rule | logical clock (executed instructions / 1_000_000) unless a monotonic provider is plugged | system monotonic clock |
+| Pure `os` fns (`os.time(t)`, `os.date(f, t)`, `os.difftime`) | absent | follow the `os` registration rule | always available | always available |
+| `collectgarbage("count")` / `gcinfo` | absent | not registered | registered; compatibility values pending O(1) incremental accounting | registered; same compatibility values |
+| `loadstring` | absent | opt-in host compiler only | opt-in host compiler only | enabled with the stock compiler |
+| Host-fn capabilities | five deterministic capabilities, through frozen modules installed before execution | the five deterministic capabilities; external-state/nondeterministic registrations and nondeterministic clock providers rejected | all seven capabilities | all seven |
+| GC/reset | deterministic schedule; reset preserves sealed configuration and discards decision allocations | full collection on the deterministic instruction-count schedule | incremental/paced | incremental/paced |
+| Reproducibility | authoritative stateless replay surface | bit-identical replay on the tested matrix | replay-stable defaults; real time only by explicit provider choice | not reproducible (live IO) |
+| wasm32 | supported | supported | supported (same script-visible values; print no-op) | `build()` fails loudly — plug providers instead |
 
-`math.random` stays pinned in every profile. Clock providers carry a determinism label
+`math.random` stays pinned in every ordinary profile surface and is absent from `HardenedLeaf`. Clock providers carry a determinism label
 (`ServiceClock::system()` is nondeterministic; `fixed(t)`/`from_fn(f)` are host-asserted deterministic), and
 the facade `build()` rejects a nondeterministic clock on `deterministic()`.
 
@@ -153,6 +157,8 @@ public rustia project; actual grabby integration work is explicitly out of scope
 - `cargo run -p rustia --example hot_reload` — compile/install hot reload plus retained-handle survival and freshness checks.
 - `cargo run -p rustia --example typed_invocation` — a block-local host context, capability views, shared fuel,
   bounded ordered records, and allocation-safe publication into a caller-owned lane.
+- `cargo run --release -p rustia --example leaf_lifecycle_bench` — a semantics-checked ABBA comparison of the
+  module lifecycle and hardened stateless-entry lifecycle.
 
 `Rustia<H>` stores only a lifetime-independent `HostSchema` and its registered callbacks. Each `invoke` or
 `invoke_into` borrows a fresh `HostContext<H>`, so tick-local input and slot slices need not be `'static`.
@@ -167,14 +173,16 @@ yield boundary, a missing typed-host dispatcher, and host panic are hard transac
 OOM/yield rule is scoped to typed `Invocation` execution and does not redefine ordinary legacy execution. A
 host panic poisons the VM: every later guest execution entry point rejects until `reset_decision()` succeeds.
 Containment covers registered host functions, typed dispatch, legacy extension ops, stdout and clock services,
-and the configured `loadstring` compiler.
+and the configured `loadstring` compiler. Panic containment requires a
+`panic = "unwind"` build; `panic = "abort"` terminates or traps before Rustia
+can recover, so callbacks in such builds must not panic.
 Rollback covers Rustia's private record journal only—not guest heap
 mutations, `HostMut`, callback captures, or context state changed through interior mutability.
 
-For grabby, make at most one invocation successful for each `(tick, phase, emitter)` and append with
-`invoke_into`; this makes the per-emitter sequence unique before lanes are stably sorted by `(emitter, seq)`.
-The returned `InvocationReceipt` reports fuel, record count, and logical record bytes without borrowing
-Rustia's journal.
+For grabby, make at most one invocation successful for each `(tick, phase, emitter)` and append hardened
+actions with `invoke_entry_into`; this makes the per-emitter sequence unique before lanes are stably sorted by
+`(emitter, seq)`, and guarantees a decision reset even when the action fails. The returned
+`InvocationReceipt` reports fuel, record count, and logical record bytes without borrowing Rustia's journal.
 
 Long-lived hosts can call `Vm::collect_garbage()` at an idle boundary to finish
 reclamation and release spare VM-owned allocations to the process allocator.

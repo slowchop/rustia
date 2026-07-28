@@ -27,7 +27,22 @@ epoch-checked and becomes stale after reset. Focused tests
 cover active-execution rejection and an exact post-warmup memory plateau across 600 mixed
 table/coroutine/program/retained-export decisions. The wasm32 Node/V8 lifecycle probe runs 300 more decisions
 and verifies module reuse, restored host functions, cleared inputs, RNG restart, stale handles, and the same
-exact plateau in WebAssembly.
+exact plateau in WebAssembly. A second wasm32 probe runs two 300-decision typed hardened-entry cohorts,
+verifies failure rollback and automatic reset, checks ordered effects and return values, holds the hardened
+immutable-prefix reset at an exact VM-owned memory plateau, and proves the second cohort does not grow linear
+memory.
+The generic authoritative-leaf layer is now implemented
+([`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md)):
+`RustiaBuilder::deterministic_leaf()` layers a frozen, allowlisted
+`GuestSurface::HardenedLeaf` on `DeterministicSim`, requires an explicit logical-live memory limit, and excludes
+environment/debug/raw mutation, output/clocks, VM RNG, buffers/vectors/coroutines, dynamic compilation, and
+captured upvalues. `Rustia::compile_entry` plus `Rustia::invoke_entry_into` execute a host-owned top-level
+decision body without exports-table, retained-closure, or loaded-program setup and reset after success or
+failure. Hardened reset preserves only the checked immutable pre-guest heap prefix and discards all
+decision-local allocations; sealing rejects both prefix holes and pre-seal external roots. The checked-in,
+semantically validated complete-lifecycle ABBA benchmark measured
+the module control at 22.292–23.750 microseconds p95 and the hardened entry at 6.625–6.958 microseconds p95 in
+three local 20,000-decision runs; this is workload-specific development evidence, not a blanket speed claim.
 The host services bus from [`72-host-services.md`](72-host-services.md) is now implemented: facade presets
 `standard()`/`deterministic()`/`live()`, a host stdout sink giving `print` its real Luau composition,
 determinism-labeled wall/monotonic clock providers feeding `os.time`/`os.date`/`os.clock`, and a deterministic
@@ -38,7 +53,8 @@ complete if a later guest error is caught by `pcall`. Transactional fuel exhaust
 invalid boundary yield, a missing typed-host dispatcher, and host panic are hard aborts; the transactional
 OOM/yield rule does not change ordinary legacy execution. A caught host panic poisons the VM, so every later
 guest execution entry point rejects until decision reset. Containment includes host functions, typed dispatch,
-legacy extension ops, stdout/clocks, and the `loadstring` compiler. Rollback
+legacy extension ops, stdout/clocks, and the `loadstring` compiler. Panic containment requires an unwinding
+build; aborting builds terminate or trap, so their callbacks must not panic. Rollback
 covers staged records only—not guest heap writes, `HostMut`, captured callback state, or context interior
 mutation. `invoke` exposes the reusable journal plus fuel/count/byte usage; `invoke_into` pre-reserves and
 publishes to a caller lane with no allocation at final append. Callback captures remain a semantic trust
@@ -270,10 +286,11 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    optimize quota accounting to O(1) and prove the complete memory path with broader long-lived churn, cyclic
    graphs, hot reload, retained handles, weak tables, native/wasm parity, and representative mixed-heap evidence
    before tuning final intervals.
-2. **Finish the remaining host-facing runtime boundary.** The typed schema/context and deterministic record
-   transaction are implemented. Add a host-owned module resolver/cache, complete binary/rich-value interop,
-   zero-copy live serde, and transactional install/hot-reload/stack diagnostics. Keep these layered and
-   public-clean; do not leak grabby-specific types or a raw C API.
+2. **Finish the remaining host-facing runtime boundary.** The typed schema/context, deterministic record
+   transaction, and hardened stateless-leaf layer are implemented. Add a host-owned module resolver/cache,
+   complete binary/rich-value interop, zero-copy live serde, and transactional
+   install/hot-reload/stack diagnostics. Keep these layered and public-clean; do not leak grabby-specific types
+   or a raw C API.
 3. **Harden the production engine** against the LOCKED decisions ([`30-architecture.md`](30-architecture.md) §1–§4):
    keep the 16-byte tagged `Value` firewall, portable `br_table`-friendly dispatch, instruction-count fuel,
    deterministic f64/libm behavior, table-key `-0` normalization, profile-specific GC behavior, and the public
@@ -392,6 +409,11 @@ tuning. Benchmark publication and the `LuauIntegerType2` watch remain ongoing ga
   uses the full-collect-on-instruction-count trigger.) Scheduling and weak sweeping are implemented; complete
   ordinary-object/program reclamation, reuse, accounting, limits, and tuning remain open.
 
+`GuestSurface::HardenedLeaf` is a narrowing layer on `DeterministicSim`, not a fourth profile. It is the
+authoritative stateless-action contract: sealed allowlisted globals/libraries/host namespaces, no ambient or
+cross-tick guest authority, bytecode policy validation, mandatory memory limit, direct `CompiledEntry`
+invocation, and a separately versioned guest ABI.
+
 ## Canonical doc map (status)
 | doc | role | status |
 |---|---|---|
@@ -406,6 +428,7 @@ tuning. Benchmark publication and the `LuauIntegerType2` watch remain ongoing ga
 | [`72-host-services.md`](72-host-services.md) | host services bus: stdout sink, determinism-labeled clock providers, facade presets, logical `os.clock` | **implemented** ✅ |
 | [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **typed invocation implemented; advanced interop pending** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |
+| [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen stateless authoritative guest surface, direct compiled entries, and fast isolated reset | **implemented v1** ✅ |
 | [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/target-first report/package metadata and dedicated Linode lifecycle implemented; standalone split pending** |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **metadata/checklist/changelog/preflight/CI gates started; publish=false remains** |
 | [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **policy started; 0.0.x remains unstable** |
@@ -438,7 +461,8 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
    reset now invalidates every prior retained-handle clone by epoch, restarts deterministic state, and plateaus
    exactly across 600 focused decisions; ordinary retained calls still survive hot reload outside a reset.
 2. **Complete the remaining host service and rich-value boundary:** the worker-local typed invocation seam is
-   implemented; finish O(1) quota accounting, a host-owned deterministic module resolver/cache,
+   implemented, including the hardened stateless leaf and direct compiled-entry path; finish O(1) quota
+   accounting, a host-owned deterministic module resolver/cache,
    binary/rich/cyclic values, live-value serde, transactional extension/module/hot-reload failure behavior, and
    stronger traceback diagnostics.
 3. **Tune the GC intervals only after reclamation exists** (Deterministic instruction-count interval =

@@ -1,13 +1,16 @@
 use crate::function::IntoHostFunction;
-use crate::{Error, HostSchema, Profile, Result, Rustia, VmError, VmErrorKind, VmSettings};
+use crate::{
+    Error, GuestSurface, HostSchema, Profile, Result, Rustia, VmError, VmErrorKind, VmSettings,
+};
 use rustia_compiler::{compile_with_options, CompileOptions};
 use rustia_vm::{ClockProvider, HostFunctionOp, OpCapability, Program, StdoutSink};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// Fluent builder for [`Rustia`]: start from a preset ([`standard`](Self::standard),
-/// [`deterministic`](Self::deterministic), [`live`](Self::live)), then override profile,
-/// settings, fuel, services, and extensions before [`build`](Self::build).
+/// [`deterministic`](Self::deterministic), [`deterministic_leaf`](Self::deterministic_leaf),
+/// [`live`](Self::live)), then override profile, settings, fuel, services, and extensions before
+/// [`build`](Self::build).
 pub struct RustiaBuilder {
     profile: Profile,
     settings: VmSettings,
@@ -41,6 +44,18 @@ impl RustiaBuilder {
     /// can still be plugged explicitly via the service sockets.
     pub fn deterministic() -> Self {
         Self::new().profile(Profile::DeterministicSim)
+    }
+
+    /// Authoritative stateless-leaf preset.
+    ///
+    /// This layers [`GuestSurface::HardenedLeaf`] on
+    /// [`Profile::DeterministicSim`]. A logical-live memory limit remains
+    /// mandatory and must be selected explicitly with
+    /// [`memory_limit_bytes`](Self::memory_limit_bytes).
+    pub fn deterministic_leaf() -> Self {
+        let mut builder = Self::deterministic();
+        builder.settings.guest_surface = GuestSurface::HardenedLeaf;
+        builder
     }
 
     /// "Normal Luau" preset with `loadstring` enabled (runtime codegen — attack surface for
@@ -128,6 +143,13 @@ impl RustiaBuilder {
 
     pub fn build(self) -> Result<Rustia> {
         self.validate()?;
+        if self.settings.guest_surface.is_hardened_leaf() {
+            return Err(Error::Vm(VmError::new(
+                VmErrorKind::HardenedLeafViolation {
+                    feature: "context-free facade",
+                },
+            )));
+        }
         let mut rustia = Rustia::with_settings(self.profile, self.settings);
         for extension in self.extensions {
             rustia.install_extension(extension)?;
@@ -184,6 +206,46 @@ impl RustiaBuilder {
                         profile: self.profile,
                     })));
                 }
+            }
+        }
+        if self.settings.guest_surface.is_hardened_leaf() {
+            if !self.profile.is_deterministic_sim() {
+                return Err(Error::Vm(VmError::new(
+                    VmErrorKind::HardenedLeafViolation {
+                        feature: "non-DeterministicSim profile",
+                    },
+                )));
+            }
+            if self.settings.memory_limit_bytes.is_none() {
+                return Err(Error::Vm(VmError::new(
+                    VmErrorKind::HardenedLeafViolation {
+                        feature: "missing logical-live memory limit",
+                    },
+                )));
+            }
+            if self.settings.services.stdout.is_some()
+                || self.settings.services.wall_clock.is_some()
+                || self.settings.services.monotonic_clock.is_some()
+            {
+                return Err(Error::Vm(VmError::new(
+                    VmErrorKind::HardenedLeafViolation {
+                        feature: "host output or clock services",
+                    },
+                )));
+            }
+            if self.settings.loadstring_compiler.is_some()
+                || self.settings.enable_conformance_coverage
+                || self.settings.enable_conformance_top_level_yield
+                || self.settings.enable_conformance_int64_userdata
+                || self.settings.enable_conformance_native_userdata
+                || self.settings.enable_conformance_native_type_checks
+                || self.settings.enable_conformance_pcall_helpers
+            {
+                return Err(Error::Vm(VmError::new(
+                    VmErrorKind::HardenedLeafViolation {
+                        feature: "dynamic-code or conformance-only facilities",
+                    },
+                )));
             }
         }
         Ok(())

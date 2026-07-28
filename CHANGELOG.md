@@ -8,6 +8,24 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- `GuestSurface::HardenedLeaf` and
+  `RustiaBuilder::deterministic_leaf()` add a fail-closed authoritative
+  action-leaf environment layered on `DeterministicSim`. It requires an
+  explicit logical-live memory limit, freezes globals/standard libraries/host
+  namespaces, and removes or rejects environment/debug/raw mutation,
+  output/clocks, VM RNG, buffers/vectors/coroutines, dynamic compilation,
+  legacy extensions, global writes, and captured upvalues. The guest contract
+  is versioned by `RUSTIA_HARDENED_LEAF_GUEST_ABI_VERSION`.
+- `Rustia::compile_entry()`, `Invocation::call_entry()`, and
+  `Rustia::invoke_entry_into()` execute a
+  precompiled top-level decision body without installing an exports table,
+  retaining a closure, or loading program metadata into the VM. Hardened reset
+  preserves the sealed immutable configuration prefix while discarding every
+  decision-local allocation; the lifecycle helper resets after both success
+  and failure. The checked-in semantically validated ABBA benchmark measured
+  the module control at 22.292–23.750 microseconds p95 and the hardened entry
+  at 6.625–6.958 microseconds p95 in three matched local runs; this is
+  workload-specific development evidence.
 - `HostSchema` and `RustiaBuilder::build_for_host::<H>()` now separate a typed
   VM's lifetime-independent host API from the fresh `HostContext` borrowed by
   each `invoke`/`invoke_into`. Contexts may contain block-local input and slot
@@ -24,7 +42,8 @@ Current unpublished workspace version: `0.0.1`.
   swallowed. Host panic poisons the VM; every later guest execution entry
   point rejects until `reset_decision()` succeeds. Containment includes typed
   and legacy callbacks, extension ops, stdout/clocks, and the `loadstring`
-  compiler. Rollback is explicitly
+  compiler. Panic containment requires `panic = "unwind"`; aborting builds
+  terminate or trap, so callbacks in those builds must not panic. Rollback is explicitly
   record-only: it does not undo guest heap mutation, `HostMut`, captured
   globals, or context interior mutation. Successful `invoke` outcomes expose
   usage plus a borrowed reusable journal, while `invoke_into` pre-reserves and
@@ -40,7 +59,11 @@ Current unpublished workspace version: `0.0.1`.
   a 600-decision mixed table/coroutine/program test proves an exact post-warmup
   VM-memory plateau. The wasm32 Node/V8 lifecycle probe executes another 300
   decisions and verifies the same compiled-module reuse, host-binding restore,
-  input clearing, RNG restart, handle invalidation, and exact plateau.
+  input clearing, RNG restart, handle invalidation, and exact plateau. A second
+  wasm32 probe executes two 300-decision typed hardened-entry cohorts and
+  verifies failed-entry rollback/reset, successful records and values, epoch
+  progression, the immutable-prefix memory plateau, and stable linear-memory
+  pages across the second cohort.
 - Runtime string atoms now use generation-checked reusable slots and ordinary
   tracing collections reclaim unreachable strings without allowing stale
   handles to alias replacements. `Vm::collect_garbage()` adds an explicit host

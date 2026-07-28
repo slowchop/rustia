@@ -3,8 +3,8 @@ use crate::value::{
     load_owned_value, snapshot_value, FromRustia, FromRustiaMulti, IntoRustiaMulti,
 };
 use crate::{
-    CompiledModule, Error, Exports, Result, RustiaHostFuelPolicy, RustiaHostFunctionInfo,
-    RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
+    CompiledEntry, CompiledModule, Error, Exports, Result, RustiaHostFuelPolicy,
+    RustiaHostFunctionInfo, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
 };
 use rustia_vm::{
     Error as VmError, ErrorKind as VmErrorKind, HostFunctionOp, OpCapability, Value as RawValue,
@@ -634,6 +634,8 @@ where
 /// The views constrain how a callback reaches the invocation context. Safe
 /// Rust cannot stop a `'static` callback from using captured globals or
 /// interior mutability, so semantic purity remains an embedding contract.
+/// Callback-panic containment also requires `panic = "unwind"`; an aborting
+/// build terminates or traps before Rustia can translate the panic.
 pub struct HostModule<C>
 where
     C: HostSchema,
@@ -1184,6 +1186,34 @@ where
             **generation = (**generation).saturating_add(1);
             let value = vm.retain_value(value);
             Ok(Exports::new(value, **generation, vm.decision_epoch()))
+        })
+    }
+
+    /// Executes a precompiled stateless decision body directly.
+    ///
+    /// Unlike [`install`](Self::install), this does not construct an exports
+    /// table, retain bytecode in the VM, or return handles that survive the
+    /// invocation. Host effects and slot writes remain transactional under the
+    /// surrounding invocation.
+    pub fn call_entry<Return>(&mut self, entry: &CompiledEntry) -> Result<Return>
+    where
+        Return: FromRustia,
+    {
+        self.scoped(|invocation| {
+            let value = {
+                let Self {
+                    vm,
+                    dispatcher,
+                    execution,
+                    ..
+                } = invocation;
+                let mut host =
+                    |vm: &mut Vm, key: u32, args: &[RawValue]| dispatcher.invoke(vm, key, args);
+                vm.run_hardened_leaf_entry_in(&entry.program, execution, &mut host)
+                    .map_err(Error::Vm)?
+            };
+            let value = snapshot_value(invocation.vm, value)?;
+            Return::from_rustia(value)
         })
     }
 

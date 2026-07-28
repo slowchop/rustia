@@ -15,6 +15,7 @@ for (const name of [
   "bench_dealloc",
   "bench_prepare_rustia_limited",
   "bench_rustia_decision_reset_probe",
+  "bench_rustia_hardened_leaf_probe",
   "bench_run",
   "bench_result_ptr",
   "bench_result_len",
@@ -47,9 +48,20 @@ const result = exports.bench_run(1);
 if (result !== 42) {
   throw new Error(`limited wasm workload returned ${result}: ${readLastResult(exports)}`);
 }
-const pagesAfter = exports.memory.buffer.byteLength / 65_536;
+const pagesAfterLimitedWorkload = exports.memory.buffer.byteLength / 65_536;
 const resetStatus = exports.bench_rustia_decision_reset_probe();
 if (resetStatus !== 0) throw new Error(readLastResult(exports));
+const firstHardenedLeafStatus = exports.bench_rustia_hardened_leaf_probe();
+if (firstHardenedLeafStatus !== 0) throw new Error(readLastResult(exports));
+const pagesAfterFirstHardenedProbe = exports.memory.buffer.byteLength / 65_536;
+const secondHardenedLeafStatus = exports.bench_rustia_hardened_leaf_probe();
+if (secondHardenedLeafStatus !== 0) throw new Error(readLastResult(exports));
+const pagesAfterSecondHardenedProbe = exports.memory.buffer.byteLength / 65_536;
+if (pagesAfterSecondHardenedProbe !== pagesAfterFirstHardenedProbe) {
+  throw new Error(
+    `hardened probe grew wasm linear memory on repeat: ${pagesAfterFirstHardenedProbe} -> ${pagesAfterSecondHardenedProbe} pages`,
+  );
+}
 console.log(
   JSON.stringify({
     status: "ok",
@@ -57,8 +69,11 @@ console.log(
     memory_limit_bytes: 512 * 1024,
     result,
     decision_reset_decisions: 300,
+    hardened_leaf_decisions: 600,
     linear_memory_pages_before: pagesBefore,
-    linear_memory_pages_after: pagesAfter,
+    linear_memory_pages_after_limited_workload: pagesAfterLimitedWorkload,
+    linear_memory_pages_after_first_hardened_probe: pagesAfterFirstHardenedProbe,
+    linear_memory_pages_after_second_hardened_probe: pagesAfterSecondHardenedProbe,
   }),
 );
 

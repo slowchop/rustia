@@ -42,6 +42,22 @@ pub(crate) struct HeapMemoryUsage {
     pub(crate) reserved_bytes: usize,
 }
 
+/// Allocation boundary captured after a hardened guest environment is sealed.
+///
+/// Hardened globals and their reachable configuration are immutable after this
+/// point, so later decision-local allocations are appended beyond these slot
+/// lengths and can be discarded without rebuilding the standard environment.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HeapCheckpoint {
+    tables: usize,
+    functions: usize,
+    upvalues: usize,
+    strings: usize,
+    userdatas: usize,
+    buffers: usize,
+    vectors: usize,
+}
+
 impl HeapMemoryUsage {
     fn add(&mut self, live_bytes: usize, reserved_bytes: usize) {
         self.live_bytes = self.live_bytes.saturating_add(live_bytes);
@@ -163,6 +179,12 @@ impl<T> ReusableSlots<T> {
             slot.generation = 1;
             self.free.push(index as u32);
         }
+    }
+
+    fn truncate_to_checkpoint(&mut self, len: usize) {
+        debug_assert!(len <= self.slots.len());
+        self.slots.truncate(len);
+        self.free.clear();
     }
 
     fn occupied_len(&self) -> usize {
@@ -771,6 +793,62 @@ impl VmCell {
             root.userdatas.reset_epoch();
             root.buffers.reset_epoch();
             root.vectors.reset_epoch();
+        });
+        self.arena.finish_cycle();
+        self.arena.finish_cycle();
+        self.allocation_debt_pending = self.arena.metrics().allocation_debt() > 0.0;
+    }
+
+    /// Captures the immutable allocation prefix used by a sealed hardened
+    /// environment.
+    pub(crate) fn hardened_checkpoint(&mut self) -> Option<HeapCheckpoint> {
+        if !self.tables.free.is_empty()
+            || !self.functions.free.is_empty()
+            || !self.upvalues.free.is_empty()
+        {
+            return None;
+        }
+        let mut checkpoint = HeapCheckpoint {
+            tables: self.tables.slots.len(),
+            functions: self.functions.slots.len(),
+            upvalues: self.upvalues.slots.len(),
+            strings: 0,
+            userdatas: 0,
+            buffers: 0,
+            vectors: 0,
+        };
+        let arena_is_append_only = self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            if !root.strings.free.is_empty()
+                || !root.userdatas.free.is_empty()
+                || !root.buffers.free.is_empty()
+                || !root.vectors.free.is_empty()
+            {
+                return false;
+            }
+            checkpoint.strings = root.strings.slots.len();
+            checkpoint.userdatas = root.userdatas.slots.len();
+            checkpoint.buffers = root.buffers.slots.len();
+            checkpoint.vectors = root.vectors.slots.len();
+            true
+        });
+        arena_is_append_only.then_some(checkpoint)
+    }
+
+    /// Drops allocations made after a hardened environment was sealed while
+    /// preserving its immutable globals, standard libraries, and host
+    /// namespaces in place.
+    pub(crate) fn reset_hardened_decision_epoch(&mut self, checkpoint: HeapCheckpoint) {
+        self.tables.truncate_to_checkpoint(checkpoint.tables);
+        self.functions.truncate_to_checkpoint(checkpoint.functions);
+        self.upvalues.truncate_to_checkpoint(checkpoint.upvalues);
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            root.strings.truncate_to_checkpoint(checkpoint.strings);
+            root.userdatas.truncate_to_checkpoint(checkpoint.userdatas);
+            root.buffers.truncate_to_checkpoint(checkpoint.buffers);
+            root.vectors.truncate_to_checkpoint(checkpoint.vectors);
+            rebuild_string_index(&mut root, STRING_INDEX_MIN_CAPACITY);
         });
         self.arena.finish_cycle();
         self.arena.finish_cycle();

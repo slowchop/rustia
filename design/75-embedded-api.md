@@ -24,6 +24,11 @@ The concrete safe-Rust host seam is also implemented: `HostSchema` separates per
 fresh, possibly borrowing `HostContext` for each typed invocation; callbacks receive capability-specific views;
 all guest calls in the invocation share fuel; and effects/slot writes stage into a bounded, ordered,
 record-transactional journal.
+The authoritative-leaf layer from
+[`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) is also implemented:
+`RustiaBuilder::deterministic_leaf()` selects a fail-closed `DeterministicSim` guest allowlist,
+`Rustia::compile_entry`/`Invocation::call_entry` avoid retained module/export state in the hot path, and the
+specialized hardened reset preserves only the sealed immutable configuration prefix.
 Object/program reclamation, real VM-owned live/reserved/peak telemetry, and the correctness-first logical-live
 quota/atomic OOM path are now implemented and validated by the exact-commit `safe-memory-588b541` native Linode
 cohort plus its wasm32 512 KiB quota/recovery probe. The next release-critical slice is not more facade
@@ -225,12 +230,16 @@ successful publication. The extra hard OOM/yield treatment is local to typed tra
 than a global change to ordinary legacy execution. Host panics are caught at the VM host-call boundary; records
 roll back and every later guest execution entry point rejects until `reset_decision()` succeeds.
 Containment covers typed/context-free host functions, extension ops, stdout and clock providers, and the
-configured `loadstring` compiler.
+configured `loadstring` compiler. This requires `panic = "unwind"`; an
+aborting build terminates or traps before Rustia can intervene, so callbacks in
+that configuration must not panic.
 
 The outer closure passed to `invoke` is ordinary caller-side Rust control flow. Its panic (or one from a
 caller-side argument/result conversion) continues unwinding after dropping the unpublished journal; it is not
 converted to `HostPanicked` and does not poison an otherwise idle VM. Conversions performed inside a
 guest-invoked host callback are inside the containment boundary and do poison on panic.
+The hardened `invoke_entry_into` lifecycle catches a caller-side conversion
+unwind, resets the decision, and resumes the same panic.
 
 This is intentionally a **record transaction**, not a heap/context transaction. It does not undo guest
 globals/tables, mutation through profile-gated `HostMut`, callback captures, or `HostContext` state modified
@@ -334,9 +343,19 @@ model and Deno's extension/op system. Do not start here; macros freeze mistakes.
 
 ## Grabby Fit
 
-The public API works for grabby with `HostModule<GrabbyHost>` as the persistent registration layer and a fresh
-borrowing `TickContext` as the invocation authority. After a setup invocation has installed the compiled module
-and retained `decide`, the worker hot path is:
+The public API works for grabby with `HostModule<GrabbyHost>` as the persistent registration layer, a
+`CompiledEntry` as the host-owned decision artifact, and a fresh borrowing `TickContext` as the invocation
+authority. Setup constructs the hardened VM and compiles the direct decision body:
+
+```rust
+let mut vm = RustiaBuilder::deterministic_leaf()
+    .memory_limit_bytes(memory_limit)
+    .build_for_host::<GrabbyHost>()?;
+vm.install_host_module(bridge)?;
+let decide = Rustia::<GrabbyHost>::compile_entry("decide.luau", source)?;
+```
+
+The worker hot path is:
 
 ```rust
 let mut context = TickContext {
@@ -344,13 +363,13 @@ let mut context = TickContext {
     input: &agent_input,
     slots: &slot_snapshot,
 };
-let receipt = vm.invoke_into(
+let receipt = vm.invoke_entry_into::<Decision>(
     &mut context,
     InvocationLimits::new(fuel)
         .with_max_records(max_records)
         .with_max_record_bytes(max_record_bytes),
     &mut worker_lane,
-    |invocation| decide.call_in::<_, _, Decision>(invocation, ()),
+    &decide,
 )?;
 ```
 
@@ -371,10 +390,14 @@ rustia owns:
 - capability views and profile enforcement.
 - bounded record count/logical bytes, one dense sequence across effects and slot writes, callback savepoints,
   and all-or-nothing outer record publication.
-- usage receipts; `invoke_into` reserves before execution and appends to the lane without allocating at commit.
+- usage receipts; `invoke_entry_into` reserves before execution, appends to the lane without allocating at
+  commit, and resets after both success and failure.
 - `reset_decision()` for per-decision `DeterministicSim` leaves, with decision-reset ABI v1, idle-only execution,
-  allocation-container reuse, deterministic RNG/GC/logical-time restart, and epoch invalidation of every
-  retained handle.
+  sealed immutable-environment reuse, decision-local allocation discard, deterministic
+  RNG/GC/logical-time restart, and epoch invalidation of every retained handle.
+- the hardened guest-surface ABI, frozen allowlisted environment, mandatory memory limit, and rejection of
+  guest globals/upvalues/raw access/dynamic authority.
+- stateless compiled-entry execution without an exports table, retained closure, or loaded-program installation.
 - install-generation/freshness checks plus VM/epoch-rooted handle ownership; transactional hot reload remains
   planned.
 
@@ -403,7 +426,10 @@ store authoritative state on the GC heap instead of in captured host slots.
     handle clone, and plateau exactly in the 600-decision mixed lifecycle test.
 11. ✅ typed host schema/context, capability views, typed modules, shared invocation fuel, bounded ordered
     records, handler savepoints, outer publication rollback, usage receipts, and host-panic poisoning/reset.
-12. ⏳ host-owned script module resolution, transactional install/reload of guest state, and rich/live values —
+12. ✅ hardened stateless action leaves — deterministic allowlisted/frozen guest surface, mandatory memory
+    limit, bytecode policy validation, direct `CompiledEntry` invocation, failure-safe lifecycle helper,
+    immutable-prefix decision reset, and native/wasm32 exact-plateau probes.
+13. ⏳ host-owned script module resolution, transactional install/reload of guest state, and rich/live values —
     next.
 
 Defer mlua-style `UserData`/`Scope` until the above is stable. The first useful embedding target is typed

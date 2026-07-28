@@ -78,6 +78,10 @@ pub enum ErrorKind {
         operation: Option<String>,
         profile: Profile,
     },
+    HardenedLeafViolation {
+        feature: &'static str,
+    },
+    GuestEnvironmentSealed,
     InvalidProgram {
         reason: &'static str,
     },
@@ -233,6 +237,12 @@ impl fmt::Display for Error {
                 }
                 None => write!(formatter, "{feature} is not available in {profile:?}"),
             },
+            ErrorKind::HardenedLeafViolation { feature } => {
+                write!(formatter, "{feature} is not available in the hardened leaf guest surface")
+            }
+            ErrorKind::GuestEnvironmentSealed => {
+                formatter.write_str("hardened leaf guest environment is sealed")
+            }
             ErrorKind::InvalidProgram { reason } => write!(formatter, "invalid bytecode: {reason}"),
         }
     }

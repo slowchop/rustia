@@ -1549,7 +1549,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia/Cargo.toml",
       "publish": false,
-      "file_count": 16,
+      "file_count": 18,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1558,6 +1558,7 @@
         "README.md",
         "examples/embedding.rs",
         "examples/hot_reload.rs",
+        "examples/leaf_lifecycle_bench.rs",
         "examples/typed_invocation.rs",
         "src/extension_api.rs",
         "src/function.rs",
@@ -1566,6 +1567,7 @@
         "src/macros.rs",
         "src/serde_value.rs",
         "src/value.rs",
+        "tests/hardened_leaf.rs",
         "tests/typed_invocation.rs"
       ]
     }

@@ -9,8 +9,9 @@ use function::IntoHostFunction;
 use invocation::{HostBindings, TypedHostDispatcher};
 use rustia_compiler::{compile_with_options, CompileError, CompileOptions};
 use rustia_parser::SourceError;
-use rustia_vm::{Program, Vm};
+use rustia_vm::{HardenedLeafProgram, Program, Vm};
 use std::fmt;
+use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
 pub use extension_api::{
     RustiaBuilder, RustiaExtension, RustiaHostFuelPolicy, RustiaHostFunctionInfo, ServiceClock,
@@ -25,8 +26,9 @@ pub use invocation::{
     SlotWrites, Slots,
 };
 pub use rustia_vm::{
-    Error as VmError, ErrorKind as VmErrorKind, OpCapability, Profile, VmMemoryStats, VmSettings,
-    DECISION_RESET_ABI_VERSION as RUSTIA_DECISION_RESET_ABI_VERSION,
+    Error as VmError, ErrorKind as VmErrorKind, GuestSurface, OpCapability, Profile, VmMemoryStats,
+    VmSettings, DECISION_RESET_ABI_VERSION as RUSTIA_DECISION_RESET_ABI_VERSION,
+    HARDENED_LEAF_GUEST_ABI_VERSION as RUSTIA_HARDENED_LEAF_GUEST_ABI_VERSION,
 };
 pub use serde_value::SerdeValueError;
 pub use value::{
@@ -85,7 +87,10 @@ where
     /// persist. Globals inserted with [`insert_global`](Self::insert_global)
     /// and [`insert_serde`](Self::insert_serde) are decision inputs and must be
     /// rebound afterward. Every prior [`Function`] and [`Exports`] handle is
-    /// invalidated, while host-owned [`CompiledModule`] values remain reusable.
+    /// invalidated, while host-owned [`CompiledModule`] and [`CompiledEntry`]
+    /// values remain reusable. A hardened-leaf VM preserves its sealed
+    /// immutable environment in place and discards every decision-local
+    /// allocation after that seal.
     ///
     /// Replay protocols must record
     /// [`RUSTIA_DECISION_RESET_ABI_VERSION`].
@@ -150,6 +155,36 @@ where
         let (value, usage) = self.invoke_core(context, limits, operation)?;
         records.append(&mut self.journal);
         Ok(InvocationReceipt { value, usage })
+    }
+
+    /// Executes one precompiled stateless entry, publishes its committed
+    /// records, and resets the decision epoch before returning.
+    ///
+    /// Reset runs after success, returned failure, and an unwinding panic from
+    /// guest-value conversion or a contained host callback. The original panic
+    /// resumes after reset. If reset itself fails after a normal return, any
+    /// records published by the invocation are removed from the caller lane
+    /// and the reset error wins. `panic = "abort"` builds cannot unwind and
+    /// therefore cannot provide panic containment. This is the complete
+    /// authoritative-leaf lifecycle used by worker lanes.
+    pub fn invoke_entry_into<Return>(
+        &mut self,
+        context: &mut dyn HostContext<C>,
+        limits: InvocationLimits,
+        records: &mut Vec<C::Record>,
+        entry: &CompiledEntry,
+    ) -> Result<InvocationReceipt<Return>>
+    where
+        Return: FromRustia,
+    {
+        let records_checkpoint = records.len();
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            self.invoke_into(context, limits, records, |invocation| {
+                invocation.call_entry::<Return>(entry)
+            })
+        }));
+        let reset = self.reset_decision();
+        finish_entry_lifecycle(records, records_checkpoint, outcome, reset)
     }
 
     fn invoke_core<Return, Func>(
@@ -393,6 +428,24 @@ where
         })
     }
 
+    /// Compiles a chunk whose top-level body is invoked directly on each
+    /// decision without installing exports or retaining bytecode in the VM.
+    ///
+    /// Stateless entries cannot contain nested function prototypes. Inputs and
+    /// outputs should cross the typed host context, and the source should
+    /// return its decision value directly.
+    pub fn compile_entry(source_name: impl Into<String>, source: &str) -> Result<CompiledEntry> {
+        let source_name = source_name.into();
+        let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
+        let options = CompileOptions::default().with_source(source_name.clone(), source);
+        let program = compile_with_options(&chunk, options).map_err(Error::Compile)?;
+        let program = HardenedLeafProgram::new(program).map_err(Error::Vm)?;
+        Ok(CompiledEntry {
+            source_name,
+            program,
+        })
+    }
+
     pub fn generation(&self) -> u64 {
         self.generation
     }
@@ -409,6 +462,25 @@ where
     #[inline]
     pub(crate) fn vm(&self) -> &Vm {
         &self.vm
+    }
+}
+
+fn finish_entry_lifecycle<T, Record>(
+    records: &mut Vec<Record>,
+    records_checkpoint: usize,
+    outcome: std::thread::Result<Result<T>>,
+    reset: Result<()>,
+) -> Result<T> {
+    match (outcome, reset) {
+        (Ok(outcome), Ok(())) => outcome,
+        (Ok(_), Err(reset_error)) => {
+            records.truncate(records_checkpoint);
+            Err(reset_error)
+        }
+        (Err(payload), _) => {
+            records.truncate(records_checkpoint);
+            resume_unwind(payload)
+        }
     }
 }
 
@@ -649,6 +721,20 @@ impl CompiledModule {
     }
 }
 
+/// Precompiled top-level decision body for allocation-light repeated
+/// invocation through [`Invocation::call_entry`].
+#[derive(Clone)]
+pub struct CompiledEntry {
+    source_name: String,
+    program: HardenedLeafProgram,
+}
+
+impl CompiledEntry {
+    pub fn source_name(&self) -> &str {
+        &self.source_name
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SourceSpan {
     pub start: usize,
@@ -715,9 +801,9 @@ impl std::error::Error for Error {}
 #[cfg(test)]
 mod tests {
     use super::{
-        Error, FromRustia, OpCapability, OwnedTable, OwnedValue, Profile, Result, Rustia,
-        RustiaBuilder, RustiaExtension, RustiaHostFunctionInfo, ServiceClock, SourceSpan,
-        VmErrorKind, VmSettings, RUSTIA_DECISION_RESET_ABI_VERSION,
+        finish_entry_lifecycle, Error, FromRustia, OpCapability, OwnedTable, OwnedValue, Profile,
+        Result, Rustia, RustiaBuilder, RustiaExtension, RustiaHostFunctionInfo, ServiceClock,
+        SourceSpan, VmErrorKind, VmSettings, RUSTIA_DECISION_RESET_ABI_VERSION,
         RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
         RUSTIA_MIN_HOST_FUNCTION_FUEL,
     };
@@ -737,6 +823,19 @@ mod tests {
             .run_owned("local x: number = 6 * 7; return x")
             .unwrap();
         assert_eq!(f64::from_rustia(result).unwrap(), 42.0);
+    }
+
+    #[test]
+    fn entry_lifecycle_removes_new_records_when_reset_fails() {
+        let mut records = vec![1, 2, 3];
+        let result = finish_entry_lifecycle(
+            &mut records,
+            2,
+            Ok(Ok(42)),
+            Err(Error::Embed("reset failed".to_owned())),
+        );
+        assert!(matches!(result, Err(Error::Embed(ref message)) if message == "reset failed"));
+        assert_eq!(records, [1, 2]);
     }
 
     #[test]
