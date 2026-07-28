@@ -1317,8 +1317,8 @@ fn measure_with_factory(
     let mut samples_prepare_ns = Vec::with_capacity(config.reps);
     let mut samples_first_call_ns = Vec::with_capacity(config.reps);
     let mut samples_cold_start_ns = Vec::with_capacity(config.reps);
-    let mut checksum = String::new();
-    for _ in 0..config.reps {
+    let mut checksum = None;
+    for repetition in 0..config.reps {
         let prepare_started = Instant::now();
         let mut cold = factory()?;
         let prepare_elapsed = prepare_started.elapsed();
@@ -1330,9 +1330,21 @@ fn measure_with_factory(
         let mut prepared = factory()?;
         let _ = prepared.run(n)?;
         let (sample_checksum, elapsed) = run_once(&mut *prepared, n)?;
-        checksum = sample_checksum;
+        if let Some(expected) = &checksum {
+            if sample_checksum != *expected {
+                return Err(Error::new(format!(
+                    "checksum changed for engine {} workload {} on repetition {}: expected {expected:?}, got {sample_checksum:?}",
+                    engine.id,
+                    workload.id,
+                    repetition + 1,
+                )));
+            }
+        } else {
+            checksum = Some(sample_checksum);
+        }
         samples_ns_per_unit.push(elapsed.as_secs_f64() * 1e9 / n_f64);
     }
+    let checksum = checksum.ok_or_else(|| Error::new("benchmark repetitions must be positive"))?;
     let mut sorted_samples = samples_ns_per_unit.clone();
     sorted_samples.sort_by(|lhs, rhs| lhs.total_cmp(rhs));
     let ns_per_unit_min = sorted_samples[0];
@@ -2815,13 +2827,24 @@ mod tests {
         id: usize,
         run_count: usize,
         runs: Rc<RefCell<Vec<(usize, usize, u64)>>>,
+        checksum: &'static str,
     }
 
     impl PreparedWorkload for RecordingPrepared {
         fn run(&mut self, n: u64) -> Result<String> {
             self.run_count += 1;
             self.runs.borrow_mut().push((self.id, self.run_count, n));
-            Ok(format!("instance:{}:run:{}", self.id, self.run_count))
+            Ok(self.checksum.to_owned())
+        }
+    }
+
+    struct FixedChecksumPrepared {
+        checksum: &'static str,
+    }
+
+    impl PreparedWorkload for FixedChecksumPrepared {
+        fn run(&mut self, _n: u64) -> Result<String> {
+            Ok(self.checksum.to_owned())
         }
     }
 
@@ -3156,6 +3179,7 @@ mod tests {
                         id,
                         run_count: 0,
                         runs: Rc::clone(&runs),
+                        checksum: "number:1",
                     }) as Box<dyn PreparedWorkload>)
                 }
             },
@@ -3185,7 +3209,7 @@ mod tests {
         );
         assert_eq!(measurement.samples_ns_per_unit.len(), 3);
         assert_eq!(measurement.n_selection, NSelection::Calibrated);
-        assert_eq!(measurement.checksum, "instance:6:run:2");
+        assert_eq!(measurement.checksum, "number:1");
     }
 
     #[test]
@@ -3214,6 +3238,7 @@ mod tests {
                         id,
                         run_count: 0,
                         runs: Rc::clone(&runs),
+                        checksum: "number:1",
                     }) as Box<dyn PreparedWorkload>)
                 }
             },
@@ -3242,6 +3267,36 @@ mod tests {
         assert_eq!(measurement.n, 1500);
         assert_eq!(measurement.n_selection, NSelection::Fixed);
         assert_eq!(measurement.samples_ns_per_unit.len(), 3);
+    }
+
+    #[test]
+    fn measurement_rejects_checksum_drift_between_repetitions() {
+        let config = Config {
+            fixed_n: Some(10),
+            reps: 3,
+            commit: Some("test".to_owned()),
+            ..Config::default()
+        };
+        let next_id = Cell::new(0_usize);
+        let error = measure_with_factory(
+            &config,
+            &ENGINE_SLOTS[0],
+            &WORKLOADS[0],
+            test_verification(),
+            || {
+                let id = next_id.get();
+                next_id.set(id + 1);
+                let checksum = if id < 3 { "number:1" } else { "number:2" };
+                Ok(Box::new(FixedChecksumPrepared { checksum }) as Box<dyn PreparedWorkload>)
+            },
+        )
+        .expect_err("second measured repetition must not change checksum");
+
+        assert!(
+            error.to_string().contains("checksum changed")
+                && error.to_string().contains("repetition 2"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
