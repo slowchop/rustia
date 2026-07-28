@@ -35,8 +35,8 @@ specialized hardened reset preserves only the sealed immutable configuration pre
 Object/program reclamation, real VM-owned live/reserved/peak telemetry, and the correctness-first logical-live
 quota/atomic OOM path are now implemented and validated by the exact-commit `safe-memory-588b541` native Linode
 cohort plus its wasm32 512 KiB quota/recovery probe. The next release-critical slice is not more facade
-decoration: the epoch-safe decision reset is now implemented; remaining work is O(1) quota accounting, a cheap
-host-owned module resolver/cache, transactional installation/reload failures, rich graph-preserving values, and
+decoration: the epoch-safe decision reset and host-owned `require` resolver/cache are now implemented; remaining
+work is O(1) quota accounting, transactional installation/reload failures, rich graph-preserving values, and
 live zero-copy serde. The consumer-facing plan is an additive advanced live-object layer, not replacement of
 the existing small typed facade. The ordered expansion is recorded in [Build Order](#build-order).
 
@@ -500,9 +500,10 @@ store authoritative state on the GC heap instead of in captured host slots.
 14. ⏳ **Add the familiar ergonomic entry points:** `globals()`, `create_table()`, `create_function()`, and a
     composable `load(source).name(...).environment(...).eval()/exec()` chunk builder. Keep `run<T>()`,
     `add_fn`, and the source-named helpers as concise facade sugar rather than breaking them.
-15. ⏳ **Add host-owned modules:** script-visible `require`, deterministic module identity where promised,
-    execute-once caching, cycle diagnostics, and host-controlled resolution rather than an ambient core
-    filesystem API.
+15. ✅ **Add host-owned modules:** script-visible `require`, deterministic module identity where promised,
+    execute-once caching, cycle diagnostics, shared caller fuel, reset-aware cache lifetime, and
+    host-controlled resolution rather than an ambient core filesystem API. The behavior is versioned by
+    `RUSTIA_MODULE_RESOLUTION_ABI_VERSION`; the host must separately bind its resolver content.
 16. ⏳ **Complete rich integration and failure semantics:** lifetime-safe live serde, transactional
     extension/module/hot-reload installation, stack diagnostics, and explicit behavior for handles across
     reload and reset.

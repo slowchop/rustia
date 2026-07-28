@@ -104,23 +104,23 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 86,
-      "confidence": 84,
-      "state": "The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, host-pluggable output/time services, lifetime-safe per-invocation host contexts, bounded transactional effect journals, CLI, benchmark matrix, private HotIR, closure-call PIC, generation-safe object/program reclamation, VM-owned memory telemetry, logical-live quotas, atomic catchable OOM, epoch-safe decision reset, and exact dedicated-Linux native plus wasm quota evidence are in-tree. The remaining release gates are O(1) quota accounting, broader mixed-heap pressure evidence, module resolution/rich values, semantic-tail hardening, and packaging.",
-      "future_plan": "Finish O(1) accounting and broader mixed-heap pressure evidence; complete module resolution and the rich-value boundary; then continue measured optimization and public release work."
+      "complete": 88,
+      "confidence": 86,
+      "state": "The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, host-pluggable output/time services, host-owned canonical-identity require resolution/cache, lifetime-safe per-invocation host contexts, bounded transactional effect journals, CLI, benchmark matrix, private HotIR, closure-call PIC, generation-safe object/program reclamation, VM-owned memory telemetry, logical-live quotas, atomic catchable OOM, epoch-safe decision reset, and exact dedicated-Linux native plus wasm quota evidence are in-tree. The remaining release gates are O(1) quota accounting, broader mixed-heap pressure evidence, rich/live values, semantic-tail hardening, and packaging.",
+      "future_plan": "Finish O(1) accounting and broader mixed-heap pressure evidence; complete the rich-value boundary and transactional failure semantics; then continue measured optimization and public release work."
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 92,
-      "confidence": 92,
-      "state": "The facade now includes typed run/compile, owned scalar/table conversions, a lifetime-independent HostSchema with fresh borrowed HostContext values per invocation, capability-specific host views, shared fuel, bounded transactional record publication, usage receipts, retained functions/exports with true collector roots plus install-generation and decision-epoch checks, owned-value serde, extensions, hot reload, epoch-safe decision reset, examples, diagnostics, migration guidance, host-pluggable stdout/clock services, VM-owned memory telemetry, and configurable logical-live quotas. It is not yet a complete rich embedding boundary: there is no script-visible module resolver/cache, graph-preserving rich values, live zero-copy serde path, or O(1) quota counter.",
-      "future_plan": "Complete O(1) accounting, module loading, rich/live values, diagnostics, and API stabilization."
+      "complete": 94,
+      "confidence": 93,
+      "state": "The facade now includes typed run/compile, owned scalar/table conversions, host-owned canonical-identity require resolution/cache, a lifetime-independent HostSchema with fresh borrowed HostContext values per invocation, capability-specific host views, shared fuel, bounded transactional record publication, usage receipts, retained functions/exports with true collector roots plus install-generation and decision-epoch checks, owned-value serde, extensions, hot reload, epoch-safe decision reset, examples, diagnostics, migration guidance, host-pluggable stdout/clock services, VM-owned memory telemetry, and configurable logical-live quotas. It is not yet a complete rich embedding boundary: graph-preserving rich values, a live zero-copy serde path, transactional guest-side failure rollback, and an O(1) quota counter remain.",
+      "future_plan": "Complete O(1) accounting, rich/live values, transactional failure semantics, diagnostics, and API stabilization."
     },
     {
       "name": "Full public standalone Luau engine release",
-      "complete": 58,
-      "confidence": 83,
-      "state": "The Luau 0.709 standalone target and 493-ref conformance denominator are strong. Bounded generation-safe object/program lifetimes, VM-owned live/reserved/peak telemetry, logical-live memory limits, atomic catchable OOM, lifetime-safe typed invocations with transactional records, and a versioned deterministic reset lifecycle are implemented; native Linode plus wasm quota evidence is exact. Release still requires O(1) quota accounting, broader mixed-heap pressure evidence, module loading, richer value interop, transactional guest-module installation, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.",
+      "complete": 61,
+      "confidence": 85,
+      "state": "The Luau 0.709 standalone target and 493-ref conformance denominator are strong. Bounded generation-safe object/program lifetimes, VM-owned live/reserved/peak telemetry, logical-live memory limits, atomic catchable OOM, host-owned require resolution/cache, lifetime-safe typed invocations with transactional records, and versioned deterministic reset/module lifecycles are implemented; native Linode plus wasm quota evidence is exact. Release still requires O(1) quota accounting, broader mixed-heap pressure evidence, richer value interop, transactional guest-module failure semantics, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.",
       "future_plan": "Close the remaining accounting and host-boundary gates, harden the semantic tail and cross-target goldens, then package and publish against the pinned target."
     },
     {
@@ -349,10 +349,10 @@
       "entries": [
         {
           "name": "Koto-shaped facade",
-          "complete": 91,
-          "confidence": 90,
-          "state": "Builder, typed run<T>, source-named compile/run helpers, public error diagnostic accessors, globals, exports, retained functions, a typed HostSchema/HostContext invocation surface, bounded record transactions, usage receipts, an epoch-safe decision reset, environment presets (standard/deterministic/live) with stdout and determinism-labeled clock service sockets, examples, and a first koto-to-rustia migration guide exist.",
-          "future_plan": "Add script-visible module resolution, stabilize names and error types, and expand migration guidance as the remaining production gates land."
+          "complete": 93,
+          "confidence": 92,
+          "state": "Builder, typed run<T>, source-named compile/run helpers, public error diagnostic accessors, globals, exports, retained functions, host-owned require resolution/cache, a typed HostSchema/HostContext invocation surface, bounded record transactions, usage receipts, an epoch-safe decision reset, environment presets (standard/deterministic/live) with stdout and determinism-labeled service sockets, examples, and a first koto-to-rustia migration guide exist.",
+          "future_plan": "Stabilize names and error types, add the rich/live-value layer, and expand migration guidance as the remaining production gates land."
         },
         {
           "name": "Owned value firewall",
@@ -384,10 +384,10 @@
         },
         {
           "name": "Module loading and resolution",
-          "complete": 20,
-          "confidence": 90,
-          "state": "CompiledModule install and hot reload exist, and the architecture correctly assigns resolution to host policy. There is no script-visible require resolver, execute-once cache, dependency/cycle handling, or versioned deterministic module policy.",
-          "future_plan": "Add a host-owned resolver/cache interface with deterministic identity, cycle diagnostics, capability policy, transactional installation failure behavior, and no implicit filesystem dependency in the core VM."
+          "complete": 82,
+          "confidence": 92,
+          "state": "CompiledModule install/hot reload and script-visible require are implemented. ServiceModuleResolver keeps resolution in host policy with no ambient filesystem; the host supplies canonical identity and source; successful zero-or-one-result modules execute once per decision epoch; cached values are roots; nested referrers, cycles, shared fuel, reset, deterministic labels, panic poisoning, quota admission, and MODULE_RESOLUTION_ABI_VERSION are covered.",
+          "future_plan": "Define transactional or isolated rollback for arbitrary guest global/heap side effects from runtime-failing module installation and hot reload, then add longer dependency-graph integration evidence."
         },
         {
           "name": "Decision lifecycle and reset",
@@ -497,10 +497,10 @@
         },
         {
           "name": "CLI",
-          "complete": 74,
-          "confidence": 65,
-          "state": "rustia-cli supports file, stdin, --eval, and --repl execution with profile, fuel, source-name options, state-preserving line evaluation, expression shorthand, unit-tested parsing, and source-aware compile/runtime diagnostics.",
-          "future_plan": "Add richer multiline editing/history behavior and diagnostic formatting as VM stack traces mature."
+          "complete": 82,
+          "confidence": 78,
+          "state": "rustia-cli supports file, stdin, --eval, and --repl execution with profile, fuel, and source-name options; state-preserving line evaluation and expression shorthand; source-aware compile/runtime diagnostics; and a fixed-order filesystem require adapter with canonical cache identities, nested referrer-relative resolution, and module-source runtime diagnostics. Deterministic CLI execution deliberately has no ambient filesystem resolver.",
+          "future_plan": "Add richer multiline editing/history behavior and stack-aware diagnostic formatting; keep filesystem resolution policy stable and covered across supported hosts."
         },
         {
           "name": "Live wasm demo",

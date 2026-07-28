@@ -4,7 +4,8 @@ use crate::{
 };
 use rustia_compiler::{compile_with_options, CompileOptions};
 use rustia_vm::{
-    ClockProvider, EntropyProvider, HostFunctionOp, OpCapability, Program, StdoutSink,
+    ClockProvider, EntropyProvider, HostFunctionOp, ModuleResolver, OpCapability, Program,
+    ResolvedModule, StdoutSink,
 };
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -258,6 +259,16 @@ impl RustiaBuilder {
         self
     }
 
+    /// Installs the host-owned resolver behind script-visible `require`.
+    ///
+    /// The resolver chooses a canonical module identity and source for every
+    /// request. Successful modules execute once per decision epoch and are
+    /// cached by that identity; [`Rustia::reset_decision`] clears the cache.
+    pub fn module_resolver(mut self, resolver: ServiceModuleResolver) -> Self {
+        self.settings.module_resolver = Some(resolver.into_provider());
+        self
+    }
+
     /// Plugs the wall-clock provider backing no-arg `os.time()` and the default `os.date`
     /// timestamp. A nondeterministic provider is rejected at [`build`](Self::build) on
     /// `DeterministicSim`.
@@ -365,6 +376,18 @@ impl RustiaBuilder {
                     profile: self.profile,
                 })));
             }
+            if self
+                .settings
+                .module_resolver
+                .as_ref()
+                .is_some_and(|resolver| !resolver.deterministic())
+            {
+                return Err(Error::Vm(VmError::new(VmErrorKind::CapabilityRemoved {
+                    feature: "non-deterministic module resolver",
+                    operation: Some("require".to_owned()),
+                    profile: self.profile,
+                })));
+            }
         }
         if self.settings.guest_surface.is_hardened_leaf() {
             if !self.profile.is_deterministic_sim() {
@@ -392,6 +415,7 @@ impl RustiaBuilder {
                 )));
             }
             if self.settings.loadstring_compiler.is_some()
+                || self.settings.module_resolver.is_some()
                 || self.settings.enable_conformance_coverage
                 || self.settings.enable_conformance_top_level_yield
                 || self.settings.enable_conformance_int64_userdata
@@ -408,6 +432,115 @@ impl RustiaBuilder {
         }
         Ok(())
     }
+}
+
+/// Host-supplied source returned by a [`ServiceModuleResolver`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ModuleSource {
+    identity: String,
+    source_name: String,
+    source: Vec<u8>,
+}
+
+impl ModuleSource {
+    /// Creates a module whose diagnostic source name matches its canonical
+    /// cache identity.
+    pub fn new(identity: impl Into<String>, source: impl AsRef<[u8]>) -> Self {
+        let identity = identity.into();
+        Self {
+            source_name: identity.clone(),
+            identity,
+            source: source.as_ref().to_vec(),
+        }
+    }
+
+    /// Creates a module with a separate canonical cache identity and
+    /// diagnostic source name.
+    pub fn named(
+        identity: impl Into<String>,
+        source_name: impl Into<String>,
+        source: impl AsRef<[u8]>,
+    ) -> Self {
+        Self {
+            identity: identity.into(),
+            source_name: source_name.into(),
+            source: source.as_ref().to_vec(),
+        }
+    }
+
+    pub fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    pub fn source_name(&self) -> &str {
+        &self.source_name
+    }
+
+    pub fn source(&self) -> &[u8] {
+        &self.source
+    }
+}
+
+/// Host-owned resolver for script-visible `require`.
+///
+/// Resolution is performed on demand with the requested path and the current
+/// chunk's source name. The host must return a stable canonical identity when
+/// it labels the resolver deterministic. Because the canonical identity is a
+/// resolver result, the resolver is called before every cache lookup; a host
+/// with expensive I/O or compilation should keep its own source cache. A cache
+/// hit skips module execution and discards the newly resolved program.
+#[derive(Clone, Debug)]
+pub struct ServiceModuleResolver {
+    provider: ModuleResolver,
+}
+
+impl ServiceModuleResolver {
+    /// Host-supplied replay-stable resolver. The determinism assertion is
+    /// trusted, not verified.
+    pub fn from_fn(
+        resolver: impl FnMut(&str, Option<&str>) -> std::result::Result<ModuleSource, String> + 'static,
+    ) -> Self {
+        Self::from_fn_with_determinism(resolver, true)
+    }
+
+    /// Host-supplied live resolver explicitly labeled nondeterministic.
+    pub fn from_nondeterministic_fn(
+        resolver: impl FnMut(&str, Option<&str>) -> std::result::Result<ModuleSource, String> + 'static,
+    ) -> Self {
+        Self::from_fn_with_determinism(resolver, false)
+    }
+
+    fn from_fn_with_determinism(
+        mut resolver: impl FnMut(&str, Option<&str>) -> std::result::Result<ModuleSource, String>
+            + 'static,
+        deterministic: bool,
+    ) -> Self {
+        let provider = ModuleResolver::new(
+            move |requested, referrer| {
+                let module = resolver(requested, referrer)?;
+                compile_module_source(module)
+            },
+            deterministic,
+        );
+        Self { provider }
+    }
+
+    fn into_provider(self) -> ModuleResolver {
+        self.provider
+    }
+}
+
+fn compile_module_source(module: ModuleSource) -> std::result::Result<ResolvedModule, String> {
+    if module.identity.is_empty() {
+        return Err("module identity must not be empty".to_owned());
+    }
+    let chunk = rustia_parser::parse_source_bytes(&module.source)
+        .map_err(|error| format!("{}:1: {error}", module.source_name))?;
+    let options =
+        CompileOptions::default().with_source_bytes(module.source_name.clone(), &module.source);
+    let program = compile_with_options(&chunk, options)
+        .map_err(|error| format!("{}:1: {error}", module.source_name))?;
+    Ok(ResolvedModule::new(module.identity, program))
 }
 
 /// Host clock provider plugged into a builder clock socket (design/72-host-services.md).

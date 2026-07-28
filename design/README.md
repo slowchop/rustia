@@ -49,13 +49,14 @@ docs are design intent.
 | [`publishability.json`](publishability.json) | generated publishability blocker audit for every workspace package | **[GENERATED]** |
 
 **TL;DR of where we are:** the architecture is decided and a substantial safe-Rust Luau 0.709 engine exists:
-694 fixtures / 493 refs / 0 pending, a typed embedding facade with host-pluggable output/clock services,
+694 fixtures / 493 refs / 0 pending, a typed embedding facade with host-pluggable output/clock services and
+canonical-identity module resolution,
 block-local invocation contexts, capability views, shared fuel, and bounded record transactions,
 CLI, deterministic profiles, reusable
 private HotIR, and a reproducible 12-adapter dedicated-Linux benchmark pipeline. The current `a562919` snapshot
 puts rustia 3.494x behind `mlua-luau` and 3.833x behind Luaur by five-workload minimum-time geometric mean; the
 targeted closure slice reduced rustia median latency by 15.036%. Before public release, prioritize complete
-O(1) quota accounting, broader mixed-heap/native/Wasm pressure evidence, module loading/rich values,
+O(1) quota accounting, broader mixed-heap/native/Wasm pressure evidence, rich/live values,
 semantic-tail hardening, then further measured optimization and packaging. Object/program reclamation,
 quotas/OOM, epoch-safe decision reset, and the per-invocation host seam are implemented.
 

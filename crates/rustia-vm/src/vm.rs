@@ -57,6 +57,11 @@ pub const DECISION_RESET_ABI_VERSION: u32 = 1;
 /// Replay and content protocols that depend on this surface must record the
 /// value alongside [`DECISION_RESET_ABI_VERSION`].
 pub const HARDENED_LEAF_GUEST_ABI_VERSION: u32 = 1;
+/// Version of host-resolved module identity, cache, cycle, and reset behavior.
+///
+/// Replay/package protocols that permit script-visible `require` must record
+/// this value together with their resolver's own content identity.
+pub const MODULE_RESOLUTION_ABI_VERSION: u32 = 1;
 const LUAU_CONFORMANCE_CALL_LIMIT: usize = 20_000;
 const CONSTANT_ATOM_EMPTY: u32 = 0;
 const SITE_CACHE_CLOSURE_CALL_EMPTY: u32 = u32::MAX - 4;
@@ -72,6 +77,7 @@ const PROGRAM_HANDLE_INDEX_MASK: u32 = (1 << PROGRAM_HANDLE_INDEX_BITS) - 1;
 const PROGRAM_HANDLE_MAX_GENERATION: u8 = u8::MAX;
 const STDOUT_SERVICE_NAME: &str = "service::stdout";
 const LOADSTRING_COMPILER_SERVICE_NAME: &str = "service::loadstring_compiler";
+const MODULE_RESOLVER_SERVICE_NAME: &str = "service::module_resolver";
 const WALL_CLOCK_SERVICE_NAME: &str = "service::wall_clock";
 const MONOTONIC_CLOCK_SERVICE_NAME: &str = "service::monotonic_clock";
 // Zero selects the validated special-cost path; every other opcode tag defaults to one fuel.
@@ -90,6 +96,71 @@ pub type LoadStringCompiler =
 
 type SharedStdoutSink = Rc<RefCell<dyn FnMut(&str)>>;
 type SharedEntropyProvider = Rc<RefCell<dyn FnMut() -> u64>>;
+type SharedModuleResolver =
+    Rc<RefCell<dyn FnMut(&str, Option<&str>) -> std::result::Result<ResolvedModule, String>>>;
+
+/// A host-resolved module with its canonical cache identity and compiled body.
+#[derive(Clone, Debug)]
+pub struct ResolvedModule {
+    identity: String,
+    program: Program,
+}
+
+impl ResolvedModule {
+    pub fn new(identity: impl Into<String>, program: Program) -> Self {
+        Self {
+            identity: identity.into(),
+            program,
+        }
+    }
+}
+
+/// Host-owned module resolution socket used by the script-visible `require`.
+///
+/// The host controls path policy and canonical identity. A resolver labeled
+/// deterministic is trusted to return the same identity and program for the
+/// same requested path/referrer pair; `DeterministicSim` rejects any resolver
+/// without that label.
+#[derive(Clone)]
+pub struct ModuleResolver {
+    resolver: SharedModuleResolver,
+    deterministic: bool,
+}
+
+impl ModuleResolver {
+    pub fn new(
+        resolver: impl FnMut(&str, Option<&str>) -> std::result::Result<ResolvedModule, String>
+            + 'static,
+        deterministic: bool,
+    ) -> Self {
+        Self {
+            resolver: Rc::new(RefCell::new(resolver)),
+            deterministic,
+        }
+    }
+
+    #[inline]
+    pub const fn deterministic(&self) -> bool {
+        self.deterministic
+    }
+
+    fn resolve(
+        &self,
+        requested: &str,
+        referrer: Option<&str>,
+    ) -> std::result::Result<ResolvedModule, String> {
+        (self.resolver.borrow_mut())(requested, referrer)
+    }
+}
+
+impl fmt::Debug for ModuleResolver {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ModuleResolver")
+            .field("deterministic", &self.deterministic)
+            .finish_non_exhaustive()
+    }
+}
 
 /// Shared host sink for composed `print` output. Cloning shares the underlying sink.
 #[derive(Clone)]
@@ -241,6 +312,8 @@ pub struct VmSettings {
     pub recursion_limit: usize,
     pub deterministic_gc_interval: NonZeroU64,
     pub loadstring_compiler: Option<LoadStringCompiler>,
+    /// Host-controlled module resolver backing script-visible `require`.
+    pub module_resolver: Option<ModuleResolver>,
     pub enable_conformance_coverage: bool,
     pub enable_conformance_top_level_yield: bool,
     pub enable_conformance_int64_userdata: bool,
@@ -270,6 +343,7 @@ impl Default for VmSettings {
             deterministic_gc_interval: NonZeroU64::new(10_000)
                 .expect("default deterministic GC interval is non-zero"),
             loadstring_compiler: None,
+            module_resolver: None,
             enable_conformance_coverage: false,
             enable_conformance_top_level_yield: false,
             enable_conformance_int64_userdata: false,
@@ -366,6 +440,8 @@ pub struct Vm {
     host_functions: Vec<HostFunctionOp>,
     host_function_bindings: Vec<HostFunctionBinding>,
     dynamic_programs: LoadedPrograms,
+    module_cache: BTreeMap<String, Option<Value>>,
+    module_loading_stack: Vec<String>,
     call_stack: Vec<CallStackFrame>,
     coroutines: Vec<CoroutineState>,
     running_coroutines: Vec<usize>,
@@ -1884,6 +1960,13 @@ impl Vm {
         };
         if profile.is_deterministic_sim() {
             settings.services.retain_deterministic_inputs();
+            if settings
+                .module_resolver
+                .as_ref()
+                .is_some_and(|resolver| !resolver.deterministic())
+            {
+                settings.module_resolver = None;
+            }
         }
         if settings.guest_surface.is_hardened_leaf() {
             if hardened_configuration_error.is_some() {
@@ -1893,6 +1976,7 @@ impl Vm {
                 settings.memory_limit_bytes = Some(0);
             }
             settings.loadstring_compiler = None;
+            settings.module_resolver = None;
             settings.enable_conformance_coverage = false;
             settings.enable_conformance_top_level_yield = false;
             settings.enable_conformance_int64_userdata = false;
@@ -1905,6 +1989,7 @@ impl Vm {
         let globals = heap.alloc_array_table(&[]);
         let enable_loadstring =
             settings.loadstring_compiler.is_some() && !profile.is_deterministic_sim();
+        let enable_require = settings.module_resolver.is_some();
         let register_os = !profile.is_deterministic_sim() || settings.services.has_clock_provider();
         let standard_globals = initialize_standard_globals(
             &mut heap,
@@ -1912,6 +1997,7 @@ impl Vm {
             profile,
             settings.guest_surface,
             enable_loadstring,
+            enable_require,
             register_os,
             settings.enable_conformance_coverage,
             settings.enable_conformance_int64_userdata,
@@ -1939,6 +2025,8 @@ impl Vm {
             host_functions: Vec::new(),
             host_function_bindings: Vec::new(),
             dynamic_programs: LoadedPrograms::default(),
+            module_cache: BTreeMap::new(),
+            module_loading_stack: Vec::new(),
             call_stack: Vec::new(),
             coroutines: Vec::new(),
             running_coroutines: Vec::new(),
@@ -2094,6 +2182,8 @@ impl Vm {
         }
 
         self.coroutines.clear();
+        self.module_cache.clear();
+        self.module_loading_stack.clear();
         self.last_error_traceback = None;
         self.protected_error_traceback = None;
         self.dynamic_programs.reset_epoch();
@@ -2123,6 +2213,7 @@ impl Vm {
             let globals = self.heap.alloc_array_table(&[]);
             let enable_loadstring =
                 self.settings.loadstring_compiler.is_some() && !self.profile.is_deterministic_sim();
+            let enable_require = self.settings.module_resolver.is_some();
             let register_os =
                 !self.profile.is_deterministic_sim() || self.settings.services.has_clock_provider();
             let standard_globals = initialize_standard_globals(
@@ -2131,6 +2222,7 @@ impl Vm {
                 self.profile,
                 self.settings.guest_surface,
                 enable_loadstring,
+                enable_require,
                 register_os,
                 self.settings.enable_conformance_coverage,
                 self.settings.enable_conformance_int64_userdata,
@@ -10444,6 +10536,9 @@ impl Vm {
         if native == NativeFunction::LoadString {
             return self.native_loadstring(args);
         }
+        if native == NativeFunction::Require {
+            return self.native_require(args, program, depth, call_site, fuel);
+        }
         if native == NativeFunction::DebugInfo {
             return self.native_debug_info(program, handle, args, call_site);
         }
@@ -10600,6 +10695,9 @@ impl Vm {
             NativeFunction::Pairs => unreachable!("pairs returns an iterator triple"),
             NativeFunction::LoadString => {
                 unreachable!("loadstring returns a variable result list")
+            }
+            NativeFunction::Require => {
+                unreachable!("require returns a variable result list")
             }
             NativeFunction::CoroutineResume => {
                 unreachable!("coroutine.resume returns a variable result list")
@@ -10901,7 +10999,7 @@ impl Vm {
             | NativeFunction::DebugTraceback
             | NativeFunction::DebugInfo
             | NativeFunction::TablePack => usize_to_u64(args.len()),
-            NativeFunction::LoadString => args
+            NativeFunction::LoadString | NativeFunction::Require => args
                 .first()
                 .and_then(|value| self.value_string_len_for_fuel(*value))
                 .map_or(0, usize_to_u64)
@@ -11841,6 +11939,102 @@ impl Vm {
                 })
             })?;
         Ok(vec![Value::function(handle)])
+    }
+
+    fn native_require(
+        &mut self,
+        args: &[Value],
+        requiring_program: &Program,
+        depth: usize,
+        call_site: Option<ErrorLocation>,
+        fuel: &mut Execution<'_>,
+    ) -> Result<Vec<Value>> {
+        validate_native_arity(args, 1, 1, "require arguments")?;
+        let requested_bytes = self.value_to_string(args[0])?;
+        let requested = std::str::from_utf8(&requested_bytes).map_err(|_| {
+            Error::new(ErrorKind::RuntimeError {
+                message: "require path must be valid UTF-8".to_owned(),
+            })
+        })?;
+        let resolver = self.settings.module_resolver.clone().ok_or_else(|| {
+            Error::new(ErrorKind::RuntimeError {
+                message: "require resolver is not configured".to_owned(),
+            })
+        })?;
+        let referrer = requiring_program.source_name.as_deref();
+        let resolved = self.catch_host_callback(MODULE_RESOLVER_SERVICE_NAME, || {
+            resolver.resolve(requested, referrer)
+        })?;
+        let resolved = resolved.map_err(|message| {
+            Error::new(ErrorKind::RuntimeError {
+                message: format!("error requiring module {requested:?}: {message}"),
+            })
+        })?;
+        if resolved.identity.is_empty() {
+            return Err(Error::new(ErrorKind::RuntimeError {
+                message: format!(
+                    "error requiring module {requested:?}: resolver returned an empty identity"
+                ),
+            }));
+        }
+        if let Some(cached) = self.module_cache.get(&resolved.identity).copied() {
+            return Ok(cached.into_iter().collect());
+        }
+        if let Some(cycle_start) = self
+            .module_loading_stack
+            .iter()
+            .position(|identity| identity == &resolved.identity)
+        {
+            let mut cycle = self.module_loading_stack[cycle_start..].to_vec();
+            cycle.push(resolved.identity);
+            return Err(Error::new(ErrorKind::RuntimeError {
+                message: format!(
+                    "requiring a module that is in the process of being required: {}",
+                    cycle.join(" -> ")
+                ),
+            }));
+        }
+
+        let identity = resolved.identity;
+        self.ensure_memory_growth(size_of::<String>().saturating_add(identity.len()), &[])?;
+        self.module_loading_stack.push(identity.clone());
+        let result = (|| {
+            let program_id = self.retain_dynamic_program(resolved.program)?;
+            let environment = self.globals;
+            let handle = self
+                .heap
+                .alloc_dynamic_main_function(program_id, environment)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "function handle overflow",
+                    })
+                })?;
+            self.call_value_with_site(
+                requiring_program,
+                Value::function(handle),
+                &[],
+                depth.saturating_add(1),
+                call_site,
+                fuel,
+            )
+        })();
+        let popped = self.module_loading_stack.pop();
+        debug_assert_eq!(popped.as_deref(), Some(identity.as_str()));
+        let results = result?;
+        if results.len() > 1 {
+            return Err(Error::new(ErrorKind::RuntimeError {
+                message: "module must return a single value".to_owned(),
+            }));
+        }
+        let value = results.first().copied();
+        let cache_growth = identity
+            .len()
+            .saturating_add(size_of::<Option<Value>>())
+            .saturating_add(size_of::<usize>().saturating_mul(4));
+        let cache_roots = value.into_iter().collect::<SmallVec<[Value; 1]>>();
+        self.ensure_memory_growth(cache_growth, &cache_roots)?;
+        self.module_cache.insert(identity, value);
+        Ok(results)
     }
 
     fn native_coroutine_create(&mut self, args: &[Value]) -> Result<Value> {
@@ -13036,6 +13230,7 @@ impl Vm {
             .map(Value::table),
         );
         roots.extend(self.external_roots.borrow().values.values().copied());
+        roots.extend(self.module_cache.values().flatten().copied());
         for loaded in self.dynamic_programs.values() {
             roots.extend(
                 loaded
@@ -18192,6 +18387,7 @@ fn initialize_standard_globals(
     profile: Profile,
     guest_surface: GuestSurface,
     enable_loadstring: bool,
+    enable_require: bool,
     register_os: bool,
     enable_conformance_coverage: bool,
     enable_conformance_int64_userdata: bool,
@@ -18273,6 +18469,15 @@ fn initialize_standard_globals(
             standard_globals,
             "loadstring",
             NativeFunction::LoadString,
+        );
+    }
+    if enable_require && !hardened_leaf {
+        set_standard_native_field(
+            heap,
+            globals,
+            standard_globals,
+            "require",
+            NativeFunction::Require,
         );
     }
     set_standard_native_field(
@@ -18589,7 +18794,13 @@ fn initialize_standard_globals(
             Value::table(coroutine),
         );
 
-        let rtti = build_standard_global_rtti(heap, profile, enable_loadstring, register_os);
+        let rtti = build_standard_global_rtti(
+            heap,
+            profile,
+            enable_loadstring,
+            enable_require,
+            register_os,
+        );
         set_standard_index_field(heap, standard_globals, "RTTI", Value::table(rtti));
     }
 
@@ -18682,6 +18893,7 @@ fn build_standard_global_rtti(
     heap: &mut VmCell,
     profile: Profile,
     enable_loadstring: bool,
+    enable_require: bool,
     register_os: bool,
 ) -> u32 {
     let rtti = heap.alloc_array_table(&[]);
@@ -18691,6 +18903,9 @@ fn build_standard_global_rtti(
     }
     if enable_loadstring {
         set_rtti_function_type(heap, rtti, "loadstring");
+    }
+    if enable_require {
+        set_rtti_function_type(heap, rtti, "require");
     }
     if !profile.is_deterministic_sim() {
         set_rtti_function_type(heap, rtti, "collectgarbage");
@@ -19004,6 +19219,7 @@ fn native_function_debug_name(native: NativeFunction) -> &'static str {
         NativeFunction::INext => "inext",
         NativeFunction::Pairs => "pairs",
         NativeFunction::LoadString => "loadstring",
+        NativeFunction::Require => "require",
         NativeFunction::ToNumber => "tonumber",
         NativeFunction::ToString => "tostring",
         NativeFunction::TypeOf => "type",
@@ -20565,6 +20781,23 @@ fn add_vm_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
                 }
             }
         }
+    }
+    let module_cache_node_overhead = size_of::<usize>().saturating_mul(4);
+    for identity in vm.module_cache.keys() {
+        usage.add(
+            identity
+                .len()
+                .saturating_add(size_of::<Option<Value>>())
+                .saturating_add(module_cache_node_overhead),
+            identity
+                .capacity()
+                .saturating_add(size_of::<Option<Value>>())
+                .saturating_add(module_cache_node_overhead),
+        );
+    }
+    usage.add_vec(&vm.module_loading_stack);
+    for identity in &vm.module_loading_stack {
+        usage.add(identity.len(), identity.capacity());
     }
     usage.add_vec(&vm.call_stack);
     for frame in &vm.call_stack {

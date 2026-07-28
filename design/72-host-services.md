@@ -237,6 +237,10 @@ recording/replay providers; WASI-style permission UI; `GcSchedule`/`determinism_
 paced-GC knobs; `Send`/`Sync` providers (the VM is thread-affine); async sinks; fixing the
 pre-existing `os.date`/`os.time(table)` oracle divergences; perf claims (service calls are cold-path).
 
+This is the scope boundary of the host-services slice, not current project
+status: the separate host-owned `ServiceModuleResolver`/`require` socket has
+since landed.
+
 ## Implementation order (strangler, always green)
 
 1. `rustia-vm`: `VmServices` (shared-provider representation) + settings plumbing, per-function `os`

@@ -82,12 +82,20 @@ impl TestScript {
     fn path(&self) -> &Path {
         &self.path
     }
+
+    fn write_relative(&self, path: &str, source: &str) -> PathBuf {
+        let path = self.directory.join(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("module directory should be created");
+        }
+        fs::write(&path, source).expect("module source should be written");
+        path
+    }
 }
 
 impl Drop for TestScript {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-        let _ = fs::remove_dir(&self.directory);
+        let _ = fs::remove_dir_all(&self.directory);
     }
 }
 
@@ -289,6 +297,128 @@ values[0 / 0] = 1
     );
     assert!(
         output.stderr.contains("2 | values[0 / 0] = 1\n  | ^"),
+        "{}",
+        output.stderr
+    );
+}
+
+#[test]
+fn file_modules_resolve_relative_paths_and_cache_canonical_identity() {
+    let script = TestScript::new(
+        "\
+local first = require('./modules/answer')
+local second = require('./modules/../modules/answer.lua')
+print(first.value, second.value)
+",
+    );
+    script.write_relative(
+        "modules/answer.lua",
+        "\
+_G.module_runs = (_G.module_runs or 0) + 1
+return { value = 40 + _G.module_runs + 1 }
+",
+    );
+
+    let output = run_rustia([script.path().as_os_str()], None);
+
+    assert_output(&output, 0, "42\t42\n", "");
+}
+
+#[test]
+fn nested_modules_resolve_relative_to_the_referring_module() {
+    let script = TestScript::new("print(require('./modules/outer').answer)\n");
+    script.write_relative(
+        "modules/outer.luau",
+        "return { answer = require('../shared/value') }\n",
+    );
+    script.write_relative("shared/value.luau", "return 42\n");
+
+    let output = run_rustia([script.path().as_os_str()], None);
+
+    assert_output(&output, 0, "42\n", "");
+}
+
+#[test]
+fn module_runtime_diagnostics_show_the_module_source() {
+    let script = TestScript::new("require('./broken')\n");
+    let module = script.write_relative(
+        "broken.luau",
+        "\
+local values = {}
+values[0 / 0] = 1
+",
+    );
+
+    let output = run_rustia([script.path().as_os_str()], None);
+
+    assert_eq!(output.code, 1, "stderr:\n{}", output.stderr);
+    assert!(output.stdout.is_empty(), "{}", output.stdout);
+    assert!(
+        output.stderr.contains(&format!(
+            " --> {}:2",
+            module.canonicalize().unwrap().display()
+        )),
+        "{}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("2 | values[0 / 0] = 1\n  | ^"),
+        "{}",
+        output.stderr
+    );
+}
+
+#[test]
+fn module_cycles_report_the_canonical_cycle_path() {
+    let script = TestScript::new("require('./a')\n");
+    let a = script.write_relative("a.luau", "return require('./b')\n");
+    let b = script.write_relative("b.luau", "return require('./a')\n");
+
+    let output = run_rustia([script.path().as_os_str()], None);
+
+    assert_eq!(output.code, 1, "stderr:\n{}", output.stderr);
+    assert!(output.stdout.is_empty(), "{}", output.stdout);
+    assert!(
+        output
+            .stderr
+            .contains("requiring a module that is in the process of being required"),
+        "{}",
+        output.stderr
+    );
+    assert!(
+        output
+            .stderr
+            .contains(&a.canonicalize().unwrap().display().to_string()),
+        "{}",
+        output.stderr
+    );
+    assert!(
+        output
+            .stderr
+            .contains(&b.canonicalize().unwrap().display().to_string()),
+        "{}",
+        output.stderr
+    );
+}
+
+#[test]
+fn deterministic_cli_has_no_ambient_filesystem_require() {
+    let script = TestScript::new("require('./answer')\n");
+    script.write_relative("answer.luau", "return 42\n");
+
+    let output = run_rustia(
+        [
+            OsStr::new("--profile"),
+            OsStr::new("deterministic-sim"),
+            script.path().as_os_str(),
+        ],
+        None,
+    );
+
+    assert_eq!(output.code, 1, "stderr:\n{}", output.stderr);
+    assert!(output.stdout.is_empty(), "{}", output.stdout);
+    assert!(
+        output.stderr.contains("attempt to call a nil value"),
         "{}",
         output.stderr
     );

@@ -8,6 +8,19 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- `ServiceModuleResolver` and `ModuleSource` add host-owned script-visible
+  `require` without an ambient filesystem dependency. Resolved canonical
+  identities drive an execute-once per-decision cache; nested referrers, cycle
+  diagnostics, shared caller fuel, GC rooting, decision-reset clearing,
+  deterministic-profile labels, panic poisoning, and logical-quota admission
+  are covered and versioned by `RUSTIA_MODULE_RESOLUTION_ABI_VERSION`. Failed
+  and multi-result modules are not cached; transactional
+  rollback of arbitrary guest side effects remains future work. The CLI
+  installs a filesystem-backed resolver in its standard and compatibility
+  profiles with fixed `.luau`/`.lua`/directory-index candidate order,
+  canonical cache identities, nested relative resolution, and module-source
+  runtime diagnostics; deterministic CLI execution has no ambient filesystem
+  loader.
 - `RustiaExecutionProfile` provides canonical identity-component bytes and
   compact compatibility IDs for the selected core profile and guest surface,
   constructs the deterministic presets, and can be read back from both a
@@ -321,6 +334,8 @@ Current unpublished workspace version: `0.0.1`.
 - Hosted CI now cross-compiles the portable engine library for the declared
   macOS, Linux, Windows, iOS, Android, and browser-Wasm triples; real-host and
   browser correctness goldens remain a separate release gate.
+- The hosted release-preflight checkout now includes repository history needed
+  by frozen benchmark-provenance self-tests.
 - Crate publishability blockers are generated from cargo metadata and package
   file audits into `design/publishability.json`.
 - GitHub Actions keeps benchmark work validation-only; fresh timing data comes

@@ -431,6 +431,7 @@ pub enum NativeFunction {
     INext,
     Pairs,
     LoadString,
+    Require,
     CoroutineCreate,
     CoroutineResume,
     CoroutineWrap,

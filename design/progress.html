@@ -401,12 +401,12 @@
       </div>
       <aside class="facts" aria-label="Current facts">
         <div class="fact">
-          <strong>86%</strong>
-          <span>Whole public rustia project, 84% confidence</span>
+          <strong>88%</strong>
+          <span>Whole public rustia project, 86% confidence</span>
         </div>
         <div class="fact">
-          <strong>92%</strong>
-          <span>Usable embedded scripting crate, 92% confidence</span>
+          <strong>94%</strong>
+          <span>Usable embedded scripting crate, 93% confidence</span>
         </div>
         <div class="fact">
           <strong>694 / 493 / 0</strong>
@@ -428,51 +428,51 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Whole public rustia project</h3>
-        <span class="percent">86%</span>
+        <span class="percent">88%</span>
       </div>
 
-    <div class="meter" aria-label="Whole public rustia project: 86% complete">
-      <div class="meter-fill" style="width: 86%"></div>
+    <div class="meter" aria-label="Whole public rustia project: 88% complete">
+      <div class="meter-fill" style="width: 88%"></div>
     </div>
 
       <div class="meta-line">
-        <span class="chip high">84% confidence</span>
+        <span class="chip high">86% confidence</span>
       </div>
-      <p>The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, host-pluggable output/time services, lifetime-safe per-invocation host contexts, bounded transactional effect journals, CLI, benchmark matrix, private HotIR, closure-call PIC, generation-safe object/program reclamation, VM-owned memory telemetry, logical-live quotas, atomic catchable OOM, epoch-safe decision reset, and exact dedicated-Linux native plus wasm quota evidence are in-tree. The remaining release gates are O(1) quota accounting, broader mixed-heap pressure evidence, module resolution/rich values, semantic-tail hardening, and packaging.</p>
-      <p class="plan"><strong>Next:</strong> Finish O(1) accounting and broader mixed-heap pressure evidence; complete module resolution and the rich-value boundary; then continue measured optimization and public release work.</p>
+      <p>The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, host-pluggable output/time services, host-owned canonical-identity require resolution/cache, lifetime-safe per-invocation host contexts, bounded transactional effect journals, CLI, benchmark matrix, private HotIR, closure-call PIC, generation-safe object/program reclamation, VM-owned memory telemetry, logical-live quotas, atomic catchable OOM, epoch-safe decision reset, and exact dedicated-Linux native plus wasm quota evidence are in-tree. The remaining release gates are O(1) quota accounting, broader mixed-heap pressure evidence, rich/live values, semantic-tail hardening, and packaging.</p>
+      <p class="plan"><strong>Next:</strong> Finish O(1) accounting and broader mixed-heap pressure evidence; complete the rich-value boundary and transactional failure semantics; then continue measured optimization and public release work.</p>
     </article>
 
     <article class="goal-card">
       <div class="card-head">
         <h3>Usable embedded scripting crate</h3>
-        <span class="percent">92%</span>
+        <span class="percent">94%</span>
       </div>
 
-    <div class="meter" aria-label="Usable embedded scripting crate: 92% complete">
-      <div class="meter-fill" style="width: 92%"></div>
+    <div class="meter" aria-label="Usable embedded scripting crate: 94% complete">
+      <div class="meter-fill" style="width: 94%"></div>
     </div>
 
       <div class="meta-line">
-        <span class="chip high">92% confidence</span>
+        <span class="chip high">93% confidence</span>
       </div>
-      <p>The facade now includes typed run/compile, owned scalar/table conversions, a lifetime-independent HostSchema with fresh borrowed HostContext values per invocation, capability-specific host views, shared fuel, bounded transactional record publication, usage receipts, retained functions/exports with true collector roots plus install-generation and decision-epoch checks, owned-value serde, extensions, hot reload, epoch-safe decision reset, examples, diagnostics, migration guidance, host-pluggable stdout/clock services, VM-owned memory telemetry, and configurable logical-live quotas. It is not yet a complete rich embedding boundary: there is no script-visible module resolver/cache, graph-preserving rich values, live zero-copy serde path, or O(1) quota counter.</p>
-      <p class="plan"><strong>Next:</strong> Complete O(1) accounting, module loading, rich/live values, diagnostics, and API stabilization.</p>
+      <p>The facade now includes typed run/compile, owned scalar/table conversions, host-owned canonical-identity require resolution/cache, a lifetime-independent HostSchema with fresh borrowed HostContext values per invocation, capability-specific host views, shared fuel, bounded transactional record publication, usage receipts, retained functions/exports with true collector roots plus install-generation and decision-epoch checks, owned-value serde, extensions, hot reload, epoch-safe decision reset, examples, diagnostics, migration guidance, host-pluggable stdout/clock services, VM-owned memory telemetry, and configurable logical-live quotas. It is not yet a complete rich embedding boundary: graph-preserving rich values, a live zero-copy serde path, transactional guest-side failure rollback, and an O(1) quota counter remain.</p>
+      <p class="plan"><strong>Next:</strong> Complete O(1) accounting, rich/live values, transactional failure semantics, diagnostics, and API stabilization.</p>
     </article>
 
     <article class="goal-card">
       <div class="card-head">
         <h3>Full public standalone Luau engine release</h3>
-        <span class="percent">58%</span>
+        <span class="percent">61%</span>
       </div>
 
-    <div class="meter" aria-label="Full public standalone Luau engine release: 58% complete">
-      <div class="meter-fill" style="width: 58%"></div>
+    <div class="meter" aria-label="Full public standalone Luau engine release: 61% complete">
+      <div class="meter-fill" style="width: 61%"></div>
     </div>
 
       <div class="meta-line">
-        <span class="chip high">83% confidence</span>
+        <span class="chip high">85% confidence</span>
       </div>
-      <p>The Luau 0.709 standalone target and 493-ref conformance denominator are strong. Bounded generation-safe object/program lifetimes, VM-owned live/reserved/peak telemetry, logical-live memory limits, atomic catchable OOM, lifetime-safe typed invocations with transactional records, and a versioned deterministic reset lifecycle are implemented; native Linode plus wasm quota evidence is exact. Release still requires O(1) quota accounting, broader mixed-heap pressure evidence, module loading, richer value interop, transactional guest-module installation, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.</p>
+      <p>The Luau 0.709 standalone target and 493-ref conformance denominator are strong. Bounded generation-safe object/program lifetimes, VM-owned live/reserved/peak telemetry, logical-live memory limits, atomic catchable OOM, host-owned require resolution/cache, lifetime-safe typed invocations with transactional records, and versioned deterministic reset/module lifecycles are implemented; native Linode plus wasm quota evidence is exact. Release still requires O(1) quota accounting, broader mixed-heap pressure evidence, richer value interop, transactional guest-module failure semantics, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.</p>
       <p class="plan"><strong>Next:</strong> Close the remaining accounting and host-boundary gates, harden the semantic tail and cross-target goldens, then package and publish against the pinned target.</p>
     </article>
 
@@ -513,7 +513,7 @@
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 93%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 79%</a><a href="#determinism">Determinism 82%</a><a href="#embedded-api">Embedded API 72%</a><a href="#benchmarks">Benchmarks 88%</a><a href="#wasm-perf">Wasm/perf 62%</a><a href="#tooling">Tooling 65%</a><a href="#packaging">Packaging 62%</a>
+      <a href="#design">Design 93%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 79%</a><a href="#determinism">Determinism 82%</a><a href="#embedded-api">Embedded API 78%</a><a href="#benchmarks">Benchmarks 88%</a><a href="#wasm-perf">Wasm/perf 62%</a><a href="#tooling">Tooling 67%</a><a href="#packaging">Packaging 62%</a>
     </nav>
 
 
@@ -1095,7 +1095,7 @@
           <p>11 tracked items</p>
         </div>
         <div class="area-score">
-          <span>72% avg complete</span>
+          <span>78% avg complete</span>
           <span>86% avg confidence</span>
         </div>
       </div>
@@ -1105,19 +1105,19 @@
       <div class="entry-top">
         <div>
           <h4>Koto-shaped facade</h4>
-          <p>Builder, typed run&lt;T&gt;, source-named compile/run helpers, public error diagnostic accessors, globals, exports, retained functions, a typed HostSchema/HostContext invocation surface, bounded record transactions, usage receipts, an epoch-safe decision reset, environment presets (standard/deterministic/live) with stdout and determinism-labeled clock service sockets, examples, and a first koto-to-rustia migration guide exist.</p>
+          <p>Builder, typed run&lt;T&gt;, source-named compile/run helpers, public error diagnostic accessors, globals, exports, retained functions, host-owned require resolution/cache, a typed HostSchema/HostContext invocation surface, bounded record transactions, usage receipts, an epoch-safe decision reset, environment presets (standard/deterministic/live) with stdout and determinism-labeled service sockets, examples, and a first koto-to-rustia migration guide exist.</p>
         </div>
         <div class="entry-score">
-          <strong>91%</strong>
-          <span class="chip high">90% confidence</span>
+          <strong>93%</strong>
+          <span class="chip high">92% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Koto-shaped facade: 91% complete">
-      <div class="meter-fill" style="width: 91%"></div>
+    <div class="meter" aria-label="Koto-shaped facade: 93% complete">
+      <div class="meter-fill" style="width: 93%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add script-visible module resolution, stabilize names and error types, and expand migration guidance as the remaining production gates land.</p>
+      <p class="plan"><strong>Future plan:</strong> Stabilize names and error types, add the rich/live-value layer, and expand migration guidance as the remaining production gates land.</p>
     </article>
 
     <article class="entry">
@@ -1200,19 +1200,19 @@
       <div class="entry-top">
         <div>
           <h4>Module loading and resolution</h4>
-          <p>CompiledModule install and hot reload exist, and the architecture correctly assigns resolution to host policy. There is no script-visible require resolver, execute-once cache, dependency/cycle handling, or versioned deterministic module policy.</p>
+          <p>CompiledModule install/hot reload and script-visible require are implemented. ServiceModuleResolver keeps resolution in host policy with no ambient filesystem; the host supplies canonical identity and source; successful zero-or-one-result modules execute once per decision epoch; cached values are roots; nested referrers, cycles, shared fuel, reset, deterministic labels, panic poisoning, quota admission, and MODULE_RESOLUTION_ABI_VERSION are covered.</p>
         </div>
         <div class="entry-score">
-          <strong>20%</strong>
-          <span class="chip high">90% confidence</span>
+          <strong>82%</strong>
+          <span class="chip high">92% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Module loading and resolution: 20% complete">
-      <div class="meter-fill" style="width: 20%"></div>
+    <div class="meter" aria-label="Module loading and resolution: 82% complete">
+      <div class="meter-fill" style="width: 82%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add a host-owned resolver/cache interface with deterministic identity, cycle diagnostics, capability policy, transactional installation failure behavior, and no implicit filesystem dependency in the core VM.</p>
+      <p class="plan"><strong>Future plan:</strong> Define transactional or isolated rollback for arbitrary guest global/heap side effects from runtime-failing module installation and hot reload, then add longer dependency-graph integration evidence.</p>
     </article>
 
     <article class="entry">
@@ -1485,8 +1485,8 @@
           <p>3 tracked items</p>
         </div>
         <div class="area-score">
-          <span>65% avg complete</span>
-          <span>70% avg confidence</span>
+          <span>67% avg complete</span>
+          <span>74% avg confidence</span>
         </div>
       </div>
       <div class="entries">
@@ -1514,19 +1514,19 @@
       <div class="entry-top">
         <div>
           <h4>CLI</h4>
-          <p>rustia-cli supports file, stdin, --eval, and --repl execution with profile, fuel, source-name options, state-preserving line evaluation, expression shorthand, unit-tested parsing, and source-aware compile/runtime diagnostics.</p>
+          <p>rustia-cli supports file, stdin, --eval, and --repl execution with profile, fuel, and source-name options; state-preserving line evaluation and expression shorthand; source-aware compile/runtime diagnostics; and a fixed-order filesystem require adapter with canonical cache identities, nested referrer-relative resolution, and module-source runtime diagnostics. Deterministic CLI execution deliberately has no ambient filesystem resolver.</p>
         </div>
         <div class="entry-score">
-          <strong>74%</strong>
-          <span class="chip medium">65% confidence</span>
+          <strong>82%</strong>
+          <span class="chip medium">78% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="CLI: 74% complete">
-      <div class="meter-fill" style="width: 74%"></div>
+    <div class="meter" aria-label="CLI: 82% complete">
+      <div class="meter-fill" style="width: 82%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add richer multiline editing/history behavior and diagnostic formatting as VM stack traces mature.</p>
+      <p class="plan"><strong>Future plan:</strong> Add richer multiline editing/history behavior and stack-aware diagnostic formatting; keep filesystem resolution policy stable and covered across supported hosts.</p>
     </article>
 
     <article class="entry">

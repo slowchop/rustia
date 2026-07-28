@@ -1,11 +1,17 @@
-use rustia::{OwnedValue, Profile, Rustia, SourceSpan, VmSettings};
-use std::collections::BTreeMap;
+use rustia::{
+    ModuleSource, OwnedValue, Profile, Rustia, ServiceModuleResolver, SourceSpan, VmSettings,
+};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::rc::Rc;
+
+type SourceMap = Rc<RefCell<BTreeMap<String, Vec<u8>>>>;
 
 const USAGE: &str = "\
 usage: rustia [options] <script.luau>
@@ -41,8 +47,12 @@ fn main() -> ExitCode {
             error,
             source_name,
             source,
+            sources,
         }) => {
-            eprintln!("{}", format_diagnostic(&error, &source_name, &source));
+            eprintln!(
+                "{}",
+                format_diagnostic_with_sources(&error, &source_name, &source, &sources)
+            );
             ExitCode::from(1)
         }
     }
@@ -65,12 +75,7 @@ fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), CliError> {
     }
 
     let (source_name, source) = read_source(&config)?;
-    run_source(&config, &source_name, &source).map_err(|error| CliError::Rustia {
-        error: Box::new(error),
-        source_name: source_name.clone(),
-        source: source.clone(),
-    })?;
-    Ok(())
+    run_source(&config, &source_name, &source)
 }
 
 fn read_source(config: &Config) -> Result<(String, Vec<u8>), CliError> {
@@ -118,20 +123,120 @@ fn read_source(config: &Config) -> Result<(String, Vec<u8>), CliError> {
     }
 }
 
-fn run_source(config: &Config, source_name: &str, source: &[u8]) -> rustia::Result<()> {
-    let mut rustia = configured_rustia(config)?;
-    let source = source_without_shebang(source);
+fn run_source(config: &Config, source_name: &str, source: &[u8]) -> Result<(), CliError> {
+    let (mut rustia, sources) = configured_rustia(config)?;
+    sources
+        .borrow_mut()
+        .insert(source_name.to_owned(), source.to_vec());
+    let executable_source = source_without_shebang(source);
     rustia
-        .compile_and_run_bytes_named(source_name, source.as_ref())
+        .compile_and_run_bytes_named(source_name, executable_source.as_ref())
         .map(|_| ())
+        .map_err(|error| CliError::Rustia {
+            error: Box::new(error),
+            source_name: source_name.to_owned(),
+            source: source.to_vec(),
+            sources: sources.borrow().clone(),
+        })
 }
 
-fn configured_rustia(config: &Config) -> rustia::Result<Rustia> {
-    Rustia::builder()
+fn configured_rustia(config: &Config) -> Result<(Rustia, SourceMap), CliError> {
+    let sources = Rc::new(RefCell::new(BTreeMap::new()));
+    let mut builder = Rustia::builder()
         .profile(config.profile)
         .settings(config.settings.clone())
-        .stdout(|text| print!("{text}"))
-        .build()
+        .stdout(|text| print!("{text}"));
+
+    if config.profile != Profile::DeterministicSim {
+        let base_directory = module_base_directory(config)?;
+        builder = builder.module_resolver(cli_module_resolver(base_directory, sources.clone()));
+    }
+
+    let rustia = builder.build()?;
+    Ok((rustia, sources))
+}
+
+fn module_base_directory(config: &Config) -> Result<PathBuf, CliError> {
+    if let Some(Input::File(path)) = &config.input {
+        let canonical = fs::canonicalize(path).map_err(|error| CliError::Io {
+            label: path.display().to_string(),
+            error,
+        })?;
+        return Ok(canonical
+            .parent()
+            .map_or_else(|| canonical.clone(), Path::to_path_buf));
+    }
+
+    env::current_dir().map_err(|error| CliError::Io {
+        label: "current directory".to_owned(),
+        error,
+    })
+}
+
+fn cli_module_resolver(base_directory: PathBuf, sources: SourceMap) -> ServiceModuleResolver {
+    let known_modules = Rc::new(RefCell::new(BTreeSet::new()));
+    ServiceModuleResolver::from_nondeterministic_fn(move |requested, referrer| {
+        let resolution_base = referrer
+            .filter(|source_name| known_modules.borrow().contains(*source_name))
+            .and_then(|source_name| Path::new(source_name).parent())
+            .map_or_else(|| base_directory.clone(), Path::to_path_buf);
+        let candidates = cli_module_candidates(&resolution_base, requested)?;
+        let mut attempted = Vec::with_capacity(candidates.len());
+
+        for candidate in candidates {
+            attempted.push(candidate.display().to_string());
+            let canonical = match fs::canonicalize(&candidate) {
+                Ok(path) => path,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(format!("could not resolve module {requested:?}: {error}"));
+                }
+            };
+            if !canonical.is_file() {
+                continue;
+            }
+            let source = fs::read(&canonical)
+                .map_err(|error| format!("{}: {error}", canonical.display()))?;
+            let identity = canonical
+                .into_os_string()
+                .into_string()
+                .map_err(|path| format!("module path is not valid UTF-8: {}", path.display()))?;
+
+            sources
+                .borrow_mut()
+                .insert(identity.clone(), source.clone());
+            known_modules.borrow_mut().insert(identity.clone());
+            return Ok(ModuleSource::new(identity, source));
+        }
+
+        Err(format!(
+            "module {requested:?} was not found (tried {})",
+            attempted.join(", ")
+        ))
+    })
+}
+
+fn cli_module_candidates(base_directory: &Path, requested: &str) -> Result<Vec<PathBuf>, String> {
+    if requested.is_empty() {
+        return Err("module path must not be empty".to_owned());
+    }
+
+    let requested = Path::new(requested);
+    let path = if requested.is_absolute() {
+        requested.to_path_buf()
+    } else {
+        base_directory.join(requested)
+    };
+    if requested.extension().is_some() {
+        return Ok(vec![path]);
+    }
+
+    Ok(vec![
+        path.with_extension("luau"),
+        path.with_extension("lua"),
+        path.join("init.luau"),
+        path.join("init.lua"),
+    ])
 }
 
 fn source_without_shebang(source: &[u8]) -> std::borrow::Cow<'_, [u8]> {
@@ -159,9 +264,8 @@ where
     O: Write,
     E: Write,
 {
-    let mut rustia = configured_rustia(config)?;
+    let (mut rustia, sources) = configured_rustia(config)?;
     let source_prefix = config.source_name.as_deref().unwrap_or("<repl>");
-    let mut sources = BTreeMap::new();
     let mut line = String::new();
     let mut line_number = 1usize;
 
@@ -211,7 +315,9 @@ where
 
         let (source, display_result) = repl_source(trimmed);
         let source_name = format!("{source_prefix}[{line_number}]");
-        sources.insert(source_name.clone(), source.as_bytes().to_vec());
+        sources
+            .borrow_mut()
+            .insert(source_name.clone(), source.as_bytes().to_vec());
         let result = if display_result {
             rustia.run_owned_named(&source_name, &source).map(Some)
         } else {
@@ -230,17 +336,16 @@ where
             }
             Ok(None) => {}
             Err(error) => {
-                writeln!(
-                    error_output,
-                    "{}",
+                let diagnostic = {
+                    let sources = sources.borrow();
                     format_diagnostic_with_sources(
                         &error,
                         &source_name,
                         source.as_bytes(),
                         &sources,
                     )
-                )
-                .map_err(|error| CliError::Io {
+                };
+                writeln!(error_output, "{diagnostic}").map_err(|error| CliError::Io {
                     label: "<stderr>".to_owned(),
                     error,
                 })?;
@@ -271,6 +376,7 @@ fn display_repl_value(value: OwnedValue) -> String {
     }
 }
 
+#[cfg(test)]
 fn format_diagnostic(error: &rustia::Error, source_name: &str, source: &[u8]) -> String {
     format_diagnostic_with_sources(error, source_name, source, &BTreeMap::new())
 }
@@ -566,6 +672,7 @@ enum CliError {
         error: Box<rustia::Error>,
         source_name: String,
         source: Vec<u8>,
+        sources: BTreeMap<String, Vec<u8>>,
     },
 }
 
@@ -581,6 +688,7 @@ impl From<rustia::Error> for CliError {
             error: Box::new(error),
             source_name: "<unknown>".to_owned(),
             source: Vec::new(),
+            sources: BTreeMap::new(),
         }
     }
 }
@@ -596,6 +704,13 @@ mod tests {
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    fn rustia_error(error: CliError) -> Box<rustia::Error> {
+        match error {
+            CliError::Rustia { error, .. } => error,
+            other => panic!("expected Rustia error, got {other:?}"),
+        }
     }
 
     #[test]
@@ -698,8 +813,10 @@ mod tests {
     #[test]
     fn run_source_preserves_source_name_in_runtime_errors() {
         let config = parse_args(args(&["--eval", "return 1"])).unwrap();
-        let error = run_source(&config, "cli-test.luau", b"local t = {}; t[0 / 0] = 1")
-            .expect_err("NaN table key should fail");
+        let error = rustia_error(
+            run_source(&config, "cli-test.luau", b"local t = {}; t[0 / 0] = 1")
+                .expect_err("NaN table key should fail"),
+        );
 
         assert!(error.to_string().contains("cli-test.luau:1:"), "{error}");
     }
@@ -711,8 +828,10 @@ mod tests {
 local x = 1
 break
 ";
-        let error = run_source(&config, "broken.luau", source.as_bytes())
-            .expect_err("break outside loop should fail compilation");
+        let error = rustia_error(
+            run_source(&config, "broken.luau", source.as_bytes())
+                .expect_err("break outside loop should fail compilation"),
+        );
         let diagnostic = format_diagnostic(&error, "broken.luau", source.as_bytes());
 
         assert!(diagnostic.contains("break outside loop"), "{diagnostic}");
@@ -728,8 +847,10 @@ break
 local t = {}
 t[0 / 0] = 1
 ";
-        let error = run_source(&config, "runtime.luau", source.as_bytes())
-            .expect_err("NaN table key should fail");
+        let error = rustia_error(
+            run_source(&config, "runtime.luau", source.as_bytes())
+                .expect_err("NaN table key should fail"),
+        );
         let diagnostic = format_diagnostic(&error, "runtime.luau", source.as_bytes());
 
         assert!(diagnostic.contains("runtime.luau:2:"), "{diagnostic}");

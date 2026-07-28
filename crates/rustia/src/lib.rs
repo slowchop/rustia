@@ -14,9 +14,10 @@ use std::fmt;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
 pub use extension_api::{
-    RustiaBuilder, RustiaExecutionProfile, RustiaExtension, RustiaHostFuelPolicy,
-    RustiaHostFunctionInfo, ServiceClock, ServiceEntropy, RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
-    RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY, RUSTIA_MIN_HOST_FUNCTION_FUEL,
+    ModuleSource, RustiaBuilder, RustiaExecutionProfile, RustiaExtension, RustiaHostFuelPolicy,
+    RustiaHostFunctionInfo, ServiceClock, ServiceEntropy, ServiceModuleResolver,
+    RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
+    RUSTIA_MIN_HOST_FUNCTION_FUEL,
 };
 pub use function::{Exports, Function};
 pub use invocation::{
@@ -29,6 +30,7 @@ pub use rustia_vm::{
     Error as VmError, ErrorKind as VmErrorKind, GuestSurface, OpCapability, Profile, VmMemoryStats,
     VmSettings, DECISION_RESET_ABI_VERSION as RUSTIA_DECISION_RESET_ABI_VERSION,
     HARDENED_LEAF_GUEST_ABI_VERSION as RUSTIA_HARDENED_LEAF_GUEST_ABI_VERSION,
+    MODULE_RESOLUTION_ABI_VERSION as RUSTIA_MODULE_RESOLUTION_ABI_VERSION,
 };
 pub use serde_value::SerdeValueError;
 pub use value::{

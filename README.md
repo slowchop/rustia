@@ -8,7 +8,7 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
 > production VM/compiler/API/conformance slice; bounded object/program reclamation, quotas/OOM, deterministic
 > decision reset, the typed per-invocation host transaction, and the hardened stateless action-leaf surface are
 > implemented. The next release-critical work is O(1) accounting, broader mixed-heap pressure evidence, and the
-> remaining module/value boundary.
+> remaining rich-value and transactional-failure boundary.
 > `spikes/` are throwaway prototypes that validated the design.
 > Read **[`design/CURRENT.md`](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](https://github.com/slowchop/rustia/blob/main/design/README.md) for the full doc map.
@@ -54,10 +54,12 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   epoch-safe decision-reset ABI are implemented. `deterministic_leaf()` adds a frozen allowlisted guest
   environment with a mandatory memory limit. `RustiaExecutionProfile` constructs and reports a typed,
   byte-stable core profile/surface identity component, while `compile_entry`/`invoke_entry_into` provide a direct
-  stateless decision path with record publication and reset across both success and failure; module resolution,
-  transactional installation/hot reload, rich graph values, and live zero-copy serde remain planned. The next
+  stateless decision path with record publication and reset across both success and failure.
+  `ServiceModuleResolver` provides host-owned canonical-identity `require` resolution with execute-once caching,
+  cycle diagnostics, shared fuel, deterministic labels, and reset-aware lifetime. Transactional installation/hot
+  reload, rich graph values, and live zero-copy serde remain planned. The next
   advanced layer keeps this concise facade while adding identity-safe values/tables/functions, globals and
-  constructors, a composable chunk builder, modules, and later optional userdata/scopes, async, and migration
+  constructors, a composable chunk builder, and later optional userdata/scopes, async, and migration
   compatibility.
 - Host services are host-pluggable through the facade: `RustiaBuilder::standard()`/`deterministic()`/`live()`
   environment presets, a `.stdout(...)` print sink with the real Luau composition (`tostring` honoring
@@ -85,6 +87,7 @@ ceiling and its explicit `InvocationLimits::new(fuel)` budget.
 | Pure `os` fns (`os.time(t)`, `os.date(f, t)`, `os.difftime`) | absent | follow the `os` registration rule | always available | always available |
 | `collectgarbage("count")` / `gcinfo` | absent | not registered | registered; compatibility values pending O(1) incremental accounting | registered; same compatibility values |
 | `loadstring` | absent | opt-in host compiler only | opt-in host compiler only | enabled with the stock compiler |
+| `require` | absent | present with a replay-stable host resolver | present with any explicitly installed host resolver | present with any explicitly installed host resolver |
 | Host-fn capabilities | five deterministic capabilities, through frozen modules installed before execution | the five deterministic capabilities; external-state/nondeterministic registrations and nondeterministic inputs rejected | all seven capabilities | all seven |
 | GC/reset | deterministic schedule; reset preserves sealed configuration and discards decision allocations | full collection on the deterministic instruction-count schedule | incremental/paced | incremental/paced |
 | Reproducibility | authoritative stateless replay surface | bit-identical replay on the tested matrix | replay-stable defaults; live inputs only by explicit provider choice | intentionally no replay guarantee |
@@ -94,8 +97,8 @@ The PCG32 algorithm remains pinned in every ordinary preset and is absent from `
 `live()` is its initial seed.
 Clock and entropy providers carry a determinism label: `system()` and `from_nondeterministic_fn(...)` are live,
 while `fixed(...)` and `from_fn(...)` are host-asserted replay-stable. The facade rejects any live input on
-`deterministic()`. `ServiceClock::monotonic()` is the conventional elapsed-time source used by live
-`os.clock()`.
+`deterministic()`; module resolvers follow the same explicit-label rule. `ServiceClock::monotonic()` is the
+conventional elapsed-time source used by live `os.clock()`.
 
 These presets are user-selected contracts, not a ladder in which deterministic scripting limits every user.
 The planned advanced embedding API is shared by all three: `deterministic()` enforces lockstep restrictions,
@@ -122,9 +125,9 @@ public rustia project; actual grabby integration work is explicitly out of scope
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 86% | 84% |
-| Usable embedded scripting crate | 92% | 92% |
-| Full public standalone Luau engine release | 58% | 83% |
+| Whole public rustia project | 88% | 86% |
+| Usable embedded scripting crate | 94% | 93% |
+| Full public standalone Luau engine release | 61% | 85% |
 | Standalone benchmark OSS project | 82% | 88% |
 | Public release readiness | 78% | 88% |
 
@@ -146,7 +149,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
   shared peak at 256 KiB and retains 14.4 KiB across the shared set versus mlua/Luau/JIT's 24.8 KiB.
   The same Node/V8 probe now runs 300 decision resets and verifies an exact post-warmup VM-owned-memory plateau.
 - Major remaining gates, in order, are an O(1) quota-accounting fast path and script counters; broader
-  mixed-heap/native/Wasm pressure coverage; module loading, rich values, and transactional installation,
+  mixed-heap/native/Wasm pressure coverage; rich values and transactional installation,
   compiler/runtime semantic-tail
   hardening, the full cross-target correctness/golden matrix, broader benchmark history, and release packaging.
   Semver policy is tracked in [`design/91-semver-policy.md`](https://github.com/slowchop/rustia/blob/main/design/91-semver-policy.md),
@@ -169,6 +172,8 @@ public rustia project; actual grabby integration work is explicitly out of scope
 ## Examples
 - `cargo run -p rustia --example embedding` — globals, fallible typed host functions, deterministic extensions, retained script functions, and serde.
 - `cargo run -p rustia --example hot_reload` — compile/install hot reload plus retained-handle survival and freshness checks.
+- `cargo run -p rustia --example module_resolution` — host-owned canonical module identity, source resolution,
+  and deterministic script-visible `require`.
 - `cargo run -p rustia --example typed_invocation` — a block-local host context, capability views, shared fuel,
   bounded ordered records, and allocation-safe publication into a caller-owned lane.
 - `cargo run --release -p rustia --example leaf_lifecycle_bench` — a semantics-checked ABBA comparison of the
@@ -212,13 +217,22 @@ must be rebound for the next decision. Replay protocols should record
 `RUSTIA_DECISION_RESET_ABI_VERSION`.
 
 ## CLI
+
 - `cargo run -p rustia-cli -- path/to/script.luau`
 - `cargo run -p rustia-cli -- --profile deterministic-sim --fuel 100000 --eval "return 40 + 2"`
 - `cargo run -p rustia-cli -- --source-name stdin.luau -`
 - `cargo run -p rustia-cli -- --repl`
 
 Compile and runtime failures include source-name-aware line snippets and caret markers where rustia has source
-span or runtime-line evidence.
+span or runtime-line evidence. In standard and compatibility profiles, file,
+eval, stdin, and REPL execution can use `require`: paths are resolved relative
+to the referring module (or the entry working directory), a fixed
+`.luau`/`.lua`/directory-index order is used, and canonical paths provide cache
+identity. Runtime errors retain loaded-module source context; resolver or
+compile failures report both the module path and the requiring call site. The
+deterministic profile deliberately installs no ambient filesystem resolver;
+deterministic embedders can instead supply a replay-stable
+`ServiceModuleResolver`.
 
 Built design-first with Claude Code.
 

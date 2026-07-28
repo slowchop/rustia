@@ -263,12 +263,18 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    monotonic-clock provider with a deterministic logical-clock fallback. Entropy selects the initial
    `math.random` seed, and native/WASI/browser adapters supply live providers. The typed per-invocation context,
    capability views, shared fuel, bounded ordered record journal, rollback/`pcall` contract, usage receipts,
-   panic poisoning/reset, and atomic typed `HostModule` registration are implemented. Still open:
+   panic poisoning/reset, and atomic typed `HostModule` registration are implemented. Script-visible `require`
+   is now backed only when the host installs a `ServiceModuleResolver`: resolution returns a canonical identity
+   and source, modules execute once per decision epoch, cache results remain roots, nested requests receive the
+   referrer's source name, cycles report their identity path, reset clears the cache, and module execution shares
+   caller fuel. `DeterministicSim` rejects resolvers not explicitly labeled replay-stable, hardened leaves reject
+   dynamic modules, the behavior is versioned by `RUSTIA_MODULE_RESOLUTION_ABI_VERSION`, and the core VM never
+   reads an ambient filesystem. The separate CLI adapter supplies fixed-order `.luau`/`.lua`/directory-index
+   lookup, canonical cache identities, nested relative resolution, and module-source runtime diagnostics in
+   standard and compatibility profiles; deterministic CLI execution leaves `require` absent. Still open:
    Host-facing VM memory telemetry is now honest for the documented VM-owned logical allocation boundary;
-   script-visible counters still need the O(1) quota counter. Practical multi-file programs also need a
-   host-owned `require` resolver, execute-once cache, and cycle detection; resolution remains host policy rather
-   than a core filesystem API. Guest module/extension installation and hot reload still need documented
-   transactional or isolated failure semantics beyond record-only invocation rollback.
+   script-visible counters still need the O(1) quota counter. Guest module/extension installation and hot reload
+   still need documented transactional or isolated failure semantics beyond record-only invocation rollback.
 3. **Complete public value interop.** `OwnedValue` intentionally starts small, but it cannot yet faithfully
    carry binary strings, buffers, vectors, opaque userdata identity, non-scalar/identity table keys,
    cyclic/shared table graphs, or zero-copy live values. Add the live-value serde path and identity-safe handles
@@ -304,7 +310,7 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    before tuning final intervals.
 2. **Finish the host-facing runtime boundary and ordered advanced API track.** Follow
    [`75-embedded-api.md`](75-embedded-api.md#build-order): add identity-safe live values/tables/functions,
-   familiar globals/value constructors and a composable chunk builder, a host-owned module resolver/cache,
+   familiar globals/value constructors and a composable chunk builder,
    complete binary/rich-value interop, zero-copy live serde, and transactional install/hot-reload/stack
    diagnostics. The worker-local/per-call host context is already implemented. Keep the existing typed facade
    as the simple layer, keep the advanced layer available to all builder presets, and do not leak
@@ -483,7 +489,7 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
    reset now invalidates every prior retained-handle clone by epoch, restarts deterministic state, and plateaus
    exactly across 600 focused decisions; ordinary retained calls still survive hot reload outside a reset.
 2. **Complete the ordered advanced API boundary:** identity-safe live values/tables/functions; globals,
-   constructors, and a composable chunk builder; a host-owned module resolver/cache; binary/rich/cyclic values;
+   constructors, and a composable chunk builder; binary/rich/cyclic values;
    live-value serde; transactional extension/module/hot-reload failure behavior; and stronger traceback
    diagnostics. The worker-local typed invocation seam, hardened stateless leaf, direct compiled-entry path,
    memory telemetry, and quota enforcement are implemented. Preserve the concise typed facade and apply

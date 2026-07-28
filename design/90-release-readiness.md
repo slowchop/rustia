@@ -16,9 +16,7 @@ general embedding API must remain available to those users.
    native/wasm mixed-heap pressure evidence. The per-VM logical-live quota,
    atomic/catchable OOM path, VM-owned live/reserved/peak telemetry, epoch-safe
    decision-reset ABI, and focused 600-decision plateau are implemented.
-2. Add a host-owned script-visible `require` resolver/cache with deterministic
-   identity, execute-once behavior, and cycle diagnostics.
-3. Complete the release value and live-handle surface for binary strings,
+2. Complete the release value and live-handle surface for binary strings,
    buffers, vectors, non-scalar/identity keys, opaque identity-safe userdata
    handles, shared/cyclic table graphs, VM/epoch-safe live `Value`/`Table`/
    `Function` handles, globals/value constructors, a composable chunk builder,
@@ -26,10 +24,10 @@ general embedding API must remain available to those users.
    simple layer. Full mlua-style `UserData`/`Scope`, async, and an mlua
    migration shim remain later optional layers unless a concrete release
    consumer promotes them.
-4. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
+3. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
    transactional extension/module/hot-reload failure behavior, and
    differential/fuzz coverage before stabilizing and publishing the API.
-5. Close the full correctness/build/golden target matrix from
+4. Close the full correctness/build/golden target matrix from
    [`00-constraints.md`](00-constraints.md); Linux remains the only active
    timing source, but not the only correctness target.
 
@@ -37,6 +35,25 @@ The cheap worker-local host-context blocker is closed: `HostSchema` registration
 are persistent, each typed invocation borrows a fresh `HostContext`, and bounded
 record transactions publish to reusable or caller-owned lanes. Capability-tagged
 output/time providers and VM-owned telemetry are also implemented.
+
+The prior module-resolution blocker is also closed: `ServiceModuleResolver`
+plugs a host-owned resolver into script-visible `require`; the host returns a
+canonical identity plus source, successful modules execute once per decision
+epoch, cached values remain GC roots, nested requests receive their referrer's
+source name, cycles report the complete identity path, and reset clears guest
+module programs/results while preserving the resolver configuration.
+`DeterministicSim` admits only a resolver explicitly labeled replay-stable,
+while hardened leaves reject dynamic modules. Resolution and module execution
+share caller fuel; resolver panics poison until reset; failed or multi-result
+modules never enter the cache; and cache admission observes the logical-live
+quota. The cache/reset contract is versioned by
+`RUSTIA_MODULE_RESOLUTION_ABI_VERSION`; replay/package identity must also bind
+the host resolver's content. The CLI's non-deterministic profiles now install a
+fixed-order filesystem adapter with canonical identities, referrer-relative
+nesting, and module-source runtime diagnostics; deterministic CLI execution has no
+ambient loader. Rolling back arbitrary guest global/heap side effects from a
+runtime-failing module and supporting a yieldable `require` continuation remain
+part of the semantic-tail/failure-semantics blocker.
 
 ## Current Policy
 
