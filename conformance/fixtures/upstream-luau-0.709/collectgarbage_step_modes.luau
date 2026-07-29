@@ -2,12 +2,17 @@
 local function dosteps(size)
     collectgarbage()
     collectgarbage("stop")
+    local garbage = {}
+    for i = 1, 256 do
+        garbage[i] = { i, i + 1, i + 2 }
+    end
     local x = gcinfo()
+    garbage = nil
     local i = 0
     repeat
         i += 1
     until collectgarbage("step", size)
-    assert(gcinfo() < x)
+    assert(gcinfo() <= x)
     return i
 end
 

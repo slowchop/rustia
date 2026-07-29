@@ -246,15 +246,19 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    storage, and shrinks VM/coroutine/traceback stack capacity. Loaded programs also use generation-safe slots:
    obsolete program bytecode, constants, inline caches, and coverage rows are reclaimed only after no reachable
    closure, coroutine, or retained host value refers to them. Compiled constant atoms stay rooted while their
-   program is live, and stale object/program handles cannot alias replacements. `Vm::memory_stats()` provides a
+   program is live, and stale object/program handles cannot alias replacements. Script-triggered and
+   quota-forced collection now applies the same program cleanup while preserving active top-level and suspended
+   coroutine program roots. `Vm::memory_stats()` provides a
    VM-owned live/reserved census and opt-in instruction-boundary peaks. `VmSettings::memory_limit_bytes` now
    enforces that logical-live boundary with one forced-collection retry, catchable OOM, preflight for large
-   string/table/buffer requests, and candidate-before-commit growing table writes. Script-visible
-   `gcinfo`/`collectgarbage("count")` remain compatibility values until O(1) incremental accounting replaces the
-   correctness-first quota-mode boundary scan. Exact-commit Linode cohort `safe-memory-588b541` retained 99
+   string/table/buffer requests, and candidate-before-commit growing table writes. Heap stores and loaded
+   programs maintain live totals; VM control state uses a cached aggregate with local refresh after structural
+   changes. Quota admission and ordinary instruction boundaries therefore avoid a whole-VM census, while exact
+   reserved telemetry remains on demand. Script-visible `gcinfo`/`collectgarbage("count")` read that same
+   maintained logical-live total. Exact-commit Linode cohort `safe-memory-588b541` retained 99
    native samples after confirmed deletion, passed the wasm32 512 KiB quota/recovery probe, tied the 256 KiB
    best shared peak, and reduced the shared retained mean to 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. Still
-   required before public release: O(1) accounting and broader mixed-heap/native/Wasm pressure coverage.
+   required before public release: broader mixed-heap/native/Wasm pressure coverage.
    GC interval tuning is not a substitute for those remaining policies.
 2. **Host-provided runtime services and modules.** The output/clock/entropy provider slice is implemented
    ([`72-host-services.md`](72-host-services.md)): `print` composes `tostring` per argument (honoring
@@ -305,7 +309,7 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    roots, stale-handle defenses, VM-owned live/reserved/peak accounting, and logical-live quota/atomic OOM
    semantics are now active. Decision-reset ABI v1 also provides epoch-safe retained-handle invalidation,
    deterministic counter restart, reusable allocation containers, and a 600-decision exact plateau. Next
-   optimize quota accounting to O(1) and prove the complete memory path with broader long-lived churn, cyclic
+   prove the complete memory path with broader long-lived churn, cyclic
    graphs, hot reload, retained handles, weak tables, native/wasm parity, and representative mixed-heap evidence
    before tuning final intervals.
 2. **Finish the host-facing runtime boundary and ordered advanced API track.** Follow
@@ -344,7 +348,7 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    is the sole active timing source and must keep its Linux-only completeness and cleanup gates green.
 
 **Pre-release gates:** see the "What's next" section below. Object reclamation/limits and deterministic
-decision reset are implemented; O(1) accounting and broader mixed-heap pressure evidence now precede final GC
+decision reset and maintained live-memory accounting are implemented; broader mixed-heap pressure evidence now precedes final GC
 tuning. Benchmark publication and the `LuauIntegerType2` watch remain ongoing gates.
 
 **Project setup facts:** dual `MIT OR Apache-2.0` (holder Gak Dev Pty Ltd); the public/private boundary +
@@ -434,8 +438,8 @@ tuning. Benchmark publication and the `LuauIntegerType2` watch remain ongoing ga
   tested matrix. (M2: the Standard modes use an
   **incremental/paced** collection schedule; only DeterministicSim
   uses the full-collect-on-instruction-count trigger.) Scheduling and weak sweeping are implemented; complete
-  ordinary-object/program reclamation, reuse, telemetry, and limits are implemented; O(1) quota accounting,
-  script-visible memory counters, broader pressure evidence, and tuning remain open.
+  ordinary-object/program reclamation, reuse, telemetry, limits, maintained quota accounting, and script-visible
+  memory counters are implemented; broader pressure evidence and tuning remain open.
 
 `GuestSurface::HardenedLeaf` is a narrowing layer on `DeterministicSim`, not a fourth profile. It is the
 authoritative stateless-action contract: sealed allowlisted globals/libraries/host namespaces, no ambient or
@@ -477,12 +481,12 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 | H2 | "~5× koto" too narrow | **RESOLVED** — drop the blanket number; state **per-workload** (below). |
 | H3 | wasm gate + Wasm 3.0 | **RESOLVED** — Wasm-3.0 assessed (br_table stays; wasm-GC rejected; relaxed-SIMD banned); V8 + Bun/JSC-family + SpiderMonkey production wasm and `call_ref` dispatch measured. |
 | M1 | three named modes | **RESOLVED** — one engine with concrete LuauCompat/ReproducibleStandard(default)/DeterministicSim runtime profiles. |
-| M2 | Standard incremental GC | **RESOLVED as a scheduling/profile decision** — paced/incremental for Standard, full-collect-on-instruction-count for DeterministicSim; O(1) accounting and final tuning remain open. |
+| M2 | Standard incremental GC | **RESOLVED as a scheduling/profile decision** — paced/incremental for Standard, full-collect-on-instruction-count for DeterministicSim; maintained live accounting is implemented and final tuning remains open. |
 | M3 | promote inline caches + hot/cold | **RESOLVED** — compact site-scoped live-slot caches plus `GETIMPORT`/`FASTCALL` and dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` landed; hot/cold remains P1. |
 
 ## What's next (the genuine remaining public-release gates)
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items, in order:
-1. **Broaden the mixed-heap pressure matrix and finish O(1) accounting.** The frozen comparator is
+1. **Broaden the mixed-heap pressure matrix.** The frozen comparator is
    `pre-reclamation-18b58d8`; exact-commit cohort `safe-memory-588b541` now validates the bounded native
    workloads and wasm32 quota/recovery path. Coroutine/program stores, true public-handle rooting, weak tables,
    cyclic graphs, hot reload, logical-live quotas, and atomic OOM have their first safety coverage. Decision

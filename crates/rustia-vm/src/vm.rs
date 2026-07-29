@@ -453,7 +453,6 @@ pub struct Vm {
     non_yieldable_depth: usize,
     initial_rng_state: u64,
     rng_state: u64,
-    gcinfo_counter: u64,
     gc_step_counter: u64,
     gc_stopped: bool,
     executed_instructions: u64,
@@ -462,8 +461,12 @@ pub struct Vm {
     decision_epoch: u64,
     external_roots: Rc<RefCell<ExternalRootRegistry>>,
     coverage_hits: BTreeMap<CoverageKey, u64>,
+    control_live_bytes: usize,
+    control_memory_dirty: bool,
     peak_live_bytes: usize,
     peak_reserved_bytes: usize,
+    #[cfg(test)]
+    full_memory_census_count: u64,
     #[cfg(test)]
     hot_ir_mode: HotIrTestMode,
     #[cfg(test)]
@@ -616,11 +619,42 @@ struct LoadedProgram {
 struct LoadedPrograms {
     slots: Vec<LoadedProgramSlot>,
     free: Vec<u32>,
+    live_bytes: usize,
 }
 
 struct LoadedProgramSlot {
     generation: u8,
     value: Option<LoadedProgram>,
+}
+
+struct LoadedProgramMut<'a> {
+    value: &'a mut LoadedProgram,
+    aggregate_live_bytes: &'a mut usize,
+    before_live_bytes: usize,
+}
+
+impl std::ops::Deref for LoadedProgramMut<'_> {
+    type Target = LoadedProgram;
+
+    fn deref(&self) -> &Self::Target {
+        self.value
+    }
+}
+
+impl std::ops::DerefMut for LoadedProgramMut<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.value
+    }
+}
+
+impl Drop for LoadedProgramMut<'_> {
+    fn drop(&mut self) {
+        let after_live_bytes = self.value.individual_live_bytes();
+        *self.aggregate_live_bytes = self
+            .aggregate_live_bytes
+            .saturating_sub(self.before_live_bytes)
+            .saturating_add(after_live_bytes);
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -655,7 +689,9 @@ impl LoadedPrograms {
             debug_assert!(slot.value.is_none());
             debug_assert!(slot.generation > 0);
             slot.value = Some(value);
-            return Some(program_handle(index, slot.generation));
+            let handle = program_handle(index, slot.generation);
+            self.refresh_live_bytes();
+            return Some(handle);
         }
 
         let index = u32::try_from(self.slots.len()).ok()?;
@@ -666,6 +702,7 @@ impl LoadedPrograms {
             generation: 0,
             value: Some(value),
         });
+        self.refresh_live_bytes();
         Some(program_handle(index, 0))
     }
 
@@ -679,12 +716,18 @@ impl LoadedPrograms {
     }
 
     #[inline]
-    fn get_mut(&mut self, handle: u32) -> Option<&mut LoadedProgram> {
+    fn get_mut(&mut self, handle: u32) -> Option<LoadedProgramMut<'_>> {
         let (index, generation) = program_handle_parts(handle);
         let slot = self.slots.get_mut(index)?;
-        (slot.generation == generation)
+        let value = (slot.generation == generation)
             .then_some(slot.value.as_mut())
-            .flatten()
+            .flatten()?;
+        let before_live_bytes = value.individual_live_bytes();
+        Some(LoadedProgramMut {
+            value,
+            aggregate_live_bytes: &mut self.live_bytes,
+            before_live_bytes,
+        })
     }
 
     fn values(&self) -> impl Iterator<Item = &LoadedProgram> {
@@ -713,6 +756,7 @@ impl LoadedPrograms {
                 self.free.push(index as u32);
             }
         }
+        self.refresh_live_bytes();
         removed
     }
 
@@ -723,6 +767,7 @@ impl LoadedPrograms {
             slot.generation = 1;
             self.free.push(index as u32);
         }
+        self.refresh_live_bytes();
     }
 
     fn release_spare_capacity(&mut self) {
@@ -747,7 +792,34 @@ impl LoadedPrograms {
         for loaded in self.values() {
             loaded.add_memory_usage(&mut usage, &mut shared_constants);
         }
+        debug_assert_eq!(
+            usage.live_bytes, self.live_bytes,
+            "incremental program memory accounting diverged from the exact census"
+        );
         usage
+    }
+
+    #[inline]
+    const fn live_bytes(&self) -> usize {
+        self.live_bytes
+    }
+
+    fn refresh_live_bytes(&mut self) {
+        let mut usage = MemoryUsage::default();
+        usage.add(
+            self.slots
+                .iter()
+                .filter(|slot| slot.value.is_some())
+                .count()
+                .saturating_mul(size_of::<LoadedProgramSlot>()),
+            0,
+        );
+        usage.add(self.free.len().saturating_mul(size_of::<u32>()), 0);
+        let mut shared_constants = std::collections::BTreeSet::new();
+        for loaded in self.values() {
+            loaded.add_memory_usage(&mut usage, &mut shared_constants);
+        }
+        self.live_bytes = usage.live_bytes;
     }
 
     #[cfg(test)]
@@ -979,6 +1051,13 @@ impl LoadedProgram {
         for caches in &self.function_inline_caches {
             caches.add_memory_usage(usage);
         }
+    }
+
+    fn individual_live_bytes(&self) -> usize {
+        let mut usage = MemoryUsage::default();
+        let mut constants = std::collections::BTreeSet::new();
+        self.add_memory_usage(&mut usage, &mut constants);
+        usage.live_bytes
     }
 }
 
@@ -1669,6 +1748,7 @@ struct StandardGlobalHandles {
 
 #[derive(Clone)]
 struct CallStackFrame {
+    program: Option<u32>,
     function: Option<Value>,
     debug_name: Option<String>,
     environment: u32,
@@ -2038,7 +2118,6 @@ impl Vm {
             non_yieldable_depth: 0,
             initial_rng_state,
             rng_state,
-            gcinfo_counter: 0,
             gc_step_counter: 0,
             gc_stopped: false,
             executed_instructions: 0,
@@ -2051,13 +2130,18 @@ impl Vm {
                 values: BTreeMap::new(),
             })),
             coverage_hits: BTreeMap::new(),
+            control_live_bytes: 0,
+            control_memory_dirty: true,
             peak_live_bytes: 0,
             peak_reserved_bytes: 0,
+            #[cfg(test)]
+            full_memory_census_count: 0,
             #[cfg(test)]
             hot_ir_mode: HotIrTestMode::Auto,
             #[cfg(test)]
             closure_call_mode: ClosureCallTestMode::Auto,
         };
+        vm.sync_control_memory();
         vm.record_memory_peak();
         vm
     }
@@ -2193,6 +2277,7 @@ impl Vm {
             next_id: 0,
             values: BTreeMap::new(),
         }));
+        self.mark_control_memory_dirty();
 
         if hardened_leaf {
             let checkpoint = self.hardened_heap_checkpoint.ok_or_else(|| {
@@ -2240,7 +2325,6 @@ impl Vm {
         }
 
         self.rng_state = self.initial_rng_state;
-        self.gcinfo_counter = 0;
         self.gc_step_counter = 0;
         self.gc_stopped = false;
         self.executed_instructions = 0;
@@ -2248,6 +2332,7 @@ impl Vm {
         self.deterministic_collection_count = 0;
         self.decision_epoch = next_epoch;
         self.poisoned = false;
+        self.sync_control_memory();
         self.record_memory_peak();
         Ok(())
     }
@@ -2397,6 +2482,11 @@ impl Vm {
     }
 
     fn current_memory_usage(&mut self) -> MemoryUsage {
+        #[cfg(test)]
+        {
+            self.full_memory_census_count = self.full_memory_census_count.saturating_add(1);
+        }
+        self.sync_control_memory();
         let heap = self.heap.memory_usage();
         let mut usage = MemoryUsage {
             live_bytes: heap.live_bytes,
@@ -2405,26 +2495,90 @@ impl Vm {
         let programs = self.dynamic_programs.memory_usage();
         usage.add(programs.live_bytes, programs.reserved_bytes);
         add_vm_control_memory(self, &mut usage);
+        #[cfg(test)]
+        {
+            let mut cached_control = MemoryUsage::default();
+            add_vm_cached_control_memory(self, &mut cached_control);
+            assert_eq!(
+                cached_control.live_bytes, self.control_live_bytes,
+                "incremental VM control accounting diverged from the exact census"
+            );
+        }
         usage
     }
 
+    fn current_live_bytes(&mut self) -> usize {
+        self.sync_control_memory();
+        let heap_live = self.heap.memory_usage().live_bytes;
+        let mut dynamic = MemoryUsage::default();
+        add_vm_dynamic_map_memory(self, &mut dynamic);
+        heap_live
+            .saturating_add(self.dynamic_programs.live_bytes())
+            .saturating_add(self.control_live_bytes)
+            .saturating_add(dynamic.live_bytes)
+    }
+
+    fn sync_control_memory(&mut self) {
+        if !self.control_memory_dirty {
+            return;
+        }
+        let mut usage = MemoryUsage::default();
+        add_vm_cached_control_memory(self, &mut usage);
+        self.control_live_bytes = usage.live_bytes;
+        self.control_memory_dirty = false;
+    }
+
+    #[inline]
+    fn mark_control_memory_dirty(&mut self) {
+        self.control_memory_dirty = true;
+    }
+
+    fn mutate_last_call_stack_frame<R>(
+        &mut self,
+        mutate: impl FnOnce(&mut CallStackFrame) -> R,
+    ) -> Option<R> {
+        let frame = self.call_stack.last_mut()?;
+        if self.control_memory_dirty {
+            return Some(mutate(frame));
+        }
+        let before = call_stack_frame_live_bytes(frame);
+        let result = mutate(frame);
+        let after = call_stack_frame_live_bytes(frame);
+        self.control_live_bytes = self
+            .control_live_bytes
+            .saturating_sub(before)
+            .saturating_add(after);
+        Some(result)
+    }
+
     fn collect_for_memory_limit(&mut self, transient_roots: &[Value]) {
+        self.collect_heap_and_programs(transient_roots, true);
+    }
+
+    fn collect_heap_and_programs(&mut self, transient_roots: &[Value], finish_cycle: bool) {
         let roots = self.collectgarbage_roots(transient_roots);
-        self.heap.finish_collection_cycle();
+        if finish_cycle {
+            self.heap.finish_collection_cycle();
+        }
         self.heap.collect_weak_tables_with_roots(&roots);
+        // Runtime-compiled programs are owned outside the traced heap, but
+        // their functions carry program handles. Reclaim the backing program
+        // immediately after the heap has discarded unreachable functions so
+        // automatic/script collection and logical-live counters agree.
+        self.reclaim_unreferenced_programs();
     }
 
     fn enforce_memory_limit(&mut self, transient_roots: &[Value]) -> Result<()> {
         let Some(limit) = self.settings.memory_limit_bytes else {
             return Ok(());
         };
-        if self.current_memory_usage().live_bytes <= limit {
+        if self.current_live_bytes() <= limit {
             return Ok(());
         }
         // The quota collector is allowed to run even while script collection
         // is stopped: a host safety boundary cannot be disabled by guest code.
         self.collect_for_memory_limit(transient_roots);
-        if self.current_memory_usage().live_bytes <= limit {
+        if self.current_live_bytes() <= limit {
             return Ok(());
         }
         Err(Error::new(ErrorKind::OutOfMemory).without_source_location())
@@ -2439,8 +2593,7 @@ impl Vm {
             return Ok(());
         };
         if self
-            .current_memory_usage()
-            .live_bytes
+            .current_live_bytes()
             .saturating_add(additional_live_bytes)
             <= limit
         {
@@ -2448,8 +2601,7 @@ impl Vm {
         }
         self.collect_for_memory_limit(transient_roots);
         if self
-            .current_memory_usage()
-            .live_bytes
+            .current_live_bytes()
             .saturating_add(additional_live_bytes)
             <= limit
         {
@@ -2465,7 +2617,9 @@ impl Vm {
             })
             .without_source_location());
         }
-        self.extensions.register(self.profile, op)
+        let id = self.extensions.register(self.profile, op)?;
+        self.mark_control_memory_dirty();
+        Ok(id)
     }
 
     pub fn register_host_function(&mut self, op: HostFunctionOp) -> Result<Value> {
@@ -2485,6 +2639,7 @@ impl Vm {
                 })
             })?;
         self.host_functions.push(op);
+        self.mark_control_memory_dirty();
         Ok(Value::function(handle))
     }
 
@@ -2509,10 +2664,12 @@ impl Vm {
         let value = self.register_host_function(op)?;
         if let Err(error) = self.set_host_configuration_global(&name, value) {
             self.host_functions.truncate(host_functions_checkpoint);
+            self.mark_control_memory_dirty();
             return Err(error);
         }
         self.host_function_bindings
             .push(HostFunctionBinding::Global { name, host });
+        self.mark_control_memory_dirty();
         Ok(())
     }
 
@@ -2576,6 +2733,7 @@ impl Vm {
         })();
         if let Err(error) = install {
             self.host_functions.truncate(host_functions_checkpoint);
+            self.mark_control_memory_dirty();
             return Err(error);
         }
         self.host_function_bindings
@@ -2583,6 +2741,7 @@ impl Vm {
                 namespace,
                 functions: bindings,
             });
+        self.mark_control_memory_dirty();
         Ok(())
     }
 
@@ -3025,14 +3184,22 @@ impl Vm {
         self.release_stack_capacity();
         self.gc_step_counter = 0;
         self.gc_stopped = false;
+        self.mark_control_memory_dirty();
     }
 
     fn reclaim_unreferenced_programs(&mut self) {
-        let referenced = self
+        let mut referenced = self
             .heap
             .referenced_programs()
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>();
+        referenced.extend(self.call_stack.iter().filter_map(|frame| frame.program));
+        for coroutine in &self.coroutines {
+            extend_coroutine_program_roots(&mut referenced, &coroutine.frames);
+        }
+        for frames in &self.active_coroutine_frames {
+            extend_coroutine_program_roots(&mut referenced, frames);
+        }
         let removed = self
             .dynamic_programs
             .retain_handles(|handle| referenced.contains(&handle));
@@ -3059,6 +3226,7 @@ impl Vm {
         fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
         self.call_stack.push(CallStackFrame {
+            program: program_id,
             function: context.current_function,
             debug_name: function.debug_name.clone(),
             environment: context.environment,
@@ -3067,6 +3235,7 @@ impl Vm {
             stackless_roots: Vec::new(),
             stackless_debug_frames: Vec::new(),
         });
+        self.mark_control_memory_dirty();
         let result = (|| -> VmFlowResult<ReturnValues> {
             self.check_recursion_depth(context.depth)?;
             if function.max_registers == 0 {
@@ -3223,6 +3392,7 @@ impl Vm {
                                     &pending_return_prefixes,
                                 );
                                 self.last_error_traceback = None;
+                                self.mark_control_memory_dirty();
                                 let error_value =
                                     self.error_object(error.take().ok_or_else(|| {
                                         Error::new(ErrorKind::InvalidProgram {
@@ -6543,9 +6713,11 @@ impl Vm {
             result.map_err(|error| attach_existing_instruction_source(program, function, error));
         if let Err(error) = &result {
             self.last_error_traceback = Some(self.traceback_snapshot(error.location.clone()));
+            self.mark_control_memory_dirty();
             self.record_running_coroutine_error_snapshot(error.location.clone());
         }
         self.call_stack.pop();
+        self.mark_control_memory_dirty();
         result
     }
 
@@ -6845,7 +7017,7 @@ impl Vm {
         })?;
         let atom = self.heap.intern_shared_string(shared);
         if let Some(program_id) = program_id {
-            if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+            if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
                 program.set_constant_atom(index, atom);
             }
         }
@@ -6933,7 +7105,7 @@ impl Vm {
             return key;
         };
         if let (Some(program_id), Ok(index)) = (program_id, usize::try_from(constant_index)) {
-            if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+            if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
                 program.set_constant_atom(index, atom);
             }
         }
@@ -8520,7 +8692,7 @@ impl Vm {
             });
         };
         for attempt in 0..2 {
-            let allowed_growth = limit.saturating_sub(self.current_memory_usage().live_bytes);
+            let allowed_growth = limit.saturating_sub(self.current_live_bytes());
             match self
                 .heap
                 .table_set_with_live_growth_limit(table, key, value, allowed_growth)
@@ -8576,7 +8748,7 @@ impl Vm {
                 });
         };
         for attempt in 0..2 {
-            let allowed_growth = limit.saturating_sub(self.current_memory_usage().live_bytes);
+            let allowed_growth = limit.saturating_sub(self.current_live_bytes());
             match self.heap.table_set_array_slot_with_live_growth_limit(
                 table,
                 index,
@@ -9163,8 +9335,10 @@ impl Vm {
         fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         let previous = self.protected_error_traceback.replace(traceback);
+        self.mark_control_memory_dirty();
         let result = self.call_value(program, callee, args, depth, fuel);
         self.protected_error_traceback = previous;
+        self.mark_control_memory_dirty();
         result
     }
 
@@ -9474,7 +9648,7 @@ impl Vm {
         pc: usize,
         entry: TableStringInlineCache,
     ) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             if program
                 .set_table_inline_cache(prototype, pc, entry)
                 .is_some()
@@ -9508,7 +9682,7 @@ impl Vm {
         lane: usize,
         entry: TableStringInlineCache,
     ) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             if program
                 .set_import_inline_cache(prototype, pc, lane, entry)
                 .is_some()
@@ -9540,7 +9714,7 @@ impl Vm {
         pc: usize,
         entry: NativeCallInlineCache,
     ) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             if program
                 .set_native_call_inline_cache(prototype, pc, entry)
                 .is_some()
@@ -9574,7 +9748,7 @@ impl Vm {
         pc: usize,
         entry: ClosureCallCacheEntry,
     ) {
-        if let Some(program) = self.dynamic_programs.get_mut(caller_program) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(caller_program) {
             let _filled = program.set_closure_call_inline_cache(caller_prototype, pc, entry);
             #[cfg(test)]
             if matches!(_filled, Some(true)) {
@@ -9586,7 +9760,7 @@ impl Vm {
 
     #[cfg(test)]
     fn record_closure_call_prototype_hit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.closure_call_prototype_hits =
                 program.closure_call_prototype_hits.saturating_add(1);
         }
@@ -9594,21 +9768,21 @@ impl Vm {
 
     #[cfg(test)]
     fn record_closure_call_fast_entry(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.closure_call_fast_entries = program.closure_call_fast_entries.saturating_add(1);
         }
     }
 
     #[cfg(test)]
     fn record_closure_call_guard_exit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.closure_call_guard_exits = program.closure_call_guard_exits.saturating_add(1);
         }
     }
 
     #[cfg(test)]
     fn record_native_call_inline_cache_hit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.native_call_inline_cache_hits =
                 program.native_call_inline_cache_hits.saturating_add(1);
         }
@@ -9616,21 +9790,21 @@ impl Vm {
 
     #[cfg(test)]
     fn record_table_inline_cache_hit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.table_inline_cache_hits = program.table_inline_cache_hits.saturating_add(1);
         }
     }
 
     #[cfg(test)]
     fn record_hot_ir_entry(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.hot_ir_entries = program.hot_ir_entries.saturating_add(1);
         }
     }
 
     #[cfg(test)]
     fn record_hot_ir_iterations(&mut self, program_id: u32, iterations: u64) {
-        let Some(program) = self.dynamic_programs.get_mut(program_id) else {
+        let Some(mut program) = self.dynamic_programs.get_mut(program_id) else {
             return;
         };
         program.hot_ir_iterations = program.hot_ir_iterations.saturating_add(iterations);
@@ -9638,7 +9812,7 @@ impl Vm {
 
     #[cfg(test)]
     fn record_hot_ir_guard_exit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.hot_ir_guard_exits = program.hot_ir_guard_exits.saturating_add(1);
         }
     }
@@ -11998,6 +12172,7 @@ impl Vm {
         let identity = resolved.identity;
         self.ensure_memory_growth(size_of::<String>().saturating_add(identity.len()), &[])?;
         self.module_loading_stack.push(identity.clone());
+        self.mark_control_memory_dirty();
         let result = (|| {
             let program_id = self.retain_dynamic_program(resolved.program)?;
             let environment = self.globals;
@@ -12019,6 +12194,7 @@ impl Vm {
             )
         })();
         let popped = self.module_loading_stack.pop();
+        self.mark_control_memory_dirty();
         debug_assert_eq!(popped.as_deref(), Some(identity.as_str()));
         let results = result?;
         if results.len() > 1 {
@@ -12034,6 +12210,7 @@ impl Vm {
         let cache_roots = value.into_iter().collect::<SmallVec<[Value; 1]>>();
         self.ensure_memory_growth(cache_growth, &cache_roots)?;
         self.module_cache.insert(identity, value);
+        self.mark_control_memory_dirty();
         Ok(results)
     }
 
@@ -12104,7 +12281,9 @@ impl Vm {
         state.frames.clear();
         state.initialized = true;
         state.dead = true;
-        if let Some(error) = state.error.take() {
+        let error = state.error.take();
+        self.mark_control_memory_dirty();
+        if let Some(error) = error {
             return Ok(vec![Value::boolean(false), error]);
         }
         Ok(vec![Value::boolean(true)])
@@ -12123,6 +12302,7 @@ impl Vm {
             return Err(non_yieldable_boundary_error());
         };
         collector.push(args.to_vec());
+        self.mark_control_memory_dirty();
         Ok(Vec::new())
     }
 
@@ -12154,6 +12334,7 @@ impl Vm {
             first_debug_info_level: 1,
         };
         self.coroutines[coroutine].debug_snapshot = Some(snapshot);
+        self.mark_control_memory_dirty();
     }
 
     fn record_running_coroutine_error_snapshot(&mut self, top_location: Option<ErrorLocation>) {
@@ -12171,6 +12352,7 @@ impl Vm {
             .is_none_or(|existing| existing.frames.len() <= snapshot.frames.len());
         if replace {
             self.coroutines[coroutine].debug_snapshot = Some(snapshot);
+            self.mark_control_memory_dirty();
         }
     }
 
@@ -12207,12 +12389,14 @@ impl Vm {
     fn take_error_traceback(&mut self, error: &Error) -> TracebackSnapshot {
         if error.location.is_some() {
             if let Some(snapshot) = self.last_error_traceback.take() {
+                self.mark_control_memory_dirty();
                 if snapshot.top_location == error.location {
                     return snapshot;
                 }
             }
         } else {
             self.last_error_traceback = None;
+            self.mark_control_memory_dirty();
         }
         self.traceback_snapshot(error.location.clone())
     }
@@ -12239,6 +12423,7 @@ impl Vm {
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
+        self.mark_control_memory_dirty();
         let flow = self.call_value_with_site_resumable(
             program,
             callee,
@@ -12251,6 +12436,7 @@ impl Vm {
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
+        self.mark_control_memory_dirty();
         flow.map(into_vec_flow)
     }
 
@@ -12265,6 +12451,7 @@ impl Vm {
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
         self.active_coroutine_frames.push(frames.clone());
+        self.mark_control_memory_dirty();
         let flow = self.resume_coroutine_frames_inner(frames, resume_results, fuel);
         let active = self.active_coroutine_frames.pop();
         debug_assert!(active.is_some());
@@ -12272,6 +12459,7 @@ impl Vm {
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
+        self.mark_control_memory_dirty();
         flow
     }
 
@@ -12286,6 +12474,7 @@ impl Vm {
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
         self.active_coroutine_frames.push(frames.clone());
+        self.mark_control_memory_dirty();
         let flow = self.propagate_coroutine_error(frames, error, fuel);
         let active = self.active_coroutine_frames.pop();
         debug_assert!(active.is_some());
@@ -12293,6 +12482,7 @@ impl Vm {
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
+        self.mark_control_memory_dirty();
         flow
     }
 
@@ -12359,6 +12549,7 @@ impl Vm {
                 CoroutineFrame::Bytecode(_) => {}
                 CoroutineFrame::PCall => {
                     self.last_error_traceback = None;
+                    self.mark_control_memory_dirty();
                     let error = self.error_object(error);
                     return self.resume_coroutine_frames_inner(
                         frames,
@@ -12472,6 +12663,7 @@ impl Vm {
             self.start_coroutine(program, coroutine, callee, &args[1..], depth, fuel)
         } else if self.coroutines[coroutine].frames.is_empty() {
             self.coroutines[coroutine].dead = true;
+            self.mark_control_memory_dirty();
             let mut values = vec![Value::boolean(true)];
             values.extend_from_slice(&args[1..]);
             return Ok(values);
@@ -12479,7 +12671,7 @@ impl Vm {
             let frames = std::mem::take(&mut self.coroutines[coroutine].frames);
             self.resume_coroutine_frames(coroutine, frames, args[1..].to_vec(), fuel)
         };
-        match flow {
+        let result = match flow {
             Ok(VmFlow::Return(results)) => {
                 let state = &mut self.coroutines[coroutine];
                 state.initialized = true;
@@ -12505,7 +12697,9 @@ impl Vm {
                 self.coroutines[coroutine].error = Some(error_value);
                 Ok(vec![Value::boolean(false), error_value])
             }
-        }
+        };
+        self.mark_control_memory_dirty();
+        result
     }
 
     fn native_conformance_resume_error(
@@ -12534,7 +12728,7 @@ impl Vm {
         let frames = std::mem::take(&mut self.coroutines[coroutine].frames);
         let error = self.guest_error_from_value(args[1])?;
         let flow = self.resume_coroutine_error(coroutine, frames, error, fuel);
-        match flow {
+        let result = match flow {
             Ok(VmFlow::Return(_)) => {
                 let state = &mut self.coroutines[coroutine];
                 state.initialized = true;
@@ -12556,7 +12750,9 @@ impl Vm {
                 self.coroutines[coroutine].error = Some(error_value);
                 Ok(Vec::new())
             }
-        }
+        };
+        self.mark_control_memory_dirty();
+        result
     }
 
     fn native_coroutine_wrapped_call(
@@ -12581,6 +12777,7 @@ impl Vm {
             self.start_coroutine(program, coroutine, callee, call_args, depth, fuel)
         } else if self.coroutines[coroutine].frames.is_empty() {
             self.coroutines[coroutine].dead = true;
+            self.mark_control_memory_dirty();
             return Ok(args.get(1..).unwrap_or(&[]).to_vec());
         } else {
             let frames = std::mem::take(&mut self.coroutines[coroutine].frames);
@@ -12591,7 +12788,7 @@ impl Vm {
                 fuel,
             )
         };
-        match flow {
+        let result = match flow {
             Ok(VmFlow::Return(results)) => {
                 let state = &mut self.coroutines[coroutine];
                 state.initialized = true;
@@ -12616,7 +12813,9 @@ impl Vm {
                     message: self.error_value_message(error_value),
                 }))
             }
-        }
+        };
+        self.mark_control_memory_dirty();
+        result
     }
 
     fn alloc_coroutine(&mut self, callee: Value, callable: bool) -> Result<u32> {
@@ -12646,6 +12845,7 @@ impl Vm {
             error: None,
             debug_snapshot: None,
         });
+        self.mark_control_memory_dirty();
         Ok(handle)
     }
 
@@ -12691,6 +12891,7 @@ impl Vm {
             Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
             Err(error) => {
                 self.last_error_traceback = None;
+                self.mark_control_memory_dirty();
                 let error = self.error_object(error);
                 Ok(vec![Value::boolean(false), error])
             }
@@ -12729,6 +12930,7 @@ impl Vm {
             Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
             Err(error) => {
                 self.last_error_traceback = None;
+                self.mark_control_memory_dirty();
                 let error = self.error_object(error);
                 Ok(VmFlow::Return(vec![Value::boolean(false), error]))
             }
@@ -13368,14 +13570,13 @@ impl Vm {
         varargs: &[Value],
         pending_return_prefixes: &[Value],
     ) {
-        let Some(frame) = self.call_stack.last_mut() else {
-            return;
-        };
-        frame.roots.clear();
-        frame.roots.extend_from_slice(registers);
-        extend_capture_cell_roots(&mut frame.roots, register_cells);
-        frame.roots.extend_from_slice(varargs);
-        frame.roots.extend_from_slice(pending_return_prefixes);
+        let _ = self.mutate_last_call_stack_frame(|frame| {
+            frame.roots.clear();
+            frame.roots.extend_from_slice(registers);
+            extend_capture_cell_roots(&mut frame.roots, register_cells);
+            frame.roots.extend_from_slice(varargs);
+            frame.roots.extend_from_slice(pending_return_prefixes);
+        });
     }
 
     fn push_stackless_self_call_roots(
@@ -13386,73 +13587,70 @@ impl Vm {
         pending_return_prefixes: &[Value],
         continuation: &BytecodeContinuation,
     ) -> usize {
-        let Some(frame) = self.call_stack.last_mut() else {
-            return 0;
-        };
-        let mark = frame.stackless_roots.len();
-        extend_heap_backed_roots(&mut frame.stackless_roots, registers);
-        extend_capture_cell_roots(&mut frame.stackless_roots, register_cells);
-        extend_heap_backed_roots(&mut frame.stackless_roots, varargs);
-        extend_heap_backed_roots(&mut frame.stackless_roots, pending_return_prefixes);
-        extend_bytecode_continuation_heap_roots(&mut frame.stackless_roots, continuation);
-        mark
+        self.mutate_last_call_stack_frame(|frame| {
+            let mark = frame.stackless_roots.len();
+            extend_heap_backed_roots(&mut frame.stackless_roots, registers);
+            extend_capture_cell_roots(&mut frame.stackless_roots, register_cells);
+            extend_heap_backed_roots(&mut frame.stackless_roots, varargs);
+            extend_heap_backed_roots(&mut frame.stackless_roots, pending_return_prefixes);
+            extend_bytecode_continuation_heap_roots(&mut frame.stackless_roots, continuation);
+            mark
+        })
+        .unwrap_or(0)
     }
 
     fn push_bytecode_continuation_roots(&mut self, continuation: &BytecodeContinuation) -> usize {
-        let Some(frame) = self.call_stack.last_mut() else {
-            return 0;
-        };
-        let mark = frame.stackless_roots.len();
-        extend_bytecode_continuation_heap_roots(&mut frame.stackless_roots, continuation);
-        mark
+        self.mutate_last_call_stack_frame(|frame| {
+            let mark = frame.stackless_roots.len();
+            extend_bytecode_continuation_heap_roots(&mut frame.stackless_roots, continuation);
+            mark
+        })
+        .unwrap_or(0)
     }
 
     fn push_stackless_self_call_debug_frame(
         &mut self,
         debug_frame: &StacklessDebugFrame,
     ) -> StacklessDebugMark {
-        let Some(frame) = self.call_stack.last_mut() else {
-            return StacklessDebugMark::default();
-        };
-        let mark = stackless_debug_frame_mark(frame);
-        push_stackless_debug_frame_run(frame, debug_frame);
-        mark
+        self.mutate_last_call_stack_frame(|frame| {
+            let mark = stackless_debug_frame_mark(frame);
+            push_stackless_debug_frame_run(frame, debug_frame);
+            mark
+        })
+        .unwrap_or_default()
     }
 
     fn rebuild_stackless_self_call_roots(&mut self, frames: &mut [StacklessSelfCallFrame]) {
-        let Some(call_frame) = self.call_stack.last_mut() else {
-            return;
-        };
-        call_frame.stackless_roots.clear();
-        call_frame.stackless_debug_frames.clear();
-        for stackless_frame in frames {
-            stackless_frame.root_mark = call_frame.stackless_roots.len();
-            extend_stackless_self_call_frame_heap_roots(
-                &mut call_frame.stackless_roots,
-                stackless_frame,
-            );
-            stackless_frame.debug_mark = stackless_debug_frame_mark(call_frame);
-            push_stackless_debug_frame_run(call_frame, &stackless_frame.debug_frame);
-        }
+        let _ = self.mutate_last_call_stack_frame(|call_frame| {
+            call_frame.stackless_roots.clear();
+            call_frame.stackless_debug_frames.clear();
+            for stackless_frame in frames {
+                stackless_frame.root_mark = call_frame.stackless_roots.len();
+                extend_stackless_self_call_frame_heap_roots(
+                    &mut call_frame.stackless_roots,
+                    stackless_frame,
+                );
+                stackless_frame.debug_mark = stackless_debug_frame_mark(call_frame);
+                push_stackless_debug_frame_run(call_frame, &stackless_frame.debug_frame);
+            }
+        });
     }
 
     fn truncate_stackless_self_call_roots(&mut self, mark: usize) {
-        let Some(frame) = self.call_stack.last_mut() else {
-            return;
-        };
-        frame.stackless_roots.truncate(mark);
+        let _ = self.mutate_last_call_stack_frame(|frame| {
+            frame.stackless_roots.truncate(mark);
+        });
     }
 
     fn truncate_stackless_self_call_debug_frames(&mut self, mark: StacklessDebugMark) {
-        let Some(frame) = self.call_stack.last_mut() else {
-            return;
-        };
-        frame.stackless_debug_frames.truncate(mark.run_count);
-        if mark.last_run_count > 0 {
-            if let Some(run) = frame.stackless_debug_frames.last_mut() {
-                run.count = mark.last_run_count;
+        let _ = self.mutate_last_call_stack_frame(|frame| {
+            frame.stackless_debug_frames.truncate(mark.run_count);
+            if mark.last_run_count > 0 {
+                if let Some(run) = frame.stackless_debug_frames.last_mut() {
+                    run.count = mark.last_run_count;
+                }
             }
-        }
+        });
     }
 
     fn native_collectgarbage(&mut self, args: &[Value]) -> Result<Value> {
@@ -13466,22 +13664,18 @@ impl Vm {
         };
         match mode.as_str() {
             "collect" => {
-                let roots = self.collectgarbage_roots(args);
-                self.heap.finish_collection_cycle();
-                self.heap.collect_weak_tables_with_roots(&roots);
+                self.collect_heap_and_programs(args, true);
                 self.gc_step_counter = 0;
                 self.gc_stopped = false;
                 Ok(Value::number(0.0))
             }
-            "count" => Ok(Value::number(0.0)),
+            "count" => Ok(Value::number(self.current_live_bytes() as f64 / 1024.0)),
             "stop" => {
-                self.gcinfo_counter = 0;
                 self.gc_step_counter = 0;
                 self.gc_stopped = true;
                 Ok(Value::number(0.0))
             }
             "restart" => {
-                self.gcinfo_counter = 1;
                 self.gc_step_counter = 0;
                 self.gc_stopped = false;
                 Ok(Value::number(0.0))
@@ -13502,10 +13696,8 @@ impl Vm {
                     collectgarbage_step_threshold(size)
                 };
                 if self.gc_step_counter >= threshold {
-                    let roots = self.collectgarbage_roots(args);
-                    self.heap.collect_weak_tables_with_roots(&roots);
+                    self.collect_heap_and_programs(args, false);
                     self.gc_step_counter = 0;
-                    self.gcinfo_counter = 1;
                     self.gc_stopped = false;
                     Ok(Value::boolean(true))
                 } else {
@@ -13520,15 +13712,7 @@ impl Vm {
 
     fn native_gcinfo(&mut self, args: &[Value]) -> Result<Value> {
         validate_native_arity(args, 0, 0, "gcinfo arguments")?;
-        self.gcinfo_counter = self.gcinfo_counter.wrapping_add(1);
-        if self.gc_stopped {
-            return Ok(Value::number((self.gcinfo_counter as f64) * 600.0));
-        }
-        Ok(Value::number(if self.gcinfo_counter % 2 == 1 {
-            1.0
-        } else {
-            0.0
-        }))
+        Ok(Value::number((self.current_live_bytes() / 1024) as f64))
     }
 
     fn native_os_clock(&mut self, args: &[Value]) -> Result<Value> {
@@ -20755,7 +20939,29 @@ fn collect_call_stack_frame_roots(roots: &mut Vec<Value>, frame: &CallStackFrame
     }
 }
 
+fn extend_coroutine_program_roots(
+    roots: &mut std::collections::BTreeSet<u32>,
+    frames: &[CoroutineFrame],
+) {
+    for frame in frames {
+        match frame {
+            CoroutineFrame::Bytecode(frame) => {
+                roots.insert(frame.program_id);
+            }
+            CoroutineFrame::XPCall(frame) => {
+                roots.insert(frame.program_id);
+            }
+            CoroutineFrame::PCall => {}
+        }
+    }
+}
+
 fn add_vm_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
+    add_vm_cached_control_memory(vm, usage);
+    add_vm_dynamic_map_memory(vm, usage);
+}
+
+fn add_vm_cached_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
     let (extension_live, extension_reserved) = vm.extensions.memory_usage();
     usage.add(extension_live, extension_reserved);
     usage.add_vec(&vm.host_functions);
@@ -20846,6 +21052,9 @@ fn add_vm_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
         }
         add_error_location_memory(snapshot.top_location.as_ref(), usage);
     }
+}
+
+fn add_vm_dynamic_map_memory(vm: &Vm, usage: &mut MemoryUsage) {
     let roots = vm.external_roots.borrow();
     let root_node_bytes = roots.values.len().saturating_mul(
         size_of::<u64>()
@@ -20859,6 +21068,12 @@ fn add_vm_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
             .saturating_add(size_of::<usize>().saturating_mul(4)),
     );
     usage.add(coverage_node_bytes, coverage_node_bytes);
+}
+
+fn call_stack_frame_live_bytes(frame: &CallStackFrame) -> usize {
+    let mut usage = MemoryUsage::default();
+    add_call_stack_frame_memory(frame, &mut usage);
+    usage.live_bytes
 }
 
 fn add_call_stack_frame_memory(frame: &CallStackFrame, usage: &mut MemoryUsage) {
@@ -26874,6 +27089,48 @@ mod inline_cache_tests {
     }
 
     #[test]
+    fn script_collection_reclaims_unreachable_dynamic_programs() {
+        let program = Program::new(
+            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            vec![Constant::String(vec![b'x'; 4_096])],
+        );
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+
+        let active_program = vm
+            .retain_dynamic_program(program.clone())
+            .expect("active top-level program");
+        vm.call_stack.push(CallStackFrame {
+            program: Some(active_program),
+            function: None,
+            debug_name: None,
+            environment: vm.globals,
+            call_site: None,
+            roots: Vec::new(),
+            stackless_roots: Vec::new(),
+            stackless_debug_frames: Vec::new(),
+        });
+        vm.native_collectgarbage(&[])
+            .expect("collection during top-level program execution");
+        assert!(vm.dynamic_programs.get(active_program).is_some());
+        vm.call_stack.pop();
+        vm.native_collectgarbage(&[])
+            .expect("collection after top-level program execution");
+        assert!(vm.dynamic_programs.get(active_program).is_none());
+
+        let script_program = vm
+            .retain_dynamic_program(program)
+            .expect("script-collection program");
+        vm.heap
+            .alloc_dynamic_main_function(script_program, vm.globals)
+            .expect("unreachable script-collection function");
+        let script_before = vm.current_live_bytes();
+        vm.native_collectgarbage(&[])
+            .expect("script-visible collection");
+        assert!(vm.dynamic_programs.get(script_program).is_none());
+        assert!(vm.current_live_bytes() < script_before);
+    }
+
+    #[test]
     fn explicit_collection_releases_idle_stack_capacity() {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         vm.call_stack.reserve(4_096);
@@ -26931,6 +27188,7 @@ mod inline_cache_tests {
         vm.set_global_value("quota_state", Value::table(table))
             .expect("setup should be unbounded");
         vm.settings.memory_limit_bytes = Some(vm.memory_stats().live_bytes);
+        vm.full_memory_census_count = 0;
 
         let error = vm
             .set_table_array_slot(table, 4_096, Value::number(99.0))
@@ -26949,6 +27207,83 @@ mod inline_cache_tests {
                 .and_then(Value::as_number),
             Some(42.0)
         );
+        assert_eq!(
+            vm.full_memory_census_count, 0,
+            "quota admission must use maintained totals, not a full VM census"
+        );
+        assert!(vm.memory_stats().live_bytes <= vm.settings.memory_limit_bytes.unwrap());
+    }
+
+    #[test]
+    fn quota_rejected_short_string_key_does_not_materialize_transient_atom() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let table = vm.heap.alloc_array_table(&[Value::nil()]);
+        vm.set_global_value("quota_hash_state", Value::table(table))
+            .expect("setup should be unbounded");
+        vm.settings.memory_limit_bytes = Some(vm.memory_stats().live_bytes);
+        vm.full_memory_census_count = 0;
+        let key = Value::short_string(b"oom-key").expect("inline short string");
+
+        let error = vm
+            .set_table_index(table, key, Value::number(99.0))
+            .expect_err("a new hash key must exceed the exact current live-byte limit");
+        assert!(matches!(error.kind, ErrorKind::OutOfMemory));
+        assert!(
+            vm.heap.table_get(table, key).is_none(),
+            "a rejected write must not add the hash entry",
+        );
+        assert!(
+            vm.current_live_bytes() <= vm.settings.memory_limit_bytes.unwrap(),
+            "a rejected write must not materialize the planned key atom",
+        );
+
+        vm.set_table_array_slot(table, 1, Value::number(42.0))
+            .expect("a no-growth write must remain usable after OOM");
+        assert_eq!(
+            vm.heap
+                .table_get(table, Value::number(1.0))
+                .and_then(Value::as_number),
+            Some(42.0)
+        );
+        assert_eq!(
+            vm.full_memory_census_count, 0,
+            "quota admission and cleanup must not require a full VM census"
+        );
+        assert!(vm.memory_stats().live_bytes <= vm.settings.memory_limit_bytes.unwrap());
+    }
+
+    #[test]
+    fn quota_rejected_vector_key_does_not_materialize_visible_copy() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let table = vm.heap.alloc_array_table(&[Value::nil()]);
+        let vector = vm
+            .heap
+            .alloc_vector(VectorData::new(-0.0, 2.0, 3.0))
+            .expect("vector key");
+        let key = Value::vector(vector);
+        vm.set_global_value("quota_vector_table", Value::table(table))
+            .expect("setup table should be unbounded");
+        vm.set_global_value("quota_vector_key", key)
+            .expect("setup key should be unbounded");
+        vm.settings.memory_limit_bytes = Some(vm.memory_stats().live_bytes);
+        vm.full_memory_census_count = 0;
+
+        let error = vm
+            .set_table_index(table, key, Value::number(99.0))
+            .expect_err("a new vector key must exceed the exact current live-byte limit");
+        assert!(matches!(error.kind, ErrorKind::OutOfMemory));
+        assert!(
+            vm.heap.table_get(table, key).is_none(),
+            "a rejected write must not add the vector entry",
+        );
+        assert!(
+            vm.current_live_bytes() <= vm.settings.memory_limit_bytes.unwrap(),
+            "a rejected write must not allocate its normalized visible vector",
+        );
+        assert_eq!(
+            vm.full_memory_census_count, 0,
+            "quota admission must use maintained totals, not a full VM census"
+        );
         assert!(vm.memory_stats().live_bytes <= vm.settings.memory_limit_bytes.unwrap());
     }
 
@@ -26960,6 +27295,27 @@ mod inline_cache_tests {
         assert!(stats.reserved_bytes >= stats.live_bytes);
         assert_eq!(stats.peak_live_bytes, None);
         assert_eq!(stats.peak_reserved_bytes, None);
+    }
+
+    #[test]
+    fn script_memory_counters_read_the_incremental_live_total() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let count = vm.heap.intern_string_value_bytes(b"count");
+        let expected_count = vm.current_live_bytes() as f64 / 1024.0;
+        let reported_count = vm
+            .native_collectgarbage(&[count])
+            .expect("collectgarbage count")
+            .as_number()
+            .expect("numeric count");
+        assert_eq!(reported_count, expected_count);
+
+        let expected_info = (vm.current_live_bytes() / 1024) as f64;
+        let reported_info = vm
+            .native_gcinfo(&[])
+            .expect("gcinfo")
+            .as_number()
+            .expect("numeric info");
+        assert_eq!(reported_info, expected_info);
     }
 
     #[test]
@@ -28215,7 +28571,6 @@ mod inline_cache_tests {
         let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
         let initial_rng_state = vm.initial_rng_state;
         vm.rng_state = 123;
-        vm.gcinfo_counter = 9;
         vm.gc_step_counter = 8;
         vm.gc_stopped = true;
         vm.executed_instructions = 77;
@@ -28227,7 +28582,6 @@ mod inline_cache_tests {
         vm.reset_decision().unwrap();
 
         assert_eq!(vm.rng_state, initial_rng_state);
-        assert_eq!(vm.gcinfo_counter, 0);
         assert_eq!(vm.gc_step_counter, 0);
         assert!(!vm.gc_stopped);
         assert_eq!(vm.executed_instructions, 0);

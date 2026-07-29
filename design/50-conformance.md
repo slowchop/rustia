@@ -984,7 +984,10 @@
 - **[c9]** Deterministic profile disabled-feature surfacing: when a script sets `__mode`, or calls getfenv/setfenv/collectgarbage/os.time, should rustia expose nil globals / ordinary runtime errors, or an explicit "disabled in deterministic profile" error?
 - **[c9]** Whether os.difftime (pure arithmetic, no clock read) should remain available in Deterministic even though os.time/os.clock are removed, or be gated with the rest of os.* for surface minimality. **RESOLVED (2026-07-25, [`72-host-services.md`](72-host-services.md)):** gated with the rest of `os.*`; the whole `os` table (all four members) is registered on Deterministic iff a deterministic clock provider is plugged.
 - **[c9]** Whether to expose a `load` global at all in Standard, given standalone Luau registers only `loadstring` and not `load` — adding `load` is a (small) divergence-by-addition from reference Luau's global surface.
-- **[c9]** Exact KB value returned by collectgarbage('count')/gcinfo() in Standard: define a stable, documented accounting (and whether to make it reproducible across arches as a courtesy) or explicitly document it as impl-defined and non-portable.
+- **[c9]** Exact KB value returned by collectgarbage('count')/gcinfo() in Standard. **RESOLVED
+  (2026-07-29):** both read rustia's maintained VM-owned logical-live total; `count` returns floating KiB and
+  `gcinfo` returns floored KiB. This is stable for a rustia build/profile but intentionally not allocator RSS
+  or byte-identical Luau accounting.
 - **[c9]** Standard GC pacing details: tune the paced/incremental policy for pause shape and decide how close it should stay to Luau's byte-debt cadence, while keeping Deterministic on instruction-count full collection.
 - **[c9]** Whether require in Deterministic is fully disabled vs backed by a host in-memory module map; and the canonical module-key normalization so re-require caching is byte-deterministic.
 - **[c9]** Whether collectgarbage('collect') should remain in Deterministic (it is actually side-effect-free given no __gc and gated weak tables) instead of being removed — keeping it would let shared code call it harmlessly.
@@ -992,7 +995,8 @@
 - **[c10]** Fuel-exhaustion coroutine surfacing: pcall/xpcall catchability is locked as uncatchable; once coroutines land, decide whether fuel unwinds straight to the host or is represented by `coroutine.resume` as a distinct non-Luau failure.
 - **[c10]** Fuel budget scope across coroutines: one VM-global counter (deterministic per tick) vs per-resume budget. Architecture leans global; confirm semantics for nested resumes.
 - **[c10]** _VERSION must stay 'Luau' for parity, but should rustia expose its own identity/version via a separate global (e.g. a rustia table or _RUSTIA_VERSION) for capability detection without breaking _VERSION?
-- **[c10]** gcinfo() / collectgarbage('count') in the Standard profile: what deterministic-but-plausible number to report, given rustia's heap accounting differs from Luau and GC is instruction-count-driven. Could report a stable synthetic value.
+- **[c10]** `gcinfo()` / `collectgarbage('count')` in Standard: resolved by the maintained VM-owned logical-live
+  accounting above; no synthetic counter remains.
 - **[c10]** Whether Standard rustia should offer an opt-in load/loadstring (runtime compilation) for REPL/general embedding use even though reference Luau omits it from base (would be a documented superset; must be hard-off in Deterministic).
 - **[c10]** Pseudo-address scheme for tostring of reference types in the Deterministic profile: monotonic per-VM allocation counter vs hashed handle; must be reproducible and not leak real pointers.
 - **[c10]** newproxy: keep it (Luau parity) or treat as a deferred/optional userdata feature, given userdata lands at P4. Decide whether Deterministic gates it.

@@ -29,8 +29,8 @@
 >
 > **v3.3 implementation update (2026-07-27):** the collection scheduling/profile decision remains locked.
 > Complete object/program reachability and generation-safe reuse, aggregate logical-live quotas with atomic OOM,
-> and epoch-safe decision-reset ABI v1 are implemented. O(1) incremental accounting and broader mixed-heap
-> native/Wasm pressure evidence remain release gates. The current first embedding slice is owned-value based;
+> epoch-safe decision-reset ABI v1, and maintained live-memory accounting are implemented. Broader mixed-heap
+> native/Wasm pressure evidence remains a release gate. The current first embedding slice is owned-value based;
 > live zero-copy serde remains planned.
 
 ## 0. The bet — proven, with honest framing
@@ -148,20 +148,23 @@ functions, upvalues, atomized runtime strings, userdata, buffers, and vectors; r
 roots. Host-requested quiescence also prunes unreachable coroutine state and releases spare heap/interner/stack
 capacity. Loaded programs use generation-safe reusable handles and host-requested quiescence drops obsolete
 program bytecode, constants, inline caches, and coverage rows after the final reachable function disappears.
+Script-triggered and quota-forced collection now perform the same program-reachability cleanup while treating
+active top-level calls and suspended coroutine frames as program roots.
 `Vm::memory_stats()` now exposes VM-owned live/reserved bytes and optional instruction-boundary peaks. Mark
-scratch uses compact generation arrays instead of general-purpose tree nodes. The legacy script-visible counters
-remain on their O(1) compatibility path until incremental accounting can back them without a quadratic full
-census. `VmSettings::memory_limit_bytes` now enforces a deterministic logical-live quota: pressure forces one
+scratch uses compact generation arrays instead of general-purpose tree nodes. Heap/program totals are
+maintained and VM-control totals are cached with local structural refresh, so quota admission and the
+script-visible counters avoid a quadratic whole-VM census. `VmSettings::memory_limit_bytes` now enforces a
+deterministic logical-live quota: pressure forces one
 collection, preflights large string/table/buffer allocations, stages growing table writes before commit, and
-returns catchable `OutOfMemory`. The correctness-first implementation scans at quota-enabled instruction
-boundaries; O(1) incremental accounting is a later performance optimization. Exact-commit Linode cohort
+returns catchable `OutOfMemory`. Exact reserved-byte telemetry remains an on-demand census, and opt-in peak
+tracking deliberately samples it at instruction boundaries. Exact-commit Linode cohort
 `safe-memory-588b541` retained 99 native samples after confirmed deletion and passed the wasm32 512 KiB
 quota/recovery probe. Rustia tied the 256 KiB best shared-workload peak and retained a 14.4 KiB shared mean,
 below the frozen mlua/Luau/JIT reference's 24.8 KiB. Decision-reset ABI v1 now discards every guest allocation
 and retained root, restores deterministic state, invalidates handles by epoch, and remains exactly flat after
 warm-up across 600 focused native decisions. A Node/V8 wasm32 probe verifies the same lifecycle and exact
-plateau across 300 more decisions. The remaining axis-D work is O(1) accounting and broader mixed-heap
-native/Wasm pressure coverage before interval tuning is meaningful.
+plateau across 300 more decisions. The remaining axis-D work is broader mixed-heap native/Wasm pressure
+coverage before interval tuning is meaningful.
 
 **E. Determinism enforcement — LOCKED.** Dense `Vec` array parts plus insertion-ordered `Vec` hash entries;
 larger hash parts use a stable custom-mixed open-addressed `Vec<u32>` side index at no more than 50% load, and
@@ -363,7 +366,7 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
 | Value-layout/correctness evidence is still incomplete across the full native/browser matrix; real **Safari/iOS JSC** remains open even though V8, Bun/JSC-family, and SpiderMonkey shell wasm are measured | **high** | close the residual §C0 public-release build/golden matrix while keeping timings dedicated-Linux-only; keep `Value` sealed/swappable until then |
 | Earlier general-script perf evidence came from narrow spike workloads | med | use the committed multi-workload harness and generated per-workload claim gate |
 | Live VM is thread-affine instead of `Send` | med | Avoids unsafe in production; hosts should construct VMs on worker threads and share only immutable compiled artifacts/configuration |
-| O(1) accounting and broad native/Wasm mixed-heap pressure evidence remain incomplete | **high** | object/program reuse, quotas/OOM, epoch reset, a focused 600-decision native plateau, and a 300-decision Node/V8 wasm32 plateau are implemented; replace boundary scans and extend the external long-run pressure matrix before tuning intervals |
+| Broad native/Wasm mixed-heap pressure evidence remains incomplete | **high** | object/program reuse, maintained accounting, quotas/OOM, epoch reset, a focused 600-decision native plateau, and a 300-decision Node/V8 wasm32 plateau are implemented; extend the external long-run pressure matrix before tuning intervals |
 | GC full-collect cost scales O(live-objects) (~10 ns/obj; ~200 µs at 20k objects) | med | after reclamation lands, tune the instruction-count collection interval on realistic heap sizes and confirm bit-reproducible native vs wasm |
 | Remaining semantic/diagnostic tail can move errors across compile/runtime boundaries | med | add focused pinned-Luau fixtures plus differential/fuzz tests and public stack-trace/source diagnostics |
 | Representative mixed-heap/wasm per-VM RSS remains open; 16B Value doubles value memory, GcBox adds 16 B/obj, and wasm memory grows only | med | retain the exact paired 512-VM Linux corpus: the candidate's primary residual string contrasts are approximately 0 KiB/VM for shared short/long program bytes and loaded 13-byte strings, plus 7.078 KiB/VM for loaded long atoms; extend to representative heaps/native+wasm targets, then set the P1 budget |

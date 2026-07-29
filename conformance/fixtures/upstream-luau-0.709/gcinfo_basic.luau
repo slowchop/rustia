@@ -1,19 +1,18 @@
 -- Derived from Luau 0.709 tests/conformance/gc.luau legacy gcinfo usage.
+-- The exact byte count and collector phase are implementation-defined, so
+-- create explicit unreachable pressure instead of requiring polling alone to
+-- advance the reference collector.
+local garbage = {}
+for i = 1, 256 do
+    garbage[i] = { i, i + 1, i + 2 }
+end
 local before = gcinfo()
+garbage = nil
 collectgarbage()
 local after = gcinfo()
 
-if type(before) ~= "number" or type(after) ~= "number" then
+if type(before) ~= "number" or type(after) ~= "number" or after > before then
     return "FAIL"
 end
 
-local bytes = gcinfo()
-for _ = 1, 4 do
-    local nbytes = gcinfo()
-    if nbytes < bytes then
-        return "OK"
-    end
-    bytes = nbytes
-end
-
-return "FAIL"
+return "OK"

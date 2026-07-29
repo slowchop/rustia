@@ -98,6 +98,17 @@ Current unpublished workspace version: `0.0.1`.
   marking uses compact per-store generation arrays rather than tree-set nodes,
   reducing temporary collection scratch while preserving the shared
   weak-table/reclamation graph.
+- Logical-live memory is now maintained incrementally across heap stores,
+  loaded programs, and VM control state. Quota admission and ordinary
+  instruction boundaries no longer perform a whole-VM census; cold structural
+  changes refresh only their affected aggregate before the next read. Exact
+  reserved-byte telemetry remains on demand through `memory_stats()`, and
+  opt-in peak tracking intentionally samples it at instruction boundaries.
+  `collectgarbage("count")` now reports the maintained live total in KiB and
+  `gcinfo()` reports its floored KiB value instead of compatibility counters.
+  Exact-census test oracles cover every heap read, and exact-boundary table
+  growth tests prove rejected array, short-string, and vector-key writes leave
+  both the table and logical-live total unchanged.
 - `VmSettings::memory_limit_bytes` and
   `RustiaBuilder::memory_limit_bytes(...)` cap VM-owned logical live bytes with
   identical native/wasm32 semantics. Limit pressure forces one collection,
@@ -408,7 +419,9 @@ Current unpublished workspace version: `0.0.1`.
   `console`, `Date`, `performance`, and `crypto`; bare Wasm disables default
   features and plugs its inputs. `build()` returns typed errors for live inputs
   on `DeterministicSim` and for an incomplete requested live environment.
-  `collectgarbage("count")`/`gcinfo` stay compatibility values until the O(1) quota tracker backs them.
+  `collectgarbage("count")`/`gcinfo` now read the maintained VM-owned logical-live total.
+  Script-triggered and quota-forced collection also reclaims unreachable runtime-compiled
+  programs while preserving active top-level and suspended-coroutine program roots.
 - Provider-less `os.clock()` now reads a deterministic logical clock — executed
   instructions divided by 1_000_000 logical instructions per second — monotonically
   non-decreasing per VM and identical across peers and targets, so sandboxed scripts
@@ -416,6 +429,12 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Changed
 
+- The standalone wasm benchmark adapter now opts out of rustia's browser-live
+  defaults, restoring the documented `--locked` release build without changing
+  its pinned dependency set or pulling unused browser-service dependencies. The Node/V8
+  512 KiB quota/recovery, 300-decision reset, and two 300-decision
+  hardened-leaf plateau probe passes with stable second-cohort linear-memory
+  pages.
 - Default `table.sort` comparisons now handle numeric pairs directly in the
   native heap-sort loop, while string ordering, custom comparators, mutation
   checks, and dynamic comparison errors retain their existing paths.

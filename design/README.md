@@ -8,7 +8,7 @@
 > multipliers are not current product claims. Bounded object/program lifetimes, quotas/OOM, and deterministic
 > reset are implemented, as is the typed schema/context invocation with bounded record transactions. The
 > hardened stateless action-leaf guest surface and direct compiled-entry path are also implemented. The next
-> release gates are O(1) accounting, broader pressure evidence, and the remaining module/value boundary — see
+> release gates are broader pressure evidence and the remaining transactional/value boundary — see
 > `CURRENT.md`.
 
 **rustia** = a fast, low-memory, wasm-friendly **Luau interpreter in Rust** with a great embedding API,
@@ -55,10 +55,11 @@ block-local invocation contexts, capability views, shared fuel, and bounded reco
 CLI, deterministic profiles, reusable
 private HotIR, and a reproducible 12-adapter dedicated-Linux benchmark pipeline. The current `a562919` snapshot
 puts rustia 3.494x behind `mlua-luau` and 3.833x behind Luaur by five-workload minimum-time geometric mean; the
-targeted closure slice reduced rustia median latency by 15.036%. Before public release, prioritize complete
-O(1) quota accounting, broader mixed-heap/native/Wasm pressure evidence, rich/live values,
+targeted closure slice reduced rustia median latency by 15.036%. Before public release, prioritize
+broader mixed-heap/native/Wasm pressure evidence, rich/live values,
 semantic-tail hardening, then further measured optimization and packaging. Object/program reclamation,
-quotas/OOM, epoch-safe decision reset, and the per-invocation host seam are implemented.
+quotas/OOM, maintained live-memory accounting, script counters, epoch-safe decision reset, and the
+per-invocation host seam are implemented.
 
 ## The decision axes (each gets ~5 directions explored)
 

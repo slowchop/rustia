@@ -36,7 +36,7 @@ Object/program reclamation, real VM-owned live/reserved/peak telemetry, and the 
 quota/atomic OOM path are now implemented and validated by the exact-commit `safe-memory-588b541` native Linode
 cohort plus its wasm32 512 KiB quota/recovery probe. The next release-critical slice is not more facade
 decoration: the epoch-safe decision reset and host-owned `require` resolver/cache are now implemented; remaining
-work is O(1) quota accounting, transactional installation/reload failures, rich graph-preserving values, and
+work is broader mixed-heap pressure evidence, transactional installation/reload failures, rich graph-preserving values, and
 live zero-copy serde. The consumer-facing plan is an additive advanced live-object layer, not replacement of
 the existing small typed facade. The ordered expansion is recorded in [Build Order](#build-order).
 
@@ -480,11 +480,12 @@ store authoritative state on the GC heap instead of in captured host slots.
 8. ✅ runtime output/time services — landed per [`72-host-services.md`](72-host-services.md): environment
    presets, `ServiceClock`/`ServiceEntropy` provider sockets, real `print` composition, pinned-epoch and
    logical-clock fallbacks, and native/WASI/browser adapters; honest host-facing VM-owned telemetry
-   (`Vm::memory_stats()`) is implemented, while script-visible counters await the O(1) quota tracker.
+   (`Vm::memory_stats()`) is implemented, and script-visible counters read the maintained logical-live total.
 9. ✅ logical-live quotas and atomic/catchable OOM — implemented through
    `VmSettings::memory_limit_bytes` / `RustiaBuilder::memory_limit_bytes`; exact-commit native Linode and wasm32
-   pressure validation is retained under `safe-memory-588b541`; replacing quota-boundary census scans with
-   O(1) incremental accounting remains a release blocker.
+   pressure validation is retained under `safe-memory-588b541`; maintained heap/program/control totals now
+   remove whole-VM census scans from quota-mode instruction boundaries. Broader pressure evidence remains a
+   release blocker.
 10. ✅ epoch-safe decision reset — `Vm::reset_decision()` / `Rustia::reset_decision()` preserve host
     configuration, discard all guest state, restart deterministic counters, invalidate every old retained
     handle clone, and plateau exactly in the 600-decision mixed lifecycle test.

@@ -11,9 +11,11 @@ general embedding API must remain available to those users.
 
 ## Current Release Blockers (Ordered)
 
-1. Replace quota-mode boundary scans with O(1) incremental accounting, connect
-   script-visible compatibility counters to the same census, and retain broader
-   native/wasm mixed-heap pressure evidence. The per-VM logical-live quota,
+1. Retain broader native/wasm mixed-heap pressure evidence. Maintained heap,
+   loaded-program, and VM-control live totals now back quota admission and
+   script-visible counters without a whole-VM census at ordinary instruction
+   boundaries. Exact reserved telemetry remains on demand, and opt-in peak
+   tracking still samples it deliberately. The per-VM logical-live quota,
    atomic/catchable OOM path, VM-owned live/reserved/peak telemetry, epoch-safe
    decision-reset ABI, and focused 600-decision plateau are implemented.
 2. Complete the release value and live-handle surface for binary strings,

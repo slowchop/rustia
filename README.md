@@ -7,8 +7,9 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
 > **Status: P1 engine implementation is substantial but not release-complete.** The locked design has a broad
 > production VM/compiler/API/conformance slice; bounded object/program reclamation, quotas/OOM, deterministic
 > decision reset, the typed per-invocation host transaction, and the hardened stateless action-leaf surface are
-> implemented. The next release-critical work is O(1) accounting, broader mixed-heap pressure evidence, and the
-> remaining rich-value and transactional-failure boundary.
+> implemented. Maintained live-memory totals now back quotas and script counters without a whole-VM census at
+> ordinary instruction boundaries. The next release-critical work is broader mixed-heap pressure evidence and
+> the remaining rich-value and transactional-failure boundary.
 > `spikes/` are throwaway prototypes that validated the design.
 > Read **[`design/CURRENT.md`](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](https://github.com/slowchop/rustia/blob/main/design/README.md) for the full doc map.
@@ -85,7 +86,7 @@ ceiling and its explicit `InvocationLimits::new(fuel)` budget.
 | `os.clock()` | absent | follows the `os` registration rule | logical clock (executed instructions / 1_000_000) unless a monotonic provider is plugged | system monotonic clock |
 | Initial `math.random` sequence | absent | pinned seed zero unless replay-stable entropy is plugged | pinned seed zero unless entropy is explicitly plugged | seeded from the host's random source |
 | Pure `os` fns (`os.time(t)`, `os.date(f, t)`, `os.difftime`) | absent | follow the `os` registration rule | always available | always available |
-| `collectgarbage("count")` / `gcinfo` | absent | not registered | registered; compatibility values pending O(1) incremental accounting | registered; same compatibility values |
+| `collectgarbage("count")` / `gcinfo` | absent | not registered | registered; current VM-owned logical live KiB estimate | registered; same live estimate |
 | `loadstring` | absent | opt-in host compiler only | opt-in host compiler only | enabled with the stock compiler |
 | `require` | absent | present with a replay-stable host resolver | present with any explicitly installed host resolver | present with any explicitly installed host resolver |
 | Host-fn capabilities | five deterministic capabilities, through frozen modules installed before execution | the five deterministic capabilities; external-state/nondeterministic registrations and nondeterministic inputs rejected | all seven capabilities | all seven |
@@ -120,16 +121,16 @@ The canonical decision filter is [`design/02-pillars.md`](https://github.com/slo
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](https://github.com/slowchop/rustia/blob/main/design/progress.json) into
-[`design/progress.html`](https://github.com/slowchop/rustia/blob/main/design/progress.html). These are rough engineering estimates as of 2026-07-28 for the
+[`design/progress.html`](https://github.com/slowchop/rustia/blob/main/design/progress.html). These are rough engineering estimates as of 2026-07-29 for the
 public rustia project; actual grabby integration work is explicitly out of scope.
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 88% | 86% |
-| Usable embedded scripting crate | 94% | 93% |
-| Full public standalone Luau engine release | 61% | 85% |
+| Whole public rustia project | 89% | 86% |
+| Usable embedded scripting crate | 95% | 93% |
+| Full public standalone Luau engine release | 63% | 85% |
 | Standalone benchmark OSS project | 82% | 88% |
-| Public release readiness | 78% | 88% |
+| Public release readiness | 80% | 88% |
 
 - Current conformance runner: **694 fixtures**, **493 refs**, **0 pending**.
 - The benchmark harness has all 12 requested adapters, an explicit verified `mlua-luau-jit` mode, and a
@@ -148,8 +149,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
   for reclamation/telemetry/quota work and passes the wasm32 512 KiB quota/recovery probe. Rustia ties the best
   shared peak at 256 KiB and retains 14.4 KiB across the shared set versus mlua/Luau/JIT's 24.8 KiB.
   The same Node/V8 probe now runs 300 decision resets and verifies an exact post-warmup VM-owned-memory plateau.
-- Major remaining gates, in order, are an O(1) quota-accounting fast path and script counters; broader
-  mixed-heap/native/Wasm pressure coverage; rich values and transactional installation,
+- Major remaining gates, in order, are broader mixed-heap/native/Wasm pressure coverage; rich values and transactional installation,
   compiler/runtime semantic-tail
   hardening, the full cross-target correctness/golden matrix, broader benchmark history, and release packaging.
   Semver policy is tracked in [`design/91-semver-policy.md`](https://github.com/slowchop/rustia/blob/main/design/91-semver-policy.md),

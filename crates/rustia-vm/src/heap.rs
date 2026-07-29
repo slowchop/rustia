@@ -27,6 +27,7 @@ const SLOT_MAX_GENERATION: u8 = u8::MAX;
 struct ReusableSlots<T> {
     slots: Vec<ReusableSlot<T>>,
     free: Vec<u32>,
+    occupied: usize,
 }
 
 #[derive(Collect)]
@@ -71,10 +72,38 @@ impl HeapMemoryUsage {
         );
     }
 
+    fn adjust(&mut self, before: Self, after: Self) {
+        self.live_bytes = self
+            .live_bytes
+            .saturating_sub(before.live_bytes)
+            .saturating_add(after.live_bytes);
+        self.reserved_bytes = self
+            .reserved_bytes
+            .saturating_sub(before.reserved_bytes)
+            .saturating_add(after.reserved_bytes);
+    }
+
     fn add_slots<T>(&mut self, slots: &ReusableSlots<T>) {
         self.add(
             slots
                 .occupied_len()
+                .saturating_mul(size_of::<ReusableSlot<T>>()),
+            slots
+                .slots
+                .capacity()
+                .saturating_mul(size_of::<ReusableSlot<T>>()),
+        );
+        self.add_vec(&slots.free);
+    }
+
+    #[cfg(test)]
+    fn add_slots_census<T>(&mut self, slots: &ReusableSlots<T>) {
+        self.add(
+            slots
+                .slots
+                .iter()
+                .filter(|slot| slot.value.is_some())
+                .count()
                 .saturating_mul(size_of::<ReusableSlot<T>>()),
             slots
                 .slots
@@ -90,6 +119,7 @@ impl<T> ReusableSlots<T> {
         Self {
             slots: Vec::new(),
             free: Vec::new(),
+            occupied: 0,
         }
     }
 
@@ -99,6 +129,7 @@ impl<T> ReusableSlots<T> {
             debug_assert!(slot.value.is_none());
             debug_assert!(slot.generation > 0);
             slot.value = Some(value);
+            self.occupied = self.occupied.saturating_add(1);
             return Some(slot_handle(index, slot.generation));
         }
 
@@ -112,7 +143,23 @@ impl<T> ReusableSlots<T> {
             generation: 0,
             value: Some(value),
         });
+        self.occupied = self.occupied.saturating_add(1);
         Some(slot_handle(index, 0))
+    }
+
+    fn planned_insert(&self) -> Option<(u32, usize)> {
+        if let Some(&index) = self.free.last() {
+            let slot = self.slots.get(index as usize)?;
+            debug_assert!(slot.value.is_none());
+            debug_assert!(slot.generation > 0);
+            return Some((
+                slot_handle(index, slot.generation),
+                size_of::<ReusableSlot<T>>().saturating_sub(size_of::<u32>()),
+            ));
+        }
+
+        let index = u32::try_from(self.slots.len()).ok()?;
+        (index < SLOT_INDEX_MASK).then_some((slot_handle(index, 0), size_of::<ReusableSlot<T>>()))
     }
 
     #[inline]
@@ -164,6 +211,7 @@ impl<T> ReusableSlots<T> {
                 slot.generation += 1;
                 self.free.push(index as u32);
             }
+            self.occupied = self.occupied.saturating_sub(1);
             removed = true;
         }
         removed
@@ -179,19 +227,23 @@ impl<T> ReusableSlots<T> {
             slot.generation = 1;
             self.free.push(index as u32);
         }
+        self.occupied = 0;
     }
 
     fn truncate_to_checkpoint(&mut self, len: usize) {
         debug_assert!(len <= self.slots.len());
         self.slots.truncate(len);
         self.free.clear();
-    }
-
-    fn occupied_len(&self) -> usize {
-        self.slots
+        self.occupied = self
+            .slots
             .iter()
             .filter(|slot| slot.value.is_some())
-            .count()
+            .count();
+    }
+
+    #[inline]
+    fn occupied_len(&self) -> usize {
+        self.occupied
     }
 
     #[cfg(test)]
@@ -727,6 +779,7 @@ pub struct VmCell {
     // Upvalues are compact `Value` handles as well. Their hot read/write path
     // does not need a GC mutation boundary; weak traversal receives this slice.
     upvalues: ReusableSlots<UpvalueData>,
+    side_usage: HeapMemoryUsage,
 }
 
 impl VmCell {
@@ -769,7 +822,35 @@ impl VmCell {
             tables: ReusableSlots::new(),
             functions: ReusableSlots::new(),
             upvalues: ReusableSlots::new(),
+            side_usage: HeapMemoryUsage::default(),
         }
+    }
+
+    fn insert_table_data(&mut self, table: TableData) -> Option<u32> {
+        let usage = table_data_memory_usage(&table);
+        let handle = self.tables.insert(table)?;
+        self.side_usage.add(usage.live_bytes, usage.reserved_bytes);
+        Some(handle)
+    }
+
+    fn insert_function_data(&mut self, function: FunctionData) -> Option<u32> {
+        let usage = function_data_memory_usage(&function);
+        let handle = self.functions.insert(function)?;
+        self.side_usage.add(usage.live_bytes, usage.reserved_bytes);
+        Some(handle)
+    }
+
+    fn mutate_table_data<R>(
+        &mut self,
+        handle: u32,
+        mutate: impl FnOnce(&mut TableData) -> R,
+    ) -> Option<R> {
+        let table = self.tables.get_mut(handle)?;
+        let before = table_data_memory_usage(table);
+        let result = mutate(table);
+        let after = table_data_memory_usage(table);
+        self.side_usage.adjust(before, after);
+        Some(result)
     }
 
     pub fn finish_collection_cycle(&mut self) {
@@ -798,6 +879,7 @@ impl VmCell {
         self.arena.finish_cycle();
         self.arena.finish_cycle();
         self.allocation_debt_pending = self.arena.metrics().allocation_debt() > 0.0;
+        self.recompute_side_usage();
     }
 
     /// Captures the immutable allocation prefix used by a sealed hardened
@@ -854,6 +936,7 @@ impl VmCell {
         self.arena.finish_cycle();
         self.arena.finish_cycle();
         self.allocation_debt_pending = self.arena.metrics().allocation_debt() > 0.0;
+        self.recompute_side_usage();
     }
 
     pub(crate) fn memory_usage(&mut self) -> HeapMemoryUsage {
@@ -861,10 +944,71 @@ impl VmCell {
         usage.add_slots(&self.tables);
         usage.add_slots(&self.functions);
         usage.add_slots(&self.upvalues);
+        usage.add(self.side_usage.live_bytes, self.side_usage.reserved_bytes);
+
+        let arena_bytes = self.arena.metrics().total_gc_allocation();
+        usage.add(arena_bytes, arena_bytes);
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            usage.add_slots(&root.strings);
+            usage.add_slots(&root.userdatas);
+            usage.add_slots(&root.buffers);
+            usage.add_slots(&root.vectors);
+        });
+        #[cfg(test)]
+        assert_eq!(
+            usage,
+            self.memory_usage_census(),
+            "incremental heap memory accounting diverged from the exact census"
+        );
+        usage
+    }
+
+    #[cfg(test)]
+    fn memory_usage_census(&mut self) -> HeapMemoryUsage {
+        let mut usage = HeapMemoryUsage::default();
+        usage.add_slots_census(&self.tables);
+        usage.add_slots_census(&self.functions);
+        usage.add_slots_census(&self.upvalues);
         for table in self.tables.values() {
-            usage.add_vec(&table.array);
-            usage.add_vec(&table.hash);
-            usage.add_vec(&table.hash_index);
+            usage.add(
+                table_data_live_bytes(table),
+                table_data_reserved_bytes(table),
+            );
+        }
+        for function in self.functions.values() {
+            let function = function_data_memory_usage(function);
+            usage.add(function.live_bytes, function.reserved_bytes);
+        }
+
+        let arena_bytes = self.arena.metrics().total_gc_allocation();
+        usage.add(arena_bytes, arena_bytes);
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            usage.add_slots_census(&root.strings);
+            usage.add_slots_census(&root.userdatas);
+            usage.add_slots_census(&root.buffers);
+            usage.add_slots_census(&root.vectors);
+            usage.add_vec(&root.string_index);
+            for string in root.strings.values() {
+                if let InternedString::Owned(value) = string {
+                    usage.add_vec(&value.0);
+                }
+            }
+            for buffer in root.buffers.values() {
+                usage.add_vec(&buffer.bytes);
+            }
+        });
+        usage
+    }
+
+    fn recompute_side_usage(&mut self) {
+        let mut usage = HeapMemoryUsage::default();
+        for table in self.tables.values() {
+            usage.add(
+                table_data_live_bytes(table),
+                table_data_reserved_bytes(table),
+            );
         }
         for function in self.functions.values() {
             usage.add(
@@ -878,15 +1022,8 @@ impl VmCell {
                     .saturating_mul(size_of::<FunctionCapture>()),
             );
         }
-
-        let arena_bytes = self.arena.metrics().total_gc_allocation();
-        usage.add(arena_bytes, arena_bytes);
         self.arena.mutate(|mc, root| {
             let root = root.unlock(mc).borrow();
-            usage.add_slots(&root.strings);
-            usage.add_slots(&root.userdatas);
-            usage.add_slots(&root.buffers);
-            usage.add_slots(&root.vectors);
             usage.add_vec(&root.string_index);
             for string in root.strings.values() {
                 if let InternedString::Owned(value) = string {
@@ -897,7 +1034,7 @@ impl VmCell {
                 usage.add_vec(&buffer.bytes);
             }
         });
-        usage
+        self.side_usage = usage;
     }
 
     pub fn collect_weak_tables_with_roots(&mut self, roots: &[Value]) {
@@ -924,7 +1061,8 @@ impl VmCell {
                 }
             }
             reclaim_unreachable(&mut root, tables, functions, upvalues, &live);
-        })
+        });
+        self.recompute_side_usage();
     }
 
     pub fn release_spare_capacity(&mut self) {
@@ -955,6 +1093,7 @@ impl VmCell {
             root.buffers.release_spare_capacity();
             root.vectors.release_spare_capacity();
         });
+        self.recompute_side_usage();
     }
 
     #[inline(always)]
@@ -978,10 +1117,11 @@ impl VmCell {
     pub fn intern_string_bytes(&mut self, value: &[u8]) -> u32 {
         let hash = stable_bytes_hash(value);
         let mut allocated_gc_string = false;
-        let atom = self.arena.mutate(|mc, root| {
+        let (atom, index_before, index_after, owned_added) = self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
+            let index_before = vec_memory_usage(&root.string_index);
             if let Some(atom) = string_index_lookup(&root, value, hash) {
-                return atom;
+                return (atom, index_before, index_before, HeapMemoryUsage::default());
             }
             let required = root.strings.occupied_len().saturating_add(1);
             if root.string_index.is_empty() || required.saturating_mul(2) > root.string_index.len()
@@ -992,10 +1132,13 @@ impl VmCell {
                     .max(STRING_INDEX_MIN_CAPACITY);
                 rebuild_string_index(&mut root, capacity);
             }
+            let mut owned_added = HeapMemoryUsage::default();
             let stored = ShortString::new(value).map_or_else(
                 || {
                     allocated_gc_string = true;
-                    InternedString::Owned(Gc::new(mc, Static(value.to_vec())))
+                    let bytes = value.to_vec();
+                    owned_added = vec_memory_usage(&bytes);
+                    InternedString::Owned(Gc::new(mc, Static(bytes)))
                 },
                 InternedString::Inline,
             );
@@ -1004,8 +1147,16 @@ impl VmCell {
                 .insert(stored)
                 .expect("string atom table exceeds compact u32 index address space");
             insert_string_index(&mut root, atom);
-            atom
+            (
+                atom,
+                index_before,
+                vec_memory_usage(&root.string_index),
+                owned_added,
+            )
         });
+        self.side_usage.adjust(index_before, index_after);
+        self.side_usage
+            .add(owned_added.live_bytes, owned_added.reserved_bytes);
         self.allocation_debt_pending |= allocated_gc_string;
         atom
     }
@@ -1015,17 +1166,22 @@ impl VmCell {
         if let Some(short) = ShortString::new(value.as_bytes()) {
             return self.intern_inline_string(short, stable_hash);
         }
-        self.arena.mutate(|mc, root| {
+        let (atom, index_before, index_after, owned_removed) = self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
+            let index_before = vec_memory_usage(&root.string_index);
             if let Some(atom) = string_index_lookup(&root, value.as_bytes(), stable_hash) {
+                let mut owned_removed = HeapMemoryUsage::default();
                 if matches!(root.strings.get(atom), Some(InternedString::Owned(_))) {
+                    if let Some(InternedString::Owned(stored)) = root.strings.get(atom) {
+                        owned_removed = vec_memory_usage(&stored.0);
+                    }
                     *root
                         .strings
                         .get_mut(atom)
                         .expect("looked-up string atom remains live") =
                         InternedString::Shared(Static(value));
                 }
-                return atom;
+                return (atom, index_before, index_before, owned_removed);
             }
             ensure_string_index_capacity(&mut root);
             let atom = root
@@ -1033,15 +1189,25 @@ impl VmCell {
                 .insert(InternedString::Shared(Static(value)))
                 .expect("string atom table exceeds compact u32 index address space");
             insert_string_index(&mut root, atom);
-            atom
-        })
+            (
+                atom,
+                index_before,
+                vec_memory_usage(&root.string_index),
+                HeapMemoryUsage::default(),
+            )
+        });
+        self.side_usage.adjust(index_before, index_after);
+        self.side_usage
+            .adjust(owned_removed, HeapMemoryUsage::default());
+        atom
     }
 
     fn intern_inline_string(&mut self, value: ShortString, stable_hash: u64) -> u32 {
-        self.arena.mutate(|_mc, root| {
+        let (atom, index_before, index_after) = self.arena.mutate(|_mc, root| {
             let mut root = root.unlock(_mc).borrow_mut();
+            let index_before = vec_memory_usage(&root.string_index);
             if let Some(atom) = string_index_lookup(&root, value.as_bytes(), stable_hash) {
-                return atom;
+                return (atom, index_before, index_before);
             }
             ensure_string_index_capacity(&mut root);
             let atom = root
@@ -1049,8 +1215,37 @@ impl VmCell {
                 .insert(InternedString::Inline(value))
                 .expect("string atom table exceeds compact u32 index address space");
             insert_string_index(&mut root, atom);
-            atom
+            (atom, index_before, vec_memory_usage(&root.string_index))
+        });
+        self.side_usage.adjust(index_before, index_after);
+        atom
+    }
+
+    fn planned_inline_string_intern(&mut self) -> Option<(u32, usize)> {
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let (atom, slot_growth) = root.strings.planned_insert()?;
+            let required = root.strings.occupied_len().saturating_add(1);
+            let index_len = if root.string_index.is_empty()
+                || required.saturating_mul(2) > root.string_index.len()
+            {
+                required
+                    .saturating_mul(2)
+                    .next_power_of_two()
+                    .max(STRING_INDEX_MIN_CAPACITY)
+            } else {
+                root.string_index.len()
+            };
+            let index_growth = index_len
+                .saturating_sub(root.string_index.len())
+                .saturating_mul(size_of::<u32>());
+            Some((atom, slot_growth.saturating_add(index_growth)))
         })
+    }
+
+    fn planned_vector_allocation(&mut self) -> Option<(u32, usize)> {
+        self.arena
+            .mutate(|mc, root| root.unlock(mc).borrow().vectors.planned_insert())
     }
 
     #[inline]
@@ -1096,30 +1291,28 @@ impl VmCell {
     }
 
     pub fn alloc_array_table(&mut self, values: &[Value]) -> u32 {
-        self.tables
-            .insert(TableData {
-                array: values.to_vec(),
-                hash: Vec::new(),
-                hash_index: Vec::new(),
-                readonly: false,
-                metatable: None,
-                shape_version: 0,
-            })
-            .expect("table slot limit exceeded")
+        self.insert_table_data(TableData {
+            array: values.to_vec(),
+            hash: Vec::new(),
+            hash_index: Vec::new(),
+            readonly: false,
+            metatable: None,
+            shape_version: 0,
+        })
+        .expect("table slot limit exceeded")
     }
 
     #[cfg(test)]
     pub fn alloc_filled_array_table(&mut self, size: usize, value: Value) -> u32 {
-        self.tables
-            .insert(TableData {
-                array: vec![value; size],
-                hash: Vec::new(),
-                hash_index: Vec::new(),
-                readonly: false,
-                metatable: None,
-                shape_version: 0,
-            })
-            .expect("table slot limit exceeded")
+        self.insert_table_data(TableData {
+            array: vec![value; size],
+            hash: Vec::new(),
+            hash_index: Vec::new(),
+            readonly: false,
+            metatable: None,
+            shape_version: 0,
+        })
+        .expect("table slot limit exceeded")
     }
 
     pub(crate) fn try_alloc_filled_array_table(
@@ -1130,7 +1323,7 @@ impl VmCell {
         let mut array = Vec::new();
         array.try_reserve_exact(size).ok()?;
         array.resize(size, value);
-        self.tables.insert(TableData {
+        self.insert_table_data(TableData {
             array,
             hash: Vec::new(),
             hash_index: Vec::new(),
@@ -1147,7 +1340,7 @@ impl VmCell {
         captures: Vec<FunctionCapture>,
         environment: u32,
     ) -> Option<u32> {
-        self.functions.insert(FunctionData {
+        self.insert_function_data(FunctionData {
             kind: FunctionKind::Bytecode { program, prototype },
             captures: captures.into_iter().collect(),
             environment,
@@ -1155,7 +1348,7 @@ impl VmCell {
     }
 
     pub fn alloc_dynamic_main_function(&mut self, program: u32, environment: u32) -> Option<u32> {
-        self.functions.insert(FunctionData {
+        self.insert_function_data(FunctionData {
             kind: FunctionKind::DynamicMain { program },
             captures: SmallVec::new(),
             environment,
@@ -1167,7 +1360,7 @@ impl VmCell {
         native: NativeFunction,
         environment: u32,
     ) -> Option<u32> {
-        self.functions.insert(FunctionData {
+        self.insert_function_data(FunctionData {
             kind: FunctionKind::Native(native),
             captures: SmallVec::new(),
             environment,
@@ -1176,7 +1369,7 @@ impl VmCell {
 
     pub fn alloc_host_function(&mut self, host: u32, environment: u32) -> Option<u32> {
         self.tables.get(environment)?;
-        self.functions.insert(FunctionData {
+        self.insert_function_data(FunctionData {
             kind: FunctionKind::Host(host),
             captures: SmallVec::new(),
             environment,
@@ -1192,7 +1385,7 @@ impl VmCell {
         for upvalue in &upvalues {
             self.upvalues.get(*upvalue)?;
         }
-        self.functions.insert(FunctionData {
+        self.insert_function_data(FunctionData {
             kind: FunctionKind::Native(native),
             captures: upvalues
                 .into_iter()
@@ -1327,10 +1520,13 @@ impl VmCell {
     }
 
     pub fn alloc_buffer(&mut self, bytes: Vec<u8>) -> Option<u32> {
-        self.arena.mutate(|mc, root| {
+        let usage = vec_memory_usage(&bytes);
+        let handle = self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
             root.buffers.insert(BufferData { bytes })
-        })
+        })?;
+        self.side_usage.add(usage.live_bytes, usage.reserved_bytes);
+        Some(handle)
     }
 
     pub(crate) fn alloc_vector(&mut self, vector: VectorData) -> Option<u32> {
@@ -1513,30 +1709,31 @@ impl VmCell {
         table: u32,
         values: &[Value],
     ) -> Option<TableNumericArrayWrite> {
-        let table = self.tables.get_mut(table)?;
-        if table.readonly {
-            return Some(TableNumericArrayWrite::Readonly);
-        }
-        if values.len() > table.array.len() {
-            return Some(TableNumericArrayWrite::Deferred);
-        }
+        self.mutate_table_data(table, |table| {
+            if table.readonly {
+                return TableNumericArrayWrite::Readonly;
+            }
+            if values.len() > table.array.len() {
+                return TableNumericArrayWrite::Deferred;
+            }
 
-        for (offset, value) in values.iter().copied().enumerate() {
-            table.array[offset] = value;
-            if table.hash.is_empty() {
-                continue;
-            }
-            let key = number_table_key((offset + 1) as f64)
-                .expect("materialized array offsets are valid numeric table keys");
-            if value.is_nil() {
-                if let Some(entry) = table_hash_entry_mut(table, key) {
-                    entry.value = Value::nil();
+            for (offset, value) in values.iter().copied().enumerate() {
+                table.array[offset] = value;
+                if table.hash.is_empty() {
+                    continue;
                 }
-            } else {
-                remove_hash_key(table, key);
+                let key = number_table_key((offset + 1) as f64)
+                    .expect("materialized array offsets are valid numeric table keys");
+                if value.is_nil() {
+                    if let Some(entry) = table_hash_entry_mut(table, key) {
+                        entry.value = Value::nil();
+                    }
+                } else {
+                    remove_hash_key(table, key);
+                }
             }
-        }
-        Some(TableNumericArrayWrite::Stored)
+            TableNumericArrayWrite::Stored
+        })
     }
 
     /// Stores a numeric array slot when doing so cannot observe `__newindex`.
@@ -1552,40 +1749,41 @@ impl VmCell {
         if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
             return Some(TableNumericArrayWrite::Deferred);
         }
-        let table = self.tables.get_mut(table)?;
-        let existing = table
-            .array
-            .get(one_based_index - 1)
-            .copied()
-            .unwrap_or_else(Value::nil);
-        if existing.is_nil() && table.metatable.is_some() {
-            return Some(TableNumericArrayWrite::Deferred);
-        }
-        if table.readonly {
-            return Some(TableNumericArrayWrite::Readonly);
-        }
+        self.mutate_table_data(table, |table| {
+            let existing = table
+                .array
+                .get(one_based_index - 1)
+                .copied()
+                .unwrap_or_else(Value::nil);
+            if existing.is_nil() && table.metatable.is_some() {
+                return TableNumericArrayWrite::Deferred;
+            }
+            if table.readonly {
+                return TableNumericArrayWrite::Readonly;
+            }
 
-        if value.is_nil() {
-            let Some(slot) = table.array.get_mut(one_based_index - 1) else {
-                // A numeric hash entry can exist beyond the array boundary.
-                return Some(TableNumericArrayWrite::Deferred);
-            };
-            *slot = Value::nil();
-            return Some(TableNumericArrayWrite::Stored);
-        }
-        if one_based_index > table.array.len() + 1 {
-            return Some(TableNumericArrayWrite::Deferred);
-        }
-        if one_based_index > table.array.len() {
-            table.array.resize(one_based_index, Value::nil());
-        }
-        table.array[one_based_index - 1] = value;
-        if !table.hash.is_empty() {
-            let key = number_table_key(one_based_index as f64)
-                .expect("validated Luau array indices are valid numeric table keys");
-            remove_hash_key(table, key);
-        }
-        Some(TableNumericArrayWrite::Stored)
+            if value.is_nil() {
+                let Some(slot) = table.array.get_mut(one_based_index - 1) else {
+                    // A numeric hash entry can exist beyond the array boundary.
+                    return TableNumericArrayWrite::Deferred;
+                };
+                *slot = Value::nil();
+                return TableNumericArrayWrite::Stored;
+            }
+            if one_based_index > table.array.len() + 1 {
+                return TableNumericArrayWrite::Deferred;
+            }
+            if one_based_index > table.array.len() {
+                table.array.resize(one_based_index, Value::nil());
+            }
+            table.array[one_based_index - 1] = value;
+            if !table.hash.is_empty() {
+                let key = number_table_key(one_based_index as f64)
+                    .expect("validated Luau array indices are valid numeric table keys");
+                remove_hash_key(table, key);
+            }
+            TableNumericArrayWrite::Stored
+        })
     }
 
     pub(crate) fn table_string_hash_probe(
@@ -1677,13 +1875,25 @@ impl VmCell {
             };
             self.table_key_from_value(key)?
         };
-        let key_value = self.table_key_visible_value(table_key, key_value)?;
-        let table = self.tables.get_mut(table)?;
-        if table.readonly {
-            return None;
-        }
-        set_table_data(table, table_key, key_value, value);
-        Some(())
+        let creates_hash_entry = {
+            let table = self.tables.get(table)?;
+            if table.readonly {
+                return None;
+            }
+            !value.is_nil()
+                && matches!(
+                    table_hash_lookup(table, table_key),
+                    TableHashLookup::Vacant(_)
+                )
+        };
+        let key_value = if matches!(table_key, TableKey::Vector(_)) && !creates_hash_entry {
+            key_value
+        } else {
+            self.table_key_visible_value(table_key, key_value)?
+        };
+        self.mutate_table_data(table, |table| {
+            set_table_data(table, table_key, key_value, value);
+        })
     }
 
     /// Stages the complete table update before committing it, so a quota
@@ -1695,8 +1905,10 @@ impl VmCell {
         value: Value,
         allowed_growth: usize,
     ) -> QuotaTableWrite {
-        let heap_before = self.memory_usage().live_bytes;
         let key_value = key;
+        let mut pending_inline_atom = None;
+        let mut pending_vector = None;
+        let mut allocation_growth = 0_usize;
         let table_key = if let Some(number) = key.as_number() {
             let Some(key) = number_table_key(number) else {
                 return QuotaTableWrite::Invalid;
@@ -1705,9 +1917,16 @@ impl VmCell {
         } else {
             let key = if let Some(short) = key.as_short_string() {
                 let stable_hash = stable_bytes_hash(short.as_bytes());
-                let atom = self
-                    .find_string_atom_bytes(short.as_bytes())
-                    .unwrap_or_else(|| self.intern_inline_string(short, stable_hash));
+                let atom = if let Some(atom) = self.find_string_atom_bytes(short.as_bytes()) {
+                    atom
+                } else {
+                    let Some((atom, growth)) = self.planned_inline_string_intern() else {
+                        return QuotaTableWrite::Invalid;
+                    };
+                    pending_inline_atom = Some((short, stable_hash, atom));
+                    allocation_growth = allocation_growth.saturating_add(growth);
+                    atom
+                };
                 Value::string_atom(atom)
             } else {
                 key
@@ -1717,27 +1936,67 @@ impl VmCell {
             };
             key
         };
-        let Some(key_value) = self.table_key_visible_value(table_key, key_value) else {
-            return QuotaTableWrite::Invalid;
+        let (old_table_usage, mut candidate, creates_hash_entry) = {
+            let Some(existing) = self.tables.get(table) else {
+                return QuotaTableWrite::Invalid;
+            };
+            if existing.readonly {
+                return QuotaTableWrite::Invalid;
+            }
+            (
+                table_data_memory_usage(existing),
+                existing.clone(),
+                !value.is_nil()
+                    && matches!(
+                        table_hash_lookup(existing, table_key),
+                        TableHashLookup::Vacant(_)
+                    ),
+            )
         };
-        let Some(existing) = self.tables.get(table) else {
-            return QuotaTableWrite::Invalid;
-        };
-        if existing.readonly {
-            return QuotaTableWrite::Invalid;
+        if !creates_hash_entry {
+            pending_inline_atom = None;
+            allocation_growth = 0;
+        } else if let TableKey::Vector(bits) = table_key {
+            let Some((vector, growth)) = self.planned_vector_allocation() else {
+                return QuotaTableWrite::Invalid;
+            };
+            pending_vector = Some((bits, vector));
+            allocation_growth = allocation_growth.saturating_add(growth);
         }
-        let old_table_bytes = table_data_live_bytes(existing);
-        let mut candidate = existing.clone();
+        let key_value = match table_key {
+            TableKey::Number(bits) => Value::number(f64::from_bits(bits)),
+            TableKey::Vector(_) => {
+                pending_vector.map_or(key_value, |(_, vector)| Value::vector(vector))
+            }
+            _ => key_value,
+        };
         set_table_data(&mut candidate, table_key, key_value, value);
-        let table_growth = table_data_live_bytes(&candidate).saturating_sub(old_table_bytes);
-        let atom_growth = self.memory_usage().live_bytes.saturating_sub(heap_before);
-        if atom_growth.saturating_add(table_growth) > allowed_growth {
+        let candidate_usage = table_data_memory_usage(&candidate);
+        let table_growth = candidate_usage
+            .live_bytes
+            .saturating_sub(old_table_usage.live_bytes);
+        if allocation_growth.saturating_add(table_growth) > allowed_growth {
             return QuotaTableWrite::WouldExceed;
+        }
+        if let Some((short, stable_hash, planned_atom)) = pending_inline_atom {
+            let atom = self.intern_inline_string(short, stable_hash);
+            debug_assert_eq!(atom, planned_atom);
+        }
+        if let Some((bits, planned_vector)) = pending_vector {
+            let vector = self
+                .alloc_vector(VectorData::new(
+                    f32::from_bits(bits[0]),
+                    f32::from_bits(bits[1]),
+                    f32::from_bits(bits[2]),
+                ))
+                .expect("validated vector allocation plan remains available");
+            debug_assert_eq!(vector, planned_vector);
         }
         *self
             .tables
             .get_mut(table)
             .expect("validated table remains available") = candidate;
+        self.side_usage.adjust(old_table_usage, candidate_usage);
         QuotaTableWrite::Stored
     }
 
@@ -1757,7 +2016,7 @@ impl VmCell {
         if existing.readonly {
             return QuotaTableWrite::Invalid;
         }
-        let old_table_bytes = table_data_live_bytes(existing);
+        let old_table_usage = table_data_memory_usage(existing);
         let mut candidate = existing.clone();
         let Some(key) = number_table_key(one_based_index as f64) else {
             return QuotaTableWrite::Invalid;
@@ -1769,7 +2028,10 @@ impl VmCell {
         if !candidate.hash.is_empty() {
             remove_hash_key(&mut candidate, key);
         }
-        let growth = table_data_live_bytes(&candidate).saturating_sub(old_table_bytes);
+        let candidate_usage = table_data_memory_usage(&candidate);
+        let growth = candidate_usage
+            .live_bytes
+            .saturating_sub(old_table_usage.live_bytes);
         if growth > allowed_growth {
             return QuotaTableWrite::WouldExceed;
         }
@@ -1777,6 +2039,7 @@ impl VmCell {
             .tables
             .get_mut(table)
             .expect("validated table remains available") = candidate;
+        self.side_usage.adjust(old_table_usage, candidate_usage);
         QuotaTableWrite::Stored
     }
 
@@ -1789,19 +2052,19 @@ impl VmCell {
         if one_based_index == 0 {
             return None;
         }
-        let table = self.tables.get_mut(table)?;
-        if table.readonly || one_based_index > MAX_LUAU_ARRAY_INDEX {
+        if self.tables.get(table)?.readonly || one_based_index > MAX_LUAU_ARRAY_INDEX {
             return None;
         }
         let key = number_table_key(one_based_index as f64)?;
-        if one_based_index > table.array.len() {
-            table.array.resize(one_based_index, Value::nil());
-        }
-        table.array[one_based_index - 1] = value;
-        if !table.hash.is_empty() {
-            remove_hash_key(table, key);
-        }
-        Some(())
+        self.mutate_table_data(table, |table| {
+            if one_based_index > table.array.len() {
+                table.array.resize(one_based_index, Value::nil());
+            }
+            table.array[one_based_index - 1] = value;
+            if !table.hash.is_empty() {
+                remove_hash_key(table, key);
+            }
+        })
     }
 
     pub fn table_metatable(&mut self, table: u32) -> Option<Option<u32>> {
@@ -1820,7 +2083,7 @@ impl VmCell {
     pub fn table_clone(&mut self, table: u32) -> Option<u32> {
         let mut clone = self.tables.get(table)?.clone();
         clone.readonly = false;
-        self.tables.insert(clone)
+        self.insert_table_data(clone)
     }
 
     pub fn array_get(&mut self, table: u32, one_based_index: usize) -> Option<Value> {
@@ -1837,54 +2100,55 @@ impl VmCell {
     }
 
     pub fn table_clear(&mut self, table: u32) -> Option<()> {
-        let table = self.tables.get_mut(table)?;
-        if table.readonly {
+        if self.tables.get(table)?.readonly {
             return None;
         }
-        bump_table_shape_version(table);
-        table.array.fill(Value::nil());
-        table.hash.clear();
-        table.hash_index = Vec::new();
-        Some(())
+        self.mutate_table_data(table, |table| {
+            bump_table_shape_version(table);
+            table.array.fill(Value::nil());
+            table.hash.clear();
+            table.hash_index = Vec::new();
+        })
     }
 
     pub fn table_insert(&mut self, table: u32, position: i32, value: Value) -> Option<()> {
-        let table = self.tables.get_mut(table)?;
-        if table.readonly {
+        if self.tables.get(table)?.readonly {
             return None;
         }
-        let len = table_array_boundary_len(table);
+        self.mutate_table_data(table, |table| {
+            let len = table_array_boundary_len(table);
 
-        if position >= 1 {
-            let position = position as usize;
-            if position <= len {
-                for index in (position..=len).rev() {
-                    let value = table_numeric_get(table, index);
-                    table_numeric_set_array_index(table, index + 1, value);
+            if position >= 1 {
+                let position = position as usize;
+                if position <= len {
+                    for index in (position..=len).rev() {
+                        let value = table_numeric_get(table, index);
+                        table_numeric_set_array_index(table, index + 1, value);
+                    }
                 }
             }
-        }
-        table_numeric_set(table, position, value);
-        Some(())
+            table_numeric_set(table, position, value);
+        })
     }
 
     pub fn table_remove(&mut self, table: u32, position: i32) -> Option<Option<Value>> {
-        let table = self.tables.get_mut(table)?;
-        if table.readonly {
+        if self.tables.get(table)?.readonly {
             return None;
         }
-        let len = table_array_boundary_len(table);
+        let len = table_array_boundary_len(self.tables.get(table)?);
         if !(1..=i32::try_from(len).ok()?).contains(&position) {
             return Some(None);
         }
-        let position = position as usize;
-        let removed = table_numeric_get(table, position);
-        for index in position..len {
-            let value = table_numeric_get(table, index + 1);
-            table_numeric_set_array_index(table, index, value);
-        }
-        table_numeric_set_array_index(table, len, Value::nil());
-        Some(Some(removed))
+        self.mutate_table_data(table, |table| {
+            let position = position as usize;
+            let removed = table_numeric_get(table, position);
+            for index in position..len {
+                let value = table_numeric_get(table, index + 1);
+                table_numeric_set_array_index(table, index, value);
+            }
+            table_numeric_set_array_index(table, len, Value::nil());
+            Some(removed)
+        })
     }
 
     pub fn max_numeric_key(&mut self, table: u32) -> Option<f64> {
@@ -2192,6 +2456,47 @@ fn table_data_live_bytes(table: &TableData) -> usize {
         .saturating_mul(size_of::<Value>())
         .saturating_add(table.hash.len().saturating_mul(size_of::<TableEntry>()))
         .saturating_add(table.hash_index.len().saturating_mul(size_of::<u32>()))
+}
+
+fn table_data_reserved_bytes(table: &TableData) -> usize {
+    table
+        .array
+        .capacity()
+        .saturating_mul(size_of::<Value>())
+        .saturating_add(
+            table
+                .hash
+                .capacity()
+                .saturating_mul(size_of::<TableEntry>()),
+        )
+        .saturating_add(table.hash_index.capacity().saturating_mul(size_of::<u32>()))
+}
+
+fn table_data_memory_usage(table: &TableData) -> HeapMemoryUsage {
+    HeapMemoryUsage {
+        live_bytes: table_data_live_bytes(table),
+        reserved_bytes: table_data_reserved_bytes(table),
+    }
+}
+
+fn vec_memory_usage<T>(values: &Vec<T>) -> HeapMemoryUsage {
+    HeapMemoryUsage {
+        live_bytes: values.len().saturating_mul(size_of::<T>()),
+        reserved_bytes: values.capacity().saturating_mul(size_of::<T>()),
+    }
+}
+
+fn function_data_memory_usage(function: &FunctionData) -> HeapMemoryUsage {
+    HeapMemoryUsage {
+        live_bytes: function
+            .captures
+            .len()
+            .saturating_mul(size_of::<FunctionCapture>()),
+        reserved_bytes: function
+            .captures
+            .capacity()
+            .saturating_mul(size_of::<FunctionCapture>()),
+    }
 }
 
 fn set_table_data(table: &mut TableData, table_key: TableKey, key_value: Value, value: Value) {

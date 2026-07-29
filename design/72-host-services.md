@@ -3,8 +3,8 @@
 > **Status: [IMPLEMENTED v2.3] (2026-07-27).** The provider
 > seam that replaces four faked environment-dependent stdlib functions with host-pluggable sockets.
 > The later reclamation/accounting tranche now gives hosts an honest `Vm::memory_stats()` census.
-> `collectgarbage("count")`/`gcinfo` remain compatibility values until the quota tracker supplies an O(1)
-> incremental counter; the provider design below remains the historical scope of this slice.
+> The later incremental-accounting tranche also connects `collectgarbage("count")`/`gcinfo` to maintained
+> VM-owned logical-live totals; the provider design below remains the historical scope of this slice.
 > Implements the provider slice of [`CURRENT.md`](CURRENT.md) known-gap #3. v2 incorporates a six-lens
 > adversarial review (VM internals, conformance/oracle, public API, determinism/lockstep, KISS/pillars,
 > docs coherence); v2.1 adds the `live()` preset; v2.2 replaces the `0.0` `os.clock` fallback with a
@@ -27,8 +27,8 @@ exists for Standard hosts to install real ones:
 | `os.time()` no-arg | fixed `OS_TIME_NOW_SECONDS` (`native_os_time`, 11536–11543) |
 | `os.date()` no-timestamp | same fixed constant (`native_os_date`, 11520–11523) |
 
-Deferred by this historical slice: public `Vm::memory_stats()` is now implemented by the bounded-lifetime
-tranche; `collectgarbage("count")`/`gcinfo` await the O(1) quota counter.
+Deferred by this historical slice and since implemented elsewhere: public `Vm::memory_stats()` and maintained
+logical-live `collectgarbage("count")`/`gcinfo`.
 Everything else in the Luau 0.709 stdlib is real. In `DeterministicSim`, `os.*`/`collectgarbage`/
 `gcinfo` are not registered at all (16176–16196 + RTTI mirror 16496–16500).
 
@@ -79,8 +79,8 @@ any existing construction path — with one documented exception (`os.clock`, be
   silent default. Native and WASI use system adapters. Browser `wasm32-unknown-unknown` uses the default
   `web-live` JavaScript adapter; a bare-Wasm consumer disables default features and plugs wall clock,
   monotonic clock, and entropy providers explicitly. `build()` returns a typed error if a requested live
-  world is incomplete. `collectgarbage("count")`/`gcinfo` stay compatibility values even under `live()` until
-  the O(1) quota tracker backs them. PCG32 stays pinned in every profile, but `live()` starts it from host entropy instead
+  world is incomplete. `collectgarbage("count")`/`gcinfo` read the same maintained VM-owned logical-live total
+  under `standard()` and `live()`. PCG32 stays pinned in every profile, but `live()` starts it from host entropy instead
   of the reproducible seed zero.
 - **LuauCompat** follows the same service rules as ReproducibleStandard (it exposes the Standard
   service surface per `CURRENT.md` Determinism-model section). Its rustdoc gains a "this is not the
@@ -194,7 +194,8 @@ by the engine.
    `live()` uses the default `web-live` JavaScript adapter. A raw/bare Wasm consumer builds without default
    features, at which point `live()` imports nothing and requires explicit providers. This is one semantic
    engine with target adapters, not a target-specific VM fork.
-8. `collectgarbage("count")`/`gcinfo` stay compatibility values pending the O(1) quota tracker; docs and errors say so.
+8. `collectgarbage("count")`/`gcinfo` read maintained VM-owned logical-live KiB; exact allocator/RSS parity with
+   Luau is intentionally not promised.
 
 ## Tests (same change; conformance corpus untouched)
 
@@ -232,14 +233,14 @@ instead of `0.0`).
 
 ## Non-goals (explicit)
 
-`require`/module-loader socket; O(1) accounting and live `count`/`gcinfo`;
+`require`/module-loader socket; incremental accounting and live `count`/`gcinfo`;
 recording/replay providers; WASI-style permission UI; `GcSchedule`/`determinism_tier()` public API;
 paced-GC knobs; `Send`/`Sync` providers (the VM is thread-affine); async sinks; fixing the
 pre-existing `os.date`/`os.time(table)` oracle divergences; perf claims (service calls are cold-path).
 
 This is the scope boundary of the host-services slice, not current project
 status: the separate host-owned `ServiceModuleResolver`/`require` socket has
-since landed.
+since landed, as has the incremental live-memory counter.
 
 ## Implementation order (strangler, always green)
 

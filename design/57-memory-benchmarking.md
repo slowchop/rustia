@@ -307,12 +307,15 @@ instrumentation cost. Such traces explain *why* a cohort moved; they do not repl
    completes reclamation, prunes unreachable coroutine records, compacts bounded application tables, and shrinks
    heap/interner/stack capacity. Loaded programs now use generation-safe reusable handles; quiescence preserves
    programs referenced by live closures/coroutines/host roots and reclaims obsolete bytecode, constants, caches,
-   and coverage rows without stale-handle aliasing. VM-owned live/reserved accounting and opt-in
+   and coverage rows without stale-handle aliasing. Script-triggered and quota-forced collection also reclaims
+   unreachable runtime-compiled programs while preserving active top-level and suspended-coroutine program
+   roots. VM-owned live/reserved accounting and opt-in
    instruction-boundary peaks are implemented as internal corroboration. Compact per-store generation arrays
    replace tree-set mark scratch. A logical-live per-VM quota now forces one collection before catchable OOM,
    preflights large string/table/buffer requests, and commits growing table writes only after an exact candidate
-   fits. The script-visible counters and quota hot path still await O(1) incremental accounting because a full
-   census in legacy `gcinfo` polling loops is quadratic. Exact-commit cohort `safe-memory-588b541` retained 99
+   fits. Maintained heap/program/control live totals now back the script-visible counters and quota hot path
+   without a whole-VM census at ordinary instruction boundaries; exact reserved telemetry remains on demand.
+   Exact-commit cohort `safe-memory-588b541` retained 99
    native samples after confirmed Linode deletion and passed the wasm32 512 KiB quota/recovery probe. Relative
    to the frozen competitor cohort, Rustia ties the 256 KiB best shared-workload peak, ranks first for stress
    peak, second for stress retention, second for todo peak, and third for todo retention. The shared retained
