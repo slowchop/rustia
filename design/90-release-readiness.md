@@ -11,15 +11,16 @@ general embedding API must remain available to those users.
 
 ## Current Release Blockers (Ordered)
 
-1. Retain broader native/wasm mixed-heap pressure evidence. Maintained heap,
-   loaded-program, and VM-control live totals now back quota admission and
-   script-visible counters without a whole-VM census at ordinary instruction
-   boundaries. Exact reserved telemetry remains on demand, and opt-in peak
-   tracking still samples it deliberately. The per-VM logical-live quota,
-   atomic/catchable OOM path, VM-owned live/reserved/peak telemetry, epoch-safe
-   decision-reset ABI, quota-checked atomic retained-root admission, and
-   focused 600-decision plateau are implemented.
-2. Complete the release value ergonomics on the implemented VM/epoch-safe,
+The mixed-heap correctness gate is closed by the shared native/Node-V8
+`mixed_heap_pressure` test: 96 epochs and 3,072 waves combine bounded public
+roots, cyclic tables, strings, closures, suspended coroutines, userdata,
+buffers, vectors, weak tables, hot reload, quota/OOM recovery, and decision
+reset under a 2 MiB logical-live limit. Native and wasm runs hold the same
+semantic invariants and exact post-reset VM plateau; warmed wasm linear-memory
+pages also remain constant. This does not claim equal process RSS or allocator
+overhead across targets.
+
+1. Complete the release value ergonomics on the implemented VM/epoch-safe,
    graph-preserving rooted `Value`/`Table`/`Function` spine. It already covers
    binary strings, buffers, vectors, non-scalar/identity keys, shared/cyclic
    tables, mutation, raw equality, and ordinary or typed invocation exchange.
@@ -28,13 +29,13 @@ general embedding API must remain available to those users.
    small typed facade as the simple layer. Full mlua-style `UserData`/`Scope`,
    async, and an mlua migration shim remain later optional layers unless a
    concrete release consumer promotes them.
-3. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
+2. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
    yieldable `require`, transactional extension/module/hot-reload failure behavior, and
    differential/coverage-guided fuzz evidence before stabilizing and publishing
    the API. The stable bounded baseline already mutates 2,048 frontend cases
    and 2,048 VM byte streams while covering all 131 production opcodes. Exact
    f32/f64 buffer-bit round trips, including NaN payloads, are covered.
-4. Close the full correctness/build/golden target matrix from
+3. Close the full correctness/build/golden target matrix from
    [`00-constraints.md`](00-constraints.md); Linux remains the only active
    timing source, but not the only correctness target.
 
@@ -202,8 +203,9 @@ part of the semantic-tail/failure-semantics blocker.
   guest programs, globals, upvalues, coroutines, tracebacks, coverage, and
   retained roots are discarded; RNG/logical time/GC scheduling restart; fuel
   remains per execution; stale handles fail by epoch; idle-only rejection and
-  a 600-decision native exact post-warmup plateau are covered. The Node/V8
-  wasm32 probe covers the same lifecycle and exact plateau across 300 decisions.
+  a 600-decision native exact post-warmup plateau are covered. The shared
+  mixed-heap lifecycle adds 96 native/Node-V8 epochs with exact post-reset VM
+  accounting and stable warmed wasm linear-memory pages.
 - GC pacing is tuned for Standard profiles only after reclamation works, and
   DeterministicSim collection intervals are treated as deterministic ABI.
 - Host-provided output/time services and internal VM memory telemetry obey each

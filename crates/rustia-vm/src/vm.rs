@@ -2561,6 +2561,7 @@ impl Vm {
             self.heap.finish_collection_cycle();
         }
         self.heap.collect_weak_tables_with_roots(&roots);
+        self.prune_unreachable_coroutines_if_idle();
         // Runtime-compiled programs are owned outside the traced heap, but
         // their functions carry program handles. Reclaim the backing program
         // immediately after the heap has discarded unreachable functions so
@@ -13466,7 +13467,7 @@ impl Vm {
         Ok(Value::userdata(userdata))
     }
 
-    fn collectgarbage_roots(&self, args: &[Value]) -> Vec<Value> {
+    fn collectgarbage_roots(&mut self, args: &[Value]) -> Vec<Value> {
         let mut roots = Vec::new();
         roots.push(Value::table(self.globals));
         roots.push(Value::table(self.standard_globals));
@@ -13495,20 +13496,6 @@ impl Vm {
         for frame in &self.call_stack {
             collect_call_stack_frame_roots(&mut roots, frame);
         }
-        for coroutine in &self.coroutines {
-            roots.push(coroutine.callee);
-            for frame in &coroutine.frames {
-                self.extend_coroutine_frame_roots(&mut roots, frame);
-            }
-            if let Some(error) = coroutine.error {
-                roots.push(error);
-            }
-            if let Some(snapshot) = &coroutine.debug_snapshot {
-                for frame in &snapshot.frames {
-                    collect_call_stack_frame_roots(&mut roots, frame);
-                }
-            }
-        }
         for frames in &self.active_coroutine_frames {
             for frame in frames {
                 self.extend_coroutine_frame_roots(&mut roots, frame);
@@ -13524,6 +13511,45 @@ impl Vm {
         }
         if let Some(snapshot) = &self.protected_error_traceback {
             collect_traceback_snapshot_roots(&mut roots, snapshot);
+        }
+
+        if self.coroutines.is_empty() {
+            return roots;
+        }
+
+        // Suspended coroutine frames are children of the script-visible
+        // userdata handle, not permanent VM roots. Trace reachable handles
+        // first, then add their saved frames until coroutine-to-coroutine
+        // references reach a fixed point.
+        let mut traced_coroutines = std::collections::BTreeSet::new();
+        loop {
+            let reachable = self
+                .heap
+                .reachable_userdata_handles(&roots)
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>();
+            let mut added = false;
+            for (index, coroutine) in self.coroutines.iter().enumerate() {
+                if !reachable.contains(&coroutine.handle) || !traced_coroutines.insert(index) {
+                    continue;
+                }
+                roots.push(coroutine.callee);
+                for frame in &coroutine.frames {
+                    self.extend_coroutine_frame_roots(&mut roots, frame);
+                }
+                if let Some(error) = coroutine.error {
+                    roots.push(error);
+                }
+                if let Some(snapshot) = &coroutine.debug_snapshot {
+                    for frame in &snapshot.frames {
+                        collect_call_stack_frame_roots(&mut roots, frame);
+                    }
+                }
+                added = true;
+            }
+            if !added {
+                break;
+            }
         }
         roots
     }
@@ -13577,9 +13603,22 @@ impl Vm {
         debug_assert!(self.running_coroutines.is_empty());
         debug_assert!(self.running_coroutine_stack_bases.is_empty());
         debug_assert!(self.active_coroutine_frames.is_empty());
+        let before = self.coroutines.len();
         let heap = &mut self.heap;
         self.coroutines
             .retain(|coroutine| heap.has_userdata(coroutine.handle));
+        if self.coroutines.len() != before {
+            self.mark_control_memory_dirty();
+        }
+    }
+
+    fn prune_unreachable_coroutines_if_idle(&mut self) {
+        if self.running_coroutines.is_empty()
+            && self.running_coroutine_stack_bases.is_empty()
+            && self.active_coroutine_frames.is_empty()
+        {
+            self.prune_unreachable_coroutines();
+        }
     }
 
     fn extend_coroutine_frame_roots(&self, roots: &mut Vec<Value>, frame: &CoroutineFrame) {
@@ -18253,6 +18292,7 @@ impl Vm {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(&[]);
                 self.heap.collect_weak_tables_with_roots(&roots);
+                self.prune_unreachable_coroutines_if_idle();
                 self.deterministic_collection_count =
                     self.deterministic_collection_count.wrapping_add(1);
             }
@@ -18262,6 +18302,7 @@ impl Vm {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(&[]);
                 self.heap.collect_weak_tables_with_roots(&roots);
+                self.prune_unreachable_coroutines_if_idle();
             }
         }
         if weak_collection_due {
@@ -18282,6 +18323,7 @@ impl Vm {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(transient_roots);
                 self.heap.collect_weak_tables_with_roots(&roots);
+                self.prune_unreachable_coroutines_if_idle();
                 self.deterministic_collection_count =
                     self.deterministic_collection_count.wrapping_add(1);
             }
@@ -18291,6 +18333,7 @@ impl Vm {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(transient_roots);
                 self.heap.collect_weak_tables_with_roots(&roots);
+                self.prune_unreachable_coroutines_if_idle();
             }
         }
         if weak_collection_due {
@@ -27431,6 +27474,71 @@ mod inline_cache_tests {
         vm.collect_garbage();
         assert!(vm.coroutines.is_empty());
         assert!(!vm.heap.has_userdata(live_handle));
+    }
+
+    #[test]
+    fn suspended_coroutine_frames_follow_handle_reachability_to_a_fixed_point() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let first_handle = vm
+            .heap
+            .alloc_userdata(None)
+            .expect("first coroutine userdata");
+        let second_handle = vm
+            .heap
+            .alloc_userdata(None)
+            .expect("second coroutine userdata");
+        let payload = vm.heap.alloc_array_table(&[Value::number(42.0)]);
+        let environment = vm.globals;
+        let snapshot = |root| CoroutineDebugSnapshot {
+            frames: vec![CallStackFrame {
+                program: None,
+                function: None,
+                debug_name: None,
+                environment,
+                call_site: None,
+                roots: vec![root],
+                stackless_roots: Vec::new(),
+                stackless_debug_frames: Vec::new(),
+            }],
+            top_location: None,
+            first_debug_info_level: 0,
+        };
+        vm.coroutines.push(CoroutineState {
+            handle: first_handle,
+            callee: Value::nil(),
+            frames: Vec::new(),
+            initialized: true,
+            dead: false,
+            error: None,
+            debug_snapshot: Some(snapshot(Value::userdata(second_handle))),
+        });
+        vm.coroutines.push(CoroutineState {
+            handle: second_handle,
+            callee: Value::nil(),
+            frames: Vec::new(),
+            initialized: true,
+            dead: false,
+            error: None,
+            debug_snapshot: Some(snapshot(Value::table(payload))),
+        });
+        let first_root = vm
+            .retain_value(Value::userdata(first_handle))
+            .expect("first coroutine root");
+
+        vm.collect_garbage();
+
+        assert_eq!(vm.coroutines.len(), 2);
+        assert!(vm.heap.has_userdata(first_handle));
+        assert!(vm.heap.has_userdata(second_handle));
+        assert!(vm.heap.has_table(payload));
+
+        drop(first_root);
+        vm.collect_garbage();
+
+        assert!(vm.coroutines.is_empty());
+        assert!(!vm.heap.has_userdata(first_handle));
+        assert!(!vm.heap.has_userdata(second_handle));
+        assert!(!vm.heap.has_table(payload));
     }
 
     #[test]

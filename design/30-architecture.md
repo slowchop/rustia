@@ -27,11 +27,11 @@
 > implemented; full Luau `__namecall` context remains a separate conformance item. Exact dedicated-Linux runs
 > now retain accepted dense/OOP throughput evidence plus a separate paired 512-VM string-memory corpus.
 >
-> **v3.3 implementation update (2026-07-27):** the collection scheduling/profile decision remains locked.
+> **v3.4 implementation update (2026-07-29):** the collection scheduling/profile decision remains locked.
 > Complete object/program reachability and generation-safe reuse, aggregate logical-live quotas with atomic OOM,
 > epoch-safe decision-reset ABI v1, maintained live-memory accounting, and the graph-preserving rooted
-> `Value`/`Table`/`Function` handle spine are implemented. Broader mixed-heap native/Wasm pressure evidence,
-> live-object constructors/chunk loading, and live serde remain release gates.
+> `Value`/`Table`/`Function` handle spine are implemented. The shared native/Node-V8 96-epoch mixed-heap
+> pressure gate is also implemented; live-object constructors/chunk loading and live serde remain release gates.
 
 ## 0. The bet — proven, with honest framing
 
@@ -162,9 +162,11 @@ tracking deliberately samples it at instruction boundaries. Exact-commit Linode 
 quota/recovery probe. Rustia tied the 256 KiB best shared-workload peak and retained a 14.4 KiB shared mean,
 below the frozen mlua/Luau/JIT reference's 24.8 KiB. Decision-reset ABI v1 now discards every guest allocation
 and retained root, restores deterministic state, invalidates handles by epoch, and remains exactly flat after
-warm-up across 600 focused native decisions. A Node/V8 wasm32 probe verifies the same lifecycle and exact
-plateau across 300 more decisions. The remaining axis-D work is broader mixed-heap native/Wasm pressure
-coverage before interval tuning is meaningful.
+warm-up across 600 focused native decisions. A shared native/Node-V8 test adds 96 epochs and 3,072 mixed
+allocation waves across cyclic graphs, weak tables, public roots, suspended coroutines, rich values, hot reload,
+and quota/OOM recovery. Both targets hold an exact post-reset VM plateau, and wasm linear-memory pages remain
+stable after warm-up. Axis-D interval tuning can now use this landed correctness gate without turning it into a
+timing benchmark.
 
 **E. Determinism enforcement — LOCKED.** Dense `Vec` array parts plus insertion-ordered `Vec` hash entries;
 larger hash parts use a stable custom-mixed open-addressed `Vec<u32>` side index at no more than 50% load, and
@@ -329,11 +331,12 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
   the `ai_bakeoff` Criterion harness as a continuous perf/golden gate. Rewrite the `.koto` scenario/console
   scripts → `.luau`. Register grabby's bespoke fused AI op via the typed host-module surface.
 - **P4 — production hardening + public release.** `buffer`, `vector`, `utf8`, `string.pack`, and the major
-  standalone library surface are already conformance-backed. The remaining release-critical work is complete
-  object/program reclamation and reuse, memory accounting/quotas/OOM behavior, deterministic reset semantics,
-  host-provided output/time services plus honest VM memory telemetry, host-owned `require` resolution/cache,
+  standalone library surface are already conformance-backed. Object/program reclamation and reuse,
+  memory accounting/quotas/OOM behavior, deterministic reset semantics, host-provided output/time services,
+  VM memory telemetry, host-owned `require` resolution/cache, and the native/Node-V8 mixed-heap gate are in
+  place. The remaining release-critical work is
   transactional guest-module install/hot-reload failure semantics, live-object constructors/serde,
-  diagnostic and semantic-tail hardening, realistic mixed-heap native+wasm evidence, the full
+  diagnostic and semantic-tail hardening, the full
   cross-target correctness/golden matrix, API/semver stabilization, and crate publication. The gradual
   typechecker/LSP is a separate later track, not a
   runtime-release gate. Keep the public codebase clean (no grabby-specific code) under the settled dual
@@ -366,8 +369,8 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
 | Value-layout/correctness evidence is still incomplete across the full native/browser matrix; real **Safari/iOS JSC** remains open even though V8, Bun/JSC-family, and SpiderMonkey shell wasm are measured | **high** | close the residual §C0 public-release build/golden matrix while keeping timings dedicated-Linux-only; keep `Value` sealed/swappable until then |
 | Earlier general-script perf evidence came from narrow spike workloads | med | use the committed multi-workload harness and generated per-workload claim gate |
 | Live VM is thread-affine instead of `Send` | med | Avoids unsafe in production; hosts should construct VMs on worker threads and share only immutable compiled artifacts/configuration |
-| Broad native/Wasm mixed-heap pressure evidence remains incomplete | **high** | object/program reuse, maintained accounting, quotas/OOM, epoch reset, a focused 600-decision native plateau, and a 300-decision Node/V8 wasm32 plateau are implemented; extend the external long-run pressure matrix before tuning intervals |
-| GC full-collect cost scales O(live-objects) (~10 ns/obj; ~200 µs at 20k objects) | med | after reclamation lands, tune the instruction-count collection interval on realistic heap sizes and confirm bit-reproducible native vs wasm |
+| Mixed-heap correctness regresses across native/wasm | med | one shared 96-epoch/3,072-wave source now covers the complete object mix, bounded roots, weak/cyclic reclamation, hot reload, OOM recovery, exact reset plateaus, and stable warmed Node/V8 linear-memory pages |
+| GC full-collect cost scales O(live-objects) (~10 ns/obj; ~200 µs at 20k objects) | med | tune the instruction-count collection interval against the landed mixed-heap correctness gate and realistic heap sizes |
 | Remaining semantic/diagnostic tail can move errors across compile/runtime boundaries | med | add focused pinned-Luau fixtures plus differential/fuzz tests and public stack-trace/source diagnostics |
 | Representative mixed-heap/wasm per-VM RSS remains open; 16B Value doubles value memory, GcBox adds 16 B/obj, and wasm memory grows only | med | retain the exact paired 512-VM Linux corpus: the candidate's primary residual string contrasts are approximately 0 KiB/VM for shared short/long program bytes and loaded 13-byte strings, plus 7.078 KiB/VM for loaded long atoms; extend to representative heaps/native+wasm targets, then set the P1 budget |
 | Public-release scope for pinned standalone Luau runtime compatibility is a long tail | low | P4; grabby ships privately on the P2 subset first; analyzer, raw C API, Roblox, Lua 5.4, and bytecode compatibility stay separate unless reclassified |

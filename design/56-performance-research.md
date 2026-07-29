@@ -21,8 +21,9 @@ retained separately; none of these results turns into a blanket cross-engine hea
 project first.
 
 Production prerequisites now implemented include complete object/program reclamation/reuse, quotas/OOM,
-epoch-safe decision-reset ABI v1, and maintained live-memory accounting. Broader mixed-heap
-native/Wasm pressure evidence must land before final GC tuning or broad release claims.
+epoch-safe decision-reset ABI v1, maintained live-memory accounting, and the shared 96-epoch/3,072-wave
+native/Node-V8 mixed-heap correctness gate. GC tuning may now use that gate, while broad memory-efficiency
+claims still require external allocator/RSS evidence.
 
 The hardened safe table/atom/cache foundation is now in-tree. VM-local byte atoms and insertion-ordered table
 hash parts at 16+ entries use deterministic open-addressed `Vec<u32>` side indices at no more than 50% load.
@@ -182,8 +183,9 @@ Current plan delta: VM-local indexed atoms and per-loaded-program constant cache
 compiled constant storage and the 13-byte inline literal/runtime-string form have now landed too. Lookup-only
 short-key misses avoid permanent atom growth. Complete reachability/sweep, public retained roots,
 generation-safe object/program reuse, maintained live/peak accounting, aggregate quotas and atomic OOM, plus
-epoch-safe decision reset are implemented. Before tuning pacing, extend the mixed-heap native/Wasm pressure
-matrix. Shared frozen stdlib state follows.
+epoch-safe decision reset are implemented. The native/Node-V8 mixed-heap gate now covers 3,072 allocation waves
+and stable warmed wasm linear memory; tune pacing without weakening those invariants. Shared frozen stdlib state
+follows.
 Expected gain: 1.2x-3x speed plus large RSS/startup wins for many-VM usage.
 
 **10. Typed lanes for vectors, buffers, and deterministic extension kernels.**

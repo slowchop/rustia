@@ -8,6 +8,14 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- A shared native/Node-V8 mixed-heap pressure test now executes 96 decision
+  epochs and 3,072 allocation waves under a 2 MiB logical-live limit. Each
+  wave combines cyclic tables, runtime strings, closures/upvalues, suspended
+  coroutines, userdata, buffers, vectors, weak tables, and bounded public
+  roots; each epoch also exercises hot reload, an atomic catchable 8 MiB
+  allocation failure, weak-root cleanup, stale-handle rejection, and an exact
+  reset plateau. The wasm run additionally requires linear-memory pages to
+  stop growing after the warm half.
 - The stable-toolchain fuzz smoke gate now performs deterministic 2,048-case
   frontend and 2,048-case VM mutation sweeps. The VM decoder covers every one
   of the 131 production opcodes exactly once under bounded input,
@@ -98,13 +106,10 @@ Current unpublished workspace version: `0.0.1`.
   functions/modules, immutable compiled modules, and lifetime memory peaks
   persist. `Function`/`Exports` handles now carry a checked decision epoch, and
   a 600-decision mixed table/coroutine/program test proves an exact post-warmup
-  VM-memory plateau. The wasm32 Node/V8 lifecycle probe executes another 300
-  decisions and verifies the same compiled-module reuse, host-binding restore,
-  input clearing, RNG restart, handle invalidation, and exact plateau. A second
-  wasm32 probe executes two 300-decision typed hardened-entry cohorts and
-  verifies failed-entry rollback/reset, successful records and values, epoch
-  progression, the immutable-prefix memory plateau, and stable linear-memory
-  pages across the second cohort.
+  VM-memory plateau. The shared mixed-heap pressure test adds a real Node/V8
+  wasm lifecycle: 96 epochs combine rich object graphs, public roots, weak
+  collection, hot reload, quota/OOM recovery, epoch invalidation, exact
+  post-reset VM accounting, and stable second-half linear-memory pages.
 - Runtime string atoms now use generation-checked reusable slots and ordinary
   tracing collections reclaim unreachable strings without allowing stale
   handles to alias replacements. `Vm::collect_garbage()` adds an explicit host
@@ -460,10 +465,10 @@ Current unpublished workspace version: `0.0.1`.
 
 - The standalone wasm benchmark adapter now opts out of rustia's browser-live
   defaults, restoring the documented `--locked` release build without changing
-  its pinned dependency set or pulling unused browser-service dependencies. The Node/V8
-  512 KiB quota/recovery, 300-decision reset, and two 300-decision
-  hardened-leaf plateau probe passes with stable second-cohort linear-memory
-  pages.
+  its pinned dependency set or pulling unused browser-service dependencies.
+  The Node/V8 512 KiB quota/recovery probe remains covered; the maintained
+  mixed-heap test now supplies the long-running reset and stable-linear-memory
+  evidence.
 - Default `table.sort` comparisons now handle numeric pairs directly in the
   native heap-sort loop, while string ordering, custom comparators, mutation
   checks, and dynamic comparison errors retain their existing paths.
@@ -502,6 +507,11 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Fixed
 
+- Suspended coroutine frames now participate in tracing only after their
+  script-visible coroutine userdata is reachable. The collector follows
+  coroutine-to-coroutine frame references to a fixed point, then reclaims
+  unreachable suspended states and their cyclic object graphs; previously
+  every suspended frame was an unconditional VM root until decision reset.
 - `buffer.readf32`/`readf64` now preserve the exact IEEE-754 payload supplied
   by the buffer, including NaN sign/payload and negative zero, so immediate
   read/write round trips are byte-exact. f32 NaNs use an explicit cross-target

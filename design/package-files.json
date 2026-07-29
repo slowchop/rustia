@@ -2270,7 +2270,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia/Cargo.toml",
       "publish": false,
-      "file_count": 26,
+      "file_count": 27,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -2295,6 +2295,7 @@
         "src/value.rs",
         "tests/bare_wasm_live.rs",
         "tests/hardened_leaf.rs",
+        "tests/mixed_heap_pressure.rs",
         "tests/module_resolution.rs",
         "tests/typed_invocation.rs",
         "tests/web_live.rs"

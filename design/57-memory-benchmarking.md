@@ -7,8 +7,9 @@
 > and vectors now reclaim backing allocations into generation-validated reusable slots; stale handles cannot
 > alias replacement objects, and generation exhaustion retires the slot instead of wrapping. Loaded programs
 > follow the same lifetime discipline. Maintained logical-live totals now back script counters, quota admission,
-> a forced-collection retry, and atomic catchable OOM; reserved/peak telemetry stays explicit. Broader mixed-heap
-> native/Wasm pressure evidence remains the release gate before final GC tuning. This protocol extends the existing
+> a forced-collection retry, and atomic catchable OOM; reserved/peak telemetry stays explicit. A shared
+> 96-epoch/3,072-wave native and Node/V8 wasm test now closes the mixed-heap correctness/reclamation gate before
+> final GC tuning. External allocator/page-return and process-RSS history remain separate measurement work. This protocol extends the existing
 > `vm-string-memory` evidence rather than replacing it. Canonical project state remains
 > [`CURRENT.md`](CURRENT.md).
 
@@ -321,11 +322,37 @@ instrumentation cost. Such traces explain *why* a cohort moved; they do not repl
    native samples after confirmed Linode deletion and passed the wasm32 512 KiB quota/recovery probe. Relative
    to the frozen competitor cohort, Rustia ties the 256 KiB best shared-workload peak, ranks first for stress
    peak, second for stress retention, second for todo peak, and third for todo retention. The shared retained
-   mean is 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. Decision-reset ABI v1 now adds focused 600-decision
-   native table/coroutine/program/retained-handle plateau evidence, plus a 300-decision Node/V8 wasm32 probe
-   covering module reuse, host restoration, input clearing, RNG restart, handle invalidation, and exact
-   plateau. Broader allocator page-return and external dedicated-Linux reset evidence are next.
+   mean is 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. Decision-reset ABI v1 adds focused 600-decision native
+   table/coroutine/program/retained-handle plateau evidence. The shared mixed-heap test adds 96 native and
+   Node/V8 wasm epochs with exact post-reset VM accounting and stable warmed wasm linear-memory pages.
+   Broader allocator page-return and external dedicated-Linux history remain next.
 8. Add the periodic `memory.max` pressure curve and targeted attribution tooling.
+
+## Maintained mixed-heap pressure gate
+
+`crates/rustia/tests/mixed_heap_pressure.rs` is one source compiled for native
+and `wasm32-unknown-unknown`; the hosted Node/V8 job runs the wasm artifact.
+Each target executes:
+
+- 96 decision epochs and 32 waves per epoch (3,072 waves total);
+- a 2 MiB VM logical-live quota with four bounded public root leases;
+- cyclic tables, runtime strings, closures/upvalues, suspended coroutines,
+  `newproxy` userdata, buffers, vectors, and weak-key/weak-value tables in each
+  wave;
+- quiescent weak collection with exactly four live entries and zero after all
+  strong roots are cleared;
+- alternating successful hot reloads plus continued calls through a retained
+  pre-reload function;
+- an intentionally oversized 8 MiB buffer request that must fail catchably,
+  preserve the existing graph, and admit a subsequent allocation;
+- epoch invalidation and an exact VM-owned live/reserved plateau after reset.
+
+Within an epoch, every four-wave allocation phase holds reserved capacity
+exactly and live accounting inside a 64-byte free-list band after warm-up. On
+wasm, the linear-memory page count must remain unchanged throughout the second
+half of the run. These are reclamation, accounting, quota, and lifecycle
+invariants; they do not assert equal native/wasm byte layouts, allocator
+metadata, or process RSS.
 
 ## Acceptance gate before memory work is declared complete
 
@@ -335,8 +362,7 @@ instrumentation cost. Such traces explain *why* a cohort moved; they do not repl
 - Rustia demonstrates bounded native and wasm plateaus across tables, strings, functions/upvalues, coroutines,
   userdata/buffers/vectors, and loaded programs.
 - Public-handle roots, weak tables, cyclic graphs, hot reload, decision reset, quotas, and atomic OOM retain
-  correctness under the same external native/Wasm runs. Focused native and Node/V8 wasm32
-  reset/epoch/plateau coverage is already implemented.
+  correctness under the same native/Node-V8 wasm source and lifecycle.
 - The dashboard reads committed memory history and exposes absolute, incremental, phase, retention, and history
   views without changing the timing claims.
 

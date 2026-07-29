@@ -36,7 +36,7 @@ Object/program reclamation, real VM-owned live/reserved/peak telemetry, and the 
 quota/atomic OOM path are now implemented and validated by the exact-commit `safe-memory-588b541` native Linode
 cohort plus its wasm32 512 KiB quota/recovery probe. The next release-critical slice is not more facade
 decoration: the epoch-safe decision reset and host-owned `require` resolver/cache are now implemented; remaining
-work is broader mixed-heap pressure evidence, transactional installation/reload failures, familiar live-object
+work is transactional installation/reload failures, familiar live-object
 constructors/chunk loading, and live serde. The graph-preserving advanced spine is now implemented:
 VM/epoch-safe rooted `Value`/`Table`/`Function` handles preserve binary strings, buffers, vectors, rich keys,
 shared/cyclic table identity, mutation, raw equality, and ordinary or typed invocation exchange without
@@ -490,8 +490,9 @@ store authoritative state on the GC heap instead of in captured host slots.
 9. ✅ logical-live quotas and atomic/catchable OOM — implemented through
    `VmSettings::memory_limit_bytes` / `RustiaBuilder::memory_limit_bytes`; exact-commit native Linode and wasm32
    pressure validation is retained under `safe-memory-588b541`; maintained heap/program/control totals now
-   remove whole-VM census scans from quota-mode instruction boundaries. Broader pressure evidence remains a
-   release blocker.
+   remove whole-VM census scans from quota-mode instruction boundaries. The shared native/Node-V8 pressure test
+   adds 96 epochs and 3,072 mixed allocation waves under a 2 MiB quota, including atomic 8 MiB allocation
+   failures and recovery.
 10. ✅ epoch-safe decision reset — `Vm::reset_decision()` / `Rustia::reset_decision()` preserve host
     configuration, discard all guest state, restart deterministic counters, invalidate every old retained
     handle clone, and plateau exactly in the 600-decision mixed lifecycle test.

@@ -9,8 +9,9 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
 > decision reset, the typed per-invocation host transaction, and the hardened stateless action-leaf surface are
 > implemented. Maintained live-memory totals now back quotas and script counters without a whole-VM census at
 > ordinary instruction boundaries. Rooted live values/tables/functions now preserve rich payloads and graph
-> identity. The next release-critical work is broader mixed-heap pressure evidence, ergonomic live constructors
-> and serde, and the remaining transactional-failure boundary.
+> identity. A shared native/Node-V8 test now maintains the mixed-heap pressure and reclamation gate. The next
+> release-critical work is ergonomic live constructors and serde, plus the remaining transactional-failure
+> boundary.
 > `spikes/` are throwaway prototypes that validated the design.
 > Read **[`design/CURRENT.md`](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](https://github.com/slowchop/rustia/blob/main/design/README.md) for the full doc map.
@@ -156,11 +157,11 @@ public rustia project; actual grabby integration work is explicitly out of scope
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 90% | 87% |
+| Whole public rustia project | 91% | 89% |
 | Usable embedded scripting crate | 96% | 94% |
-| Full public standalone Luau engine release | 65% | 86% |
+| Full public standalone Luau engine release | 67% | 88% |
 | Standalone benchmark OSS project | 82% | 88% |
-| Public release readiness | 81% | 89% |
+| Public release readiness | 83% | 91% |
 
 - Current conformance runner: **694 fixtures**, **493 refs**, **0 pending**.
 - The benchmark harness has all 12 requested adapters, an explicit verified `mlua-luau-jit` mode, and a
@@ -178,9 +179,9 @@ public rustia project; actual grabby integration work is explicitly out of scope
 - Exact-commit cohort `safe-memory-588b541` now supplies the first dedicated-Linode native pressure evidence
   for reclamation/telemetry/quota work and passes the wasm32 512 KiB quota/recovery probe. Rustia ties the best
   shared peak at 256 KiB and retains 14.4 KiB across the shared set versus mlua/Luau/JIT's 24.8 KiB.
-  The same Node/V8 probe now runs 300 decision resets and verifies an exact post-warmup VM-owned-memory plateau.
-- Major remaining gates, in order, are broader mixed-heap/native/Wasm pressure coverage; live constructors/serde and transactional installation,
-  compiler/runtime semantic-tail
+  A separate shared native/Node-V8 pressure test runs 96 decision epochs and 3,072 mixed allocation waves with
+  exact post-reset VM-owned-memory plateaus and stable warmed wasm linear-memory pages.
+- Major remaining gates, in order, are live constructors/serde and transactional installation, compiler/runtime semantic-tail
   hardening, the full cross-target correctness/golden matrix, broader benchmark history, and release packaging.
   Semver policy is tracked in [`design/91-semver-policy.md`](https://github.com/slowchop/rustia/blob/main/design/91-semver-policy.md),
   release notes in [`CHANGELOG.md`](https://github.com/slowchop/rustia/blob/main/CHANGELOG.md), koto migration guidance in

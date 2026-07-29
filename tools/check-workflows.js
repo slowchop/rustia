@@ -165,6 +165,11 @@ function checkCi(text) {
   );
   requireIncludes(
     text,
+    "cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test mixed_heap_pressure",
+    label,
+  );
+  requireIncludes(
+    text,
     "cargo test --locked -p rustia --target wasm32-unknown-unknown --test web_live",
     label,
   );

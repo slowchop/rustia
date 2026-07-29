@@ -9,8 +9,8 @@
 > reset are implemented, as is the typed schema/context invocation with bounded record transactions. The
 > hardened stateless action-leaf guest surface, direct compiled-entry path, and graph-preserving rooted live
 > `Value`/`Table`/`Function` spine are also implemented. Stable preflight now mutates the frontend and all 131
-> VM opcodes under bounded resources, while hosted CI executes the wasm adapters on Node/V8. The next release
-> gates are broader pressure evidence, remaining live-object ergonomics/serde, transactional failure semantics,
+> VM opcodes under bounded resources, while hosted CI executes the wasm adapters and the 96-epoch mixed-heap
+> pressure lifecycle on Node/V8. The next release gates are remaining live-object ergonomics/serde, transactional failure semantics,
 > longer differential/fuzz campaigns, and real-host/browser goldens — see `CURRENT.md`.
 
 **rustia** = a fast, low-memory, wasm-friendly **Luau interpreter in Rust** with a great embedding API,
@@ -36,7 +36,7 @@ docs are design intent.
 | [`50-conformance.md`](50-conformance.md) | historical 709-row behavior inventory; executable Luau-0.709 truth is 694 fixtures / 493 refs / 0 pending | **[INVENTORY + LIVE CORPUS]** ✅ |
 | [`55-improvements.md`](55-improvements.md) | **10 adopted design improvements**, each verified still-conformant (dual-part table, string interning, FASTCALL, libm-enforcement, …) | **[IMPROVEMENTS v1]** ✅ |
 | [`56-performance-research.md`](56-performance-research.md) | safe-Rust performance sequence, landed HotIR/closure fast paths, current Linux evidence, and measurement protocol | **[PERFORMANCE RESEARCH v2.0]** |
-| [`57-memory-benchmarking.md`](57-memory-benchmarking.md) | implemented cross-engine short-spike, phase, plateau/growth, pressure, and dashboard memory protocol plus generation-safe reclamation evidence | **[IMPLEMENTED; BROADER PRESSURE EVIDENCE PENDING]** |
+| [`57-memory-benchmarking.md`](57-memory-benchmarking.md) | implemented cross-engine short-spike, phase, plateau/growth, pressure, and dashboard protocol plus native/Node-V8 mixed-heap reclamation evidence | **[IMPLEMENTED; HISTORY EXPANSION ONGOING]** |
 | [`65-wasmjit.md`](65-wasmjit.md) | **wasm-emit JIT / AOT-to-wasm spike** (verified) — ~176× the interpreter in V8, crossover ≈ 6 calls; the in-browser near-native path | **[SPIKE]** ✅ |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | typed invocation plus the deterministic effect/slot and decision-reset contract | **[CONTRACT + GENERIC SEAM IMPLEMENTED]** ✅ |
 | [`72-host-services.md`](72-host-services.md) | **host services bus** — stdout sink, determinism-labeled `ServiceClock` providers, `standard()`/`deterministic()`/`live()` presets, logical `os.clock` | **[IMPLEMENTED v1]** ✅ |
@@ -58,10 +58,12 @@ CLI, deterministic profiles, reusable
 private HotIR, and a reproducible 12-adapter dedicated-Linux benchmark pipeline. The current `a562919` snapshot
 puts rustia 3.494x behind `mlua-luau` and 3.833x behind Luaur by five-workload minimum-time geometric mean; the
 targeted closure slice reduced rustia median latency by 15.036%. Before public release, prioritize
-broader mixed-heap/native/Wasm pressure evidence, live-object constructors/serde,
+live-object constructors/serde,
 semantic-tail hardening, then further measured optimization and packaging. Object/program reclamation,
 quotas/OOM, maintained live-memory accounting, script counters, epoch-safe decision reset, and the
-per-invocation host seam are implemented.
+per-invocation host seam are implemented. A maintained 96-epoch/3,072-wave mixed-heap soak now runs on native
+and Node/V8 wasm with an exact reset plateau and stable warmed wasm linear-memory pages; this is correctness
+evidence, not a claim of allocator or process-RSS parity.
 
 ## The decision axes (each gets ~5 directions explored)
 

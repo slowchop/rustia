@@ -138,8 +138,9 @@ Every successful reset advances a checked `u64` decision epoch. All `Function`/`
 creation epoch and reject every operation after reset; the raw `RetainedValue` registry is replaced as the
 lower-level epoch boundary. Reset is idle-only and is rejected from guest/host-callback execution. A
 600-decision native table/coroutine/program/retained-export test remains exactly flat after warm-up, including
-across the compact per-slot generation range. The wasm32 Node/V8 probe runs a further 300 decisions and checks
-module reuse, host-binding restoration, input clearing, RNG restart, stale handles, and the same exact plateau.
+across the compact per-slot generation range. The shared native/Node-V8 mixed-heap test runs 96 further
+decision epochs and checks bounded public roots, rich cyclic graphs, weak collection, hot reload, quota/OOM
+recovery, stale handles, exact post-reset VM accounting, and stable warmed wasm linear-memory pages.
 Replay/golden protocols must record
 `RUSTIA_DECISION_RESET_ABI_VERSION` (currently 1). Outside an explicit reset epoch, ordinary retained function
 calls retain their documented survival across successful hot reload.

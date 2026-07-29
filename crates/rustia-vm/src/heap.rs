@@ -1065,6 +1065,30 @@ impl VmCell {
         self.recompute_side_usage();
     }
 
+    pub(crate) fn reachable_userdata_handles(&mut self, roots: &[Value]) -> Vec<u32> {
+        let tables = &self.tables;
+        let functions = &self.functions;
+        let upvalues = &self.upvalues;
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let mode_key = b"__mode";
+            let mode_atom = string_index_lookup(&root, mode_key, stable_bytes_hash(mode_key));
+            let modes = mode_atom.map_or_else(BTreeMap::new, |mode_atom| {
+                tables
+                    .handles()
+                    .filter_map(|handle| {
+                        table_weak_mode(&root, tables, handle, mode_atom).map(|mode| (handle, mode))
+                    })
+                    .collect()
+            });
+            let live = mark_heap_reachable(&root, tables, functions, upvalues, &modes, roots);
+            root.userdatas
+                .handles()
+                .filter(|handle| live.userdatas.contains(*handle))
+                .collect()
+        })
+    }
+
     pub fn release_spare_capacity(&mut self) {
         for table in self.tables.values_mut() {
             while table.array.last().is_some_and(|value| value.is_nil()) {
