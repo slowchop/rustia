@@ -1,6 +1,7 @@
 mod extension_api;
 mod function;
 mod invocation;
+mod live_value;
 mod macros;
 mod serde_value;
 mod value;
@@ -26,6 +27,7 @@ pub use invocation::{
     Invocation, InvocationLimits, InvocationOutcome, InvocationReceipt, InvocationUsage,
     SlotWrites, Slots,
 };
+pub use live_value::{Table, Value, ValueType};
 pub use rustia_vm::{
     Error as VmError, ErrorKind as VmErrorKind, GuestSurface, OpCapability, Profile, VmMemoryStats,
     VmSettings, DECISION_RESET_ABI_VERSION as RUSTIA_DECISION_RESET_ABI_VERSION,
@@ -101,9 +103,9 @@ where
     /// VM configuration, services, extensions, and installed host functions
     /// persist. Globals inserted with [`insert_global`](Self::insert_global)
     /// and [`insert_serde`](Self::insert_serde) are decision inputs and must be
-    /// rebound afterward. Every prior [`Function`] and [`Exports`] handle is
-    /// invalidated, while host-owned [`CompiledModule`] and [`CompiledEntry`]
-    /// values remain reusable. A hardened-leaf VM preserves its sealed
+    /// rebound afterward. Every prior [`Value`], [`Table`], [`Function`], and
+    /// [`Exports`] handle is invalidated, while host-owned [`CompiledModule`]
+    /// and [`CompiledEntry`] values remain reusable. A hardened-leaf VM preserves its sealed
     /// immutable environment in place and discards every decision-local
     /// allocation after that seal.
     ///
@@ -559,7 +561,7 @@ impl Rustia<()> {
 
     pub fn compile_and_run(&mut self, source: &str) -> Result<Exports> {
         let value = self.compile_and_run_raw(source)?;
-        let value = self.vm.retain_value(value);
+        let value = self.vm.retain_value(value).map_err(Error::Vm)?;
         Ok(Exports::new(value, self.generation, self.decision_epoch()))
     }
 
@@ -569,7 +571,7 @@ impl Rustia<()> {
         source: &str,
     ) -> Result<Exports> {
         let value = self.compile_and_run_raw_named(source_name, source)?;
-        let value = self.vm.retain_value(value);
+        let value = self.vm.retain_value(value).map_err(Error::Vm)?;
         Ok(Exports::new(value, self.generation, self.decision_epoch()))
     }
 
@@ -579,7 +581,7 @@ impl Rustia<()> {
         source: &[u8],
     ) -> Result<Exports> {
         let value = self.compile_and_run_raw_bytes_named(source_name, source)?;
-        let value = self.vm.retain_value(value);
+        let value = self.vm.retain_value(value).map_err(Error::Vm)?;
         Ok(Exports::new(value, self.generation, self.decision_epoch()))
     }
 
@@ -598,6 +600,32 @@ impl Rustia<()> {
     pub fn run_owned(&mut self, source: &str) -> Result<OwnedValue> {
         let value = self.compile_and_run_raw(source)?;
         value::snapshot_value(&mut self.vm, value)
+    }
+
+    /// Runs a chunk and retains its first result as a live VM value.
+    pub fn run_value(&mut self, source: &str) -> Result<Value> {
+        let value = self.compile_and_run_raw(source)?;
+        Value::retain(&mut self.vm, value, self.generation)
+    }
+
+    /// Runs a named chunk and retains its first result as a live VM value.
+    pub fn run_value_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &str,
+    ) -> Result<Value> {
+        let value = self.compile_and_run_raw_named(source_name, source)?;
+        Value::retain(&mut self.vm, value, self.generation)
+    }
+
+    /// Runs named source bytes and retains the first result as a live VM value.
+    pub fn run_value_bytes_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &[u8],
+    ) -> Result<Value> {
+        let value = self.compile_and_run_raw_bytes_named(source_name, source)?;
+        Value::retain(&mut self.vm, value, self.generation)
     }
 
     pub fn run_owned_named(
@@ -637,7 +665,7 @@ impl Rustia<()> {
     pub fn install(&mut self, module: CompiledModule) -> Result<Exports> {
         let value = self.vm.run(&module.program).map_err(Error::Vm)?;
         self.advance_generation();
-        let value = self.vm.retain_value(value);
+        let value = self.vm.retain_value(value).map_err(Error::Vm)?;
         Ok(Exports::new(value, self.generation, self.decision_epoch()))
     }
 
@@ -860,7 +888,7 @@ mod tests {
         finish_entry_lifecycle, Error, FromRustia, GuestSurface, IntoRustia, OpCapability,
         OwnedTable, OwnedValue, Profile, Result, Rustia, RustiaBuilder, RustiaExecutionProfile,
         RustiaExtension, RustiaHostFunctionInfo, ServiceClock, ServiceEntropy, SourceSpan,
-        VmErrorKind, VmSettings, RUSTIA_DECISION_RESET_ABI_VERSION,
+        ValueType, VmErrorKind, VmSettings, RUSTIA_DECISION_RESET_ABI_VERSION,
         RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
         RUSTIA_MIN_HOST_FUNCTION_FUEL,
     };
@@ -880,6 +908,151 @@ mod tests {
             .run_owned("local x: number = 6 * 7; return x")
             .unwrap();
         assert_eq!(f64::from_rustia(result).unwrap(), 42.0);
+    }
+
+    #[test]
+    fn live_values_preserve_identity_cycles_and_rich_payloads() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let root = rustia
+            .run_value(
+                r#"
+local root = {}
+local richKey = {}
+local shared = { answer = 42 }
+root.self = root
+root.left = shared
+root.right = shared
+root.binary = string.char(0, 255, 65)
+root.bytes = buffer.fromstring(string.char(1, 0, 254))
+root.direction = vector(1.5, -2, 3)
+root[richKey] = shared
+return root
+"#,
+            )
+            .unwrap();
+        assert_eq!(root.kind(&rustia).unwrap(), ValueType::Table);
+        let table = root.as_table(&rustia).unwrap().unwrap();
+
+        let self_value = table.get(&mut rustia, "self").unwrap();
+        assert!(root.raw_equal(&mut rustia, &self_value).unwrap());
+        let left = table.get(&mut rustia, "left").unwrap();
+        let right = table.get(&mut rustia, "right").unwrap();
+        assert!(left.raw_equal(&mut rustia, &right).unwrap());
+        assert_eq!(
+            table
+                .get(&mut rustia, "binary")
+                .unwrap()
+                .string_bytes(&mut rustia)
+                .unwrap(),
+            Some(vec![0, 255, 65])
+        );
+        assert_eq!(
+            table
+                .get(&mut rustia, "bytes")
+                .unwrap()
+                .buffer_bytes(&mut rustia)
+                .unwrap(),
+            Some(vec![1, 0, 254])
+        );
+        assert_eq!(
+            table
+                .get(&mut rustia, "direction")
+                .unwrap()
+                .vector_components(&mut rustia)
+                .unwrap(),
+            Some([1.5, -2.0, 3.0])
+        );
+
+        table.set(&mut rustia, "added", 99_i32).unwrap();
+        assert_eq!(
+            table
+                .get(&mut rustia, "added")
+                .unwrap()
+                .as_number(&rustia)
+                .unwrap(),
+            Some(99.0)
+        );
+        let rich_entry = table
+            .entries(&mut rustia)
+            .unwrap()
+            .into_iter()
+            .find(|(key, _)| key.kind(&rustia).unwrap() == ValueType::Table)
+            .expect("table identity key");
+        assert!(left.raw_equal(&mut rustia, &rich_entry.1).unwrap());
+
+        let exports = rustia
+            .compile_and_run("local live = { answer = 7 }; return { live = live }")
+            .unwrap();
+        let exported = exports.get_live_current(&mut rustia, "live").unwrap();
+        assert_eq!(
+            exported
+                .as_table(&rustia)
+                .unwrap()
+                .unwrap()
+                .get(&mut rustia, "answer")
+                .unwrap()
+                .as_number(&rustia)
+                .unwrap(),
+            Some(7.0)
+        );
+
+        let _: f64 = rustia.run("collectgarbage('collect'); return 0").unwrap();
+        assert_eq!(
+            left.as_table(&rustia)
+                .unwrap()
+                .unwrap()
+                .get(&mut rustia, "answer")
+                .unwrap()
+                .as_number(&rustia)
+                .unwrap(),
+            Some(42.0),
+            "a live handle remains a collector root"
+        );
+        assert!(
+            root.to_owned(&mut rustia).is_err(),
+            "cyclic snapshots stay explicit"
+        );
+
+        let mut other = Rustia::new(Profile::ReproducibleStandard);
+        assert!(root
+            .kind(&other)
+            .unwrap_err()
+            .to_string()
+            .contains("different Rustia VM"));
+        other.reset_decision().unwrap();
+        rustia.reset_decision().unwrap();
+        assert!(root
+            .kind(&rustia)
+            .unwrap_err()
+            .to_string()
+            .contains("stale value handle"));
+    }
+
+    #[test]
+    fn live_functions_accept_and_return_live_values() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let function = rustia
+            .run_value(
+                "return function(value) local t = { value = value }; t.self = t; return value, t end",
+            )
+            .unwrap()
+            .as_function(&rustia)
+            .unwrap()
+            .unwrap();
+        let argument = rustia.run_value("return { answer = 42 }").unwrap();
+        let results = function
+            .call_values(&mut rustia, std::slice::from_ref(&argument))
+            .unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(argument.raw_equal(&mut rustia, &results[0]).unwrap());
+        let returned = results[1].as_table(&rustia).unwrap().unwrap();
+        let returned_value = returned.get(&mut rustia, "value").unwrap();
+        assert!(argument.raw_equal(&mut rustia, &returned_value).unwrap());
+        let returned_self = returned.get(&mut rustia, "self").unwrap();
+        assert!(returned
+            .as_value()
+            .raw_equal(&mut rustia, &returned_self)
+            .unwrap());
     }
 
     #[test]

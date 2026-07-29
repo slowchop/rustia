@@ -78,6 +78,14 @@
         "panic_recovery": "contain host functions, typed dispatch, extension ops, stdout/clocks, and loadstring compiler; discard records and poison the VM until decision reset",
         "rollback_scope": "staged records only, not guest heap/global state, HostMut mutation, or host interior mutability"
       },
+      "live_values": {
+        "handles": "rooted Value, Table, and Function handles with VM identity and decision-epoch checks",
+        "payloads": "binary strings, buffers, vectors, rich table keys, and functions",
+        "graphs": "shared/cyclic table identity, mutation, iteration, and raw equality",
+        "invocation": "live arguments and results across ordinary and typed invocations",
+        "snapshot_rule": "OwnedValue stays acyclic and reports cycles explicitly",
+        "quota_rule": "root-registry admission is logical-live quota checked and atomic"
+      },
       "wasm_target_bench": {
         "default_adapters": [
           "rustia",
@@ -104,23 +112,23 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 89,
-      "confidence": 86,
-      "state": "The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, host-pluggable output/time services, host-owned canonical-identity require resolution/cache, lifetime-safe per-invocation host contexts, bounded transactional effect journals, CLI, benchmark matrix, private HotIR, closure-call PIC, generation-safe object/program reclamation, VM-owned memory telemetry, maintained logical-live quota accounting and script counters, atomic catchable OOM, epoch-safe decision reset, and exact dedicated-Linux native plus wasm quota evidence are in-tree. The remaining release gates are broader mixed-heap pressure evidence, rich/live values, semantic-tail hardening, and packaging.",
-      "future_plan": "Broaden mixed-heap pressure evidence; complete the rich-value boundary and transactional failure semantics; then continue measured optimization and public release work."
+      "complete": 90,
+      "confidence": 87,
+      "state": "The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, host-pluggable output/time services, host-owned canonical-identity require resolution/cache, lifetime-safe per-invocation host contexts, bounded transactional effect journals, graph-preserving rooted live Value/Table/Function handles, CLI, benchmark matrix, private HotIR, closure-call PIC, generation-safe object/program reclamation, VM-owned memory telemetry, maintained logical-live quota accounting and script counters, atomic catchable OOM, epoch-safe decision reset, and exact dedicated-Linux native plus wasm quota evidence are in-tree. The remaining release gates are broader mixed-heap pressure evidence, live-object constructors/serde, transactional failure semantics, semantic-tail hardening, and packaging.",
+      "future_plan": "Broaden mixed-heap pressure evidence; complete live-object ergonomics/serde and transactional failure semantics; then continue measured optimization and public release work."
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 95,
-      "confidence": 93,
-      "state": "The facade now includes typed run/compile, owned scalar/table conversions, host-owned canonical-identity require resolution/cache, a lifetime-independent HostSchema with fresh borrowed HostContext values per invocation, capability-specific host views, shared fuel, bounded transactional record publication, usage receipts, retained functions/exports with true collector roots plus install-generation and decision-epoch checks, owned-value serde, extensions, hot reload, epoch-safe decision reset, examples, diagnostics, migration guidance, host-pluggable stdout/clock services, VM-owned memory telemetry, maintained logical-live accounting, and configurable quotas. It is not yet a complete rich embedding boundary: graph-preserving rich values, a live zero-copy serde path, and transactional guest-side failure rollback remain.",
-      "future_plan": "Complete rich/live values, transactional failure semantics, diagnostics, and API stabilization."
+      "complete": 96,
+      "confidence": 94,
+      "state": "The facade now includes typed run/compile, owned scalar/table conversions, host-owned canonical-identity require resolution/cache, a lifetime-independent HostSchema with fresh borrowed HostContext values per invocation, capability-specific host views, shared fuel, bounded transactional record publication, usage receipts, rooted live Value/Table/Function handles that preserve rich payloads and graph identity, retained exports with install-generation and decision-epoch checks, owned-value serde, extensions, hot reload, epoch-safe decision reset, examples, diagnostics, migration guidance, host-pluggable stdout/clock services, VM-owned memory telemetry, maintained logical-live accounting, and configurable quotas. It is not yet a complete rich embedding boundary: globals/value/function constructors, a chunk builder, live serde, and transactional guest-side failure rollback remain.",
+      "future_plan": "Complete live-object ergonomics/serde, transactional failure semantics, diagnostics, and API stabilization."
     },
     {
       "name": "Full public standalone Luau engine release",
-      "complete": 63,
-      "confidence": 85,
-      "state": "The Luau 0.709 standalone target and 493-ref conformance denominator are strong. Bounded generation-safe object/program lifetimes, VM-owned live/reserved/peak telemetry, maintained logical-live memory limits and script counters, atomic catchable OOM, host-owned require resolution/cache, lifetime-safe typed invocations with transactional records, and versioned deterministic reset/module lifecycles are implemented; native Linode plus wasm quota evidence is exact. Release still requires broader mixed-heap pressure evidence, richer value interop, transactional guest-module failure semantics, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.",
+      "complete": 65,
+      "confidence": 86,
+      "state": "The Luau 0.709 standalone target and 493-ref conformance denominator are strong. Bounded generation-safe object/program lifetimes, VM-owned live/reserved/peak telemetry, maintained logical-live memory limits and script counters, atomic catchable OOM, host-owned require resolution/cache, lifetime-safe typed invocations with transactional records, graph-preserving rooted live values, and versioned deterministic reset/module lifecycles are implemented; native Linode plus wasm quota evidence is exact. Release still requires broader mixed-heap pressure evidence, remaining live-object ergonomics/serde, transactional guest-module failure semantics, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.",
       "future_plan": "Close the remaining pressure-evidence and host-boundary gates, harden the semantic tail and cross-target goldens, then package and publish against the pinned target."
     },
     {
@@ -132,10 +140,10 @@
     },
     {
       "name": "Public release readiness",
-      "complete": 80,
-      "confidence": 88,
-      "state": "License, generated crate metadata audit, explicit internal dependency versions, release-preflight-enforced examples, migration guidance, CLI/diagnostics, typed owned values and callbacks, true-root epoch-safe retained handles, host signature/fuel metadata, output/time services, VM memory telemetry, maintained logical-live limits and script counters with atomic OOM, versioned decision reset, release-readiness and semver policy, hosted CI, benchmark claim gating, package dry-runs, and publishability auditing are present; crates are still workspace-private and release polish is incomplete.",
-      "future_plan": "Close pressure-evidence, value-interop, transactional-install, and semantic-tail gates before removing publish blockers in topological order."
+      "complete": 81,
+      "confidence": 89,
+      "state": "License, generated crate metadata audit, explicit internal dependency versions, release-preflight-enforced examples, migration guidance, CLI/diagnostics, typed owned values and callbacks, graph-preserving rooted live values, true-root epoch-safe retained handles, host signature/fuel metadata, output/time services, VM memory telemetry, maintained logical-live limits and script counters with atomic OOM, versioned decision reset, release-readiness and semver policy, hosted CI, benchmark claim gating, package dry-runs, and publishability auditing are present; crates are still workspace-private and release polish is incomplete.",
+      "future_plan": "Close pressure-evidence, remaining live-object ergonomics/serde, transactional-install, and semantic-tail gates before removing publish blockers in topological order."
     }
   ],
   "areas": [
@@ -349,17 +357,24 @@
       "entries": [
         {
           "name": "Koto-shaped facade",
-          "complete": 93,
-          "confidence": 92,
-          "state": "Builder, typed run<T>, source-named compile/run helpers, public error diagnostic accessors, globals, exports, retained functions, host-owned require resolution/cache, a typed HostSchema/HostContext invocation surface, bounded record transactions, usage receipts, an epoch-safe decision reset, environment presets (standard/deterministic/live) with stdout and determinism-labeled service sockets, examples, and a first koto-to-rustia migration guide exist.",
-          "future_plan": "Stabilize names and error types, add the rich/live-value layer, and expand migration guidance as the remaining production gates land."
+          "complete": 95,
+          "confidence": 93,
+          "state": "Builder, typed run<T>, source-named compile/run helpers, public error diagnostic accessors, global insertion, exports, graph-preserving rooted live Value/Table/Function handles, host-owned require resolution/cache, a typed HostSchema/HostContext invocation surface, bounded record transactions, usage receipts, an epoch-safe decision reset, environment presets (standard/deterministic/live) with stdout and determinism-labeled service sockets, examples, and a first koto-to-rustia migration guide exist.",
+          "future_plan": "Stabilize names and error types; add a globals handle, live constructors, chunk builder, and live serde; then expand migration guidance."
         },
         {
           "name": "Owned value firewall",
           "complete": 68,
           "confidence": 88,
-          "state": "OwnedValue supports nil, booleans, numbers, UTF-8 strings, tree-shaped tables, scalar/Option/Vec/BTreeMap conversions, and typed table helpers. It does not faithfully represent binary strings, buffers, vectors, opaque userdata identity, non-scalar/identity keys, shared/cyclic table graphs, or live VM values.",
-          "future_plan": "Add bytes/buffers/vectors, opaque identity-safe userdata handles, richer keys, and graph-preserving shared/cyclic tables while keeping internal GC lifetimes behind the facade; full UserData/Scope registration remains optional later work."
+          "state": "OwnedValue supports nil, booleans, numbers, UTF-8 strings, tree-shaped tables, scalar/Option/Vec/BTreeMap conversions, and typed table helpers. It deliberately remains an acyclic snapshot and reports cycles rather than losing graph identity; the separate live layer carries binary strings, buffers, vectors, opaque identity, rich keys, and shared/cyclic tables.",
+          "future_plan": "Keep the owned layer small and explicit while stabilizing its conversion diagnostics; use rooted live handles whenever payload or graph fidelity matters."
+        },
+        {
+          "name": "Live value handles",
+          "complete": 84,
+          "confidence": 92,
+          "state": "Rooted VM/epoch-safe Value, Table, and Function handles preserve binary strings, buffers, vectors, rich identity-bearing keys, shared/cyclic tables, mutation, iteration, and raw equality without exposing collector lifetimes. Live arguments/results cross ordinary and typed invocations, and focused tests cover collector rooting, cross-VM rejection, reset invalidation, rich payloads, cycles, shared identity, and export access.",
+          "future_plan": "Add globals/value/function constructors, a composable chunk builder, live serde, and a concrete public userdata registration contract."
         },
         {
           "name": "Typed host functions",
@@ -393,7 +408,7 @@
           "name": "Decision lifecycle and reset",
           "complete": 90,
           "confidence": 94,
-          "state": "Reset ABI v1 is public at VM and facade layers and is restricted to idle decision boundaries. It preserves configuration, services, extensions, installed host functions/modules, lifetime peaks, and host-owned immutable CompiledModule values; discards all guest globals, heap objects, coroutines, programs, caches, diagnostics, coverage, and roots; restarts RNG, logical time, instruction counters, and deterministic GC scheduling; and epoch-invalidates every Function, Exports, and RetainedValue lease. A focused native mixed table/string/coroutine/program/retained-export workload holds exact VM-owned memory statistics after warmup through 600 decisions; a Node/V8 wasm32 probe covers the same lifecycle and exact plateau across 300 decisions.",
+          "state": "Reset ABI v1 is public at VM and facade layers and is restricted to idle decision boundaries. It preserves configuration, services, extensions, installed host functions/modules, lifetime peaks, and host-owned immutable CompiledModule values; discards all guest globals, heap objects, coroutines, programs, caches, diagnostics, coverage, and roots; restarts RNG, logical time, instruction counters, and deterministic GC scheduling; and epoch-invalidates every Value, Table, Function, Exports, and RetainedValue lease. A focused native mixed table/string/coroutine/program/retained-export workload holds exact VM-owned memory statistics after warmup through 600 decisions; a Node/V8 wasm32 probe covers the same lifecycle and exact plateau across 300 decisions.",
           "future_plan": "Add external dedicated-Linux long-running-host evidence and keep the reset plus typed-invocation contracts stable."
         },
         {
@@ -401,14 +416,14 @@
           "complete": 62,
           "confidence": 82,
           "state": "Owned-value serde paths exist, and OwnedTable can deserialize string-keyed fields plus array slots through serde.",
-          "future_plan": "Add binary and graph-preserving owned serde, then a lifetime-safe live/zero-copy path after the public value surface stabilizes."
+          "future_plan": "Keep owned serde as the explicit acyclic snapshot path, then add a lifetime-safe deserializer over the rooted live value surface."
         },
         {
           "name": "Retained handles",
-          "complete": 94,
-          "confidence": 94,
-          "state": "Script function and export handles are true collector roots. They can be retained, called, inspected for their install generation and decision epoch, checked for freshness, and accessed through fail-closed current-generation/current-epoch call/value/get/function/deserialize paths. Repeated slot reuse cannot make stale handles alias replacement objects or programs; reset invalidates every clone while ordinary retained calls remain valid across hot reload outside reset epochs.",
-          "future_plan": "Keep generation and epoch failures explicit as richer live-value handles are introduced."
+          "complete": 96,
+          "confidence": 95,
+          "state": "Script Value, Table, Function, and Exports handles are true collector roots. They can be retained, inspected for their install generation and decision epoch, checked for freshness, exchanged across live calls, and accessed through fail-closed current-generation/current-epoch paths. Repeated slot reuse cannot make stale handles alias replacement objects or programs; reset invalidates every clone while ordinary retained access remains valid across hot reload outside reset epochs.",
+          "future_plan": "Keep VM, generation, and epoch failures explicit while live-object constructors and serde are added."
         },
         {
           "name": "Hot reload",

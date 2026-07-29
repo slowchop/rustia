@@ -4,7 +4,7 @@ use crate::value::{
 };
 use crate::{
     CompiledEntry, CompiledModule, Error, Exports, Result, RustiaHostFuelPolicy,
-    RustiaHostFunctionInfo, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
+    RustiaHostFunctionInfo, Value, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
 };
 use rustia_vm::{
     Error as VmError, ErrorKind as VmErrorKind, HostFunctionOp, OpCapability, Value as RawValue,
@@ -1184,7 +1184,7 @@ where
                 .run_in(&module.program, execution, &mut host)
                 .map_err(Error::Vm)?;
             **generation = (**generation).saturating_add(1);
-            let value = vm.retain_value(value);
+            let value = vm.retain_value(value).map_err(Error::Vm)?;
             Ok(Exports::new(value, **generation, vm.decision_epoch()))
         })
     }
@@ -1227,6 +1227,12 @@ where
             let value = exports.value_in(invocation)?;
             Return::from_rustia(value)
         })
+    }
+
+    /// Runs a named chunk and retains its first result without snapshotting it.
+    pub fn run_value(&mut self, source_name: impl Into<String>, source: &str) -> Result<Value> {
+        let module = crate::Rustia::<C>::compile_module(source_name, source)?;
+        self.scoped(|invocation| invocation.install(module).map(|exports| exports.as_value()))
     }
 
     pub(crate) fn convert_call<Args, Return>(

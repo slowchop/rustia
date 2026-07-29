@@ -1002,7 +1002,7 @@ fn decision_reset_requires_idle_execution_and_preserves_installed_host_functions
         vec![Constant::Number(7.0)],
     );
     let retained_table = vm.empty_table();
-    let retained = vm.retain_value(retained_table);
+    let retained = vm.retain_value(retained_table).unwrap();
 
     assert_eq!(vm.run(&call).unwrap().as_bool(), Some(true));
     assert_eq!(vm.run(&extension_call).unwrap().as_number(), Some(7.0));

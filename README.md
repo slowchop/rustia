@@ -8,8 +8,9 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
 > production VM/compiler/API/conformance slice; bounded object/program reclamation, quotas/OOM, deterministic
 > decision reset, the typed per-invocation host transaction, and the hardened stateless action-leaf surface are
 > implemented. Maintained live-memory totals now back quotas and script counters without a whole-VM census at
-> ordinary instruction boundaries. The next release-critical work is broader mixed-heap pressure evidence and
-> the remaining rich-value and transactional-failure boundary.
+> ordinary instruction boundaries. Rooted live values/tables/functions now preserve rich payloads and graph
+> identity. The next release-critical work is broader mixed-heap pressure evidence, ergonomic live constructors
+> and serde, and the remaining transactional-failure boundary.
 > `spikes/` are throwaway prototypes that validated the design.
 > Read **[`design/CURRENT.md`](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](https://github.com/slowchop/rustia/blob/main/design/README.md) for the full doc map.
@@ -47,7 +48,8 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   `Option<T>`/`Vec<T>`/`BTreeMap<String, T>`/table conversions plus typed and nested table helpers, source-named
   run/compile helpers, typed/capability-tagged host functions with fallible `rustia::Result<T>` returns and up to
   eight arguments/results, retained script functions, pre-install host signature/fuel ABI metadata,
-  retained-handle freshness checks and current-generation accessors, public source-span/runtime-location error
+  retained-handle freshness checks and current-generation accessors, rooted live `Value`/`Table`/`Function`
+  handles with graph identity, binary strings, buffers, vectors, rich keys, and raw equality, public source-span/runtime-location error
   accessors, owned-value/table serde, deterministic extensions, hot reload, and early macro sugar. `HostSchema`
   separates persistent function registration from a block-local `HostContext`; capability-specific views expose
   input, slots, ordered effects, slot writes, or profile-gated external mutation. Typed invocations share one
@@ -58,9 +60,8 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   stateless decision path with record publication and reset across both success and failure.
   `ServiceModuleResolver` provides host-owned canonical-identity `require` resolution with execute-once caching,
   cycle diagnostics, shared fuel, deterministic labels, and reset-aware lifetime. Transactional installation/hot
-  reload, rich graph values, and live zero-copy serde remain planned. The next
-  advanced layer keeps this concise facade while adding identity-safe values/tables/functions, globals and
-  constructors, a composable chunk builder, and later optional userdata/scopes, async, and migration
+  reload and live zero-copy serde remain planned. The next advanced slice keeps this concise facade while adding
+  globals and constructors, a composable chunk builder, and later optional userdata/scopes, async, and migration
   compatibility.
 - Host services are host-pluggable through the facade: `RustiaBuilder::standard()`/`deterministic()`/`live()`
   environment presets, a `.stdout(...)` print sink with the real Luau composition (`tostring` honoring
@@ -102,9 +103,34 @@ while `fixed(...)` and `from_fn(...)` are host-asserted replay-stable. The facad
 conventional elapsed-time source used by live `os.clock()`.
 
 These presets are user-selected contracts, not a ladder in which deterministic scripting limits every user.
-The planned advanced embedding API is shared by all three: `deterministic()` enforces lockstep restrictions,
+The advanced embedding API is shared by all three: `deterministic()` enforces lockstep restrictions,
 `standard()` has reproducible defaults but permits explicit nondeterministic providers/capabilities, and
 `live()` is the first-class ordinary embedding choice with no reproducibility guarantee.
+
+## Live values
+
+`run_value` retains a result in its VM and decision epoch. `Table` access stays live, so shared/cyclic graphs
+and rich values do not pass through the smaller `OwnedValue` deep-copy boundary:
+
+```rust
+use rustia::{Profile, Rustia};
+
+let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+let root = rustia.run_value(
+    "local t = {}; t.self = t; t.bytes = buffer.fromstring('abc'); return t",
+)?;
+let table = root.as_table(&rustia)?.expect("table");
+let self_value = table.get(&mut rustia, "self")?;
+assert!(root.raw_equal(&mut rustia, &self_value)?);
+assert_eq!(
+    table.get(&mut rustia, "bytes")?.buffer_bytes(&mut rustia)?,
+    Some(b"abc".to_vec()),
+);
+# Ok::<(), rustia::Error>(())
+```
+
+Clones share a collector root lease. Handles reject another VM and become stale after `reset_decision`; they
+remain usable across hot reload unless a caller deliberately requests a current-generation check.
 
 ## Project Pillars
 The canonical decision filter is [`design/02-pillars.md`](https://github.com/slowchop/rustia/blob/main/design/02-pillars.md). The short version:
@@ -126,11 +152,11 @@ public rustia project; actual grabby integration work is explicitly out of scope
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 89% | 86% |
-| Usable embedded scripting crate | 95% | 93% |
-| Full public standalone Luau engine release | 63% | 85% |
+| Whole public rustia project | 90% | 87% |
+| Usable embedded scripting crate | 96% | 94% |
+| Full public standalone Luau engine release | 65% | 86% |
 | Standalone benchmark OSS project | 82% | 88% |
-| Public release readiness | 80% | 88% |
+| Public release readiness | 81% | 89% |
 
 - Current conformance runner: **694 fixtures**, **493 refs**, **0 pending**.
 - The benchmark harness has all 12 requested adapters, an explicit verified `mlua-luau-jit` mode, and a
@@ -149,7 +175,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
   for reclamation/telemetry/quota work and passes the wasm32 512 KiB quota/recovery probe. Rustia ties the best
   shared peak at 256 KiB and retains 14.4 KiB across the shared set versus mlua/Luau/JIT's 24.8 KiB.
   The same Node/V8 probe now runs 300 decision resets and verifies an exact post-warmup VM-owned-memory plateau.
-- Major remaining gates, in order, are broader mixed-heap/native/Wasm pressure coverage; rich values and transactional installation,
+- Major remaining gates, in order, are broader mixed-heap/native/Wasm pressure coverage; live constructors/serde and transactional installation,
   compiler/runtime semantic-tail
   hardening, the full cross-target correctness/golden matrix, broader benchmark history, and release packaging.
   Semver policy is tracked in [`design/91-semver-policy.md`](https://github.com/slowchop/rustia/blob/main/design/91-semver-policy.md),
@@ -174,6 +200,8 @@ public rustia project; actual grabby integration work is explicitly out of scope
 - `cargo run -p rustia --example hot_reload` — compile/install hot reload plus retained-handle survival and freshness checks.
 - `cargo run -p rustia --example module_resolution` — host-owned canonical module identity, source resolution,
   and deterministic script-visible `require`.
+- `cargo run -p rustia --example live_values` — rooted cyclic/shared tables, identity checks, and live buffer
+  access without snapshotting.
 - `cargo run -p rustia --example typed_invocation` — a block-local host context, capability views, shared fuel,
   bounded ordered records, and allocation-safe publication into a caller-owned lane.
 - `cargo run --release -p rustia --example leaf_lifecycle_bench` — a semantics-checked ABBA comparison of the

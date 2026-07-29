@@ -2,14 +2,14 @@
 
 > ⚠️ **Read [`CURRENT.md`](CURRENT.md) first — it is the single canonical state.** This index and the dated
 > docs are staged snapshots and can lag; `CURRENT.md` wins on any disagreement. (Drift fixed per review H1.)
-> **Status note (2026-07-28):** the broad production VM/compiler/API slice, pending-free pinned conformance
+> **Status note (2026-07-29):** the broad production VM/compiler/API slice, pending-free pinned conformance
 > corpus, 12-adapter Linux benchmark snapshot, cross-engine wasm pre-lock gate, and host output/time services
 > slice are in-tree. Historical spike
 > multipliers are not current product claims. Bounded object/program lifetimes, quotas/OOM, and deterministic
 > reset are implemented, as is the typed schema/context invocation with bounded record transactions. The
-> hardened stateless action-leaf guest surface and direct compiled-entry path are also implemented. The next
-> release gates are broader pressure evidence and the remaining transactional/value boundary — see
-> `CURRENT.md`.
+> hardened stateless action-leaf guest surface, direct compiled-entry path, and graph-preserving rooted live
+> `Value`/`Table`/`Function` spine are also implemented. The next release gates are broader pressure evidence,
+> remaining live-object ergonomics/serde, and transactional failure semantics — see `CURRENT.md`.
 
 **rustia** = a fast, low-memory, wasm-friendly **Luau interpreter in Rust** with a great embedding API,
 built to replace **koto** in `../grabby-aliens/`. Design-first: we explore ~5 directions per decision,
@@ -56,7 +56,7 @@ CLI, deterministic profiles, reusable
 private HotIR, and a reproducible 12-adapter dedicated-Linux benchmark pipeline. The current `a562919` snapshot
 puts rustia 3.494x behind `mlua-luau` and 3.833x behind Luaur by five-workload minimum-time geometric mean; the
 targeted closure slice reduced rustia median latency by 15.036%. Before public release, prioritize
-broader mixed-heap/native/Wasm pressure evidence, rich/live values,
+broader mixed-heap/native/Wasm pressure evidence, live-object constructors/serde,
 semantic-tail hardening, then further measured optimization and packaging. Object/program reclamation,
 quotas/OOM, maintained live-memory accounting, script counters, epoch-safe decision reset, and the
 per-invocation host seam are implemented.

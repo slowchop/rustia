@@ -236,8 +236,9 @@ hidden behind interior mutability.
 ## What not to port directly
 
 - Wall-clock execution timeouts. Use deterministic instruction fuel.
-- Long-lived references to internal script values. Use `OwnedValue`, `Exports`,
-  or `Function`.
+- Unchecked references to internal script values. Use an acyclic `OwnedValue`
+  snapshot or rooted VM/epoch-safe `Value`, `Table`, `Exports`, or `Function`
+  handle.
 - Arbitrary host mutation from deterministic scripts.
 - One invocation per helper call when those calls form one logical decision.
 - Public grabby types or domain effect enums in rustia itself.

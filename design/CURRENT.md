@@ -255,7 +255,9 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    programs maintain live totals; VM control state uses a cached aggregate with local refresh after structural
    changes. Quota admission and ordinary instruction boundaries therefore avoid a whole-VM census, while exact
    reserved telemetry remains on demand. Script-visible `gcinfo`/`collectgarbage("count")` read that same
-   maintained logical-live total. Exact-commit Linode cohort `safe-memory-588b541` retained 99
+   maintained logical-live total. Public retained-root registry nodes are also admitted against the quota and
+   fail atomically rather than letting live-handle creation cross the boundary. Exact-commit Linode cohort
+   `safe-memory-588b541` retained 99
    native samples after confirmed deletion, passed the wasm32 512 KiB quota/recovery probe, tied the 256 KiB
    best shared peak, and reduced the shared retained mean to 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. Still
    required before public release: broader mixed-heap/native/Wasm pressure coverage.
@@ -276,19 +278,21 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    reads an ambient filesystem. The separate CLI adapter supplies fixed-order `.luau`/`.lua`/directory-index
    lookup, canonical cache identities, nested relative resolution, and module-source runtime diagnostics in
    standard and compatibility profiles; deterministic CLI execution leaves `require` absent. Still open:
-   Host-facing VM memory telemetry is now honest for the documented VM-owned logical allocation boundary;
-   script-visible counters still need the O(1) quota counter. Guest module/extension installation and hot reload
-   still need documented transactional or isolated failure semantics beyond record-only invocation rollback.
-3. **Complete public value interop.** `OwnedValue` intentionally starts small, but it cannot yet faithfully
-   carry binary strings, buffers, vectors, opaque userdata identity, non-scalar/identity table keys,
-   cyclic/shared table graphs, or zero-copy live values. Add the live-value serde path and identity-safe handles
-   before claiming a general rich embedding boundary. The consumer target is two additive layers: retain the
-   concise typed command/data facade, then add VM/epoch-safe live `Value`/`Table`/`Function` handles,
-   `globals()` and value constructors, and a composable chunk builder. Full mlua-style `UserData`/`Scope`
-   registration, async callbacks, and any mlua migration shim remain later optional layers. These APIs serve
-   every builder preset: `deterministic()` enforces replay restrictions, `standard()` permits explicit
-   nondeterminism over reproducible defaults, and `live()` is a first-class intentionally non-reproducible
-   environment rather than a restricted or second-class mode.
+   Host-facing VM memory telemetry and script-visible counters now read the maintained VM-owned logical-live
+   total without a whole-VM census at ordinary instruction boundaries. Guest module/extension installation and
+   hot reload still need documented transactional or isolated failure semantics beyond record-only invocation
+   rollback.
+3. **Complete public value interop.** The advanced live-handle spine is implemented: VM/epoch-safe rooted
+   `Value`/`Table`/`Function` handles preserve binary strings, buffers, vectors, identity-bearing keys,
+   shared/cyclic table graphs, mutation, and raw equality without exposing collector lifetimes. Live values
+   can cross ordinary and typed invocations, and `OwnedValue` remains the deliberately small acyclic snapshot
+   layer. Before calling this a complete rich embedding boundary, add `globals()`, value/function constructors,
+   a composable chunk builder, live serde, and a concrete public userdata registration contract. A public
+   `Thread` handle remains intentionally absent until a real host-side scheduler caller defines its contract.
+   Full mlua-style `UserData`/`Scope`, async callbacks, and any mlua migration shim remain later optional
+   layers. These APIs serve every builder preset: `deterministic()` enforces replay restrictions, `standard()`
+   permits explicit nondeterminism over reproducible defaults, and `live()` is a first-class intentionally
+   non-reproducible environment rather than a restricted or second-class mode.
 4. **Semantic-tail and diagnostics hardening.** Continue differential parser/compiler testing, keep valid
    runtime errors catchable at runtime rather than prematurely rejecting them at compile time, and finish
    public stack traces/source diagnostics. Module/extension installation and runtime-failing hot reload also need
@@ -313,14 +317,13 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    graphs, hot reload, retained handles, weak tables, native/wasm parity, and representative mixed-heap evidence
    before tuning final intervals.
 2. **Finish the host-facing runtime boundary and ordered advanced API track.** Follow
-   [`75-embedded-api.md`](75-embedded-api.md#build-order): add identity-safe live values/tables/functions,
-   familiar globals/value constructors and a composable chunk builder,
-   complete binary/rich-value interop, zero-copy live serde, and transactional install/hot-reload/stack
-   diagnostics. The worker-local/per-call host context is already implemented. Keep the existing typed facade
-   as the simple layer, keep the advanced layer available to all builder presets, and do not leak
-   grabby-specific types, internal GC lifetimes, or a raw C API. `live()` remains the explicit
-   no-reproducibility-guarantee environment; deterministic policy is enforced only by constructors that
-   promise it.
+   [`75-embedded-api.md`](75-embedded-api.md#build-order): build familiar globals/value/function constructors
+   and a composable chunk builder on the implemented graph-preserving live `Value`/`Table`/`Function` spine,
+   then add live serde and transactional install/hot-reload/stack diagnostics. The worker-local/per-call host
+   context is already implemented. Keep the existing typed facade as the simple layer, keep the advanced layer
+   available to all builder presets, and do not leak grabby-specific types, internal GC lifetimes, or a raw C
+   API. `live()` remains the explicit no-reproducibility-guarantee environment; deterministic policy is
+   enforced only by constructors that promise it.
 3. **Harden the production engine** against the LOCKED decisions ([`30-architecture.md`](30-architecture.md) §1–§4):
    keep the 16-byte tagged `Value` firewall, portable `br_table`-friendly dispatch, instruction-count fuel,
    deterministic f64/libm behavior, table-key `-0` normalization, profile-specific GC behavior, and the public
@@ -458,7 +461,7 @@ invocation, and a separately versioned guest ABI.
 | [`56-performance-research.md`](56-performance-research.md) | no-unsafe SotA performance stack, top-10 ordered bets, C++ Luau estimates | current research note |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | typed invocation plus the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative + implemented generic seam** ✅ |
 | [`72-host-services.md`](72-host-services.md) | host services bus: stdout, determinism-labeled clocks and entropy, native/WASI/browser adapters, facade presets, logical `os.clock` | **implemented** ✅ |
-| [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **typed invocation implemented; advanced interop pending** ✅ |
+| [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **typed invocation + live-handle spine implemented; advanced ergonomics/serde pending** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |
 | [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen stateless authoritative guest surface, direct compiled entries, and fast isolated reset | **implemented v1** ✅ |
 | [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/target-first report/package metadata and dedicated Linode lifecycle implemented; standalone split pending** |
@@ -492,12 +495,12 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
    cyclic graphs, hot reload, logical-live quotas, and atomic OOM have their first safety coverage. Decision
    reset now invalidates every prior retained-handle clone by epoch, restarts deterministic state, and plateaus
    exactly across 600 focused decisions; ordinary retained calls still survive hot reload outside a reset.
-2. **Complete the ordered advanced API boundary:** identity-safe live values/tables/functions; globals,
-   constructors, and a composable chunk builder; binary/rich/cyclic values;
-   live-value serde; transactional extension/module/hot-reload failure behavior; and stronger traceback
-   diagnostics. The worker-local typed invocation seam, hardened stateless leaf, direct compiled-entry path,
-   memory telemetry, and quota enforcement are implemented. Preserve the concise typed facade and apply
-   determinism restrictions according to the selected builder: `live()` intentionally promises none.
+2. **Complete the ordered advanced API boundary:** build globals, constructors, and a composable chunk builder
+   on the implemented graph-preserving live `Value`/`Table`/`Function` spine; add live-value serde,
+   transactional extension/module/hot-reload failure behavior, and stronger traceback diagnostics. The
+   worker-local typed invocation seam, hardened stateless leaf, direct compiled-entry path, binary/rich/cyclic
+   live values, memory telemetry, and quota enforcement are implemented. Preserve the concise typed facade and
+   apply determinism restrictions according to the selected builder: `live()` intentionally promises none.
 3. **Tune the GC intervals only after reclamation exists** (Deterministic instruction-count interval =
    determinism ABI; Standard paced-debt multiplier) on realistic long-lived and mixed heaps.
 4. **Harden compiler/runtime error-phase parity** with focused oracle fixtures plus differential/fuzz testing.

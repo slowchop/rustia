@@ -29,9 +29,9 @@
 >
 > **v3.3 implementation update (2026-07-27):** the collection scheduling/profile decision remains locked.
 > Complete object/program reachability and generation-safe reuse, aggregate logical-live quotas with atomic OOM,
-> epoch-safe decision-reset ABI v1, and maintained live-memory accounting are implemented. Broader mixed-heap
-> native/Wasm pressure evidence remains a release gate. The current first embedding slice is owned-value based;
-> live zero-copy serde remains planned.
+> epoch-safe decision-reset ABI v1, maintained live-memory accounting, and the graph-preserving rooted
+> `Value`/`Table`/`Function` handle spine are implemented. Broader mixed-heap native/Wasm pressure evidence,
+> live-object constructors/chunk loading, and live serde remain release gates.
 
 ## 0. The bet — proven, with honest framing
 
@@ -75,8 +75,8 @@ rustia-vm         16-byte tagged Value, VM heap + profile-specific gc-arena sche
                   dispatch, per-instruction fuel + recursion cap, stackless trampoline, coroutines, and the
                   math/table/string/bit32/base/coroutine/buffer/vector/utf8/string.pack standard-library surface
 rustia            embedding API: koto-shaped Vm facade + typed FromRustia/IntoRustia core + owned-value serde;
-                  lifetime-free owned handles (the 'gc brand never leaks to the embedder); live zero-copy serde
-                  remains a planned advanced layer
+                  VM/epoch-rooted live Value/Table/Function handles preserve graph identity without leaking the
+                  'gc brand; constructors, chunk loading, and live serde remain planned advanced ergonomics
 rustia-cli        REPL / runner
 ```
 
@@ -332,8 +332,8 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
   standalone library surface are already conformance-backed. The remaining release-critical work is complete
   object/program reclamation and reuse, memory accounting/quotas/OOM behavior, deterministic reset semantics,
   host-provided output/time services plus honest VM memory telemetry, host-owned `require` resolution/cache,
-  transactional guest-module install/hot-reload failure semantics, rich/live value
-  interop, diagnostic and semantic-tail hardening, realistic mixed-heap native+wasm evidence, the full
+  transactional guest-module install/hot-reload failure semantics, live-object constructors/serde,
+  diagnostic and semantic-tail hardening, realistic mixed-heap native+wasm evidence, the full
   cross-target correctness/golden matrix, API/semver stabilization, and crate publication. The gradual
   typechecker/LSP is a separate later track, not a
   runtime-release gate. Keep the public codebase clean (no grabby-specific code) under the settled dual

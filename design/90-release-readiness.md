@@ -17,15 +17,17 @@ general embedding API must remain available to those users.
    boundaries. Exact reserved telemetry remains on demand, and opt-in peak
    tracking still samples it deliberately. The per-VM logical-live quota,
    atomic/catchable OOM path, VM-owned live/reserved/peak telemetry, epoch-safe
-   decision-reset ABI, and focused 600-decision plateau are implemented.
-2. Complete the release value and live-handle surface for binary strings,
-   buffers, vectors, non-scalar/identity keys, opaque identity-safe userdata
-   handles, shared/cyclic table graphs, VM/epoch-safe live `Value`/`Table`/
-   `Function` handles, globals/value constructors, a composable chunk builder,
-   and a lifetime-safe live serde layer. Preserve the small typed facade as the
-   simple layer. Full mlua-style `UserData`/`Scope`, async, and an mlua
-   migration shim remain later optional layers unless a concrete release
-   consumer promotes them.
+   decision-reset ABI, quota-checked atomic retained-root admission, and
+   focused 600-decision plateau are implemented.
+2. Complete the release value ergonomics on the implemented VM/epoch-safe,
+   graph-preserving rooted `Value`/`Table`/`Function` spine. It already covers
+   binary strings, buffers, vectors, non-scalar/identity keys, shared/cyclic
+   tables, mutation, raw equality, and ordinary or typed invocation exchange.
+   Add globals/value/function constructors, a composable chunk builder, live
+   serde, and a concrete opaque-userdata registration contract. Preserve the
+   small typed facade as the simple layer. Full mlua-style `UserData`/`Scope`,
+   async, and an mlua migration shim remain later optional layers unless a
+   concrete release consumer promotes them.
 3. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
    transactional extension/module/hot-reload failure behavior, and
    differential/fuzz coverage before stabilizing and publishing the API.
@@ -158,6 +160,10 @@ part of the semantic-tail/failure-semantics blocker.
   functions, and hot reload.
 - Owned snapshots expose serde deserialization at the `OwnedValue` level plus
   string-keyed field and array-slot helpers on `OwnedTable`.
+- Rooted live `Value`, `Table`, and `Function` handles preserve VM identity and
+  decision-epoch safety across binary strings, buffers, vectors, rich keys,
+  shared/cyclic tables, mutation, raw equality, and ordinary or typed
+  invocation exchange. Snapshot conversion stays explicit and reports cycles.
 - The first public koto-to-rustia migration guide is tracked in
   [`76-koto-migration.md`](76-koto-migration.md).
 - Current examples:
@@ -169,6 +175,8 @@ part of the semantic-tail/failure-semantics blocker.
   - `crates/rustia/examples/typed_invocation.rs` covers `HostSchema`, a
     block-local `HostContext`, capability views, namespaced typed functions,
     shared limits, dense records, usage receipts, and `invoke_into`.
+  - `crates/rustia/examples/live_values.rs` covers graph-preserving live table
+    access, mutation, raw identity, and live function arguments/results.
 - Retained `Function` handles and `Exports` expose install generations, and
   failed hot reloads leave the current generation unchanged. `is_current()` /
   `ensure_current()` expose freshness checks, while `Function::call_current()`
@@ -202,9 +210,10 @@ part of the semantic-tail/failure-semantics blocker.
   boundary yields, missing dispatch, and host panic uncatchable by guest
   `pcall`; record savepoints and outer rollback are tested, and a host panic
   poisons the VM until `reset_decision()`.
-- Module resolution/cache, rich value interop, error-phase parity, and public
-  stack/source diagnostics satisfy their focused tests; failed extension/module
-  installation and runtime-failing reload cannot leave undocumented partial state.
+- Module resolution/cache, the remaining live-value ergonomics/serde, error-phase
+  parity, and public stack/source diagnostics satisfy their focused tests;
+  failed extension/module installation and runtime-failing reload cannot leave
+  undocumented partial state.
 - The value-layout and dispatch wasm pre-lock gate is closed with retained V8,
   JavaScriptCore-family, and SpiderMonkey evidence; recurring Node/V8 evidence
   remains current.

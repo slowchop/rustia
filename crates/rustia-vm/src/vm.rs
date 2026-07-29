@@ -2949,22 +2949,38 @@ impl Vm {
     /// Hardened-leaf roots are decision-local. Retaining a value before the
     /// first hardened environment seal causes that seal to fail; the host must
     /// drop the handle and retry after making the heap append-only.
-    pub fn retain_value(&mut self, value: Value) -> RetainedValue {
-        let (id, decision_epoch) = {
-            let mut roots = self.external_roots.borrow_mut();
+    ///
+    /// Root-registry admission participates in the VM logical-live quota and
+    /// returns [`ErrorKind::OutOfMemory`] without installing a partial root.
+    pub fn retain_value(&mut self, value: Value) -> Result<RetainedValue> {
+        self.retain_values(std::slice::from_ref(&value))
+            .map(|mut values| values.pop().expect("one retained input"))
+    }
+
+    /// Retains several values as one quota-checked admission.
+    ///
+    /// Every input remains a transient collector root if quota pressure forces
+    /// collection. Either all registry nodes are installed or none are.
+    pub fn retain_values(&mut self, values: &[Value]) -> Result<Vec<RetainedValue>> {
+        let additional_live_bytes = external_root_node_live_bytes().saturating_mul(values.len());
+        self.ensure_memory_growth(additional_live_bytes, values)?;
+        let mut retained = Vec::with_capacity(values.len());
+        let mut roots = self.external_roots.borrow_mut();
+        let decision_epoch = roots.decision_epoch;
+        for &value in values {
             let id = roots.next_id;
             roots.next_id = roots.next_id.wrapping_add(1);
             roots.values.insert(id, value);
-            (id, roots.decision_epoch)
-        };
-        RetainedValue {
-            value,
-            lease: Rc::new(ExternalRootLease {
-                id,
-                decision_epoch,
-                registry: Rc::downgrade(&self.external_roots),
-            }),
+            retained.push(RetainedValue {
+                value,
+                lease: Rc::new(ExternalRootLease {
+                    id,
+                    decision_epoch,
+                    registry: Rc::downgrade(&self.external_roots),
+                }),
+            });
         }
+        Ok(retained)
     }
 
     #[inline]
@@ -7188,6 +7204,38 @@ impl Vm {
         })
     }
 
+    /// Returns a copy of a buffer value's bytes, or `None` for another value kind.
+    #[doc(hidden)]
+    pub fn buffer_value_bytes(&mut self, value: Value) -> Result<Option<Vec<u8>>> {
+        let Some(buffer) = value.as_buffer() else {
+            return Ok(None);
+        };
+        let len = self.heap.buffer_len(buffer).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "buffer handle is missing",
+            })
+        })?;
+        self.heap
+            .buffer_read(buffer, 0, len)
+            .map(Some)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "buffer handle is missing",
+                })
+            })
+    }
+
+    /// Returns the canonical three-component vector payload, or `None` for
+    /// another value kind.
+    #[doc(hidden)]
+    pub fn vector_value_components(&mut self, value: Value) -> Result<Option<[f32; 3]>> {
+        if value.kind() != ValueKind::Vector {
+            return Ok(None);
+        }
+        let vector = self.vector_data(value)?;
+        Ok(Some([vector.x(), vector.y(), vector.z()]))
+    }
+
     fn coerce_to_string(&mut self, registers: &[Value], register: u8) -> Result<Vec<u8>> {
         let value = get_register(registers, register)?;
         self.value_to_string(value)
@@ -7570,7 +7618,8 @@ impl Vm {
         self.raw_equal_values(lhs, rhs)
     }
 
-    fn raw_equal_values(&mut self, lhs: Value, rhs: Value) -> Result<bool> {
+    #[doc(hidden)]
+    pub fn raw_equal_values(&mut self, lhs: Value, rhs: Value) -> Result<bool> {
         if lhs.kind() == ValueKind::String || rhs.kind() == ValueKind::String {
             if lhs.kind() != ValueKind::String || rhs.kind() != ValueKind::String {
                 return Ok(false);
@@ -18499,7 +18548,7 @@ mod hardened_leaf_validation_tests {
     fn hardened_seal_rejects_preseal_retained_values_and_recovers() {
         let mut vm = Vm::with_settings(Profile::DeterministicSim, hardened_settings());
         let table = vm.empty_table();
-        let retained = vm.retain_value(table);
+        let retained = vm.retain_value(table).unwrap();
 
         let error = vm
             .reset_decision()
@@ -21056,11 +21105,10 @@ fn add_vm_cached_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
 
 fn add_vm_dynamic_map_memory(vm: &Vm, usage: &mut MemoryUsage) {
     let roots = vm.external_roots.borrow();
-    let root_node_bytes = roots.values.len().saturating_mul(
-        size_of::<u64>()
-            .saturating_add(size_of::<Value>())
-            .saturating_add(size_of::<usize>().saturating_mul(4)),
-    );
+    let root_node_bytes = roots
+        .values
+        .len()
+        .saturating_mul(external_root_node_live_bytes());
     usage.add(root_node_bytes, root_node_bytes);
     let coverage_node_bytes = vm.coverage_hits.len().saturating_mul(
         size_of::<CoverageKey>()
@@ -21068,6 +21116,12 @@ fn add_vm_dynamic_map_memory(vm: &Vm, usage: &mut MemoryUsage) {
             .saturating_add(size_of::<usize>().saturating_mul(4)),
     );
     usage.add(coverage_node_bytes, coverage_node_bytes);
+}
+
+fn external_root_node_live_bytes() -> usize {
+    size_of::<u64>()
+        .saturating_add(size_of::<Value>())
+        .saturating_add(size_of::<usize>().saturating_mul(4))
 }
 
 fn call_stack_frame_live_bytes(frame: &CallStackFrame) -> usize {
@@ -27029,7 +27083,7 @@ mod inline_cache_tests {
             .heap
             .alloc_function(Some(first_program), 0, Vec::new(), vm.globals)
             .expect("program-rooting function");
-        let retained_function = vm.retain_value(Value::function(retained_function));
+        let retained_function = vm.retain_value(Value::function(retained_function)).unwrap();
 
         let dead = vm
             .heap
@@ -27067,7 +27121,7 @@ mod inline_cache_tests {
             .heap
             .alloc_function(Some(old_program), 0, Vec::new(), vm.globals)
             .expect("first function");
-        let old_root = vm.retain_value(Value::function(old_function));
+        let old_root = vm.retain_value(Value::function(old_function)).unwrap();
 
         vm.collect_garbage();
         assert!(vm.dynamic_programs.get(old_program).is_some());
@@ -27165,7 +27219,7 @@ mod inline_cache_tests {
         assert_eq!(baseline.peak_reserved_bytes, Some(baseline.reserved_bytes));
 
         let table = vm.heap.alloc_filled_array_table(8_192, Value::nil());
-        let root = vm.retain_value(Value::table(table));
+        let root = vm.retain_value(Value::table(table)).unwrap();
         let allocated = vm.memory_stats();
         assert!(allocated.live_bytes >= baseline.live_bytes + 8_192 * size_of::<Value>());
         assert!(allocated.reserved_bytes >= allocated.live_bytes);
@@ -27329,7 +27383,7 @@ mod inline_cache_tests {
             .heap
             .alloc_userdata(None)
             .expect("dead coroutine userdata");
-        let live_root = vm.retain_value(Value::userdata(live_handle));
+        let live_root = vm.retain_value(Value::userdata(live_handle)).unwrap();
         for handle in [live_handle, dead_handle] {
             vm.coroutines.push(CoroutineState {
                 handle,
@@ -28532,6 +28586,64 @@ mod inline_cache_tests {
     }
 
     #[test]
+    fn retained_root_admission_is_quota_checked_and_atomic() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let first = vm.empty_table();
+        let second = vm.empty_table();
+        let before = vm.current_live_bytes();
+        let root_bytes = external_root_node_live_bytes();
+        vm.settings.memory_limit_bytes = Some(
+            before
+                .saturating_add(root_bytes.saturating_mul(2))
+                .saturating_sub(1),
+        );
+
+        let error = match vm.retain_values(&[first, second]) {
+            Ok(_) => panic!("batch root admission above the logical-live quota must fail"),
+            Err(error) => error,
+        };
+        assert!(matches!(error.kind, ErrorKind::OutOfMemory));
+        assert!(vm.external_roots.borrow().values.is_empty());
+        assert_eq!(vm.current_live_bytes(), before);
+
+        vm.settings.memory_limit_bytes = Some(before.saturating_add(root_bytes.saturating_mul(2)));
+        let retained = vm.retain_values(&[first, second]).unwrap();
+        assert_eq!(
+            vm.current_live_bytes(),
+            before.saturating_add(root_bytes.saturating_mul(2))
+        );
+        drop(retained);
+        assert_eq!(vm.current_live_bytes(), before);
+    }
+
+    #[test]
+    fn batch_root_admission_preserves_every_transient_across_quota_collection() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let first = vm.empty_table();
+        let second = vm.empty_table();
+        let live_before_garbage = vm.current_live_bytes();
+        for _ in 0..64 {
+            let _ = vm.empty_table();
+        }
+        let with_garbage = vm.current_live_bytes();
+        assert!(with_garbage > live_before_garbage);
+        let reclaimable = with_garbage.saturating_sub(live_before_garbage);
+        vm.settings.memory_limit_bytes = Some(
+            live_before_garbage
+                .saturating_add(external_root_node_live_bytes().saturating_mul(2))
+                .saturating_add(reclaimable / 2),
+        );
+
+        let retained = vm.retain_values(&[first, second]).unwrap();
+        assert_eq!(retained[0].value(&vm).unwrap().as_table(), first.as_table());
+        assert_eq!(
+            retained[1].value(&vm).unwrap().as_table(),
+            second.as_table()
+        );
+        assert!(vm.current_live_bytes() <= vm.settings.memory_limit_bytes.unwrap());
+    }
+
+    #[test]
     fn raw_string_equality_handles_atom_inline_and_packed_inline_paths() {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let inline = vm.heap.intern_string_value_bytes(b"same\0bytes");
@@ -28599,7 +28711,7 @@ mod inline_cache_tests {
         vm.set_global_value("survives", Value::number(42.0))
             .unwrap();
         let table = vm.empty_table();
-        let retained = vm.retain_value(table);
+        let retained = vm.retain_value(table).unwrap();
 
         let error = vm.reset_decision().unwrap_err();
 

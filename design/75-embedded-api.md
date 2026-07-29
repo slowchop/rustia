@@ -1,6 +1,6 @@
 # rustia - embedded API goal and plan
 
-> **Status: [TYPED INVOCATION + DECISION RESET IMPLEMENTED - advanced interop pending] (updated 2026-07-29).**
+> **Status: [TYPED INVOCATION + LIVE-HANDLE SPINE IMPLEMENTED - advanced ergonomics/serde pending] (updated 2026-07-29).**
 > This records the public Rust embedding API direction and its honest implementation boundary after comparing
 > rustia's constraints with current Rust scripting/runtime APIs. It refines the locked
 > architecture axis H in [`30-architecture.md`](30-architecture.md) and the grabby bridge contract in
@@ -36,9 +36,13 @@ Object/program reclamation, real VM-owned live/reserved/peak telemetry, and the 
 quota/atomic OOM path are now implemented and validated by the exact-commit `safe-memory-588b541` native Linode
 cohort plus its wasm32 512 KiB quota/recovery probe. The next release-critical slice is not more facade
 decoration: the epoch-safe decision reset and host-owned `require` resolver/cache are now implemented; remaining
-work is broader mixed-heap pressure evidence, transactional installation/reload failures, rich graph-preserving values, and
-live zero-copy serde. The consumer-facing plan is an additive advanced live-object layer, not replacement of
-the existing small typed facade. The ordered expansion is recorded in [Build Order](#build-order).
+work is broader mixed-heap pressure evidence, transactional installation/reload failures, familiar live-object
+constructors/chunk loading, and live serde. The graph-preserving advanced spine is now implemented:
+VM/epoch-safe rooted `Value`/`Table`/`Function` handles preserve binary strings, buffers, vectors, rich keys,
+shared/cyclic table identity, mutation, raw equality, and ordinary or typed invocation exchange without
+exposing collector lifetimes. `OwnedValue` remains the small acyclic snapshot layer. This advanced layer is
+additive, not a replacement for the existing typed facade. The ordered expansion is recorded in
+[Build Order](#build-order).
 
 ## Non-Negotiable Requirements
 
@@ -88,11 +92,13 @@ one engine:
 1. **Typed command/data facade (existing and retained).** `insert_global`, `add_fn`, `run<T>`, `Exports`,
    owned serde, extensions, fuel/capabilities, and hot reload remain the shortest route for deterministic
    decisions, configuration, and simple applications.
-2. **Advanced live-object API (planned after safe lifetime foundations).** Identity-safe live `Value` and
-   `Table` handles, the existing rooted `Function` evolved into the same model, a public coroutine `Thread`
-   handle when a real host-side scheduling caller exists, `globals()`, table/function constructors, a
-   composable chunk builder, per-call host context, modules, rich values, and later optional
-   `UserData`/`Scope` and async.
+2. **Advanced live-object API (spine implemented; ergonomics/integration continuing).** Identity-safe live
+   `Value` and `Table` handles now share the rooted VM/epoch model with `Function`; `run_value`, live table
+   lookup/mutation/iteration, live function arguments/results, typed-invocation exchange, binary
+   string/buffer/vector access, rich keys, and raw identity equality are implemented. A public coroutine
+   `Thread` handle remains conditional on a real host-side scheduling caller. Still planned: `globals()`,
+   table/function constructors, a composable chunk builder, live serde, and later optional `UserData`/`Scope`
+   and async.
 
 The advanced layer is not a raw Luau C stack API and must not expose internal GC lifetimes. Handles belong to
 one VM, are real GC roots while alive, fail safely when used with another VM, and carry an epoch contract:
@@ -473,7 +479,7 @@ store authoritative state on the GC heap instead of in captured host slots.
 1. ✅ `OwnedValue` plus `FromRustia` / `IntoRustia` and typed/nested `OwnedTable` helpers — first slice landed.
 2. ✅ typed `add_fn` and `Function::call` — landed through tuple arity 8.
 3. ✅ returned-table `Exports` facade — landed with generation-aware accessors.
-4. ✅ owned serde deserialize/serialize — landed; rich graphs and live zero-copy values remain.
+4. ✅ owned serde deserialize/serialize — landed; live serde remains.
 5. ✅ extension/linker with capability and fuel metadata — first slice landed.
 6. ✅ hot reload and diagnostics — first slice landed; reclamation and stack traces remain.
 7. ✅ early declarative macro sugar — landed; broader attribute/codegen expansion is deferred.
@@ -494,10 +500,11 @@ store authoritative state on the GC heap instead of in captured host slots.
 12. ✅ hardened stateless action leaves — deterministic allowlisted/frozen guest surface, mandatory memory
     limit, bytecode policy validation, direct `CompiledEntry` invocation, failure-safe lifecycle helper,
     immutable-prefix decision reset, and native/wasm32 exact-plateau probes.
-13. ⏳ **Add the advanced live-handle spine:** identity-safe live `Value` and `Table` handles; evolve the
-    existing rooted `Function` into the same VM/epoch model; add a public `Thread` handle only with a concrete
-    host-side scheduling caller. Preserve binary strings, buffers, vectors, rich keys, userdata identity, and
-    shared/cyclic table graphs without exposing GC lifetimes.
+13. ✅ **Add the advanced live-handle spine:** identity-safe live `Value` and `Table` handles now share the
+    existing rooted `Function` VM/epoch model. `run_value`, live lookup/mutation/iteration, live function
+    arguments/results, typed-invocation exchange, binary strings, buffers, vectors, rich keys, userdata
+    identity, raw equality, and shared/cyclic table graphs do not expose GC lifetimes. A public `Thread` handle
+    remains intentionally absent until a concrete host-side scheduling caller defines its contract.
 14. ⏳ **Add the familiar ergonomic entry points:** `globals()`, `create_table()`, `create_function()`, and a
     composable `load(source).name(...).environment(...).eval()/exec()` chunk builder. Keep `run<T>()`,
     `add_fn`, and the source-named helpers as concise facade sugar rather than breaking them.

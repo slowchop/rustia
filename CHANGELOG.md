@@ -8,6 +8,18 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- Rooted public `Value` and `Table` handles extend the existing retained
+  `Function` model into a graph-preserving live embedding layer. They carry
+  VM identity and decision epoch checks; expose binary strings, buffers,
+  vectors, rich table keys, mutation, iteration, and raw equality; preserve
+  shared/cyclic tables without leaking collector lifetimes; and cross both
+  ordinary and typed invocations as live function arguments/results.
+  `OwnedValue` remains the explicit acyclic snapshot layer, and snapshotting a
+  cycle reports an error instead of silently losing identity. Creating a root
+  is quota-checked and fails atomically when its registry node would exceed the
+  VM logical-live memory limit; the low-level `Vm::retain_value` is therefore
+  fallible, while `Vm::retain_values` admits multi-result batches atomically
+  and keeps every candidate live across a pressure collection.
 - `ServiceModuleResolver` and `ModuleSource` add host-owned script-visible
   `require` without an ambient filesystem dependency. Resolved canonical
   identities drive an execute-once per-decision cache; nested referrers, cycle
