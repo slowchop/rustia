@@ -8,8 +8,10 @@
 > multipliers are not current product claims. Bounded object/program lifetimes, quotas/OOM, and deterministic
 > reset are implemented, as is the typed schema/context invocation with bounded record transactions. The
 > hardened stateless action-leaf guest surface, direct compiled-entry path, and graph-preserving rooted live
-> `Value`/`Table`/`Function` spine are also implemented. The next release gates are broader pressure evidence,
-> remaining live-object ergonomics/serde, and transactional failure semantics — see `CURRENT.md`.
+> `Value`/`Table`/`Function` spine are also implemented. Stable preflight now mutates the frontend and all 131
+> VM opcodes under bounded resources, while hosted CI executes the wasm adapters on Node/V8. The next release
+> gates are broader pressure evidence, remaining live-object ergonomics/serde, transactional failure semantics,
+> longer differential/fuzz campaigns, and real-host/browser goldens — see `CURRENT.md`.
 
 **rustia** = a fast, low-memory, wasm-friendly **Luau interpreter in Rust** with a great embedding API,
 built to replace **koto** in `../grabby-aliens/`. Design-first: we explore ~5 directions per decision,

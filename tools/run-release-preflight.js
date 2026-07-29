@@ -61,6 +61,17 @@ node("tools/check-current-report-summary.js");
 node("bench/render-current-results.js", "--check");
 node("bench/render-claims.js", "--check");
 
+run("cargo", ["fmt", "--all", "--manifest-path", "fuzz/Cargo.toml", "--", "--check"]);
+run("cargo", [
+  "clippy",
+  "--locked",
+  "--manifest-path",
+  "fuzz/Cargo.toml",
+  "--all-targets",
+  "--",
+  "-D",
+  "warnings",
+]);
 run("cargo", ["test", "--locked", "--manifest-path", "fuzz/Cargo.toml"]);
 run("cargo", ["test", "--locked", "-p", "rustia", "--examples", "--no-run"]);
 run("cargo", ["test", "--locked", "--workspace"]);

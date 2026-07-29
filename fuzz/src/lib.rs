@@ -12,6 +12,7 @@ pub const MAX_VM_INPUT_BYTES: usize = VM_INSTRUCTION_BYTES * MAX_VM_INSTRUCTIONS
 const VM_REGISTER_COUNT: u8 = 16;
 const VM_FUEL: u64 = 4_096;
 const VM_RECURSION_LIMIT: usize = 32;
+const VM_MEMORY_LIMIT_BYTES: usize = 512 * 1024;
 
 pub fn fuzz_lexer(data: &[u8]) -> bool {
     if data.len() > MAX_LEXER_INPUT_BYTES {
@@ -53,6 +54,7 @@ pub fn fuzz_vm(data: &[u8]) -> bool {
     let settings = VmSettings {
         initial_fuel: Some(VM_FUEL),
         recursion_limit: VM_RECURSION_LIMIT,
+        memory_limit_bytes: Some(VM_MEMORY_LIMIT_BYTES),
         ..VmSettings::default()
     };
     let mut vm = Vm::with_settings(profile, settings);
@@ -133,8 +135,12 @@ fn byte(bytes: &[u8], index: usize) -> u8 {
     bytes.get(index).copied().unwrap_or_default()
 }
 
-// This set intentionally excludes VM operations that can invoke arbitrary standard-library
-// allocation sizes. Source-level coverage can be added once the VM has a hard memory quota.
+pub fn fuzzed_vm_opcodes() -> &'static [Opcode] {
+    VM_OPCODES
+}
+
+// Every production opcode is safe to include now that input length, instruction
+// count, fuel, recursion, and VM-owned logical-live memory are all bounded.
 const VM_OPCODES: &[Opcode] = &[
     Opcode::Halt,
     Opcode::LoadConst,
@@ -160,6 +166,7 @@ const VM_OPCODES: &[Opcode] = &[
     Opcode::GreaterEqual,
     Opcode::FloorDiv,
     Opcode::Pow,
+    Opcode::Concat,
     Opcode::ForPrep,
     Opcode::ForLoop,
     Opcode::ToNumber,
@@ -171,10 +178,23 @@ const VM_OPCODES: &[Opcode] = &[
     Opcode::Len,
     Opcode::GetIndex,
     Opcode::SetIndex,
+    Opcode::TableConcat,
+    Opcode::ConcatArgs,
     Opcode::ToString,
     Opcode::NextKey,
     Opcode::TypeOf,
     Opcode::Abs,
+    Opcode::StringSub,
+    Opcode::StringLen,
+    Opcode::StringByte,
+    Opcode::StringUpper,
+    Opcode::StringLower,
+    Opcode::StringReverse,
+    Opcode::StringRep,
+    Opcode::StringFind,
+    Opcode::StringSplit,
+    Opcode::TableGetN,
+    Opcode::TableMaxN,
     Opcode::MathFloor,
     Opcode::MathCeil,
     Opcode::MathRound,
@@ -210,18 +230,46 @@ const VM_OPCODES: &[Opcode] = &[
     Opcode::RawSet,
     Opcode::RawLen,
     Opcode::TableFind,
+    Opcode::TableCreate,
+    Opcode::TableInsert,
+    Opcode::TableRemove,
     Opcode::LoadFunction,
     Opcode::Call,
     Opcode::LoadCurrentFunction,
+    Opcode::GetGlobal,
+    Opcode::SetGlobal,
     Opcode::GetLocalCell,
     Opcode::SetLocalCell,
     Opcode::GetUpvalue,
     Opcode::SetUpvalue,
     Opcode::ClearLocalCell,
+    Opcode::CallMulti,
+    Opcode::ReturnCall,
+    Opcode::CallExpand,
+    Opcode::LoadVarargs,
+    Opcode::ReturnVarargs,
+    Opcode::CallVarargs,
+    Opcode::ReturnCallVarargs,
+    Opcode::AppendVarargs,
+    Opcode::ReturnCallExpand,
+    Opcode::CallExpand2,
+    Opcode::CallExpandVarargs,
+    Opcode::ReturnCallExpand2,
+    Opcode::ReturnCallExpandVarargs,
+    Opcode::AppendCall,
+    Opcode::AppendCallVarargs,
+    Opcode::AppendCallExpand,
+    Opcode::ReturnCallExpand2Varargs,
+    Opcode::GenericCallPrep,
+    Opcode::GenericCallLoop,
+    Opcode::GeneralizedIterPrep,
+    Opcode::GeneralizedIterLoop,
     Opcode::LoadConstWide,
+    Opcode::CallExpand3,
     Opcode::CheckMethod,
     Opcode::CoerceForNumber,
     Opcode::GetImport,
+    Opcode::FastCall,
     Opcode::GetTableKs,
     Opcode::SetTableKs,
     Opcode::NameCall,

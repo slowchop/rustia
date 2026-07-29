@@ -8,6 +8,17 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- The stable-toolchain fuzz smoke gate now performs deterministic 2,048-case
+  frontend and 2,048-case VM mutation sweeps. The VM decoder covers every one
+  of the 131 production opcodes exactly once under bounded input,
+  instruction fuel, recursion, and a 512 KiB logical-live quota; the separate
+  `cargo-fuzz` targets remain available for longer nightly
+  coverage-guided campaigns.
+- Hosted CI now executes both bare/no-default-feature and default web-live
+  `wasm32-unknown-unknown` adapter tests through the matching
+  `wasm-bindgen-test-runner` on Node 22/V8, in addition to cross-compiling the
+  declared target matrix. This is real wasm runtime coverage, but does not
+  replace the still-open Firefox/Safari browser golden gate.
 - Rooted public `Value` and `Table` handles extend the existing retained
   `Function` model into a graph-preserving live embedding layer. They carry
   VM identity and decision epoch checks; expose binary strings, buffers,
@@ -354,9 +365,15 @@ Current unpublished workspace version: `0.0.1`.
   result freshness, and workspace tests.
 - Release preflight and hosted CI now enforce formatting plus strict Clippy on
   the pinned Rust toolchain.
+- The separate fuzz workspace now receives pinned-toolchain formatting,
+  strict Clippy, deterministic mutation sweeps, and smoke tests during release
+  preflight.
 - Hosted CI now cross-compiles the portable engine library for the declared
   macOS, Linux, Windows, iOS, Android, and browser-Wasm triples; real-host and
   browser correctness goldens remain a separate release gate.
+- GitHub-hosted workflows pin `actions/checkout` 7.0.1 and
+  `actions/setup-node` 7.0.0 by full commit SHA, removing the deprecated
+  Node-20 action runtime while retaining explicit Node 22 project execution.
 - The hosted release-preflight checkout now includes repository history needed
   by frozen benchmark-provenance self-tests.
 - Crate publishability blockers are generated from cargo metadata and package

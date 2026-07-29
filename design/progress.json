@@ -106,6 +106,18 @@
           "Node/V8"
         ],
         "note": "The recurring dispatch check runs on Node/V8; historical cross-engine evidence also found call_ref slower than br_table."
+      },
+      "bounded_fuzz": {
+        "frontend_mutations": 2048,
+        "vm_mutations": 2048,
+        "vm_opcodes": 131,
+        "vm_limits": "2 KiB input, 4,096 fuel, recursion depth 32, and 512 KiB logical-live memory",
+        "toolchain": "pinned stable release toolchain; longer coverage-guided cargo-fuzz campaigns remain separate"
+      },
+      "wasm_runtime_ci": {
+        "runtime": "Node 22/V8",
+        "tests": "bare no-default-feature host adapters plus default web-live adapters",
+        "runner": "wasm-bindgen-test-runner 0.2.126"
       }
     }
   },
@@ -251,10 +263,10 @@
         },
         {
           "name": "Compiler",
-          "complete": 72,
-          "confidence": 75,
-          "state": "The production compiler emits bytecode for the pinned corpus and discovers captured bindings before final lowering, enabling direct immutable captures while preserving mutable loop/backedge semantics.",
-          "future_plan": "Add differential/fuzz coverage for parser/compiler and runtime-error-phase parity, then harden diagnostics, O2 passes, superinstructions, and optimization boundaries."
+          "complete": 74,
+          "confidence": 78,
+          "state": "The production compiler emits bytecode for the pinned corpus and discovers captured bindings before final lowering, enabling direct immutable captures while preserving mutable loop/backedge semantics. Stable preflight now runs a deterministic 2,048-case mutated frontend sweep in addition to the seed corpus and dedicated coverage-guided targets.",
+          "future_plan": "Add Luau-oracle differential cases and longer coverage-guided campaigns for runtime-error-phase parity, then harden diagnostics, O2 passes, superinstructions, and optimization boundaries."
         }
       ]
     },
@@ -345,9 +357,9 @@
         },
         {
           "name": "Full target correctness and golden matrix",
-          "complete": 65,
-          "confidence": 90,
-          "state": "Linux x86_64, macOS arm64, and wasm/V8 golden evidence exists, with retained JavaScriptCore-family and SpiderMonkey shell portability measurements. Hosted CI cross-compiles the portable engine library for the full declared native triple set plus wasm32. Real Intel Mac, Windows, Linux arm64, mobile-native, Firefox, and Safari execution/goldens are not all continuously covered.",
+          "complete": 68,
+          "confidence": 92,
+          "state": "Linux x86_64, macOS arm64, and wasm/V8 golden evidence exists, with retained JavaScriptCore-family and SpiderMonkey shell portability measurements. Hosted CI cross-compiles the portable engine library for the full declared native triple set plus wasm32 and executes bare plus default web-live wasm adapter tests on Node 22/V8. Real Intel Mac, Windows, Linux arm64, mobile-native, Firefox, and Safari execution/goldens are not all continuously covered.",
           "future_plan": "Execute reproducible cross-target goldens on real hosts and browsers for the full design/00-constraints.md matrix without mixing non-dedicated macOS/Windows timings into benchmark history."
         }
       ]
@@ -493,9 +505,9 @@
         },
         {
           "name": "Native/wasm matrix",
-          "complete": 78,
-          "confidence": 75,
-          "state": "A coherent 12-adapter-family native Linux baseline plus a verified mlua/Luau JIT mode is recorded; recurring wasm target results cover rustia+koto+rhai and br_table/call_ref dispatch on Node/V8, while the accepted four-runtime matrix remains archived as historical portability evidence.",
+          "complete": 80,
+          "confidence": 80,
+          "state": "A coherent 12-adapter-family native Linux baseline plus a verified mlua/Luau JIT mode is recorded; recurring wasm target results cover rustia+koto+rhai and br_table/call_ref dispatch on Node/V8, hosted CI executes the rustia wasm host adapters on Node 22/V8, and the accepted four-runtime matrix remains archived as historical portability evidence.",
           "future_plan": "Broaden public baselines and keep result history fresh across runtime updates."
         }
       ]
@@ -505,9 +517,9 @@
       "entries": [
         {
           "name": "Workspace tests and release preflight",
-          "complete": 85,
-          "confidence": 75,
-          "state": "Production crates have meaningful unit and conformance tests; just release-preflight composes release artifact checks, crate metadata checks, workflow policy checks, generated leaf package dry-run checks, explicit public-example compilation, and cargo test --workspace; hosted CI mirrors that gate.",
+          "complete": 88,
+          "confidence": 82,
+          "state": "Production crates have meaningful unit and conformance tests; just release-preflight composes release artifact checks, crate metadata checks, workflow policy checks, generated leaf package dry-run checks, explicit public-example compilation, strict formatting/linting plus deterministic mutation tests for the separate fuzz workspace, and cargo test --workspace; hosted CI mirrors that gate and adds real Node/V8 wasm adapter execution.",
           "future_plan": "Keep expanding tests with new runtime/API work and keep CI aligned with release-preflight."
         },
         {

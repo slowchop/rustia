@@ -513,7 +513,7 @@
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 93%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 78%</a><a href="#vm-runtime">VM/runtime 80%</a><a href="#determinism">Determinism 83%</a><a href="#embedded-api">Embedded API 79%</a><a href="#benchmarks">Benchmarks 88%</a><a href="#wasm-perf">Wasm/perf 62%</a><a href="#tooling">Tooling 67%</a><a href="#packaging">Packaging 62%</a>
+      <a href="#design">Design 93%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 79%</a><a href="#vm-runtime">VM/runtime 80%</a><a href="#determinism">Determinism 84%</a><a href="#embedded-api">Embedded API 79%</a><a href="#benchmarks">Benchmarks 88%</a><a href="#wasm-perf">Wasm/perf 63%</a><a href="#tooling">Tooling 68%</a><a href="#packaging">Packaging 62%</a>
     </nav>
 
 
@@ -743,8 +743,8 @@
           <p>4 tracked items</p>
         </div>
         <div class="area-score">
-          <span>78% avg complete</span>
-          <span>71% avg confidence</span>
+          <span>79% avg complete</span>
+          <span>72% avg confidence</span>
         </div>
       </div>
       <div class="entries">
@@ -810,19 +810,19 @@
       <div class="entry-top">
         <div>
           <h4>Compiler</h4>
-          <p>The production compiler emits bytecode for the pinned corpus and discovers captured bindings before final lowering, enabling direct immutable captures while preserving mutable loop/backedge semantics.</p>
+          <p>The production compiler emits bytecode for the pinned corpus and discovers captured bindings before final lowering, enabling direct immutable captures while preserving mutable loop/backedge semantics. Stable preflight now runs a deterministic 2,048-case mutated frontend sweep in addition to the seed corpus and dedicated coverage-guided targets.</p>
         </div>
         <div class="entry-score">
-          <strong>72%</strong>
-          <span class="chip medium">75% confidence</span>
+          <strong>74%</strong>
+          <span class="chip medium">78% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Compiler: 72% complete">
-      <div class="meter-fill" style="width: 72%"></div>
+    <div class="meter" aria-label="Compiler: 74% complete">
+      <div class="meter-fill" style="width: 74%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add differential/fuzz coverage for parser/compiler and runtime-error-phase parity, then harden diagnostics, O2 passes, superinstructions, and optimization boundaries.</p>
+      <p class="plan"><strong>Future plan:</strong> Add Luau-oracle differential cases and longer coverage-guided campaigns for runtime-error-phase parity, then harden diagnostics, O2 passes, superinstructions, and optimization boundaries.</p>
     </article>
 
       </div>
@@ -984,7 +984,7 @@
           <p>5 tracked items</p>
         </div>
         <div class="area-score">
-          <span>83% avg complete</span>
+          <span>84% avg complete</span>
           <span>85% avg confidence</span>
         </div>
       </div>
@@ -1070,16 +1070,16 @@
       <div class="entry-top">
         <div>
           <h4>Full target correctness and golden matrix</h4>
-          <p>Linux x86_64, macOS arm64, and wasm/V8 golden evidence exists, with retained JavaScriptCore-family and SpiderMonkey shell portability measurements. Hosted CI cross-compiles the portable engine library for the full declared native triple set plus wasm32. Real Intel Mac, Windows, Linux arm64, mobile-native, Firefox, and Safari execution/goldens are not all continuously covered.</p>
+          <p>Linux x86_64, macOS arm64, and wasm/V8 golden evidence exists, with retained JavaScriptCore-family and SpiderMonkey shell portability measurements. Hosted CI cross-compiles the portable engine library for the full declared native triple set plus wasm32 and executes bare plus default web-live wasm adapter tests on Node 22/V8. Real Intel Mac, Windows, Linux arm64, mobile-native, Firefox, and Safari execution/goldens are not all continuously covered.</p>
         </div>
         <div class="entry-score">
-          <strong>65%</strong>
-          <span class="chip high">90% confidence</span>
+          <strong>68%</strong>
+          <span class="chip high">92% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Full target correctness and golden matrix: 65% complete">
-      <div class="meter-fill" style="width: 65%"></div>
+    <div class="meter" aria-label="Full target correctness and golden matrix: 68% complete">
+      <div class="meter-fill" style="width: 68%"></div>
     </div>
 
       <p class="plan"><strong>Future plan:</strong> Execute reproducible cross-target goldens on real hosts and browsers for the full design/00-constraints.md matrix without mixing non-dedicated macOS/Windows timings into benchmark history.</p>
@@ -1450,8 +1450,8 @@
           <p>2 tracked items</p>
         </div>
         <div class="area-score">
-          <span>62% avg complete</span>
-          <span>73% avg confidence</span>
+          <span>63% avg complete</span>
+          <span>75% avg confidence</span>
         </div>
       </div>
       <div class="entries">
@@ -1479,16 +1479,16 @@
       <div class="entry-top">
         <div>
           <h4>Native/wasm matrix</h4>
-          <p>A coherent 12-adapter-family native Linux baseline plus a verified mlua/Luau JIT mode is recorded; recurring wasm target results cover rustia+koto+rhai and br_table/call_ref dispatch on Node/V8, while the accepted four-runtime matrix remains archived as historical portability evidence.</p>
+          <p>A coherent 12-adapter-family native Linux baseline plus a verified mlua/Luau JIT mode is recorded; recurring wasm target results cover rustia+koto+rhai and br_table/call_ref dispatch on Node/V8, hosted CI executes the rustia wasm host adapters on Node 22/V8, and the accepted four-runtime matrix remains archived as historical portability evidence.</p>
         </div>
         <div class="entry-score">
-          <strong>78%</strong>
-          <span class="chip medium">75% confidence</span>
+          <strong>80%</strong>
+          <span class="chip high">80% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Native/wasm matrix: 78% complete">
-      <div class="meter-fill" style="width: 78%"></div>
+    <div class="meter" aria-label="Native/wasm matrix: 80% complete">
+      <div class="meter-fill" style="width: 80%"></div>
     </div>
 
       <p class="plan"><strong>Future plan:</strong> Broaden public baselines and keep result history fresh across runtime updates.</p>
@@ -1504,8 +1504,8 @@
           <p>3 tracked items</p>
         </div>
         <div class="area-score">
-          <span>67% avg complete</span>
-          <span>74% avg confidence</span>
+          <span>68% avg complete</span>
+          <span>77% avg confidence</span>
         </div>
       </div>
       <div class="entries">
@@ -1514,16 +1514,16 @@
       <div class="entry-top">
         <div>
           <h4>Workspace tests and release preflight</h4>
-          <p>Production crates have meaningful unit and conformance tests; just release-preflight composes release artifact checks, crate metadata checks, workflow policy checks, generated leaf package dry-run checks, explicit public-example compilation, and cargo test --workspace; hosted CI mirrors that gate.</p>
+          <p>Production crates have meaningful unit and conformance tests; just release-preflight composes release artifact checks, crate metadata checks, workflow policy checks, generated leaf package dry-run checks, explicit public-example compilation, strict formatting/linting plus deterministic mutation tests for the separate fuzz workspace, and cargo test --workspace; hosted CI mirrors that gate and adds real Node/V8 wasm adapter execution.</p>
         </div>
         <div class="entry-score">
-          <strong>85%</strong>
-          <span class="chip medium">75% confidence</span>
+          <strong>88%</strong>
+          <span class="chip high">82% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Workspace tests and release preflight: 85% complete">
-      <div class="meter-fill" style="width: 85%"></div>
+    <div class="meter" aria-label="Workspace tests and release preflight: 88% complete">
+      <div class="meter-fill" style="width: 88%"></div>
     </div>
 
       <p class="plan"><strong>Future plan:</strong> Keep expanding tests with new runtime/API work and keep CI aligned with release-preflight.</p>

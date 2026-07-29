@@ -146,6 +146,28 @@ function checkCi(text) {
     "cargo check --locked -p rustia --lib --target ${{ matrix.target }}",
     label,
   );
+  requireIncludes(text, "wasm-node-runtime:\n", label);
+  requireIncludes(text, "name: Wasm runtime (Node/V8)", label);
+  requireIncludes(
+    text,
+    "cargo install wasm-bindgen-cli --version 0.2.126 --locked",
+    label,
+  );
+  requireIncludes(
+    text,
+    "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner",
+    label,
+  );
+  requireIncludes(
+    text,
+    "cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test bare_wasm_live",
+    label,
+  );
+  requireIncludes(
+    text,
+    "cargo test --locked -p rustia --target wasm32-unknown-unknown --test web_live",
+    label,
+  );
   checkActionPins(text, label);
 }
 
@@ -184,7 +206,9 @@ function checkReleasePreflight(text) {
     '"tools/check-current-report-summary.js"',
     '"bench/render-current-results.js"',
     '"bench/render-claims.js"',
-    '"fuzz/Cargo.toml"',
+    '"cargo", ["fmt", "--all", "--manifest-path", "fuzz/Cargo.toml"',
+    '"clippy",\n  "--locked",\n  "--manifest-path",\n  "fuzz/Cargo.toml"',
+    '"cargo", ["test", "--locked", "--manifest-path", "fuzz/Cargo.toml"]',
     '"cargo", ["test", "--locked", "--workspace"]',
   ]) {
     requireIncludes(text, needle, label);

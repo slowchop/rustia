@@ -30,7 +30,9 @@ general embedding API must remain available to those users.
    concrete release consumer promotes them.
 3. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
    transactional extension/module/hot-reload failure behavior, and
-   differential/fuzz coverage before stabilizing and publishing the API.
+   differential/coverage-guided fuzz evidence before stabilizing and publishing
+   the API. The stable bounded baseline already mutates 2,048 frontend cases
+   and 2,048 VM byte streams while covering all 131 production opcodes.
 4. Close the full correctness/build/golden target matrix from
    [`00-constraints.md`](00-constraints.md); Linux remains the only active
    timing source, but not the only correctness target.
@@ -257,8 +259,14 @@ part of the semantic-tail/failure-semantics blocker.
   measurements.
 - Hosted CI separately cross-compiles the portable `rustia` engine library for
   macOS arm64/x86_64, Linux x86_64/arm64, Windows x86_64 MSVC, iOS arm64,
-  Android arm64, and `wasm32-unknown-unknown`. These build checks do not replace
-  the still-open real-host and browser correctness/golden gate.
+  Android arm64, and `wasm32-unknown-unknown`. It also executes the bare and
+  default web-live wasm adapters through the matching wasm-bindgen test runner
+  on Node 22/V8. These checks do not replace the still-open non-Linux real-host
+  and Firefox/Safari correctness/golden gate.
+- Release preflight formats and strictly lints the separate fuzz workspace,
+  then runs its seed tests plus deterministic 2,048-case frontend and VM
+  mutation sweeps. The VM decoder covers every production opcode exactly once
+  under bounded input, fuel, recursion, and a 512 KiB logical-live limit.
 - The explicit Linode matrix command provisions, measures, validates, deletes,
   and only then promotes a coherent native-plus-wasm Linux result set. Hosted
   workflows do not provision billed resources or publish timings.

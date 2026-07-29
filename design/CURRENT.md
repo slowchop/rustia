@@ -8,6 +8,11 @@
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
 The current workspace contains the VM/lexer/parser/compiler/public API/CLI/conformance runner, plus an
 executable Luau 0.709 conformance corpus with **0 pending-oracle** and **0 pending-impl** rows. The public
+release gate also formats, strictly lints, and smoke-tests the separate fuzz workspace. Its stable deterministic
+baseline mutates 2,048 frontend cases and 2,048 VM byte streams; the VM decoder covers all 131 production
+opcodes exactly once under bounded input, fuel, recursion, and a 512 KiB logical-live quota. Hosted CI executes
+the bare and default web-live wasm adapters on Node 22/V8 as real WebAssembly runtime tests in addition to
+cross-compiling the declared target matrix; Firefox/Safari browser goldens remain open. The public
 embedding facade from [`75-embedded-api.md`](75-embedded-api.md) is implemented at the first useful level:
 owned values with typed and nested table helpers, source-named run/compile helpers, typed host functions with
 fallible `rustia::Result<T>` returns, pre-install host signature/fuel ABI metadata, retained script function
@@ -327,7 +332,8 @@ production concern or host-facing facility is finished. The highest-impact gaps 
 3. **Harden the production engine** against the LOCKED decisions ([`30-architecture.md`](30-architecture.md) §1–§4):
    keep the 16-byte tagged `Value` firewall, portable `br_table`-friendly dispatch, instruction-count fuel,
    deterministic f64/libm behavior, table-key `-0` normalization, profile-specific GC behavior, and the public
-   workspace's `unsafe_code = "forbid"` gate. Add differential/fuzz coverage for newly discovered compiler and
+   workspace's `unsafe_code = "forbid"` gate. The stable bounded fuzz baseline now mutates the frontend and all
+   131 VM opcodes; continue coverage-guided and differential work for newly discovered compiler and
    runtime-error-phase edges, and close the full native/browser correctness-build-golden matrix without adding
    developer-machine timings to benchmark history.
 4. **Continue measured performance work** using [`56-performance-research.md`](56-performance-research.md).
@@ -503,7 +509,8 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
    apply determinism restrictions according to the selected builder: `live()` intentionally promises none.
 3. **Tune the GC intervals only after reclamation exists** (Deterministic instruction-count interval =
    determinism ABI; Standard paced-debt multiplier) on realistic long-lived and mixed heaps.
-4. **Harden compiler/runtime error-phase parity** with focused oracle fixtures plus differential/fuzz testing.
+4. **Harden compiler/runtime error-phase parity** with focused oracle fixtures plus differential and longer
+   coverage-guided fuzz campaigns; the stable all-opcode deterministic mutation baseline is implemented.
 5. **Close the full correctness/build/golden target matrix.** Linux-only timings remain intentional, but public
    release still requires the native and browser targets in [`00-constraints.md`](00-constraints.md) to build
    and reproduce the declared goldens; real Firefox/Safari and non-Linux native coverage is still incomplete.

@@ -44,6 +44,10 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   `unsafe_code = "forbid"`; research spikes and standalone wasm FFI demos are kept outside that product gate.
 - Pinned to **Luau 0.709** (standalone luau.org surface, not Roblox).
 - Current conformance runner: **694 fixtures**, **493 refs**, **0 pending-oracle**, **0 pending-impl**.
+- Stable release preflight runs deterministic 2,048-case frontend and VM mutation sweeps; the bounded VM
+  decoder covers all **131 production opcodes** under fuel, recursion, input-size, and 512 KiB memory limits.
+  Hosted CI also executes the bare and default web-live wasm adapters on Node 22/V8, while real
+  Firefox/Safari goldens remain a release gate.
 - Public embedding API first slice: typed `run<T>()`, owned values with
   `Option<T>`/`Vec<T>`/`BTreeMap<String, T>`/table conversions plus typed and nested table helpers, source-named
   run/compile helpers, typed/capability-tagged host functions with fallible `rustia::Result<T>` returns and up to
