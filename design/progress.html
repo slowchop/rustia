@@ -513,7 +513,7 @@
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 93%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 79%</a><a href="#vm-runtime">VM/runtime 80%</a><a href="#determinism">Determinism 84%</a><a href="#embedded-api">Embedded API 79%</a><a href="#benchmarks">Benchmarks 88%</a><a href="#wasm-perf">Wasm/perf 63%</a><a href="#tooling">Tooling 68%</a><a href="#packaging">Packaging 62%</a>
+      <a href="#design">Design 93%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 79%</a><a href="#vm-runtime">VM/runtime 81%</a><a href="#determinism">Determinism 84%</a><a href="#embedded-api">Embedded API 79%</a><a href="#benchmarks">Benchmarks 88%</a><a href="#wasm-perf">Wasm/perf 63%</a><a href="#tooling">Tooling 68%</a><a href="#packaging">Packaging 62%</a>
     </nav>
 
 
@@ -835,8 +835,8 @@
           <p>7 tracked items</p>
         </div>
         <div class="area-score">
-          <span>80% avg complete</span>
-          <span>78% avg confidence</span>
+          <span>81% avg complete</span>
+          <span>79% avg confidence</span>
         </div>
       </div>
       <div class="entries">
@@ -940,16 +940,16 @@
       <div class="entry-top">
         <div>
           <h4>Base/math/string/bit32/vector/utf8 stdlib</h4>
-          <p>Major pinned Luau stdlib surfaces, including buffer, vector, utf8, and string pack/unpack behavior, are fixture-covered. Host-environment output/time services are provider-backed: print composes tostring/__tostring into a host stdout sink (no-op without one), no-arg os.time/os.date read a wall-clock provider with a pinned-epoch fallback, and os.clock reads a monotonic provider with a deterministic logical-clock fallback. collectgarbage('count') and gcinfo now report the maintained VM-owned logical-live KiB estimate.</p>
+          <p>Major pinned Luau stdlib surfaces, including buffer, vector, utf8, and string pack/unpack behavior, are fixture-covered. Exact buffer.readf32/writef32 and readf64/writef64 round trips preserve NaN sign/payload bits through raw deterministic ingress; f32 uses an explicit cross-target payload mapping while arithmetic results remain canonicalized. Host-environment output/time services are provider-backed: print composes tostring/__tostring into a host stdout sink (no-op without one), no-arg os.time/os.date read a wall-clock provider with a pinned-epoch fallback, and os.clock reads a monotonic provider with a deterministic logical-clock fallback. collectgarbage('count') and gcinfo now report the maintained VM-owned logical-live KiB estimate.</p>
         </div>
         <div class="entry-score">
-          <strong>84%</strong>
-          <span class="chip medium">78% confidence</span>
+          <strong>86%</strong>
+          <span class="chip high">82% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Base/math/string/bit32/vector/utf8 stdlib: 84% complete">
-      <div class="meter-fill" style="width: 84%"></div>
+    <div class="meter" aria-label="Base/math/string/bit32/vector/utf8 stdlib: 86% complete">
+      <div class="meter-fill" style="width: 86%"></div>
     </div>
 
       <p class="plan"><strong>Future plan:</strong> Keep the language-library corpus green and broaden memory-pressure evidence without claiming process RSS or allocator parity.</p>
@@ -1219,7 +1219,7 @@
       <div class="entry-top">
         <div>
           <h4>Module loading and resolution</h4>
-          <p>CompiledModule install/hot reload and script-visible require are implemented. ServiceModuleResolver keeps resolution in host policy with no ambient filesystem; the host supplies canonical identity and source; successful zero-or-one-result modules execute once per decision epoch; cached values are roots; nested referrers, cycles, shared fuel, reset, deterministic labels, panic poisoning, quota admission, and MODULE_RESOLUTION_ABI_VERSION are covered.</p>
+          <p>CompiledModule install/hot reload and script-visible require are implemented. ServiceModuleResolver keeps resolution in host policy with no ambient filesystem; the host supplies canonical identity and source; successful zero-or-one-result modules execute once per decision epoch; cached values are roots; nested referrers, cycles, shared fuel, reset, deterministic labels, panic poisoning, quota admission, and MODULE_RESOLUTION_ABI_VERSION are covered. Required modules still cross a non-yieldable native boundary.</p>
         </div>
         <div class="entry-score">
           <strong>82%</strong>
@@ -1231,7 +1231,7 @@
       <div class="meter-fill" style="width: 82%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Define transactional or isolated rollback for arbitrary guest global/heap side effects from runtime-failing module installation and hot reload, then add longer dependency-graph integration evidence.</p>
+      <p class="plan"><strong>Future plan:</strong> Add a yieldable require continuation; define transactional or isolated rollback for arbitrary guest global/heap side effects from runtime-failing module installation and hot reload; then add longer dependency-graph integration evidence.</p>
     </article>
 
     <article class="entry">

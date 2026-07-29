@@ -286,7 +286,8 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    Host-facing VM memory telemetry and script-visible counters now read the maintained VM-owned logical-live
    total without a whole-VM census at ordinary instruction boundaries. Guest module/extension installation and
    hot reload still need documented transactional or isolated failure semantics beyond record-only invocation
-   rollback.
+   rollback. Required modules also still cross a non-yieldable native boundary; matching Luau's yieldable
+   `require` needs a continuation that preserves the loading stack and commits the cache only after completion.
 3. **Complete public value interop.** The advanced live-handle spine is implemented: VM/epoch-safe rooted
    `Value`/`Table`/`Function` handles preserve binary strings, buffers, vectors, identity-bearing keys,
    shared/cyclic table graphs, mutation, and raw equality without exposing collector lifetimes. Live values
@@ -302,7 +303,21 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    runtime errors catchable at runtime rather than prematurely rejecting them at compile time, and finish
    public stack traces/source diagnostics. Module/extension installation and runtime-failing hot reload also need
    documented transactional or isolated failure semantics; generation counters alone do not roll back partial
-   global/heap changes. New gaps require focused Luau-0.709 oracle fixtures.
+   global/heap changes. The final audit closed untracked `buffer.readf32`/`readf64` NaN-payload loss by
+   separating exact buffer-bit ingress from canonicalized arithmetic results and giving f32 NaNs an explicit
+   cross-target widening/narrowing rule. New gaps require focused Luau-0.709 oracle fixtures.
+
+### Deep-audit reconciliation (2026-07-29)
+
+The multi-agent review and final repository-wide sweep found no remaining `TODO`, `FIXME`, `todo!`, or
+`unimplemented!` marker in production crates, fuzz targets, release tools, or hosted workflows. It did find
+and reconcile three kinds of documentation drift: the implemented memory benchmark was still marked pending
+in the index; resolved conformance decisions (deterministic reference IDs, three-wide vectors, buffer bit
+operations, OOM, recursion, and the absent `load` global) were still labeled open; and a later `__le` row
+contradicted the source-verified Lua-5.1 fallback recorded earlier in the same inventory. The exact remaining
+release boundary is the four numbered gaps above plus the full target/golden and packaging gates in
+[`90-release-readiness.md`](90-release-readiness.md); historical watch-list rows are evidence prompts, not
+silent claims of completion.
 
 ## 🚀 Next actions (cold-start handoff — do in this order)
 **Read order for a fresh agent:** `CLAUDE.md` (auto-loaded) → **this file** → [`02-pillars.md`](02-pillars.md)
@@ -310,11 +325,11 @@ production concern or host-facing facility is finished. The highest-impact gaps 
 → the doc for your task. (A fresh Claude session in this repo also auto-loads the project memory.)
 
 **Action queue:**
-1. **Implement bounded VM object lifetimes against the recorded baseline.** Cohort
+1. **Broaden mixed-heap pressure evidence against the recorded baseline.** Cohort
    `pre-reclamation-18b58d8` now freezes the 110-row/990-process cross-engine short-spike/phase/retention
    baseline from [`57-memory-benchmarking.md`](57-memory-benchmarking.md), including existing workloads,
-   bounded-churn and intentional-retention controls, and dashboard views. Add reachability-based
-   reclamation/reuse for ordinary VM objects, coroutine state, and loaded programs; those stores, retained host
+   bounded-churn and intentional-retention controls, and dashboard views. Reachability-based
+   reclamation/reuse now covers ordinary VM objects, coroutine state, and loaded programs; those stores, retained host
    roots, stale-handle defenses, VM-owned live/reserved/peak accounting, and logical-live quota/atomic OOM
    semantics are now active. Decision-reset ABI v1 also provides epoch-safe retained-handle invalidation,
    deterministic counter restart, reusable allocation containers, and a 600-decision exact plateau. Next

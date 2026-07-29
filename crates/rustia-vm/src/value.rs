@@ -112,6 +112,21 @@ impl Value {
         })
     }
 
+    /// Constructs a number from an exact IEEE-754 payload supplied by a raw bit channel.
+    ///
+    /// Ordinary numeric ingress and every arithmetic result must use [`Self::number`] so
+    /// engine-produced NaNs remain canonical across targets. Buffer bit reinterpretation is
+    /// different: its input bytes are already deterministic script data, and Luau requires
+    /// immediate `readf32`/`writef32` and `readf64`/`writef64` round trips to preserve those
+    /// bytes exactly.
+    #[inline]
+    pub(crate) const fn number_from_bits(bits: u64) -> Self {
+        Self(ValueRepr {
+            tag: TAG_NUMBER,
+            payload: bits,
+        })
+    }
+
     #[inline]
     pub(crate) const fn string_atom(atom: u32) -> Self {
         Self(ValueRepr {

@@ -14034,15 +14034,14 @@ impl Vm {
         let buffer = self.buffer_arg(args[0])?;
         let offset = self.buffer_offset_arg(args[1])?;
         let bytes = self.buffer_read_checked(buffer, offset, buffer_float_size(kind))?;
-        let value = match kind {
-            BufferFloatKind::F32 => {
-                f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
-            }
-            BufferFloatKind::F64 => f64::from_le_bytes([
+        match kind {
+            BufferFloatKind::F32 => Ok(Value::number_from_bits(widen_buffer_f32_bits(
+                u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+            ))),
+            BufferFloatKind::F64 => Ok(Value::number_from_bits(u64::from_le_bytes([
                 bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-            ]),
-        };
-        Ok(Value::number(value))
+            ]))),
+        }
     }
 
     fn native_buffer_readstring(&mut self, args: &[Value]) -> Result<Value> {
@@ -14133,7 +14132,7 @@ impl Vm {
             .coerce_to_number(args[2])?
             .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
         let bytes = match kind {
-            BufferFloatKind::F32 => (number as f32).to_le_bytes().to_vec(),
+            BufferFloatKind::F32 => narrow_buffer_f64_bits(number).to_le_bytes().to_vec(),
             BufferFloatKind::F64 => number.to_le_bytes().to_vec(),
         };
         self.buffer_write_checked(buffer, offset, &bytes)
@@ -19754,6 +19753,32 @@ fn buffer_float_size(kind: BufferFloatKind) -> usize {
         BufferFloatKind::F32 => 4,
         BufferFloatKind::F64 => 8,
     }
+}
+
+fn widen_buffer_f32_bits(bits: u32) -> u64 {
+    const F32_EXPONENT_MASK: u32 = 0x7f80_0000;
+    const F32_FRACTION_MASK: u32 = 0x007f_ffff;
+    const F64_EXPONENT_MASK: u64 = 0x7ff0_0000_0000_0000;
+    let fraction = bits & F32_FRACTION_MASK;
+    if bits & F32_EXPONENT_MASK == F32_EXPONENT_MASK && fraction != 0 {
+        return (u64::from(bits >> 31) << 63) | F64_EXPONENT_MASK | (u64::from(fraction) << 29);
+    }
+    (f32::from_bits(bits) as f64).to_bits()
+}
+
+fn narrow_buffer_f64_bits(value: f64) -> u32 {
+    const F64_EXPONENT_MASK: u64 = 0x7ff0_0000_0000_0000;
+    const F64_FRACTION_MASK: u64 = 0x000f_ffff_ffff_ffff;
+    const F32_EXPONENT_MASK: u32 = 0x7f80_0000;
+    const F32_QUIET_NAN: u32 = 0x0040_0000;
+    let bits = value.to_bits();
+    let fraction = bits & F64_FRACTION_MASK;
+    if bits & F64_EXPONENT_MASK == F64_EXPONENT_MASK && fraction != 0 {
+        let payload = (fraction >> 29) as u32;
+        let payload = if payload == 0 { F32_QUIET_NAN } else { payload };
+        return ((bits >> 63) as u32) << 31 | F32_EXPONENT_MASK | payload;
+    }
+    (value as f32).to_bits()
 }
 
 fn buffer_out_of_bounds() -> Error {
@@ -28560,6 +28585,81 @@ mod inline_cache_tests {
                 .as_deref(),
             Some(b"xxxxxxxxxxxxxx".as_slice())
         );
+    }
+
+    #[test]
+    fn buffer_f32_round_trip_preserves_exact_special_value_bits() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        for payload in [
+            0x7fc0_0001_u32,
+            0xffc0_0042_u32,
+            0x7fa0_0001_u32,
+            (-0.0_f32).to_bits(),
+        ] {
+            let source = Value::buffer(
+                vm.heap
+                    .alloc_buffer(payload.to_le_bytes().to_vec())
+                    .expect("source buffer should allocate"),
+            );
+            let number = vm
+                .native_buffer_read_float(&[source, Value::number(0.0)], BufferFloatKind::F32)
+                .expect("readf32 should accept the exact source buffer");
+
+            let target = Value::buffer(
+                vm.heap
+                    .alloc_buffer(vec![0; 4])
+                    .expect("target buffer should allocate"),
+            );
+            vm.native_buffer_write_float(
+                &[target, Value::number(0.0), number],
+                BufferFloatKind::F32,
+            )
+            .expect("writef32 should preserve the exact number payload");
+            assert_eq!(
+                vm.buffer_read_checked(target.as_buffer().expect("buffer handle"), 0, 4)
+                    .expect("target bytes should be readable"),
+                payload.to_le_bytes()
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_f64_round_trip_preserves_exact_special_value_bits() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        for payload in [
+            0x7ff8_0000_0000_0001_u64,
+            0xfff8_0000_0000_0042_u64,
+            (-0.0_f64).to_bits(),
+        ] {
+            let source = Value::buffer(
+                vm.heap
+                    .alloc_buffer(payload.to_le_bytes().to_vec())
+                    .expect("source buffer should allocate"),
+            );
+            let number = vm
+                .native_buffer_read_float(&[source, Value::number(0.0)], BufferFloatKind::F64)
+                .expect("readf64 should accept the exact source buffer");
+            assert_eq!(
+                number.as_number().expect("number result").to_bits(),
+                payload
+            );
+
+            let target = Value::buffer(
+                vm.heap
+                    .alloc_buffer(vec![0; 8])
+                    .expect("target buffer should allocate"),
+            );
+            vm.native_buffer_write_float(
+                &[target, Value::number(0.0), number],
+                BufferFloatKind::F64,
+            )
+            .expect("writef64 should preserve the exact number payload");
+            assert_eq!(
+                vm.buffer_read_checked(target.as_buffer().expect("buffer handle"), 0, 8)
+                    .expect("target bytes should be readable"),
+                payload.to_le_bytes()
+            );
+        }
     }
 
     #[test]

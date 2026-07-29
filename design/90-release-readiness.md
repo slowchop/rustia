@@ -29,10 +29,11 @@ general embedding API must remain available to those users.
    async, and an mlua migration shim remain later optional layers unless a
    concrete release consumer promotes them.
 3. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
-   transactional extension/module/hot-reload failure behavior, and
+   yieldable `require`, transactional extension/module/hot-reload failure behavior, and
    differential/coverage-guided fuzz evidence before stabilizing and publishing
    the API. The stable bounded baseline already mutates 2,048 frontend cases
-   and 2,048 VM byte streams while covering all 131 production opcodes.
+   and 2,048 VM byte streams while covering all 131 production opcodes. Exact
+   f32/f64 buffer-bit round trips, including NaN payloads, are covered.
 4. Close the full correctness/build/golden target matrix from
    [`00-constraints.md`](00-constraints.md); Linux remains the only active
    timing source, but not the only correctness target.

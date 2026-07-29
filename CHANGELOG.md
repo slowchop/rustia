@@ -502,6 +502,11 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Fixed
 
+- `buffer.readf32`/`readf64` now preserve the exact IEEE-754 payload supplied
+  by the buffer, including NaN sign/payload and negative zero, so immediate
+  read/write round trips are byte-exact. f32 NaNs use an explicit cross-target
+  widening/narrowing rule; arithmetic and ordinary numeric ingress continue
+  to canonicalize engine-produced NaNs.
 - Direct, tail, and stackless self-recursion now honor the configured VM
   recursion limit instead of the Luau conformance harness's 20,000-call
   compatibility ceiling. The pinned harness retains its oracle-specific frame

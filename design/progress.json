@@ -310,9 +310,9 @@
         },
         {
           "name": "Base/math/string/bit32/vector/utf8 stdlib",
-          "complete": 84,
-          "confidence": 78,
-          "state": "Major pinned Luau stdlib surfaces, including buffer, vector, utf8, and string pack/unpack behavior, are fixture-covered. Host-environment output/time services are provider-backed: print composes tostring/__tostring into a host stdout sink (no-op without one), no-arg os.time/os.date read a wall-clock provider with a pinned-epoch fallback, and os.clock reads a monotonic provider with a deterministic logical-clock fallback. collectgarbage('count') and gcinfo now report the maintained VM-owned logical-live KiB estimate.",
+          "complete": 86,
+          "confidence": 82,
+          "state": "Major pinned Luau stdlib surfaces, including buffer, vector, utf8, and string pack/unpack behavior, are fixture-covered. Exact buffer.readf32/writef32 and readf64/writef64 round trips preserve NaN sign/payload bits through raw deterministic ingress; f32 uses an explicit cross-target payload mapping while arithmetic results remain canonicalized. Host-environment output/time services are provider-backed: print composes tostring/__tostring into a host stdout sink (no-op without one), no-arg os.time/os.date read a wall-clock provider with a pinned-epoch fallback, and os.clock reads a monotonic provider with a deterministic logical-clock fallback. collectgarbage('count') and gcinfo now report the maintained VM-owned logical-live KiB estimate.",
           "future_plan": "Keep the language-library corpus green and broaden memory-pressure evidence without claiming process RSS or allocator parity."
         },
         {
@@ -413,8 +413,8 @@
           "name": "Module loading and resolution",
           "complete": 82,
           "confidence": 92,
-          "state": "CompiledModule install/hot reload and script-visible require are implemented. ServiceModuleResolver keeps resolution in host policy with no ambient filesystem; the host supplies canonical identity and source; successful zero-or-one-result modules execute once per decision epoch; cached values are roots; nested referrers, cycles, shared fuel, reset, deterministic labels, panic poisoning, quota admission, and MODULE_RESOLUTION_ABI_VERSION are covered.",
-          "future_plan": "Define transactional or isolated rollback for arbitrary guest global/heap side effects from runtime-failing module installation and hot reload, then add longer dependency-graph integration evidence."
+          "state": "CompiledModule install/hot reload and script-visible require are implemented. ServiceModuleResolver keeps resolution in host policy with no ambient filesystem; the host supplies canonical identity and source; successful zero-or-one-result modules execute once per decision epoch; cached values are roots; nested referrers, cycles, shared fuel, reset, deterministic labels, panic poisoning, quota admission, and MODULE_RESOLUTION_ABI_VERSION are covered. Required modules still cross a non-yieldable native boundary.",
+          "future_plan": "Add a yieldable require continuation; define transactional or isolated rollback for arbitrary guest global/heap side effects from runtime-failing module installation and hot reload; then add longer dependency-graph integration evidence."
         },
         {
           "name": "Decision lifecycle and reset",

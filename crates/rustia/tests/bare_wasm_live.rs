@@ -31,3 +31,29 @@ fn bare_wasm_live_reports_a_missing_platform_adapter() {
     };
     assert!(matches!(error.kind, VmErrorKind::Unsupported { .. }));
 }
+
+#[wasm_bindgen_test]
+fn wasm_buffer_float_round_trips_preserve_nan_payload_bits() {
+    let mut rustia = RustiaBuilder::deterministic().build().unwrap();
+    let exact: bool = rustia
+        .run(
+            r#"
+            local f32_source = buffer.create(4)
+            buffer.writeu32(f32_source, 0, 0x7fc00001)
+            local f32_target = buffer.create(4)
+            buffer.writef32(f32_target, 0, buffer.readf32(f32_source, 0))
+
+            local f64_source = buffer.create(8)
+            buffer.writeu32(f64_source, 0, 0x00000001)
+            buffer.writeu32(f64_source, 4, 0x7ff80000)
+            local f64_target = buffer.create(8)
+            buffer.writef64(f64_target, 0, buffer.readf64(f64_source, 0))
+
+            return buffer.readu32(f32_target, 0) == 0x7fc00001
+                and buffer.readu32(f64_target, 0) == 0x00000001
+                and buffer.readu32(f64_target, 4) == 0x7ff80000
+            "#,
+        )
+        .unwrap();
+    assert!(exact);
+}
