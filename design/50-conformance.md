@@ -949,6 +949,24 @@ Accepted divergences from stock PUC 5.1.5 under this profile:
   oracle's and the profile's reach; rustia's formatter is pinned to the glibc/C-locale shape.
 - The `table.sort` mutation guard stays stricter than PUC: writing to the sorted array from inside the
   comparator raises instead of being UB-adjacent, and the len² fuel charge still applies.
+- `table.sort` runs the ported `auxsort` over a snapshot of the array prefix and writes back at the end,
+  so a comparator that *reads* the table being sorted observes the original pre-sort contents, not PUC's
+  live in-flight permutation (`lua_rawgeti` during partitioning). The final result is identical for any
+  consistent comparator; only mid-sort reads diverge (and mid-sort writes already raise, above).
+- Tombstone-key liveness: PUC's GC traversal (`traversetable`, lgc.c) skips marking nil-valued nodes'
+  keys and converts them to dead keys (`removeentry`), so a deleted collectable key becomes collectable
+  at the next GC. rustia keeps deleted keys `Live` and marks them until a rehash drops the node, so the
+  key object survives while the table does. `next(t, deleted_key)` still matches — PUC resumes via its
+  dead-key pointer-identity rule (ltable.c `findindex`), rustia via its equivalent `PucNodeKey::Dead` —
+  the divergence is only in GC-timing-observable channels (when a *second* weak structure holding the
+  same key object clears), not in iteration or lookup results.
+- Runtime error messages carry rustia's `pc N:` prefix (plus host-side rich diagnostics) where PUC
+  prints the bare `chunk:line: message`; cosmetic, and the script-visible `pcall` message text otherwise
+  matches.
+- Known gap, not a divergence: there is no public size-hinted host table API (the `lua_createtable`
+  analog). Host-built tables (e.g. a mock host's `plot:*` tables) currently grow incrementally and so
+  accumulate a different rehash history than PUC would. Add the API alongside the first host that needs
+  it; the heap already has the pre-sizing primitives (`try_alloc_puc_table`).
 - `LUA_COMPAT_MOD` / `LUA_COMPAT_GFIND` aliases (`math.mod`, `string.gfind`) are not exposed; stock
   5.1.5 luaconf.h has both ON, but the profile keeps rustia's standard global surface. Add only if a
   future corpus needs them.
