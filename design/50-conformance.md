@@ -960,10 +960,16 @@ Accepted divergences from stock PUC 5.1.5 under this profile:
   its own cap instead of raising PUC's exact error.
 - Host-facing raw table entry enumeration (embedding API) walks PUC tables array-part-ascending then
   node-slot-ascending; this is a host-API order, not script-visible.
-- Constructor evaluation order is rustia's (source order) rather than PUC's keyed-first-then-SETLIST:
-  overlapping positional/keyed writes such as `{ 1, 2, 3, [1] = "one", 4 }` yield `t[1] == "one"` in
-  rustia (under every profile — this is a rustia-wide compiler choice that also differs from reference
-  Luau) but `t[1] == 1` in PUC 5.1. Non-overlapping constructors agree exactly.
+- Constructor evaluation order is source order in both engines; the *write*
+  order differs. PUC writes keyed fields immediately but flushes positional
+  values in `LFIELDS_PER_FLUSH` (50) batches plus a final SETLIST, so
+  `{ 1, 2, 3, [1] = "one", 4 }` yields `t[1] == 1`; reference Luau keeps
+  source order (its compiler flushes the SETLIST chunk *before* any keyed
+  field — luau0-src 0.18.3+luau709 `Compiler.cpp`), yielding `"one"`. rustia
+  matches each: source order by default, PUC batch order under
+  `CompileOptions::puc51_constructor_order` (set by the profile plumbing,
+  including `loadstring`). Pinned by `ctor_emission_order.luau`. Not a
+  divergence.
 
 ## Historical open-decision register (superseded as a work queue)
 

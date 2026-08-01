@@ -436,9 +436,9 @@ implemented. Benchmark publication and the `LuauIntegerType2` watch remain ongoi
 - **LuauCompat** — a real `Profile` variant that currently selects Luau-style hash iteration and exposes the
   Standard service/capability surface. Further reference-oriented knobs require explicit implementation/tests.
 - **Puc51Compat** (added 2026-07-31) — PUC Lua 5.1.5 source-compat profile: faithful `ltable.c` table layout
-  and `next()` order, PUC `auxsort`, `%.14g` number formatting, and constructor pre-sizing, with
-  ReproducibleStandard host-service rules. Orthogonal to the determinism axis below; parity is pinned by the
-  offline-derived `conformance/fixtures/puc51-compat/` corpus (see
+  and `next()` order, PUC `auxsort`, `%.14g` number formatting, constructor pre-sizing, and PUC constructor
+  write order, with ReproducibleStandard host-service rules. Orthogonal to the determinism axis below;
+  parity is pinned by the offline-derived `conformance/fixtures/puc51-compat/` corpus (see
   [`50-conformance.md`](50-conformance.md)).
 - **ReproducibleStandard** (the recommended public default) — targets the full pinned standalone Luau surface
   and is pending-free on the current 511-ref denominator, with reproducible choices for unspecified behavior
