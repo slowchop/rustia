@@ -227,7 +227,8 @@ Determinism work splits in two, and only the second part needs a flag:
   `loadstring`, and host registrations that read external mutable state or emit nondeterministic effects. Weak
   tables remain supported and are swept on deterministic instruction-count boundaries.
 
-⇒ **ONE engine with THREE concrete `Profile` variants** (review M1):
+⇒ **ONE engine with THREE concrete `Profile` variants** (review M1; a fourth source-compat variant,
+`Puc51Compat`, was added 2026-07-31 — see below):
 - **`ReproducibleStandard` (the public default):** targets the full pinned standalone surface with Group A on
   and the Standard service surface available; the current 493-ref executable denominator is pending-free.
   It is cross-platform-reproducible for scripts inside the proven surface that avoid environment services.
@@ -244,7 +245,10 @@ Determinism work splits in two, and only the second part needs a flag:
 Mechanism: a per-VM runtime setting. There is no separate engine build or current Cargo feature that hard-strips
 the restricted globals.
 
-The three profiles are still the complete semantic profile set. A separate `GuestSurface` setting narrows what
+The three profiles above are the complete *determinism-axis* profile set. A fourth `Profile` variant,
+`Puc51Compat` (added 2026-07-31), sits on the source-compat axis instead: it reproduces PUC Lua 5.1.5 table
+layout/`next()` order, `auxsort`, and `%.14g` formatting with ReproducibleStandard host-service rules, pinned
+by the offline-derived `conformance/fixtures/puc51-compat/` differential corpus. A separate `GuestSurface` setting narrows what
 compatible language environment a particular embedding exposes. `GuestSurface::HardenedLeaf`, selected by
 `RustiaBuilder::deterministic_leaf()`, layers on `DeterministicSim` for authoritative stateless actions: globals,
 standard libraries, and host namespaces are frozen; environment/debug/raw mutation, RNG, clocks/output,

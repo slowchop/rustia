@@ -22,7 +22,7 @@ usage: rustia [options] <script.luau>
 options:
   -e, --eval <source>        run source passed on the command line
       --repl                 run a line-oriented interactive session
-      --profile <profile>    luau-compat | reproducible-standard | deterministic-sim
+      --profile <profile>    luau-compat | reproducible-standard | deterministic-sim | puc51-compat
       --fuel <instructions>  set an instruction fuel budget
       --source-name <name>   override the source name used in diagnostics
   -h, --help                 show this help

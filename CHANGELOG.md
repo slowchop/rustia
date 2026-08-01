@@ -8,6 +8,22 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- A new `Profile::Puc51Compat` PUC Lua 5.1.5 compatibility profile: a faithful
+  `ltable.c` table backend (array part + node part with main-position chaining,
+  Brent-style relocation, `computesizes` rehash, tombstone deletion, `luaH_next`
+  enumeration order, and `luaH_getn` border), the PUC `auxsort` for
+  `table.sort`, `%.14g` number formatting through `tostring`/concat/
+  `table.concat`/`string.format("%s")`, and constructor pre-sizing (compiler
+  hash-field hints plus `luaH_resizearray` append tails). The `rustia` facade
+  gains a `RustiaBuilder::puc51_compat()` preset pairing the profile with the
+  stock `loadstring` compiler, and the CLI accepts `--profile puc51-compat`.
+  Behavior parity is pinned by a new offline-derived differential corpus under
+  `conformance/fixtures/puc51-compat/` (17 fixtures; expectations captured from
+  the pinned PUC 5.1.5 C sources in the new `third_party/lua-src` submodule —
+  everything rustia builds stays pure Rust; the C oracle is compiled only
+  offline and never by CI). Accepted divergences are documented in
+  `design/50-conformance.md`.
+
 - A shared native/Node-V8 mixed-heap pressure test now executes 96 decision
   epochs and 3,072 allocation waves under a 2 MiB logical-live limit. Each
   wave combines cyclic tables, runtime strings, closures/upvalues, suspended

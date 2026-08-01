@@ -928,6 +928,43 @@
 | 10 | Global namespace: unpack, load/loadstring/loadfile/dofile | Global unpack present in the pinned 0.709 corpus; load/loadfile/dofile absent from the base sandbox, with loadstring only as host/conformance surface. | Provide global unpack; omit public base dynamic source loaders, except for the gated literal-only Luau conformance helper. | Dynamic source loading remains a profile/host decision and must stay off in deterministic; global unpack is no longer treated as removed. |
 | 10 | typeof on a plain table carrying __type | Returns 'table' (per-table __type is ignored; only userdata-own-MT or a global type-metatable __type is honored). | Returns 'table'. | Not a divergence if implemented correctly, but a very common implementer mistake — listed so the implementation is verified against the subtle rule in luaT_objtypenamestr. |
 
+## PUC Lua 5.1.5 compatibility profile (Puc51Compat)
+
+The `Puc51Compat` profile swaps the table backend, `table.sort`, and number formatting for faithful PUC
+Lua 5.1.5 behavior: `ltable.c` array+node layout with main-position chaining and rehash history (so
+`next()` enumeration order and `#` borders match PUC), the `ltablib.c` `auxsort` quicksort (so tie order
+matches), constructor pre-sizing (compiler hash-hint + `luaH_resizearray` append tails), and `%.14g`
+number-to-string. Parity is covered by the offline-derived differential corpus in
+`conformance/fixtures/puc51-compat/` — expectations captured from the pinned PUC 5.1.5 C sources
+(`third_party/lua-src` submodule, regeneration procedure in `conformance/README.md`) — not by the
+upstream Luau 0.709 oracle.
+
+Accepted divergences from stock PUC 5.1.5 under this profile:
+
+- Pointer-address-keyed tables (table/function/userdata keys) have no reproducible iteration order even
+  in real PUC, so rustia does not attempt parity there; the fixture corpus excludes them.
+- Transcendental last-ULP results follow rustia's pinned pure-Rust libm, not the host C library the
+  oracle happened to link (same policy as the other profiles).
+- Platform-libc `printf` corners (nan/inf spelling, 3-digit exponents on MSVC) are outside both the
+  oracle's and the profile's reach; rustia's formatter is pinned to the glibc/C-locale shape.
+- The `table.sort` mutation guard stays stricter than PUC: writing to the sorted array from inside the
+  comparator raises instead of being UB-adjacent, and the len² fuel charge still applies.
+- `LUA_COMPAT_MOD` / `LUA_COMPAT_GFIND` aliases (`math.mod`, `string.gfind`) are not exposed; stock
+  5.1.5 luaconf.h has both ON, but the profile keeps rustia's standard global surface. Add only if a
+  future corpus needs them.
+- `-0.0` is canonicalized to `+0.0` at table keys, so `-0.0` never appears as a `next()` key (it prints
+  as `0`); PUC likewise aliases the two (its `mainposition` maps both to slot 0) but real PUC never
+  surfaces `-0.0` as a distinct key either — the divergence is only in the printed form of a key that
+  was stored as `-0.0`.
+- There is no "table overflow" error at PUC's 2^26 node limit: rustia saturates node-vector growth at
+  its own cap instead of raising PUC's exact error.
+- Host-facing raw table entry enumeration (embedding API) walks PUC tables array-part-ascending then
+  node-slot-ascending; this is a host-API order, not script-visible.
+- Constructor evaluation order is rustia's (source order) rather than PUC's keyed-first-then-SETLIST:
+  overlapping positional/keyed writes such as `{ 1, 2, 3, [1] = "one", 4 }` yield `t[1] == "one"` in
+  rustia (under every profile — this is a rustia-wide compiler choice that also differs from reference
+  Luau) but `t[1] == 1` in PUC 5.1. Non-overlapping constructors agree exactly.
+
 ## Historical open-decision register (superseded as a work queue)
 
 This register is preserved as the research trail behind the original 709-row inventory. It predates the

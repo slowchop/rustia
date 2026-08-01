@@ -44,7 +44,7 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
 - **No unsafe code in the public workspace:** all workspace crates, including the benchmark harness, inherit
   `unsafe_code = "forbid"`; research spikes and standalone wasm FFI demos are kept outside that product gate.
 - Pinned to **Luau 0.709** (standalone luau.org surface, not Roblox).
-- Current conformance runner: **694 fixtures**, **493 refs**, **0 pending-oracle**, **0 pending-impl**.
+- Current conformance runner: **711 fixtures**, **510 refs**, **0 pending-oracle**, **0 pending-impl**.
 - Stable release preflight runs deterministic 2,048-case frontend and VM mutation sweeps; the bounded VM
   decoder covers all **131 production opcodes** under fuel, recursion, input-size, and 512 KiB memory limits.
   Hosted CI also executes the bare and default web-live wasm adapters on Node 22/V8, while real
@@ -102,6 +102,10 @@ ceiling and its explicit `InvocationLimits::new(fuel)` budget.
 
 The PCG32 algorithm remains pinned in every ordinary preset and is absent from `HardenedLeaf`; what changes in
 `live()` is its initial seed.
+The `puc51_compat()` preset pairs `Profile::Puc51Compat` — PUC Lua 5.1.5 table layout/`next()` order, PUC
+`auxsort`, `%.14g` number formatting, and constructor pre-sizing — with the stock `loadstring` compiler on the
+`standard()` service base, so PUC-era code that compiles chunks at runtime works out of the box. The CLI
+exposes the same profile as `--profile puc51-compat` (the CLI itself installs no `loadstring` compiler).
 Clock and entropy providers carry a determinism label: `system()` and `from_nondeterministic_fn(...)` are live,
 while `fixed(...)` and `from_fn(...)` are host-asserted replay-stable. The facade rejects any live input on
 `deterministic()`; module resolvers follow the same explicit-label rule. `ServiceClock::monotonic()` is the
@@ -163,7 +167,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
 | Standalone benchmark OSS project | 82% | 88% |
 | Public release readiness | 83% | 91% |
 
-- Current conformance runner: **694 fixtures**, **493 refs**, **0 pending**.
+- Current conformance runner: **711 fixtures**, **510 refs**, **0 pending**.
 - The benchmark harness has all 12 requested adapters, an explicit verified `mlua-luau-jit` mode, and a
   non-default `string_building` workload source set across them; Lua 5.4 runs separately from Luau because
   `mlua-sys` cannot link both in one binary.
