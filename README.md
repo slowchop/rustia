@@ -44,7 +44,7 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
 - **No unsafe code in the public workspace:** all workspace crates, including the benchmark harness, inherit
   `unsafe_code = "forbid"`; research spikes and standalone wasm FFI demos are kept outside that product gate.
 - Pinned to **Luau 0.709** (standalone luau.org surface, not Roblox).
-- Current conformance runner: **711 fixtures**, **510 refs**, **0 pending-oracle**, **0 pending-impl**.
+- Current conformance runner: **712 fixtures**, **511 refs**, **0 pending-oracle**, **0 pending-impl**.
 - Stable release preflight runs deterministic 2,048-case frontend and VM mutation sweeps; the bounded VM
   decoder covers all **131 production opcodes** under fuel, recursion, input-size, and 512 KiB memory limits.
   Hosted CI also executes the bare and default web-live wasm adapters on Node 22/V8, while real
@@ -167,7 +167,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
 | Standalone benchmark OSS project | 82% | 88% |
 | Public release readiness | 83% | 91% |
 
-- Current conformance runner: **711 fixtures**, **510 refs**, **0 pending**.
+- Current conformance runner: **712 fixtures**, **511 refs**, **0 pending**.
 - The benchmark harness has all 12 requested adapters, an explicit verified `mlua-luau-jit` mode, and a
   non-default `string_building` workload source set across them; Lua 5.4 runs separately from Luau because
   `mlua-sys` cannot link both in one binary.

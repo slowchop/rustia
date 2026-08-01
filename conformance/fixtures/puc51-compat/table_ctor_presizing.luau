@@ -30,11 +30,10 @@ trace(b, "b:")
 local c = { 1, 2, 3, x = "a", y = "b", [10] = 10, [20] = 20 }
 emit("c#=" .. tostring(#c))
 trace(c, "c:")
--- Duplicate keyed field: PUC and rustia both evaluate keyed fields in source
--- order, so x ends "uno". (Overlapping positional/keyed writes such as
--- `{ 1, 2, 3, [1] = "one", 4 }` diverge rustia-wide: rustia evaluates
--- constructor fields in source order, while PUC flushes positional items
--- after keyed ones — see docs/accepted divergences.)
+-- Duplicate keyed field: keyed fields evaluate and write in source order, so
+-- x ends "uno". Overlapping positional/keyed writes such as
+-- `{ 1, 2, 3, [1] = "one", 4 }` follow PUC's flush order under this profile —
+-- see ctor_emission_order.luau.
 local d = { 1, 2, 3, x = "one", x = "uno", 4 }
 emit("d#=" .. tostring(#d))
 trace(d, "d:")

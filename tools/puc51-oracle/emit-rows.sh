@@ -43,6 +43,8 @@ row table_iter_bool_keys.luau puc51.table.iter_bool_keys runtime puc51.table.ite
     "PUC 5.1.5 boolean keys alongside distinct number/string keys, with tombstone and resurrection."
 row table_ctor_presizing.luau puc51.table.ctor_presizing runtime puc51.table.ctor-presizing \
     "PUC 5.1.5 table constructors: positional runs, int2fb round-up, multi-flush SETLIST, keyed fields, call/vararg tails."
+row ctor_emission_order.luau puc51.table.ctor_emission_order runtime puc51.table.ctor-emission-order \
+    "PUC 5.1.5 constructor write order: immediate keyed writes vs 50-item positional flushes and trailing multret SETLIST."
 row table_iter_frac_negative_keys.luau puc51.table.iter_frac_negative_keys runtime puc51.table.iter-frac-negative-keys \
     "PUC 5.1.5 next() order for negative and fractional number keys living in the hash part."
 row table_next_walk.luau puc51.table.next_walk runtime puc51.table.next-walk \

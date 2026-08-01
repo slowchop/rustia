@@ -500,6 +500,7 @@ puc51.table.delete-during-next	runtime	conformance/fixtures/puc51-compat/table_d
 puc51.table.iter-string-heavy	runtime	conformance/fixtures/puc51-compat/table_iter_string_heavy.luau	puc-lua-5.1.5	PUC 5.1.5 next() order for string-key-dominated tables driven through hash-part rehashes.
 puc51.table.iter-bool-keys	runtime	conformance/fixtures/puc51-compat/table_iter_bool_keys.luau	puc-lua-5.1.5	PUC 5.1.5 boolean keys alongside distinct number/string keys, with tombstone and resurrection.
 puc51.table.ctor-presizing	runtime	conformance/fixtures/puc51-compat/table_ctor_presizing.luau	puc-lua-5.1.5	PUC 5.1.5 table constructors: positional runs, int2fb round-up, multi-flush SETLIST, keyed fields, call/vararg tails.
+puc51.table.ctor-emission-order	runtime	conformance/fixtures/puc51-compat/ctor_emission_order.luau	puc-lua-5.1.5	PUC 5.1.5 constructor write order: immediate keyed writes vs 50-item positional flushes and trailing multret SETLIST.
 puc51.table.iter-frac-negative-keys	runtime	conformance/fixtures/puc51-compat/table_iter_frac_negative_keys.luau	puc-lua-5.1.5	PUC 5.1.5 next() order for negative and fractional number keys living in the hash part.
 puc51.table.next-walk	runtime	conformance/fixtures/puc51-compat/table_next_walk.luau	puc-lua-5.1.5	PUC 5.1.5 next() walks from explicit middle keys, the invalid-key error, and empty-table nil.
 puc51.table.insert-remove	stdlib	conformance/fixtures/puc51-compat/table_insert_remove.luau	puc-lua-5.1.5	PUC 5.1.5 table.insert/table.remove sequences resolved through the luaH_getn border.
