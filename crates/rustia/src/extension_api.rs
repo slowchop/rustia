@@ -214,6 +214,21 @@ impl RustiaBuilder {
         builder
     }
 
+    /// PUC Lua 5.1 compatibility preset: `Profile::Puc51Compat` plus the stock
+    /// `loadstring` compiler, on the same service base as
+    /// [`standard`](Self::standard).
+    ///
+    /// The profile alone reproduces PUC 5.1.5 table layout, number
+    /// formatting, and `table.sort`; this preset adds `loadstring` so PUC-era
+    /// code that compiles chunks at runtime works out of the box. Runtime
+    /// codegen is attack surface for hosts running untrusted scripts — add it
+    /// only where PUC source compatibility requires it.
+    pub fn puc51_compat() -> Self {
+        let mut builder = Self::standard().profile(Profile::Puc51Compat);
+        builder.settings.loadstring_compiler = Some(stock_loadstring_compiler);
+        builder
+    }
+
     pub fn profile(mut self, profile: Profile) -> Self {
         self.profile = profile;
         self
