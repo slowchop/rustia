@@ -16,6 +16,7 @@ fn first_arg(args: &[Value]) -> rustia_vm::Result<Value> {
 fn loadstring_program_returns_42(
     _source: &[u8],
     _source_name: Option<&[u8]>,
+    _profile: Profile,
 ) -> std::result::Result<Program, String> {
     Ok(Program::new(
         Function::new(
@@ -32,6 +33,7 @@ fn loadstring_program_returns_42(
 fn loadstring_compiler_should_not_run(
     _source: &[u8],
     _source_name: Option<&[u8]>,
+    _profile: Profile,
 ) -> std::result::Result<Program, String> {
     panic!("loadstring compiler should not run after fuel exhaustion")
 }
@@ -39,6 +41,7 @@ fn loadstring_compiler_should_not_run(
 fn panicking_loadstring_compiler(
     _source: &[u8],
     _source_name: Option<&[u8]>,
+    _profile: Profile,
 ) -> std::result::Result<Program, String> {
     panic!("loadstring compiler panic")
 }

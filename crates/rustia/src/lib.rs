@@ -267,7 +267,11 @@ where
 
     pub(crate) fn compile_and_run_raw(&mut self, source: &str) -> Result<rustia_vm::Value> {
         let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
-        let program = rustia_compiler::compile(&chunk).map_err(Error::Compile)?;
+        let options = CompileOptions {
+            puc51_constructor_order: self.vm.profile() == Profile::Puc51Compat,
+            ..CompileOptions::default()
+        };
+        let program = compile_with_options(&chunk, options).map_err(Error::Compile)?;
         let value = self.vm.run(&program).map_err(Error::Vm)?;
         self.advance_generation();
         Ok(value)
@@ -278,7 +282,11 @@ where
         source_name: impl Into<String>,
         source: &str,
     ) -> Result<rustia_vm::Value> {
-        let module = Self::compile_module(source_name, source)?;
+        let module = Self::compile_module_bytes_with_constructor_order(
+            source_name,
+            source.as_bytes(),
+            self.vm.profile() == Profile::Puc51Compat,
+        )?;
         let value = self.vm.run(&module.program).map_err(Error::Vm)?;
         self.advance_generation();
         Ok(value)
@@ -289,7 +297,11 @@ where
         source_name: impl Into<String>,
         source: &[u8],
     ) -> Result<rustia_vm::Value> {
-        let module = Self::compile_module_bytes(source_name, source)?;
+        let module = Self::compile_module_bytes_with_constructor_order(
+            source_name,
+            source,
+            self.vm.profile() == Profile::Puc51Compat,
+        )?;
         let value = self.vm.run(&module.program).map_err(Error::Vm)?;
         self.advance_generation();
         Ok(value)
@@ -449,13 +461,29 @@ where
         Self::compile_module_bytes(source_name, source.as_bytes())
     }
 
+    /// Compiles with the standard (source-order) table-constructor write
+    /// order. `Profile::Puc51Compat` hosts need PUC write order instead;
+    /// compile through the instance run helpers (which read the VM profile) or
+    /// pass [`CompileOptions::puc51_constructor_order`] yourself.
     pub fn compile_module_bytes(
         source_name: impl Into<String>,
         source: &[u8],
     ) -> Result<CompiledModule> {
+        Self::compile_module_bytes_with_constructor_order(source_name, source, false)
+    }
+
+    fn compile_module_bytes_with_constructor_order(
+        source_name: impl Into<String>,
+        source: &[u8],
+        puc51_constructor_order: bool,
+    ) -> Result<CompiledModule> {
         let source_name = source_name.into();
         let chunk = rustia_parser::parse_source_bytes(source).map_err(Error::Source)?;
-        let options = CompileOptions::default().with_source_bytes(source_name.clone(), source);
+        let options = CompileOptions {
+            puc51_constructor_order,
+            ..CompileOptions::default()
+        }
+        .with_source_bytes(source_name.clone(), source);
         let program = compile_with_options(&chunk, options).map_err(Error::Compile)?;
         Ok(CompiledModule {
             source_name,
@@ -469,6 +497,9 @@ where
     /// Stateless entries cannot contain nested function prototypes. Inputs and
     /// outputs should cross the typed host context, and the source should
     /// return its decision value directly.
+    ///
+    /// Compiles with the standard (source-order) table-constructor write
+    /// order; see [`compile_module_bytes`](Self::compile_module_bytes).
     pub fn compile_entry(source_name: impl Into<String>, source: &str) -> Result<CompiledEntry> {
         let source_name = source_name.into();
         let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;

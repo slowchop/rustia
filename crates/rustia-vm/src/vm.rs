@@ -91,8 +91,14 @@ const OPCODE_FUEL_OR_SPECIAL: [u8; OPCODE_TAG_SPACE] = {
     costs
 };
 
-pub type LoadStringCompiler =
-    fn(source: &[u8], source_name: Option<&[u8]>) -> std::result::Result<Program, String>;
+/// Runtime chunk compiler for `loadstring`. The VM passes its own [`Profile`]
+/// so the compiler can honor profile-dependent codegen (e.g. PUC 5.1
+/// table-constructor write order under [`Profile::Puc51Compat`]).
+pub type LoadStringCompiler = fn(
+    source: &[u8],
+    source_name: Option<&[u8]>,
+    profile: Profile,
+) -> std::result::Result<Program, String>;
 
 type SharedStdoutSink = Rc<RefCell<dyn FnMut(&str)>>;
 type SharedEntropyProvider = Rc<RefCell<dyn FnMut() -> u64>>;
@@ -12311,8 +12317,9 @@ impl Vm {
                 .intern_string_value_bytes(b"loadstring compiler is not configured");
             return Ok(vec![Value::nil(), message]);
         };
+        let profile = self.profile;
         let compiled = self.catch_host_callback(LOADSTRING_COMPILER_SERVICE_NAME, || {
-            compiler(&source, source_name.as_deref())
+            compiler(&source, source_name.as_deref(), profile)
         })?;
         let program = match compiled {
             Ok(program) => program,

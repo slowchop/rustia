@@ -743,9 +743,14 @@ fn web_monotonic_seconds() -> f64 {
 /// Stock `loadstring` compiler installed by [`RustiaBuilder::live`]: the same parse + compile
 /// pipeline the facade uses for ahead-of-time source (public builtin environment), with
 /// Luau's `[string "..."]` chunk naming when the script passes no chunk name.
+///
+/// The VM supplies its active [`Profile`] so profile-dependent codegen stays
+/// consistent between ahead-of-time and runtime-compiled chunks (currently the
+/// PUC 5.1 table-constructor write order under `Profile::Puc51Compat`).
 fn stock_loadstring_compiler(
     source: &[u8],
     source_name: Option<&[u8]>,
+    profile: Profile,
 ) -> std::result::Result<Program, String> {
     let source_name = source_name.map_or_else(
         || loadstring_chunk_name(source),
@@ -753,7 +758,11 @@ fn stock_loadstring_compiler(
     );
     let chunk = rustia_parser::parse_source_bytes(source)
         .map_err(|error| format!("{source_name}:1: {error}"))?;
-    let options = CompileOptions::default().with_source_bytes(source_name.clone(), source);
+    let options = CompileOptions {
+        puc51_constructor_order: profile == Profile::Puc51Compat,
+        ..CompileOptions::default()
+    }
+    .with_source_bytes(source_name.clone(), source);
     compile_with_options(&chunk, options).map_err(|error| format!("{source_name}:1: {error}"))
 }
 

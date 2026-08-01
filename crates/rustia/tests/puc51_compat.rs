@@ -23,4 +23,17 @@ fn puc51_compat_preset_enables_loadstring_and_puc_semantics() {
         )
         .unwrap();
     assert_eq!(order, "beta,eps,delta,gamma,alpha");
+
+    // PUC constructor write order: the trailing positional flush overwrites an
+    // earlier keyed write (reference Luau keeps source order instead).
+    let slot: f64 = rustia
+        .run("local t = {1, 2, 3, [1] = 9, 4} return t[1]")
+        .unwrap();
+    assert_eq!(slot, 1.0);
+
+    // Runtime-compiled chunks (loadstring) follow the same PUC write order.
+    let loaded_slot: f64 = rustia
+        .run("return loadstring('local t = {1, [1] = 9} return t[1]')()")
+        .unwrap();
+    assert_eq!(loaded_slot, 1.0);
 }

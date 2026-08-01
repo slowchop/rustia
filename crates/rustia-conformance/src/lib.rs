@@ -575,6 +575,7 @@ fn compile_and_run_luau_conformance(
     let chunk = parse_source_bytes(source).map_err(|error| error.to_string())?;
     let options = CompileOptions {
         builtins: BuiltinEnvironment::LuauConformance,
+        puc51_constructor_order: profile == Profile::Puc51Compat,
         ..CompileOptions::default()
     }
     .with_source_bytes(source_name, source);
@@ -723,12 +724,14 @@ fn luau_conformance_limited_stack() -> bool {
 fn compile_luau_loadstring(
     source: &[u8],
     source_name: Option<&[u8]>,
+    profile: Profile,
 ) -> std::result::Result<Program, String> {
     let source_name = loadstring_source_name(source, source_name);
     let chunk = parse_source_bytes(source)
         .map_err(|error| luau_loadstring_source_error(&source_name, error))?;
     let options = CompileOptions {
         builtins: BuiltinEnvironment::LuauConformance,
+        puc51_constructor_order: profile == Profile::Puc51Compat,
         ..CompileOptions::default()
     }
     .with_source_bytes(source_name.clone(), source);
