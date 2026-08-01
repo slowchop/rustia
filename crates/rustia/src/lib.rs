@@ -2386,6 +2386,16 @@ return ok and done and not protected and string.find(err, 'foo', 1, true) ~= nil
                 6,
                 [1, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0],
             ),
+            (
+                RustiaExecutionProfile::new(Profile::Puc51Compat, GuestSurface::Standard),
+                7,
+                [1, 0, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0],
+            ),
+            (
+                RustiaExecutionProfile::new(Profile::Puc51Compat, GuestSurface::HardenedLeaf),
+                8,
+                [1, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0],
+            ),
         ];
         for (index, (profile, compatibility_id, identity_bytes)) in profiles.iter().enumerate() {
             assert_eq!(profile.compatibility_id(), *compatibility_id);

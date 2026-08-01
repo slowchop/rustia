@@ -7242,12 +7242,20 @@ impl Vm {
         self.value_to_string(value)
     }
 
+    fn number_to_string(&self, value: f64) -> String {
+        if self.profile.is_puc51_compat() {
+            puc51_number_to_string(value)
+        } else {
+            luau_number_to_string(value)
+        }
+    }
+
     fn value_to_string(&mut self, value: Value) -> Result<Vec<u8>> {
         if let Some(text) = self.string_value_bytes(value)? {
             return Ok(text);
         }
         if let Some(number) = value.as_number() {
-            return Ok(luau_number_to_string(number).into_bytes());
+            return Ok(self.number_to_string(number).into_bytes());
         }
         Err(Error::new(ErrorKind::TypeError {
             expected: "string or number",
@@ -7263,7 +7271,7 @@ impl Vm {
                 b"false".to_vec()
             }),
             ValueKind::Number => {
-                Ok(luau_number_to_string(value.as_number().unwrap_or(f64::NAN)).into_bytes())
+                Ok(self.number_to_string(value.as_number().unwrap_or(f64::NAN)).into_bytes())
             }
             ValueKind::String => self.string_value_bytes(value)?.ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
@@ -11302,7 +11310,7 @@ impl Vm {
             } else {
                 "false".len()
             }),
-            ValueKind::Number => Some(luau_number_to_string(value.as_number()?).len()),
+            ValueKind::Number => Some(self.number_to_string(value.as_number()?).len()),
             ValueKind::String => self
                 .string_value_bytes(value)
                 .ok()
@@ -11576,7 +11584,7 @@ impl Vm {
                     })?;
                     String::from_utf8_lossy(&message).into_owned()
                 }
-                ValueKind::Number => luau_number_to_string(value.as_number().unwrap_or(f64::NAN)),
+                ValueKind::Number => self.number_to_string(value.as_number().unwrap_or(f64::NAN)),
                 _ => {
                     return Err(Error::new(ErrorKind::RuntimeError {
                         message: format!(
@@ -14850,7 +14858,7 @@ impl Vm {
     }
 
     fn table_next_after(&mut self, table: u32, after: Value) -> Option<TableNext> {
-        let order = if self.profile == Profile::LuauCompat {
+        let order = if self.profile.is_luau_compat() {
             TableIterationOrder::LuauHash
         } else {
             TableIterationOrder::Insertion
@@ -17180,7 +17188,17 @@ impl Vm {
                 reason: "table handle is missing",
             })
         })?;
-        if comparator.is_none()
+        if self.profile.is_puc51_compat() {
+            self.table_sort_puc51(
+                &mut values,
+                comparator,
+                table,
+                initial_storage_len,
+                program,
+                depth,
+                fuel,
+            )?;
+        } else if comparator.is_none()
             && values
                 .iter()
                 .all(|value| value.as_number().is_some_and(|number| !number.is_nan()))
@@ -17216,6 +17234,178 @@ impl Vm {
             }
         }
         Ok(Vec::new())
+    }
+
+    /// PUC Lua 5.1 `auxsort` (ltablib.c): recursive quicksort, middle-element
+    /// pivot with median-of-three, in-place partition. Comparison order and
+    /// tie behavior are observable, so this ports the C control flow verbatim
+    /// (including the out-of-range reads as nil and the
+    /// `"invalid order function for sorting"` guards) over the snapshot.
+    fn table_sort_puc51(
+        &mut self,
+        values: &mut [Value],
+        comparator: Option<Value>,
+        table: u32,
+        initial_storage_len: usize,
+        program: &Program,
+        depth: usize,
+        fuel: &mut Execution<'_>,
+    ) -> Result<()> {
+        if values.len() < 2 {
+            return Ok(());
+        }
+        self.table_sort_puc51_auxsort(
+            values,
+            0,
+            values.len() as isize - 1,
+            comparator,
+            table,
+            initial_storage_len,
+            program,
+            depth,
+            fuel,
+        )
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    fn table_sort_puc51_auxsort(
+        &mut self,
+        values: &mut [Value],
+        mut l: isize,
+        mut u: isize,
+        comparator: Option<Value>,
+        table: u32,
+        initial_storage_len: usize,
+        program: &Program,
+        depth: usize,
+        fuel: &mut Execution<'_>,
+    ) -> Result<()> {
+        while l < u {
+            // sort elements a[l], a[(l+u)/2] and a[u]
+            if self.table_sort_less(
+                values[u as usize],
+                values[l as usize],
+                comparator,
+                table,
+                initial_storage_len,
+                program,
+                depth,
+                fuel,
+            )? {
+                values.swap(l as usize, u as usize);
+            }
+            if u - l == 1 {
+                break;
+            }
+            let mid = (l + u) / 2;
+            if self.table_sort_less(
+                values[mid as usize],
+                values[l as usize],
+                comparator,
+                table,
+                initial_storage_len,
+                program,
+                depth,
+                fuel,
+            )? {
+                values.swap(mid as usize, l as usize);
+            } else if self.table_sort_less(
+                values[u as usize],
+                values[mid as usize],
+                comparator,
+                table,
+                initial_storage_len,
+                program,
+                depth,
+                fuel,
+            )? {
+                values.swap(mid as usize, u as usize);
+            }
+            if u - l == 2 {
+                break;
+            }
+            // Pivot: a[mid], stashed at a[u-1].
+            values.swap(mid as usize, (u - 1) as usize);
+            let pivot = values[(u - 1) as usize];
+            let mut i = l;
+            let mut j = u - 1;
+            // invariant: a[l..=i] <= P <= a[j..=u]
+            loop {
+                loop {
+                    i += 1;
+                    let probe = table_sort_puc51_probe(values, i, l, u);
+                    if !self.table_sort_less(
+                        probe,
+                        pivot,
+                        comparator,
+                        table,
+                        initial_storage_len,
+                        program,
+                        depth,
+                        fuel,
+                    )? {
+                        break;
+                    }
+                    if i > u {
+                        return Err(puc51_invalid_order_function_error());
+                    }
+                }
+                loop {
+                    j -= 1;
+                    let probe = table_sort_puc51_probe(values, j, l, u);
+                    if !self.table_sort_less(
+                        pivot,
+                        probe,
+                        comparator,
+                        table,
+                        initial_storage_len,
+                        program,
+                        depth,
+                        fuel,
+                    )? {
+                        break;
+                    }
+                    if j < l {
+                        return Err(puc51_invalid_order_function_error());
+                    }
+                }
+                if j < i {
+                    break;
+                }
+                values.swap(i as usize, j as usize);
+            }
+            // Swap pivot back into place: a[u-1] <-> a[i].
+            values.swap((u - 1) as usize, i as usize);
+            // Recurse on the smaller half, loop on the larger.
+            if i - l < u - i {
+                self.table_sort_puc51_auxsort(
+                    values,
+                    l,
+                    i - 1,
+                    comparator,
+                    table,
+                    initial_storage_len,
+                    program,
+                    depth,
+                    fuel,
+                )?;
+                l = i + 1;
+            } else {
+                self.table_sort_puc51_auxsort(
+                    values,
+                    i + 1,
+                    u,
+                    comparator,
+                    table,
+                    initial_storage_len,
+                    program,
+                    depth,
+                    fuel,
+                )?;
+                u = i - 1;
+            }
+        }
+        Ok(())
     }
 
     fn table_sort_heap(
@@ -20733,6 +20923,142 @@ fn luau_number_to_string(value: f64) -> String {
         output.insert(0, '-');
     }
     output
+}
+
+/// PUC Lua 5.1 `lua_number2str`: C `sprintf("%.14g")`.
+///
+/// 14 significant digits, correctly rounded (round half-to-even) via Rust's
+/// `LowerExp` formatting; style selection per C99 `%g`: scientific iff the
+/// post-rounding decimal exponent is < -4 or >= 14, trailing fractional zeros
+/// removed, exponent always signed with at least two digits.
+fn puc51_number_to_string(value: f64) -> String {
+    let value = canonicalize_number(value);
+    if value.is_nan() {
+        return "nan".to_owned();
+    }
+    if value == f64::INFINITY {
+        return "inf".to_owned();
+    }
+    if value == f64::NEG_INFINITY {
+        return "-inf".to_owned();
+    }
+    let scientific = format!("{value:.13e}");
+    let (mantissa, exponent) = scientific
+        .split_once('e')
+        .expect("LowerExp formatting always contains 'e'");
+    let exponent: i32 = exponent
+        .parse()
+        .expect("LowerExp exponent is always an integer");
+    let (negative, mantissa) = mantissa
+        .strip_prefix('-')
+        .map_or((false, mantissa), |magnitude| (true, magnitude));
+    let mut digits = String::with_capacity(14);
+    digits.extend(mantissa.chars().filter(|char| char.is_ascii_digit()));
+    debug_assert_eq!(digits.len(), 14, "LowerExp with precision 13 yields 14 significant digits");
+
+    let mut output = String::with_capacity(digits.len() + 8);
+    if negative {
+        output.push('-');
+    }
+    if (-4..14).contains(&exponent) {
+        puc51_push_fixed_digits(&mut output, &digits, exponent);
+    } else {
+        puc51_push_scientific_digits(&mut output, &digits, exponent);
+    }
+    output
+}
+
+/// `%g` fixed (`%f`-style) form: decimal point placed after `exponent + 1`
+/// significant digits, fractional trailing zeros trimmed, bare radix dropped.
+fn puc51_push_fixed_digits(output: &mut String, digits: &str, exponent: i32) {
+    let integer_len = exponent + 1;
+    if integer_len <= 0 {
+        output.push_str("0.");
+        output.extend(std::iter::repeat_n('0', (-integer_len) as usize));
+        let mut fraction = digits;
+        while fraction.ends_with('0') {
+            fraction = &fraction[..fraction.len() - 1];
+        }
+        output.push_str(fraction);
+        return;
+    }
+    let integer_len = integer_len as usize;
+    output.push_str(&digits[..integer_len]);
+    let mut fraction = &digits[integer_len..];
+    while fraction.ends_with('0') {
+        fraction = &fraction[..fraction.len() - 1];
+    }
+    if !fraction.is_empty() {
+        output.push('.');
+        output.push_str(fraction);
+    }
+}
+
+/// `%g` scientific (`%e`-style) form: one leading digit, trimmed fraction,
+/// signed exponent padded to at least two digits.
+fn puc51_push_scientific_digits(output: &mut String, digits: &str, exponent: i32) {
+    output.push_str(&digits[..1]);
+    let mut fraction = &digits[1..];
+    while fraction.ends_with('0') {
+        fraction = &fraction[..fraction.len() - 1];
+    }
+    if !fraction.is_empty() {
+        output.push('.');
+        output.push_str(fraction);
+    }
+    output.push('e');
+    output.push(if exponent >= 0 { '+' } else { '-' });
+    let magnitude = exponent.unsigned_abs();
+    if magnitude < 10 {
+        output.push('0');
+    }
+    output.push_str(&magnitude.to_string());
+}
+
+#[cfg(test)]
+mod puc51_number_format_tests {
+    use super::puc51_number_to_string;
+
+    #[test]
+    fn matches_libc_14g_reference_outputs() {
+        // Reference outputs measured from C `sprintf("%.14g")` (BSD/glibc).
+        let cases = [
+            (0.0, "0"),
+            (-0.0, "-0"),
+            (1.0, "1"),
+            (3.0, "3"),
+            (2.5, "2.5"),
+            (-1.5, "-1.5"),
+            (0.1, "0.1"),
+            (0.5, "0.5"),
+            (42.0, "42"),
+            (0.0001, "0.0001"),
+            (0.00001, "1e-05"),
+            (1e15, "1e+15"),
+            (1e20, "1e+20"),
+            (1e21, "1e+21"),
+            (100000000000000.5, "1e+14"),
+            (1000000000000000.5, "1e+15"),
+            (99999999999999.9, "1e+14"),
+            (123456789012345678.0, "1.2345678901235e+17"),
+            (5e-324, "4.9406564584125e-324"),
+            (2.2250738585072014e-308, "2.2250738585072e-308"),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(
+                puc51_number_to_string(value),
+                expected,
+                "%.14g of {value:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_finite_values_match_libc() {
+        assert_eq!(puc51_number_to_string(f64::NAN), "nan");
+        assert_eq!(puc51_number_to_string(f64::INFINITY), "inf");
+        assert_eq!(puc51_number_to_string(f64::NEG_INFINITY), "-inf");
+    }
 }
 
 fn luau_number_magnitude_to_string(magnitude: &str) -> Option<String> {
@@ -25905,6 +26231,23 @@ fn validate_table_key(key: Value) -> Result<()> {
 fn readonly_table_error() -> Error {
     Error::new(ErrorKind::RuntimeError {
         message: READONLY_TABLE_ERROR.to_owned(),
+    })
+}
+
+/// PUC `auxsort` reads the table through `lua_rawgeti`, so partition scans
+/// that run past the sorted range (only possible with an inconsistent
+/// comparator) observe nil rather than panicking.
+fn table_sort_puc51_probe(values: &[Value], index: isize, l: isize, u: isize) -> Value {
+    if (l..=u).contains(&index) {
+        values[index as usize]
+    } else {
+        Value::nil()
+    }
+}
+
+fn puc51_invalid_order_function_error() -> Error {
+    Error::new(ErrorKind::RuntimeError {
+        message: "invalid order function for sorting".to_owned(),
     })
 }
 

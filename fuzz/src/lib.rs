@@ -46,10 +46,11 @@ pub fn fuzz_vm(data: &[u8]) -> bool {
         return false;
     }
 
-    let profile = match data.first().copied().unwrap_or_default() % 3 {
+    let profile = match data.first().copied().unwrap_or_default() % 4 {
         0 => Profile::LuauCompat,
         1 => Profile::ReproducibleStandard,
-        _ => Profile::DeterministicSim,
+        2 => Profile::DeterministicSim,
+        _ => Profile::Puc51Compat,
     };
     let settings = VmSettings {
         initial_fuel: Some(VM_FUEL),

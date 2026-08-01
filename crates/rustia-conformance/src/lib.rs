@@ -41,6 +41,7 @@ pub struct Report {
     pub pending_oracle: usize,
     pub pending_impl: usize,
     pub rustia_only: usize,
+    pub puc51_oracle: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -70,6 +71,7 @@ pub fn run_repository(repo: impl AsRef<Path>) -> Result<Report> {
         pending_oracle: 0,
         pending_impl: 0,
         rustia_only: 0,
+        puc51_oracle: 0,
     };
 
     for case in &cases {
@@ -79,6 +81,7 @@ pub fn run_repository(repo: impl AsRef<Path>) -> Result<Report> {
             OracleStatus::PendingOracle => report.pending_oracle += 1,
             OracleStatus::PendingImpl => report.pending_impl += 1,
             OracleStatus::RustiaOnly => report.rustia_only += 1,
+            OracleStatus::PucLua515 => report.puc51_oracle += 1,
         }
         case.run(repo, &known_refs)?;
     }
@@ -214,6 +217,7 @@ enum OracleStatus {
     PendingOracle,
     PendingImpl,
     RustiaOnly,
+    PucLua515,
 }
 
 impl OracleStatus {
@@ -221,7 +225,7 @@ impl OracleStatus {
         match self {
             Self::PendingOracle => Some("pending-oracle"),
             Self::PendingImpl => Some("pending-impl"),
-            Self::Luau0709 | Self::RustiaOnly => None,
+            Self::Luau0709 | Self::RustiaOnly | Self::PucLua515 => None,
         }
     }
 }
@@ -233,6 +237,7 @@ enum CatalogStatus {
     PendingImpl,
     PendingFixture,
     RustiaOnly,
+    PucLua515,
 }
 
 impl CatalogStatus {
@@ -243,6 +248,7 @@ impl CatalogStatus {
             Self::PendingImpl => "pending-impl",
             Self::PendingFixture => "pending-fixture",
             Self::RustiaOnly => "rustia-only",
+            Self::PucLua515 => "puc-lua-5.1.5",
         }
     }
 }
@@ -371,6 +377,13 @@ impl<'a> Case<'a> {
                 OracleStatus::RustiaOnly if *status != CatalogStatus::RustiaOnly => {
                     return Err(Error::new(format!(
                         "{}: rustia-only manifest rows must reference only rustia-only refs; {reference:?} has {} status in conformance/REFS.tsv",
+                        self.id,
+                        status.as_str()
+                    )));
+                }
+                OracleStatus::PucLua515 if *status != CatalogStatus::PucLua515 => {
+                    return Err(Error::new(format!(
+                        "{}: puc-lua-5.1.5 manifest rows must reference only puc-lua-5.1.5 refs; {reference:?} has {} status in conformance/REFS.tsv",
                         self.id,
                         status.as_str()
                     )));
@@ -910,6 +923,7 @@ fn parse_profile(text: &str, line_number: usize) -> Result<Profile> {
         "LuauCompat" => Ok(Profile::LuauCompat),
         "ReproducibleStandard" => Ok(Profile::ReproducibleStandard),
         "DeterministicSim" => Ok(Profile::DeterministicSim),
+        "Puc51Compat" => Ok(Profile::Puc51Compat),
         _ => Err(Error::new(format!(
             "manifest line {line_number}: unknown profile {text:?}"
         ))),
@@ -922,6 +936,7 @@ fn parse_oracle_status(text: &str, line_number: usize) -> Result<OracleStatus> {
         "pending-oracle" => Ok(OracleStatus::PendingOracle),
         "pending-impl" => Ok(OracleStatus::PendingImpl),
         "rustia-only" => Ok(OracleStatus::RustiaOnly),
+        "puc-lua-5.1.5" => Ok(OracleStatus::PucLua515),
         _ => Err(Error::new(format!(
             "manifest line {line_number}: unknown oracle status {text:?}"
         ))),
@@ -935,6 +950,7 @@ fn parse_catalog_status(text: &str, line_number: usize) -> Result<CatalogStatus>
         "pending-impl" => Ok(CatalogStatus::PendingImpl),
         "pending-fixture" => Ok(CatalogStatus::PendingFixture),
         "rustia-only" => Ok(CatalogStatus::RustiaOnly),
+        "puc-lua-5.1.5" => Ok(CatalogStatus::PucLua515),
         _ => Err(Error::new(format!(
             "refs line {line_number}: unknown status {text:?}"
         ))),

@@ -84,6 +84,8 @@ impl RustiaExecutionProfile {
             (Profile::DeterministicSim, GuestSurface::Standard) => 4,
             (Profile::LuauCompat, GuestSurface::HardenedLeaf) => 5,
             (Profile::ReproducibleStandard, GuestSurface::HardenedLeaf) => 6,
+            (Profile::Puc51Compat, GuestSurface::Standard) => 7,
+            (Profile::Puc51Compat, GuestSurface::HardenedLeaf) => 8,
         }
     }
 
@@ -97,6 +99,7 @@ impl RustiaExecutionProfile {
             Profile::LuauCompat => 1u32,
             Profile::ReproducibleStandard => 2,
             Profile::DeterministicSim => 3,
+            Profile::Puc51Compat => 4,
         }
         .to_le_bytes();
         let surface = match self.guest_surface {

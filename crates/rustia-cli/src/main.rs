@@ -598,8 +598,9 @@ fn parse_profile(value: &str) -> Result<Profile, CliError> {
         "deterministic" | "deterministic-sim" | "DeterministicSim" => {
             Ok(Profile::DeterministicSim)
         }
+        "puc51" | "puc51-compat" | "Puc51Compat" => Ok(Profile::Puc51Compat),
         _ => Err(CliError::usage(format!(
-            "unknown profile {value:?}; expected luau-compat, reproducible-standard, or deterministic-sim"
+            "unknown profile {value:?}; expected luau-compat, reproducible-standard, deterministic-sim, or puc51-compat"
         ))),
     }
 }

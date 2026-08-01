@@ -8,12 +8,28 @@ pub enum Profile {
     #[default]
     ReproducibleStandard,
     DeterministicSim,
+    /// PUC Lua 5.1.5 compatibility: faithful `ltable.c` table layout (array part + node part
+    /// with main-position chaining, rehash history, `luaH_next` enumeration order), PUC
+    /// `auxsort` for `table.sort`, and `%.14g` number formatting. Host-service rules match
+    /// [`ReproducibleStandard`](Profile::ReproducibleStandard). Pointer-address-keyed table
+    /// iteration order is not reproducible (it varies per run even in real PUC).
+    Puc51Compat,
 }
 
 impl Profile {
     #[inline]
     pub const fn is_deterministic_sim(self) -> bool {
         matches!(self, Self::DeterministicSim)
+    }
+
+    #[inline]
+    pub const fn is_luau_compat(self) -> bool {
+        matches!(self, Self::LuauCompat)
+    }
+
+    #[inline]
+    pub const fn is_puc51_compat(self) -> bool {
+        matches!(self, Self::Puc51Compat)
     }
 }
 

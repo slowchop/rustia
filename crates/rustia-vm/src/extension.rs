@@ -61,7 +61,7 @@ impl ExtensionOp {
                     | OpCapability::EmitsDeterministicEffect
                     | OpCapability::WritesSlotEffect
             ),
-            Profile::ReproducibleStandard | Profile::LuauCompat => true,
+            Profile::ReproducibleStandard | Profile::LuauCompat | Profile::Puc51Compat => true,
         }
     }
 }

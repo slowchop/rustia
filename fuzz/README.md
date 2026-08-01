@@ -12,7 +12,7 @@ compiler, and VM.
 
 The VM decoder excludes operations that can request arbitrary standard-library allocation sizes.
 It still exercises bytecode validation, control flow, registers, arithmetic, tables, calls,
-closures, imports, inline-cache instructions, and all three runtime profiles. Expand that opcode
+closures, imports, inline-cache instructions, and all four runtime profiles. Expand that opcode
 set after the VM has a hard memory quota.
 
 Install `cargo-fuzz` once, then run a target from the repository root:

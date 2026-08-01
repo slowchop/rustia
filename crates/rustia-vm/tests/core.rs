@@ -279,7 +279,11 @@ fn nan_is_canonical_at_value_ingress() {
 
 #[test]
 fn deterministic_sim_omits_environment_dependent_gc_and_os_globals() {
-    for profile in [Profile::LuauCompat, Profile::ReproducibleStandard] {
+    for profile in [
+        Profile::LuauCompat,
+        Profile::ReproducibleStandard,
+        Profile::Puc51Compat,
+    ] {
         assert_eq!(global_kind(profile, b"collectgarbage"), ValueKind::Function);
         assert_eq!(global_kind(profile, b"gcinfo"), ValueKind::Function);
         assert_eq!(global_kind(profile, b"os"), ValueKind::Table);

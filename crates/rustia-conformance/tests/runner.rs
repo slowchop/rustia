@@ -228,6 +228,10 @@ fn ref_catalog_status_matches_source_evidence() {
                     || source.starts_with("design/"),
                 "rustia-only ref {reference:?} must cite a rustia-only fixture or design source, got {source:?}"
             ),
+            "puc-lua-5.1.5" => assert!(
+                source.starts_with("conformance/fixtures/puc51-compat/"),
+                "puc-lua-5.1.5 ref {reference:?} must cite a puc51-compat fixture derived from the pinned PUC 5.1.5 oracle, got {source:?}"
+            ),
             status => panic!("refs line {} has unknown status {status:?}", line_number + 1),
         }
     }
@@ -885,6 +889,7 @@ struct CoverageCounts {
     pending_oracle: usize,
     pending_impl: usize,
     rustia_only: usize,
+    puc51: usize,
 }
 
 fn coverage_counts(repo: &Path) -> CoverageCounts {
@@ -908,6 +913,7 @@ fn coverage_counts(repo: &Path) -> CoverageCounts {
             "pending-oracle" => counts.pending_oracle += 1,
             "pending-impl" => counts.pending_impl += 1,
             "rustia-only" => counts.rustia_only += 1,
+            "puc-lua-5.1.5" => counts.puc51 += 1,
             status => panic!(
                 "manifest line {} has unknown oracle status {status:?}",
                 line_number + 1
