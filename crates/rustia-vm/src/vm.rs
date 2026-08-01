@@ -9064,18 +9064,20 @@ impl Vm {
     }
 
     fn table_create(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
-        if !(1..=2).contains(&instruction.aux) {
+        if !(0..=2).contains(&instruction.aux) {
             return Err(Error::new(ErrorKind::InvalidProgram {
                 reason: "invalid table.create arity",
             }));
         }
         // Compiler-emitted constructors (Opcode::TableCreate from
-        // `compile_table_to`) carry PUC pre-sizing hints: b is the
-        // array-field count and c the hash-field count. The 100k
-        // `table.create` builtin cap does not apply to constructor hints.
+        // `compile_table_to`) carry PUC pre-sizing hints at aux == 0: b is the
+        // array-field count and c the hash-field count. The `table.create`
+        // builtin only ever carries its argument count in aux (1..=2 — a
+        // zero-argument call is a compile error), so aux == 0 cannot collide
+        // with it. The 100k builtin cap does not apply to constructor hints.
         let puc_constructor = self.profile.is_puc51_compat()
             && instruction.op == Opcode::TableCreate
-            && instruction.aux == 1;
+            && instruction.aux == 0;
         let size = table_create_size(
             self.coerce_register_to_number(registers, instruction.b)?,
             !puc_constructor,

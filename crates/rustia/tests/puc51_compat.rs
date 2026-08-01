@@ -37,3 +37,36 @@ fn puc51_compat_preset_enables_loadstring_and_puc_semantics() {
         .unwrap();
     assert_eq!(loaded_slot, 1.0);
 }
+
+#[test]
+fn puc51_compat_table_create_builtin_is_not_a_constructor_hint() {
+    let mut rustia = RustiaBuilder::puc51_compat().build().unwrap();
+
+    // One-arg table.create(n) must not be mistaken for a compiler constructor
+    // hint: the aux marker space is disjoint (constructor aux == 0, builtin
+    // arity 1..=2). Register 0 holding a non-number previously produced a
+    // spurious "type error: expected number"; a large number silently sized
+    // the node part from unrelated data.
+    let size: f64 = rustia
+        .run(
+            "local s = 'str' \
+             local t = table.create(5) \
+             local u = table.create(3, 'v') \
+             return #t + #u + (u[3] == 'v' and 100 or 0)",
+        )
+        .unwrap();
+    assert_eq!(size, 103.0);
+
+    // The builtin's size cap still applies (constructor hints bypass it, but
+    // only for actual constructors).
+    let capped: String = rustia
+        .run("local ok, err = pcall(table.create, 200000) return tostring(ok)")
+        .unwrap();
+    assert_eq!(capped, "false");
+
+    // Aliased calls take the compiled (non-native) route with the same result.
+    let aliased: f64 = rustia
+        .run("local s = 'str' local tc = table.create local t = tc(5) return #t")
+        .unwrap();
+    assert_eq!(aliased, 0.0);
+}

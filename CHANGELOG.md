@@ -33,6 +33,16 @@ Current unpublished workspace version: `0.0.1`.
   constructor write order under `Profile::Puc51Compat`). Update custom
   loadstring compilers to the new signature.
 
+### Fixed
+
+- One-argument `table.create(n)` under `Profile::Puc51Compat` no longer
+  collides with compiler constructor pre-sizing hints: constructor
+  `TableCreate` instructions now mark with `aux == 0` (the builtin's arity is
+  always 1..=2), so the builtin's argument is no longer misread as a
+  hash-field hint (spurious "type error: expected number", node-part
+  over-allocation from unrelated register data, and a bypassed builtin size
+  cap).
+
 - A shared native/Node-V8 mixed-heap pressure test now executes 96 decision
   epochs and 3,072 allocation waves under a 2 MiB logical-live limit. Each
   wave combines cyclic tables, runtime strings, closures/upvalues, suspended

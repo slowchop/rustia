@@ -1763,7 +1763,8 @@ impl Compiler {
             .count();
         // PUC constructor pre-sizing (OP_NEWTABLE B/C operands): the hash
         // field count rides along unconditionally; only the Puc51Compat
-        // profile consumes it.
+        // profile consumes it. aux is 0 so constructor markers can never
+        // collide with the `table.create` builtin arity (1..=2).
         let hash_field_count = fields.len() - array_field_count;
         if array_field_count == 0 {
             self.code.push(Instruction::with_aux(
@@ -1781,7 +1782,7 @@ impl Compiler {
                 target,
                 target,
                 hash_register,
-                1,
+                0,
             ));
             self.free_register(hash_register);
         }
