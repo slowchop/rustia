@@ -327,14 +327,114 @@ impl InternedString<'_> {
     }
 }
 
+/// Per-VM table storage layout, selected from the VM profile at construction.
+///
+/// `Log` is the historical rustia backend (insertion-ordered entries with a
+/// side hash index). `Puc51` ports the PUC Lua 5.1.5 `ltable.c` layout
+/// (array part + chained node part with Brent's variation) so that the
+/// `Puc51Compat` profile reproduces PUC sizing, rehash, and iteration-order
+/// behavior exactly.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TableLayout {
+    Log,
+    Puc51,
+}
+
 #[derive(Clone)]
 struct TableData {
     array: Vec<Value>,
-    hash: Vec<TableEntry>,
-    hash_index: Vec<u32>,
+    hash: HashPart,
     readonly: bool,
     metatable: Option<u32>,
     shape_version: u64,
+}
+
+/// Hash-part storage backing a [`TableData`]. The variant is fixed per VM by
+/// [`TableLayout`]; every table in one VM uses the same variant.
+#[derive(Clone)]
+enum HashPart {
+    /// Insertion-ordered entries plus a compact side index (default rustia
+    /// backend).
+    Log {
+        entries: Vec<TableEntry>,
+        index: Vec<u32>,
+    },
+    /// PUC Lua 5.1.5 `ltable.c` node part.
+    Puc(PucHashPart),
+}
+
+/// PUC node part: a chained scatter table with Brent's variation. `nodes` is
+/// persistent (never shrunk outside `table_clear` semantics) and its size is
+/// either zero (the PUC `dummynode` case) or a power of two.
+#[derive(Clone)]
+struct PucHashPart {
+    nodes: Vec<PucNode>,
+    /// PUC `lastfree`: a scan-down cursor one past the next free-slot
+    /// candidate. It only moves downward and never resets except on rehash or
+    /// `table_clear`.
+    lastfree: usize,
+}
+
+#[derive(Clone, Copy)]
+struct PucNode {
+    key: PucNodeKey,
+    /// Live `Value` form of the key (same role as `TableEntry.key_value`).
+    key_value: Value,
+    value: Value,
+    /// Next slot in the collision chain; -1 is the PUC `gnext == NULL` end.
+    next: i32,
+}
+
+#[derive(Clone, Copy)]
+enum PucNodeKey {
+    /// PUC nil key: a never-used slot, i.e. a `getfreepos` candidate.
+    Free,
+    Live(TableKey),
+    /// GC-tombstoned collectable key; never GC-marked and never matches
+    /// reads, but still answers `next()` lookups like a PUC dead key.
+    Dead(TableKey),
+}
+
+const PUC_FREE_NODE: PucNode = PucNode {
+    key: PucNodeKey::Free,
+    key_value: Value::nil(),
+    value: Value::nil(),
+    next: -1,
+};
+
+/// PUC `MAXBITS`/`MAXASIZE` (ltable.c:41-47).
+const PUC_MAXBITS: usize = 26;
+const PUC_MAXASIZE: usize = 1 << PUC_MAXBITS;
+
+fn empty_hash_part(layout: TableLayout) -> HashPart {
+    match layout {
+        TableLayout::Log => HashPart::Log {
+            entries: Vec::new(),
+            index: Vec::new(),
+        },
+        TableLayout::Puc51 => HashPart::Puc(PucHashPart {
+            nodes: Vec::new(),
+            lastfree: 0,
+        }),
+    }
+}
+
+impl TableData {
+    #[inline]
+    fn puc_hash(&self) -> Option<&PucHashPart> {
+        match &self.hash {
+            HashPart::Puc(puc) => Some(puc),
+            HashPart::Log { .. } => None,
+        }
+    }
+
+    #[inline]
+    fn puc_hash_mut(&mut self) -> Option<&mut PucHashPart> {
+        match &mut self.hash {
+            HashPart::Puc(puc) => Some(puc),
+            HashPart::Log { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -754,6 +854,7 @@ pub(crate) enum TableNumericArrayWrite {
 pub(crate) enum TableIterationOrder {
     Insertion,
     LuauHash,
+    Puc51,
 }
 
 type ArenaRoot = Rootable![Gc<'_, RefLock<RootData<'_>>>];
@@ -780,6 +881,9 @@ pub struct VmCell {
     // does not need a GC mutation boundary; weak traversal receives this slice.
     upvalues: ReusableSlots<UpvalueData>,
     side_usage: HeapMemoryUsage,
+    // Selected once at VM construction from the profile; every table in this
+    // cell uses the same hash-part variant.
+    table_layout: TableLayout,
 }
 
 impl VmCell {
@@ -801,7 +905,15 @@ impl VmCell {
             .saturating_add(64)
     }
 
+    /// Default Log-layout constructor. Production VMs go through
+    /// [`VmCell::with_table_layout`]; this stays for the existing test
+    /// callers.
+    #[allow(dead_code)]
     pub fn new() -> Self {
+        Self::with_table_layout(TableLayout::Log)
+    }
+
+    pub(crate) fn with_table_layout(table_layout: TableLayout) -> Self {
         let arena = VmArena::new(|mc| {
             Gc::new(
                 mc,
@@ -823,6 +935,7 @@ impl VmCell {
             functions: ReusableSlots::new(),
             upvalues: ReusableSlots::new(),
             side_usage: HeapMemoryUsage::default(),
+            table_layout,
         }
     }
 
@@ -851,6 +964,26 @@ impl VmCell {
         let after = table_data_memory_usage(table);
         self.side_usage.adjust(before, after);
         Some(result)
+    }
+
+    /// Same accounting wrapper as [`VmCell::mutate_table_data`], but the
+    /// closure also receives the string-atom root. PUC-layout hashing needs
+    /// string bytes to compute node main positions.
+    fn mutate_table_data_with_root<R>(
+        &mut self,
+        handle: u32,
+        mutate: impl FnOnce(&RootData<'_>, &mut TableData) -> R,
+    ) -> Option<R> {
+        let tables = &mut self.tables;
+        let side_usage = &mut self.side_usage;
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = tables.get_mut(handle)?;
+            let before = table_data_memory_usage(table);
+            let result = mutate(&root, table);
+            side_usage.adjust(before, table_data_memory_usage(table));
+            Some(result)
+        })
     }
 
     pub fn finish_collection_cycle(&mut self) {
@@ -1091,13 +1224,22 @@ impl VmCell {
 
     pub fn release_spare_capacity(&mut self) {
         for table in self.tables.values_mut() {
+            if !matches!(table.hash, HashPart::Log { .. }) {
+                // PUC tables keep their array and node sizes outside rehash:
+                // popping trailing nils or shrinking vectors would change
+                // border semantics and main-position layout.
+                continue;
+            }
             while table.array.last().is_some_and(|value| value.is_nil()) {
                 table.array.pop();
             }
             table.array.shrink_to_fit();
-            table.hash.shrink_to_fit();
-            rebuild_hash_index(table);
-            table.hash_index.shrink_to_fit();
+            let HashPart::Log { entries, index } = &mut table.hash else {
+                unreachable!("Log layout checked above")
+            };
+            entries.shrink_to_fit();
+            rebuild_hash_index(entries, index);
+            index.shrink_to_fit();
         }
         for function in self.functions.values_mut() {
             function.captures.shrink_to_fit();
@@ -1317,8 +1459,31 @@ impl VmCell {
     pub fn alloc_array_table(&mut self, values: &[Value]) -> u32 {
         self.insert_table_data(TableData {
             array: values.to_vec(),
-            hash: Vec::new(),
-            hash_index: Vec::new(),
+            hash: empty_hash_part(self.table_layout),
+            readonly: false,
+            metatable: None,
+            shape_version: 0,
+        })
+        .expect("table slot limit exceeded")
+    }
+
+    /// Allocates a PUC-layout table with pre-sized array and node parts,
+    /// matching `luaH_new` + `setarrayvector`/`setnodevector` (ltable.c:358).
+    ///
+    /// Reserved for the `table.create`-style constructor pre-sizing path
+    /// (Phase 5); defensive fallback to a plain empty table on Log VMs.
+    #[allow(dead_code)]
+    pub(crate) fn alloc_puc_table(&mut self, array_size: usize, hash_size: usize) -> u32 {
+        if self.table_layout != TableLayout::Puc51 {
+            return self.alloc_array_table(&[]);
+        }
+        let node_len = puc_node_vector_len(hash_size);
+        self.insert_table_data(TableData {
+            array: vec![Value::nil(); array_size],
+            hash: HashPart::Puc(PucHashPart {
+                nodes: vec![PUC_FREE_NODE; node_len],
+                lastfree: node_len,
+            }),
             readonly: false,
             metatable: None,
             shape_version: 0,
@@ -1330,8 +1495,7 @@ impl VmCell {
     pub fn alloc_filled_array_table(&mut self, size: usize, value: Value) -> u32 {
         self.insert_table_data(TableData {
             array: vec![value; size],
-            hash: Vec::new(),
-            hash_index: Vec::new(),
+            hash: empty_hash_part(self.table_layout),
             readonly: false,
             metatable: None,
             shape_version: 0,
@@ -1349,8 +1513,7 @@ impl VmCell {
         array.resize(size, value);
         self.insert_table_data(TableData {
             array,
-            hash: Vec::new(),
-            hash_index: Vec::new(),
+            hash: empty_hash_part(self.table_layout),
             readonly: false,
             metatable: None,
             shape_version: 0,
@@ -1695,13 +1858,26 @@ impl VmCell {
         } else {
             self.table_key_from_value(key)?
         };
-        let table = self.tables.get(table)?;
+        let table_data = self.tables.get(table)?;
+        if table_data.puc_hash().is_some() {
+            // PUC hashing needs string bytes for main positions.
+            let tables = &self.tables;
+            return self.arena.mutate(|mc, root| {
+                let root = root.unlock(mc).borrow();
+                let table = tables.get(table)?;
+                puc_lookup(&root, table, table_key)
+            });
+        }
         if let Some(index) = table_key_array_index(table_key) {
-            if let Some(value) = table.array.get(index - 1) {
+            if let Some(value) = table_data.array.get(index - 1) {
                 return Some(*value);
             }
         }
-        table_hash_entry(table, table_key).map(|entry| entry.value)
+        let HashPart::Log { entries, index } = &table_data.hash else {
+            debug_assert!(false, "table layout changed between checks");
+            return None;
+        };
+        table_hash_entry(entries, index, table_key).map(|entry| entry.value)
     }
 
     /// Reads an already-materialized numeric array slot without constructing or hashing a key.
@@ -1733,6 +1909,22 @@ impl VmCell {
         table: u32,
         values: &[Value],
     ) -> Option<TableNumericArrayWrite> {
+        if self.tables.get(table)?.puc_hash().is_some() {
+            // PUC: array-range keys are never in the node part, so a prefix
+            // write that fits the existing array is a pure slot write.
+            return self.mutate_table_data(table, |table| {
+                if table.readonly {
+                    return TableNumericArrayWrite::Readonly;
+                }
+                if values.len() > table.array.len() {
+                    return TableNumericArrayWrite::Deferred;
+                }
+                for (offset, value) in values.iter().copied().enumerate() {
+                    table.array[offset] = value;
+                }
+                TableNumericArrayWrite::Stored
+            });
+        }
         self.mutate_table_data(table, |table| {
             if table.readonly {
                 return TableNumericArrayWrite::Readonly;
@@ -1741,19 +1933,22 @@ impl VmCell {
                 return TableNumericArrayWrite::Deferred;
             }
 
+            let HashPart::Log { entries, index } = &mut table.hash else {
+                unreachable!("Log layout checked above")
+            };
             for (offset, value) in values.iter().copied().enumerate() {
                 table.array[offset] = value;
-                if table.hash.is_empty() {
+                if entries.is_empty() {
                     continue;
                 }
                 let key = number_table_key((offset + 1) as f64)
                     .expect("materialized array offsets are valid numeric table keys");
                 if value.is_nil() {
-                    if let Some(entry) = table_hash_entry_mut(table, key) {
+                    if let Some(entry) = table_hash_entry_mut(entries, index, key) {
                         entry.value = Value::nil();
                     }
                 } else {
-                    remove_hash_key(table, key);
+                    remove_hash_key(entries, index, &mut table.shape_version, key);
                 }
             }
             TableNumericArrayWrite::Stored
@@ -1772,6 +1967,25 @@ impl VmCell {
     ) -> Option<TableNumericArrayWrite> {
         if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
             return Some(TableNumericArrayWrite::Deferred);
+        }
+        if self.tables.get(table)?.puc_hash().is_some() {
+            // PUC: the array never grows outside rehash, so out-of-range
+            // indices defer to the general path (node part); in-range writes
+            // keep the metatable/readonly checks.
+            return self.mutate_table_data(table, |table| {
+                if one_based_index > table.array.len() {
+                    return TableNumericArrayWrite::Deferred;
+                }
+                let existing = table.array[one_based_index - 1];
+                if existing.is_nil() && table.metatable.is_some() {
+                    return TableNumericArrayWrite::Deferred;
+                }
+                if table.readonly {
+                    return TableNumericArrayWrite::Readonly;
+                }
+                table.array[one_based_index - 1] = value;
+                TableNumericArrayWrite::Stored
+            });
         }
         self.mutate_table_data(table, |table| {
             let existing = table
@@ -1801,10 +2015,13 @@ impl VmCell {
                 table.array.resize(one_based_index, Value::nil());
             }
             table.array[one_based_index - 1] = value;
-            if !table.hash.is_empty() {
+            let HashPart::Log { entries, index } = &mut table.hash else {
+                unreachable!("Log layout checked above")
+            };
+            if !entries.is_empty() {
                 let key = number_table_key(one_based_index as f64)
                     .expect("validated Luau array indices are valid numeric table keys");
-                remove_hash_key(table, key);
+                remove_hash_key(entries, index, &mut table.shape_version, key);
             }
             TableNumericArrayWrite::Stored
         })
@@ -1816,10 +2033,15 @@ impl VmCell {
         atom: u32,
     ) -> Option<Option<(Value, TableStringHashSlot)>> {
         let table = self.tables.get(table)?;
-        let Some(index) = table_hash_entry_index(table, TableKey::String(atom)) else {
+        let HashPart::Log { entries, index } = &table.hash else {
+            // PUC node slots are not stable across rehash: the inline cache
+            // is bypassed and the general path handles the lookup.
             return Some(None);
         };
-        let Some(entry) = table.hash.get(index) else {
+        let Some(index) = table_hash_entry_index(entries, index, TableKey::String(atom)) else {
+            return Some(None);
+        };
+        let Some(entry) = entries.get(index) else {
             return Some(None);
         };
         Some(Some((
@@ -1838,10 +2060,13 @@ impl VmCell {
         slot: TableStringHashSlot,
     ) -> Option<Option<Value>> {
         let table = self.tables.get(table)?;
+        let HashPart::Log { entries, .. } = &table.hash else {
+            return Some(None);
+        };
         if table.shape_version != slot.shape_version {
             return Some(None);
         }
-        let Some(entry) = table.hash.get(slot.index as usize) else {
+        let Some(entry) = entries.get(slot.index as usize) else {
             return Some(None);
         };
         if entry.key != TableKey::String(atom) {
@@ -1858,10 +2083,13 @@ impl VmCell {
         value: Value,
     ) -> Option<TableStringHashWrite> {
         let table = self.tables.get_mut(table)?;
+        let HashPart::Log { entries, .. } = &mut table.hash else {
+            return Some(TableStringHashWrite::Deferred);
+        };
         if table.shape_version != slot.shape_version {
             return Some(TableStringHashWrite::Deferred);
         }
-        let Some(entry) = table.hash.get_mut(slot.index as usize) else {
+        let Some(entry) = entries.get_mut(slot.index as usize) else {
             return Some(TableStringHashWrite::Deferred);
         };
         if entry.key != TableKey::String(atom) || entry.value.is_nil() {
@@ -1888,7 +2116,10 @@ impl VmCell {
                     if table.readonly {
                         return None;
                     }
-                    if value.is_nil() {
+                    // PUC creates a tombstone node when an absent key is set
+                    // to nil, so the atom must be interned as the key; only
+                    // Log tables may skip the write entirely.
+                    if value.is_nil() && table.puc_hash().is_none() {
                         return Some(());
                     }
                     self.intern_inline_string(short, stable_hash)
@@ -1899,16 +2130,29 @@ impl VmCell {
             };
             self.table_key_from_value(key)?
         };
-        let creates_hash_entry = {
+        let is_puc = {
             let table = self.tables.get(table)?;
             if table.readonly {
                 return None;
             }
-            !value.is_nil()
-                && matches!(
-                    table_hash_lookup(table, table_key),
-                    TableHashLookup::Vacant(_)
-                )
+            table.puc_hash().is_some()
+        };
+        if is_puc {
+            let key_value = self.table_key_visible_value(table_key, key_value)?;
+            return self.mutate_table_data_with_root(table, |root, table| {
+                puc_store(root, table, table_key, key_value, value, false);
+            });
+        }
+        let creates_hash_entry = !value.is_nil() && {
+            let table = self.tables.get(table)?;
+            let HashPart::Log { entries, index } = &table.hash else {
+                debug_assert!(false, "table layout changed between checks");
+                return None;
+            };
+            matches!(
+                table_hash_lookup(entries, index, table_key),
+                TableHashLookup::Vacant(_)
+            )
         };
         let key_value = if matches!(table_key, TableKey::Vector(_)) && !creates_hash_entry {
             key_value
@@ -1960,22 +2204,32 @@ impl VmCell {
             };
             key
         };
-        let (old_table_usage, mut candidate, creates_hash_entry) = {
+        let (old_table_usage, mut candidate) = {
             let Some(existing) = self.tables.get(table) else {
                 return QuotaTableWrite::Invalid;
             };
             if existing.readonly {
                 return QuotaTableWrite::Invalid;
             }
-            (
-                table_data_memory_usage(existing),
-                existing.clone(),
-                !value.is_nil()
-                    && matches!(
-                        table_hash_lookup(existing, table_key),
-                        TableHashLookup::Vacant(_)
-                    ),
-            )
+            (table_data_memory_usage(existing), existing.clone())
+        };
+        let is_puc = candidate.puc_hash().is_some();
+        let creates_hash_entry = if is_puc {
+            // PUC nil-stores to absent keys create tombstones, so value
+            // nilness does not clear `creates_hash_entry` here.
+            self.arena.mutate(|mc, root| {
+                let root = root.unlock(mc).borrow();
+                puc_creates_hash_entry(&root, &candidate, table_key)
+            })
+        } else {
+            let HashPart::Log { entries, index } = &candidate.hash else {
+                unreachable!("Log layout confirmed above")
+            };
+            !value.is_nil()
+                && matches!(
+                    table_hash_lookup(entries, index, table_key),
+                    TableHashLookup::Vacant(_)
+                )
         };
         if !creates_hash_entry {
             pending_inline_atom = None;
@@ -1994,7 +2248,14 @@ impl VmCell {
             }
             _ => key_value,
         };
-        set_table_data(&mut candidate, table_key, key_value, value);
+        if is_puc {
+            self.arena.mutate(|mc, root| {
+                let root = root.unlock(mc).borrow();
+                puc_store(&root, &mut candidate, table_key, key_value, value, false);
+            });
+        } else {
+            set_table_data(&mut candidate, table_key, key_value, value);
+        }
         let candidate_usage = table_data_memory_usage(&candidate);
         let table_growth = candidate_usage
             .live_bytes
@@ -2045,12 +2306,26 @@ impl VmCell {
         let Some(key) = number_table_key(one_based_index as f64) else {
             return QuotaTableWrite::Invalid;
         };
-        if one_based_index > candidate.array.len() {
-            candidate.array.resize(one_based_index, Value::nil());
-        }
-        candidate.array[one_based_index - 1] = value;
-        if !candidate.hash.is_empty() {
-            remove_hash_key(&mut candidate, key);
+        if candidate.puc_hash().is_some() {
+            // PUC: an in-range index is a pure slot write; anything beyond
+            // the array goes to the node part (never Invalid for in-range
+            // i32 indices).
+            let key_value = Value::number(one_based_index as f64);
+            self.arena.mutate(|mc, root| {
+                let root = root.unlock(mc).borrow();
+                puc_store(&root, &mut candidate, key, key_value, value, false);
+            });
+        } else {
+            if one_based_index > candidate.array.len() {
+                candidate.array.resize(one_based_index, Value::nil());
+            }
+            candidate.array[one_based_index - 1] = value;
+            let HashPart::Log { entries, index } = &mut candidate.hash else {
+                unreachable!("Log layout confirmed above")
+            };
+            if !entries.is_empty() {
+                remove_hash_key(entries, index, &mut candidate.shape_version, key);
+            }
         }
         let candidate_usage = table_data_memory_usage(&candidate);
         let growth = candidate_usage
@@ -2080,13 +2355,22 @@ impl VmCell {
             return None;
         }
         let key = number_table_key(one_based_index as f64)?;
+        if self.tables.get(table)?.puc_hash().is_some() {
+            let key_value = Value::number(one_based_index as f64);
+            return self.mutate_table_data_with_root(table, |root, table| {
+                puc_store(root, table, key, key_value, value, false);
+            });
+        }
         self.mutate_table_data(table, |table| {
             if one_based_index > table.array.len() {
                 table.array.resize(one_based_index, Value::nil());
             }
             table.array[one_based_index - 1] = value;
-            if !table.hash.is_empty() {
-                remove_hash_key(table, key);
+            let HashPart::Log { entries, index } = &mut table.hash else {
+                unreachable!("Log layout checked above")
+            };
+            if !entries.is_empty() {
+                remove_hash_key(entries, index, &mut table.shape_version, key);
             }
         })
     }
@@ -2120,7 +2404,11 @@ impl VmCell {
 
     pub fn table_storage_len(&mut self, table: u32) -> Option<usize> {
         let table = self.tables.get(table)?;
-        Some(table.array.len().saturating_add(table.hash.len()))
+        let hash_len = match &table.hash {
+            HashPart::Log { entries, .. } => entries.len(),
+            HashPart::Puc(puc) => puc.nodes.len(),
+        };
+        Some(table.array.len().saturating_add(hash_len))
     }
 
     pub fn table_clear(&mut self, table: u32) -> Option<()> {
@@ -2130,14 +2418,40 @@ impl VmCell {
         self.mutate_table_data(table, |table| {
             bump_table_shape_version(table);
             table.array.fill(Value::nil());
-            table.hash.clear();
-            table.hash_index = Vec::new();
+            match &mut table.hash {
+                HashPart::Log { entries, index } => {
+                    entries.clear();
+                    *index = Vec::new();
+                }
+                HashPart::Puc(puc) => {
+                    puc.nodes.fill(PUC_FREE_NODE);
+                    puc.lastfree = puc.nodes.len();
+                }
+            }
         })
     }
 
     pub fn table_insert(&mut self, table: u32, position: i32, value: Value) -> Option<()> {
         if self.tables.get(table)?.readonly {
             return None;
+        }
+        if self.tables.get(table)?.puc_hash().is_some() {
+            // luaB_tinsert shape: shifting goes through get/set, so
+            // out-of-array indices land in the node part.
+            return self.mutate_table_data_with_root(table, |root, table| {
+                let len = table_array_boundary_len(table);
+
+                if position >= 1 {
+                    let position = position as usize;
+                    if position <= len {
+                        for index in (position..=len).rev() {
+                            let value = table_numeric_get(table, index);
+                            puc_store_num(root, table, (index + 1) as i64, value, false);
+                        }
+                    }
+                }
+                puc_store_num(root, table, i64::from(position), value, false);
+            });
         }
         self.mutate_table_data(table, |table| {
             let len = table_array_boundary_len(table);
@@ -2163,6 +2477,20 @@ impl VmCell {
         if !(1..=i32::try_from(len).ok()?).contains(&position) {
             return Some(None);
         }
+        if self.tables.get(table)?.puc_hash().is_some() {
+            // luaB_tremove shape: the final nil-store on a key outside the
+            // array part creates a tombstone node, as luaH_setnum would.
+            return self.mutate_table_data_with_root(table, |root, table| {
+                let position = position as usize;
+                let removed = table_numeric_get(table, position);
+                for index in position..len {
+                    let value = table_numeric_get(table, index + 1);
+                    puc_store_num(root, table, index as i64, value, false);
+                }
+                puc_store_num(root, table, len as i64, Value::nil(), false);
+                Some(removed)
+            });
+        }
         self.mutate_table_data(table, |table| {
             let position = position as usize;
             let removed = table_numeric_get(table, position);
@@ -2185,20 +2513,36 @@ impl VmCell {
             .find(|(_, value)| value.kind() != ValueKind::Nil)
             .map(|(index, _)| (index + 1) as f64)
             .unwrap_or(0.0);
-        Some(table.hash.iter().fold(array_max, |max, entry| {
-            if entry.value.kind() == ValueKind::Nil {
-                return max;
-            }
-            let TableKey::Number(bits) = entry.key else {
-                return max;
-            };
-            let key = f64::from_bits(bits);
-            if key > max {
-                key
-            } else {
-                max
-            }
-        }))
+        match &table.hash {
+            HashPart::Log { entries, .. } => Some(entries.iter().fold(array_max, |max, entry| {
+                if entry.value.kind() == ValueKind::Nil {
+                    return max;
+                }
+                let TableKey::Number(bits) = entry.key else {
+                    return max;
+                };
+                let key = f64::from_bits(bits);
+                if key > max {
+                    key
+                } else {
+                    max
+                }
+            })),
+            HashPart::Puc(puc) => Some(puc.nodes.iter().fold(array_max, |max, node| {
+                if node.value.kind() == ValueKind::Nil {
+                    return max;
+                }
+                let PucNodeKey::Live(TableKey::Number(bits)) = node.key else {
+                    return max;
+                };
+                let key = f64::from_bits(bits);
+                if key > max {
+                    key
+                } else {
+                    max
+                }
+            })),
+        }
     }
 
     pub fn table_next_after(
@@ -2412,6 +2756,10 @@ fn table_numeric_get(table: &TableData, one_based_index: usize) -> Value {
         return Value::nil();
     }
 
+    if let HashPart::Puc(puc) = &table.hash {
+        return puc_getnum(table, puc, one_based_index);
+    }
+
     if let Some(value) = table.array.get(one_based_index - 1) {
         return *value;
     }
@@ -2419,7 +2767,11 @@ fn table_numeric_get(table: &TableData, one_based_index: usize) -> Value {
     let Some(key) = number_table_key(one_based_index as f64) else {
         return Value::nil();
     };
-    table_hash_entry(table, key).map_or_else(Value::nil, |entry| entry.value)
+    let HashPart::Log { entries, index } = &table.hash else {
+        debug_assert!(false, "table layout changed between checks");
+        return Value::nil();
+    };
+    table_hash_entry(entries, index, key).map_or_else(Value::nil, |entry| entry.value)
 }
 
 fn bump_table_shape_version(table: &mut TableData) {
@@ -2441,24 +2793,40 @@ fn table_numeric_set_array_index(table: &mut TableData, index: usize, value: Val
     let Some(key) = number_table_key(index as f64) else {
         return;
     };
+    let HashPart::Log {
+        entries,
+        index: hash_index,
+    } = &mut table.hash
+    else {
+        // Only called from the Log table_insert/table_remove shift loops.
+        debug_assert!(false, "Log numeric set on a PUC-layout table");
+        return;
+    };
 
     if value.kind() == ValueKind::Nil {
         if let Some(slot) = table.array.get_mut(index - 1) {
             *slot = Value::nil();
         }
-        if !table.hash.is_empty() {
-            remove_hash_key(table, key);
+        if !entries.is_empty() {
+            remove_hash_key(entries, hash_index, &mut table.shape_version, key);
         }
     } else if index <= table.array.len() + 1 {
         if index > table.array.len() {
             table.array.resize(index, Value::nil());
         }
         table.array[index - 1] = value;
-        if !table.hash.is_empty() {
-            remove_hash_key(table, key);
+        if !entries.is_empty() {
+            remove_hash_key(entries, hash_index, &mut table.shape_version, key);
         }
     } else {
-        set_hash_key(table, key, key_value, value);
+        set_hash_key(
+            entries,
+            hash_index,
+            &mut table.shape_version,
+            key,
+            key_value,
+            value,
+        );
     }
 }
 
@@ -2470,30 +2838,49 @@ fn set_hash_number_key(table: &mut TableData, number: f64, value: Value) {
         TableKey::Number(bits) => Value::number(f64::from_bits(bits)),
         _ => Value::number(number),
     };
-    set_hash_key(table, key, key_value, value);
+    let HashPart::Log { entries, index } = &mut table.hash else {
+        // Only called from the Log table_insert/table_remove shift loops.
+        debug_assert!(false, "Log numeric set on a PUC-layout table");
+        return;
+    };
+    set_hash_key(
+        entries,
+        index,
+        &mut table.shape_version,
+        key,
+        key_value,
+        value,
+    );
 }
 
 fn table_data_live_bytes(table: &TableData) -> usize {
+    let hash_bytes = match &table.hash {
+        HashPart::Log { entries, index } => entries
+            .len()
+            .saturating_mul(size_of::<TableEntry>())
+            .saturating_add(index.len().saturating_mul(size_of::<u32>())),
+        HashPart::Puc(puc) => puc.nodes.len().saturating_mul(size_of::<PucNode>()),
+    };
     table
         .array
         .len()
         .saturating_mul(size_of::<Value>())
-        .saturating_add(table.hash.len().saturating_mul(size_of::<TableEntry>()))
-        .saturating_add(table.hash_index.len().saturating_mul(size_of::<u32>()))
+        .saturating_add(hash_bytes)
 }
 
 fn table_data_reserved_bytes(table: &TableData) -> usize {
+    let hash_bytes = match &table.hash {
+        HashPart::Log { entries, index } => entries
+            .capacity()
+            .saturating_mul(size_of::<TableEntry>())
+            .saturating_add(index.capacity().saturating_mul(size_of::<u32>())),
+        HashPart::Puc(puc) => puc.nodes.capacity().saturating_mul(size_of::<PucNode>()),
+    };
     table
         .array
         .capacity()
         .saturating_mul(size_of::<Value>())
-        .saturating_add(
-            table
-                .hash
-                .capacity()
-                .saturating_mul(size_of::<TableEntry>()),
-        )
-        .saturating_add(table.hash_index.capacity().saturating_mul(size_of::<u32>()))
+        .saturating_add(hash_bytes)
 }
 
 fn table_data_memory_usage(table: &TableData) -> HeapMemoryUsage {
@@ -2524,13 +2911,22 @@ fn function_data_memory_usage(function: &FunctionData) -> HeapMemoryUsage {
 }
 
 fn set_table_data(table: &mut TableData, table_key: TableKey, key_value: Value, value: Value) {
+    let HashPart::Log {
+        entries,
+        index: hash_index,
+    } = &mut table.hash
+    else {
+        // Only called from the Log branches of table_set and the quota path.
+        debug_assert!(false, "set_table_data requires a Log-layout table");
+        return;
+    };
     if value.is_nil() {
         if let Some(index) = table_key_array_index(table_key) {
             if let Some(slot) = table.array.get_mut(index - 1) {
                 *slot = Value::nil();
             }
         }
-        if let Some(entry) = table_hash_entry_mut(table, table_key) {
+        if let Some(entry) = table_hash_entry_mut(entries, hash_index, table_key) {
             entry.value = Value::nil();
         }
         return;
@@ -2541,43 +2937,62 @@ fn set_table_data(table: &mut TableData, table_key: TableKey, key_value: Value, 
                 table.array.resize(index, Value::nil());
             }
             table.array[index - 1] = value;
-            if !table.hash.is_empty() {
-                remove_hash_key(table, table_key);
+            if !entries.is_empty() {
+                remove_hash_key(entries, hash_index, &mut table.shape_version, table_key);
             }
             return;
         }
     }
-    set_hash_key(table, table_key, key_value, value);
+    set_hash_key(
+        entries,
+        hash_index,
+        &mut table.shape_version,
+        table_key,
+        key_value,
+        value,
+    );
 }
 
-fn set_hash_key(table: &mut TableData, key: TableKey, key_value: Value, value: Value) {
-    match table_hash_lookup(table, key) {
+fn set_hash_key(
+    entries: &mut Vec<TableEntry>,
+    index: &mut Vec<u32>,
+    shape_version: &mut u64,
+    key: TableKey,
+    key_value: Value,
+    value: Value,
+) {
+    match table_hash_lookup(entries, index, key) {
         TableHashLookup::Found(index) => {
-            if let Some(entry) = table.hash.get_mut(index) {
+            if let Some(entry) = entries.get_mut(index) {
                 entry.value = value;
             }
         }
         TableHashLookup::Vacant(vacant_hash_index) => {
             if !value.is_nil() {
-                let index = table.hash.len();
-                table.hash.push(TableEntry {
+                let entry_index = entries.len();
+                entries.push(TableEntry {
                     key,
                     key_value,
                     value,
                 });
-                bump_table_shape_version(table);
-                record_hash_insert(table, index, vacant_hash_index);
+                *shape_version = shape_version.saturating_add(1);
+                record_hash_insert(entries, index, entry_index, vacant_hash_index);
             }
         }
     }
 }
 
 #[inline]
-fn remove_hash_key(table: &mut TableData, key: TableKey) {
-    if let Some(hash_index) = table_hash_entry_index(table, key) {
-        table.hash.remove(hash_index);
-        bump_table_shape_version(table);
-        record_hash_remove(table);
+fn remove_hash_key(
+    entries: &mut Vec<TableEntry>,
+    index: &mut Vec<u32>,
+    shape_version: &mut u64,
+    key: TableKey,
+) {
+    if let Some(hash_index) = table_hash_entry_index(entries, index, key) {
+        entries.remove(hash_index);
+        *shape_version = shape_version.saturating_add(1);
+        record_hash_remove(entries, index);
     }
 }
 
@@ -2588,128 +3003,140 @@ enum TableHashLookup {
 }
 
 #[inline]
-fn table_hash_entry(table: &TableData, key: TableKey) -> Option<&TableEntry> {
-    let index = table_hash_entry_index(table, key)?;
-    table.hash.get(index)
+fn table_hash_entry<'a>(
+    entries: &'a [TableEntry],
+    index: &[u32],
+    key: TableKey,
+) -> Option<&'a TableEntry> {
+    let index = table_hash_entry_index(entries, index, key)?;
+    entries.get(index)
 }
 
 #[inline]
-fn table_hash_entry_mut(table: &mut TableData, key: TableKey) -> Option<&mut TableEntry> {
-    let index = table_hash_entry_index(table, key)?;
-    table.hash.get_mut(index)
+fn table_hash_entry_mut<'a>(
+    entries: &'a mut [TableEntry],
+    index: &[u32],
+    key: TableKey,
+) -> Option<&'a mut TableEntry> {
+    let index = table_hash_entry_index(entries, index, key)?;
+    entries.get_mut(index)
 }
 
 #[inline]
-fn table_hash_entry_index(table: &TableData, key: TableKey) -> Option<usize> {
-    match table_hash_lookup(table, key) {
+fn table_hash_entry_index(entries: &[TableEntry], index: &[u32], key: TableKey) -> Option<usize> {
+    match table_hash_lookup(entries, index, key) {
         TableHashLookup::Found(index) => Some(index),
         TableHashLookup::Vacant(_) => None,
     }
 }
 
 #[inline]
-fn table_hash_lookup(table: &TableData, key: TableKey) -> TableHashLookup {
-    if table.hash.is_empty() {
+fn table_hash_lookup(entries: &[TableEntry], index: &[u32], key: TableKey) -> TableHashLookup {
+    if entries.is_empty() {
         return TableHashLookup::Vacant(None);
     }
-    if table.hash_index.is_empty() {
-        return match table.hash.iter().position(|entry| entry.key == key) {
+    if index.is_empty() {
+        return match entries.iter().position(|entry| entry.key == key) {
             Some(index) => TableHashLookup::Found(index),
             None => TableHashLookup::Vacant(None),
         };
     }
 
-    let mut position = table_hash_index_position(key, table.hash_index.len());
-    for _ in 0..table.hash_index.len() {
-        let slot = table.hash_index[position];
+    let mut position = table_hash_index_position(key, index.len());
+    for _ in 0..index.len() {
+        let slot = index[position];
         if slot == 0 {
             return TableHashLookup::Vacant(Some(position));
         }
-        let index = (slot - 1) as usize;
-        let indexed_entry = table.hash.get(index);
+        let entry_index = (slot - 1) as usize;
+        let indexed_entry = entries.get(entry_index);
         debug_assert!(
             indexed_entry.is_some(),
             "table hash side index contains an invalid entry index"
         );
         if indexed_entry.is_some_and(|candidate| candidate.key == key) {
-            return TableHashLookup::Found(index);
+            return TableHashLookup::Found(entry_index);
         }
-        position = (position + 1) & (table.hash_index.len() - 1);
+        position = (position + 1) & (index.len() - 1);
     }
     TableHashLookup::Vacant(None)
 }
 
-fn record_hash_insert(table: &mut TableData, index: usize, vacant_hash_index: Option<usize>) {
-    if table.hash_index.is_empty() {
-        if table.hash.len() >= TABLE_HASH_INDEX_MIN_LEN {
-            rebuild_hash_index(table);
+fn record_hash_insert(
+    entries: &mut [TableEntry],
+    index: &mut Vec<u32>,
+    entry_index: usize,
+    vacant_hash_index: Option<usize>,
+) {
+    if index.is_empty() {
+        if entries.len() >= TABLE_HASH_INDEX_MIN_LEN {
+            rebuild_hash_index(entries, index);
         }
         return;
     }
     if let Some(position) = vacant_hash_index {
-        if table.hash.len().saturating_mul(2) > table.hash_index.len() {
-            rebuild_hash_index(table);
-        } else if let Some(entry) = table.hash_index.get_mut(position) {
-            *entry = compact_hash_index_slot(index);
+        if entries.len().saturating_mul(2) > index.len() {
+            rebuild_hash_index(entries, index);
+        } else if let Some(slot) = index.get_mut(position) {
+            *slot = compact_hash_index_slot(entry_index);
         }
         return;
     }
-    insert_hash_index(table, index);
+    insert_hash_index(entries, index, entry_index);
 }
 
-fn insert_hash_index(table: &mut TableData, index: usize) {
-    if table.hash.len().saturating_mul(2) > table.hash_index.len() {
-        rebuild_hash_index(table);
+fn insert_hash_index(entries: &[TableEntry], index: &mut Vec<u32>, entry_index: usize) {
+    if entries.len().saturating_mul(2) > index.len() {
+        rebuild_hash_index(entries, index);
         return;
     }
-    let Some(key) = table.hash.get(index).map(|entry| entry.key) else {
+    let Some(key) = entries.get(entry_index).map(|entry| entry.key) else {
         debug_assert!(
             false,
             "table hash side index insertion references an invalid entry"
         );
         return;
     };
-    let mut position = table_hash_index_position(key, table.hash_index.len());
-    for _ in 0..table.hash_index.len() {
-        let slot = table.hash_index[position];
+    let mut position = table_hash_index_position(key, index.len());
+    for _ in 0..index.len() {
+        let slot = index[position];
         if slot == 0 {
-            table.hash_index[position] = compact_hash_index_slot(index);
+            index[position] = compact_hash_index_slot(entry_index);
             return;
         }
         let existing_index = (slot - 1) as usize;
-        match table.hash.get(existing_index) {
+        match entries.get(existing_index) {
             Some(entry) if entry.key == key => {
-                table.hash_index[position] = compact_hash_index_slot(index);
+                index[position] = compact_hash_index_slot(entry_index);
                 return;
             }
-            _ => position = (position + 1) & (table.hash_index.len() - 1),
+            _ => position = (position + 1) & (index.len() - 1),
         }
     }
-    rebuild_hash_index(table);
+    rebuild_hash_index(entries, index);
 }
 
-fn record_hash_remove(table: &mut TableData) {
-    if table.hash.len() < TABLE_HASH_INDEX_MIN_LEN {
-        table.hash_index = Vec::new();
+fn record_hash_remove(entries: &[TableEntry], index: &mut Vec<u32>) {
+    if entries.len() < TABLE_HASH_INDEX_MIN_LEN {
+        *index = Vec::new();
     } else {
-        rebuild_hash_index(table);
+        rebuild_hash_index(entries, index);
     }
 }
 
-fn rebuild_hash_index(table: &mut TableData) {
-    if table.hash.len() < TABLE_HASH_INDEX_MIN_LEN {
-        table.hash_index = Vec::new();
+fn rebuild_hash_index(entries: &[TableEntry], index: &mut Vec<u32>) {
+    if entries.len() < TABLE_HASH_INDEX_MIN_LEN {
+        *index = Vec::new();
         return;
     }
-    let capacity = table
-        .hash
+    let capacity = entries
         .len()
         .saturating_mul(2)
         .next_power_of_two()
         .max(TABLE_HASH_INDEX_MIN_LEN * 2);
-    table.hash_index = vec![0; capacity];
-    for index in 0..table.hash.len() {
-        insert_hash_index(table, index);
+    *index = vec![0; capacity];
+    for entry_index in 0..entries.len() {
+        insert_hash_index(entries, index, entry_index);
     }
 }
 
@@ -2763,6 +3190,560 @@ fn mix_index_hash(mut value: u64) -> u64 {
     value ^= value >> 27;
     value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
     value ^ (value >> 31)
+}
+
+// ===========================================================================
+// PUC Lua 5.1.5 table layout (port of third_party/lua-src/lua-5.1.5/ltable.c)
+//
+// A PUC table keeps non-negative integral keys in `TableData.array` and
+// everything else in a chained scatter node vector (`PucHashPart`) with
+// Brent's variation: if a node is not in its main position, the node
+// colliding with it is in its own main position. Deletes are tombstones
+// (value set to nil, key stays live); the node vector only ever changes size
+// inside `rehash`. PUC tables never grow the array part outside `rehash`.
+// ===========================================================================
+
+/// PUC `ceillog2`: 1→0, 2→1, 3→2, 4→2, ...
+fn puc_ceil_log2(x: usize) -> usize {
+    debug_assert!(x >= 1);
+    (usize::BITS - (x - 1).leading_zeros()) as usize
+}
+
+/// `setnodevector` sizing (ltable.c:272): zero stays empty (the PUC
+/// `dummynode` case); anything larger rounds up to a power of two and
+/// saturates at 2^MAXBITS instead of raising PUC's "table overflow".
+fn puc_node_vector_len(size: usize) -> usize {
+    if size == 0 {
+        0
+    } else {
+        1usize << puc_ceil_log2(size).min(PUC_MAXBITS)
+    }
+}
+
+/// `hashnum` main position (ltable.c:84), root-free. ±0.0 is canonicalized
+/// to +0.0 bits before keys are built, and PUC hashes zero to slot 0.
+fn puc_number_main_position(nodes_len: usize, bits: u64) -> usize {
+    debug_assert!(nodes_len.is_power_of_two());
+    if bits == 0 {
+        return 0;
+    }
+    (luau_number_hash(bits) as usize) % ((nodes_len - 1) | 1)
+}
+
+/// `mainposition` (ltable.c:100). Strings and booleans use power-of-two
+/// masking; numbers and raw handles use modulus by `(sizenode-1)|1`. Vectors
+/// do not exist in PUC; they use the deterministic Luau vector hash so a
+/// stray vector key still has well-defined placement.
+fn puc_main_position(root: &RootData<'_>, nodes_len: usize, key: TableKey) -> usize {
+    if nodes_len == 0 {
+        // The dummynode case: every main position is slot 0, and callers
+        // guard against indexing the empty node vector.
+        return 0;
+    }
+    debug_assert!(nodes_len.is_power_of_two());
+    match key {
+        TableKey::Boolean(value) => usize::from(value) & (nodes_len - 1),
+        TableKey::Number(bits) => puc_number_main_position(nodes_len, bits),
+        TableKey::String(atom) => {
+            let hash = root
+                .strings
+                .get(atom)
+                .map_or(atom, |value| luau_string_hash(value.as_bytes()));
+            (hash as usize) & (nodes_len - 1)
+        }
+        TableKey::Table(handle)
+        | TableKey::Function(handle)
+        | TableKey::Userdata(handle)
+        | TableKey::Buffer(handle) => (handle as usize) % ((nodes_len - 1) | 1),
+        TableKey::Vector(bits) => (luau_vector_hash(bits) as usize) % ((nodes_len - 1) | 1),
+    }
+}
+
+/// Walks the collision chain from the key's main position looking for a live
+/// node with exactly this key. Dead and free nodes never match.
+fn puc_find_node(root: &RootData<'_>, puc: &PucHashPart, key: TableKey) -> Option<usize> {
+    if puc.nodes.is_empty() {
+        return None;
+    }
+    let mut slot = puc_main_position(root, puc.nodes.len(), key);
+    loop {
+        let node = &puc.nodes[slot];
+        if matches!(node.key, PucNodeKey::Live(live) if live == key) {
+            return Some(slot);
+        }
+        if node.next < 0 {
+            return None;
+        }
+        slot = node.next as usize;
+    }
+}
+
+/// `findindex`'s chain walk (ltable.c:137): like [`puc_find_node`], but a
+/// dead node with the same key also matches ("key may be dead already, but
+/// it is ok to use it in `next`").
+fn puc_find_node_for_next(root: &RootData<'_>, puc: &PucHashPart, key: TableKey) -> Option<usize> {
+    if puc.nodes.is_empty() {
+        return None;
+    }
+    let mut slot = puc_main_position(root, puc.nodes.len(), key);
+    loop {
+        let node = &puc.nodes[slot];
+        let matches = match node.key {
+            PucNodeKey::Live(live) | PucNodeKey::Dead(live) => live == key,
+            PucNodeKey::Free => false,
+        };
+        if matches {
+            return Some(slot);
+        }
+        if node.next < 0 {
+            return None;
+        }
+        slot = node.next as usize;
+    }
+}
+
+/// `luaH_get` (ltable.c:469). `Some` means the key was found — including
+/// tombstone nodes and in-range nil array slots, which PUC reports as found
+/// nils; `None` means absent.
+fn puc_lookup(root: &RootData<'_>, table: &TableData, key: TableKey) -> Option<Value> {
+    if let Some(index) = table_key_array_index(key) {
+        if let Some(value) = table.array.get(index - 1) {
+            return Some(*value);
+        }
+    }
+    let puc = table.puc_hash()?;
+    let slot = puc_find_node(root, puc, key)?;
+    Some(puc.nodes[slot].value)
+}
+
+/// `luaH_getnum` (ltable.c:435), root-free because only number keys are
+/// compared. Absent reads report nil.
+fn puc_getnum(table: &TableData, puc: &PucHashPart, key: usize) -> Value {
+    if (1..=table.array.len()).contains(&key) {
+        return table.array[key - 1];
+    }
+    if key > i32::MAX as usize || puc.nodes.is_empty() {
+        return Value::nil();
+    }
+    let bits = table_key_number_bits(key as f64);
+    let mut slot = puc_number_main_position(puc.nodes.len(), bits);
+    loop {
+        let node = &puc.nodes[slot];
+        if matches!(node.key, PucNodeKey::Live(TableKey::Number(live)) if live == bits) {
+            return node.value;
+        }
+        if node.next < 0 {
+            return Value::nil();
+        }
+        slot = node.next as usize;
+    }
+}
+
+/// `getfreepos` (ltable.c:382): a monotone scan-down cursor. Only key-free
+/// slots count; tombstones and dead nodes are never reused as free space.
+fn puc_get_free_pos(puc: &mut PucHashPart) -> Option<usize> {
+    while puc.lastfree > 0 {
+        puc.lastfree -= 1;
+        if matches!(puc.nodes[puc.lastfree].key, PucNodeKey::Free) {
+            return Some(puc.lastfree);
+        }
+    }
+    None
+}
+
+/// Where a PUC `luaH_set` lookup lands, before the value is stored.
+enum PucSlot {
+    /// One-based array-part index.
+    Array(usize),
+    /// Node-part slot.
+    Node(usize),
+}
+
+/// `luaH_set` (ltable.c:494) without the store: an integral key in array
+/// range always lands on the array slot; an existing chain node (tombstones
+/// included) is reused; anything absent goes through `newkey`.
+fn puc_set_slot(
+    root: &RootData<'_>,
+    table: &mut TableData,
+    key: TableKey,
+    key_value: Value,
+    during_rehash: bool,
+) -> PucSlot {
+    if let Some(index) = table_key_array_index(key) {
+        if index <= table.array.len() {
+            return PucSlot::Array(index);
+        }
+    }
+    let found = table
+        .puc_hash()
+        .and_then(|puc| puc_find_node(root, puc, key));
+    if let Some(slot) = found {
+        return PucSlot::Node(slot);
+    }
+    puc_newkey(root, table, key, key_value, during_rehash)
+}
+
+/// `newkey` (ltable.c:399). `during_rehash` is set when reinserting existing
+/// entries into an exactly-sized node vector, where `getfreepos` can never
+/// run dry; the recursion through `rehash` therefore bottoms out after one
+/// level.
+fn puc_newkey(
+    root: &RootData<'_>,
+    table: &mut TableData,
+    key: TableKey,
+    key_value: Value,
+    during_rehash: bool,
+) -> PucSlot {
+    bump_table_shape_version(table);
+    let (mp, main_occupied) = {
+        let Some(puc) = table.puc_hash() else {
+            debug_assert!(false, "puc_newkey requires a PUC-layout table");
+            return PucSlot::Node(0);
+        };
+        let mp = puc_main_position(root, puc.nodes.len(), key);
+        // PUC tests the main position's *value*: a nil-valued node (free,
+        // tombstone, or dead) is reused in place with no chain surgery. The
+        // dummynode (empty node vector) counts as occupied: it always goes
+        // through getfreepos and its rehash fallback.
+        let occupied = puc.nodes.is_empty() || !puc.nodes[mp].value.is_nil();
+        (mp, occupied)
+    };
+    if !main_occupied {
+        let Some(puc) = table.puc_hash_mut() else {
+            debug_assert!(false, "puc_newkey requires a PUC-layout table");
+            return PucSlot::Node(0);
+        };
+        puc.nodes[mp].key = PucNodeKey::Live(key);
+        puc.nodes[mp].key_value = key_value;
+        debug_assert!(puc.nodes[mp].value.is_nil());
+        return PucSlot::Node(mp);
+    }
+    let free = table.puc_hash_mut().and_then(puc_get_free_pos);
+    let Some(n) = free else {
+        // Node part is full: grow via rehash, then re-run luaH_set for the
+        // triggering key (ltable.c:405-406). The exactly-sized new node part
+        // always has room, so this recurses at most once.
+        debug_assert!(
+            !during_rehash,
+            "PUC rehash failed to make room for its own entries"
+        );
+        puc_rehash(root, table, key);
+        return puc_set_slot(root, table, key, key_value, true);
+    };
+    let Some(puc) = table.puc_hash_mut() else {
+        debug_assert!(false, "puc_newkey requires a PUC-layout table");
+        return PucSlot::Node(0);
+    };
+    let occupant_key = match puc.nodes[mp].key {
+        PucNodeKey::Live(key) => key,
+        PucNodeKey::Free | PucNodeKey::Dead(_) => {
+            unreachable!("an occupied PUC node always has a live key")
+        }
+    };
+    let othern = puc_main_position(root, puc.nodes.len(), occupant_key);
+    if othern != mp {
+        // The colliding node sits outside its own main position: relocate it
+        // to the free slot and take the main position for the new key
+        // (Brent's variation).
+        let mut prev = othern;
+        while puc.nodes[prev].next != mp as i32 {
+            let next = puc.nodes[prev].next;
+            debug_assert!(next >= 0, "PUC chain must reach the colliding node");
+            prev = next as usize;
+        }
+        puc.nodes[prev].next = n as i32;
+        puc.nodes[n] = puc.nodes[mp];
+        puc.nodes[mp].next = -1;
+        puc.nodes[mp].value = Value::nil();
+        puc.nodes[mp].key = PucNodeKey::Live(key);
+        puc.nodes[mp].key_value = key_value;
+        debug_assert!(puc.nodes[mp].value.is_nil());
+        PucSlot::Node(mp)
+    } else {
+        // The colliding node is in its own main position: chain the new key
+        // behind it in the free slot.
+        puc.nodes[n].next = puc.nodes[mp].next;
+        puc.nodes[mp].next = n as i32;
+        puc.nodes[n].key = PucNodeKey::Live(key);
+        puc.nodes[n].key_value = key_value;
+        debug_assert!(puc.nodes[n].value.is_nil());
+        PucSlot::Node(n)
+    }
+}
+
+/// `luaH_set` plus the `setobj2t` store (luaV_settable): finds or creates
+/// the key's slot, then writes the value — including nil, which is how PUC
+/// creates tombstones for absent keys.
+fn puc_store(
+    root: &RootData<'_>,
+    table: &mut TableData,
+    key: TableKey,
+    key_value: Value,
+    value: Value,
+    during_rehash: bool,
+) {
+    match puc_set_slot(root, table, key, key_value, during_rehash) {
+        PucSlot::Array(index) => {
+            if let Some(slot) = table.array.get_mut(index - 1) {
+                *slot = value;
+            }
+        }
+        PucSlot::Node(slot) => {
+            if let Some(puc) = table.puc_hash_mut() {
+                puc.nodes[slot].value = value;
+            }
+        }
+    }
+}
+
+/// Numeric store in the shape of `luaH_setnum` (ltable.c:508): indices
+/// inside the array part write the slot, everything else goes to the node
+/// part (negative and zero indices included).
+fn puc_store_num(
+    root: &RootData<'_>,
+    table: &mut TableData,
+    index: i64,
+    value: Value,
+    during_rehash: bool,
+) {
+    let number = index as f64;
+    let Some(key) = number_table_key(number) else {
+        return;
+    };
+    puc_store(
+        root,
+        table,
+        key,
+        Value::number(number),
+        value,
+        during_rehash,
+    );
+}
+
+/// `countint` (ltable.c:211).
+fn puc_count_int(key: TableKey, nums: &mut [usize; PUC_MAXBITS + 1]) -> usize {
+    if let Some(k) = table_key_array_index(key) {
+        if k <= PUC_MAXASIZE {
+            nums[puc_ceil_log2(k)] += 1;
+            return 1;
+        }
+    }
+    0
+}
+
+/// `numusearray` (ltable.c:222): counts non-nil array values per
+/// `(2^(lg-1), 2^lg]` slice.
+fn puc_num_use_array(table: &TableData, nums: &mut [usize; PUC_MAXBITS + 1]) -> usize {
+    let mut ause = 0usize;
+    let mut i = 1usize;
+    let mut lg = 0usize;
+    let mut ttlg = 1usize;
+    while lg <= PUC_MAXBITS {
+        let mut lc = 0usize;
+        let mut lim = ttlg;
+        if lim > table.array.len() {
+            lim = table.array.len();
+            if i > lim {
+                break;
+            }
+        }
+        while i <= lim {
+            if !table.array[i - 1].is_nil() {
+                lc += 1;
+            }
+            i += 1;
+        }
+        nums[lg] += lc;
+        ause += lc;
+        lg += 1;
+        ttlg = ttlg.saturating_mul(2);
+    }
+    ause
+}
+
+/// `numusehash` (ltable.c:247): counts nodes with non-nil values, buckets
+/// array-candidate keys, and folds the array-candidate total into `nasize`.
+fn puc_num_use_hash(
+    table: &TableData,
+    nums: &mut [usize; PUC_MAXBITS + 1],
+    nasize: &mut usize,
+) -> usize {
+    let Some(puc) = table.puc_hash() else {
+        debug_assert!(false, "puc_num_use_hash requires a PUC-layout table");
+        return 0;
+    };
+    let mut totaluse = 0usize;
+    let mut ause = 0usize;
+    for node in &puc.nodes {
+        if !node.value.is_nil() {
+            if let PucNodeKey::Live(key) = node.key {
+                ause += puc_count_int(key, nums);
+            }
+            totaluse += 1;
+        }
+    }
+    *nasize += ause;
+    totaluse
+}
+
+/// `computesizes` (ltable.c:189): the largest array size whose lower half is
+/// more than half full.
+fn puc_compute_sizes(nums: &[usize; PUC_MAXBITS + 1], narray: &mut usize) -> usize {
+    let mut a = 0usize;
+    let mut na = 0usize;
+    let mut n = 0usize;
+    let mut i = 0usize;
+    let mut twotoi = 1usize;
+    while twotoi / 2 < *narray {
+        if i > PUC_MAXBITS {
+            // Defensive: counted keys are capped at MAXASIZE, so `narray`
+            // can never drive the slice index out of `nums` in practice.
+            break;
+        }
+        if nums[i] > 0 {
+            a += nums[i];
+            if a > twotoi / 2 {
+                n = twotoi;
+                na = a;
+            }
+        }
+        if a == *narray {
+            break;
+        }
+        i += 1;
+        twotoi = twotoi.saturating_mul(2);
+    }
+    *narray = n;
+    na
+}
+
+/// `resize` (ltable.c:297). Array growth happens first; the old node vector
+/// is replaced with a fresh all-free one; the vanishing array slice is
+/// reinserted through the numeric store path (those indices all exceed the
+/// new array size, so they land in nodes); old nodes are reinserted in
+/// descending slot order through the general store path.
+fn puc_resize(root: &RootData<'_>, table: &mut TableData, nasize: usize, nhsize: usize) {
+    let old_array_len = table.array.len();
+    if nasize > old_array_len {
+        table.array.resize(nasize, Value::nil());
+    }
+    let node_len = puc_node_vector_len(nhsize);
+    let old_nodes = {
+        let Some(puc) = table.puc_hash_mut() else {
+            debug_assert!(false, "puc_resize requires a PUC-layout table");
+            return;
+        };
+        puc.lastfree = node_len;
+        std::mem::replace(&mut puc.nodes, vec![PUC_FREE_NODE; node_len])
+    };
+    if nasize < old_array_len {
+        let vanishing: Vec<Value> = table.array[nasize..].to_vec();
+        table.array.truncate(nasize);
+        for (offset, value) in vanishing.into_iter().enumerate() {
+            if !value.is_nil() {
+                puc_store_num(root, table, (nasize + offset + 1) as i64, value, true);
+            }
+        }
+    }
+    for node in old_nodes.iter().rev() {
+        if node.value.is_nil() {
+            // Nil-valued nodes (tombstones, dead keys, free slots) are
+            // dropped by not being reinserted.
+            continue;
+        }
+        let PucNodeKey::Live(key) = node.key else {
+            continue;
+        };
+        puc_store(root, table, key, node.key_value, node.value, true);
+    }
+    bump_table_shape_version(table);
+}
+
+/// `rehash` (ltable.c:333).
+fn puc_rehash(root: &RootData<'_>, table: &mut TableData, triggering_key: TableKey) {
+    let mut nums = [0usize; PUC_MAXBITS + 1];
+    let mut nasize = puc_num_use_array(table, &mut nums);
+    let mut totaluse = nasize;
+    totaluse += puc_num_use_hash(table, &mut nums, &mut nasize);
+    nasize += puc_count_int(triggering_key, &mut nums);
+    totaluse += 1;
+    let na = puc_compute_sizes(&nums, &mut nasize);
+    puc_resize(root, table, nasize, totaluse - na);
+}
+
+/// `luaH_getn` (ltable.c:560): a boundary in the array part if there is one,
+/// the array size when the node part is empty, else an unbound search.
+fn puc_table_border(table: &TableData, puc: &PucHashPart) -> usize {
+    let mut j = table.array.len();
+    if j > 0 && table.array[j - 1].is_nil() {
+        let mut i = 0usize;
+        while j - i > 1 {
+            let m = (i + j) / 2;
+            if table.array[m - 1].is_nil() {
+                j = m;
+            } else {
+                i = m;
+            }
+        }
+        return i;
+    }
+    if puc.nodes.is_empty() {
+        return j;
+    }
+    puc_unbound_search(table, puc, j)
+}
+
+/// `unbound_search` (ltable.c:532).
+fn puc_unbound_search(table: &TableData, puc: &PucHashPart, j: usize) -> usize {
+    let mut i = j;
+    let mut j = j.saturating_add(1);
+    while !puc_getnum(table, puc, j).is_nil() {
+        i = j;
+        j = j.saturating_mul(2);
+        if j > i32::MAX as usize {
+            // The table was built with bad purposes: resort to linear
+            // search (ltable.c:539-543).
+            let mut i = 1usize;
+            while !puc_getnum(table, puc, i).is_nil() {
+                i += 1;
+            }
+            return i - 1;
+        }
+    }
+    while j - i > 1 {
+        let m = (i + j) / 2;
+        if puc_getnum(table, puc, m).is_nil() {
+            j = m;
+        } else {
+            i = m;
+        }
+    }
+    i
+}
+
+/// First node with a non-nil value in ascending slot order (the hash-part
+/// half of `luaH_next`, ltable.c:171-178). Dead-key nodes always carry nil
+/// values, so every returned `key_value` is valid.
+fn puc_first_node_entry(puc: &PucHashPart, from: usize) -> Option<(Value, Value)> {
+    puc.nodes
+        .get(from..)?
+        .iter()
+        .find_map(|node| (!node.value.is_nil()).then_some((node.key_value, node.value)))
+}
+
+/// Whether storing `key` (nil or not) would create a new node entry: the key
+/// is not array-routed and not already present in its chain. PUC nil-stores
+/// to absent keys create tombstones, so value nilness is irrelevant here.
+fn puc_creates_hash_entry(root: &RootData<'_>, table: &TableData, key: TableKey) -> bool {
+    if let Some(index) = table_key_array_index(key) {
+        if index <= table.array.len() {
+            return false;
+        }
+    }
+    match table.puc_hash() {
+        Some(puc) => puc_find_node(root, puc, key).is_none(),
+        None => false,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2891,7 +3872,15 @@ fn table_weak_mode(
     let table = tables.get(table)?;
     let metatable = table.metatable?;
     let metatable = tables.get(metatable)?;
-    let mode = table_hash_entry(metatable, TableKey::String(mode_atom))?.value;
+    let mode = match &metatable.hash {
+        HashPart::Log { entries, index } => {
+            table_hash_entry(entries, index, TableKey::String(mode_atom))?.value
+        }
+        HashPart::Puc(puc) => {
+            let slot = puc_find_node(root, puc, TableKey::String(mode_atom))?;
+            puc.nodes[slot].value
+        }
+    };
     let weak = WeakMode {
         keys: string_value_contains(root, mode, b'k')?,
         values: string_value_contains(root, mode, b'v')?,
@@ -2979,21 +3968,46 @@ fn mark_heap_reachable(
                         mark_heap_value(*value, &mut live, &mut queue);
                     }
                 }
-                for entry in &table.hash {
-                    if !weak_keys {
-                        mark_heap_key(entry.key, &mut live, &mut queue);
+                match &table.hash {
+                    HashPart::Log { entries, .. } => {
+                        for entry in entries {
+                            if !weak_keys {
+                                mark_heap_key(entry.key, &mut live, &mut queue);
+                            }
+                            // Strings and vectors are value-like in Luau weak-table
+                            // semantics. Rustia stores their payloads in reusable
+                            // backing slots, so keep those slots live for every key,
+                            // including keys in a weak-key table.
+                            if matches!(entry.key, TableKey::String(_)) {
+                                mark_heap_key(entry.key, &mut live, &mut queue);
+                            } else if matches!(entry.key, TableKey::Vector(_)) {
+                                mark_heap_value(entry.key_value, &mut live, &mut queue);
+                            }
+                            if !weak_values {
+                                mark_heap_value(entry.value, &mut live, &mut queue);
+                            }
+                        }
                     }
-                    // Strings and vectors are value-like in Luau weak-table
-                    // semantics. Rustia stores their payloads in reusable
-                    // backing slots, so keep those slots live for every key,
-                    // including keys in a weak-key table.
-                    if matches!(entry.key, TableKey::String(_)) {
-                        mark_heap_key(entry.key, &mut live, &mut queue);
-                    } else if matches!(entry.key, TableKey::Vector(_)) {
-                        mark_heap_value(entry.key_value, &mut live, &mut queue);
-                    }
-                    if !weak_values {
-                        mark_heap_value(entry.value, &mut live, &mut queue);
+                    HashPart::Puc(puc) => {
+                        for node in &puc.nodes {
+                            // Dead keys reference collected objects: mark
+                            // nothing for them. Live keys follow the same
+                            // weak/string-payload/vector-payload rules as the
+                            // Log backend.
+                            if let PucNodeKey::Live(key) = node.key {
+                                if !weak_keys {
+                                    mark_heap_key(key, &mut live, &mut queue);
+                                }
+                                if matches!(key, TableKey::String(_)) {
+                                    mark_heap_key(key, &mut live, &mut queue);
+                                } else if matches!(key, TableKey::Vector(_)) {
+                                    mark_heap_value(node.key_value, &mut live, &mut queue);
+                                }
+                            }
+                            if !weak_values {
+                                mark_heap_value(node.value, &mut live, &mut queue);
+                            }
+                        }
                     }
                 }
             }
@@ -3049,22 +4063,58 @@ fn sweep_weak_table(table: &mut TableData, mode: WeakMode, live: &HeapLiveSet) {
             }
         }
     }
-    let hash_len = table.hash.len();
-    table.hash.retain(|entry| {
-        let same_identity = table_key_value_same_identity(entry.key, entry.value);
-        let remove_key = mode.keys
-            && table_key_is_collectable(entry.key)
-            && !live.contains_key(entry.key)
-            && (mode.values || !same_identity);
-        let remove_value = mode.values
-            && weak_value_is_collectable(entry.value)
-            && !live.contains_value(entry.value)
-            && (mode.keys || !same_identity);
-        !(remove_key || remove_value)
-    });
-    if table.hash.len() != hash_len {
-        bump_table_shape_version(table);
-        rebuild_hash_index(table);
+    match &mut table.hash {
+        HashPart::Log { entries, index } => {
+            let hash_len = entries.len();
+            entries.retain(|entry| {
+                let same_identity = table_key_value_same_identity(entry.key, entry.value);
+                let remove_key = mode.keys
+                    && table_key_is_collectable(entry.key)
+                    && !live.contains_key(entry.key)
+                    && (mode.values || !same_identity);
+                let remove_value = mode.values
+                    && weak_value_is_collectable(entry.value)
+                    && !live.contains_value(entry.value)
+                    && (mode.keys || !same_identity);
+                !(remove_key || remove_value)
+            });
+            if entries.len() != hash_len {
+                table.shape_version = table.shape_version.saturating_add(1);
+                rebuild_hash_index(entries, index);
+            }
+        }
+        HashPart::Puc(puc) => {
+            // PUC never removes nodes outside rehash: swept entries become
+            // tombstones, and dead collectable keys become dead-key nodes
+            // (LUA_TDEADKEY), which still answer next() lookups.
+            let mut changed = false;
+            for node in &mut puc.nodes {
+                let PucNodeKey::Live(key) = node.key else {
+                    continue;
+                };
+                let same_identity = table_key_value_same_identity(key, node.value);
+                let remove_key = mode.keys
+                    && table_key_is_collectable(key)
+                    && !live.contains_key(key)
+                    && (mode.values || !same_identity);
+                let remove_value = mode.values
+                    && weak_value_is_collectable(node.value)
+                    && !live.contains_value(node.value)
+                    && (mode.keys || !same_identity);
+                if !(remove_key || remove_value) {
+                    continue;
+                }
+                node.value = Value::nil();
+                if remove_key {
+                    node.key = PucNodeKey::Dead(key);
+                    node.key_value = Value::nil();
+                }
+                changed = true;
+            }
+            if changed {
+                table.shape_version = table.shape_version.saturating_add(1);
+            }
+        }
     }
 }
 
@@ -3141,6 +4191,9 @@ fn table_key_value_same_identity(key: TableKey, value: Value) -> bool {
 }
 
 fn table_array_boundary_len(table: &TableData) -> usize {
+    if let HashPart::Puc(puc) = &table.hash {
+        return puc_table_border(table, puc);
+    }
     let len = table.array.len();
     if len == 0 {
         return table_unbound_search(table, 0);
@@ -3234,16 +4287,23 @@ fn first_hash_entry(
     table: &TableData,
     order: TableIterationOrder,
 ) -> Option<(Value, Value)> {
-    if order == TableIterationOrder::Insertion {
-        return table.hash.iter().find_map(|entry| {
-            (entry.value.kind() != ValueKind::Nil).then_some((entry.key_value, entry.value))
-        });
+    match &table.hash {
+        // A PUC table always enumerates node-slot ascending, regardless of
+        // the requested order.
+        HashPart::Puc(puc) => puc_first_node_entry(puc, 0),
+        HashPart::Log { entries, .. } => {
+            if order == TableIterationOrder::Insertion {
+                return entries.iter().find_map(|entry| {
+                    (entry.value.kind() != ValueKind::Nil).then_some((entry.key_value, entry.value))
+                });
+            }
+            ordered_hash_entries(root, entries, order)
+                .into_iter()
+                .find_map(|entry| {
+                    (entry.value.kind() != ValueKind::Nil).then_some((entry.key_value, entry.value))
+                })
+        }
     }
-    ordered_hash_entries(root, table, order)
-        .into_iter()
-        .find_map(|entry| {
-            (entry.value.kind() != ValueKind::Nil).then_some((entry.key_value, entry.value))
-        })
 }
 
 fn next_after_hash_key(
@@ -3252,37 +4312,51 @@ fn next_after_hash_key(
     key: TableKey,
     order: TableIterationOrder,
 ) -> Option<Option<(Value, Value)>> {
-    if order == TableIterationOrder::Insertion {
-        let index = table_hash_entry_index(table, key)?;
-        return Some(table.hash.iter().skip(index + 1).find_map(|entry| {
-            (entry.value.kind() != ValueKind::Nil).then_some((entry.key_value, entry.value))
-        }));
+    match &table.hash {
+        HashPart::Puc(puc) => {
+            // findindex (ltable.c:137): live or dead keys both answer next().
+            let slot = puc_find_node_for_next(root, puc, key)?;
+            Some(puc_first_node_entry(puc, slot + 1))
+        }
+        HashPart::Log { entries, index } => {
+            if order == TableIterationOrder::Insertion {
+                let position = table_hash_entry_index(entries, index, key)?;
+                return Some(entries.iter().skip(position + 1).find_map(|entry| {
+                    (entry.value.kind() != ValueKind::Nil).then_some((entry.key_value, entry.value))
+                }));
+            }
+            let ordered = ordered_hash_entries(root, entries, order);
+            let position = ordered.iter().position(|entry| entry.key == key)?;
+            Some(ordered.into_iter().skip(position + 1).find_map(|entry| {
+                (entry.value.kind() != ValueKind::Nil).then_some((entry.key_value, entry.value))
+            }))
+        }
     }
-    let entries = ordered_hash_entries(root, table, order);
-    let index = entries.iter().position(|entry| entry.key == key)?;
-    Some(entries.into_iter().skip(index + 1).find_map(|entry| {
-        (entry.value.kind() != ValueKind::Nil).then_some((entry.key_value, entry.value))
-    }))
 }
 
 fn ordered_hash_entries<'a>(
     root: &RootData<'_>,
-    table: &'a TableData,
+    entries: &'a [TableEntry],
     order: TableIterationOrder,
 ) -> Vec<&'a TableEntry> {
     match order {
-        TableIterationOrder::Insertion => table.hash.iter().collect(),
-        TableIterationOrder::LuauHash => luau_hash_nodes(root, table),
+        TableIterationOrder::Insertion => entries.iter().collect(),
+        // Puc51 never reaches order-based replay: PUC-layout tables dispatch
+        // on the hash variant first. Map it to the Luau replay to keep the
+        // match total.
+        TableIterationOrder::LuauHash | TableIterationOrder::Puc51 => {
+            luau_hash_nodes(root, entries)
+        }
     }
 }
 
-fn luau_hash_nodes<'a>(root: &RootData<'_>, table: &'a TableData) -> Vec<&'a TableEntry> {
-    let Some(hash_size) = table_hash_size(table) else {
+fn luau_hash_nodes<'a>(root: &RootData<'_>, entries: &'a [TableEntry]) -> Vec<&'a TableEntry> {
+    let Some(hash_size) = table_hash_size(entries) else {
         return Vec::new();
     };
     let mut nodes = vec![LuauHashNode::default(); hash_size];
     let mut last_free = hash_size;
-    for entry in &table.hash {
+    for entry in entries {
         luau_hash_insert(root, &mut nodes, &mut last_free, entry);
     }
     nodes.into_iter().filter_map(|node| node.entry).collect()
@@ -3346,11 +4420,11 @@ fn luau_hash_chain_previous<'a>(
     None
 }
 
-fn table_hash_size(table: &TableData) -> Option<usize> {
-    if table.hash.is_empty() {
+fn table_hash_size(entries: &[TableEntry]) -> Option<usize> {
+    if entries.is_empty() {
         None
     } else {
-        Some(table.hash.len().next_power_of_two())
+        Some(entries.len().next_power_of_two())
     }
 }
 
@@ -3435,12 +4509,22 @@ mod tests {
     fn empty_table() -> TableData {
         TableData {
             array: Vec::new(),
-            hash: Vec::new(),
-            hash_index: Vec::new(),
+            hash: empty_hash_part(TableLayout::Log),
             readonly: false,
             metatable: None,
             shape_version: 0,
         }
+    }
+
+    /// Destructures the Log hash part of a test table (test tables are
+    /// Log-layout unless built through a PUC `VmCell`). The shape version
+    /// comes along so callers can pass it to the Log hash machinery without
+    /// borrowing the table twice.
+    fn log_hash_parts(table: &mut TableData) -> (&mut Vec<TableEntry>, &mut Vec<u32>, &mut u64) {
+        let HashPart::Log { entries, index } = &mut table.hash else {
+            panic!("test table should be Log-layout");
+        };
+        (entries, index, &mut table.shape_version)
     }
 
     #[test]
@@ -3826,42 +4910,65 @@ mod tests {
         assert_eq!(atoms.len(), 20);
 
         for atom in &atoms {
+            let (entries, index, shape_version) = log_hash_parts(&mut table);
             set_hash_key(
-                &mut table,
+                entries,
+                index,
+                shape_version,
                 TableKey::String(*atom),
                 Value::string_atom(*atom),
                 Value::number(f64::from(*atom)),
             );
         }
-        assert_eq!(table.hash_index.len(), 64);
+        let HashPart::Log { entries, index } = &table.hash else {
+            panic!("test table should be Log-layout");
+        };
+        assert_eq!(index.len(), 64);
         for atom in &atoms {
             assert_eq!(
-                table_hash_entry(&table, TableKey::String(*atom))
+                table_hash_entry(entries, index, TableKey::String(*atom))
                     .and_then(|entry| entry.value.as_number()),
                 Some(f64::from(*atom))
             );
         }
 
         let removed = atoms.remove(7);
-        remove_hash_key(&mut table, TableKey::String(removed));
-        assert_eq!(table.hash.len(), atoms.len());
-        assert!(!table.hash_index.is_empty());
-        assert!(table_hash_entry(&table, TableKey::String(removed)).is_none());
+        let (entries, index, shape_version) = log_hash_parts(&mut table);
+        remove_hash_key(entries, index, shape_version, TableKey::String(removed));
+        assert_eq!(entries.len(), atoms.len());
+        assert!(!index.is_empty());
+        assert!(table_hash_entry(entries, index, TableKey::String(removed)).is_none());
         for atom in &atoms {
-            assert!(table_hash_entry(&table, TableKey::String(*atom)).is_some());
+            assert!(table_hash_entry(entries, index, TableKey::String(*atom)).is_some());
         }
 
         let clone = table.clone();
+        let HashPart::Log {
+            entries: clone_entries,
+            index: clone_index,
+        } = &clone.hash
+        else {
+            panic!("cloned table should be Log-layout");
+        };
         for atom in &atoms {
-            assert!(table_hash_entry(&clone, TableKey::String(*atom)).is_some());
+            assert!(
+                table_hash_entry(clone_entries, clone_index, TableKey::String(*atom)).is_some()
+            );
         }
 
-        while table.hash.len() >= TABLE_HASH_INDEX_MIN_LEN {
-            let key = table.hash[0].key;
-            remove_hash_key(&mut table, key);
+        loop {
+            let (entries, index, shape_version) = log_hash_parts(&mut table);
+            if entries.len() < TABLE_HASH_INDEX_MIN_LEN {
+                break;
+            }
+            let key = entries[0].key;
+            remove_hash_key(entries, index, shape_version, key);
         }
-        assert!(table.hash_index.is_empty());
-        assert_eq!(table.hash_index.capacity(), 0);
+        let HashPart::Log { index, .. } = &table.hash else {
+            panic!("test table should be Log-layout");
+        };
+        assert!(index.is_empty());
+        assert_eq!(index.capacity(), 0);
     }
 
     #[test]
@@ -4076,10 +5183,13 @@ mod tests {
         let table = heap.tables.get(table).expect("rooted table remains live");
         assert!(table.array.is_empty());
         assert_eq!(table.array.capacity(), 0);
-        assert!(table.hash.is_empty());
-        assert_eq!(table.hash.capacity(), 0);
-        assert!(table.hash_index.is_empty());
-        assert_eq!(table.hash_index.capacity(), 0);
+        let HashPart::Log { entries, index } = &table.hash else {
+            panic!("test table should be Log-layout");
+        };
+        assert!(entries.is_empty());
+        assert_eq!(entries.capacity(), 0);
+        assert!(index.is_empty());
+        assert_eq!(index.capacity(), 0);
     }
 
     #[test]
@@ -4272,12 +5382,485 @@ mod tests {
                 Some(())
             );
         }
-        assert!(!heap.tables.get(table).unwrap().hash_index.is_empty());
+        let HashPart::Log { index, .. } = &heap.tables.get(table).unwrap().hash else {
+            panic!("test table should be Log-layout");
+        };
+        assert!(!index.is_empty());
 
         assert_eq!(heap.table_clear(table), Some(()));
         let table = heap.tables.get(table).unwrap();
-        assert!(table.hash.is_empty());
-        assert!(table.hash_index.is_empty());
-        assert_eq!(table.hash_index.capacity(), 0);
+        let HashPart::Log { entries, index } = &table.hash else {
+            panic!("test table should be Log-layout");
+        };
+        assert!(entries.is_empty());
+        assert!(index.is_empty());
+        assert_eq!(index.capacity(), 0);
+    }
+
+    // =========================================================================
+    // PUC 5.1.5 table layout
+    // =========================================================================
+
+    fn puc_heap() -> VmCell {
+        VmCell::with_table_layout(TableLayout::Puc51)
+    }
+
+    /// Test-only accessor to the raw PUC node vector.
+    fn puc_node_snapshot(heap: &VmCell, table: u32) -> Vec<PucNode> {
+        let HashPart::Puc(puc) = &heap.tables.get(table).expect("table exists").hash else {
+            panic!("expected a PUC-layout table");
+        };
+        puc.nodes.clone()
+    }
+
+    fn puc_array_len(heap: &VmCell, table: u32) -> usize {
+        heap.tables.get(table).expect("table exists").array.len()
+    }
+
+    fn puc_node_live_entry(node: &PucNode) -> Option<(TableKey, Value)> {
+        match node.key {
+            PucNodeKey::Live(key) => Some((key, node.value)),
+            PucNodeKey::Free | PucNodeKey::Dead(_) => None,
+        }
+    }
+
+    /// Walks every live key's chain from its own main position, asserting it
+    /// reaches its slot (the PUC chain-integrity invariant).
+    fn assert_puc_chain_integrity(heap: &VmCell, table: u32) {
+        let tables = &heap.tables;
+        heap.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let table = tables.get(table).expect("table exists");
+            let HashPart::Puc(puc) = &table.hash else {
+                panic!("expected a PUC-layout table");
+            };
+            for slot in 0..puc.nodes.len() {
+                let PucNodeKey::Live(key) = puc.nodes[slot].key else {
+                    continue;
+                };
+                let mut at = puc_main_position(&root, puc.nodes.len(), key);
+                loop {
+                    assert!(
+                        at < puc.nodes.len(),
+                        "PUC chain for slot {slot} leaves the node vector"
+                    );
+                    if at == slot {
+                        break;
+                    }
+                    let next = puc.nodes[at].next;
+                    assert!(
+                        next >= 0,
+                        "PUC key at slot {slot} is unreachable from its main position"
+                    );
+                    at = next as usize;
+                }
+            }
+        });
+    }
+
+    /// Test-only main-position helper for a single key.
+    fn puc_test_main_position(heap: &VmCell, nodes_len: usize, key: TableKey) -> usize {
+        heap.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            puc_main_position(&root, nodes_len, key)
+        })
+    }
+
+    fn same_test_value(a: Value, b: Value) -> bool {
+        if a.kind() != b.kind() {
+            return false;
+        }
+        match a.kind() {
+            ValueKind::Nil => true,
+            ValueKind::Boolean => a.as_bool() == b.as_bool(),
+            ValueKind::Number => a.as_number() == b.as_number(),
+            ValueKind::String => a.as_string_atom() == b.as_string_atom(),
+            _ => false,
+        }
+    }
+
+    fn collect_puc_iteration(heap: &mut VmCell, table: u32) -> Vec<(Value, Value)> {
+        let mut entries = Vec::new();
+        let mut after = Value::nil();
+        loop {
+            match heap.table_next_after(table, after, TableIterationOrder::Puc51) {
+                Some(TableNext::Entry(key, value)) => {
+                    entries.push((key, value));
+                    after = key;
+                }
+                Some(TableNext::End) => return entries,
+                Some(TableNext::InvalidKey) => panic!("iteration key became invalid"),
+                None => panic!("table handle is missing"),
+            }
+        }
+    }
+
+    #[test]
+    fn puc_chain_integrity_and_lookup_fuzz() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+        enum FuzzKey {
+            Number(u32),
+            String(u32),
+            Boolean(bool),
+        }
+
+        fn number_key_value(key: u32) -> f64 {
+            match key % 3 {
+                // Small integral keys are array-part candidates; fractional
+                // and large keys live in the node part only.
+                0 => f64::from(key / 3 + 1),
+                1 => f64::from(key) + 0.25,
+                _ => 500.0 + f64::from(key * 7),
+            }
+        }
+
+        let mut heap = puc_heap();
+        let table = heap.alloc_array_table(&[]);
+        let mut pool: Vec<(FuzzKey, Value)> = Vec::new();
+        for index in 0..36_u32 {
+            pool.push((
+                FuzzKey::Number(index),
+                Value::number(number_key_value(index)),
+            ));
+        }
+        for index in 0..36_u32 {
+            let atom = heap.intern_string(&format!("fuzz-key-{index}"));
+            pool.push((FuzzKey::String(index), Value::string_atom(atom)));
+        }
+        for boolean in [false, true] {
+            pool.push((FuzzKey::Boolean(boolean), Value::boolean(boolean)));
+        }
+
+        let mut state = 0x243F_6A88_85A3_08D3_u64;
+        let mut rng = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+
+        let mut oracle: BTreeMap<FuzzKey, Option<f64>> = BTreeMap::new();
+        for op in 0..500_u32 {
+            let (key, key_value) = pool[(rng() as usize) % pool.len()];
+            if rng() % 3 == 0 {
+                assert_eq!(heap.table_set(table, key_value, Value::nil()), Some(()));
+                oracle.insert(key, None);
+            } else {
+                let value = f64::from(op) + 1_000.0;
+                assert_eq!(
+                    heap.table_set(table, key_value, Value::number(value)),
+                    Some(())
+                );
+                oracle.insert(key, Some(value));
+            }
+
+            assert_puc_chain_integrity(&heap, table);
+            for (key, expected) in &oracle {
+                let (_, key_value) = pool
+                    .iter()
+                    .find(|(pool_key, _)| pool_key == key)
+                    .expect("oracle key is in the pool");
+                let got = heap.table_get(table, *key_value);
+                match expected {
+                    Some(value) => assert_eq!(
+                        got.and_then(Value::as_number),
+                        Some(*value),
+                        "lookup mismatch for {key:?}"
+                    ),
+                    None => assert!(
+                        got.is_none_or(|value| value.is_nil()),
+                        "deleted key {key:?} should read absent or nil"
+                    ),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn puc_tombstone_slot_is_reused_in_place() {
+        let mut heap = puc_heap();
+        let table = heap.alloc_array_table(&[]);
+        // All number main positions collide modulo ((sizenode-1)|1) == 1
+        // while the node vector has two slots.
+        assert_eq!(
+            heap.table_set(table, Value::number(100.0), Value::number(1.0)),
+            Some(())
+        );
+        assert_eq!(
+            heap.table_set(table, Value::number(200.0), Value::number(2.0)),
+            Some(())
+        );
+        let nodes = puc_node_snapshot(&heap, table);
+        assert_eq!(nodes.len(), 2);
+        let slot_a = nodes
+            .iter()
+            .position(|node| matches!(node.key, PucNodeKey::Live(TableKey::Number(bits)) if f64::from_bits(bits) == 100.0))
+            .expect("key 100 node");
+        assert_eq!(slot_a, 0);
+        assert_eq!(nodes[0].next, 1);
+
+        assert_eq!(
+            heap.table_set(table, Value::number(100.0), Value::nil()),
+            Some(())
+        );
+        let key_300 = number_table_key(300.0).expect("number key");
+        assert_eq!(
+            puc_test_main_position(&heap, nodes.len(), key_300),
+            slot_a,
+            "test key 300 must collide at key 100's main position"
+        );
+
+        assert_eq!(
+            heap.table_set(table, Value::number(300.0), Value::number(3.0)),
+            Some(())
+        );
+        let nodes = puc_node_snapshot(&heap, table);
+        assert_eq!(
+            nodes.len(),
+            2,
+            "tombstone reuse must not grow the node vector"
+        );
+        let (key, value) = puc_node_live_entry(&nodes[0]).expect("slot 0 stays live");
+        assert!(key == key_300, "slot 0 should hold key 300");
+        assert_eq!(value.as_number(), Some(3.0));
+        assert_eq!(nodes[0].next, 1, "the stale chain link is preserved");
+        let (key, value) = puc_node_live_entry(&nodes[1]).expect("slot 1 stays live");
+        assert!(matches!(key, TableKey::Number(bits) if f64::from_bits(bits) == 200.0));
+        assert_eq!(value.as_number(), Some(2.0));
+
+        assert!(heap.table_get(table, Value::number(100.0)).is_none());
+        assert_eq!(
+            heap.table_get(table, Value::number(300.0))
+                .and_then(Value::as_number),
+            Some(3.0)
+        );
+        assert_puc_chain_integrity(&heap, table);
+    }
+
+    #[test]
+    fn puc_nil_store_to_absent_key_creates_tombstone() {
+        let mut heap = puc_heap();
+        let table = heap.alloc_array_table(&[]);
+        let short = Value::short_string(b"tombstone-key").expect("short string");
+        assert_eq!(heap.string_atom_count(), 0);
+
+        // PUC interns the key and creates a nil-valued live node even though
+        // the store writes nil (luaV_settable always goes through luaH_set).
+        assert_eq!(heap.table_set(table, short, Value::nil()), Some(()));
+        assert_eq!(heap.string_atom_count(), 1);
+
+        let nodes = puc_node_snapshot(&heap, table);
+        assert_eq!(nodes.len(), 1);
+        let (key, value) = puc_node_live_entry(&nodes[0]).expect("tombstone keeps a live key");
+        let TableKey::String(atom) = key else {
+            panic!("tombstone key should be a string");
+        };
+        assert_eq!(
+            heap.string_bytes(atom).as_deref(),
+            Some(b"tombstone-key".as_slice())
+        );
+        assert!(value.is_nil());
+        // key_value keeps the original (short-string) Value, mirroring PUC
+        // storing the original TString* in the node key.
+        assert!(nodes[0]
+            .key_value
+            .as_short_string()
+            .is_some_and(|s| s.as_bytes() == b"tombstone-key"));
+    }
+
+    #[test]
+    fn puc_border_matches_lua_h_getn() {
+        let mut heap = puc_heap();
+
+        // Dense prefix: array part has no trailing nil, empty node part.
+        let dense =
+            heap.alloc_array_table(&[Value::number(1.0), Value::number(2.0), Value::number(3.0)]);
+        assert_eq!(heap.array_len(dense), Some(3));
+
+        // Forcing a rehash with the next integral key grows the array to 4
+        // (computesizes: keys 1..=4 all land in the array part).
+        assert_eq!(
+            heap.table_set(dense, Value::number(4.0), Value::number(4.0)),
+            Some(())
+        );
+        assert_eq!(puc_array_len(&heap, dense), 4);
+        assert_eq!(heap.array_len(dense), Some(4));
+
+        // Trailing nils: binary search inside the array part.
+        let trailing_one =
+            heap.alloc_array_table(&[Value::number(1.0), Value::nil(), Value::nil(), Value::nil()]);
+        assert_eq!(heap.array_len(trailing_one), Some(1));
+        let trailing_two = heap.alloc_array_table(&[
+            Value::number(1.0),
+            Value::number(2.0),
+            Value::nil(),
+            Value::nil(),
+        ]);
+        assert_eq!(heap.array_len(trailing_two), Some(2));
+
+        // Hash-only overflow: t[1] then t[2] on an empty table grows the
+        // array exactly to 2 through successive rehashes.
+        let overflow = heap.alloc_array_table(&[]);
+        assert_eq!(
+            heap.table_set(overflow, Value::number(1.0), Value::number(1.0)),
+            Some(())
+        );
+        assert_eq!(puc_array_len(&heap, overflow), 1);
+        assert_eq!(
+            heap.table_set(overflow, Value::number(2.0), Value::number(2.0)),
+            Some(())
+        );
+        assert_eq!(puc_array_len(&heap, overflow), 2);
+        assert_eq!(heap.array_len(overflow), Some(2));
+
+        // Sparse: a single far-away key stays in the node part, so the
+        // border is 0.
+        let sparse = heap.alloc_array_table(&[]);
+        assert_eq!(
+            heap.table_set(sparse, Value::number(100.0), Value::number(1.0)),
+            Some(())
+        );
+        assert_eq!(puc_array_len(&heap, sparse), 0);
+        assert_eq!(heap.array_len(sparse), Some(0));
+    }
+
+    #[test]
+    fn puc_next_walks_array_then_node_slots() {
+        let mut heap = puc_heap();
+        let table = heap.alloc_array_table(&[]);
+        assert_eq!(
+            heap.table_set(table, Value::number(1.0), Value::number(10.0)),
+            Some(())
+        );
+        assert_eq!(
+            heap.table_set(table, Value::number(2.0), Value::number(20.0)),
+            Some(())
+        );
+        let atom_x = heap.intern_string("x");
+        let atom_y = heap.intern_string("y");
+        assert_eq!(
+            heap.table_set(table, Value::string_atom(atom_x), Value::number(30.0)),
+            Some(())
+        );
+        assert_eq!(
+            heap.table_set(table, Value::string_atom(atom_y), Value::number(40.0)),
+            Some(())
+        );
+
+        // Expected order: array ascending, then node slots ascending.
+        let nodes = puc_node_snapshot(&heap, table);
+        let mut expected = vec![
+            (Value::number(1.0), Value::number(10.0)),
+            (Value::number(2.0), Value::number(20.0)),
+        ];
+        for node in &nodes {
+            if !node.value.is_nil() {
+                expected.push((node.key_value, node.value));
+            }
+        }
+        assert_eq!(expected.len(), 4);
+
+        let entries = collect_puc_iteration(&mut heap, table);
+        assert_eq!(entries.len(), expected.len());
+        for (got, want) in entries.iter().zip(&expected) {
+            assert!(same_test_value(got.0, want.0), "iteration key mismatch");
+            assert!(same_test_value(got.1, want.1), "iteration value mismatch");
+        }
+
+        // The requested order is ignored for PUC tables (raw_table_entries
+        // passes Insertion and must see the same sequence).
+        let mut insertion_entries = Vec::new();
+        let mut after = Value::nil();
+        loop {
+            match heap.table_next_after(table, after, TableIterationOrder::Insertion) {
+                Some(TableNext::Entry(key, value)) => {
+                    insertion_entries.push((key, value));
+                    after = key;
+                }
+                Some(TableNext::End) => break,
+                _ => panic!("unexpected iteration outcome"),
+            }
+        }
+        assert_eq!(insertion_entries.len(), entries.len());
+        for (got, want) in insertion_entries.iter().zip(&entries) {
+            assert!(same_test_value(got.0, want.0));
+            assert!(same_test_value(got.1, want.1));
+        }
+
+        // next() from a tombstoned key resumes at the following slot, or ends
+        // when the tombstone occupies the last node slot.
+        assert_eq!(
+            heap.table_set(table, Value::string_atom(atom_x), Value::nil()),
+            Some(())
+        );
+        let tombstone_slot = puc_node_snapshot(&heap, table)
+            .iter()
+            .position(|node| matches!(node.key, PucNodeKey::Live(TableKey::String(atom)) if atom == atom_x))
+            .expect("tombstone keeps its slot");
+        let following = puc_first_node_entry(
+            &PucHashPart {
+                nodes: puc_node_snapshot(&heap, table),
+                lastfree: 0,
+            },
+            tombstone_slot + 1,
+        );
+        match (
+            heap.table_next_after(
+                table,
+                Value::string_atom(atom_x),
+                TableIterationOrder::Puc51,
+            ),
+            following,
+        ) {
+            (Some(TableNext::Entry(key, value)), Some((expected_key, expected_value))) => {
+                assert!(same_test_value(key, expected_key));
+                assert!(same_test_value(value, expected_value));
+            }
+            (Some(TableNext::End), None) => {}
+            (got, expected) => {
+                panic!("next after a tombstone mismatch: got {got:?}, expected {expected:?}");
+            }
+        }
+
+        // next() from an unknown key reports InvalidKey.
+        let unknown = heap.intern_string("unknown");
+        assert!(matches!(
+            heap.table_next_after(
+                table,
+                Value::string_atom(unknown),
+                TableIterationOrder::Puc51
+            ),
+            Some(TableNext::InvalidKey)
+        ));
+    }
+
+    #[test]
+    fn puc_rehash_sizes_match_computesizes() {
+        let mut heap = puc_heap();
+
+        // Inserting keys 1..=3 as the first writes: the third insert rehashes
+        // and computesizes picks an array size of 4.
+        let table = heap.alloc_array_table(&[]);
+        for index in 1..=3_u32 {
+            assert_eq!(
+                heap.table_set(
+                    table,
+                    Value::number(f64::from(index)),
+                    Value::number(f64::from(index)),
+                ),
+                Some(())
+            );
+        }
+        assert_eq!(puc_array_len(&heap, table), 4);
+
+        // A lone key 100 has nums[7] = 1 and never fills half of any slice:
+        // the array part stays empty and the key lives in a single node.
+        let sparse = heap.alloc_array_table(&[]);
+        assert_eq!(
+            heap.table_set(sparse, Value::number(100.0), Value::number(1.0)),
+            Some(())
+        );
+        assert_eq!(puc_array_len(&heap, sparse), 0);
+        assert_eq!(puc_node_snapshot(&heap, sparse).len(), 1);
     }
 }

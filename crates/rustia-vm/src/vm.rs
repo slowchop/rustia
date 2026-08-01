@@ -13,7 +13,7 @@ use crate::extension::{
 };
 use crate::heap::{
     FunctionCapture, FunctionKind, HeapCheckpoint, NativeFunction, QuotaTableWrite,
-    TableIterationOrder, TableNext, TableNumericArrayWrite, TableStringHashSlot,
+    TableIterationOrder, TableLayout, TableNext, TableNumericArrayWrite, TableStringHashSlot,
     TableStringHashWrite, UserdataPayload, VectorData, VmCell,
 };
 use crate::hot_ir::{recognize_hot_ir_loops, HotIr, HotIrNumber, HotIrOpKind, HotIrValue};
@@ -2065,7 +2065,11 @@ impl Vm {
             settings.enable_conformance_pcall_helpers = false;
             settings.services = VmServices::default();
         }
-        let mut heap = VmCell::new();
+        let mut heap = VmCell::with_table_layout(if profile.is_puc51_compat() {
+            TableLayout::Puc51
+        } else {
+            TableLayout::Log
+        });
         let globals = heap.alloc_array_table(&[]);
         let enable_loadstring =
             settings.loadstring_compiler.is_some() && !profile.is_deterministic_sim();
@@ -7270,9 +7274,9 @@ impl Vm {
             } else {
                 b"false".to_vec()
             }),
-            ValueKind::Number => {
-                Ok(self.number_to_string(value.as_number().unwrap_or(f64::NAN)).into_bytes())
-            }
+            ValueKind::Number => Ok(self
+                .number_to_string(value.as_number().unwrap_or(f64::NAN))
+                .into_bytes()),
             ValueKind::String => self.string_value_bytes(value)?.ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "string atom is missing",
@@ -14858,7 +14862,9 @@ impl Vm {
     }
 
     fn table_next_after(&mut self, table: u32, after: Value) -> Option<TableNext> {
-        let order = if self.profile.is_luau_compat() {
+        let order = if self.profile.is_puc51_compat() {
+            TableIterationOrder::Puc51
+        } else if self.profile.is_luau_compat() {
             TableIterationOrder::LuauHash
         } else {
             TableIterationOrder::Insertion
@@ -20954,7 +20960,11 @@ fn puc51_number_to_string(value: f64) -> String {
         .map_or((false, mantissa), |magnitude| (true, magnitude));
     let mut digits = String::with_capacity(14);
     digits.extend(mantissa.chars().filter(|char| char.is_ascii_digit()));
-    debug_assert_eq!(digits.len(), 14, "LowerExp with precision 13 yields 14 significant digits");
+    debug_assert_eq!(
+        digits.len(),
+        14,
+        "LowerExp with precision 13 yields 14 significant digits"
+    );
 
     let mut output = String::with_capacity(digits.len() + 8);
     if negative {
