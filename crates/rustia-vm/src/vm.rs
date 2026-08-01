@@ -4286,7 +4286,18 @@ impl Vm {
                                     })
                                     .at_pc(pc - 1));
                                 }
-                                let table = self.heap.alloc_array_table(&registers[first..end]);
+                                // `compile_table_to` carries the constructor's
+                                // hash-field count in aux; only the PUC layout
+                                // consumes the pre-sizing hint.
+                                let table = if self.profile.is_puc51_compat() {
+                                    let hash_size = usize::try_from(instruction.aux).unwrap_or(0);
+                                    self.heap.alloc_puc_table_from_parts(
+                                        registers[first..end].to_vec(),
+                                        hash_size,
+                                    )
+                                } else {
+                                    self.heap.alloc_array_table(&registers[first..end])
+                                };
                                 set_register(&mut registers, instruction.a, Value::table(table))
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -6132,6 +6143,17 @@ impl Vm {
                                     Error::new(ErrorKind::TypeError { expected: "table" })
                                         .at_pc(pc - 1)
                                 })?;
+                                self.ensure_puc_table_append_presized(
+                                    table,
+                                    usize::try_from(instruction.aux).map_err(|_| {
+                                        Error::new(ErrorKind::InvalidProgram {
+                                            reason: "table vararg index overflow",
+                                        })
+                                        .at_pc(pc - 1)
+                                    })?,
+                                    varargs.len(),
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
                                 for (offset, value) in varargs.iter().copied().enumerate() {
                                     let offset = u32::try_from(offset).map_err(|_| {
                                         Error::new(ErrorKind::InvalidProgram {
@@ -6229,6 +6251,17 @@ impl Vm {
                                         );
                                     }
                                 };
+                                self.ensure_puc_table_append_presized(
+                                    table,
+                                    usize::try_from(instruction.aux).map_err(|_| {
+                                        Error::new(ErrorKind::InvalidProgram {
+                                            reason: "table call append index overflow",
+                                        })
+                                        .at_pc(pc - 1)
+                                    })?,
+                                    results.len(),
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
                                 for (offset, value) in results.iter().copied().enumerate() {
                                     let offset = u32::try_from(offset).map_err(|_| {
                                         Error::new(ErrorKind::InvalidProgram {
@@ -6328,6 +6361,17 @@ impl Vm {
                                         );
                                     }
                                 };
+                                self.ensure_puc_table_append_presized(
+                                    table,
+                                    usize::try_from(instruction.aux).map_err(|_| {
+                                        Error::new(ErrorKind::InvalidProgram {
+                                            reason: "table vararg call append index overflow",
+                                        })
+                                        .at_pc(pc - 1)
+                                    })?,
+                                    results.len(),
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
                                 for (offset, value) in results.iter().copied().enumerate() {
                                     let offset = u32::try_from(offset).map_err(|_| {
                                         Error::new(ErrorKind::InvalidProgram {
@@ -6466,6 +6510,17 @@ impl Vm {
                                         );
                                     }
                                 };
+                                self.ensure_puc_table_append_presized(
+                                    table,
+                                    usize::try_from(start_index).map_err(|_| {
+                                        Error::new(ErrorKind::InvalidProgram {
+                                            reason: "table expanded call append index overflow",
+                                        })
+                                        .at_pc(pc - 1)
+                                    })?,
+                                    results.len(),
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
                                 for (offset, value) in results.iter().copied().enumerate() {
                                     let offset = u32::try_from(offset).map_err(|_| {
                                         Error::new(ErrorKind::InvalidProgram {
@@ -6860,12 +6915,80 @@ impl Vm {
         }
     }
 
+    /// `luaH_resizearray` on the OP_SETLIST path (lvm.c): a multi-value
+    /// constructor tail pre-sizes the array part to the last written index
+    /// exactly. No-op outside the PUC profile or when the array part already
+    /// reaches `last`.
+    fn ensure_puc_table_append_presized(
+        &mut self,
+        table: u32,
+        start_index: usize,
+        count: usize,
+    ) -> Result<()> {
+        if !self.profile.is_puc51_compat() || count == 0 {
+            return Ok(());
+        }
+        let last = start_index.checked_add(count - 1).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table append index overflow",
+            })
+            .without_source_location()
+        })?;
+        if self.heap.table_is_readonly(table) == Some(true) {
+            // Leave the readonly error to the element write below.
+            return Ok(());
+        }
+        let Some(array_len) = self.heap.table_array_part_len(table) else {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+            .without_source_location());
+        };
+        if last <= array_len {
+            return Ok(());
+        }
+        let Some(limit) = self.settings.memory_limit_bytes else {
+            return self
+                .heap
+                .puc_resize_array_table(table, last)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table array resize failed after validation",
+                    })
+                    .without_source_location()
+                });
+        };
+        for attempt in 0..2 {
+            let allowed_growth = limit.saturating_sub(self.current_live_bytes());
+            match self
+                .heap
+                .puc_resize_array_with_live_growth_limit(table, last, allowed_growth)
+            {
+                QuotaTableWrite::Stored => return Ok(()),
+                QuotaTableWrite::Invalid => {
+                    return Err(Error::new(ErrorKind::InvalidProgram {
+                        reason: "table array resize failed after validation",
+                    })
+                    .without_source_location());
+                }
+                QuotaTableWrite::WouldExceed if attempt == 0 => {
+                    self.collect_for_memory_limit(&[Value::table(table)]);
+                }
+                QuotaTableWrite::WouldExceed => {
+                    return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn append_call_results_to_table(
         &mut self,
         table: u32,
         start_index: usize,
         results: &[Value],
     ) -> Result<()> {
+        self.ensure_puc_table_append_presized(table, start_index, results.len())?;
         for (offset, value) in results.iter().copied().enumerate() {
             let index = start_index.checked_add(offset).ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
@@ -8940,12 +9063,46 @@ impl Vm {
                 reason: "invalid table.create arity",
             }));
         }
-        let size = table_create_size(self.coerce_register_to_number(registers, instruction.b)?)?;
+        // Compiler-emitted constructors (Opcode::TableCreate from
+        // `compile_table_to`) carry PUC pre-sizing hints: b is the
+        // array-field count and c the hash-field count. The 100k
+        // `table.create` builtin cap does not apply to constructor hints.
+        let puc_constructor = self.profile.is_puc51_compat()
+            && instruction.op == Opcode::TableCreate
+            && instruction.aux == 1;
+        let size = table_create_size(
+            self.coerce_register_to_number(registers, instruction.b)?,
+            !puc_constructor,
+        )?;
+        if puc_constructor {
+            let hash_size = table_create_size(
+                self.coerce_register_to_number(registers, instruction.c)?,
+                false,
+            )?;
+            let array_size = puc_constructor_array_size(size);
+            self.ensure_memory_growth(VmCell::puc_table_live_bytes(array_size, hash_size), &[])?;
+            let table = self
+                .heap
+                .try_alloc_puc_table(array_size, hash_size, Value::nil())
+                .ok_or_else(|| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+            return Ok(Value::table(table));
+        }
         let value = if instruction.aux == 2 {
             get_register(registers, instruction.c)?
         } else {
             Value::nil()
         };
+        if self.profile.is_puc51_compat() {
+            // `table.create` builtin (native route or hand-written aux==2
+            // bytecode): the lua_createtable analog — exact array size,
+            // empty node part, optional fill.
+            self.ensure_memory_growth(VmCell::puc_table_live_bytes(size, 0), &[value])?;
+            let table = self
+                .heap
+                .try_alloc_puc_table(size, 0, value)
+                .ok_or_else(|| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+            return Ok(Value::table(table));
+        }
         self.ensure_memory_growth(VmCell::filled_array_table_live_bytes(size), &[value])?;
         let table = self
             .heap
@@ -23516,7 +23673,7 @@ fn table_find_start(value: f64) -> Result<usize> {
     Ok(value as usize)
 }
 
-fn table_create_size(value: f64) -> Result<usize> {
+fn table_create_size(value: f64, apply_create_cap: bool) -> Result<usize> {
     if !value.is_finite() || value < i32::MIN as f64 || value > i32::MAX as f64 {
         return Err(Error::new(ErrorKind::TypeError {
             expected: "integer table.create size",
@@ -23534,10 +23691,33 @@ fn table_create_size(value: f64) -> Result<usize> {
             expected: "table overflow",
         }));
     }
-    if size > MAX_TABLE_CREATE_ARRAY_SIZE {
+    if apply_create_cap && size > MAX_TABLE_CREATE_ARRAY_SIZE {
         return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
     }
     Ok(size)
+}
+
+/// `luaO_int2fb` + `luaO_fb2int` (lobject.c): PUC constructor array-size
+/// hints are rounded up to the nearest floating-byte value, so the array
+/// part of a 17-element constructor is 18 slots, not 17.
+fn puc_constructor_array_size(size: usize) -> usize {
+    let mut x = size;
+    let mut exponent = 0usize;
+    while x >= 16 {
+        x = (x + 1) >> 1;
+        exponent += 1;
+    }
+    let fb = if x < 8 {
+        x
+    } else {
+        ((exponent + 1) << 3) | (x - 8)
+    };
+    let decoded_exponent = (fb >> 3) & 31;
+    if decoded_exponent == 0 {
+        fb
+    } else {
+        ((fb & 7) + 8) << (decoded_exponent - 1)
+    }
 }
 
 fn table_len_to_i32(len: usize) -> Result<i32> {

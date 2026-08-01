@@ -1752,18 +1752,29 @@ impl Compiler {
             .iter()
             .filter(|field| matches!(field, TableField::Array { .. }))
             .count();
+        // PUC constructor pre-sizing (OP_NEWTABLE B/C operands): the hash
+        // field count rides along unconditionally; only the Puc51Compat
+        // profile consumes it.
+        let hash_field_count = fields.len() - array_field_count;
         if array_field_count == 0 {
-            self.code
-                .push(Instruction::new(Opcode::NewArray, target, 0, 0));
+            self.code.push(Instruction::with_aux(
+                Opcode::NewArray,
+                target,
+                0,
+                0,
+                hash_field_count as i32,
+            ));
         } else {
             self.load_constant_to(target, Constant::Number(array_field_count as f64))?;
+            let hash_register = self.load_constant(Constant::Number(hash_field_count as f64))?;
             self.code.push(Instruction::with_aux(
                 Opcode::TableCreate,
                 target,
                 target,
-                0,
+                hash_register,
                 1,
             ));
+            self.free_register(hash_register);
         }
         let last_index = fields.len().saturating_sub(1);
         for (index, field) in fields.iter().enumerate() {

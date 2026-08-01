@@ -905,6 +905,14 @@ impl VmCell {
             .saturating_add(64)
     }
 
+    /// Live bytes of a PUC-layout table with the given array-part size and
+    /// hash-part element count (before `setnodevector` power-of-two rounding).
+    pub(crate) const fn puc_table_live_bytes(array_size: usize, hash_size: usize) -> usize {
+        size_of::<ReusableSlot<TableData>>()
+            .saturating_add(array_size.saturating_mul(size_of::<Value>()))
+            .saturating_add(puc_node_vector_len(hash_size).saturating_mul(size_of::<PucNode>()))
+    }
+
     /// Default Log-layout constructor. Production VMs go through
     /// [`VmCell::with_table_layout`]; this stays for the existing test
     /// callers.
@@ -1469,17 +1477,34 @@ impl VmCell {
 
     /// Allocates a PUC-layout table with pre-sized array and node parts,
     /// matching `luaH_new` + `setarrayvector`/`setnodevector` (ltable.c:358).
-    ///
-    /// Reserved for the `table.create`-style constructor pre-sizing path
-    /// (Phase 5); defensive fallback to a plain empty table on Log VMs.
-    #[allow(dead_code)]
-    pub(crate) fn alloc_puc_table(&mut self, array_size: usize, hash_size: usize) -> u32 {
+    /// The array part is filled with `fill` (`table.create`-style fills write
+    /// a real value; constructor pre-sizing passes nil).
+    pub(crate) fn try_alloc_puc_table(
+        &mut self,
+        array_size: usize,
+        hash_size: usize,
+        fill: Value,
+    ) -> Option<u32> {
         if self.table_layout != TableLayout::Puc51 {
-            return self.alloc_array_table(&[]);
+            return None;
         }
+        let mut array = Vec::new();
+        array.try_reserve_exact(array_size).ok()?;
+        array.resize(array_size, fill);
+        Some(self.alloc_puc_table_from_parts(array, hash_size))
+    }
+
+    /// PUC-layout table taking an already-materialized array part (the
+    /// `NewArray` register-window path); node part is sized like
+    /// `setnodevector`.
+    pub(crate) fn alloc_puc_table_from_parts(
+        &mut self,
+        array: Vec<Value>,
+        hash_size: usize,
+    ) -> u32 {
         let node_len = puc_node_vector_len(hash_size);
         self.insert_table_data(TableData {
-            array: vec![Value::nil(); array_size],
+            array,
             hash: HashPart::Puc(PucHashPart {
                 nodes: vec![PUC_FREE_NODE; node_len],
                 lastfree: node_len,
@@ -1489,6 +1514,67 @@ impl VmCell {
             shape_version: 0,
         })
         .expect("table slot limit exceeded")
+    }
+
+    /// Current array-part size (`sizearray`), not the `#t` border.
+    pub(crate) fn table_array_part_len(&mut self, table: u32) -> Option<usize> {
+        self.tables.get(table).map(|table| table.array.len())
+    }
+
+    /// `luaH_resizearray` (ltable.c:327): grows the array part to exactly
+    /// `nasize`, re-laying the node part into a fresh same-sized vector. No-op
+    /// when the array is already large enough.
+    pub(crate) fn puc_resize_array_table(&mut self, table: u32, nasize: usize) -> Option<()> {
+        let existing = self.tables.get(table)?;
+        if existing.readonly || existing.puc_hash().is_none() {
+            return None;
+        }
+        if nasize <= existing.array.len() {
+            return Some(());
+        }
+        self.mutate_table_data_with_root(table, |root, table| {
+            let node_len = table.puc_hash().map_or(0, |puc| puc.nodes.len());
+            puc_resize(root, table, nasize, node_len);
+        })
+    }
+
+    /// Quota variant of [`VmCell::puc_resize_array_table`]: stages the resize
+    /// on a candidate clone so a rejection cannot leave a partial write.
+    pub(crate) fn puc_resize_array_with_live_growth_limit(
+        &mut self,
+        table: u32,
+        nasize: usize,
+        allowed_growth: usize,
+    ) -> QuotaTableWrite {
+        let Some(existing) = self.tables.get(table) else {
+            return QuotaTableWrite::Invalid;
+        };
+        if existing.readonly || existing.puc_hash().is_none() {
+            return QuotaTableWrite::Invalid;
+        }
+        if nasize <= existing.array.len() {
+            return QuotaTableWrite::Stored;
+        }
+        let old_table_usage = table_data_memory_usage(existing);
+        let mut candidate = existing.clone();
+        let node_len = candidate.puc_hash().map_or(0, |puc| puc.nodes.len());
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            puc_resize(&root, &mut candidate, nasize, node_len);
+        });
+        let candidate_usage = table_data_memory_usage(&candidate);
+        let growth = candidate_usage
+            .live_bytes
+            .saturating_sub(old_table_usage.live_bytes);
+        if growth > allowed_growth {
+            return QuotaTableWrite::WouldExceed;
+        }
+        *self
+            .tables
+            .get_mut(table)
+            .expect("validated table remains available") = candidate;
+        self.side_usage.adjust(old_table_usage, candidate_usage);
+        QuotaTableWrite::Stored
     }
 
     #[cfg(test)]
@@ -3204,7 +3290,7 @@ fn mix_index_hash(mut value: u64) -> u64 {
 // ===========================================================================
 
 /// PUC `ceillog2`: 1→0, 2→1, 3→2, 4→2, ...
-fn puc_ceil_log2(x: usize) -> usize {
+const fn puc_ceil_log2(x: usize) -> usize {
     debug_assert!(x >= 1);
     (usize::BITS - (x - 1).leading_zeros()) as usize
 }
@@ -3212,11 +3298,17 @@ fn puc_ceil_log2(x: usize) -> usize {
 /// `setnodevector` sizing (ltable.c:272): zero stays empty (the PUC
 /// `dummynode` case); anything larger rounds up to a power of two and
 /// saturates at 2^MAXBITS instead of raising PUC's "table overflow".
-fn puc_node_vector_len(size: usize) -> usize {
+const fn puc_node_vector_len(size: usize) -> usize {
     if size == 0 {
         0
     } else {
-        1usize << puc_ceil_log2(size).min(PUC_MAXBITS)
+        let log2 = puc_ceil_log2(size);
+        1usize
+            << if log2 > PUC_MAXBITS {
+                PUC_MAXBITS
+            } else {
+                log2
+            }
     }
 }
 
