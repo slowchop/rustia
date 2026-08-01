@@ -49,6 +49,9 @@ id<TAB>category<TAB>refs<TAB>profile<TAB>oracle<TAB>expect<TAB>path
   for unspecified behavior, including insertion-ordered hash traversal.
 - `DeterministicSim` - sandboxed deterministic subset for grabby/sim behavior. Use this for rustia-only
   deterministic invariants and narrow smoke fixtures that do not require Standard-only features.
+- `Puc51Compat` - PUC Lua 5.1.5 compatibility profile: PUC table layout and `next()` order, PUC `auxsort`,
+  and `%.14g` number formatting. Use this only for the `puc51-compat` differential corpus, whose
+  expectations come from the offline PUC 5.1.5 oracle (see the regeneration section below).
 
 `refs` is a comma-separated list of stable conformance topics from `design/50-conformance.md`.
 It is deliberately required: fixtures are not generic regression tests; they prove named Luau behaviors.
@@ -75,6 +78,9 @@ The catalog status must match its evidence source: `luau-0.709` refs cite pinned
   counts it but does not execute it.
 - `rustia-only` - rustia-specific invariant outside Luau compatibility, such as a deterministic profile
   restriction. Prefer adding a Luau fixture too when possible.
+- `puc-lua-5.1.5` - expectation was derived offline from the pinned PUC Lua 5.1.5 C sources
+  (`third_party/lua-src` submodule). Only `Puc51Compat` profile rows in
+  `conformance/fixtures/puc51-compat/` may use it.
 
 The current pending manifest rows and pending catalog refs are exact-allowlisted in `rustia-conformance`
 tests. The remaining `pending-impl` rows are also force-run in tests and matched against their current
@@ -95,6 +101,36 @@ Supported expectation atoms in the current harness:
 - `string:<exact-utf8>`
 - `string_hex:<hex-bytes>`
 - `error_contains:<substring>`
+
+## PUC 5.1.5 Differential Fixture Workflow
+
+The `conformance/fixtures/puc51-compat/` corpus pins PUC Lua 5.1.5 behavior (spec Levels 1, 1.5, and 2:
+table layout/`next()` order, `%.14g` formatting, and `auxsort`) for the `Puc51Compat` profile. Everything
+CI runs is pure Rust — the C oracle is compiled only offline, outside the workspace build.
+
+- Oracle source: `third_party/lua-src` submodule (mlua-rs/lua-src-rs @ `4518bd0`, verified byte-identical
+  to the official `lua-5.1.5.tar.gz` modulo inert WASI guards plus one `ldo.c` stack-check hunk that
+  `tools/puc51-oracle/build.sh` reverts before compiling).
+- Oracle binary: `tools/puc51-oracle/build.sh` builds `tools/puc51-oracle/build/puc51-oracle` (gitignored)
+  from the submodule sources with the host C compiler. It is never a workspace member and never built by
+  CI.
+- Generator: fixtures are self-contained scripts; deterministic op streams come from an in-guest
+  Park–Miller MINSTD PRNG (`seed = (seed * 48271) % 2147483647`, exact in IEEE doubles in both PUC 5.1
+  and rustia). Seed constants live at the top of each fixture (1001, 2002, 6006, 9009, 11011, 12012,
+  13013, 14014, 15015).
+- Oracle hygiene: every fixture returns a string serialized in-guest via `tostring` / `..` /
+  `table.concat` / `string.format("%s")` — no number is ever formatted host-side. Tables with
+  pointer-keyed entries (tables, functions, userdata) are excluded because PUC hashes them by address.
+  Expectation capture runs under `LC_ALL=C`.
+- Regenerate expectations (after editing or adding a fixture, then re-add its MANIFEST/REFS rows):
+
+  ```sh
+  git submodule update --init third_party/lua-src
+  tools/puc51-oracle/emit-rows.sh /tmp/puc51-manifest-rows.tsv /tmp/puc51-refs-rows.tsv
+  ```
+
+  `emit-rows.sh` rebuilds the oracle if needed, captures each fixture's returned string via
+  `capture-expectations.sh`, and prints complete MANIFEST.tsv and REFS.tsv rows.
 
 ## Upstream Luau Test Port Workflow
 
