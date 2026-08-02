@@ -152,9 +152,9 @@ inside the preserved prefix. It also rejects externally retained values before
 the initial seal: retained handles are decision-local, and treating one as a
 configuration root would let arbitrary mutable state enter the immutable
 prefix. Native tests hold an exact plateau across 600 heterogeneous typed
-entries. The wasm32 Node/V8 probe repeats the hardened entry, ordered-record,
-failure-reset, epoch, and exact-plateau checks in two 300-decision cohorts; the
-second cohort does not grow WebAssembly linear memory.
+entries. Cross-target mixed-heap/reset and wasm linear-memory plateaus are
+covered by the separate shared pressure test; the hardened typed-entry
+transaction itself remains native-test coverage.
 
 The checked-in `leaf_lifecycle_bench` measures one complete native release
 decision with:

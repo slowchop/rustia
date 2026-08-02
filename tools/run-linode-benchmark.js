@@ -4089,7 +4089,10 @@ function validateMatrixStatus(status) {
 }
 
 function loadStrictJsonLines(file, location) {
-  const bytes = fs.readFileSync(file);
+  return loadStrictJsonLinesBytes(fs.readFileSync(file), location);
+}
+
+function loadStrictJsonLinesBytes(bytes, location) {
   const text = strictUtf8(bytes, location);
   if (text.length === 0 || !text.endsWith("\n")) fail(`${location} must be non-empty and newline terminated`);
   const lines = text.slice(0, -1).split("\n");
@@ -4119,8 +4122,22 @@ function requireFreshMatrixTimestamp(value, status, location) {
   }
 }
 
-function validateMatrixNativeRows(config, file, status) {
-  const rows = loadStrictJsonLines(file, "matrix native history");
+function validateMatrixNativeRows(config, file, historyPrefixFile, status) {
+  const publication = fs.readFileSync(file);
+  const historyPrefix = fs.readFileSync(historyPrefixFile);
+  if (historyPrefix.length === 0 || historyPrefix[historyPrefix.length - 1] !== 0x0a) {
+    fail("local matrix history prefix must be non-empty and newline terminated");
+  }
+  if (
+    publication.length <= historyPrefix.length ||
+    !publication.subarray(0, historyPrefix.length).equals(historyPrefix)
+  ) {
+    fail("matrix native history does not preserve the frozen local history prefix exactly");
+  }
+  const rows = loadStrictJsonLinesBytes(
+    publication.subarray(historyPrefix.length),
+    "matrix native history fresh suffix",
+  );
   if (rows.length !== config.publication.native_rows) {
     fail(`matrix native history has ${rows.length} rows, expected ${config.publication.native_rows}`);
   }
@@ -4526,7 +4543,12 @@ async function promoteMatrixResult(config, state, downloadDirectory, verifyCheck
   if (sha256File(historyDestination) !== config.source.expected_sha256.history_before) {
     fail("local benchmark history changed while the Linode matrix was in flight");
   }
-  const nativeRows = validateMatrixNativeRows(config, publications.history, status);
+  const nativeRows = validateMatrixNativeRows(
+    config,
+    publications.history,
+    historyDestination,
+    status,
+  );
   validateMatrixWasm(config, publications.wasm, status);
   validateMatrixDispatch(config, publications.dispatch, status);
   validateMatrixEvidence(config, state, evidenceSource, publications, status, nativeRows);
@@ -6380,6 +6402,8 @@ async function selfTest(config) {
     const malformedMemorySamples = path.join(temporary, "malformed-memory-samples.jsonl");
     const malformedMemoryGate = path.join(temporary, "malformed-memory-gate.jsonl");
     const matrixGate = path.join(temporary, "matrix-gate.jsonl");
+    const matrixHistoryPrefix = path.join(temporary, "matrix-history-prefix.jsonl");
+    const matrixHistoryPublication = path.join(temporary, "matrix-history-publication.jsonl");
     fs.writeFileSync(malformedMemorySamples, "{}\n");
     fs.writeFileSync(malformedMemoryGate, "{}\n");
     assert.throws(() =>
@@ -6393,6 +6417,81 @@ async function selfTest(config) {
     );
     assert.throws(() =>
       validateMemoryGateLog(memoryConfig, malformedMemoryGate, 1, [1], Array(16).fill(1)),
+    );
+    const matrixDialects = {
+      rustia: "luau",
+      boa: "javascript",
+      koto: "koto",
+      luaur: "luau",
+      "mlua-luau": "luau",
+      "mlua-luau-jit": "luau",
+      rhai: "rhai",
+      roto: "roto",
+      ruau: "luau",
+      rquickjs: "javascript",
+      wasmi: "wasm",
+      wasmtime: "wasm",
+      "mlua-lua54": "lua54",
+    };
+    const freshMatrixRows = MATRIX_NATIVE_ENGINES.flatMap((engine) =>
+      MATRIX_WORKLOADS.map((workload) => ({
+        timestamp_unix: 1784505630,
+        commit: matrixConfig.source.benchmark_commit,
+        target: MATRIX_NATIVE_TARGET,
+        engine,
+        dialect: matrixDialects[engine],
+        workload,
+        unit: "iteration",
+        n: 10,
+        reps: matrixConfig.measurement.native_repetitions,
+        ns_per_unit_min: 10,
+        ns_per_unit_median: 11,
+        units_per_sec: 100000000,
+        checksum: "number:1",
+        prepare_ns_min: 10,
+        prepare_ns_median: 11,
+        first_call_ns_min: 10,
+        first_call_ns_median: 11,
+        cold_start_ns_min: 20,
+        cold_start_ns_median: 22,
+        mode_family: engine === "mlua-luau-jit" ? "mlua-luau" : engine,
+        execution_mode: engine === "mlua-luau-jit" ? "jit" :
+          (engine === "roto" || engine === "wasmtime" ? "native" : "interpreter"),
+        native_verified: engine === "mlua-luau-jit",
+        native_verification: engine === "mlua-luau-jit" ? "ab-native-sentinel" : "not-applicable",
+        native_verification_ratio: engine === "mlua-luau-jit" ? 2 : null,
+      })),
+    );
+    const frozenPrefix = `${JSON.stringify({ prior: "accepted" })}\n`;
+    const freshSuffix = `${freshMatrixRows.map((row) => JSON.stringify(row)).join("\n")}\n`;
+    fs.writeFileSync(matrixHistoryPrefix, frozenPrefix);
+    fs.writeFileSync(matrixHistoryPublication, frozenPrefix + freshSuffix);
+    assert.equal(
+      validateMatrixNativeRows(
+        matrixConfig,
+        matrixHistoryPublication,
+        matrixHistoryPrefix,
+        matrixStatus,
+      ).length,
+      matrixConfig.publication.native_rows,
+    );
+    fs.writeFileSync(matrixHistoryPublication, `${JSON.stringify({ prior: "changed" })}\n${freshSuffix}`);
+    assert.throws(() =>
+      validateMatrixNativeRows(
+        matrixConfig,
+        matrixHistoryPublication,
+        matrixHistoryPrefix,
+        matrixStatus,
+      ),
+    );
+    fs.writeFileSync(matrixHistoryPublication, freshSuffix);
+    assert.throws(() =>
+      validateMatrixNativeRows(
+        matrixConfig,
+        matrixHistoryPublication,
+        matrixHistoryPrefix,
+        matrixStatus,
+      ),
     );
     const writeMatrixGate = (records) => {
       fs.writeFileSync(matrixGate, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);

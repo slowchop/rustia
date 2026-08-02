@@ -21,7 +21,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal --component clippy --component rustfmt
@@ -30,7 +32,7 @@ jobs:
         run: rustup default 1.95.0
 
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
 
@@ -40,48 +42,64 @@ jobs:
           cargo --version
           node --version
 
-      - name: Check Rust formatting
-        run: cargo fmt --all -- --check
+      - name: Run canonical release preflight
+        run: node tools/run-release-preflight.js
 
-      - name: Check Rust lints
-        run: cargo clippy --workspace --all-targets -- -D warnings
+  portable-engine-build:
+    name: Engine build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - x86_64-pc-windows-msvc
+          - aarch64-apple-ios
+          - aarch64-linux-android
+          - wasm32-unknown-unknown
 
-      - name: Check release notes
-        run: node tools/check-release-notes.js
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Check crate metadata audit
-        run: node tools/check-crate-metadata.js --check
+      - name: Install pinned Rust toolchain and target
+        run: rustup toolchain install 1.95.0 --profile minimal --target ${{ matrix.target }}
 
-      - name: Check workflow policy
-        run: node tools/check-workflows.js
+      - name: Check portable engine library
+        run: cargo check --locked -p rustia --lib --target ${{ matrix.target }}
 
-      - name: Check package file audit
-        run: node tools/check-package-files.js --check
+  wasm-node-runtime:
+    name: Wasm runtime (Node/V8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
 
-      - name: Check publishability audit
-        run: node tools/check-publishability.js --check
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Check leaf package dry runs
-        run: node tools/check-package-dry-runs.js
+      - name: Install pinned Rust toolchain and wasm target
+        run: rustup toolchain install 1.95.0 --profile minimal --target wasm32-unknown-unknown
 
-      - name: Check progress dashboard
-        run: node design/render-progress.js --check
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
 
-      - name: Check project status alignment
-        run: node tools/check-project-status.js
+      - name: Install matching wasm-bindgen test runner
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
 
-      - name: Check benchmark generated artifacts
+      - name: Run bare wasm host-adapter tests
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
         run: |
-          node bench/analyze-fixed-samples.js --self-test
-          node tools/check-benchmark-results.js
-          node tools/check-wasm-gate-results.js
-          node tools/check-current-report-summary.js
-          node tools/merge-rustia-ci-memory-data.js self-test
-          node bench/render-current-results.js --check
-          node bench/render-claims.js --check
+          cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test bare_wasm_live
+          cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test mixed_heap_pressure
 
-      - name: Check rustia examples
-        run: cargo test -p rustia --examples --no-run
-
-      - name: Run workspace tests
-        run: cargo test --workspace
+      - name: Run default web-live adapter tests on Node/V8
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+        run: cargo test --locked -p rustia --target wasm32-unknown-unknown --test web_live

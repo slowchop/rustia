@@ -164,7 +164,7 @@ impl<'de> Deserializer<'de> for OwnedDeserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        visitor.visit_i128(i128::from(number_to_i64_value(self.value)?))
+        visitor.visit_i128(number_to_i128_value(self.value)?)
     }
 
     fn deserialize_u64<V>(self, visitor: V) -> SerdeResult<V::Value>
@@ -205,7 +205,7 @@ impl<'de> Deserializer<'de> for OwnedDeserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        visitor.visit_u128(u128::from(number_to_u64_value(self.value)?))
+        visitor.visit_u128(number_to_u128_value(self.value)?)
     }
 
     fn deserialize_f64<V>(self, visitor: V) -> SerdeResult<V::Value>
@@ -593,11 +593,11 @@ impl ser::Serializer for OwnedSerializer {
     }
 
     fn serialize_i64(self, value: i64) -> SerdeResult<Self::Ok> {
-        Ok(OwnedValue::Number(value as f64))
+        signed_integer_to_number(i128::from(value)).map(OwnedValue::Number)
     }
 
     fn serialize_i128(self, value: i128) -> SerdeResult<Self::Ok> {
-        Ok(OwnedValue::Number(value as f64))
+        signed_integer_to_number(value).map(OwnedValue::Number)
     }
 
     fn serialize_u8(self, value: u8) -> SerdeResult<Self::Ok> {
@@ -613,11 +613,11 @@ impl ser::Serializer for OwnedSerializer {
     }
 
     fn serialize_u64(self, value: u64) -> SerdeResult<Self::Ok> {
-        Ok(OwnedValue::Number(value as f64))
+        unsigned_integer_to_number(u128::from(value)).map(OwnedValue::Number)
     }
 
     fn serialize_u128(self, value: u128) -> SerdeResult<Self::Ok> {
-        Ok(OwnedValue::Number(value as f64))
+        unsigned_integer_to_number(value).map(OwnedValue::Number)
     }
 
     fn serialize_f32(self, value: f32) -> SerdeResult<Self::Ok> {
@@ -958,11 +958,11 @@ impl ser::Serializer for KeySerializer {
     }
 
     fn serialize_i64(self, value: i64) -> SerdeResult<Self::Ok> {
-        Ok(OwnedKey::Number(value as f64))
+        signed_integer_to_number(i128::from(value)).map(OwnedKey::Number)
     }
 
     fn serialize_i128(self, value: i128) -> SerdeResult<Self::Ok> {
-        Ok(OwnedKey::Number(value as f64))
+        signed_integer_to_number(value).map(OwnedKey::Number)
     }
 
     fn serialize_u8(self, value: u8) -> SerdeResult<Self::Ok> {
@@ -978,11 +978,11 @@ impl ser::Serializer for KeySerializer {
     }
 
     fn serialize_u64(self, value: u64) -> SerdeResult<Self::Ok> {
-        Ok(OwnedKey::Number(value as f64))
+        unsigned_integer_to_number(u128::from(value)).map(OwnedKey::Number)
     }
 
     fn serialize_u128(self, value: u128) -> SerdeResult<Self::Ok> {
-        Ok(OwnedKey::Number(value as f64))
+        unsigned_integer_to_number(value).map(OwnedKey::Number)
     }
 
     fn serialize_f32(self, value: f32) -> SerdeResult<Self::Ok> {
@@ -1115,23 +1115,33 @@ impl ser::Serializer for KeySerializer {
 }
 
 fn number_to_i64(value: f64) -> SerdeResult<i64> {
-    if !value.is_finite() || value.fract() != 0.0 {
-        return Err(SerdeValueError(format!("expected integer, got {value}")));
-    }
-    if value < i64::MIN as f64 || value > i64::MAX as f64 {
-        return Err(SerdeValueError(format!("{value} is outside i64 range")));
-    }
-    Ok(value as i64)
+    integer_in_range(number_to_i128(value)?)
 }
 
 fn number_to_u64(value: f64) -> SerdeResult<u64> {
+    integer_in_range(number_to_u128(value)?)
+}
+
+fn number_to_i128(value: f64) -> SerdeResult<i128> {
     if !value.is_finite() || value.fract() != 0.0 {
         return Err(SerdeValueError(format!("expected integer, got {value}")));
     }
-    if value < 0.0 || value > u64::MAX as f64 {
-        return Err(SerdeValueError(format!("{value} is outside u64 range")));
+    let upper_exclusive = 2.0_f64.powi(127);
+    if value < -upper_exclusive || value >= upper_exclusive {
+        return Err(SerdeValueError(format!("{value} is outside i128 range")));
     }
-    Ok(value as u64)
+    Ok(value as i128)
+}
+
+fn number_to_u128(value: f64) -> SerdeResult<u128> {
+    if !value.is_finite() || value.fract() != 0.0 {
+        return Err(SerdeValueError(format!("expected integer, got {value}")));
+    }
+    let upper_exclusive = 2.0_f64.powi(128);
+    if value < 0.0 || value >= upper_exclusive {
+        return Err(SerdeValueError(format!("{value} is outside u128 range")));
+    }
+    Ok(value as u128)
 }
 
 fn number_to_i64_value(value: &OwnedValue) -> SerdeResult<i64> {
@@ -1152,6 +1162,55 @@ fn number_to_u64_value(value: &OwnedValue) -> SerdeResult<u64> {
             value.type_name()
         ))),
     }
+}
+
+fn number_to_i128_value(value: &OwnedValue) -> SerdeResult<i128> {
+    match value {
+        OwnedValue::Number(value) => number_to_i128(*value),
+        value => Err(SerdeValueError(format!(
+            "expected number, got {}",
+            value.type_name()
+        ))),
+    }
+}
+
+fn number_to_u128_value(value: &OwnedValue) -> SerdeResult<u128> {
+    match value {
+        OwnedValue::Number(value) => number_to_u128(*value),
+        value => Err(SerdeValueError(format!(
+            "expected number, got {}",
+            value.type_name()
+        ))),
+    }
+}
+
+fn signed_integer_to_number(value: i128) -> SerdeResult<f64> {
+    exact_integer_to_number(value.unsigned_abs())
+        .map(|_| value as f64)
+        .ok_or_else(|| {
+            SerdeValueError(format!(
+                "integer value {value} cannot be represented exactly as a Luau number"
+            ))
+        })
+}
+
+fn unsigned_integer_to_number(value: u128) -> SerdeResult<f64> {
+    exact_integer_to_number(value)
+        .map(|_| value as f64)
+        .ok_or_else(|| {
+            SerdeValueError(format!(
+                "integer value {value} cannot be represented exactly as a Luau number"
+            ))
+        })
+}
+
+fn exact_integer_to_number(magnitude: u128) -> Option<()> {
+    if magnitude == 0 {
+        return Some(());
+    }
+    let significant_bits = u128::BITS - magnitude.leading_zeros();
+    let discarded_bits = significant_bits.saturating_sub(f64::MANTISSA_DIGITS);
+    (magnitude.trailing_zeros() >= discarded_bits).then_some(())
 }
 
 fn integer_in_range<T, U>(value: U) -> SerdeResult<T>

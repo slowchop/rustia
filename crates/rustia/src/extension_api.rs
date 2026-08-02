@@ -3,9 +3,21 @@ use crate::{
     Error, GuestSurface, HostSchema, Profile, Result, Rustia, VmError, VmErrorKind, VmSettings,
 };
 use rustia_compiler::{compile_with_options, CompileOptions};
-use rustia_vm::{ClockProvider, HostFunctionOp, OpCapability, Program, StdoutSink};
-#[cfg(not(target_arch = "wasm32"))]
+use rustia_vm::{
+    ClockProvider, EntropyProvider, HostFunctionOp, ModuleResolver, OpCapability, Program,
+    ResolvedModule, StdoutSink,
+};
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
+#[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console, js_name = log)]
+    fn web_console_log(text: &str);
+}
 
 /// Fluent builder for [`Rustia`]: start from a preset ([`standard`](Self::standard),
 /// [`deterministic`](Self::deterministic), [`deterministic_leaf`](Self::deterministic_leaf),
@@ -72,6 +84,8 @@ impl RustiaExecutionProfile {
             (Profile::DeterministicSim, GuestSurface::Standard) => 4,
             (Profile::LuauCompat, GuestSurface::HardenedLeaf) => 5,
             (Profile::ReproducibleStandard, GuestSurface::HardenedLeaf) => 6,
+            (Profile::Puc51Compat, GuestSurface::Standard) => 7,
+            (Profile::Puc51Compat, GuestSurface::HardenedLeaf) => 8,
         }
     }
 
@@ -85,6 +99,7 @@ impl RustiaExecutionProfile {
             Profile::LuauCompat => 1u32,
             Profile::ReproducibleStandard => 2,
             Profile::DeterministicSim => 3,
+            Profile::Puc51Compat => 4,
         }
         .to_le_bytes();
         let surface = match self.guest_surface {
@@ -149,7 +164,7 @@ impl RustiaBuilder {
     /// [`Rustia::builder()`](crate::Rustia::builder) delegates here.
     pub fn standard() -> Self {
         let builder = Self::new();
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
         let builder = builder.stdout(|text| print!("{text}"));
         builder
     }
@@ -173,19 +188,43 @@ impl RustiaBuilder {
     /// "Normal Luau" preset with `loadstring` enabled (runtime codegen — attack surface for
     /// hosts running untrusted scripts).
     ///
-    /// `Profile::ReproducibleStandard` + real stdout + `ServiceClock::system()` on both clock
-    /// sockets + the stock `loadstring` compiler. The language core stays deterministic
-    /// (insertion order, pinned PCG32, Schubfach, libm); only the services go live. On wasm32
-    /// there is no system clock or stdout, so [`build`](Self::build) fails with a typed error
-    /// telling the host to plug providers explicitly.
+    /// `Profile::ReproducibleStandard` + host stdout + real wall/monotonic clocks + system
+    /// entropy for the initial `math.random` seed + the stock `loadstring` compiler.
+    ///
+    /// Native and WASI targets use their system services. With the default `web-live` feature,
+    /// `wasm32-unknown-unknown` uses the JavaScript host (`console`, `Date`, `performance`, and
+    /// `crypto`). Bare-Wasm builds can disable default features and plug the three input
+    /// providers explicitly; [`build`](Self::build) then verifies that none are missing.
     pub fn live() -> Self {
         let builder = Self::standard();
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
         let builder = builder
             .wall_clock(ServiceClock::system())
-            .monotonic_clock(ServiceClock::system());
+            .monotonic_clock(ServiceClock::monotonic())
+            .entropy(ServiceEntropy::system());
+        #[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+        let builder = builder
+            .stdout(web_console_log)
+            .wall_clock(ServiceClock::system())
+            .monotonic_clock(ServiceClock::monotonic())
+            .entropy(ServiceEntropy::system());
         let mut builder = builder;
         builder.live_requested = true;
+        builder.settings.loadstring_compiler = Some(stock_loadstring_compiler);
+        builder
+    }
+
+    /// PUC Lua 5.1 compatibility preset: `Profile::Puc51Compat` plus the stock
+    /// `loadstring` compiler, on the same service base as
+    /// [`standard`](Self::standard).
+    ///
+    /// The profile alone reproduces PUC 5.1.5 table layout, number
+    /// formatting, and `table.sort`; this preset adds `loadstring` so PUC-era
+    /// code that compiles chunks at runtime works out of the box. Runtime
+    /// codegen is attack surface for hosts running untrusted scripts — add it
+    /// only where PUC source compatibility requires it.
+    pub fn puc51_compat() -> Self {
+        let mut builder = Self::standard().profile(Profile::Puc51Compat);
         builder.settings.loadstring_compiler = Some(stock_loadstring_compiler);
         builder
     }
@@ -238,6 +277,16 @@ impl RustiaBuilder {
         self
     }
 
+    /// Installs the host-owned resolver behind script-visible `require`.
+    ///
+    /// The resolver chooses a canonical module identity and source for every
+    /// request. Successful modules execute once per decision epoch and are
+    /// cached by that identity; [`Rustia::reset_decision`] clears the cache.
+    pub fn module_resolver(mut self, resolver: ServiceModuleResolver) -> Self {
+        self.settings.module_resolver = Some(resolver.into_provider());
+        self
+    }
+
     /// Plugs the wall-clock provider backing no-arg `os.time()` and the default `os.date`
     /// timestamp. A nondeterministic provider is rejected at [`build`](Self::build) on
     /// `DeterministicSim`.
@@ -250,6 +299,14 @@ impl RustiaBuilder {
     /// logical clock. Same `DeterministicSim` validation as [`wall_clock`](Self::wall_clock).
     pub fn monotonic_clock(mut self, clock: ServiceClock) -> Self {
         self.settings.services.monotonic_clock = Some(clock.into_provider());
+        self
+    }
+
+    /// Plugs the provider used once at VM construction to choose the initial `math.random`
+    /// sequence. Calling `math.randomseed` later still replaces that state. A nondeterministic
+    /// provider is rejected by [`deterministic`](Self::deterministic).
+    pub fn entropy(mut self, entropy: ServiceEntropy) -> Self {
+        self.settings.services.entropy = Some(entropy.into_provider());
         self
     }
 
@@ -294,10 +351,15 @@ impl RustiaBuilder {
     }
 
     fn validate(&self) -> Result<()> {
-        if cfg!(target_arch = "wasm32") && self.live_requested {
+        if self.live_requested
+            && (self.settings.services.wall_clock.is_none()
+                || self.settings.services.monotonic_clock.is_none()
+                || self.settings.services.entropy.is_none())
+        {
             return Err(Error::Vm(VmError::new(VmErrorKind::Unsupported {
-                feature: "live() preset on wasm32 (no system clock or stdout exists; plug \
-                          providers explicitly via .stdout/.wall_clock/.monotonic_clock)",
+                feature: "live() without a complete platform adapter (plug \
+                          .wall_clock/.monotonic_clock/.entropy providers, or enable the \
+                          default web-live feature for browser/JavaScript wasm hosts)",
             })));
         }
         if self.profile.is_deterministic_sim() {
@@ -318,6 +380,31 @@ impl RustiaBuilder {
                         profile: self.profile,
                     })));
                 }
+            }
+            if self
+                .settings
+                .services
+                .entropy
+                .as_ref()
+                .is_some_and(|entropy| !entropy.deterministic())
+            {
+                return Err(Error::Vm(VmError::new(VmErrorKind::CapabilityRemoved {
+                    feature: "non-deterministic entropy provider",
+                    operation: None,
+                    profile: self.profile,
+                })));
+            }
+            if self
+                .settings
+                .module_resolver
+                .as_ref()
+                .is_some_and(|resolver| !resolver.deterministic())
+            {
+                return Err(Error::Vm(VmError::new(VmErrorKind::CapabilityRemoved {
+                    feature: "non-deterministic module resolver",
+                    operation: Some("require".to_owned()),
+                    profile: self.profile,
+                })));
             }
         }
         if self.settings.guest_surface.is_hardened_leaf() {
@@ -346,6 +433,7 @@ impl RustiaBuilder {
                 )));
             }
             if self.settings.loadstring_compiler.is_some()
+                || self.settings.module_resolver.is_some()
                 || self.settings.enable_conformance_coverage
                 || self.settings.enable_conformance_top_level_yield
                 || self.settings.enable_conformance_int64_userdata
@@ -364,6 +452,121 @@ impl RustiaBuilder {
     }
 }
 
+/// Host-supplied source returned by a [`ServiceModuleResolver`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ModuleSource {
+    identity: String,
+    source_name: String,
+    source: Vec<u8>,
+}
+
+impl ModuleSource {
+    /// Creates a module whose diagnostic source name matches its canonical
+    /// cache identity.
+    pub fn new(identity: impl Into<String>, source: impl AsRef<[u8]>) -> Self {
+        let identity = identity.into();
+        Self {
+            source_name: identity.clone(),
+            identity,
+            source: source.as_ref().to_vec(),
+        }
+    }
+
+    /// Creates a module with a separate canonical cache identity and
+    /// diagnostic source name.
+    pub fn named(
+        identity: impl Into<String>,
+        source_name: impl Into<String>,
+        source: impl AsRef<[u8]>,
+    ) -> Self {
+        Self {
+            identity: identity.into(),
+            source_name: source_name.into(),
+            source: source.as_ref().to_vec(),
+        }
+    }
+
+    pub fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    pub fn source_name(&self) -> &str {
+        &self.source_name
+    }
+
+    pub fn source(&self) -> &[u8] {
+        &self.source
+    }
+}
+
+/// Host-owned resolver for script-visible `require`.
+///
+/// Resolution is performed on demand with the requested path and the current
+/// chunk's source name. The host must return a stable canonical identity when
+/// it labels the resolver deterministic. Because the canonical identity is a
+/// resolver result, the resolver is called before every cache lookup; a host
+/// with expensive I/O or compilation should keep its own source cache. A cache
+/// hit skips module execution and discards the newly resolved program.
+#[derive(Clone, Debug)]
+pub struct ServiceModuleResolver {
+    provider: ModuleResolver,
+}
+
+impl ServiceModuleResolver {
+    /// Host-supplied replay-stable resolver. The determinism assertion is
+    /// trusted, not verified.
+    pub fn from_fn(
+        resolver: impl FnMut(&str, Option<&str>) -> std::result::Result<ModuleSource, String> + 'static,
+    ) -> Self {
+        Self::from_fn_with_determinism(resolver, true)
+    }
+
+    /// Host-supplied live resolver explicitly labeled nondeterministic.
+    pub fn from_nondeterministic_fn(
+        resolver: impl FnMut(&str, Option<&str>) -> std::result::Result<ModuleSource, String> + 'static,
+    ) -> Self {
+        Self::from_fn_with_determinism(resolver, false)
+    }
+
+    fn from_fn_with_determinism(
+        mut resolver: impl FnMut(&str, Option<&str>) -> std::result::Result<ModuleSource, String>
+            + 'static,
+        deterministic: bool,
+    ) -> Self {
+        let provider = ModuleResolver::new_with_profile(
+            move |requested, referrer, profile| {
+                let module = resolver(requested, referrer)?;
+                compile_module_source(module, profile)
+            },
+            deterministic,
+        );
+        Self { provider }
+    }
+
+    fn into_provider(self) -> ModuleResolver {
+        self.provider
+    }
+}
+
+fn compile_module_source(
+    module: ModuleSource,
+    profile: Profile,
+) -> std::result::Result<ResolvedModule, String> {
+    if module.identity.is_empty() {
+        return Err("module identity must not be empty".to_owned());
+    }
+    let chunk = rustia_parser::parse_source_bytes(&module.source)
+        .map_err(|error| format!("{}:1: {error}", module.source_name))?;
+    let options = CompileOptions {
+        puc51_constructor_order: profile == Profile::Puc51Compat,
+        ..CompileOptions::default()
+    }
+    .with_source_bytes(module.source_name.clone(), &module.source);
+    let program = compile_with_options(&chunk, options)
+        .map_err(|error| format!("{}:1: {error}", module.source_name))?;
+    Ok(ResolvedModule::new(module.identity, program))
+}
+
 /// Host clock provider plugged into a builder clock socket (design/72-host-services.md).
 ///
 /// Every constructor carries a determinism label: `DeterministicSim` rejects a
@@ -378,10 +581,8 @@ pub struct ServiceClock {
 impl ServiceClock {
     /// Real system time in seconds since the Unix epoch, anchored to a monotonic instant at
     /// construction so readings never move backwards. Labeled nondeterministic: usable on
-    /// `ReproducibleStandard`/`LuauCompat`, rejected on `DeterministicSim`. Not available on
-    /// wasm32, where no system clock exists — plug [`ServiceClock::fixed`] or
-    /// [`ServiceClock::from_fn`] explicitly.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// `ReproducibleStandard`/`LuauCompat`, rejected on `DeterministicSim`.
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     pub fn system() -> Self {
         let epoch = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -389,6 +590,32 @@ impl ServiceClock {
         let start = Instant::now();
         Self {
             provider: ClockProvider::new(move || epoch + start.elapsed().as_secs_f64(), false),
+        }
+    }
+
+    /// Monotonic elapsed time in seconds. Labeled nondeterministic.
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    pub fn monotonic() -> Self {
+        let start = Instant::now();
+        Self {
+            provider: ClockProvider::new(move || start.elapsed().as_secs_f64(), false),
+        }
+    }
+
+    /// JavaScript host wall time in seconds since the Unix epoch. Labeled nondeterministic.
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+    pub fn system() -> Self {
+        Self {
+            provider: ClockProvider::new(|| js_sys::Date::now() / 1_000.0, false),
+        }
+    }
+
+    /// JavaScript host monotonic time in seconds. Uses `performance.now()` when available and
+    /// falls back to `Date.now()`. Labeled nondeterministic.
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+    pub fn monotonic() -> Self {
+        Self {
+            provider: ClockProvider::new(web_monotonic_seconds, false),
         }
     }
 
@@ -407,17 +634,129 @@ impl ServiceClock {
         }
     }
 
+    /// Host-supplied live clock. The provider is explicitly labeled nondeterministic.
+    pub fn from_nondeterministic_fn(clock: impl FnMut() -> f64 + 'static) -> Self {
+        Self {
+            provider: ClockProvider::new(clock, false),
+        }
+    }
+
     pub(crate) fn into_provider(self) -> ClockProvider {
         self.provider
     }
 }
 
+/// Host entropy used to select the VM's initial `math.random` sequence.
+///
+/// Like [`ServiceClock`], every constructor carries a determinism label. The provider is read
+/// once while the VM is built; `math.randomseed` remains available afterward.
+#[non_exhaustive]
+#[derive(Clone, Debug)]
+pub struct ServiceEntropy {
+    provider: EntropyProvider,
+}
+
+impl ServiceEntropy {
+    /// System entropy where Rustia has a default platform adapter. If the platform random
+    /// source is temporarily unavailable, a time-varying fallback still preserves `live()`'s
+    /// no-replay-guarantee contract. Labeled nondeterministic.
+    #[cfg(any(
+        not(all(target_arch = "wasm32", target_os = "unknown")),
+        all(target_arch = "wasm32", target_os = "unknown", feature = "web-live")
+    ))]
+    pub fn system() -> Self {
+        let mut fallback_counter = 0_u64;
+        Self {
+            provider: EntropyProvider::new(
+                move || {
+                    system_entropy().unwrap_or_else(|| {
+                        fallback_counter = fallback_counter.wrapping_add(1);
+                        fallback_entropy(fallback_counter)
+                    })
+                },
+                false,
+            ),
+        }
+    }
+
+    /// Constant replay-stable seed.
+    pub fn fixed(seed: u64) -> Self {
+        Self {
+            provider: EntropyProvider::new(move || seed, true),
+        }
+    }
+
+    /// Host-supplied replay-stable seed provider.
+    pub fn from_fn(entropy: impl FnMut() -> u64 + 'static) -> Self {
+        Self {
+            provider: EntropyProvider::new(entropy, true),
+        }
+    }
+
+    /// Host-supplied live seed provider, explicitly labeled nondeterministic.
+    pub fn from_nondeterministic_fn(entropy: impl FnMut() -> u64 + 'static) -> Self {
+        Self {
+            provider: EntropyProvider::new(entropy, false),
+        }
+    }
+
+    pub(crate) fn into_provider(self) -> EntropyProvider {
+        self.provider
+    }
+}
+
+#[cfg(feature = "web-live")]
+fn system_entropy() -> Option<u64> {
+    getrandom::u64().ok()
+}
+
+#[cfg(all(
+    not(feature = "web-live"),
+    not(all(target_arch = "wasm32", target_os = "unknown"))
+))]
+fn system_entropy() -> Option<u64> {
+    None
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+fn fallback_entropy(counter: u64) -> u64 {
+    let wall = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0_u128, |duration| duration.as_nanos());
+    (wall as u64) ^ ((wall >> 64) as u64) ^ counter.rotate_left(29)
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+fn fallback_entropy(counter: u64) -> u64 {
+    js_sys::Date::now().to_bits() ^ web_monotonic_seconds().to_bits() ^ counter.rotate_left(29)
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+fn web_monotonic_seconds() -> f64 {
+    let global = js_sys::global();
+    let performance = js_sys::Reflect::get(&global, &JsValue::from_str("performance"));
+    let Ok(performance) = performance else {
+        return js_sys::Date::now() / 1_000.0;
+    };
+    let now = js_sys::Reflect::get(&performance, &JsValue::from_str("now"))
+        .ok()
+        .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
+        .and_then(|now| now.call0(&performance).ok())
+        .and_then(|value| value.as_f64());
+    now.unwrap_or_else(js_sys::Date::now) / 1_000.0
+}
+
 /// Stock `loadstring` compiler installed by [`RustiaBuilder::live`]: the same parse + compile
 /// pipeline the facade uses for ahead-of-time source (public builtin environment), with
 /// Luau's `[string "..."]` chunk naming when the script passes no chunk name.
+///
+/// The VM supplies its active [`Profile`] so profile-dependent codegen stays
+/// consistent between ahead-of-time and runtime-compiled chunks (currently the
+/// PUC 5.1 table-constructor write order under `Profile::Puc51Compat`).
 fn stock_loadstring_compiler(
     source: &[u8],
     source_name: Option<&[u8]>,
+    profile: Profile,
 ) -> std::result::Result<Program, String> {
     let source_name = source_name.map_or_else(
         || loadstring_chunk_name(source),
@@ -425,7 +764,11 @@ fn stock_loadstring_compiler(
     );
     let chunk = rustia_parser::parse_source_bytes(source)
         .map_err(|error| format!("{source_name}:1: {error}"))?;
-    let options = CompileOptions::default().with_source_bytes(source_name.clone(), source);
+    let options = CompileOptions {
+        puc51_constructor_order: profile == Profile::Puc51Compat,
+        ..CompileOptions::default()
+    }
+    .with_source_bytes(source_name.clone(), source);
     compile_with_options(&chunk, options).map_err(|error| format!("{source_name}:1: {error}"))
 }
 

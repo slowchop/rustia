@@ -13,7 +13,7 @@ use crate::extension::{
 };
 use crate::heap::{
     FunctionCapture, FunctionKind, HeapCheckpoint, NativeFunction, QuotaTableWrite,
-    TableIterationOrder, TableNext, TableNumericArrayWrite, TableStringHashSlot,
+    TableIterationOrder, TableLayout, TableNext, TableNumericArrayWrite, TableStringHashSlot,
     TableStringHashWrite, UserdataPayload, VectorData, VmCell,
 };
 use crate::hot_ir::{recognize_hot_ir_loops, HotIr, HotIrNumber, HotIrOpKind, HotIrValue};
@@ -57,7 +57,12 @@ pub const DECISION_RESET_ABI_VERSION: u32 = 1;
 /// Replay and content protocols that depend on this surface must record the
 /// value alongside [`DECISION_RESET_ABI_VERSION`].
 pub const HARDENED_LEAF_GUEST_ABI_VERSION: u32 = 1;
-const LUAU_TAIL_CALL_LIMIT: usize = 20_000;
+/// Version of host-resolved module identity, cache, cycle, and reset behavior.
+///
+/// Replay/package protocols that permit script-visible `require` must record
+/// this value together with their resolver's own content identity.
+pub const MODULE_RESOLUTION_ABI_VERSION: u32 = 1;
+const LUAU_CONFORMANCE_CALL_LIMIT: usize = 20_000;
 const CONSTANT_ATOM_EMPTY: u32 = 0;
 const SITE_CACHE_CLOSURE_CALL_EMPTY: u32 = u32::MAX - 4;
 const SITE_CACHE_FAST_CALL_EMPTY: u32 = u32::MAX - 3;
@@ -72,6 +77,7 @@ const PROGRAM_HANDLE_INDEX_MASK: u32 = (1 << PROGRAM_HANDLE_INDEX_BITS) - 1;
 const PROGRAM_HANDLE_MAX_GENERATION: u8 = u8::MAX;
 const STDOUT_SERVICE_NAME: &str = "service::stdout";
 const LOADSTRING_COMPILER_SERVICE_NAME: &str = "service::loadstring_compiler";
+const MODULE_RESOLVER_SERVICE_NAME: &str = "service::module_resolver";
 const WALL_CLOCK_SERVICE_NAME: &str = "service::wall_clock";
 const MONOTONIC_CLOCK_SERVICE_NAME: &str = "service::monotonic_clock";
 // Zero selects the validated special-cost path; every other opcode tag defaults to one fuel.
@@ -85,10 +91,97 @@ const OPCODE_FUEL_OR_SPECIAL: [u8; OPCODE_TAG_SPACE] = {
     costs
 };
 
-pub type LoadStringCompiler =
-    fn(source: &[u8], source_name: Option<&[u8]>) -> std::result::Result<Program, String>;
+/// Runtime chunk compiler for `loadstring`. The VM passes its own [`Profile`]
+/// so the compiler can honor profile-dependent codegen (e.g. PUC 5.1
+/// table-constructor write order under [`Profile::Puc51Compat`]).
+pub type LoadStringCompiler = fn(
+    source: &[u8],
+    source_name: Option<&[u8]>,
+    profile: Profile,
+) -> std::result::Result<Program, String>;
 
 type SharedStdoutSink = Rc<RefCell<dyn FnMut(&str)>>;
+type SharedEntropyProvider = Rc<RefCell<dyn FnMut() -> u64>>;
+type SharedModuleResolver = Rc<
+    RefCell<dyn FnMut(&str, Option<&str>, Profile) -> std::result::Result<ResolvedModule, String>>,
+>;
+
+/// A host-resolved module with its canonical cache identity and compiled body.
+#[derive(Clone, Debug)]
+pub struct ResolvedModule {
+    identity: String,
+    program: Program,
+}
+
+impl ResolvedModule {
+    pub fn new(identity: impl Into<String>, program: Program) -> Self {
+        Self {
+            identity: identity.into(),
+            program,
+        }
+    }
+}
+
+/// Host-owned module resolution socket used by the script-visible `require`.
+///
+/// The host controls path policy and canonical identity. A resolver labeled
+/// deterministic is trusted to return the same identity and program for the
+/// same requested path/referrer pair; `DeterministicSim` rejects any resolver
+/// without that label.
+#[derive(Clone)]
+pub struct ModuleResolver {
+    resolver: SharedModuleResolver,
+    deterministic: bool,
+}
+
+impl ModuleResolver {
+    pub fn new(
+        mut resolver: impl FnMut(&str, Option<&str>) -> std::result::Result<ResolvedModule, String>
+            + 'static,
+        deterministic: bool,
+    ) -> Self {
+        Self::new_with_profile(
+            move |requested, referrer, _profile| resolver(requested, referrer),
+            deterministic,
+        )
+    }
+
+    /// Creates a resolver that can compile source according to the requesting
+    /// VM's execution profile.
+    pub fn new_with_profile(
+        resolver: impl FnMut(&str, Option<&str>, Profile) -> std::result::Result<ResolvedModule, String>
+            + 'static,
+        deterministic: bool,
+    ) -> Self {
+        Self {
+            resolver: Rc::new(RefCell::new(resolver)),
+            deterministic,
+        }
+    }
+
+    #[inline]
+    pub const fn deterministic(&self) -> bool {
+        self.deterministic
+    }
+
+    fn resolve(
+        &self,
+        requested: &str,
+        referrer: Option<&str>,
+        profile: Profile,
+    ) -> std::result::Result<ResolvedModule, String> {
+        (self.resolver.borrow_mut())(requested, referrer, profile)
+    }
+}
+
+impl fmt::Debug for ModuleResolver {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ModuleResolver")
+            .field("deterministic", &self.deterministic)
+            .finish_non_exhaustive()
+    }
+}
 
 /// Shared host sink for composed `print` output. Cloning shares the underlying sink.
 #[derive(Clone)]
@@ -150,20 +243,58 @@ impl fmt::Debug for ClockProvider {
     }
 }
 
+/// Shared host entropy provider used to choose the VM's initial `math.random` seed.
+/// `deterministic` marks the supplied seed as replay-stable. Cloning shares the
+/// underlying provider.
+#[derive(Clone)]
+pub struct EntropyProvider {
+    entropy: SharedEntropyProvider,
+    deterministic: bool,
+}
+
+impl EntropyProvider {
+    pub fn new(entropy: impl FnMut() -> u64 + 'static, deterministic: bool) -> Self {
+        Self {
+            entropy: Rc::new(RefCell::new(entropy)),
+            deterministic,
+        }
+    }
+
+    #[inline]
+    pub const fn deterministic(&self) -> bool {
+        self.deterministic
+    }
+
+    fn read(&self) -> u64 {
+        (self.entropy.borrow_mut())()
+    }
+}
+
+impl fmt::Debug for EntropyProvider {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("EntropyProvider")
+            .field("deterministic", &self.deterministic)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Host-pluggable service sockets (design/72-host-services.md). The default is empty: every
 /// socket falls back to the VM's built-in deterministic default (`print` no-op, the pinned
-/// epoch for `os.time`/`os.date`, the logical clock for `os.clock`).
+/// epoch for `os.time`/`os.date`, the logical clock for `os.clock`, seed zero for
+/// `math.random`).
 #[derive(Clone, Debug, Default)]
 pub struct VmServices {
     pub stdout: Option<StdoutSink>,
     pub wall_clock: Option<ClockProvider>,
     pub monotonic_clock: Option<ClockProvider>,
+    pub entropy: Option<EntropyProvider>,
 }
 
 impl VmServices {
-    /// `DeterministicSim` admits only deterministic providers; nondeterministic clocks are
+    /// `DeterministicSim` admits only deterministic providers; nondeterministic inputs are
     /// silently dropped (same rule as `loadstring_compiler`).
-    fn retain_deterministic_clocks(&mut self) {
+    fn retain_deterministic_inputs(&mut self) {
         if self
             .wall_clock
             .as_ref()
@@ -178,10 +309,21 @@ impl VmServices {
         {
             self.monotonic_clock = None;
         }
+        if self
+            .entropy
+            .as_ref()
+            .is_some_and(|entropy| !entropy.deterministic())
+        {
+            self.entropy = None;
+        }
     }
 
     fn has_clock_provider(&self) -> bool {
         self.wall_clock.is_some() || self.monotonic_clock.is_some()
+    }
+
+    fn initial_random_seed(&self) -> u64 {
+        self.entropy.as_ref().map_or(0, EntropyProvider::read)
     }
 }
 
@@ -191,12 +333,15 @@ pub struct VmSettings {
     pub recursion_limit: usize,
     pub deterministic_gc_interval: NonZeroU64,
     pub loadstring_compiler: Option<LoadStringCompiler>,
+    /// Host-controlled module resolver backing script-visible `require`.
+    pub module_resolver: Option<ModuleResolver>,
     pub enable_conformance_coverage: bool,
     pub enable_conformance_top_level_yield: bool,
     pub enable_conformance_int64_userdata: bool,
     pub enable_conformance_native_userdata: bool,
     pub enable_conformance_native_type_checks: bool,
     pub enable_conformance_pcall_helpers: bool,
+    pub enable_conformance_luau_call_limit: bool,
     /// Records exact VM-owned logical live/reserved high-water marks at every
     /// instruction boundary. Disabled by default so benchmark timings do not
     /// include telemetry scans.
@@ -219,12 +364,14 @@ impl Default for VmSettings {
             deterministic_gc_interval: NonZeroU64::new(10_000)
                 .expect("default deterministic GC interval is non-zero"),
             loadstring_compiler: None,
+            module_resolver: None,
             enable_conformance_coverage: false,
             enable_conformance_top_level_yield: false,
             enable_conformance_int64_userdata: false,
             enable_conformance_native_userdata: false,
             enable_conformance_native_type_checks: false,
             enable_conformance_pcall_helpers: false,
+            enable_conformance_luau_call_limit: false,
             enable_memory_tracking: false,
             memory_limit_bytes: None,
             guest_surface: GuestSurface::Standard,
@@ -314,6 +461,8 @@ pub struct Vm {
     host_functions: Vec<HostFunctionOp>,
     host_function_bindings: Vec<HostFunctionBinding>,
     dynamic_programs: LoadedPrograms,
+    module_cache: BTreeMap<String, Option<Value>>,
+    module_loading_stack: Vec<String>,
     call_stack: Vec<CallStackFrame>,
     coroutines: Vec<CoroutineState>,
     running_coroutines: Vec<usize>,
@@ -325,7 +474,6 @@ pub struct Vm {
     non_yieldable_depth: usize,
     initial_rng_state: u64,
     rng_state: u64,
-    gcinfo_counter: u64,
     gc_step_counter: u64,
     gc_stopped: bool,
     executed_instructions: u64,
@@ -334,8 +482,12 @@ pub struct Vm {
     decision_epoch: u64,
     external_roots: Rc<RefCell<ExternalRootRegistry>>,
     coverage_hits: BTreeMap<CoverageKey, u64>,
+    control_live_bytes: usize,
+    control_memory_dirty: bool,
     peak_live_bytes: usize,
     peak_reserved_bytes: usize,
+    #[cfg(test)]
+    full_memory_census_count: u64,
     #[cfg(test)]
     hot_ir_mode: HotIrTestMode,
     #[cfg(test)]
@@ -488,11 +640,42 @@ struct LoadedProgram {
 struct LoadedPrograms {
     slots: Vec<LoadedProgramSlot>,
     free: Vec<u32>,
+    live_bytes: usize,
 }
 
 struct LoadedProgramSlot {
     generation: u8,
     value: Option<LoadedProgram>,
+}
+
+struct LoadedProgramMut<'a> {
+    value: &'a mut LoadedProgram,
+    aggregate_live_bytes: &'a mut usize,
+    before_live_bytes: usize,
+}
+
+impl std::ops::Deref for LoadedProgramMut<'_> {
+    type Target = LoadedProgram;
+
+    fn deref(&self) -> &Self::Target {
+        self.value
+    }
+}
+
+impl std::ops::DerefMut for LoadedProgramMut<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.value
+    }
+}
+
+impl Drop for LoadedProgramMut<'_> {
+    fn drop(&mut self) {
+        let after_live_bytes = self.value.individual_live_bytes();
+        *self.aggregate_live_bytes = self
+            .aggregate_live_bytes
+            .saturating_sub(self.before_live_bytes)
+            .saturating_add(after_live_bytes);
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -527,7 +710,9 @@ impl LoadedPrograms {
             debug_assert!(slot.value.is_none());
             debug_assert!(slot.generation > 0);
             slot.value = Some(value);
-            return Some(program_handle(index, slot.generation));
+            let handle = program_handle(index, slot.generation);
+            self.refresh_live_bytes();
+            return Some(handle);
         }
 
         let index = u32::try_from(self.slots.len()).ok()?;
@@ -538,6 +723,7 @@ impl LoadedPrograms {
             generation: 0,
             value: Some(value),
         });
+        self.refresh_live_bytes();
         Some(program_handle(index, 0))
     }
 
@@ -551,12 +737,18 @@ impl LoadedPrograms {
     }
 
     #[inline]
-    fn get_mut(&mut self, handle: u32) -> Option<&mut LoadedProgram> {
+    fn get_mut(&mut self, handle: u32) -> Option<LoadedProgramMut<'_>> {
         let (index, generation) = program_handle_parts(handle);
         let slot = self.slots.get_mut(index)?;
-        (slot.generation == generation)
+        let value = (slot.generation == generation)
             .then_some(slot.value.as_mut())
-            .flatten()
+            .flatten()?;
+        let before_live_bytes = value.individual_live_bytes();
+        Some(LoadedProgramMut {
+            value,
+            aggregate_live_bytes: &mut self.live_bytes,
+            before_live_bytes,
+        })
     }
 
     fn values(&self) -> impl Iterator<Item = &LoadedProgram> {
@@ -585,6 +777,7 @@ impl LoadedPrograms {
                 self.free.push(index as u32);
             }
         }
+        self.refresh_live_bytes();
         removed
     }
 
@@ -595,6 +788,7 @@ impl LoadedPrograms {
             slot.generation = 1;
             self.free.push(index as u32);
         }
+        self.refresh_live_bytes();
     }
 
     fn release_spare_capacity(&mut self) {
@@ -619,7 +813,34 @@ impl LoadedPrograms {
         for loaded in self.values() {
             loaded.add_memory_usage(&mut usage, &mut shared_constants);
         }
+        debug_assert_eq!(
+            usage.live_bytes, self.live_bytes,
+            "incremental program memory accounting diverged from the exact census"
+        );
         usage
+    }
+
+    #[inline]
+    const fn live_bytes(&self) -> usize {
+        self.live_bytes
+    }
+
+    fn refresh_live_bytes(&mut self) {
+        let mut usage = MemoryUsage::default();
+        usage.add(
+            self.slots
+                .iter()
+                .filter(|slot| slot.value.is_some())
+                .count()
+                .saturating_mul(size_of::<LoadedProgramSlot>()),
+            0,
+        );
+        usage.add(self.free.len().saturating_mul(size_of::<u32>()), 0);
+        let mut shared_constants = std::collections::BTreeSet::new();
+        for loaded in self.values() {
+            loaded.add_memory_usage(&mut usage, &mut shared_constants);
+        }
+        self.live_bytes = usage.live_bytes;
     }
 
     #[cfg(test)]
@@ -851,6 +1072,13 @@ impl LoadedProgram {
         for caches in &self.function_inline_caches {
             caches.add_memory_usage(usage);
         }
+    }
+
+    fn individual_live_bytes(&self) -> usize {
+        let mut usage = MemoryUsage::default();
+        let mut constants = std::collections::BTreeSet::new();
+        self.add_memory_usage(&mut usage, &mut constants);
+        usage.live_bytes
     }
 }
 
@@ -1541,6 +1769,7 @@ struct StandardGlobalHandles {
 
 #[derive(Clone)]
 struct CallStackFrame {
+    program: Option<u32>,
     function: Option<Value>,
     debug_name: Option<String>,
     environment: u32,
@@ -1802,6 +2031,12 @@ enum BytecodeContinuation {
         table: u32,
         start_index: usize,
     },
+    IteratorStep {
+        window: CallIteratorRegisters,
+        jump_target: usize,
+        jump_if_advanced: bool,
+        error_pc: usize,
+    },
 }
 
 impl Vm {
@@ -1825,7 +2060,14 @@ impl Vm {
             ..settings
         };
         if profile.is_deterministic_sim() {
-            settings.services.retain_deterministic_clocks();
+            settings.services.retain_deterministic_inputs();
+            if settings
+                .module_resolver
+                .as_ref()
+                .is_some_and(|resolver| !resolver.deterministic())
+            {
+                settings.module_resolver = None;
+            }
         }
         if settings.guest_surface.is_hardened_leaf() {
             if hardened_configuration_error.is_some() {
@@ -1835,6 +2077,7 @@ impl Vm {
                 settings.memory_limit_bytes = Some(0);
             }
             settings.loadstring_compiler = None;
+            settings.module_resolver = None;
             settings.enable_conformance_coverage = false;
             settings.enable_conformance_top_level_yield = false;
             settings.enable_conformance_int64_userdata = false;
@@ -1843,10 +2086,15 @@ impl Vm {
             settings.enable_conformance_pcall_helpers = false;
             settings.services = VmServices::default();
         }
-        let mut heap = VmCell::new();
+        let mut heap = VmCell::with_table_layout(if profile.is_puc51_compat() {
+            TableLayout::Puc51
+        } else {
+            TableLayout::Log
+        });
         let globals = heap.alloc_array_table(&[]);
         let enable_loadstring =
             settings.loadstring_compiler.is_some() && !profile.is_deterministic_sim();
+        let enable_require = settings.module_resolver.is_some();
         let register_os = !profile.is_deterministic_sim() || settings.services.has_clock_provider();
         let standard_globals = initialize_standard_globals(
             &mut heap,
@@ -1854,6 +2102,7 @@ impl Vm {
             profile,
             settings.guest_surface,
             enable_loadstring,
+            enable_require,
             register_os,
             settings.enable_conformance_coverage,
             settings.enable_conformance_int64_userdata,
@@ -1861,7 +2110,7 @@ impl Vm {
             settings.enable_conformance_native_type_checks,
             settings.enable_conformance_pcall_helpers,
         );
-        let initial_rng_state = pcg32_seed(0);
+        let initial_rng_state = pcg32_seed(settings.services.initial_random_seed());
         let rng_state = initial_rng_state;
         let next_weak_collection_instruction = settings.deterministic_gc_interval.get();
         let mut vm = Self {
@@ -1881,6 +2130,8 @@ impl Vm {
             host_functions: Vec::new(),
             host_function_bindings: Vec::new(),
             dynamic_programs: LoadedPrograms::default(),
+            module_cache: BTreeMap::new(),
+            module_loading_stack: Vec::new(),
             call_stack: Vec::new(),
             coroutines: Vec::new(),
             running_coroutines: Vec::new(),
@@ -1892,7 +2143,6 @@ impl Vm {
             non_yieldable_depth: 0,
             initial_rng_state,
             rng_state,
-            gcinfo_counter: 0,
             gc_step_counter: 0,
             gc_stopped: false,
             executed_instructions: 0,
@@ -1905,13 +2155,18 @@ impl Vm {
                 values: BTreeMap::new(),
             })),
             coverage_hits: BTreeMap::new(),
+            control_live_bytes: 0,
+            control_memory_dirty: true,
             peak_live_bytes: 0,
             peak_reserved_bytes: 0,
+            #[cfg(test)]
+            full_memory_census_count: 0,
             #[cfg(test)]
             hot_ir_mode: HotIrTestMode::Auto,
             #[cfg(test)]
             closure_call_mode: ClosureCallTestMode::Auto,
         };
+        vm.sync_control_memory();
         vm.record_memory_peak();
         vm
     }
@@ -2036,6 +2291,8 @@ impl Vm {
         }
 
         self.coroutines.clear();
+        self.module_cache.clear();
+        self.module_loading_stack.clear();
         self.last_error_traceback = None;
         self.protected_error_traceback = None;
         self.dynamic_programs.reset_epoch();
@@ -2045,6 +2302,7 @@ impl Vm {
             next_id: 0,
             values: BTreeMap::new(),
         }));
+        self.mark_control_memory_dirty();
 
         if hardened_leaf {
             let checkpoint = self.hardened_heap_checkpoint.ok_or_else(|| {
@@ -2065,6 +2323,7 @@ impl Vm {
             let globals = self.heap.alloc_array_table(&[]);
             let enable_loadstring =
                 self.settings.loadstring_compiler.is_some() && !self.profile.is_deterministic_sim();
+            let enable_require = self.settings.module_resolver.is_some();
             let register_os =
                 !self.profile.is_deterministic_sim() || self.settings.services.has_clock_provider();
             let standard_globals = initialize_standard_globals(
@@ -2073,6 +2332,7 @@ impl Vm {
                 self.profile,
                 self.settings.guest_surface,
                 enable_loadstring,
+                enable_require,
                 register_os,
                 self.settings.enable_conformance_coverage,
                 self.settings.enable_conformance_int64_userdata,
@@ -2090,7 +2350,6 @@ impl Vm {
         }
 
         self.rng_state = self.initial_rng_state;
-        self.gcinfo_counter = 0;
         self.gc_step_counter = 0;
         self.gc_stopped = false;
         self.executed_instructions = 0;
@@ -2098,6 +2357,7 @@ impl Vm {
         self.deterministic_collection_count = 0;
         self.decision_epoch = next_epoch;
         self.poisoned = false;
+        self.sync_control_memory();
         self.record_memory_peak();
         Ok(())
     }
@@ -2247,6 +2507,11 @@ impl Vm {
     }
 
     fn current_memory_usage(&mut self) -> MemoryUsage {
+        #[cfg(test)]
+        {
+            self.full_memory_census_count = self.full_memory_census_count.saturating_add(1);
+        }
+        self.sync_control_memory();
         let heap = self.heap.memory_usage();
         let mut usage = MemoryUsage {
             live_bytes: heap.live_bytes,
@@ -2255,26 +2520,91 @@ impl Vm {
         let programs = self.dynamic_programs.memory_usage();
         usage.add(programs.live_bytes, programs.reserved_bytes);
         add_vm_control_memory(self, &mut usage);
+        #[cfg(test)]
+        {
+            let mut cached_control = MemoryUsage::default();
+            add_vm_cached_control_memory(self, &mut cached_control);
+            assert_eq!(
+                cached_control.live_bytes, self.control_live_bytes,
+                "incremental VM control accounting diverged from the exact census"
+            );
+        }
         usage
     }
 
+    fn current_live_bytes(&mut self) -> usize {
+        self.sync_control_memory();
+        let heap_live = self.heap.memory_usage().live_bytes;
+        let mut dynamic = MemoryUsage::default();
+        add_vm_dynamic_map_memory(self, &mut dynamic);
+        heap_live
+            .saturating_add(self.dynamic_programs.live_bytes())
+            .saturating_add(self.control_live_bytes)
+            .saturating_add(dynamic.live_bytes)
+    }
+
+    fn sync_control_memory(&mut self) {
+        if !self.control_memory_dirty {
+            return;
+        }
+        let mut usage = MemoryUsage::default();
+        add_vm_cached_control_memory(self, &mut usage);
+        self.control_live_bytes = usage.live_bytes;
+        self.control_memory_dirty = false;
+    }
+
+    #[inline]
+    fn mark_control_memory_dirty(&mut self) {
+        self.control_memory_dirty = true;
+    }
+
+    fn mutate_last_call_stack_frame<R>(
+        &mut self,
+        mutate: impl FnOnce(&mut CallStackFrame) -> R,
+    ) -> Option<R> {
+        let frame = self.call_stack.last_mut()?;
+        if self.control_memory_dirty {
+            return Some(mutate(frame));
+        }
+        let before = call_stack_frame_live_bytes(frame);
+        let result = mutate(frame);
+        let after = call_stack_frame_live_bytes(frame);
+        self.control_live_bytes = self
+            .control_live_bytes
+            .saturating_sub(before)
+            .saturating_add(after);
+        Some(result)
+    }
+
     fn collect_for_memory_limit(&mut self, transient_roots: &[Value]) {
+        self.collect_heap_and_programs(transient_roots, true);
+    }
+
+    fn collect_heap_and_programs(&mut self, transient_roots: &[Value], finish_cycle: bool) {
         let roots = self.collectgarbage_roots(transient_roots);
-        self.heap.finish_collection_cycle();
+        if finish_cycle {
+            self.heap.finish_collection_cycle();
+        }
         self.heap.collect_weak_tables_with_roots(&roots);
+        self.prune_unreachable_coroutines_if_idle();
+        // Runtime-compiled programs are owned outside the traced heap, but
+        // their functions carry program handles. Reclaim the backing program
+        // immediately after the heap has discarded unreachable functions so
+        // automatic/script collection and logical-live counters agree.
+        self.reclaim_unreferenced_programs();
     }
 
     fn enforce_memory_limit(&mut self, transient_roots: &[Value]) -> Result<()> {
         let Some(limit) = self.settings.memory_limit_bytes else {
             return Ok(());
         };
-        if self.current_memory_usage().live_bytes <= limit {
+        if self.current_live_bytes() <= limit {
             return Ok(());
         }
         // The quota collector is allowed to run even while script collection
         // is stopped: a host safety boundary cannot be disabled by guest code.
         self.collect_for_memory_limit(transient_roots);
-        if self.current_memory_usage().live_bytes <= limit {
+        if self.current_live_bytes() <= limit {
             return Ok(());
         }
         Err(Error::new(ErrorKind::OutOfMemory).without_source_location())
@@ -2289,8 +2619,7 @@ impl Vm {
             return Ok(());
         };
         if self
-            .current_memory_usage()
-            .live_bytes
+            .current_live_bytes()
             .saturating_add(additional_live_bytes)
             <= limit
         {
@@ -2298,8 +2627,7 @@ impl Vm {
         }
         self.collect_for_memory_limit(transient_roots);
         if self
-            .current_memory_usage()
-            .live_bytes
+            .current_live_bytes()
             .saturating_add(additional_live_bytes)
             <= limit
         {
@@ -2315,7 +2643,9 @@ impl Vm {
             })
             .without_source_location());
         }
-        self.extensions.register(self.profile, op)
+        let id = self.extensions.register(self.profile, op)?;
+        self.mark_control_memory_dirty();
+        Ok(id)
     }
 
     pub fn register_host_function(&mut self, op: HostFunctionOp) -> Result<Value> {
@@ -2335,6 +2665,7 @@ impl Vm {
                 })
             })?;
         self.host_functions.push(op);
+        self.mark_control_memory_dirty();
         Ok(Value::function(handle))
     }
 
@@ -2359,10 +2690,12 @@ impl Vm {
         let value = self.register_host_function(op)?;
         if let Err(error) = self.set_host_configuration_global(&name, value) {
             self.host_functions.truncate(host_functions_checkpoint);
+            self.mark_control_memory_dirty();
             return Err(error);
         }
         self.host_function_bindings
             .push(HostFunctionBinding::Global { name, host });
+        self.mark_control_memory_dirty();
         Ok(())
     }
 
@@ -2426,6 +2759,7 @@ impl Vm {
         })();
         if let Err(error) = install {
             self.host_functions.truncate(host_functions_checkpoint);
+            self.mark_control_memory_dirty();
             return Err(error);
         }
         self.host_function_bindings
@@ -2433,6 +2767,7 @@ impl Vm {
                 namespace,
                 functions: bindings,
             });
+        self.mark_control_memory_dirty();
         Ok(())
     }
 
@@ -2640,22 +2975,38 @@ impl Vm {
     /// Hardened-leaf roots are decision-local. Retaining a value before the
     /// first hardened environment seal causes that seal to fail; the host must
     /// drop the handle and retry after making the heap append-only.
-    pub fn retain_value(&mut self, value: Value) -> RetainedValue {
-        let (id, decision_epoch) = {
-            let mut roots = self.external_roots.borrow_mut();
+    ///
+    /// Root-registry admission participates in the VM logical-live quota and
+    /// returns [`ErrorKind::OutOfMemory`] without installing a partial root.
+    pub fn retain_value(&mut self, value: Value) -> Result<RetainedValue> {
+        self.retain_values(std::slice::from_ref(&value))
+            .map(|mut values| values.pop().expect("one retained input"))
+    }
+
+    /// Retains several values as one quota-checked admission.
+    ///
+    /// Every input remains a transient collector root if quota pressure forces
+    /// collection. Either all registry nodes are installed or none are.
+    pub fn retain_values(&mut self, values: &[Value]) -> Result<Vec<RetainedValue>> {
+        let additional_live_bytes = external_root_node_live_bytes().saturating_mul(values.len());
+        self.ensure_memory_growth(additional_live_bytes, values)?;
+        let mut retained = Vec::with_capacity(values.len());
+        let mut roots = self.external_roots.borrow_mut();
+        let decision_epoch = roots.decision_epoch;
+        for &value in values {
             let id = roots.next_id;
             roots.next_id = roots.next_id.wrapping_add(1);
             roots.values.insert(id, value);
-            (id, roots.decision_epoch)
-        };
-        RetainedValue {
-            value,
-            lease: Rc::new(ExternalRootLease {
-                id,
-                decision_epoch,
-                registry: Rc::downgrade(&self.external_roots),
-            }),
+            retained.push(RetainedValue {
+                value,
+                lease: Rc::new(ExternalRootLease {
+                    id,
+                    decision_epoch,
+                    registry: Rc::downgrade(&self.external_roots),
+                }),
+            });
         }
+        Ok(retained)
     }
 
     #[inline]
@@ -2875,14 +3226,22 @@ impl Vm {
         self.release_stack_capacity();
         self.gc_step_counter = 0;
         self.gc_stopped = false;
+        self.mark_control_memory_dirty();
     }
 
     fn reclaim_unreferenced_programs(&mut self) {
-        let referenced = self
+        let mut referenced = self
             .heap
             .referenced_programs()
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>();
+        referenced.extend(self.call_stack.iter().filter_map(|frame| frame.program));
+        for coroutine in &self.coroutines {
+            extend_coroutine_program_roots(&mut referenced, &coroutine.frames);
+        }
+        for frames in &self.active_coroutine_frames {
+            extend_coroutine_program_roots(&mut referenced, frames);
+        }
         let removed = self
             .dynamic_programs
             .retain_handles(|handle| referenced.contains(&handle));
@@ -2909,6 +3268,7 @@ impl Vm {
         fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
         self.call_stack.push(CallStackFrame {
+            program: program_id,
             function: context.current_function,
             debug_name: function.debug_name.clone(),
             environment: context.environment,
@@ -2917,6 +3277,7 @@ impl Vm {
             stackless_roots: Vec::new(),
             stackless_debug_frames: Vec::new(),
         });
+        self.mark_control_memory_dirty();
         let result = (|| -> VmFlowResult<ReturnValues> {
             self.check_recursion_depth(context.depth)?;
             if function.max_registers == 0 {
@@ -2933,6 +3294,7 @@ impl Vm {
             }
 
             let allow_stackless_self_calls = resumed.is_none();
+            let stackless_recursion_limit = self.stackless_recursion_limit();
             let mut stackless_self_calls;
             let mut tail_call_count;
             let (
@@ -3017,7 +3379,9 @@ impl Vm {
                         );
                         let continuation_result = self.apply_bytecode_continuation(
                             program,
+                            &mut pc,
                             &mut registers,
+                            &mut register_cells,
                             &mut pending_return_prefixes,
                             continuation,
                             returned.into_vec(),
@@ -3070,6 +3434,7 @@ impl Vm {
                                     &pending_return_prefixes,
                                 );
                                 self.last_error_traceback = None;
+                                self.mark_control_memory_dirty();
                                 let error_value =
                                     self.error_object(error.take().ok_or_else(|| {
                                         Error::new(ErrorKind::InvalidProgram {
@@ -3114,7 +3479,9 @@ impl Vm {
                         self.push_bytecode_continuation_roots(&continuation);
                     let continuation_result = self.apply_bytecode_continuation(
                         program,
+                        &mut pc,
                         &mut registers,
+                        &mut register_cells,
                         &mut pending_return_prefixes,
                         continuation,
                         resume_results,
@@ -3652,9 +4019,10 @@ impl Vm {
                                     .as_function()
                                         == current_function
                                 {
-                                    let result_count =
-                                        (LUAU_TAIL_CALL_LIMIT.saturating_sub(context.depth) / 2)
-                                            .max(2);
+                                    let result_count = (stackless_recursion_limit
+                                        .saturating_sub(context.depth)
+                                        / 2)
+                                    .max(2);
                                     let mut results = Vec::with_capacity(result_count);
                                     results.resize(result_count - 2, Value::boolean(true));
                                     results.push(Value::boolean(false));
@@ -3663,7 +4031,7 @@ impl Vm {
                                         function,
                                         pc - 1,
                                         Error::new(ErrorKind::RecursionLimit {
-                                            limit: LUAU_TAIL_CALL_LIMIT,
+                                            limit: stackless_recursion_limit,
                                         }),
                                     );
                                     let error = self.error_object(error);
@@ -3677,15 +4045,15 @@ impl Vm {
                                     && current_function == callee.as_function()
                                 {
                                     tail_call_count = tail_call_count.saturating_add(1);
-                                    if context.depth.saturating_add(tail_call_count)
-                                        > LUAU_TAIL_CALL_LIMIT
-                                    {
+                                    if self.recursion_depth_exceeded(
+                                        context.depth.saturating_add(tail_call_count),
+                                    ) {
                                         return Err(attach_instruction_source(
                                             program,
                                             function,
                                             pc - 1,
                                             Error::new(ErrorKind::RecursionLimit {
-                                                limit: LUAU_TAIL_CALL_LIMIT,
+                                                limit: stackless_recursion_limit,
                                             }),
                                         ));
                                     }
@@ -3939,7 +4307,31 @@ impl Vm {
                                     })
                                     .at_pc(pc - 1));
                                 }
-                                let table = self.heap.alloc_array_table(&registers[first..end]);
+                                // `compile_table_to` carries the constructor's
+                                // hash-field count in aux; only the PUC layout
+                                // consumes the pre-sizing hint.
+                                let table = if self.profile.is_puc51_compat() {
+                                    let hash_size =
+                                        usize::try_from(instruction.aux).map_err(|_| {
+                                            Error::new(ErrorKind::InvalidProgram {
+                                                reason: "negative table constructor hash hint",
+                                            })
+                                            .at_pc(pc - 1)
+                                        })?;
+                                    let values = &registers[first..end];
+                                    self.ensure_memory_growth(
+                                        VmCell::puc_table_live_bytes(values.len(), hash_size),
+                                        values,
+                                    )
+                                    .map_err(|error| error.at_pc(pc - 1))?;
+                                    self.heap
+                                        .try_alloc_puc_table_from_parts(values.to_vec(), hash_size)
+                                        .ok_or_else(|| {
+                                            Error::new(ErrorKind::OutOfMemory).at_pc(pc - 1)
+                                        })?
+                                } else {
+                                    self.heap.alloc_array_table(&registers[first..end])
+                                };
                                 set_register(&mut registers, instruction.a, Value::table(table))
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -3988,7 +4380,7 @@ impl Vm {
                                 }
                             }
                             Opcode::GenericCallPrep => {
-                                if !self
+                                let step = self
                                     .generic_call_iterator_step(
                                         program,
                                         &mut registers,
@@ -3997,14 +4389,43 @@ impl Vm {
                                         context.depth,
                                         fuel,
                                     )
-                                    .map_err(|e| e.at_pc(pc - 1))?
-                                {
-                                    pc = checked_jump(instruction.aux)
-                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                match step {
+                                    CallIteratorStep::Complete(false) => {
+                                        pc = checked_jump(instruction.aux)
+                                            .map_err(|e| e.at_pc(pc - 1))?;
+                                    }
+                                    CallIteratorStep::Complete(true) => {}
+                                    CallIteratorStep::Yield(suspension) => {
+                                        let continuation = BytecodeContinuation::IteratorStep {
+                                            window: CallIteratorRegisters::generic(
+                                                instruction.a,
+                                                instruction.c,
+                                            )
+                                            .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_target: checked_jump(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_if_advanced: false,
+                                            error_pc: pc - 1,
+                                        };
+                                        return self.suspend_bytecode_frame(
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            continuation,
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            suspension,
+                                        );
+                                    }
                                 }
                             }
                             Opcode::GenericCallLoop => {
-                                if self
+                                let step = self
                                     .generic_call_iterator_step(
                                         program,
                                         &mut registers,
@@ -4013,14 +4434,43 @@ impl Vm {
                                         context.depth,
                                         fuel,
                                     )
-                                    .map_err(|e| e.at_pc(pc - 1))?
-                                {
-                                    pc = checked_jump(instruction.aux)
-                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                match step {
+                                    CallIteratorStep::Complete(true) => {
+                                        pc = checked_jump(instruction.aux)
+                                            .map_err(|e| e.at_pc(pc - 1))?;
+                                    }
+                                    CallIteratorStep::Complete(false) => {}
+                                    CallIteratorStep::Yield(suspension) => {
+                                        let continuation = BytecodeContinuation::IteratorStep {
+                                            window: CallIteratorRegisters::generic(
+                                                instruction.a,
+                                                instruction.c,
+                                            )
+                                            .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_target: checked_jump(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_if_advanced: true,
+                                            error_pc: pc - 1,
+                                        };
+                                        return self.suspend_bytecode_frame(
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            continuation,
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            suspension,
+                                        );
+                                    }
                                 }
                             }
                             Opcode::GeneralizedIterPrep => {
-                                if !self
+                                let step = self
                                     .generalized_iterator_prepare(
                                         program,
                                         &mut registers,
@@ -4029,14 +4479,44 @@ impl Vm {
                                         context.depth,
                                         fuel,
                                     )
-                                    .map_err(|e| e.at_pc(pc - 1))?
-                                {
-                                    pc = checked_jump(instruction.aux)
-                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                match step {
+                                    CallIteratorStep::Complete(false) => {
+                                        pc = checked_jump(instruction.aux)
+                                            .map_err(|e| e.at_pc(pc - 1))?;
+                                    }
+                                    CallIteratorStep::Complete(true) => {}
+                                    CallIteratorStep::Yield(suspension) => {
+                                        let continuation = BytecodeContinuation::IteratorStep {
+                                            window: GeneralizedIteratorRegisters::new(
+                                                instruction.a,
+                                                instruction.c,
+                                            )
+                                            .map_err(|e| e.at_pc(pc - 1))?
+                                            .call,
+                                            jump_target: checked_jump(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_if_advanced: false,
+                                            error_pc: pc - 1,
+                                        };
+                                        return self.suspend_bytecode_frame(
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            continuation,
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            suspension,
+                                        );
+                                    }
                                 }
                             }
                             Opcode::GeneralizedIterLoop => {
-                                if self
+                                let step = self
                                     .generalized_iterator_loop(
                                         program,
                                         &mut registers,
@@ -4045,10 +4525,40 @@ impl Vm {
                                         context.depth,
                                         fuel,
                                     )
-                                    .map_err(|e| e.at_pc(pc - 1))?
-                                {
-                                    pc = checked_jump(instruction.aux)
-                                        .map_err(|e| e.at_pc(pc - 1))?;
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                match step {
+                                    CallIteratorStep::Complete(true) => {
+                                        pc = checked_jump(instruction.aux)
+                                            .map_err(|e| e.at_pc(pc - 1))?;
+                                    }
+                                    CallIteratorStep::Complete(false) => {}
+                                    CallIteratorStep::Yield(suspension) => {
+                                        let continuation = BytecodeContinuation::IteratorStep {
+                                            window: GeneralizedIteratorRegisters::new(
+                                                instruction.a,
+                                                instruction.c,
+                                            )
+                                            .map_err(|e| e.at_pc(pc - 1))?
+                                            .call,
+                                            jump_target: checked_jump(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_if_advanced: true,
+                                            error_pc: pc - 1,
+                                        };
+                                        return self.suspend_bytecode_frame(
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            continuation,
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            suspension,
+                                        );
+                                    }
                                 }
                             }
                             Opcode::Len => {
@@ -4578,6 +5088,19 @@ impl Vm {
                                         && current_function.is_some()
                                         && current_function == callee.as_function()
                                     {
+                                        tail_call_count = tail_call_count.saturating_add(1);
+                                        if self.recursion_depth_exceeded(
+                                            context.depth.saturating_add(tail_call_count),
+                                        ) {
+                                            return Err(attach_instruction_source(
+                                                program,
+                                                function,
+                                                pc - 1,
+                                                Error::new(ErrorKind::RecursionLimit {
+                                                    limit: stackless_recursion_limit,
+                                                }),
+                                            ));
+                                        }
                                         if instruction.aux < 0
                                             || instruction.aux > i32::from(u8::MAX)
                                         {
@@ -4655,13 +5178,13 @@ impl Vm {
                                         .depth
                                         .saturating_add(stackless_self_calls.len())
                                         .saturating_add(1);
-                                    if next_depth >= LUAU_TAIL_CALL_LIMIT.saturating_sub(1) {
+                                    if self.recursion_depth_exceeded(next_depth) {
                                         return Err(attach_instruction_source(
                                             program,
                                             function,
                                             pc - 1,
                                             Error::new(ErrorKind::RecursionLimit {
-                                                limit: LUAU_TAIL_CALL_LIMIT,
+                                                limit: stackless_recursion_limit,
                                             }),
                                         ));
                                     }
@@ -4886,13 +5409,13 @@ impl Vm {
                                         .depth
                                         .saturating_add(stackless_self_calls.len())
                                         .saturating_add(2);
-                                    if next_depth >= LUAU_TAIL_CALL_LIMIT.saturating_sub(1) {
+                                    if self.recursion_depth_exceeded(next_depth) {
                                         let error = attach_instruction_source(
                                             program,
                                             function,
                                             pc - 1,
                                             Error::new(ErrorKind::RecursionLimit {
-                                                limit: LUAU_TAIL_CALL_LIMIT,
+                                                limit: stackless_recursion_limit,
                                             }),
                                         );
                                         let error = self.error_object(error);
@@ -5654,6 +6177,17 @@ impl Vm {
                                     Error::new(ErrorKind::TypeError { expected: "table" })
                                         .at_pc(pc - 1)
                                 })?;
+                                self.ensure_puc_table_append_presized(
+                                    table,
+                                    usize::try_from(instruction.aux).map_err(|_| {
+                                        Error::new(ErrorKind::InvalidProgram {
+                                            reason: "table vararg index overflow",
+                                        })
+                                        .at_pc(pc - 1)
+                                    })?,
+                                    varargs.len(),
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
                                 for (offset, value) in varargs.iter().copied().enumerate() {
                                     let offset = u32::try_from(offset).map_err(|_| {
                                         Error::new(ErrorKind::InvalidProgram {
@@ -5751,6 +6285,17 @@ impl Vm {
                                         );
                                     }
                                 };
+                                self.ensure_puc_table_append_presized(
+                                    table,
+                                    usize::try_from(instruction.aux).map_err(|_| {
+                                        Error::new(ErrorKind::InvalidProgram {
+                                            reason: "table call append index overflow",
+                                        })
+                                        .at_pc(pc - 1)
+                                    })?,
+                                    results.len(),
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
                                 for (offset, value) in results.iter().copied().enumerate() {
                                     let offset = u32::try_from(offset).map_err(|_| {
                                         Error::new(ErrorKind::InvalidProgram {
@@ -5850,6 +6395,17 @@ impl Vm {
                                         );
                                     }
                                 };
+                                self.ensure_puc_table_append_presized(
+                                    table,
+                                    usize::try_from(instruction.aux).map_err(|_| {
+                                        Error::new(ErrorKind::InvalidProgram {
+                                            reason: "table vararg call append index overflow",
+                                        })
+                                        .at_pc(pc - 1)
+                                    })?,
+                                    results.len(),
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
                                 for (offset, value) in results.iter().copied().enumerate() {
                                     let offset = u32::try_from(offset).map_err(|_| {
                                         Error::new(ErrorKind::InvalidProgram {
@@ -5988,6 +6544,17 @@ impl Vm {
                                         );
                                     }
                                 };
+                                self.ensure_puc_table_append_presized(
+                                    table,
+                                    usize::try_from(start_index).map_err(|_| {
+                                        Error::new(ErrorKind::InvalidProgram {
+                                            reason: "table expanded call append index overflow",
+                                        })
+                                        .at_pc(pc - 1)
+                                    })?,
+                                    results.len(),
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
                                 for (offset, value) in results.iter().copied().enumerate() {
                                     let offset = u32::try_from(offset).map_err(|_| {
                                         Error::new(ErrorKind::InvalidProgram {
@@ -6256,9 +6823,11 @@ impl Vm {
             result.map_err(|error| attach_existing_instruction_source(program, function, error));
         if let Err(error) = &result {
             self.last_error_traceback = Some(self.traceback_snapshot(error.location.clone()));
+            self.mark_control_memory_dirty();
             self.record_running_coroutine_error_snapshot(error.location.clone());
         }
         self.call_stack.pop();
+        self.mark_control_memory_dirty();
         result
     }
 
@@ -6308,7 +6877,9 @@ impl Vm {
     fn apply_bytecode_continuation(
         &mut self,
         program: &Program,
+        pc: &mut usize,
         registers: &mut [Value],
+        register_cells: &mut [Option<u32>],
         pending_return_prefixes: &mut Vec<Value>,
         continuation: BytecodeContinuation,
         mut results: Vec<Value>,
@@ -6361,7 +6932,88 @@ impl Vm {
                 self.append_call_results_to_table(table, start_index, &results)?;
                 Ok(None)
             }
+            BytecodeContinuation::IteratorStep {
+                window,
+                jump_target,
+                jump_if_advanced,
+                error_pc,
+            } => {
+                let advanced =
+                    apply_call_iterator_results(registers, register_cells, window, &results)
+                        .map_err(|error| error.at_pc(error_pc))?;
+                if advanced == jump_if_advanced {
+                    *pc = jump_target;
+                }
+                Ok(None)
+            }
         }
+    }
+
+    /// `luaH_resizearray` on the OP_SETLIST path (lvm.c): a multi-value
+    /// constructor tail pre-sizes the array part to the last written index
+    /// exactly. No-op outside the PUC profile or when the array part already
+    /// reaches `last`.
+    fn ensure_puc_table_append_presized(
+        &mut self,
+        table: u32,
+        start_index: usize,
+        count: usize,
+    ) -> Result<()> {
+        if !self.profile.is_puc51_compat() || count == 0 {
+            return Ok(());
+        }
+        let last = start_index.checked_add(count - 1).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table append index overflow",
+            })
+            .without_source_location()
+        })?;
+        if self.heap.table_is_readonly(table) == Some(true) {
+            // Leave the readonly error to the element write below.
+            return Ok(());
+        }
+        let Some(array_len) = self.heap.table_array_part_len(table) else {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+            .without_source_location());
+        };
+        if last <= array_len {
+            return Ok(());
+        }
+        let Some(limit) = self.settings.memory_limit_bytes else {
+            return self
+                .heap
+                .puc_resize_array_table(table, last)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "table array resize failed after validation",
+                    })
+                    .without_source_location()
+                });
+        };
+        for attempt in 0..2 {
+            let allowed_growth = limit.saturating_sub(self.current_live_bytes());
+            match self
+                .heap
+                .puc_resize_array_with_live_growth_limit(table, last, allowed_growth)
+            {
+                QuotaTableWrite::Stored => return Ok(()),
+                QuotaTableWrite::Invalid => {
+                    return Err(Error::new(ErrorKind::InvalidProgram {
+                        reason: "table array resize failed after validation",
+                    })
+                    .without_source_location());
+                }
+                QuotaTableWrite::WouldExceed if attempt == 0 => {
+                    self.collect_for_memory_limit(&[Value::table(table)]);
+                }
+                QuotaTableWrite::WouldExceed => {
+                    return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+                }
+            }
+        }
+        Ok(())
     }
 
     fn append_call_results_to_table(
@@ -6370,6 +7022,7 @@ impl Vm {
         start_index: usize,
         results: &[Value],
     ) -> Result<()> {
+        self.ensure_puc_table_append_presized(table, start_index, results.len())?;
         for (offset, value) in results.iter().copied().enumerate() {
             let index = start_index.checked_add(offset).ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
@@ -6542,7 +7195,7 @@ impl Vm {
         })?;
         let atom = self.heap.intern_shared_string(shared);
         if let Some(program_id) = program_id {
-            if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+            if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
                 program.set_constant_atom(index, atom);
             }
         }
@@ -6630,7 +7283,7 @@ impl Vm {
             return key;
         };
         if let (Some(program_id), Ok(index)) = (program_id, usize::try_from(constant_index)) {
-            if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+            if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
                 program.set_constant_atom(index, atom);
             }
         }
@@ -6713,9 +7366,49 @@ impl Vm {
         })
     }
 
+    /// Returns a copy of a buffer value's bytes, or `None` for another value kind.
+    #[doc(hidden)]
+    pub fn buffer_value_bytes(&mut self, value: Value) -> Result<Option<Vec<u8>>> {
+        let Some(buffer) = value.as_buffer() else {
+            return Ok(None);
+        };
+        let len = self.heap.buffer_len(buffer).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "buffer handle is missing",
+            })
+        })?;
+        self.heap
+            .buffer_read(buffer, 0, len)
+            .map(Some)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "buffer handle is missing",
+                })
+            })
+    }
+
+    /// Returns the canonical three-component vector payload, or `None` for
+    /// another value kind.
+    #[doc(hidden)]
+    pub fn vector_value_components(&mut self, value: Value) -> Result<Option<[f32; 3]>> {
+        if value.kind() != ValueKind::Vector {
+            return Ok(None);
+        }
+        let vector = self.vector_data(value)?;
+        Ok(Some([vector.x(), vector.y(), vector.z()]))
+    }
+
     fn coerce_to_string(&mut self, registers: &[Value], register: u8) -> Result<Vec<u8>> {
         let value = get_register(registers, register)?;
         self.value_to_string(value)
+    }
+
+    fn number_to_string(&self, value: f64) -> String {
+        if self.profile.is_puc51_compat() {
+            puc51_number_to_string(value)
+        } else {
+            luau_number_to_string(value)
+        }
     }
 
     fn value_to_string(&mut self, value: Value) -> Result<Vec<u8>> {
@@ -6723,7 +7416,7 @@ impl Vm {
             return Ok(text);
         }
         if let Some(number) = value.as_number() {
-            return Ok(luau_number_to_string(number).into_bytes());
+            return Ok(self.number_to_string(number).into_bytes());
         }
         Err(Error::new(ErrorKind::TypeError {
             expected: "string or number",
@@ -6738,9 +7431,9 @@ impl Vm {
             } else {
                 b"false".to_vec()
             }),
-            ValueKind::Number => {
-                Ok(luau_number_to_string(value.as_number().unwrap_or(f64::NAN)).into_bytes())
-            }
+            ValueKind::Number => Ok(self
+                .number_to_string(value.as_number().unwrap_or(f64::NAN))
+                .into_bytes()),
             ValueKind::String => self.string_value_bytes(value)?.ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "string atom is missing",
@@ -7095,7 +7788,8 @@ impl Vm {
         self.raw_equal_values(lhs, rhs)
     }
 
-    fn raw_equal_values(&mut self, lhs: Value, rhs: Value) -> Result<bool> {
+    #[doc(hidden)]
+    pub fn raw_equal_values(&mut self, lhs: Value, rhs: Value) -> Result<bool> {
         if lhs.kind() == ValueKind::String || rhs.kind() == ValueKind::String {
             if lhs.kind() != ValueKind::String || rhs.kind() != ValueKind::String {
                 return Ok(false);
@@ -8217,7 +8911,7 @@ impl Vm {
             });
         };
         for attempt in 0..2 {
-            let allowed_growth = limit.saturating_sub(self.current_memory_usage().live_bytes);
+            let allowed_growth = limit.saturating_sub(self.current_live_bytes());
             match self
                 .heap
                 .table_set_with_live_growth_limit(table, key, value, allowed_growth)
@@ -8273,7 +8967,7 @@ impl Vm {
                 });
         };
         for attempt in 0..2 {
-            let allowed_growth = limit.saturating_sub(self.current_memory_usage().live_bytes);
+            let allowed_growth = limit.saturating_sub(self.current_live_bytes());
             match self.heap.table_set_array_slot_with_live_growth_limit(
                 table,
                 index,
@@ -8398,17 +9092,53 @@ impl Vm {
     }
 
     fn table_create(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
-        if !(1..=2).contains(&instruction.aux) {
+        if !(0..=2).contains(&instruction.aux) {
             return Err(Error::new(ErrorKind::InvalidProgram {
                 reason: "invalid table.create arity",
             }));
         }
-        let size = table_create_size(self.coerce_register_to_number(registers, instruction.b)?)?;
+        // Compiler-emitted constructors (Opcode::TableCreate from
+        // `compile_table_to`) carry PUC pre-sizing hints at aux == 0: b is the
+        // array-field count and c the hash-field count. The `table.create`
+        // builtin only ever carries its argument count in aux (1..=2 — a
+        // zero-argument call is a compile error), so aux == 0 cannot collide
+        // with it. The 100k builtin cap does not apply to constructor hints.
+        let puc_constructor = self.profile.is_puc51_compat()
+            && instruction.op == Opcode::TableCreate
+            && instruction.aux == 0;
+        let size = table_create_size(
+            self.coerce_register_to_number(registers, instruction.b)?,
+            !puc_constructor,
+        )?;
+        if puc_constructor {
+            let hash_size = table_create_size(
+                self.coerce_register_to_number(registers, instruction.c)?,
+                false,
+            )?;
+            let array_size = puc_constructor_array_size(size);
+            self.ensure_memory_growth(VmCell::puc_table_live_bytes(array_size, hash_size), &[])?;
+            let table = self
+                .heap
+                .try_alloc_puc_table(array_size, hash_size, Value::nil())
+                .ok_or_else(|| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+            return Ok(Value::table(table));
+        }
         let value = if instruction.aux == 2 {
             get_register(registers, instruction.c)?
         } else {
             Value::nil()
         };
+        if self.profile.is_puc51_compat() {
+            // `table.create` builtin (native route or hand-written aux==2
+            // bytecode): the lua_createtable analog — exact array size,
+            // empty node part, optional fill.
+            self.ensure_memory_growth(VmCell::puc_table_live_bytes(size, 0), &[value])?;
+            let table = self
+                .heap
+                .try_alloc_puc_table(size, 0, value)
+                .ok_or_else(|| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+            return Ok(Value::table(table));
+        }
         self.ensure_memory_growth(VmCell::filled_array_table_live_bytes(size), &[value])?;
         let table = self
             .heap
@@ -8860,8 +9590,10 @@ impl Vm {
         fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         let previous = self.protected_error_traceback.replace(traceback);
+        self.mark_control_memory_dirty();
         let result = self.call_value(program, callee, args, depth, fuel);
         self.protected_error_traceback = previous;
+        self.mark_control_memory_dirty();
         result
     }
 
@@ -9171,7 +9903,7 @@ impl Vm {
         pc: usize,
         entry: TableStringInlineCache,
     ) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             if program
                 .set_table_inline_cache(prototype, pc, entry)
                 .is_some()
@@ -9205,7 +9937,7 @@ impl Vm {
         lane: usize,
         entry: TableStringInlineCache,
     ) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             if program
                 .set_import_inline_cache(prototype, pc, lane, entry)
                 .is_some()
@@ -9237,7 +9969,7 @@ impl Vm {
         pc: usize,
         entry: NativeCallInlineCache,
     ) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             if program
                 .set_native_call_inline_cache(prototype, pc, entry)
                 .is_some()
@@ -9271,7 +10003,7 @@ impl Vm {
         pc: usize,
         entry: ClosureCallCacheEntry,
     ) {
-        if let Some(program) = self.dynamic_programs.get_mut(caller_program) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(caller_program) {
             let _filled = program.set_closure_call_inline_cache(caller_prototype, pc, entry);
             #[cfg(test)]
             if matches!(_filled, Some(true)) {
@@ -9283,7 +10015,7 @@ impl Vm {
 
     #[cfg(test)]
     fn record_closure_call_prototype_hit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.closure_call_prototype_hits =
                 program.closure_call_prototype_hits.saturating_add(1);
         }
@@ -9291,21 +10023,21 @@ impl Vm {
 
     #[cfg(test)]
     fn record_closure_call_fast_entry(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.closure_call_fast_entries = program.closure_call_fast_entries.saturating_add(1);
         }
     }
 
     #[cfg(test)]
     fn record_closure_call_guard_exit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.closure_call_guard_exits = program.closure_call_guard_exits.saturating_add(1);
         }
     }
 
     #[cfg(test)]
     fn record_native_call_inline_cache_hit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.native_call_inline_cache_hits =
                 program.native_call_inline_cache_hits.saturating_add(1);
         }
@@ -9313,21 +10045,21 @@ impl Vm {
 
     #[cfg(test)]
     fn record_table_inline_cache_hit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.table_inline_cache_hits = program.table_inline_cache_hits.saturating_add(1);
         }
     }
 
     #[cfg(test)]
     fn record_hot_ir_entry(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.hot_ir_entries = program.hot_ir_entries.saturating_add(1);
         }
     }
 
     #[cfg(test)]
     fn record_hot_ir_iterations(&mut self, program_id: u32, iterations: u64) {
-        let Some(program) = self.dynamic_programs.get_mut(program_id) else {
+        let Some(mut program) = self.dynamic_programs.get_mut(program_id) else {
             return;
         };
         program.hot_ir_iterations = program.hot_ir_iterations.saturating_add(iterations);
@@ -9335,7 +10067,7 @@ impl Vm {
 
     #[cfg(test)]
     fn record_hot_ir_guard_exit(&mut self, program_id: u32) {
-        if let Some(program) = self.dynamic_programs.get_mut(program_id) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.hot_ir_guard_exits = program.hot_ir_guard_exits.saturating_add(1);
         }
     }
@@ -9445,7 +10177,7 @@ impl Vm {
             || self.settings.enable_conformance_coverage
             || self.heap.has_allocation_debt()
             || self.weak_collection_due_within(plan.maximum_instruction_count())
-            || depth.saturating_add(1) > self.settings.recursion_limit
+            || self.recursion_depth_exceeded(depth.saturating_add(1))
         {
             return Ok(None);
         }
@@ -10233,6 +10965,9 @@ impl Vm {
         if native == NativeFunction::LoadString {
             return self.native_loadstring(args);
         }
+        if native == NativeFunction::Require {
+            return self.native_require(args, program, depth, call_site, fuel);
+        }
         if native == NativeFunction::DebugInfo {
             return self.native_debug_info(program, handle, args, call_site);
         }
@@ -10348,12 +11083,28 @@ impl Vm {
     }
 
     fn check_recursion_depth(&self, depth: usize) -> Result<()> {
-        if depth > self.settings.recursion_limit {
+        if self.recursion_depth_exceeded(depth) {
             return Err(Error::new(ErrorKind::RecursionLimit {
-                limit: self.settings.recursion_limit,
+                limit: self.stackless_recursion_limit(),
             }));
         }
         Ok(())
+    }
+
+    fn recursion_depth_exceeded(&self, depth: usize) -> bool {
+        if self.settings.enable_conformance_luau_call_limit {
+            depth >= LUAU_CONFORMANCE_CALL_LIMIT.saturating_sub(1)
+        } else {
+            depth > self.settings.recursion_limit
+        }
+    }
+
+    fn stackless_recursion_limit(&self) -> usize {
+        if self.settings.enable_conformance_luau_call_limit {
+            LUAU_CONFORMANCE_CALL_LIMIT
+        } else {
+            self.settings.recursion_limit
+        }
     }
 
     fn call_native_scalar_function(
@@ -10373,6 +11124,9 @@ impl Vm {
             NativeFunction::Pairs => unreachable!("pairs returns an iterator triple"),
             NativeFunction::LoadString => {
                 unreachable!("loadstring returns a variable result list")
+            }
+            NativeFunction::Require => {
+                unreachable!("require returns a variable result list")
             }
             NativeFunction::CoroutineResume => {
                 unreachable!("coroutine.resume returns a variable result list")
@@ -10674,7 +11428,7 @@ impl Vm {
             | NativeFunction::DebugTraceback
             | NativeFunction::DebugInfo
             | NativeFunction::TablePack => usize_to_u64(args.len()),
-            NativeFunction::LoadString => args
+            NativeFunction::LoadString | NativeFunction::Require => args
                 .first()
                 .and_then(|value| self.value_string_len_for_fuel(*value))
                 .map_or(0, usize_to_u64)
@@ -10753,7 +11507,7 @@ impl Vm {
             } else {
                 "false".len()
             }),
-            ValueKind::Number => Some(luau_number_to_string(value.as_number()?).len()),
+            ValueKind::Number => Some(self.number_to_string(value.as_number()?).len()),
             ValueKind::String => self
                 .string_value_bytes(value)
                 .ok()
@@ -11027,7 +11781,7 @@ impl Vm {
                     })?;
                     String::from_utf8_lossy(&message).into_owned()
                 }
-                ValueKind::Number => luau_number_to_string(value.as_number().unwrap_or(f64::NAN)),
+                ValueKind::Number => self.number_to_string(value.as_number().unwrap_or(f64::NAN)),
                 _ => {
                     return Err(Error::new(ErrorKind::RuntimeError {
                         message: format!(
@@ -11593,8 +12347,9 @@ impl Vm {
                 .intern_string_value_bytes(b"loadstring compiler is not configured");
             return Ok(vec![Value::nil(), message]);
         };
+        let profile = self.profile;
         let compiled = self.catch_host_callback(LOADSTRING_COMPILER_SERVICE_NAME, || {
-            compiler(&source, source_name.as_deref())
+            compiler(&source, source_name.as_deref(), profile)
         })?;
         let program = match compiled {
             Ok(program) => program,
@@ -11614,6 +12369,106 @@ impl Vm {
                 })
             })?;
         Ok(vec![Value::function(handle)])
+    }
+
+    fn native_require(
+        &mut self,
+        args: &[Value],
+        requiring_program: &Program,
+        depth: usize,
+        call_site: Option<ErrorLocation>,
+        fuel: &mut Execution<'_>,
+    ) -> Result<Vec<Value>> {
+        validate_native_arity(args, 1, 1, "require arguments")?;
+        let requested_bytes = self.value_to_string(args[0])?;
+        let requested = std::str::from_utf8(&requested_bytes).map_err(|_| {
+            Error::new(ErrorKind::RuntimeError {
+                message: "require path must be valid UTF-8".to_owned(),
+            })
+        })?;
+        let resolver = self.settings.module_resolver.clone().ok_or_else(|| {
+            Error::new(ErrorKind::RuntimeError {
+                message: "require resolver is not configured".to_owned(),
+            })
+        })?;
+        let referrer = requiring_program.source_name.as_deref();
+        let profile = self.profile;
+        let resolved = self.catch_host_callback(MODULE_RESOLVER_SERVICE_NAME, || {
+            resolver.resolve(requested, referrer, profile)
+        })?;
+        let resolved = resolved.map_err(|message| {
+            Error::new(ErrorKind::RuntimeError {
+                message: format!("error requiring module {requested:?}: {message}"),
+            })
+        })?;
+        if resolved.identity.is_empty() {
+            return Err(Error::new(ErrorKind::RuntimeError {
+                message: format!(
+                    "error requiring module {requested:?}: resolver returned an empty identity"
+                ),
+            }));
+        }
+        if let Some(cached) = self.module_cache.get(&resolved.identity).copied() {
+            return Ok(cached.into_iter().collect());
+        }
+        if let Some(cycle_start) = self
+            .module_loading_stack
+            .iter()
+            .position(|identity| identity == &resolved.identity)
+        {
+            let mut cycle = self.module_loading_stack[cycle_start..].to_vec();
+            cycle.push(resolved.identity);
+            return Err(Error::new(ErrorKind::RuntimeError {
+                message: format!(
+                    "requiring a module that is in the process of being required: {}",
+                    cycle.join(" -> ")
+                ),
+            }));
+        }
+
+        let identity = resolved.identity;
+        self.ensure_memory_growth(size_of::<String>().saturating_add(identity.len()), &[])?;
+        self.module_loading_stack.push(identity.clone());
+        self.mark_control_memory_dirty();
+        let result = (|| {
+            let program_id = self.retain_dynamic_program(resolved.program)?;
+            let environment = self.globals;
+            let handle = self
+                .heap
+                .alloc_dynamic_main_function(program_id, environment)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "function handle overflow",
+                    })
+                })?;
+            self.call_value_with_site(
+                requiring_program,
+                Value::function(handle),
+                &[],
+                depth.saturating_add(1),
+                call_site,
+                fuel,
+            )
+        })();
+        let popped = self.module_loading_stack.pop();
+        self.mark_control_memory_dirty();
+        debug_assert_eq!(popped.as_deref(), Some(identity.as_str()));
+        let results = result?;
+        if results.len() > 1 {
+            return Err(Error::new(ErrorKind::RuntimeError {
+                message: "module must return a single value".to_owned(),
+            }));
+        }
+        let value = results.first().copied();
+        let cache_growth = identity
+            .len()
+            .saturating_add(size_of::<Option<Value>>())
+            .saturating_add(size_of::<usize>().saturating_mul(4));
+        let cache_roots = value.into_iter().collect::<SmallVec<[Value; 1]>>();
+        self.ensure_memory_growth(cache_growth, &cache_roots)?;
+        self.module_cache.insert(identity, value);
+        self.mark_control_memory_dirty();
+        Ok(results)
     }
 
     fn native_coroutine_create(&mut self, args: &[Value]) -> Result<Value> {
@@ -11683,7 +12538,9 @@ impl Vm {
         state.frames.clear();
         state.initialized = true;
         state.dead = true;
-        if let Some(error) = state.error.take() {
+        let error = state.error.take();
+        self.mark_control_memory_dirty();
+        if let Some(error) = error {
             return Ok(vec![Value::boolean(false), error]);
         }
         Ok(vec![Value::boolean(true)])
@@ -11702,6 +12559,7 @@ impl Vm {
             return Err(non_yieldable_boundary_error());
         };
         collector.push(args.to_vec());
+        self.mark_control_memory_dirty();
         Ok(Vec::new())
     }
 
@@ -11733,6 +12591,7 @@ impl Vm {
             first_debug_info_level: 1,
         };
         self.coroutines[coroutine].debug_snapshot = Some(snapshot);
+        self.mark_control_memory_dirty();
     }
 
     fn record_running_coroutine_error_snapshot(&mut self, top_location: Option<ErrorLocation>) {
@@ -11750,6 +12609,7 @@ impl Vm {
             .is_none_or(|existing| existing.frames.len() <= snapshot.frames.len());
         if replace {
             self.coroutines[coroutine].debug_snapshot = Some(snapshot);
+            self.mark_control_memory_dirty();
         }
     }
 
@@ -11786,12 +12646,14 @@ impl Vm {
     fn take_error_traceback(&mut self, error: &Error) -> TracebackSnapshot {
         if error.location.is_some() {
             if let Some(snapshot) = self.last_error_traceback.take() {
+                self.mark_control_memory_dirty();
                 if snapshot.top_location == error.location {
                     return snapshot;
                 }
             }
         } else {
             self.last_error_traceback = None;
+            self.mark_control_memory_dirty();
         }
         self.traceback_snapshot(error.location.clone())
     }
@@ -11818,6 +12680,7 @@ impl Vm {
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
+        self.mark_control_memory_dirty();
         let flow = self.call_value_with_site_resumable(
             program,
             callee,
@@ -11830,6 +12693,7 @@ impl Vm {
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
+        self.mark_control_memory_dirty();
         flow.map(into_vec_flow)
     }
 
@@ -11844,6 +12708,7 @@ impl Vm {
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
         self.active_coroutine_frames.push(frames.clone());
+        self.mark_control_memory_dirty();
         let flow = self.resume_coroutine_frames_inner(frames, resume_results, fuel);
         let active = self.active_coroutine_frames.pop();
         debug_assert!(active.is_some());
@@ -11851,6 +12716,7 @@ impl Vm {
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
+        self.mark_control_memory_dirty();
         flow
     }
 
@@ -11865,6 +12731,7 @@ impl Vm {
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
         self.active_coroutine_frames.push(frames.clone());
+        self.mark_control_memory_dirty();
         let flow = self.propagate_coroutine_error(frames, error, fuel);
         let active = self.active_coroutine_frames.pop();
         debug_assert!(active.is_some());
@@ -11872,6 +12739,7 @@ impl Vm {
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
+        self.mark_control_memory_dirty();
         flow
     }
 
@@ -11938,6 +12806,7 @@ impl Vm {
                 CoroutineFrame::Bytecode(_) => {}
                 CoroutineFrame::PCall => {
                     self.last_error_traceback = None;
+                    self.mark_control_memory_dirty();
                     let error = self.error_object(error);
                     return self.resume_coroutine_frames_inner(
                         frames,
@@ -12051,6 +12920,7 @@ impl Vm {
             self.start_coroutine(program, coroutine, callee, &args[1..], depth, fuel)
         } else if self.coroutines[coroutine].frames.is_empty() {
             self.coroutines[coroutine].dead = true;
+            self.mark_control_memory_dirty();
             let mut values = vec![Value::boolean(true)];
             values.extend_from_slice(&args[1..]);
             return Ok(values);
@@ -12058,7 +12928,7 @@ impl Vm {
             let frames = std::mem::take(&mut self.coroutines[coroutine].frames);
             self.resume_coroutine_frames(coroutine, frames, args[1..].to_vec(), fuel)
         };
-        match flow {
+        let result = match flow {
             Ok(VmFlow::Return(results)) => {
                 let state = &mut self.coroutines[coroutine];
                 state.initialized = true;
@@ -12084,7 +12954,9 @@ impl Vm {
                 self.coroutines[coroutine].error = Some(error_value);
                 Ok(vec![Value::boolean(false), error_value])
             }
-        }
+        };
+        self.mark_control_memory_dirty();
+        result
     }
 
     fn native_conformance_resume_error(
@@ -12113,7 +12985,7 @@ impl Vm {
         let frames = std::mem::take(&mut self.coroutines[coroutine].frames);
         let error = self.guest_error_from_value(args[1])?;
         let flow = self.resume_coroutine_error(coroutine, frames, error, fuel);
-        match flow {
+        let result = match flow {
             Ok(VmFlow::Return(_)) => {
                 let state = &mut self.coroutines[coroutine];
                 state.initialized = true;
@@ -12135,7 +13007,9 @@ impl Vm {
                 self.coroutines[coroutine].error = Some(error_value);
                 Ok(Vec::new())
             }
-        }
+        };
+        self.mark_control_memory_dirty();
+        result
     }
 
     fn native_coroutine_wrapped_call(
@@ -12160,6 +13034,7 @@ impl Vm {
             self.start_coroutine(program, coroutine, callee, call_args, depth, fuel)
         } else if self.coroutines[coroutine].frames.is_empty() {
             self.coroutines[coroutine].dead = true;
+            self.mark_control_memory_dirty();
             return Ok(args.get(1..).unwrap_or(&[]).to_vec());
         } else {
             let frames = std::mem::take(&mut self.coroutines[coroutine].frames);
@@ -12170,7 +13045,7 @@ impl Vm {
                 fuel,
             )
         };
-        match flow {
+        let result = match flow {
             Ok(VmFlow::Return(results)) => {
                 let state = &mut self.coroutines[coroutine];
                 state.initialized = true;
@@ -12195,7 +13070,9 @@ impl Vm {
                     message: self.error_value_message(error_value),
                 }))
             }
-        }
+        };
+        self.mark_control_memory_dirty();
+        result
     }
 
     fn alloc_coroutine(&mut self, callee: Value, callable: bool) -> Result<u32> {
@@ -12225,6 +13102,7 @@ impl Vm {
             error: None,
             debug_snapshot: None,
         });
+        self.mark_control_memory_dirty();
         Ok(handle)
     }
 
@@ -12270,6 +13148,7 @@ impl Vm {
             Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
             Err(error) => {
                 self.last_error_traceback = None;
+                self.mark_control_memory_dirty();
                 let error = self.error_object(error);
                 Ok(vec![Value::boolean(false), error])
             }
@@ -12308,6 +13187,7 @@ impl Vm {
             Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
             Err(error) => {
                 self.last_error_traceback = None;
+                self.mark_control_memory_dirty();
                 let error = self.error_object(error);
                 Ok(VmFlow::Return(vec![Value::boolean(false), error]))
             }
@@ -12794,7 +13674,7 @@ impl Vm {
         Ok(Value::userdata(userdata))
     }
 
-    fn collectgarbage_roots(&self, args: &[Value]) -> Vec<Value> {
+    fn collectgarbage_roots(&mut self, args: &[Value]) -> Vec<Value> {
         let mut roots = Vec::new();
         roots.push(Value::table(self.globals));
         roots.push(Value::table(self.standard_globals));
@@ -12809,6 +13689,7 @@ impl Vm {
             .map(Value::table),
         );
         roots.extend(self.external_roots.borrow().values.values().copied());
+        roots.extend(self.module_cache.values().flatten().copied());
         for loaded in self.dynamic_programs.values() {
             roots.extend(
                 loaded
@@ -12821,20 +13702,6 @@ impl Vm {
         roots.extend_from_slice(args);
         for frame in &self.call_stack {
             collect_call_stack_frame_roots(&mut roots, frame);
-        }
-        for coroutine in &self.coroutines {
-            roots.push(coroutine.callee);
-            for frame in &coroutine.frames {
-                self.extend_coroutine_frame_roots(&mut roots, frame);
-            }
-            if let Some(error) = coroutine.error {
-                roots.push(error);
-            }
-            if let Some(snapshot) = &coroutine.debug_snapshot {
-                for frame in &snapshot.frames {
-                    collect_call_stack_frame_roots(&mut roots, frame);
-                }
-            }
         }
         for frames in &self.active_coroutine_frames {
             for frame in frames {
@@ -12851,6 +13718,45 @@ impl Vm {
         }
         if let Some(snapshot) = &self.protected_error_traceback {
             collect_traceback_snapshot_roots(&mut roots, snapshot);
+        }
+
+        if self.coroutines.is_empty() {
+            return roots;
+        }
+
+        // Suspended coroutine frames are children of the script-visible
+        // userdata handle, not permanent VM roots. Trace reachable handles
+        // first, then add their saved frames until coroutine-to-coroutine
+        // references reach a fixed point.
+        let mut traced_coroutines = std::collections::BTreeSet::new();
+        loop {
+            let reachable = self
+                .heap
+                .reachable_userdata_handles(&roots)
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>();
+            let mut added = false;
+            for (index, coroutine) in self.coroutines.iter().enumerate() {
+                if !reachable.contains(&coroutine.handle) || !traced_coroutines.insert(index) {
+                    continue;
+                }
+                roots.push(coroutine.callee);
+                for frame in &coroutine.frames {
+                    self.extend_coroutine_frame_roots(&mut roots, frame);
+                }
+                if let Some(error) = coroutine.error {
+                    roots.push(error);
+                }
+                if let Some(snapshot) = &coroutine.debug_snapshot {
+                    for frame in &snapshot.frames {
+                        collect_call_stack_frame_roots(&mut roots, frame);
+                    }
+                }
+                added = true;
+            }
+            if !added {
+                break;
+            }
         }
         roots
     }
@@ -12904,9 +13810,22 @@ impl Vm {
         debug_assert!(self.running_coroutines.is_empty());
         debug_assert!(self.running_coroutine_stack_bases.is_empty());
         debug_assert!(self.active_coroutine_frames.is_empty());
+        let before = self.coroutines.len();
         let heap = &mut self.heap;
         self.coroutines
             .retain(|coroutine| heap.has_userdata(coroutine.handle));
+        if self.coroutines.len() != before {
+            self.mark_control_memory_dirty();
+        }
+    }
+
+    fn prune_unreachable_coroutines_if_idle(&mut self) {
+        if self.running_coroutines.is_empty()
+            && self.running_coroutine_stack_bases.is_empty()
+            && self.active_coroutine_frames.is_empty()
+        {
+            self.prune_unreachable_coroutines();
+        }
     }
 
     fn extend_coroutine_frame_roots(&self, roots: &mut Vec<Value>, frame: &CoroutineFrame) {
@@ -12946,14 +13865,13 @@ impl Vm {
         varargs: &[Value],
         pending_return_prefixes: &[Value],
     ) {
-        let Some(frame) = self.call_stack.last_mut() else {
-            return;
-        };
-        frame.roots.clear();
-        frame.roots.extend_from_slice(registers);
-        extend_capture_cell_roots(&mut frame.roots, register_cells);
-        frame.roots.extend_from_slice(varargs);
-        frame.roots.extend_from_slice(pending_return_prefixes);
+        let _ = self.mutate_last_call_stack_frame(|frame| {
+            frame.roots.clear();
+            frame.roots.extend_from_slice(registers);
+            extend_capture_cell_roots(&mut frame.roots, register_cells);
+            frame.roots.extend_from_slice(varargs);
+            frame.roots.extend_from_slice(pending_return_prefixes);
+        });
     }
 
     fn push_stackless_self_call_roots(
@@ -12964,73 +13882,70 @@ impl Vm {
         pending_return_prefixes: &[Value],
         continuation: &BytecodeContinuation,
     ) -> usize {
-        let Some(frame) = self.call_stack.last_mut() else {
-            return 0;
-        };
-        let mark = frame.stackless_roots.len();
-        extend_heap_backed_roots(&mut frame.stackless_roots, registers);
-        extend_capture_cell_roots(&mut frame.stackless_roots, register_cells);
-        extend_heap_backed_roots(&mut frame.stackless_roots, varargs);
-        extend_heap_backed_roots(&mut frame.stackless_roots, pending_return_prefixes);
-        extend_bytecode_continuation_heap_roots(&mut frame.stackless_roots, continuation);
-        mark
+        self.mutate_last_call_stack_frame(|frame| {
+            let mark = frame.stackless_roots.len();
+            extend_heap_backed_roots(&mut frame.stackless_roots, registers);
+            extend_capture_cell_roots(&mut frame.stackless_roots, register_cells);
+            extend_heap_backed_roots(&mut frame.stackless_roots, varargs);
+            extend_heap_backed_roots(&mut frame.stackless_roots, pending_return_prefixes);
+            extend_bytecode_continuation_heap_roots(&mut frame.stackless_roots, continuation);
+            mark
+        })
+        .unwrap_or(0)
     }
 
     fn push_bytecode_continuation_roots(&mut self, continuation: &BytecodeContinuation) -> usize {
-        let Some(frame) = self.call_stack.last_mut() else {
-            return 0;
-        };
-        let mark = frame.stackless_roots.len();
-        extend_bytecode_continuation_heap_roots(&mut frame.stackless_roots, continuation);
-        mark
+        self.mutate_last_call_stack_frame(|frame| {
+            let mark = frame.stackless_roots.len();
+            extend_bytecode_continuation_heap_roots(&mut frame.stackless_roots, continuation);
+            mark
+        })
+        .unwrap_or(0)
     }
 
     fn push_stackless_self_call_debug_frame(
         &mut self,
         debug_frame: &StacklessDebugFrame,
     ) -> StacklessDebugMark {
-        let Some(frame) = self.call_stack.last_mut() else {
-            return StacklessDebugMark::default();
-        };
-        let mark = stackless_debug_frame_mark(frame);
-        push_stackless_debug_frame_run(frame, debug_frame);
-        mark
+        self.mutate_last_call_stack_frame(|frame| {
+            let mark = stackless_debug_frame_mark(frame);
+            push_stackless_debug_frame_run(frame, debug_frame);
+            mark
+        })
+        .unwrap_or_default()
     }
 
     fn rebuild_stackless_self_call_roots(&mut self, frames: &mut [StacklessSelfCallFrame]) {
-        let Some(call_frame) = self.call_stack.last_mut() else {
-            return;
-        };
-        call_frame.stackless_roots.clear();
-        call_frame.stackless_debug_frames.clear();
-        for stackless_frame in frames {
-            stackless_frame.root_mark = call_frame.stackless_roots.len();
-            extend_stackless_self_call_frame_heap_roots(
-                &mut call_frame.stackless_roots,
-                stackless_frame,
-            );
-            stackless_frame.debug_mark = stackless_debug_frame_mark(call_frame);
-            push_stackless_debug_frame_run(call_frame, &stackless_frame.debug_frame);
-        }
+        let _ = self.mutate_last_call_stack_frame(|call_frame| {
+            call_frame.stackless_roots.clear();
+            call_frame.stackless_debug_frames.clear();
+            for stackless_frame in frames {
+                stackless_frame.root_mark = call_frame.stackless_roots.len();
+                extend_stackless_self_call_frame_heap_roots(
+                    &mut call_frame.stackless_roots,
+                    stackless_frame,
+                );
+                stackless_frame.debug_mark = stackless_debug_frame_mark(call_frame);
+                push_stackless_debug_frame_run(call_frame, &stackless_frame.debug_frame);
+            }
+        });
     }
 
     fn truncate_stackless_self_call_roots(&mut self, mark: usize) {
-        let Some(frame) = self.call_stack.last_mut() else {
-            return;
-        };
-        frame.stackless_roots.truncate(mark);
+        let _ = self.mutate_last_call_stack_frame(|frame| {
+            frame.stackless_roots.truncate(mark);
+        });
     }
 
     fn truncate_stackless_self_call_debug_frames(&mut self, mark: StacklessDebugMark) {
-        let Some(frame) = self.call_stack.last_mut() else {
-            return;
-        };
-        frame.stackless_debug_frames.truncate(mark.run_count);
-        if mark.last_run_count > 0 {
-            if let Some(run) = frame.stackless_debug_frames.last_mut() {
-                run.count = mark.last_run_count;
+        let _ = self.mutate_last_call_stack_frame(|frame| {
+            frame.stackless_debug_frames.truncate(mark.run_count);
+            if mark.last_run_count > 0 {
+                if let Some(run) = frame.stackless_debug_frames.last_mut() {
+                    run.count = mark.last_run_count;
+                }
             }
-        }
+        });
     }
 
     fn native_collectgarbage(&mut self, args: &[Value]) -> Result<Value> {
@@ -13044,22 +13959,18 @@ impl Vm {
         };
         match mode.as_str() {
             "collect" => {
-                let roots = self.collectgarbage_roots(args);
-                self.heap.finish_collection_cycle();
-                self.heap.collect_weak_tables_with_roots(&roots);
+                self.collect_heap_and_programs(args, true);
                 self.gc_step_counter = 0;
                 self.gc_stopped = false;
                 Ok(Value::number(0.0))
             }
-            "count" => Ok(Value::number(0.0)),
+            "count" => Ok(Value::number(self.current_live_bytes() as f64 / 1024.0)),
             "stop" => {
-                self.gcinfo_counter = 0;
                 self.gc_step_counter = 0;
                 self.gc_stopped = true;
                 Ok(Value::number(0.0))
             }
             "restart" => {
-                self.gcinfo_counter = 1;
                 self.gc_step_counter = 0;
                 self.gc_stopped = false;
                 Ok(Value::number(0.0))
@@ -13080,10 +13991,8 @@ impl Vm {
                     collectgarbage_step_threshold(size)
                 };
                 if self.gc_step_counter >= threshold {
-                    let roots = self.collectgarbage_roots(args);
-                    self.heap.collect_weak_tables_with_roots(&roots);
+                    self.collect_heap_and_programs(args, false);
                     self.gc_step_counter = 0;
-                    self.gcinfo_counter = 1;
                     self.gc_stopped = false;
                     Ok(Value::boolean(true))
                 } else {
@@ -13098,15 +14007,7 @@ impl Vm {
 
     fn native_gcinfo(&mut self, args: &[Value]) -> Result<Value> {
         validate_native_arity(args, 0, 0, "gcinfo arguments")?;
-        self.gcinfo_counter = self.gcinfo_counter.wrapping_add(1);
-        if self.gc_stopped {
-            return Ok(Value::number((self.gcinfo_counter as f64) * 600.0));
-        }
-        Ok(Value::number(if self.gcinfo_counter % 2 == 1 {
-            1.0
-        } else {
-            0.0
-        }))
+        Ok(Value::number((self.current_live_bytes() / 1024) as f64))
     }
 
     fn native_os_clock(&mut self, args: &[Value]) -> Result<Value> {
@@ -13379,15 +14280,14 @@ impl Vm {
         let buffer = self.buffer_arg(args[0])?;
         let offset = self.buffer_offset_arg(args[1])?;
         let bytes = self.buffer_read_checked(buffer, offset, buffer_float_size(kind))?;
-        let value = match kind {
-            BufferFloatKind::F32 => {
-                f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
-            }
-            BufferFloatKind::F64 => f64::from_le_bytes([
+        match kind {
+            BufferFloatKind::F32 => Ok(Value::number_from_bits(widen_buffer_f32_bits(
+                u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+            ))),
+            BufferFloatKind::F64 => Ok(Value::number_from_bits(u64::from_le_bytes([
                 bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-            ]),
-        };
-        Ok(Value::number(value))
+            ]))),
+        }
     }
 
     fn native_buffer_readstring(&mut self, args: &[Value]) -> Result<Value> {
@@ -13478,7 +14378,7 @@ impl Vm {
             .coerce_to_number(args[2])?
             .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
         let bytes = match kind {
-            BufferFloatKind::F32 => (number as f32).to_le_bytes().to_vec(),
+            BufferFloatKind::F32 => narrow_buffer_f64_bits(number).to_le_bytes().to_vec(),
             BufferFloatKind::F64 => number.to_le_bytes().to_vec(),
         };
         self.buffer_write_checked(buffer, offset, &bytes)
@@ -14157,7 +15057,9 @@ impl Vm {
     }
 
     fn table_next_after(&mut self, table: u32, after: Value) -> Option<TableNext> {
-        let order = if self.profile == Profile::LuauCompat {
+        let order = if self.profile.is_puc51_compat() {
+            TableIterationOrder::Puc51
+        } else if self.profile.is_luau_compat() {
             TableIterationOrder::LuauHash
         } else {
             TableIterationOrder::Insertion
@@ -16482,12 +17384,23 @@ impl Vm {
             values
         };
 
-        let initial_storage_len = self.heap.table_storage_len(table).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "table handle is missing",
-            })
-        })?;
-        if comparator.is_none()
+        let initial_mutation_version =
+            self.heap.table_mutation_version(table).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?;
+        if self.profile.is_puc51_compat() {
+            self.table_sort_puc51(
+                &mut values,
+                comparator,
+                table,
+                initial_mutation_version,
+                program,
+                depth,
+                fuel,
+            )?;
+        } else if comparator.is_none()
             && values
                 .iter()
                 .all(|value| value.as_number().is_some_and(|number| !number.is_nan()))
@@ -16506,7 +17419,7 @@ impl Vm {
                 &mut values,
                 comparator,
                 table,
-                initial_storage_len,
+                initial_mutation_version,
                 program,
                 depth,
                 fuel,
@@ -16525,12 +17438,184 @@ impl Vm {
         Ok(Vec::new())
     }
 
+    /// PUC Lua 5.1 `auxsort` (ltablib.c): recursive quicksort, middle-element
+    /// pivot with median-of-three, in-place partition. Comparison order and
+    /// tie behavior are observable, so this ports the C control flow verbatim
+    /// (including the out-of-range reads as nil and the
+    /// `"invalid order function for sorting"` guards) over the snapshot.
+    fn table_sort_puc51(
+        &mut self,
+        values: &mut [Value],
+        comparator: Option<Value>,
+        table: u32,
+        initial_mutation_version: u64,
+        program: &Program,
+        depth: usize,
+        fuel: &mut Execution<'_>,
+    ) -> Result<()> {
+        if values.len() < 2 {
+            return Ok(());
+        }
+        self.table_sort_puc51_auxsort(
+            values,
+            0,
+            values.len() as isize - 1,
+            comparator,
+            table,
+            initial_mutation_version,
+            program,
+            depth,
+            fuel,
+        )
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    fn table_sort_puc51_auxsort(
+        &mut self,
+        values: &mut [Value],
+        mut l: isize,
+        mut u: isize,
+        comparator: Option<Value>,
+        table: u32,
+        initial_mutation_version: u64,
+        program: &Program,
+        depth: usize,
+        fuel: &mut Execution<'_>,
+    ) -> Result<()> {
+        while l < u {
+            // sort elements a[l], a[(l+u)/2] and a[u]
+            if self.table_sort_less(
+                values[u as usize],
+                values[l as usize],
+                comparator,
+                table,
+                initial_mutation_version,
+                program,
+                depth,
+                fuel,
+            )? {
+                values.swap(l as usize, u as usize);
+            }
+            if u - l == 1 {
+                break;
+            }
+            let mid = (l + u) / 2;
+            if self.table_sort_less(
+                values[mid as usize],
+                values[l as usize],
+                comparator,
+                table,
+                initial_mutation_version,
+                program,
+                depth,
+                fuel,
+            )? {
+                values.swap(mid as usize, l as usize);
+            } else if self.table_sort_less(
+                values[u as usize],
+                values[mid as usize],
+                comparator,
+                table,
+                initial_mutation_version,
+                program,
+                depth,
+                fuel,
+            )? {
+                values.swap(mid as usize, u as usize);
+            }
+            if u - l == 2 {
+                break;
+            }
+            // Pivot: a[mid], stashed at a[u-1].
+            values.swap(mid as usize, (u - 1) as usize);
+            let pivot = values[(u - 1) as usize];
+            let mut i = l;
+            let mut j = u - 1;
+            // invariant: a[l..=i] <= P <= a[j..=u]
+            loop {
+                loop {
+                    i += 1;
+                    let probe = table_sort_puc51_probe(values, i, l, u);
+                    if !self.table_sort_less(
+                        probe,
+                        pivot,
+                        comparator,
+                        table,
+                        initial_mutation_version,
+                        program,
+                        depth,
+                        fuel,
+                    )? {
+                        break;
+                    }
+                    if i > u {
+                        return Err(puc51_invalid_order_function_error());
+                    }
+                }
+                loop {
+                    j -= 1;
+                    let probe = table_sort_puc51_probe(values, j, l, u);
+                    if !self.table_sort_less(
+                        pivot,
+                        probe,
+                        comparator,
+                        table,
+                        initial_mutation_version,
+                        program,
+                        depth,
+                        fuel,
+                    )? {
+                        break;
+                    }
+                    if j < l {
+                        return Err(puc51_invalid_order_function_error());
+                    }
+                }
+                if j < i {
+                    break;
+                }
+                values.swap(i as usize, j as usize);
+            }
+            // Swap pivot back into place: a[u-1] <-> a[i].
+            values.swap((u - 1) as usize, i as usize);
+            // Recurse on the smaller half, loop on the larger.
+            if i - l < u - i {
+                self.table_sort_puc51_auxsort(
+                    values,
+                    l,
+                    i - 1,
+                    comparator,
+                    table,
+                    initial_mutation_version,
+                    program,
+                    depth,
+                    fuel,
+                )?;
+                l = i + 1;
+            } else {
+                self.table_sort_puc51_auxsort(
+                    values,
+                    i + 1,
+                    u,
+                    comparator,
+                    table,
+                    initial_mutation_version,
+                    program,
+                    depth,
+                    fuel,
+                )?;
+                u = i - 1;
+            }
+        }
+        Ok(())
+    }
+
     fn table_sort_heap(
         &mut self,
         values: &mut [Value],
         comparator: Option<Value>,
         table: u32,
-        initial_storage_len: usize,
+        initial_mutation_version: u64,
         program: &Program,
         depth: usize,
         fuel: &mut Execution<'_>,
@@ -16548,7 +17633,7 @@ impl Vm {
                 values.len() - 1,
                 comparator,
                 table,
-                initial_storage_len,
+                initial_mutation_version,
                 program,
                 depth,
                 fuel,
@@ -16565,7 +17650,7 @@ impl Vm {
                 end,
                 comparator,
                 table,
-                initial_storage_len,
+                initial_mutation_version,
                 program,
                 depth,
                 fuel,
@@ -16582,7 +17667,7 @@ impl Vm {
         end: usize,
         comparator: Option<Value>,
         table: u32,
-        initial_storage_len: usize,
+        initial_mutation_version: u64,
         program: &Program,
         depth: usize,
         fuel: &mut Execution<'_>,
@@ -16600,7 +17685,7 @@ impl Vm {
                 values[child],
                 comparator,
                 table,
-                initial_storage_len,
+                initial_mutation_version,
                 program,
                 depth,
                 fuel,
@@ -16613,7 +17698,7 @@ impl Vm {
                     values[child + 1],
                     comparator,
                     table,
-                    initial_storage_len,
+                    initial_mutation_version,
                     program,
                     depth,
                     fuel,
@@ -16636,7 +17721,7 @@ impl Vm {
         rhs: Value,
         comparator: Option<Value>,
         table: u32,
-        initial_storage_len: usize,
+        initial_mutation_version: u64,
         program: &Program,
         depth: usize,
         fuel: &mut Execution<'_>,
@@ -16650,12 +17735,12 @@ impl Vm {
         } else {
             self.less_than(program, lhs, rhs, depth, fuel)?
         };
-        let storage_len = self.heap.table_storage_len(table).ok_or_else(|| {
+        let mutation_version = self.heap.table_mutation_version(table).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "table handle is missing",
             })
         })?;
-        if storage_len != initial_storage_len {
+        if mutation_version != initial_mutation_version {
             return Err(Error::new(ErrorKind::RuntimeError {
                 message: "table modified during sorting".to_owned(),
             }));
@@ -17173,7 +18258,7 @@ impl Vm {
         instruction: Instruction,
         depth: usize,
         fuel: &mut Execution<'_>,
-    ) -> Result<bool> {
+    ) -> Result<CallIteratorStep> {
         let window = CallIteratorRegisters::generic(instruction.a, instruction.c)?;
         window.validate(registers.len(), "generic call iterator")?;
         self.call_iterator_step(CallIteratorStepContext {
@@ -17195,7 +18280,7 @@ impl Vm {
         instruction: Instruction,
         depth: usize,
         fuel: &mut Execution<'_>,
-    ) -> Result<bool> {
+    ) -> Result<CallIteratorStep> {
         let window = GeneralizedIteratorRegisters::new(instruction.a, instruction.c)?;
         window.validate(registers.len())?;
 
@@ -17224,7 +18309,9 @@ impl Vm {
                     )?;
                     set_register(registers, window.call.state, subject)?;
                     set_register(registers, window.call.control, Value::nil())?;
-                    return self.table_iterator_step(registers, register_cells, window.call);
+                    return self
+                        .table_iterator_step(registers, register_cells, window.call)
+                        .map(CallIteratorStep::Complete);
                 }
                 Err(iteration_error(subject))
             }
@@ -17259,7 +18346,7 @@ impl Vm {
         instruction: Instruction,
         depth: usize,
         fuel: &mut Execution<'_>,
-    ) -> Result<bool> {
+    ) -> Result<CallIteratorStep> {
         let window = GeneralizedIteratorRegisters::new(instruction.a, instruction.c)?;
         window.validate(registers.len())?;
         let mode = get_number(registers, window.mode)?;
@@ -17275,6 +18362,7 @@ impl Vm {
             })
         } else if mode == GENERALIZED_ITERATOR_MODE_TABLE {
             self.table_iterator_step(registers, register_cells, window.call)
+                .map(CallIteratorStep::Complete)
         } else {
             Err(Error::new(ErrorKind::InvalidProgram {
                 reason: "generalized iterator mode is invalid",
@@ -17310,7 +18398,10 @@ impl Vm {
         )
     }
 
-    fn call_iterator_step(&mut self, context: CallIteratorStepContext<'_, '_>) -> Result<bool> {
+    fn call_iterator_step(
+        &mut self,
+        context: CallIteratorStepContext<'_, '_>,
+    ) -> Result<CallIteratorStep> {
         let CallIteratorStepContext {
             program,
             registers,
@@ -17338,7 +18429,7 @@ impl Vm {
             depth,
             fuel,
         )? {
-            return Ok(advanced);
+            return Ok(CallIteratorStep::Complete(advanced));
         }
         let results = match self.call_value_with_site_resumable(
             program,
@@ -17349,26 +18440,11 @@ impl Vm {
             fuel,
         )? {
             VmFlow::Return(results) => results,
-            VmFlow::Yield(_) => return Err(non_yieldable_boundary_error()),
+            VmFlow::Yield(suspension) => return Ok(CallIteratorStep::Yield(suspension)),
         };
         self.sync_register_cells(registers, register_cells)?;
-
-        let first = results.first().copied().unwrap_or_else(Value::nil);
-        if first.kind() == ValueKind::Nil {
-            return Ok(false);
-        }
-
-        set_register(registers, window.control, first)?;
-        for index in 0..window.visible_count {
-            let value = results
-                .get(usize::from(index))
-                .copied()
-                .unwrap_or_else(Value::nil);
-            let register = window.visible_register(index)?;
-            set_register(registers, register, value)?;
-            clear_register_cell(register_cells, register)?;
-        }
-        Ok(true)
+        apply_call_iterator_results(registers, register_cells, window, &results)
+            .map(CallIteratorStep::Complete)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -17608,6 +18684,7 @@ impl Vm {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(&[]);
                 self.heap.collect_weak_tables_with_roots(&roots);
+                self.prune_unreachable_coroutines_if_idle();
                 self.deterministic_collection_count =
                     self.deterministic_collection_count.wrapping_add(1);
             }
@@ -17617,6 +18694,7 @@ impl Vm {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(&[]);
                 self.heap.collect_weak_tables_with_roots(&roots);
+                self.prune_unreachable_coroutines_if_idle();
             }
         }
         if weak_collection_due {
@@ -17637,6 +18715,7 @@ impl Vm {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(transient_roots);
                 self.heap.collect_weak_tables_with_roots(&roots);
+                self.prune_unreachable_coroutines_if_idle();
                 self.deterministic_collection_count =
                     self.deterministic_collection_count.wrapping_add(1);
             }
@@ -17646,6 +18725,7 @@ impl Vm {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(transient_roots);
                 self.heap.collect_weak_tables_with_roots(&roots);
+                self.prune_unreachable_coroutines_if_idle();
             }
         }
         if weak_collection_due {
@@ -17902,7 +18982,7 @@ mod hardened_leaf_validation_tests {
     fn hardened_seal_rejects_preseal_retained_values_and_recovers() {
         let mut vm = Vm::with_settings(Profile::DeterministicSim, hardened_settings());
         let table = vm.empty_table();
-        let retained = vm.retain_value(table);
+        let retained = vm.retain_value(table).unwrap();
 
         let error = vm
             .reset_decision()
@@ -17974,6 +19054,7 @@ fn initialize_standard_globals(
     profile: Profile,
     guest_surface: GuestSurface,
     enable_loadstring: bool,
+    enable_require: bool,
     register_os: bool,
     enable_conformance_coverage: bool,
     enable_conformance_int64_userdata: bool,
@@ -18055,6 +19136,15 @@ fn initialize_standard_globals(
             standard_globals,
             "loadstring",
             NativeFunction::LoadString,
+        );
+    }
+    if enable_require && !hardened_leaf {
+        set_standard_native_field(
+            heap,
+            globals,
+            standard_globals,
+            "require",
+            NativeFunction::Require,
         );
     }
     set_standard_native_field(
@@ -18371,7 +19461,13 @@ fn initialize_standard_globals(
             Value::table(coroutine),
         );
 
-        let rtti = build_standard_global_rtti(heap, profile, enable_loadstring, register_os);
+        let rtti = build_standard_global_rtti(
+            heap,
+            profile,
+            enable_loadstring,
+            enable_require,
+            register_os,
+        );
         set_standard_index_field(heap, standard_globals, "RTTI", Value::table(rtti));
     }
 
@@ -18464,6 +19560,7 @@ fn build_standard_global_rtti(
     heap: &mut VmCell,
     profile: Profile,
     enable_loadstring: bool,
+    enable_require: bool,
     register_os: bool,
 ) -> u32 {
     let rtti = heap.alloc_array_table(&[]);
@@ -18473,6 +19570,9 @@ fn build_standard_global_rtti(
     }
     if enable_loadstring {
         set_rtti_function_type(heap, rtti, "loadstring");
+    }
+    if enable_require {
+        set_rtti_function_type(heap, rtti, "require");
     }
     if !profile.is_deterministic_sim() {
         set_rtti_function_type(heap, rtti, "collectgarbage");
@@ -18786,6 +19886,7 @@ fn native_function_debug_name(native: NativeFunction) -> &'static str {
         NativeFunction::INext => "inext",
         NativeFunction::Pairs => "pairs",
         NativeFunction::LoadString => "loadstring",
+        NativeFunction::Require => "require",
         NativeFunction::ToNumber => "tonumber",
         NativeFunction::ToString => "tostring",
         NativeFunction::TypeOf => "type",
@@ -19087,6 +20188,32 @@ fn buffer_float_size(kind: BufferFloatKind) -> usize {
         BufferFloatKind::F32 => 4,
         BufferFloatKind::F64 => 8,
     }
+}
+
+fn widen_buffer_f32_bits(bits: u32) -> u64 {
+    const F32_EXPONENT_MASK: u32 = 0x7f80_0000;
+    const F32_FRACTION_MASK: u32 = 0x007f_ffff;
+    const F64_EXPONENT_MASK: u64 = 0x7ff0_0000_0000_0000;
+    let fraction = bits & F32_FRACTION_MASK;
+    if bits & F32_EXPONENT_MASK == F32_EXPONENT_MASK && fraction != 0 {
+        return (u64::from(bits >> 31) << 63) | F64_EXPONENT_MASK | (u64::from(fraction) << 29);
+    }
+    (f32::from_bits(bits) as f64).to_bits()
+}
+
+fn narrow_buffer_f64_bits(value: f64) -> u32 {
+    const F64_EXPONENT_MASK: u64 = 0x7ff0_0000_0000_0000;
+    const F64_FRACTION_MASK: u64 = 0x000f_ffff_ffff_ffff;
+    const F32_EXPONENT_MASK: u32 = 0x7f80_0000;
+    const F32_QUIET_NAN: u32 = 0x0040_0000;
+    let bits = value.to_bits();
+    let fraction = bits & F64_FRACTION_MASK;
+    if bits & F64_EXPONENT_MASK == F64_EXPONENT_MASK && fraction != 0 {
+        let payload = (fraction >> 29) as u32;
+        let payload = if payload == 0 { F32_QUIET_NAN } else { payload };
+        return ((bits >> 63) as u32) << 31 | F32_EXPONENT_MASK | payload;
+    }
+    (value as f32).to_bits()
 }
 
 fn buffer_out_of_bounds() -> Error {
@@ -20000,6 +21127,146 @@ fn luau_number_to_string(value: f64) -> String {
     output
 }
 
+/// PUC Lua 5.1 `lua_number2str`: C `sprintf("%.14g")`.
+///
+/// 14 significant digits, correctly rounded (round half-to-even) via Rust's
+/// `LowerExp` formatting; style selection per C99 `%g`: scientific iff the
+/// post-rounding decimal exponent is < -4 or >= 14, trailing fractional zeros
+/// removed, exponent always signed with at least two digits.
+fn puc51_number_to_string(value: f64) -> String {
+    let value = canonicalize_number(value);
+    if value.is_nan() {
+        return "nan".to_owned();
+    }
+    if value == f64::INFINITY {
+        return "inf".to_owned();
+    }
+    if value == f64::NEG_INFINITY {
+        return "-inf".to_owned();
+    }
+    let scientific = format!("{value:.13e}");
+    let (mantissa, exponent) = scientific
+        .split_once('e')
+        .expect("LowerExp formatting always contains 'e'");
+    let exponent: i32 = exponent
+        .parse()
+        .expect("LowerExp exponent is always an integer");
+    let (negative, mantissa) = mantissa
+        .strip_prefix('-')
+        .map_or((false, mantissa), |magnitude| (true, magnitude));
+    let mut digits = String::with_capacity(14);
+    digits.extend(mantissa.chars().filter(|char| char.is_ascii_digit()));
+    debug_assert_eq!(
+        digits.len(),
+        14,
+        "LowerExp with precision 13 yields 14 significant digits"
+    );
+
+    let mut output = String::with_capacity(digits.len() + 8);
+    if negative {
+        output.push('-');
+    }
+    if (-4..14).contains(&exponent) {
+        puc51_push_fixed_digits(&mut output, &digits, exponent);
+    } else {
+        puc51_push_scientific_digits(&mut output, &digits, exponent);
+    }
+    output
+}
+
+/// `%g` fixed (`%f`-style) form: decimal point placed after `exponent + 1`
+/// significant digits, fractional trailing zeros trimmed, bare radix dropped.
+fn puc51_push_fixed_digits(output: &mut String, digits: &str, exponent: i32) {
+    let integer_len = exponent + 1;
+    if integer_len <= 0 {
+        output.push_str("0.");
+        output.extend(std::iter::repeat_n('0', (-integer_len) as usize));
+        let mut fraction = digits;
+        while fraction.ends_with('0') {
+            fraction = &fraction[..fraction.len() - 1];
+        }
+        output.push_str(fraction);
+        return;
+    }
+    let integer_len = integer_len as usize;
+    output.push_str(&digits[..integer_len]);
+    let mut fraction = &digits[integer_len..];
+    while fraction.ends_with('0') {
+        fraction = &fraction[..fraction.len() - 1];
+    }
+    if !fraction.is_empty() {
+        output.push('.');
+        output.push_str(fraction);
+    }
+}
+
+/// `%g` scientific (`%e`-style) form: one leading digit, trimmed fraction,
+/// signed exponent padded to at least two digits.
+fn puc51_push_scientific_digits(output: &mut String, digits: &str, exponent: i32) {
+    output.push_str(&digits[..1]);
+    let mut fraction = &digits[1..];
+    while fraction.ends_with('0') {
+        fraction = &fraction[..fraction.len() - 1];
+    }
+    if !fraction.is_empty() {
+        output.push('.');
+        output.push_str(fraction);
+    }
+    output.push('e');
+    output.push(if exponent >= 0 { '+' } else { '-' });
+    let magnitude = exponent.unsigned_abs();
+    if magnitude < 10 {
+        output.push('0');
+    }
+    output.push_str(&magnitude.to_string());
+}
+
+#[cfg(test)]
+mod puc51_number_format_tests {
+    use super::puc51_number_to_string;
+
+    #[test]
+    fn matches_libc_14g_reference_outputs() {
+        // Reference outputs measured from C `sprintf("%.14g")` (BSD/glibc).
+        let cases = [
+            (0.0, "0"),
+            (-0.0, "-0"),
+            (1.0, "1"),
+            (3.0, "3"),
+            (2.5, "2.5"),
+            (-1.5, "-1.5"),
+            (0.1, "0.1"),
+            (0.5, "0.5"),
+            (42.0, "42"),
+            (0.0001, "0.0001"),
+            (0.00001, "1e-05"),
+            (1e15, "1e+15"),
+            (1e20, "1e+20"),
+            (1e21, "1e+21"),
+            (100000000000000.5, "1e+14"),
+            (1000000000000000.5, "1e+15"),
+            (99999999999999.9, "1e+14"),
+            (123456789012345678.0, "1.2345678901235e+17"),
+            (5e-324, "4.9406564584125e-324"),
+            (2.2250738585072014e-308, "2.2250738585072e-308"),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(
+                puc51_number_to_string(value),
+                expected,
+                "%.14g of {value:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_finite_values_match_libc() {
+        assert_eq!(puc51_number_to_string(f64::NAN), "nan");
+        assert_eq!(puc51_number_to_string(f64::INFINITY), "inf");
+        assert_eq!(puc51_number_to_string(f64::NEG_INFINITY), "-inf");
+    }
+}
+
 fn luau_number_magnitude_to_string(magnitude: &str) -> Option<String> {
     let (mantissa, exponent) = magnitude
         .split_once('e')
@@ -20279,7 +21546,8 @@ fn shrink_bytecode_continuation_capacity(continuation: &mut BytecodeContinuation
         BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
         | BytecodeContinuation::PCallWriteFixed { .. }
-        | BytecodeContinuation::AppendToTable { .. } => {}
+        | BytecodeContinuation::AppendToTable { .. }
+        | BytecodeContinuation::IteratorStep { .. } => {}
     }
 }
 
@@ -20320,7 +21588,29 @@ fn collect_call_stack_frame_roots(roots: &mut Vec<Value>, frame: &CallStackFrame
     }
 }
 
+fn extend_coroutine_program_roots(
+    roots: &mut std::collections::BTreeSet<u32>,
+    frames: &[CoroutineFrame],
+) {
+    for frame in frames {
+        match frame {
+            CoroutineFrame::Bytecode(frame) => {
+                roots.insert(frame.program_id);
+            }
+            CoroutineFrame::XPCall(frame) => {
+                roots.insert(frame.program_id);
+            }
+            CoroutineFrame::PCall => {}
+        }
+    }
+}
+
 fn add_vm_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
+    add_vm_cached_control_memory(vm, usage);
+    add_vm_dynamic_map_memory(vm, usage);
+}
+
+fn add_vm_cached_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
     let (extension_live, extension_reserved) = vm.extensions.memory_usage();
     usage.add(extension_live, extension_reserved);
     usage.add_vec(&vm.host_functions);
@@ -20346,6 +21636,23 @@ fn add_vm_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
                 }
             }
         }
+    }
+    let module_cache_node_overhead = size_of::<usize>().saturating_mul(4);
+    for identity in vm.module_cache.keys() {
+        usage.add(
+            identity
+                .len()
+                .saturating_add(size_of::<Option<Value>>())
+                .saturating_add(module_cache_node_overhead),
+            identity
+                .capacity()
+                .saturating_add(size_of::<Option<Value>>())
+                .saturating_add(module_cache_node_overhead),
+        );
+    }
+    usage.add_vec(&vm.module_loading_stack);
+    for identity in &vm.module_loading_stack {
+        usage.add(identity.len(), identity.capacity());
     }
     usage.add_vec(&vm.call_stack);
     for frame in &vm.call_stack {
@@ -20394,12 +21701,14 @@ fn add_vm_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
         }
         add_error_location_memory(snapshot.top_location.as_ref(), usage);
     }
+}
+
+fn add_vm_dynamic_map_memory(vm: &Vm, usage: &mut MemoryUsage) {
     let roots = vm.external_roots.borrow();
-    let root_node_bytes = roots.values.len().saturating_mul(
-        size_of::<u64>()
-            .saturating_add(size_of::<Value>())
-            .saturating_add(size_of::<usize>().saturating_mul(4)),
-    );
+    let root_node_bytes = roots
+        .values
+        .len()
+        .saturating_mul(external_root_node_live_bytes());
     usage.add(root_node_bytes, root_node_bytes);
     let coverage_node_bytes = vm.coverage_hits.len().saturating_mul(
         size_of::<CoverageKey>()
@@ -20407,6 +21716,18 @@ fn add_vm_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
             .saturating_add(size_of::<usize>().saturating_mul(4)),
     );
     usage.add(coverage_node_bytes, coverage_node_bytes);
+}
+
+fn external_root_node_live_bytes() -> usize {
+    size_of::<u64>()
+        .saturating_add(size_of::<Value>())
+        .saturating_add(size_of::<usize>().saturating_mul(4))
+}
+
+fn call_stack_frame_live_bytes(frame: &CallStackFrame) -> usize {
+    let mut usage = MemoryUsage::default();
+    add_call_stack_frame_memory(frame, &mut usage);
+    usage.live_bytes
 }
 
 fn add_call_stack_frame_memory(frame: &CallStackFrame, usage: &mut MemoryUsage) {
@@ -20499,7 +21820,8 @@ fn add_continuation_memory(continuation: &BytecodeContinuation, usage: &mut Memo
         BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
         | BytecodeContinuation::PCallWriteFixed { .. }
-        | BytecodeContinuation::AppendToTable { .. } => {}
+        | BytecodeContinuation::AppendToTable { .. }
+        | BytecodeContinuation::IteratorStep { .. } => {}
     }
 }
 
@@ -21484,6 +22806,11 @@ enum InvalidIteratorCallee {
     Iterate,
 }
 
+enum CallIteratorStep {
+    Complete(bool),
+    Yield(CoroutineYield),
+}
+
 struct CallIteratorStepContext<'a, 'call> {
     program: &'a Program,
     registers: &'a mut [Value],
@@ -21578,6 +22905,30 @@ impl CallIteratorRegisters {
             })
         })
     }
+}
+
+fn apply_call_iterator_results(
+    registers: &mut [Value],
+    register_cells: &mut [Option<u32>],
+    window: CallIteratorRegisters,
+    results: &[Value],
+) -> Result<bool> {
+    let first = results.first().copied().unwrap_or_else(Value::nil);
+    if first.kind() == ValueKind::Nil {
+        return Ok(false);
+    }
+
+    set_register(registers, window.control, first)?;
+    for index in 0..window.visible_count {
+        let value = results
+            .get(usize::from(index))
+            .copied()
+            .unwrap_or_else(Value::nil);
+        let register = window.visible_register(index)?;
+        set_register(registers, register, value)?;
+        clear_register_cell(register_cells, register)?;
+    }
+    Ok(true)
 }
 
 struct GeneralizedIteratorRegisters {
@@ -22151,7 +23502,8 @@ fn extend_bytecode_continuation_roots(roots: &mut Vec<Value>, continuation: &Byt
         BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
         | BytecodeContinuation::PCallWriteFixed { .. }
-        | BytecodeContinuation::AppendToTable { .. } => {}
+        | BytecodeContinuation::AppendToTable { .. }
+        | BytecodeContinuation::IteratorStep { .. } => {}
     }
 }
 
@@ -22172,7 +23524,8 @@ fn extend_bytecode_continuation_heap_roots(
         BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
         | BytecodeContinuation::PCallWriteFixed { .. }
-        | BytecodeContinuation::AppendToTable { .. } => {}
+        | BytecodeContinuation::AppendToTable { .. }
+        | BytecodeContinuation::IteratorStep { .. } => {}
     }
 }
 
@@ -22359,7 +23712,7 @@ fn table_find_start(value: f64) -> Result<usize> {
     Ok(value as usize)
 }
 
-fn table_create_size(value: f64) -> Result<usize> {
+fn table_create_size(value: f64, apply_create_cap: bool) -> Result<usize> {
     if !value.is_finite() || value < i32::MIN as f64 || value > i32::MAX as f64 {
         return Err(Error::new(ErrorKind::TypeError {
             expected: "integer table.create size",
@@ -22377,10 +23730,33 @@ fn table_create_size(value: f64) -> Result<usize> {
             expected: "table overflow",
         }));
     }
-    if size > MAX_TABLE_CREATE_ARRAY_SIZE {
+    if apply_create_cap && size > MAX_TABLE_CREATE_ARRAY_SIZE {
         return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
     }
     Ok(size)
+}
+
+/// `luaO_int2fb` + `luaO_fb2int` (lobject.c): PUC constructor array-size
+/// hints are rounded up to the nearest floating-byte value, so the array
+/// part of a 17-element constructor is 18 slots, not 17.
+fn puc_constructor_array_size(size: usize) -> usize {
+    let mut x = size;
+    let mut exponent = 0usize;
+    while x >= 16 {
+        x = (x + 1) >> 1;
+        exponent += 1;
+    }
+    let fb = if x < 8 {
+        x
+    } else {
+        ((exponent + 1) << 3) | (x - 8)
+    };
+    let decoded_exponent = (fb >> 3) & 31;
+    if decoded_exponent == 0 {
+        fb
+    } else {
+        ((fb & 7) + 8) << (decoded_exponent - 1)
+    }
 }
 
 fn table_len_to_i32(len: usize) -> Result<i32> {
@@ -25087,6 +26463,23 @@ fn readonly_table_error() -> Error {
     })
 }
 
+/// PUC `auxsort` reads the table through `lua_rawgeti`, so partition scans
+/// that run past the sorted range (only possible with an inconsistent
+/// comparator) observe nil rather than panicking.
+fn table_sort_puc51_probe(values: &[Value], index: isize, l: isize, u: isize) -> Value {
+    if (l..=u).contains(&index) {
+        values[index as usize]
+    } else {
+        Value::nil()
+    }
+}
+
+fn puc51_invalid_order_function_error() -> Error {
+    Error::new(ErrorKind::RuntimeError {
+        message: "invalid order function for sorting".to_owned(),
+    })
+}
+
 fn table_expected_error() -> Error {
     Error::new(ErrorKind::RuntimeError {
         message: "table expected".to_owned(),
@@ -26330,7 +27723,7 @@ mod inline_cache_tests {
             .heap
             .alloc_function(Some(first_program), 0, Vec::new(), vm.globals)
             .expect("program-rooting function");
-        let retained_function = vm.retain_value(Value::function(retained_function));
+        let retained_function = vm.retain_value(Value::function(retained_function)).unwrap();
 
         let dead = vm
             .heap
@@ -26368,7 +27761,7 @@ mod inline_cache_tests {
             .heap
             .alloc_function(Some(old_program), 0, Vec::new(), vm.globals)
             .expect("first function");
-        let old_root = vm.retain_value(Value::function(old_function));
+        let old_root = vm.retain_value(Value::function(old_function)).unwrap();
 
         vm.collect_garbage();
         assert!(vm.dynamic_programs.get(old_program).is_some());
@@ -26387,6 +27780,48 @@ mod inline_cache_tests {
         );
         assert!(vm.dynamic_program(old_program).is_err());
         assert!(vm.dynamic_program(replacement).is_ok());
+    }
+
+    #[test]
+    fn script_collection_reclaims_unreachable_dynamic_programs() {
+        let program = Program::new(
+            Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
+            vec![Constant::String(vec![b'x'; 4_096])],
+        );
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+
+        let active_program = vm
+            .retain_dynamic_program(program.clone())
+            .expect("active top-level program");
+        vm.call_stack.push(CallStackFrame {
+            program: Some(active_program),
+            function: None,
+            debug_name: None,
+            environment: vm.globals,
+            call_site: None,
+            roots: Vec::new(),
+            stackless_roots: Vec::new(),
+            stackless_debug_frames: Vec::new(),
+        });
+        vm.native_collectgarbage(&[])
+            .expect("collection during top-level program execution");
+        assert!(vm.dynamic_programs.get(active_program).is_some());
+        vm.call_stack.pop();
+        vm.native_collectgarbage(&[])
+            .expect("collection after top-level program execution");
+        assert!(vm.dynamic_programs.get(active_program).is_none());
+
+        let script_program = vm
+            .retain_dynamic_program(program)
+            .expect("script-collection program");
+        vm.heap
+            .alloc_dynamic_main_function(script_program, vm.globals)
+            .expect("unreachable script-collection function");
+        let script_before = vm.current_live_bytes();
+        vm.native_collectgarbage(&[])
+            .expect("script-visible collection");
+        assert!(vm.dynamic_programs.get(script_program).is_none());
+        assert!(vm.current_live_bytes() < script_before);
     }
 
     #[test]
@@ -26424,7 +27859,7 @@ mod inline_cache_tests {
         assert_eq!(baseline.peak_reserved_bytes, Some(baseline.reserved_bytes));
 
         let table = vm.heap.alloc_filled_array_table(8_192, Value::nil());
-        let root = vm.retain_value(Value::table(table));
+        let root = vm.retain_value(Value::table(table)).unwrap();
         let allocated = vm.memory_stats();
         assert!(allocated.live_bytes >= baseline.live_bytes + 8_192 * size_of::<Value>());
         assert!(allocated.reserved_bytes >= allocated.live_bytes);
@@ -26447,6 +27882,7 @@ mod inline_cache_tests {
         vm.set_global_value("quota_state", Value::table(table))
             .expect("setup should be unbounded");
         vm.settings.memory_limit_bytes = Some(vm.memory_stats().live_bytes);
+        vm.full_memory_census_count = 0;
 
         let error = vm
             .set_table_array_slot(table, 4_096, Value::number(99.0))
@@ -26465,6 +27901,112 @@ mod inline_cache_tests {
                 .and_then(Value::as_number),
             Some(42.0)
         );
+        assert_eq!(
+            vm.full_memory_census_count, 0,
+            "quota admission must use maintained totals, not a full VM census"
+        );
+        assert!(vm.memory_stats().live_bytes <= vm.settings.memory_limit_bytes.unwrap());
+    }
+
+    #[test]
+    fn puc_hash_only_constructor_hint_is_checked_before_allocation() {
+        let mut baseline = Vm::new(Profile::Puc51Compat);
+        let limit = baseline.memory_stats().live_bytes + 64 * 1024;
+        let mut vm = Vm::with_settings(
+            Profile::Puc51Compat,
+            VmSettings {
+                memory_limit_bytes: Some(limit),
+                ..VmSettings::default()
+            },
+        );
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::with_aux(Opcode::NewArray, 0, 0, 0, 1_000_000),
+                    Instruction::new(Opcode::Halt, 0, 0, 0),
+                ],
+                1,
+            ),
+            Vec::new(),
+        );
+
+        let error = vm
+            .run(&program)
+            .expect_err("the oversized node hint must fail before allocation");
+        assert!(matches!(error.kind, ErrorKind::OutOfMemory));
+        assert!(vm.memory_stats().live_bytes <= limit);
+    }
+
+    #[test]
+    fn quota_rejected_short_string_key_does_not_materialize_transient_atom() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let table = vm.heap.alloc_array_table(&[Value::nil()]);
+        vm.set_global_value("quota_hash_state", Value::table(table))
+            .expect("setup should be unbounded");
+        vm.settings.memory_limit_bytes = Some(vm.memory_stats().live_bytes);
+        vm.full_memory_census_count = 0;
+        let key = Value::short_string(b"oom-key").expect("inline short string");
+
+        let error = vm
+            .set_table_index(table, key, Value::number(99.0))
+            .expect_err("a new hash key must exceed the exact current live-byte limit");
+        assert!(matches!(error.kind, ErrorKind::OutOfMemory));
+        assert!(
+            vm.heap.table_get(table, key).is_none(),
+            "a rejected write must not add the hash entry",
+        );
+        assert!(
+            vm.current_live_bytes() <= vm.settings.memory_limit_bytes.unwrap(),
+            "a rejected write must not materialize the planned key atom",
+        );
+
+        vm.set_table_array_slot(table, 1, Value::number(42.0))
+            .expect("a no-growth write must remain usable after OOM");
+        assert_eq!(
+            vm.heap
+                .table_get(table, Value::number(1.0))
+                .and_then(Value::as_number),
+            Some(42.0)
+        );
+        assert_eq!(
+            vm.full_memory_census_count, 0,
+            "quota admission and cleanup must not require a full VM census"
+        );
+        assert!(vm.memory_stats().live_bytes <= vm.settings.memory_limit_bytes.unwrap());
+    }
+
+    #[test]
+    fn quota_rejected_vector_key_does_not_materialize_visible_copy() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let table = vm.heap.alloc_array_table(&[Value::nil()]);
+        let vector = vm
+            .heap
+            .alloc_vector(VectorData::new(-0.0, 2.0, 3.0))
+            .expect("vector key");
+        let key = Value::vector(vector);
+        vm.set_global_value("quota_vector_table", Value::table(table))
+            .expect("setup table should be unbounded");
+        vm.set_global_value("quota_vector_key", key)
+            .expect("setup key should be unbounded");
+        vm.settings.memory_limit_bytes = Some(vm.memory_stats().live_bytes);
+        vm.full_memory_census_count = 0;
+
+        let error = vm
+            .set_table_index(table, key, Value::number(99.0))
+            .expect_err("a new vector key must exceed the exact current live-byte limit");
+        assert!(matches!(error.kind, ErrorKind::OutOfMemory));
+        assert!(
+            vm.heap.table_get(table, key).is_none(),
+            "a rejected write must not add the vector entry",
+        );
+        assert!(
+            vm.current_live_bytes() <= vm.settings.memory_limit_bytes.unwrap(),
+            "a rejected write must not allocate its normalized visible vector",
+        );
+        assert_eq!(
+            vm.full_memory_census_count, 0,
+            "quota admission must use maintained totals, not a full VM census"
+        );
         assert!(vm.memory_stats().live_bytes <= vm.settings.memory_limit_bytes.unwrap());
     }
 
@@ -26479,6 +28021,27 @@ mod inline_cache_tests {
     }
 
     #[test]
+    fn script_memory_counters_read_the_incremental_live_total() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let count = vm.heap.intern_string_value_bytes(b"count");
+        let expected_count = vm.current_live_bytes() as f64 / 1024.0;
+        let reported_count = vm
+            .native_collectgarbage(&[count])
+            .expect("collectgarbage count")
+            .as_number()
+            .expect("numeric count");
+        assert_eq!(reported_count, expected_count);
+
+        let expected_info = (vm.current_live_bytes() / 1024) as f64;
+        let reported_info = vm
+            .native_gcinfo(&[])
+            .expect("gcinfo")
+            .as_number()
+            .expect("numeric info");
+        assert_eq!(reported_info, expected_info);
+    }
+
+    #[test]
     fn explicit_collection_prunes_only_unreachable_coroutine_state() {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let live_handle = vm
@@ -26489,7 +28052,7 @@ mod inline_cache_tests {
             .heap
             .alloc_userdata(None)
             .expect("dead coroutine userdata");
-        let live_root = vm.retain_value(Value::userdata(live_handle));
+        let live_root = vm.retain_value(Value::userdata(live_handle)).unwrap();
         for handle in [live_handle, dead_handle] {
             vm.coroutines.push(CoroutineState {
                 handle,
@@ -26512,6 +28075,71 @@ mod inline_cache_tests {
         vm.collect_garbage();
         assert!(vm.coroutines.is_empty());
         assert!(!vm.heap.has_userdata(live_handle));
+    }
+
+    #[test]
+    fn suspended_coroutine_frames_follow_handle_reachability_to_a_fixed_point() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let first_handle = vm
+            .heap
+            .alloc_userdata(None)
+            .expect("first coroutine userdata");
+        let second_handle = vm
+            .heap
+            .alloc_userdata(None)
+            .expect("second coroutine userdata");
+        let payload = vm.heap.alloc_array_table(&[Value::number(42.0)]);
+        let environment = vm.globals;
+        let snapshot = |root| CoroutineDebugSnapshot {
+            frames: vec![CallStackFrame {
+                program: None,
+                function: None,
+                debug_name: None,
+                environment,
+                call_site: None,
+                roots: vec![root],
+                stackless_roots: Vec::new(),
+                stackless_debug_frames: Vec::new(),
+            }],
+            top_location: None,
+            first_debug_info_level: 0,
+        };
+        vm.coroutines.push(CoroutineState {
+            handle: first_handle,
+            callee: Value::nil(),
+            frames: Vec::new(),
+            initialized: true,
+            dead: false,
+            error: None,
+            debug_snapshot: Some(snapshot(Value::userdata(second_handle))),
+        });
+        vm.coroutines.push(CoroutineState {
+            handle: second_handle,
+            callee: Value::nil(),
+            frames: Vec::new(),
+            initialized: true,
+            dead: false,
+            error: None,
+            debug_snapshot: Some(snapshot(Value::table(payload))),
+        });
+        let first_root = vm
+            .retain_value(Value::userdata(first_handle))
+            .expect("first coroutine root");
+
+        vm.collect_garbage();
+
+        assert_eq!(vm.coroutines.len(), 2);
+        assert!(vm.heap.has_userdata(first_handle));
+        assert!(vm.heap.has_userdata(second_handle));
+        assert!(vm.heap.has_table(payload));
+
+        drop(first_root);
+        vm.collect_garbage();
+
+        assert!(vm.coroutines.is_empty());
+        assert!(!vm.heap.has_userdata(first_handle));
+        assert!(!vm.heap.has_userdata(second_handle));
+        assert!(!vm.heap.has_table(payload));
     }
 
     #[test]
@@ -27669,6 +29297,81 @@ mod inline_cache_tests {
     }
 
     #[test]
+    fn buffer_f32_round_trip_preserves_exact_special_value_bits() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        for payload in [
+            0x7fc0_0001_u32,
+            0xffc0_0042_u32,
+            0x7fa0_0001_u32,
+            (-0.0_f32).to_bits(),
+        ] {
+            let source = Value::buffer(
+                vm.heap
+                    .alloc_buffer(payload.to_le_bytes().to_vec())
+                    .expect("source buffer should allocate"),
+            );
+            let number = vm
+                .native_buffer_read_float(&[source, Value::number(0.0)], BufferFloatKind::F32)
+                .expect("readf32 should accept the exact source buffer");
+
+            let target = Value::buffer(
+                vm.heap
+                    .alloc_buffer(vec![0; 4])
+                    .expect("target buffer should allocate"),
+            );
+            vm.native_buffer_write_float(
+                &[target, Value::number(0.0), number],
+                BufferFloatKind::F32,
+            )
+            .expect("writef32 should preserve the exact number payload");
+            assert_eq!(
+                vm.buffer_read_checked(target.as_buffer().expect("buffer handle"), 0, 4)
+                    .expect("target bytes should be readable"),
+                payload.to_le_bytes()
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_f64_round_trip_preserves_exact_special_value_bits() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        for payload in [
+            0x7ff8_0000_0000_0001_u64,
+            0xfff8_0000_0000_0042_u64,
+            (-0.0_f64).to_bits(),
+        ] {
+            let source = Value::buffer(
+                vm.heap
+                    .alloc_buffer(payload.to_le_bytes().to_vec())
+                    .expect("source buffer should allocate"),
+            );
+            let number = vm
+                .native_buffer_read_float(&[source, Value::number(0.0)], BufferFloatKind::F64)
+                .expect("readf64 should accept the exact source buffer");
+            assert_eq!(
+                number.as_number().expect("number result").to_bits(),
+                payload
+            );
+
+            let target = Value::buffer(
+                vm.heap
+                    .alloc_buffer(vec![0; 8])
+                    .expect("target buffer should allocate"),
+            );
+            vm.native_buffer_write_float(
+                &[target, Value::number(0.0), number],
+                BufferFloatKind::F64,
+            )
+            .expect("writef64 should preserve the exact number payload");
+            assert_eq!(
+                vm.buffer_read_checked(target.as_buffer().expect("buffer handle"), 0, 8)
+                    .expect("target bytes should be readable"),
+                payload.to_le_bytes()
+            );
+        }
+    }
+
+    #[test]
     fn assert_message_renders_invalid_utf8_lossily() {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let message = vm.heap.intern_string_value_bytes(&[b'a', 0xff, b'b']);
@@ -27689,6 +29392,64 @@ mod inline_cache_tests {
                 .expect("binary atom assertion messages should be accepted"),
             String::from_utf8_lossy(&long_bytes)
         );
+    }
+
+    #[test]
+    fn retained_root_admission_is_quota_checked_and_atomic() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let first = vm.empty_table();
+        let second = vm.empty_table();
+        let before = vm.current_live_bytes();
+        let root_bytes = external_root_node_live_bytes();
+        vm.settings.memory_limit_bytes = Some(
+            before
+                .saturating_add(root_bytes.saturating_mul(2))
+                .saturating_sub(1),
+        );
+
+        let error = match vm.retain_values(&[first, second]) {
+            Ok(_) => panic!("batch root admission above the logical-live quota must fail"),
+            Err(error) => error,
+        };
+        assert!(matches!(error.kind, ErrorKind::OutOfMemory));
+        assert!(vm.external_roots.borrow().values.is_empty());
+        assert_eq!(vm.current_live_bytes(), before);
+
+        vm.settings.memory_limit_bytes = Some(before.saturating_add(root_bytes.saturating_mul(2)));
+        let retained = vm.retain_values(&[first, second]).unwrap();
+        assert_eq!(
+            vm.current_live_bytes(),
+            before.saturating_add(root_bytes.saturating_mul(2))
+        );
+        drop(retained);
+        assert_eq!(vm.current_live_bytes(), before);
+    }
+
+    #[test]
+    fn batch_root_admission_preserves_every_transient_across_quota_collection() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let first = vm.empty_table();
+        let second = vm.empty_table();
+        let live_before_garbage = vm.current_live_bytes();
+        for _ in 0..64 {
+            let _ = vm.empty_table();
+        }
+        let with_garbage = vm.current_live_bytes();
+        assert!(with_garbage > live_before_garbage);
+        let reclaimable = with_garbage.saturating_sub(live_before_garbage);
+        vm.settings.memory_limit_bytes = Some(
+            live_before_garbage
+                .saturating_add(external_root_node_live_bytes().saturating_mul(2))
+                .saturating_add(reclaimable / 2),
+        );
+
+        let retained = vm.retain_values(&[first, second]).unwrap();
+        assert_eq!(retained[0].value(&vm).unwrap().as_table(), first.as_table());
+        assert_eq!(
+            retained[1].value(&vm).unwrap().as_table(),
+            second.as_table()
+        );
+        assert!(vm.current_live_bytes() <= vm.settings.memory_limit_bytes.unwrap());
     }
 
     #[test]
@@ -27731,7 +29492,6 @@ mod inline_cache_tests {
         let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
         let initial_rng_state = vm.initial_rng_state;
         vm.rng_state = 123;
-        vm.gcinfo_counter = 9;
         vm.gc_step_counter = 8;
         vm.gc_stopped = true;
         vm.executed_instructions = 77;
@@ -27743,7 +29503,6 @@ mod inline_cache_tests {
         vm.reset_decision().unwrap();
 
         assert_eq!(vm.rng_state, initial_rng_state);
-        assert_eq!(vm.gcinfo_counter, 0);
         assert_eq!(vm.gc_step_counter, 0);
         assert!(!vm.gc_stopped);
         assert_eq!(vm.executed_instructions, 0);
@@ -27761,7 +29520,7 @@ mod inline_cache_tests {
         vm.set_global_value("survives", Value::number(42.0))
             .unwrap();
         let table = vm.empty_table();
-        let retained = vm.retain_value(table);
+        let retained = vm.retain_value(table).unwrap();
 
         let error = vm.reset_decision().unwrap_err();
 

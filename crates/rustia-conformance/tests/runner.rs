@@ -100,17 +100,46 @@ fn p1_smoke_inventory_is_manifested() {
 }
 
 #[test]
+fn puc51_compat_inventory_is_manifested() {
+    let repo = repository_from_crate_manifest(PathBuf::from(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let puc_root = repo.join("conformance/fixtures/puc51-compat");
+    let mut copied = BTreeSet::new();
+    for entry in fs::read_dir(puc_root).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "luau")
+        {
+            copied.insert(repo_relative(&repo, &path));
+        }
+    }
+    assert!(!copied.is_empty());
+
+    let manifest = fs::read_to_string(repo.join("conformance/MANIFEST.tsv")).unwrap();
+    let manifest_paths = manifest
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| line.split('\t').nth(6))
+        .filter(|path| path.starts_with("conformance/fixtures/puc51-compat/"))
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(manifest_paths, copied);
+}
+
+#[test]
 fn coverage_current_status_counts_match_manifest() {
     let repo = repository_from_crate_manifest(PathBuf::from(env!("CARGO_MANIFEST_DIR"))).unwrap();
     let counts = coverage_counts(&repo);
     let coverage = fs::read_to_string(repo.join("conformance/COVERAGE.md")).unwrap();
     let normalized_coverage = coverage.split_whitespace().collect::<Vec<_>>().join(" ");
     let expected_status = format!(
-        "The current manifest contains {} fixtures and {} refs: {} executable `luau-0.709` fixtures, {} `pending-oracle` P1 smoke fixtures, and {} whole upstream Luau 0.709 conformance scripts as `pending-impl` inventory.",
+        "The current manifest contains {} fixtures and {} refs: {} executable `luau-0.709` fixtures, {} `pending-oracle` P1 smoke fixtures, {} `puc-lua-5.1.5` PUC 5.1.5 compat fixtures, and {} whole upstream Luau 0.709 conformance scripts as `pending-impl` inventory.",
         counts.fixtures,
         counts.refs,
         counts.luau_0709,
         counts.pending_oracle,
+        counts.puc51,
         counts.pending_impl
     );
 
@@ -227,6 +256,10 @@ fn ref_catalog_status_matches_source_evidence() {
                 source.starts_with("conformance/fixtures/rustia-only/")
                     || source.starts_with("design/"),
                 "rustia-only ref {reference:?} must cite a rustia-only fixture or design source, got {source:?}"
+            ),
+            "puc-lua-5.1.5" => assert!(
+                source.starts_with("conformance/fixtures/puc51-compat/"),
+                "puc-lua-5.1.5 ref {reference:?} must cite a puc51-compat fixture derived from the pinned PUC 5.1.5 oracle, got {source:?}"
             ),
             status => panic!("refs line {} has unknown status {status:?}", line_number + 1),
         }
@@ -885,6 +918,7 @@ struct CoverageCounts {
     pending_oracle: usize,
     pending_impl: usize,
     rustia_only: usize,
+    puc51: usize,
 }
 
 fn coverage_counts(repo: &Path) -> CoverageCounts {
@@ -908,6 +942,7 @@ fn coverage_counts(repo: &Path) -> CoverageCounts {
             "pending-oracle" => counts.pending_oracle += 1,
             "pending-impl" => counts.pending_impl += 1,
             "rustia-only" => counts.rustia_only += 1,
+            "puc-lua-5.1.5" => counts.puc51 += 1,
             status => panic!(
                 "manifest line {} has unknown oracle status {status:?}",
                 line_number + 1

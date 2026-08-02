@@ -11,11 +11,13 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-rustia = { path = "../../../crates/rustia" }
+# The page instantiates this artifact with the raw WebAssembly API and an empty import object.
+# Keep the runner on Rustia's bare-Wasm surface; the default `web-live` adapter intentionally
+# imports JavaScript glue for applications built through wasm-bindgen.
+rustia = { path = "../../../crates/rustia", default-features = false }
 
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
-

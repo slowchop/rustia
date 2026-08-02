@@ -88,7 +88,7 @@ impl OwnedValue {
 }
 
 pub trait IntoRustia {
-    fn into_rustia(self) -> OwnedValue;
+    fn into_rustia(self) -> Result<OwnedValue>;
 }
 
 pub trait FromRustia: Sized {
@@ -96,28 +96,35 @@ pub trait FromRustia: Sized {
 }
 
 impl OwnedTable {
-    pub fn array_values<T>(values: impl IntoIterator<Item = T>) -> Self
+    pub fn array_values<T>(values: impl IntoIterator<Item = T>) -> Result<Self>
     where
         T: IntoRustia,
     {
-        Self {
-            array: values.into_iter().map(IntoRustia::into_rustia).collect(),
+        Ok(Self {
+            array: values
+                .into_iter()
+                .map(IntoRustia::into_rustia)
+                .collect::<Result<Vec<_>>>()?,
             entries: Vec::new(),
-        }
+        })
     }
 
-    pub fn string_entries<K, V>(entries: impl IntoIterator<Item = (K, V)>) -> Self
+    pub fn string_entries<K, V>(entries: impl IntoIterator<Item = (K, V)>) -> Result<Self>
     where
         K: Into<String>,
         V: IntoRustia,
     {
-        Self {
+        Ok(Self {
             array: Vec::new(),
             entries: entries
                 .into_iter()
-                .map(|(key, value)| (OwnedKey::String(key.into()), value.into_rustia()))
-                .collect(),
-        }
+                .map(|(key, value)| {
+                    value
+                        .into_rustia()
+                        .map(|value| (OwnedKey::String(key.into()), value))
+                })
+                .collect::<Result<Vec<_>>>()?,
+        })
     }
 
     pub fn get_string_as<T>(&self, key: &str) -> Result<Option<T>>
@@ -143,7 +150,7 @@ impl OwnedTable {
 }
 
 pub trait IntoRustiaMulti {
-    fn into_rustia_multi(self) -> Vec<OwnedValue>;
+    fn into_rustia_multi(self) -> Result<Vec<OwnedValue>>;
 
     fn rustia_type_names() -> Vec<&'static str>
     where
@@ -158,8 +165,8 @@ pub trait FromRustiaMulti: Sized {
 }
 
 impl IntoRustia for OwnedValue {
-    fn into_rustia(self) -> OwnedValue {
-        self
+    fn into_rustia(self) -> Result<OwnedValue> {
+        Ok(self)
     }
 }
 
@@ -170,8 +177,8 @@ impl FromRustia for OwnedValue {
 }
 
 impl IntoRustia for OwnedTable {
-    fn into_rustia(self) -> OwnedValue {
-        OwnedValue::Table(self)
+    fn into_rustia(self) -> Result<OwnedValue> {
+        Ok(OwnedValue::Table(self))
     }
 }
 
@@ -185,8 +192,8 @@ impl FromRustia for OwnedTable {
 }
 
 impl IntoRustia for () {
-    fn into_rustia(self) -> OwnedValue {
-        OwnedValue::Nil
+    fn into_rustia(self) -> Result<OwnedValue> {
+        Ok(OwnedValue::Nil)
     }
 }
 
@@ -197,8 +204,8 @@ impl FromRustia for () {
 }
 
 impl IntoRustia for bool {
-    fn into_rustia(self) -> OwnedValue {
-        OwnedValue::Boolean(self)
+    fn into_rustia(self) -> Result<OwnedValue> {
+        Ok(OwnedValue::Boolean(self))
     }
 }
 
@@ -212,8 +219,8 @@ impl FromRustia for bool {
 }
 
 impl IntoRustia for f64 {
-    fn into_rustia(self) -> OwnedValue {
-        OwnedValue::Number(self)
+    fn into_rustia(self) -> Result<OwnedValue> {
+        Ok(OwnedValue::Number(self))
     }
 }
 
@@ -227,8 +234,8 @@ impl FromRustia for f64 {
 }
 
 impl IntoRustia for f32 {
-    fn into_rustia(self) -> OwnedValue {
-        OwnedValue::Number(f64::from(self))
+    fn into_rustia(self) -> Result<OwnedValue> {
+        Ok(OwnedValue::Number(f64::from(self)))
     }
 }
 
@@ -238,12 +245,19 @@ impl FromRustia for f32 {
     }
 }
 
-macro_rules! impl_integer_value {
+macro_rules! impl_signed_integer_value {
     ($($ty:ty),* $(,)?) => {
         $(
             impl IntoRustia for $ty {
-                fn into_rustia(self) -> OwnedValue {
-                    OwnedValue::Number(self as f64)
+                fn into_rustia(self) -> Result<OwnedValue> {
+                    let number = self as f64;
+                    if number as i128 != self as i128 {
+                        return Err(Error::Embed(format!(
+                            "{} value {self} cannot be represented exactly as a Luau number",
+                            stringify!($ty)
+                        )));
+                    }
+                    Ok(OwnedValue::Number(number))
                 }
             }
 
@@ -255,30 +269,76 @@ macro_rules! impl_integer_value {
                             "expected integer-compatible number, got {number}"
                         )));
                     }
-                    if number < <$ty>::MIN as f64 || number > <$ty>::MAX as f64 {
+                    let integer = number as i128;
+                    if integer < <$ty>::MIN as i128 || integer > <$ty>::MAX as i128 {
                         return Err(Error::Embed(format!(
                             "number {number} is outside {} range",
                             stringify!($ty)
                         )));
                     }
-                    Ok(number as $ty)
+                    Ok(integer as $ty)
                 }
             }
         )*
     };
 }
 
-impl_integer_value!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
+macro_rules! impl_unsigned_integer_value {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl IntoRustia for $ty {
+                fn into_rustia(self) -> Result<OwnedValue> {
+                    let number = self as f64;
+                    if number as u128 != self as u128 {
+                        return Err(Error::Embed(format!(
+                            "{} value {self} cannot be represented exactly as a Luau number",
+                            stringify!($ty)
+                        )));
+                    }
+                    Ok(OwnedValue::Number(number))
+                }
+            }
+
+            impl FromRustia for $ty {
+                fn from_rustia(value: OwnedValue) -> Result<Self> {
+                    let number = f64::from_rustia(value)?;
+                    if !number.is_finite() || number.fract() != 0.0 {
+                        return Err(Error::Embed(format!(
+                            "expected integer-compatible number, got {number}"
+                        )));
+                    }
+                    if number < 0.0 {
+                        return Err(Error::Embed(format!(
+                            "number {number} is outside {} range",
+                            stringify!($ty)
+                        )));
+                    }
+                    let integer = number as u128;
+                    if integer > <$ty>::MAX as u128 {
+                        return Err(Error::Embed(format!(
+                            "number {number} is outside {} range",
+                            stringify!($ty)
+                        )));
+                    }
+                    Ok(integer as $ty)
+                }
+            }
+        )*
+    };
+}
+
+impl_signed_integer_value!(i8, i16, i32, i64, isize);
+impl_unsigned_integer_value!(u8, u16, u32, u64, usize);
 
 impl IntoRustia for String {
-    fn into_rustia(self) -> OwnedValue {
-        OwnedValue::String(self)
+    fn into_rustia(self) -> Result<OwnedValue> {
+        Ok(OwnedValue::String(self))
     }
 }
 
 impl IntoRustia for &str {
-    fn into_rustia(self) -> OwnedValue {
-        OwnedValue::String(self.to_owned())
+    fn into_rustia(self) -> Result<OwnedValue> {
+        Ok(OwnedValue::String(self.to_owned()))
     }
 }
 
@@ -295,8 +355,8 @@ impl<T> IntoRustia for Option<T>
 where
     T: IntoRustia,
 {
-    fn into_rustia(self) -> OwnedValue {
-        self.map_or(OwnedValue::Nil, IntoRustia::into_rustia)
+    fn into_rustia(self) -> Result<OwnedValue> {
+        self.map_or(Ok(OwnedValue::Nil), IntoRustia::into_rustia)
     }
 }
 
@@ -316,8 +376,8 @@ impl<T> IntoRustia for Vec<T>
 where
     T: IntoRustia,
 {
-    fn into_rustia(self) -> OwnedValue {
-        OwnedValue::Table(OwnedTable::array_values(self))
+    fn into_rustia(self) -> Result<OwnedValue> {
+        OwnedTable::array_values(self).map(OwnedValue::Table)
     }
 }
 
@@ -342,8 +402,8 @@ impl<T> IntoRustia for BTreeMap<String, T>
 where
     T: IntoRustia,
 {
-    fn into_rustia(self) -> OwnedValue {
-        OwnedValue::Table(OwnedTable::string_entries(self))
+    fn into_rustia(self) -> Result<OwnedValue> {
+        OwnedTable::string_entries(self).map(OwnedValue::Table)
     }
 }
 
@@ -375,8 +435,8 @@ macro_rules! impl_single_multi {
     ($($ty:ty),* $(,)?) => {
         $(
             impl IntoRustiaMulti for $ty {
-                fn into_rustia_multi(self) -> Vec<OwnedValue> {
-                    vec![self.into_rustia()]
+                fn into_rustia_multi(self) -> Result<Vec<OwnedValue>> {
+                    self.into_rustia().map(|value| vec![value])
                 }
             }
 
@@ -400,8 +460,8 @@ impl_single_multi!(
 );
 
 impl IntoRustiaMulti for &str {
-    fn into_rustia_multi(self) -> Vec<OwnedValue> {
-        vec![self.into_rustia()]
+    fn into_rustia_multi(self) -> Result<Vec<OwnedValue>> {
+        self.into_rustia().map(|value| vec![value])
     }
 }
 
@@ -409,8 +469,8 @@ impl<T> IntoRustiaMulti for Option<T>
 where
     T: IntoRustia,
 {
-    fn into_rustia_multi(self) -> Vec<OwnedValue> {
-        vec![self.into_rustia()]
+    fn into_rustia_multi(self) -> Result<Vec<OwnedValue>> {
+        self.into_rustia().map(|value| vec![value])
     }
 }
 
@@ -432,8 +492,8 @@ impl<T> IntoRustiaMulti for Vec<T>
 where
     T: IntoRustia,
 {
-    fn into_rustia_multi(self) -> Vec<OwnedValue> {
-        vec![self.into_rustia()]
+    fn into_rustia_multi(self) -> Result<Vec<OwnedValue>> {
+        self.into_rustia().map(|value| vec![value])
     }
 }
 
@@ -455,8 +515,8 @@ impl<T> IntoRustiaMulti for BTreeMap<String, T>
 where
     T: IntoRustia,
 {
-    fn into_rustia_multi(self) -> Vec<OwnedValue> {
-        vec![self.into_rustia()]
+    fn into_rustia_multi(self) -> Result<Vec<OwnedValue>> {
+        self.into_rustia().map(|value| vec![value])
     }
 }
 
@@ -475,8 +535,8 @@ where
 }
 
 impl IntoRustiaMulti for () {
-    fn into_rustia_multi(self) -> Vec<OwnedValue> {
-        Vec::new()
+    fn into_rustia_multi(self) -> Result<Vec<OwnedValue>> {
+        Ok(Vec::new())
     }
 
     fn rustia_type_names() -> Vec<&'static str> {
@@ -497,9 +557,9 @@ macro_rules! impl_tuple_multi {
             $($name: IntoRustia,)+
         {
             #[allow(non_snake_case)]
-            fn into_rustia_multi(self) -> Vec<OwnedValue> {
+            fn into_rustia_multi(self) -> Result<Vec<OwnedValue>> {
                 let ($($name,)+) = self;
-                vec![$($name.into_rustia(),)+]
+                Ok(vec![$($name.into_rustia()?,)+])
             }
 
             fn rustia_type_names() -> Vec<&'static str> {

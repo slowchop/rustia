@@ -1,8 +1,8 @@
 use rustia_vm::number::{binary, NumericOp, CANON_NAN_BITS};
 use rustia_vm::{
-    ClockProvider, Constant, ErrorKind, ExtensionOp, Function, HostFunctionOp, Instruction,
-    OpCapability, Opcode, Profile, Program, StdoutSink, Value, ValueKind, Vm, VmServices,
-    VmSettings, DECISION_RESET_ABI_VERSION, MAX_RECURSION_LIMIT,
+    ClockProvider, Constant, EntropyProvider, ErrorKind, ExtensionOp, Function, HostFunctionOp,
+    Instruction, OpCapability, Opcode, Profile, Program, StdoutSink, Value, ValueKind, Vm,
+    VmServices, VmSettings, DECISION_RESET_ABI_VERSION, MAX_RECURSION_LIMIT,
 };
 use std::cell::RefCell;
 use std::num::NonZeroU64;
@@ -16,6 +16,7 @@ fn first_arg(args: &[Value]) -> rustia_vm::Result<Value> {
 fn loadstring_program_returns_42(
     _source: &[u8],
     _source_name: Option<&[u8]>,
+    _profile: Profile,
 ) -> std::result::Result<Program, String> {
     Ok(Program::new(
         Function::new(
@@ -32,6 +33,7 @@ fn loadstring_program_returns_42(
 fn loadstring_compiler_should_not_run(
     _source: &[u8],
     _source_name: Option<&[u8]>,
+    _profile: Profile,
 ) -> std::result::Result<Program, String> {
     panic!("loadstring compiler should not run after fuel exhaustion")
 }
@@ -39,6 +41,7 @@ fn loadstring_compiler_should_not_run(
 fn panicking_loadstring_compiler(
     _source: &[u8],
     _source_name: Option<&[u8]>,
+    _profile: Profile,
 ) -> std::result::Result<Program, String> {
     panic!("loadstring compiler panic")
 }
@@ -124,6 +127,26 @@ fn os_member_call_program(member: &[u8]) -> Program {
         vec![
             Constant::String(b"os".to_vec()),
             Constant::String(member.to_vec()),
+        ],
+    )
+}
+
+/// Calls `math.random()` with no arguments and returns the result.
+fn math_random_program() -> Program {
+    Program::new(
+        Function::new(
+            vec![
+                Instruction::with_aux(Opcode::GetGlobal, 0, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                Instruction::new(Opcode::GetIndex, 0, 0, 1),
+                Instruction::with_aux(Opcode::Call, 0, 0, 1, 0),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+            ],
+            2,
+        ),
+        vec![
+            Constant::String(b"math".to_vec()),
+            Constant::String(b"random".to_vec()),
         ],
     )
 }
@@ -259,7 +282,11 @@ fn nan_is_canonical_at_value_ingress() {
 
 #[test]
 fn deterministic_sim_omits_environment_dependent_gc_and_os_globals() {
-    for profile in [Profile::LuauCompat, Profile::ReproducibleStandard] {
+    for profile in [
+        Profile::LuauCompat,
+        Profile::ReproducibleStandard,
+        Profile::Puc51Compat,
+    ] {
         assert_eq!(global_kind(profile, b"collectgarbage"), ValueKind::Function);
         assert_eq!(global_kind(profile, b"gcinfo"), ValueKind::Function);
         assert_eq!(global_kind(profile, b"os"), ValueKind::Table);
@@ -982,7 +1009,7 @@ fn decision_reset_requires_idle_execution_and_preserves_installed_host_functions
         vec![Constant::Number(7.0)],
     );
     let retained_table = vm.empty_table();
-    let retained = vm.retain_value(retained_table);
+    let retained = vm.retain_value(retained_table).unwrap();
 
     assert_eq!(vm.run(&call).unwrap().as_bool(), Some(true));
     assert_eq!(vm.run(&extension_call).unwrap().as_number(), Some(7.0));
@@ -1742,6 +1769,60 @@ fn clock_provider_nan_is_canonicalized_and_negative_zero_passes_through() {
         assert_eq!(value.to_bits(), (-0.0f64).to_bits());
         assert_eq!(1.0 / value, f64::NEG_INFINITY);
     }
+}
+
+#[test]
+fn entropy_provider_selects_the_initial_random_sequence() {
+    let sequence = |seed| {
+        let settings = VmSettings {
+            services: VmServices {
+                entropy: Some(EntropyProvider::new(move || seed, true)),
+                ..VmServices::default()
+            },
+            ..VmSettings::default()
+        };
+        let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        [
+            vm.run(&math_random_program()).unwrap().as_number().unwrap(),
+            vm.run(&math_random_program()).unwrap().as_number().unwrap(),
+        ]
+    };
+
+    assert_eq!(sequence(42), sequence(42));
+    assert_ne!(sequence(42), sequence(43));
+    assert_eq!(sequence(0), {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        [
+            vm.run(&math_random_program()).unwrap().as_number().unwrap(),
+            vm.run(&math_random_program()).unwrap().as_number().unwrap(),
+        ]
+    });
+}
+
+#[test]
+fn deterministic_sim_silently_drops_nondeterministic_entropy() {
+    let settings = VmSettings {
+        services: VmServices {
+            entropy: Some(EntropyProvider::new(
+                || panic!("dropped entropy provider must not be read"),
+                false,
+            )),
+            ..VmServices::default()
+        },
+        ..VmSettings::default()
+    };
+    let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
+    let seeded = vm.run(&math_random_program()).unwrap().as_number().unwrap();
+
+    let mut baseline = Vm::new(Profile::DeterministicSim);
+    assert_eq!(
+        seeded,
+        baseline
+            .run(&math_random_program())
+            .unwrap()
+            .as_number()
+            .unwrap()
+    );
 }
 
 #[test]

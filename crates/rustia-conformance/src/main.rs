@@ -1,6 +1,6 @@
 use rustia_conformance::{
-    list_repository_pending, run_repository, run_repository_case, CaseRun, Error, PendingCase,
-    Report,
+    bundled_repository, list_repository_pending, run_repository, run_repository_case, CaseRun,
+    Error, PendingCase, Report,
 };
 use std::env;
 use std::ffi::OsStr;
@@ -55,13 +55,14 @@ fn main() -> ExitCode {
         }
         Ok(RunResult::Report(report)) => {
             println!(
-                "conformance: {} fixtures, {} refs, {} luau-0.709, {} pending-oracle, {} pending-impl, {} rustia-only",
+                "conformance: {} fixtures, {} refs, {} luau-0.709, {} pending-oracle, {} pending-impl, {} rustia-only, {} puc-lua-5.1.5",
                 report.fixtures,
                 report.refs,
                 report.luau_oracle,
                 report.pending_oracle,
                 report.pending_impl,
-                report.rustia_only
+                report.rustia_only,
+                report.puc51_oracle
             );
             ExitCode::SUCCESS
         }
@@ -75,12 +76,12 @@ fn main() -> ExitCode {
 fn parse_command(args: &[std::ffi::OsString]) -> Option<Command> {
     match args {
         [] => Some(Command::Run {
-            repo: ".".into(),
+            repo: bundled_repository().ok()?,
             selector: None,
         }),
-        [flag] if flag == OsStr::new("--list-pending") => {
-            Some(Command::ListPending { repo: ".".into() })
-        }
+        [flag] if flag == OsStr::new("--list-pending") => Some(Command::ListPending {
+            repo: bundled_repository().ok()?,
+        }),
         [repo] => Some(Command::Run {
             repo: PathBuf::from(repo),
             selector: None,

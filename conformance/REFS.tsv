@@ -492,3 +492,21 @@ upstream.luau-0-709.utf8	stdlib	conformance/upstream/luau-0.709/tests/conformanc
 upstream.luau-0-709.vararg	core-language	conformance/upstream/luau-0.709/tests/conformance/vararg.luau	luau-0.709	Whole upstream Luau 0.709 conformance script vararg.luau.
 upstream.luau-0-709.vector	stdlib	conformance/upstream/luau-0.709/tests/conformance/vector.luau	luau-0.709	Whole upstream Luau 0.709 conformance script vector.luau.
 upstream.luau-0-709.vector-library	stdlib	conformance/upstream/luau-0.709/tests/conformance/vector_library.luau	luau-0.709	Whole upstream Luau 0.709 conformance script vector_library.luau.
+puc51.table.iter-mixed-scalars	runtime	conformance/fixtures/puc51-compat/table_iter_mixed_scalars.luau	puc-lua-5.1.5	PUC 5.1.5 next() enumeration order and border under mixed scalar keys with insert/delete churn.
+puc51.table.iter-delete-churn	runtime	conformance/fixtures/puc51-compat/table_iter_delete_churn.luau	puc-lua-5.1.5	PUC 5.1.5 next() order after mass-deletion tombstones and second-wave inserts across rehash boundaries.
+puc51.table.border-rehash	runtime	conformance/fixtures/puc51-compat/table_border_rehash.luau	puc-lua-5.1.5	PUC 5.1.5 length-border evolution while sequential inserts cross array-part rehash boundaries.
+puc51.table.iter-sparse-jumps	runtime	conformance/fixtures/puc51-compat/table_iter_sparse_jumps.luau	puc-lua-5.1.5	PUC 5.1.5 next() order and border for jumping-k sparse integer writes with hole filling.
+puc51.table.delete-during-next	runtime	conformance/fixtures/puc51-compat/table_delete_during_next.luau	puc-lua-5.1.5	PUC 5.1.5 deletion of the current key during next() traversal plus tombstone resurrection.
+puc51.table.iter-string-heavy	runtime	conformance/fixtures/puc51-compat/table_iter_string_heavy.luau	puc-lua-5.1.5	PUC 5.1.5 next() order for string-key-dominated tables driven through hash-part rehashes.
+puc51.table.iter-bool-keys	runtime	conformance/fixtures/puc51-compat/table_iter_bool_keys.luau	puc-lua-5.1.5	PUC 5.1.5 boolean keys alongside distinct number/string keys, with tombstone and resurrection.
+puc51.table.ctor-presizing	runtime	conformance/fixtures/puc51-compat/table_ctor_presizing.luau	puc-lua-5.1.5	PUC 5.1.5 table constructors: positional runs, int2fb round-up, multi-flush SETLIST, keyed fields, call/vararg tails.
+puc51.table.ctor-emission-order	runtime	conformance/fixtures/puc51-compat/ctor_emission_order.luau	puc-lua-5.1.5	PUC 5.1.5 constructor write order: immediate keyed writes vs 50-item positional flushes and trailing multret SETLIST.
+puc51.table.iter-frac-negative-keys	runtime	conformance/fixtures/puc51-compat/table_iter_frac_negative_keys.luau	puc-lua-5.1.5	PUC 5.1.5 next() order for negative and fractional number keys living in the hash part.
+puc51.table.next-walk	runtime	conformance/fixtures/puc51-compat/table_next_walk.luau	puc-lua-5.1.5	PUC 5.1.5 next() walks from explicit middle keys, the invalid-key error, and empty-table nil.
+puc51.table.insert-remove	stdlib	conformance/fixtures/puc51-compat/table_insert_remove.luau	puc-lua-5.1.5	PUC 5.1.5 table.insert/table.remove sequences resolved through the luaH_getn border.
+puc51.format.tostring-edges	stdlib	conformance/fixtures/puc51-compat/format_tostring_edges.luau	puc-lua-5.1.5	PUC 5.1.5 %.14g formatting edges through tostring, concatenation, table.concat, and string.format.
+puc51.format.tostring-prng	stdlib	conformance/fixtures/puc51-compat/format_tostring_prng.luau	puc-lua-5.1.5	PUC 5.1.5 %.14g formatting of deterministic PRNG-generated doubles.
+puc51.sort.plain-duplicates	stdlib	conformance/fixtures/puc51-compat/sort_plain_duplicates.luau	puc-lua-5.1.5	PUC 5.1.5 auxsort default-order output over arrays with engineered duplicate keys.
+puc51.sort.comparator-ties	stdlib	conformance/fixtures/puc51-compat/sort_comparator_ties.luau	puc-lua-5.1.5	PUC 5.1.5 auxsort ascending-comparator tie order pinned by record ids.
+puc51.sort.reverse-comparator	stdlib	conformance/fixtures/puc51-compat/sort_reverse_comparator.luau	puc-lua-5.1.5	PUC 5.1.5 auxsort descending-comparator tie order pinned by record ids.
+puc51.sort.shapes	stdlib	conformance/fixtures/puc51-compat/sort_shapes.luau	puc-lua-5.1.5	PUC 5.1.5 auxsort over engineered array shapes: ascending, descending, organ-pipe, all-equal, sawtooth.

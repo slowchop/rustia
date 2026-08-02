@@ -41,6 +41,7 @@ pub struct Report {
     pub pending_oracle: usize,
     pub pending_impl: usize,
     pub rustia_only: usize,
+    pub puc51_oracle: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -70,6 +71,7 @@ pub fn run_repository(repo: impl AsRef<Path>) -> Result<Report> {
         pending_oracle: 0,
         pending_impl: 0,
         rustia_only: 0,
+        puc51_oracle: 0,
     };
 
     for case in &cases {
@@ -79,6 +81,7 @@ pub fn run_repository(repo: impl AsRef<Path>) -> Result<Report> {
             OracleStatus::PendingOracle => report.pending_oracle += 1,
             OracleStatus::PendingImpl => report.pending_impl += 1,
             OracleStatus::RustiaOnly => report.rustia_only += 1,
+            OracleStatus::PucLua515 => report.puc51_oracle += 1,
         }
         case.run(repo, &known_refs)?;
     }
@@ -145,12 +148,27 @@ pub fn list_repository_pending(repo: impl AsRef<Path>) -> Result<Vec<PendingCase
 }
 
 pub fn repository_from_crate_manifest(crate_manifest_dir: impl AsRef<Path>) -> Result<PathBuf> {
+    let crate_manifest_dir = crate_manifest_dir.as_ref();
+    let bundled = crate_manifest_dir.join("corpus");
+    if bundled.join("conformance/MANIFEST.tsv").is_file()
+        && bundled.join("conformance/REFS.tsv").is_file()
+    {
+        return Ok(bundled);
+    }
     crate_manifest_dir
-        .as_ref()
         .parent()
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .ok_or_else(|| Error::new("crate must live under <repo>/crates/<crate>"))
+}
+
+/// Returns the conformance repository bundled into this crate package.
+///
+/// In the workspace `corpus` is a link to the canonical top-level corpus. Cargo follows that link
+/// when assembling the crate archive, so an unpacked package retains the same manifest, refs,
+/// fixtures, and provenance without depending on a surrounding Rustia checkout.
+pub fn bundled_repository() -> Result<PathBuf> {
+    repository_from_crate_manifest(env!("CARGO_MANIFEST_DIR"))
 }
 
 fn load_manifest_text(repo: &Path) -> Result<String> {
@@ -199,6 +217,7 @@ enum OracleStatus {
     PendingOracle,
     PendingImpl,
     RustiaOnly,
+    PucLua515,
 }
 
 impl OracleStatus {
@@ -206,7 +225,7 @@ impl OracleStatus {
         match self {
             Self::PendingOracle => Some("pending-oracle"),
             Self::PendingImpl => Some("pending-impl"),
-            Self::Luau0709 | Self::RustiaOnly => None,
+            Self::Luau0709 | Self::RustiaOnly | Self::PucLua515 => None,
         }
     }
 }
@@ -218,6 +237,7 @@ enum CatalogStatus {
     PendingImpl,
     PendingFixture,
     RustiaOnly,
+    PucLua515,
 }
 
 impl CatalogStatus {
@@ -228,6 +248,7 @@ impl CatalogStatus {
             Self::PendingImpl => "pending-impl",
             Self::PendingFixture => "pending-fixture",
             Self::RustiaOnly => "rustia-only",
+            Self::PucLua515 => "puc-lua-5.1.5",
         }
     }
 }
@@ -356,6 +377,13 @@ impl<'a> Case<'a> {
                 OracleStatus::RustiaOnly if *status != CatalogStatus::RustiaOnly => {
                     return Err(Error::new(format!(
                         "{}: rustia-only manifest rows must reference only rustia-only refs; {reference:?} has {} status in conformance/REFS.tsv",
+                        self.id,
+                        status.as_str()
+                    )));
+                }
+                OracleStatus::PucLua515 if *status != CatalogStatus::PucLua515 => {
+                    return Err(Error::new(format!(
+                        "{}: puc-lua-5.1.5 manifest rows must reference only puc-lua-5.1.5 refs; {reference:?} has {} status in conformance/REFS.tsv",
                         self.id,
                         status.as_str()
                     )));
@@ -547,6 +575,7 @@ fn compile_and_run_luau_conformance(
     let chunk = parse_source_bytes(source).map_err(|error| error.to_string())?;
     let options = CompileOptions {
         builtins: BuiltinEnvironment::LuauConformance,
+        puc51_constructor_order: profile == Profile::Puc51Compat,
         ..CompileOptions::default()
     }
     .with_source_bytes(source_name, source);
@@ -558,6 +587,7 @@ fn compile_and_run_luau_conformance(
     let mut vm = Vm::with_settings(
         profile,
         VmSettings {
+            enable_conformance_luau_call_limit: true,
             loadstring_compiler: Some(compile_luau_loadstring),
             enable_conformance_coverage: is_upstream_0709_fixture(harness_path, "coverage.luau"),
             enable_conformance_top_level_yield: is_upstream_0709_fixture(
@@ -694,12 +724,14 @@ fn luau_conformance_limited_stack() -> bool {
 fn compile_luau_loadstring(
     source: &[u8],
     source_name: Option<&[u8]>,
+    profile: Profile,
 ) -> std::result::Result<Program, String> {
     let source_name = loadstring_source_name(source, source_name);
     let chunk = parse_source_bytes(source)
         .map_err(|error| luau_loadstring_source_error(&source_name, error))?;
     let options = CompileOptions {
         builtins: BuiltinEnvironment::LuauConformance,
+        puc51_constructor_order: profile == Profile::Puc51Compat,
         ..CompileOptions::default()
     }
     .with_source_bytes(source_name.clone(), source);
@@ -894,6 +926,7 @@ fn parse_profile(text: &str, line_number: usize) -> Result<Profile> {
         "LuauCompat" => Ok(Profile::LuauCompat),
         "ReproducibleStandard" => Ok(Profile::ReproducibleStandard),
         "DeterministicSim" => Ok(Profile::DeterministicSim),
+        "Puc51Compat" => Ok(Profile::Puc51Compat),
         _ => Err(Error::new(format!(
             "manifest line {line_number}: unknown profile {text:?}"
         ))),
@@ -906,6 +939,7 @@ fn parse_oracle_status(text: &str, line_number: usize) -> Result<OracleStatus> {
         "pending-oracle" => Ok(OracleStatus::PendingOracle),
         "pending-impl" => Ok(OracleStatus::PendingImpl),
         "rustia-only" => Ok(OracleStatus::RustiaOnly),
+        "puc-lua-5.1.5" => Ok(OracleStatus::PucLua515),
         _ => Err(Error::new(format!(
             "manifest line {line_number}: unknown oracle status {text:?}"
         ))),
@@ -919,6 +953,7 @@ fn parse_catalog_status(text: &str, line_number: usize) -> Result<CatalogStatus>
         "pending-impl" => Ok(CatalogStatus::PendingImpl),
         "pending-fixture" => Ok(CatalogStatus::PendingFixture),
         "rustia-only" => Ok(CatalogStatus::RustiaOnly),
+        "puc-lua-5.1.5" => Ok(CatalogStatus::PucLua515),
         _ => Err(Error::new(format!(
             "refs line {line_number}: unknown status {text:?}"
         ))),

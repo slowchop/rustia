@@ -129,10 +129,10 @@ fn quiescent_collection_preserves_bounded_todo_application_state() {
         let program = compile_source(source);
         let mut collected = Vm::new(Profile::ReproducibleStandard);
         let collected_function = collected.run(&program).unwrap();
-        let collected_function = collected.retain_value(collected_function);
+        let collected_function = collected.retain_value(collected_function).unwrap();
         let mut natural = Vm::new(Profile::ReproducibleStandard);
         let natural_function = natural.run(&program).unwrap();
-        let natural_function = natural.retain_value(natural_function);
+        let natural_function = natural.retain_value(natural_function).unwrap();
 
         for _ in 0..40 {
             let collected_value = collected_function.value(&collected).unwrap();

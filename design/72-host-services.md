@@ -1,14 +1,17 @@
-# rustia — host services bus (provider seam for print / os.time / os.clock)
+# rustia — host services bus (output / clocks / entropy / platform adapters)
 
-> **Status: [IMPLEMENTED v1] (2026-07-25).** The provider
-> seam that replaces four faked environment-dependent stdlib functions with host-pluggable sockets
+> **Status: [IMPLEMENTED v2.3] (2026-07-27).** The provider
+> seam that replaces four faked environment-dependent stdlib functions with host-pluggable sockets.
 > The later reclamation/accounting tranche now gives hosts an honest `Vm::memory_stats()` census.
-> `collectgarbage("count")`/`gcinfo` remain compatibility values until the quota tracker supplies an O(1)
-> incremental counter; the provider design below remains the historical scope of this slice.
+> The later incremental-accounting tranche also connects `collectgarbage("count")`/`gcinfo` to maintained
+> VM-owned logical-live totals; the provider design below remains the historical scope of this slice.
 > Implements the provider slice of [`CURRENT.md`](CURRENT.md) known-gap #3. v2 incorporates a six-lens
 > adversarial review (VM internals, conformance/oracle, public API, determinism/lockstep, KISS/pillars,
 > docs coherence); v2.1 adds the `live()` preset; v2.2 replaces the `0.0` `os.clock` fallback with a
-> deterministic logical clock and records the input/output service rule. Scope discipline: no recorder,
+> deterministic logical clock and records the input/output service rule; v2.3 makes `live()` conventional:
+> host entropy selects its initial `math.random` seed, `os.clock` uses a true monotonic source, native/WASI
+> services are automatic, and the default browser-Wasm adapter uses JavaScript `console`, `Date`,
+> `performance`, and `crypto`. Bare Wasm can disable that adapter and inject providers. Scope discipline: no recorder,
 > verifier, permission ceremony, taxonomy renames, GC-schedule wrapping, tier API, or memory telemetry
 > in this change.
 
@@ -24,8 +27,8 @@ exists for Standard hosts to install real ones:
 | `os.time()` no-arg | fixed `OS_TIME_NOW_SECONDS` (`native_os_time`, 11536–11543) |
 | `os.date()` no-timestamp | same fixed constant (`native_os_date`, 11520–11523) |
 
-Deferred by this historical slice: public `Vm::memory_stats()` is now implemented by the bounded-lifetime
-tranche; `collectgarbage("count")`/`gcinfo` await the O(1) quota counter.
+Deferred by this historical slice and since implemented elsewhere: public `Vm::memory_stats()` and maintained
+logical-live `collectgarbage("count")`/`gcinfo`.
 Everything else in the Luau 0.709 stdlib is real. In `DeterministicSim`, `os.*`/`collectgarbage`/
 `gcinfo` are not registered at all (16176–16196 + RTTI mirror 16496–16500).
 
@@ -64,18 +67,21 @@ any existing construction path — with one documented exception (`os.clock`, be
   visible-in-code choice (`.wall_clock(ServiceClock::system())`), never a default. This preserves
   pillar "reproducible by default": the default build's `os.time` stays replay-stable.
 - `RustiaBuilder::deterministic()` = `Profile::DeterministicSim`, no services (unchanged from today).
-- `RustiaBuilder::live()` = "normal Luau": `Profile::ReproducibleStandard` + real stdout +
-  `ServiceClock::system()` on both clock sockets + `loadstring` enabled with the stock compiler —
+- `RustiaBuilder::live()` = "normal Luau": `Profile::ReproducibleStandard` + host stdout +
+  system wall/monotonic clocks + host entropy for the initial random seed + `loadstring` enabled with the stock compiler —
   the what-any-Luau-user-expects preset, one word instead of manual plumbing. The language core
-  stays deterministic (insertion order, pinned PCG32, Schubfach, libm; `math.randomseed` available);
-  only the services go live. Named `live()` rather than `nondeterministic()` or `dynamic()`: accurate
-  (only IO goes live; `dynamic` collides with the VM's existing `dynamic_program` = loadstring
+  keeps its pinned algorithms (insertion order, PCG32, Schubfach, libm; `math.randomseed` available),
+  while ambient inputs go live. Named `live()` rather than `nondeterministic()` or `dynamic()`: accurate
+  (`dynamic` collides with the VM's existing `dynamic_program` = loadstring
   vocabulary and with `dyn`/dynamic-typing associations), positively framed, and forms the
   environment axis with the other presets. The default `builder()` remains reproducible-by-default —
   the pillar holds because the live world is an explicit, greppable one-word choice, never the
-  silent default. On wasm, `live()` fails loudly (no system clock exists) and tells the host to plug
-  providers. `collectgarbage("count")`/`gcinfo` stay canned even under `live()` until the reclamation
-  arc; `math.random` stays pinned in every profile.
+  silent default. Native and WASI use system adapters. Browser `wasm32-unknown-unknown` uses the default
+  `web-live` JavaScript adapter; a bare-Wasm consumer disables default features and plugs wall clock,
+  monotonic clock, and entropy providers explicitly. `build()` returns a typed error if a requested live
+  world is incomplete. `collectgarbage("count")`/`gcinfo` read the same maintained VM-owned logical-live total
+  under `standard()` and `live()`. PCG32 stays pinned in every profile, but `live()` starts it from host entropy instead
+  of the reproducible seed zero.
 - **LuauCompat** follows the same service rules as ReproducibleStandard (it exposes the Standard
   service surface per `CURRENT.md` Determinism-model section). Its rustdoc gains a "this is not the
   `live()` preset" pointer for users hunting normal Luau.
@@ -115,20 +121,28 @@ today's no-op (see the input/output rule). This narrows `CURRENT.md`'s "Determin
 // presets (sugar over Profile + Services; single source of truth)
 RustiaBuilder::standard()        // ReproducibleStandard + stdout sink (native); deterministic clocks
 RustiaBuilder::deterministic()   // DeterministicSim, no services
-RustiaBuilder::live()            // "normal Luau": stdout + system clocks + stock loadstring
+RustiaBuilder::live()            // stdout + system clocks + system random seed + stock loadstring
 
 // service sockets — the provider is the argument, so the chosen world is visible in code
 .stdout(impl FnMut(&str) + 'static)          // closure only; errors are the host closure's business
 .wall_clock(ServiceClock)                    // backs no-arg os.time + default os.date timestamp
 .monotonic_clock(ServiceClock)               // backs os.clock (overrides the logical default)
+.entropy(ServiceEntropy)                     // selects the initial math.random sequence
 ```
 
 `ServiceClock` constructors carry a determinism label:
 
 ```rust
-ServiceClock::system()          // real wall/monotonic time; labeled nondeterministic
+ServiceClock::system()          // real wall time; labeled nondeterministic
+ServiceClock::monotonic()       // real elapsed time; labeled nondeterministic
 ServiceClock::fixed(t)          // constant; deterministic
 ServiceClock::from_fn(f)        // host asserts determinism (host is trusted, label is greppable)
+ServiceClock::from_nondeterministic_fn(f)
+
+ServiceEntropy::system()        // host random source; labeled nondeterministic
+ServiceEntropy::fixed(seed)     // deterministic
+ServiceEntropy::from_fn(f)      // host asserts determinism
+ServiceEntropy::from_nondeterministic_fn(f)
 ```
 
 `live()`'s rustdoc states the `loadstring` enablement in its first line (runtime codegen is
@@ -140,7 +154,7 @@ on `DeterministicSim`; the infallible VM constructors silently drop a nondetermi
 (same rule as `loadstring_compiler`, vm.rs:1263–1264) and document it. Preset/override ordering
 (`.standard().profile(DeterministicSim)`) is caught by the same build error.
 
-**Representation:** shared providers (`Rc<RefCell<dyn FnMut …>>`) with a manual `Debug`, so
+**Representation:** shared clock/entropy providers (`Rc<RefCell<dyn FnMut …>>`) with a manual `Debug`, so
 `VmSettings` keeps its load-bearing `Clone + Debug` derives (rustia-cli clones settings; VM tests
 clone). Cloning settings shares providers; documented. `ServiceClock` and any new public enum get
 `#[non_exhaustive]` per facade convention.
@@ -173,13 +187,15 @@ by the engine.
 5. Sink re-entrancy: `FnMut(&str)` receives no `&mut Vm` (strictly weaker than host functions), so it
    cannot touch VM state. Caveat documented: a sink that mutates host state later read by a
    slot-read host fn is the same exposure class as existing host fns.
-6. wasm32-unknown-unknown: the workspace is std-time-free today. `ServiceClock::system()` is
-   `cfg`-gated to non-wasm targets; on wasm the facade `standard()` installs no clock (built-in
-   deterministic defaults apply, same script-visible values as native — the logical clock is
-   target-independent) and print defaults to no-op (no stdout exists). Script-visible surface is
-   therefore identical across targets — no semantic fork (pillar 6); only the print destination
-   differs, which scripts cannot observe.
-7. `collectgarbage("count")`/`gcinfo` stay canned; docs and errors say so.
+6. Randomness: `VmServices::entropy` is read once while the VM is constructed. Empty means seed zero.
+   A deterministic provider can select another replay-stable sequence; a nondeterministic provider is dropped
+   by infallible Sim construction and rejected by the facade. `math.randomseed` can still reset the state later.
+7. wasm32-unknown-unknown: `standard()` retains target-independent deterministic inputs and swallowed output.
+   `live()` uses the default `web-live` JavaScript adapter. A raw/bare Wasm consumer builds without default
+   features, at which point `live()` imports nothing and requires explicit providers. This is one semantic
+   engine with target adapters, not a target-specific VM fork.
+8. `collectgarbage("count")`/`gcinfo` read maintained VM-owned logical-live KiB; exact allocator/RSS parity with
+   Luau is intentionally not promised.
 
 ## Tests (same change; conformance corpus untouched)
 
@@ -189,7 +205,8 @@ by the engine.
   `os.time`/`os.clock` exact values, NaN canonicalization of provider outputs, print composition
   (tab-join, `\n`, `__tostring`), sink capture, Sim rejection of `ServiceClock::system()` (facade
   error + VM silent-drop), Sim `os` presence iff clock provider plugged, settings-clone sharing,
-  `live()` preset installs system clocks + stock `loadstring` on native and fails loudly on wasm,
+  `live()` installs host clocks + entropy + stdout + stock `loadstring`; native and Wasm feature builds compile,
+  bare Wasm accepts explicitly labeled live providers,
   logical clock determinism (two identical runs read identical `os.clock` values; monotonic
   non-decreasing; value derives from executed instructions; provider override wins).
 - Conformance runner: unchanged VM behavior by default; optionally installs a capture sink for
@@ -216,10 +233,14 @@ instead of `0.0`).
 
 ## Non-goals (explicit)
 
-`require`/module-loader socket; memory telemetry and honest `count`/`gcinfo` (reclamation arc);
+`require`/module-loader socket; incremental accounting and live `count`/`gcinfo`;
 recording/replay providers; WASI-style permission UI; `GcSchedule`/`determinism_tier()` public API;
 paced-GC knobs; `Send`/`Sync` providers (the VM is thread-affine); async sinks; fixing the
 pre-existing `os.date`/`os.time(table)` oracle divergences; perf claims (service calls are cold-path).
+
+This is the scope boundary of the host-services slice, not current project
+status: the separate host-owned `ServiceModuleResolver`/`require` socket has
+since landed, as has the incremental live-memory counter.
 
 ## Implementation order (strangler, always green)
 

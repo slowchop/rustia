@@ -98,7 +98,7 @@ function benchmarkInventory() {
   try {
     stdout = childProcess.execFileSync(
       "cargo",
-      ["run", "-p", "script-bench-harness", "--", "--list-json"],
+      ["run", "--locked", "-p", "script-bench-harness", "--", "--list-json"],
       {
         cwd: root,
         encoding: "utf8",
@@ -107,7 +107,7 @@ function benchmarkInventory() {
     );
   } catch (error) {
     const stderr = error.stderr ? String(error.stderr).trim() : "";
-    fail(`cargo run -p script-bench-harness -- --list-json failed${stderr ? `\n${stderr}` : ""}`);
+    fail(`cargo run --locked -p script-bench-harness -- --list-json failed${stderr ? `\n${stderr}` : ""}`);
   }
 
   try {

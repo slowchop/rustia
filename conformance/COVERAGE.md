@@ -5,9 +5,16 @@ The declared behavior-topic catalog is `REFS.tsv`.
 
 ## Current Status
 
-- The current manifest contains 694 fixtures and 493 refs: 694 executable `luau-0.709` fixtures, 0
-  `pending-oracle` P1 smoke fixtures, and 0 whole upstream Luau 0.709 conformance scripts as
-  `pending-impl` inventory.
+- The current manifest contains 712 fixtures and 511 refs: 694 executable `luau-0.709` fixtures, 0
+  `pending-oracle` P1 smoke fixtures, 18 `puc-lua-5.1.5` PUC 5.1.5 compat fixtures, and 0 whole upstream
+  Luau 0.709 conformance scripts as `pending-impl` inventory.
+- The `puc-lua-5.1.5` rows are the `Puc51Compat` differential corpus: expectations were captured offline
+  from the pinned PUC Lua 5.1.5 oracle (`third_party/lua-src` submodule, regeneration procedure in
+  `conformance/README.md`), covering PUC table `next()` enumeration order under mixed/scalar, string-heavy,
+  boolean, negative/fractional, and sparse jumping-k keys, deletion-during-`next()`, tombstone
+  resurrection, `#` border evolution across rehash boundaries, constructor pre-sizing, `table.insert` /
+  `table.remove` border behavior, `%.14g` number formatting through `tostring`/concat/`table.concat` /
+  `string.format("%s")`, and PUC `auxsort` tie order.
 - No manifest rows or catalog refs remain pending. P1 smoke fixtures are now pinned to Luau 0.709 oracle
   evidence, and the whole upstream `apicalls.luau`, `assert.luau`, `attrib.luau`, `basic.luau`, `calls.luau`, `constructs.luau`,
   `ifelseexpr.luau`, `clear.luau`, `closure.luau`, `coroutine.luau`, `coverage.luau`, `cyield.luau`, `move.luau`, `bitwise.luau`, `interrupt.luau`, `iter.luau`, `literals.luau`, `locals.luau`,

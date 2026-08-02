@@ -1,6 +1,7 @@
 mod extension_api;
 mod function;
 mod invocation;
+mod live_value;
 mod macros;
 mod serde_value;
 mod value;
@@ -14,9 +15,10 @@ use std::fmt;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
 pub use extension_api::{
-    RustiaBuilder, RustiaExecutionProfile, RustiaExtension, RustiaHostFuelPolicy,
-    RustiaHostFunctionInfo, ServiceClock, RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
-    RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY, RUSTIA_MIN_HOST_FUNCTION_FUEL,
+    ModuleSource, RustiaBuilder, RustiaExecutionProfile, RustiaExtension, RustiaHostFuelPolicy,
+    RustiaHostFunctionInfo, ServiceClock, ServiceEntropy, ServiceModuleResolver,
+    RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
+    RUSTIA_MIN_HOST_FUNCTION_FUEL,
 };
 pub use function::{Exports, Function};
 pub use invocation::{
@@ -25,10 +27,12 @@ pub use invocation::{
     Invocation, InvocationLimits, InvocationOutcome, InvocationReceipt, InvocationUsage,
     SlotWrites, Slots,
 };
+pub use live_value::{Table, Value, ValueType};
 pub use rustia_vm::{
     Error as VmError, ErrorKind as VmErrorKind, GuestSurface, OpCapability, Profile, VmMemoryStats,
     VmSettings, DECISION_RESET_ABI_VERSION as RUSTIA_DECISION_RESET_ABI_VERSION,
     HARDENED_LEAF_GUEST_ABI_VERSION as RUSTIA_HARDENED_LEAF_GUEST_ABI_VERSION,
+    MODULE_RESOLUTION_ABI_VERSION as RUSTIA_MODULE_RESOLUTION_ABI_VERSION,
 };
 pub use serde_value::SerdeValueError;
 pub use value::{
@@ -99,9 +103,9 @@ where
     /// VM configuration, services, extensions, and installed host functions
     /// persist. Globals inserted with [`insert_global`](Self::insert_global)
     /// and [`insert_serde`](Self::insert_serde) are decision inputs and must be
-    /// rebound afterward. Every prior [`Function`] and [`Exports`] handle is
-    /// invalidated, while host-owned [`CompiledModule`] and [`CompiledEntry`]
-    /// values remain reusable. A hardened-leaf VM preserves its sealed
+    /// rebound afterward. Every prior [`Value`], [`Table`], [`Function`], and
+    /// [`Exports`] handle is invalidated, while host-owned [`CompiledModule`]
+    /// and [`CompiledEntry`] values remain reusable. A hardened-leaf VM preserves its sealed
     /// immutable environment in place and discards every decision-local
     /// allocation after that seal.
     ///
@@ -263,7 +267,11 @@ where
 
     pub(crate) fn compile_and_run_raw(&mut self, source: &str) -> Result<rustia_vm::Value> {
         let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
-        let program = rustia_compiler::compile(&chunk).map_err(Error::Compile)?;
+        let options = CompileOptions {
+            puc51_constructor_order: self.vm.profile() == Profile::Puc51Compat,
+            ..CompileOptions::default()
+        };
+        let program = compile_with_options(&chunk, options).map_err(Error::Compile)?;
         let value = self.vm.run(&program).map_err(Error::Vm)?;
         self.advance_generation();
         Ok(value)
@@ -274,7 +282,26 @@ where
         source_name: impl Into<String>,
         source: &str,
     ) -> Result<rustia_vm::Value> {
-        let module = Self::compile_module(source_name, source)?;
+        let module = Self::compile_module_bytes_with_constructor_order(
+            source_name,
+            source.as_bytes(),
+            self.vm.profile() == Profile::Puc51Compat,
+        )?;
+        let value = self.vm.run(&module.program).map_err(Error::Vm)?;
+        self.advance_generation();
+        Ok(value)
+    }
+
+    pub(crate) fn compile_and_run_raw_bytes_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &[u8],
+    ) -> Result<rustia_vm::Value> {
+        let module = Self::compile_module_bytes_with_constructor_order(
+            source_name,
+            source,
+            self.vm.profile() == Profile::Puc51Compat,
+        )?;
         let value = self.vm.run(&module.program).map_err(Error::Vm)?;
         self.advance_generation();
         Ok(value)
@@ -284,7 +311,7 @@ where
     where
         T: IntoRustia,
     {
-        let value = value.into_rustia();
+        let value = value.into_rustia()?;
         let value = value::load_owned_value(&mut self.vm, &value)?;
         self.vm.set_global_value(name, value).map_err(Error::Vm)
     }
@@ -431,9 +458,56 @@ where
     }
 
     pub fn compile_module(source_name: impl Into<String>, source: &str) -> Result<CompiledModule> {
+        Self::compile_module_bytes(source_name, source.as_bytes())
+    }
+
+    /// Compiles a reusable module with code generation appropriate for
+    /// `profile`. Use this when the module will be installed into a VM whose
+    /// profile is known ahead of time.
+    pub fn compile_module_with_profile(
+        source_name: impl Into<String>,
+        source: &str,
+        profile: Profile,
+    ) -> Result<CompiledModule> {
+        Self::compile_module_bytes_with_profile(source_name, source.as_bytes(), profile)
+    }
+
+    /// Compiles with the standard (source-order) table-constructor write
+    /// order. `Profile::Puc51Compat` hosts need PUC write order instead;
+    /// compile through the instance run helpers (which read the VM profile) or
+    /// use [`compile_module_bytes_with_profile`](Self::compile_module_bytes_with_profile).
+    pub fn compile_module_bytes(
+        source_name: impl Into<String>,
+        source: &[u8],
+    ) -> Result<CompiledModule> {
+        Self::compile_module_bytes_with_constructor_order(source_name, source, false)
+    }
+
+    /// Byte-oriented form of [`compile_module_with_profile`](Self::compile_module_with_profile).
+    pub fn compile_module_bytes_with_profile(
+        source_name: impl Into<String>,
+        source: &[u8],
+        profile: Profile,
+    ) -> Result<CompiledModule> {
+        Self::compile_module_bytes_with_constructor_order(
+            source_name,
+            source,
+            profile == Profile::Puc51Compat,
+        )
+    }
+
+    fn compile_module_bytes_with_constructor_order(
+        source_name: impl Into<String>,
+        source: &[u8],
+        puc51_constructor_order: bool,
+    ) -> Result<CompiledModule> {
         let source_name = source_name.into();
-        let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
-        let options = CompileOptions::default().with_source(source_name.clone(), source);
+        let chunk = rustia_parser::parse_source_bytes(source).map_err(Error::Source)?;
+        let options = CompileOptions {
+            puc51_constructor_order,
+            ..CompileOptions::default()
+        }
+        .with_source_bytes(source_name.clone(), source);
         let program = compile_with_options(&chunk, options).map_err(Error::Compile)?;
         Ok(CompiledModule {
             source_name,
@@ -447,6 +521,9 @@ where
     /// Stateless entries cannot contain nested function prototypes. Inputs and
     /// outputs should cross the typed host context, and the source should
     /// return its decision value directly.
+    ///
+    /// Compiles with the standard (source-order) table-constructor write
+    /// order; see [`compile_module_bytes`](Self::compile_module_bytes).
     pub fn compile_entry(source_name: impl Into<String>, source: &str) -> Result<CompiledEntry> {
         let source_name = source_name.into();
         let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
@@ -533,9 +610,13 @@ impl Rustia<()> {
         Self::compile_module(source_name, source)
     }
 
+    pub fn compile_bytes(source_name: impl Into<String>, source: &[u8]) -> Result<CompiledModule> {
+        Self::compile_module_bytes(source_name, source)
+    }
+
     pub fn compile_and_run(&mut self, source: &str) -> Result<Exports> {
         let value = self.compile_and_run_raw(source)?;
-        let value = self.vm.retain_value(value);
+        let value = self.vm.retain_value(value).map_err(Error::Vm)?;
         Ok(Exports::new(value, self.generation, self.decision_epoch()))
     }
 
@@ -545,7 +626,17 @@ impl Rustia<()> {
         source: &str,
     ) -> Result<Exports> {
         let value = self.compile_and_run_raw_named(source_name, source)?;
-        let value = self.vm.retain_value(value);
+        let value = self.vm.retain_value(value).map_err(Error::Vm)?;
+        Ok(Exports::new(value, self.generation, self.decision_epoch()))
+    }
+
+    pub fn compile_and_run_bytes_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &[u8],
+    ) -> Result<Exports> {
+        let value = self.compile_and_run_raw_bytes_named(source_name, source)?;
+        let value = self.vm.retain_value(value).map_err(Error::Vm)?;
         Ok(Exports::new(value, self.generation, self.decision_epoch()))
     }
 
@@ -566,12 +657,47 @@ impl Rustia<()> {
         value::snapshot_value(&mut self.vm, value)
     }
 
+    /// Runs a chunk and retains its first result as a live VM value.
+    pub fn run_value(&mut self, source: &str) -> Result<Value> {
+        let value = self.compile_and_run_raw(source)?;
+        Value::retain(&mut self.vm, value, self.generation)
+    }
+
+    /// Runs a named chunk and retains its first result as a live VM value.
+    pub fn run_value_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &str,
+    ) -> Result<Value> {
+        let value = self.compile_and_run_raw_named(source_name, source)?;
+        Value::retain(&mut self.vm, value, self.generation)
+    }
+
+    /// Runs named source bytes and retains the first result as a live VM value.
+    pub fn run_value_bytes_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &[u8],
+    ) -> Result<Value> {
+        let value = self.compile_and_run_raw_bytes_named(source_name, source)?;
+        Value::retain(&mut self.vm, value, self.generation)
+    }
+
     pub fn run_owned_named(
         &mut self,
         source_name: impl Into<String>,
         source: &str,
     ) -> Result<OwnedValue> {
         let value = self.compile_and_run_raw_named(source_name, source)?;
+        value::snapshot_value(&mut self.vm, value)
+    }
+
+    pub fn run_owned_bytes_named(
+        &mut self,
+        source_name: impl Into<String>,
+        source: &[u8],
+    ) -> Result<OwnedValue> {
+        let value = self.compile_and_run_raw_bytes_named(source_name, source)?;
         value::snapshot_value(&mut self.vm, value)
     }
 
@@ -594,12 +720,12 @@ impl Rustia<()> {
     pub fn install(&mut self, module: CompiledModule) -> Result<Exports> {
         let value = self.vm.run(&module.program).map_err(Error::Vm)?;
         self.advance_generation();
-        let value = self.vm.retain_value(value);
+        let value = self.vm.retain_value(value).map_err(Error::Vm)?;
         Ok(Exports::new(value, self.generation, self.decision_epoch()))
     }
 
     pub fn hot_reload(&mut self, source_name: impl Into<String>, source: &str) -> Result<Exports> {
-        let module = Self::compile_module(source_name, source)?;
+        let module = Self::compile_module_with_profile(source_name, source, self.vm.profile())?;
         self.install(module)
     }
 
@@ -814,11 +940,12 @@ impl std::error::Error for Error {}
 #[cfg(test)]
 mod tests {
     use super::{
-        finish_entry_lifecycle, Error, FromRustia, GuestSurface, OpCapability, OwnedTable,
-        OwnedValue, Profile, Result, Rustia, RustiaBuilder, RustiaExecutionProfile,
-        RustiaExtension, RustiaHostFunctionInfo, ServiceClock, SourceSpan, VmErrorKind, VmSettings,
-        RUSTIA_DECISION_RESET_ABI_VERSION, RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
-        RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY, RUSTIA_MIN_HOST_FUNCTION_FUEL,
+        finish_entry_lifecycle, Error, FromRustia, GuestSurface, IntoRustia, OpCapability,
+        OwnedTable, OwnedValue, Profile, Result, Rustia, RustiaBuilder, RustiaExecutionProfile,
+        RustiaExtension, RustiaHostFunctionInfo, ServiceClock, ServiceEntropy, SourceSpan,
+        ValueType, VmErrorKind, VmSettings, RUSTIA_DECISION_RESET_ABI_VERSION,
+        RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
+        RUSTIA_MIN_HOST_FUNCTION_FUEL,
     };
     use rustia_compiler::{compile_with_options, CompileOptions};
     use rustia_parser::parse_source;
@@ -836,6 +963,151 @@ mod tests {
             .run_owned("local x: number = 6 * 7; return x")
             .unwrap();
         assert_eq!(f64::from_rustia(result).unwrap(), 42.0);
+    }
+
+    #[test]
+    fn live_values_preserve_identity_cycles_and_rich_payloads() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let root = rustia
+            .run_value(
+                r#"
+local root = {}
+local richKey = {}
+local shared = { answer = 42 }
+root.self = root
+root.left = shared
+root.right = shared
+root.binary = string.char(0, 255, 65)
+root.bytes = buffer.fromstring(string.char(1, 0, 254))
+root.direction = vector(1.5, -2, 3)
+root[richKey] = shared
+return root
+"#,
+            )
+            .unwrap();
+        assert_eq!(root.kind(&rustia).unwrap(), ValueType::Table);
+        let table = root.as_table(&rustia).unwrap().unwrap();
+
+        let self_value = table.get(&mut rustia, "self").unwrap();
+        assert!(root.raw_equal(&mut rustia, &self_value).unwrap());
+        let left = table.get(&mut rustia, "left").unwrap();
+        let right = table.get(&mut rustia, "right").unwrap();
+        assert!(left.raw_equal(&mut rustia, &right).unwrap());
+        assert_eq!(
+            table
+                .get(&mut rustia, "binary")
+                .unwrap()
+                .string_bytes(&mut rustia)
+                .unwrap(),
+            Some(vec![0, 255, 65])
+        );
+        assert_eq!(
+            table
+                .get(&mut rustia, "bytes")
+                .unwrap()
+                .buffer_bytes(&mut rustia)
+                .unwrap(),
+            Some(vec![1, 0, 254])
+        );
+        assert_eq!(
+            table
+                .get(&mut rustia, "direction")
+                .unwrap()
+                .vector_components(&mut rustia)
+                .unwrap(),
+            Some([1.5, -2.0, 3.0])
+        );
+
+        table.set(&mut rustia, "added", 99_i32).unwrap();
+        assert_eq!(
+            table
+                .get(&mut rustia, "added")
+                .unwrap()
+                .as_number(&rustia)
+                .unwrap(),
+            Some(99.0)
+        );
+        let rich_entry = table
+            .entries(&mut rustia)
+            .unwrap()
+            .into_iter()
+            .find(|(key, _)| key.kind(&rustia).unwrap() == ValueType::Table)
+            .expect("table identity key");
+        assert!(left.raw_equal(&mut rustia, &rich_entry.1).unwrap());
+
+        let exports = rustia
+            .compile_and_run("local live = { answer = 7 }; return { live = live }")
+            .unwrap();
+        let exported = exports.get_live_current(&mut rustia, "live").unwrap();
+        assert_eq!(
+            exported
+                .as_table(&rustia)
+                .unwrap()
+                .unwrap()
+                .get(&mut rustia, "answer")
+                .unwrap()
+                .as_number(&rustia)
+                .unwrap(),
+            Some(7.0)
+        );
+
+        let _: f64 = rustia.run("collectgarbage('collect'); return 0").unwrap();
+        assert_eq!(
+            left.as_table(&rustia)
+                .unwrap()
+                .unwrap()
+                .get(&mut rustia, "answer")
+                .unwrap()
+                .as_number(&rustia)
+                .unwrap(),
+            Some(42.0),
+            "a live handle remains a collector root"
+        );
+        assert!(
+            root.to_owned(&mut rustia).is_err(),
+            "cyclic snapshots stay explicit"
+        );
+
+        let mut other = Rustia::new(Profile::ReproducibleStandard);
+        assert!(root
+            .kind(&other)
+            .unwrap_err()
+            .to_string()
+            .contains("different Rustia VM"));
+        other.reset_decision().unwrap();
+        rustia.reset_decision().unwrap();
+        assert!(root
+            .kind(&rustia)
+            .unwrap_err()
+            .to_string()
+            .contains("stale value handle"));
+    }
+
+    #[test]
+    fn live_functions_accept_and_return_live_values() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let function = rustia
+            .run_value(
+                "return function(value) local t = { value = value }; t.self = t; return value, t end",
+            )
+            .unwrap()
+            .as_function(&rustia)
+            .unwrap()
+            .unwrap();
+        let argument = rustia.run_value("return { answer = 42 }").unwrap();
+        let results = function
+            .call_values(&mut rustia, std::slice::from_ref(&argument))
+            .unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(argument.raw_equal(&mut rustia, &results[0]).unwrap());
+        let returned = results[1].as_table(&rustia).unwrap().unwrap();
+        let returned_value = returned.get(&mut rustia, "value").unwrap();
+        assert!(argument.raw_equal(&mut rustia, &returned_value).unwrap());
+        let returned_self = returned.get(&mut rustia, "self").unwrap();
+        assert!(returned
+            .as_value()
+            .raw_equal(&mut rustia, &returned_self)
+            .unwrap());
     }
 
     #[test]
@@ -974,14 +1246,14 @@ return {
 
     #[test]
     fn owned_table_helpers_accept_typed_values_and_getters() {
-        let labels = OwnedTable::string_entries([("kind", "scout"), ("role", "ai")]);
+        let labels = OwnedTable::string_entries([("kind", "scout"), ("role", "ai")]).unwrap();
         assert_eq!(
             labels.get_string_as::<String>("kind").unwrap().as_deref(),
             Some("scout")
         );
         assert_eq!(labels.get_string_as::<String>("missing").unwrap(), None);
 
-        let stats = OwnedTable::string_entries([("hp", 5_i32), ("speed", 7_i32)]);
+        let stats = OwnedTable::string_entries([("hp", 5_i32), ("speed", 7_i32)]).unwrap();
         assert_eq!(stats.get_string_as::<i32>("hp").unwrap(), Some(5));
 
         let error = labels
@@ -993,7 +1265,7 @@ return {
             "unexpected error: {error}"
         );
 
-        let array = OwnedTable::array_values([1_i32, 2, 3]);
+        let array = OwnedTable::array_values([1_i32, 2, 3]).unwrap();
         assert_eq!(
             array.array,
             vec![
@@ -1003,6 +1275,53 @@ return {
             ]
         );
         assert!(array.entries.is_empty());
+    }
+
+    #[test]
+    fn integer_embedding_rejects_silent_luau_number_rounding() {
+        let exact = (1_u64 << 53).into_rustia().unwrap();
+        assert_eq!(exact, OwnedValue::Number((1_u64 << 53) as f64));
+
+        for error in [
+            ((1_u64 << 53) + 1).into_rustia().unwrap_err(),
+            u64::MAX.into_rustia().unwrap_err(),
+            i64::MAX.into_rustia().unwrap_err(),
+        ] {
+            assert!(
+                error.to_string().contains("cannot be represented exactly"),
+                "unexpected error: {error}"
+            );
+        }
+
+        assert!(u64::from_rustia(OwnedValue::Number(2.0_f64.powi(64))).is_err());
+        assert!(i64::from_rustia(OwnedValue::Number(2.0_f64.powi(63))).is_err());
+
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        assert!(rustia.insert_global("too_wide", u64::MAX).is_err());
+    }
+
+    #[test]
+    fn serde_integer_conversion_is_exact_for_values_and_map_keys() {
+        assert_eq!(
+            OwnedValue::from_serialize(&(1_u64 << 53)).unwrap(),
+            OwnedValue::Number((1_u64 << 53) as f64)
+        );
+        assert!(OwnedValue::from_serialize(&((1_u64 << 53) + 1)).is_err());
+        assert!(OwnedValue::from_serialize(&u128::MAX).is_err());
+
+        let exact_wide = 1_i128 << 100;
+        let serialized = OwnedValue::from_serialize(&exact_wide).unwrap();
+        assert_eq!(serialized.deserialize::<i128>().unwrap(), exact_wide);
+
+        let rounded_key = BTreeMap::from([((1_u64 << 53) + 1, true)]);
+        assert!(OwnedValue::from_serialize(&rounded_key).is_err());
+
+        assert!(OwnedValue::Number(2.0_f64.powi(64))
+            .deserialize::<u64>()
+            .is_err());
+        assert!(OwnedValue::Number(2.0_f64.powi(128))
+            .deserialize::<u128>()
+            .is_err());
     }
 
     #[test]
@@ -1134,7 +1453,10 @@ return {
         rustia.insert_global("numbers", vec![1_i32, 2, 3]).unwrap();
         rustia.insert_global("named_map", named_map).unwrap();
         rustia
-            .insert_global("named", OwnedTable::string_entries([("kind", "scout")]))
+            .insert_global(
+                "named",
+                OwnedTable::string_entries([("kind", "scout")]).unwrap(),
+            )
             .unwrap();
 
         let value = rustia
@@ -2119,6 +2441,16 @@ return ok and done and not protected and string.find(err, 'foo', 1, true) ~= nil
                 6,
                 [1, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0],
             ),
+            (
+                RustiaExecutionProfile::new(Profile::Puc51Compat, GuestSurface::Standard),
+                7,
+                [1, 0, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0],
+            ),
+            (
+                RustiaExecutionProfile::new(Profile::Puc51Compat, GuestSurface::HardenedLeaf),
+                8,
+                [1, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0],
+            ),
         ];
         for (index, (profile, compatibility_id, identity_bytes)) in profiles.iter().enumerate() {
             assert_eq!(profile.compatibility_id(), *compatibility_id);
@@ -2208,12 +2540,44 @@ return type(os) == 'table'
         assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
 
         let result = RustiaBuilder::deterministic()
-            .monotonic_clock(ServiceClock::system())
+            .monotonic_clock(ServiceClock::monotonic())
             .build();
         let Err(Error::Vm(error)) = result else {
             panic!("expected deterministic profile to reject a nondeterministic monotonic clock");
         };
         assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
+
+        let result = RustiaBuilder::deterministic()
+            .entropy(ServiceEntropy::system())
+            .build();
+        let Err(Error::Vm(error)) = result else {
+            panic!("expected deterministic profile to reject nondeterministic entropy");
+        };
+        assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
+    }
+
+    #[test]
+    fn fixed_entropy_is_reproducible_and_changes_the_initial_random_sequence() {
+        let sequence = |seed| {
+            let mut rustia = RustiaBuilder::standard()
+                .entropy(ServiceEntropy::fixed(seed))
+                .build()
+                .unwrap();
+            [
+                rustia.run::<f64>("return math.random()").unwrap(),
+                rustia.run::<f64>("return math.random()").unwrap(),
+            ]
+        };
+
+        assert_eq!(sequence(42), sequence(42));
+        assert_ne!(sequence(42), sequence(43));
+        assert_eq!(sequence(0), {
+            let mut rustia = RustiaBuilder::standard().build().unwrap();
+            [
+                rustia.run::<f64>("return math.random()").unwrap(),
+                rustia.run::<f64>("return math.random()").unwrap(),
+            ]
+        });
     }
 
     #[test]
@@ -2395,15 +2759,5 @@ return { count = #decision_global }
         assert_eq!(answer, 42.0);
         // print goes to real process stdout via `print!`, which a test cannot read back from
         // inside the process; sink delivery is covered by the VM-level capture tests.
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    #[test]
-    fn live_preset_fails_loudly_on_wasm32() {
-        let result = RustiaBuilder::live().build();
-        let Err(Error::Vm(error)) = result else {
-            panic!("expected live() to fail on wasm32");
-        };
-        assert!(matches!(error.kind, VmErrorKind::Unsupported { .. }));
     }
 }

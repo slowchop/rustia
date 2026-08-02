@@ -27,11 +27,11 @@
 > implemented; full Luau `__namecall` context remains a separate conformance item. Exact dedicated-Linux runs
 > now retain accepted dense/OOP throughput evidence plus a separate paired 512-VM string-memory corpus.
 >
-> **v3.3 implementation update (2026-07-27):** the collection scheduling/profile decision remains locked.
+> **v3.4 implementation update (2026-07-29):** the collection scheduling/profile decision remains locked.
 > Complete object/program reachability and generation-safe reuse, aggregate logical-live quotas with atomic OOM,
-> and epoch-safe decision-reset ABI v1 are implemented. O(1) incremental accounting and broader mixed-heap
-> native/Wasm pressure evidence remain release gates. The current first embedding slice is owned-value based;
-> live zero-copy serde remains planned.
+> epoch-safe decision-reset ABI v1, maintained live-memory accounting, and the graph-preserving rooted
+> `Value`/`Table`/`Function` handle spine are implemented. The shared native/Node-V8 96-epoch mixed-heap
+> pressure gate is also implemented; live-object constructors/chunk loading and live serde remain release gates.
 
 ## 0. The bet — proven, with honest framing
 
@@ -75,8 +75,8 @@ rustia-vm         16-byte tagged Value, VM heap + profile-specific gc-arena sche
                   dispatch, per-instruction fuel + recursion cap, stackless trampoline, coroutines, and the
                   math/table/string/bit32/base/coroutine/buffer/vector/utf8/string.pack standard-library surface
 rustia            embedding API: koto-shaped Vm facade + typed FromRustia/IntoRustia core + owned-value serde;
-                  lifetime-free owned handles (the 'gc brand never leaks to the embedder); live zero-copy serde
-                  remains a planned advanced layer
+                  VM/epoch-rooted live Value/Table/Function handles preserve graph identity without leaking the
+                  'gc brand; constructors, chunk loading, and live serde remain planned advanced ergonomics
 rustia-cli        REPL / runner
 ```
 
@@ -148,20 +148,25 @@ functions, upvalues, atomized runtime strings, userdata, buffers, and vectors; r
 roots. Host-requested quiescence also prunes unreachable coroutine state and releases spare heap/interner/stack
 capacity. Loaded programs use generation-safe reusable handles and host-requested quiescence drops obsolete
 program bytecode, constants, inline caches, and coverage rows after the final reachable function disappears.
+Script-triggered and quota-forced collection now perform the same program-reachability cleanup while treating
+active top-level calls and suspended coroutine frames as program roots.
 `Vm::memory_stats()` now exposes VM-owned live/reserved bytes and optional instruction-boundary peaks. Mark
-scratch uses compact generation arrays instead of general-purpose tree nodes. The legacy script-visible counters
-remain on their O(1) compatibility path until incremental accounting can back them without a quadratic full
-census. `VmSettings::memory_limit_bytes` now enforces a deterministic logical-live quota: pressure forces one
+scratch uses compact generation arrays instead of general-purpose tree nodes. Heap/program totals are
+maintained and VM-control totals are cached with local structural refresh, so quota admission and the
+script-visible counters avoid a quadratic whole-VM census. `VmSettings::memory_limit_bytes` now enforces a
+deterministic logical-live quota: pressure forces one
 collection, preflights large string/table/buffer allocations, stages growing table writes before commit, and
-returns catchable `OutOfMemory`. The correctness-first implementation scans at quota-enabled instruction
-boundaries; O(1) incremental accounting is a later performance optimization. Exact-commit Linode cohort
+returns catchable `OutOfMemory`. Exact reserved-byte telemetry remains an on-demand census, and opt-in peak
+tracking deliberately samples it at instruction boundaries. Exact-commit Linode cohort
 `safe-memory-588b541` retained 99 native samples after confirmed deletion and passed the wasm32 512 KiB
 quota/recovery probe. Rustia tied the 256 KiB best shared-workload peak and retained a 14.4 KiB shared mean,
 below the frozen mlua/Luau/JIT reference's 24.8 KiB. Decision-reset ABI v1 now discards every guest allocation
 and retained root, restores deterministic state, invalidates handles by epoch, and remains exactly flat after
-warm-up across 600 focused native decisions. A Node/V8 wasm32 probe verifies the same lifecycle and exact
-plateau across 300 more decisions. The remaining axis-D work is O(1) accounting and broader mixed-heap
-native/Wasm pressure coverage before interval tuning is meaningful.
+warm-up across 600 focused native decisions. A shared native/Node-V8 test adds 96 epochs and 3,072 mixed
+allocation waves across cyclic graphs, weak tables, public roots, suspended coroutines, rich values, hot reload,
+and quota/OOM recovery. Both targets hold an exact post-reset VM plateau, and wasm linear-memory pages remain
+stable after warm-up. Axis-D interval tuning can now use this landed correctness gate without turning it into a
+timing benchmark.
 
 **E. Determinism enforcement — LOCKED.** Dense `Vec` array parts plus insertion-ordered `Vec` hash entries;
 larger hash parts use a stable custom-mixed open-addressed `Vec<u32>` side index at no more than 50% load, and
@@ -222,7 +227,8 @@ Determinism work splits in two, and only the second part needs a flag:
   `loadstring`, and host registrations that read external mutable state or emit nondeterministic effects. Weak
   tables remain supported and are swept on deterministic instruction-count boundaries.
 
-⇒ **ONE engine with THREE concrete `Profile` variants** (review M1):
+⇒ **ONE engine with THREE concrete `Profile` variants** (review M1; a fourth source-compat variant,
+`Puc51Compat`, was added 2026-07-31 — see below):
 - **`ReproducibleStandard` (the public default):** targets the full pinned standalone surface with Group A on
   and the Standard service surface available; the current 493-ref executable denominator is pending-free.
   It is cross-platform-reproducible for scripts inside the proven surface that avoid environment services.
@@ -239,7 +245,10 @@ Determinism work splits in two, and only the second part needs a flag:
 Mechanism: a per-VM runtime setting. There is no separate engine build or current Cargo feature that hard-strips
 the restricted globals.
 
-The three profiles are still the complete semantic profile set. A separate `GuestSurface` setting narrows what
+The three profiles above are the complete *determinism-axis* profile set. A fourth `Profile` variant,
+`Puc51Compat` (added 2026-07-31), sits on the source-compat axis instead: it reproduces PUC Lua 5.1.5 table
+layout/`next()` order, `auxsort`, and `%.14g` formatting with ReproducibleStandard host-service rules, pinned
+by the offline-derived `conformance/fixtures/puc51-compat/` differential corpus. A separate `GuestSurface` setting narrows what
 compatible language environment a particular embedding exposes. `GuestSurface::HardenedLeaf`, selected by
 `RustiaBuilder::deterministic_leaf()`, layers on `DeterministicSim` for authoritative stateless actions: globals,
 standard libraries, and host namespaces are frozen; environment/debug/raw mutation, RNG, clocks/output,
@@ -326,11 +335,12 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
   the `ai_bakeoff` Criterion harness as a continuous perf/golden gate. Rewrite the `.koto` scenario/console
   scripts → `.luau`. Register grabby's bespoke fused AI op via the typed host-module surface.
 - **P4 — production hardening + public release.** `buffer`, `vector`, `utf8`, `string.pack`, and the major
-  standalone library surface are already conformance-backed. The remaining release-critical work is complete
-  object/program reclamation and reuse, memory accounting/quotas/OOM behavior, deterministic reset semantics,
-  host-provided output/time services plus honest VM memory telemetry, host-owned `require` resolution/cache,
-  transactional guest-module install/hot-reload failure semantics, rich/live value
-  interop, diagnostic and semantic-tail hardening, realistic mixed-heap native+wasm evidence, the full
+  standalone library surface are already conformance-backed. Object/program reclamation and reuse,
+  memory accounting/quotas/OOM behavior, deterministic reset semantics, host-provided output/time services,
+  VM memory telemetry, host-owned `require` resolution/cache, and the native/Node-V8 mixed-heap gate are in
+  place. The remaining release-critical work is
+  transactional guest-module install/hot-reload failure semantics, live-object constructors/serde,
+  diagnostic and semantic-tail hardening, the full
   cross-target correctness/golden matrix, API/semver stabilization, and crate publication. The gradual
   typechecker/LSP is a separate later track, not a
   runtime-release gate. Keep the public codebase clean (no grabby-specific code) under the settled dual
@@ -363,8 +373,8 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
 | Value-layout/correctness evidence is still incomplete across the full native/browser matrix; real **Safari/iOS JSC** remains open even though V8, Bun/JSC-family, and SpiderMonkey shell wasm are measured | **high** | close the residual §C0 public-release build/golden matrix while keeping timings dedicated-Linux-only; keep `Value` sealed/swappable until then |
 | Earlier general-script perf evidence came from narrow spike workloads | med | use the committed multi-workload harness and generated per-workload claim gate |
 | Live VM is thread-affine instead of `Send` | med | Avoids unsafe in production; hosts should construct VMs on worker threads and share only immutable compiled artifacts/configuration |
-| O(1) accounting and broad native/Wasm mixed-heap pressure evidence remain incomplete | **high** | object/program reuse, quotas/OOM, epoch reset, a focused 600-decision native plateau, and a 300-decision Node/V8 wasm32 plateau are implemented; replace boundary scans and extend the external long-run pressure matrix before tuning intervals |
-| GC full-collect cost scales O(live-objects) (~10 ns/obj; ~200 µs at 20k objects) | med | after reclamation lands, tune the instruction-count collection interval on realistic heap sizes and confirm bit-reproducible native vs wasm |
+| Mixed-heap correctness regresses across native/wasm | med | one shared 96-epoch/3,072-wave source now covers the complete object mix, bounded roots, weak/cyclic reclamation, hot reload, OOM recovery, exact reset plateaus, and stable warmed Node/V8 linear-memory pages |
+| GC full-collect cost scales O(live-objects) (~10 ns/obj; ~200 µs at 20k objects) | med | tune the instruction-count collection interval against the landed mixed-heap correctness gate and realistic heap sizes |
 | Remaining semantic/diagnostic tail can move errors across compile/runtime boundaries | med | add focused pinned-Luau fixtures plus differential/fuzz tests and public stack-trace/source diagnostics |
 | Representative mixed-heap/wasm per-VM RSS remains open; 16B Value doubles value memory, GcBox adds 16 B/obj, and wasm memory grows only | med | retain the exact paired 512-VM Linux corpus: the candidate's primary residual string contrasts are approximately 0 KiB/VM for shared short/long program bytes and loaded 13-byte strings, plus 7.078 KiB/VM for loaded long atoms; extend to representative heaps/native+wasm targets, then set the P1 budget |
 | Public-release scope for pinned standalone Luau runtime compatibility is a long tail | low | P4; grabby ships privately on the P2 subset first; analyzer, raw C API, Roblox, Lua 5.4, and bytecode compatibility stay separate unless reclassified |

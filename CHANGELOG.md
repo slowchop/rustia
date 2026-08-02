@@ -8,6 +8,85 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- A new `Profile::Puc51Compat` PUC Lua 5.1.5 compatibility profile: a faithful
+  `ltable.c` table backend (array part + node part with main-position chaining,
+  Brent-style relocation, `computesizes` rehash, tombstone deletion, `luaH_next`
+  enumeration order, and `luaH_getn` border), the PUC `auxsort` for
+  `table.sort`, `%.14g` number formatting through `tostring`/concat/
+  `table.concat`/`string.format("%s")`, constructor pre-sizing (compiler
+  hash-field hints plus `luaH_resizearray` append tails), and PUC constructor
+  write order (immediate keyed writes vs `LFIELDS_PER_FLUSH` positional
+  batches, via `CompileOptions::puc51_constructor_order`). The `rustia` facade
+  gains a `RustiaBuilder::puc51_compat()` preset pairing the profile with the
+  stock `loadstring` compiler, and the CLI accepts `--profile puc51-compat`.
+  Behavior parity is pinned by a new offline-derived differential corpus under
+  `conformance/fixtures/puc51-compat/` (18 fixtures; expectations captured from
+  the pinned PUC 5.1.5 C sources in the new `third_party/lua-src` submodule —
+  everything rustia builds stays pure Rust; the C oracle is compiled only
+  offline and never by CI). Accepted divergences are documented in
+  `design/50-conformance.md`.
+
+### Changed
+
+- `LoadStringCompiler` now receives the VM's `Profile` as a third parameter so
+  runtime-compiled chunks honor profile-dependent codegen (currently the PUC
+  constructor write order under `Profile::Puc51Compat`). Update custom
+  loadstring compilers to the new signature.
+
+### Fixed
+
+- One-argument `table.create(n)` under `Profile::Puc51Compat` no longer
+  collides with compiler constructor pre-sizing hints: constructor
+  `TableCreate` instructions now mark with `aux == 0` (the builtin's arity is
+  always 1..=2), so the builtin's argument is no longer misread as a
+  hash-field hint (spurious "type error: expected number", node-part
+  over-allocation from unrelated register data, and a bypassed builtin size
+  cap).
+
+- A shared native/Node-V8 mixed-heap pressure test now executes 96 decision
+  epochs and 3,072 allocation waves under a 2 MiB logical-live limit. Each
+  wave combines cyclic tables, runtime strings, closures/upvalues, suspended
+  coroutines, userdata, buffers, vectors, weak tables, and bounded public
+  roots; each epoch also exercises hot reload, an atomic catchable 8 MiB
+  allocation failure, weak-root cleanup, stale-handle rejection, and an exact
+  reset plateau. The wasm run additionally requires linear-memory pages to
+  stop growing after the warm half.
+- The stable-toolchain fuzz smoke gate now performs deterministic 2,048-case
+  frontend and 2,048-case VM mutation sweeps. The VM decoder covers every one
+  of the 131 production opcodes exactly once under bounded input,
+  instruction fuel, recursion, and a 512 KiB logical-live quota; the separate
+  `cargo-fuzz` targets remain available for longer nightly
+  coverage-guided campaigns.
+- Hosted CI now executes both bare/no-default-feature and default web-live
+  `wasm32-unknown-unknown` adapter tests through the matching
+  `wasm-bindgen-test-runner` on Node 22/V8, in addition to cross-compiling the
+  declared target matrix. This is real wasm runtime coverage, but does not
+  replace the still-open Firefox/Safari browser golden gate.
+- Rooted public `Value` and `Table` handles extend the existing retained
+  `Function` model into a graph-preserving live embedding layer. They carry
+  VM identity and decision epoch checks; expose binary strings, buffers,
+  vectors, rich table keys, mutation, iteration, and raw equality; preserve
+  shared/cyclic tables without leaking collector lifetimes; and cross both
+  ordinary and typed invocations as live function arguments/results.
+  `OwnedValue` remains the explicit acyclic snapshot layer, and snapshotting a
+  cycle reports an error instead of silently losing identity. Creating a root
+  is quota-checked and fails atomically when its registry node would exceed the
+  VM logical-live memory limit; the low-level `Vm::retain_value` is therefore
+  fallible, while `Vm::retain_values` admits multi-result batches atomically
+  and keeps every candidate live across a pressure collection.
+- `ServiceModuleResolver` and `ModuleSource` add host-owned script-visible
+  `require` without an ambient filesystem dependency. Resolved canonical
+  identities drive an execute-once per-decision cache; nested referrers, cycle
+  diagnostics, shared caller fuel, GC rooting, decision-reset clearing,
+  deterministic-profile labels, panic poisoning, and logical-quota admission
+  are covered and versioned by `RUSTIA_MODULE_RESOLUTION_ABI_VERSION`. Failed
+  and multi-result modules are not cached; transactional
+  rollback of arbitrary guest side effects remains future work. The CLI
+  installs a filesystem-backed resolver in its standard and compatibility
+  profiles with fixed `.luau`/`.lua`/directory-index candidate order,
+  canonical cache identities, nested relative resolution, and module-source
+  runtime diagnostics; deterministic CLI execution has no ambient filesystem
+  loader.
 - `RustiaExecutionProfile` provides canonical identity-component bytes and
   compact compatibility IDs for the selected core profile and guest surface,
   constructs the deterministic presets, and can be read back from both a
@@ -62,13 +141,10 @@ Current unpublished workspace version: `0.0.1`.
   functions/modules, immutable compiled modules, and lifetime memory peaks
   persist. `Function`/`Exports` handles now carry a checked decision epoch, and
   a 600-decision mixed table/coroutine/program test proves an exact post-warmup
-  VM-memory plateau. The wasm32 Node/V8 lifecycle probe executes another 300
-  decisions and verifies the same compiled-module reuse, host-binding restore,
-  input clearing, RNG restart, handle invalidation, and exact plateau. A second
-  wasm32 probe executes two 300-decision typed hardened-entry cohorts and
-  verifies failed-entry rollback/reset, successful records and values, epoch
-  progression, the immutable-prefix memory plateau, and stable linear-memory
-  pages across the second cohort.
+  VM-memory plateau. The shared mixed-heap pressure test adds a real Node/V8
+  wasm lifecycle: 96 epochs combine rich object graphs, public roots, weak
+  collection, hot reload, quota/OOM recovery, epoch invalidation, exact
+  post-reset VM accounting, and stable second-half linear-memory pages.
 - Runtime string atoms now use generation-checked reusable slots and ordinary
   tracing collections reclaim unreachable strings without allowing stale
   handles to alias replacements. `Vm::collect_garbage()` adds an explicit host
@@ -85,6 +161,17 @@ Current unpublished workspace version: `0.0.1`.
   marking uses compact per-store generation arrays rather than tree-set nodes,
   reducing temporary collection scratch while preserving the shared
   weak-table/reclamation graph.
+- Logical-live memory is now maintained incrementally across heap stores,
+  loaded programs, and VM control state. Quota admission and ordinary
+  instruction boundaries no longer perform a whole-VM census; cold structural
+  changes refresh only their affected aggregate before the next read. Exact
+  reserved-byte telemetry remains on demand through `memory_stats()`, and
+  opt-in peak tracking intentionally samples it at instruction boundaries.
+  `collectgarbage("count")` now reports the maintained live total in KiB and
+  `gcinfo()` reports its floored KiB value instead of compatibility counters.
+  Exact-census test oracles cover every heap read, and exact-boundary table
+  growth tests prove rejected array, short-string, and vector-key writes leave
+  both the table and logical-live total unchanged.
 - `VmSettings::memory_limit_bytes` and
   `RustiaBuilder::memory_limit_bytes(...)` cap VM-owned logical live bytes with
   identical native/wasm32 semantics. Limit pressure forces one collection,
@@ -318,11 +405,25 @@ Current unpublished workspace version: `0.0.1`.
   result freshness, and workspace tests.
 - Release preflight and hosted CI now enforce formatting plus strict Clippy on
   the pinned Rust toolchain.
+- The separate fuzz workspace now receives pinned-toolchain formatting,
+  strict Clippy, deterministic mutation sweeps, and smoke tests during release
+  preflight.
+- Hosted CI now cross-compiles the portable engine library for the declared
+  macOS, Linux, Windows, iOS, Android, and browser-Wasm triples; real-host and
+  browser correctness goldens remain a separate release gate.
+- GitHub-hosted workflows pin `actions/checkout` 7.0.1 and
+  `actions/setup-node` 7.0.0 by full commit SHA, removing the deprecated
+  Node-20 action runtime while retaining explicit Node 22 project execution.
+- The hosted release-preflight checkout now includes repository history needed
+  by frozen benchmark-provenance self-tests.
 - Crate publishability blockers are generated from cargo metadata and package
   file audits into `design/publishability.json`.
 - GitHub Actions keeps benchmark work validation-only; fresh timing data comes
   from the explicit ephemeral Linode Linux lifecycle instead of an arbitrary
   self-hosted runner.
+- The billed Linode lifecycle is now operator-started, accepts only an exact
+  commit already present on `main`, and validates that ancestry before exposing
+  credentials or running repository code.
 - Workflow policy is checked in release preflight so hosted CI cannot record or
   publish fresh benchmark timings.
 - Release preflight and hosted CI now compile the public `rustia` examples
@@ -363,26 +464,33 @@ Current unpublished workspace version: `0.0.1`.
   structs are non-exhaustive.
 - Release-readiness docs now cover package metadata, package file-list audits,
   semver policy, changelog validation, and publish ordering.
-- The VM now has a `VmServices` provider seam with shared stdout, wall-clock, and
-  monotonic-clock sockets. `print` composes `tostring` per argument (honoring
+- The VM now has a `VmServices` provider seam with shared stdout, wall-clock,
+  monotonic-clock, and entropy sockets. `print` composes `tostring` per argument (honoring
   `__tostring`), joins arguments with tabs, appends a trailing newline, and writes to
   the attached sink, staying a no-op without one. No-argument `os.time` and
   default-timestamp `os.date` read the wall-clock provider and otherwise fall back to
   the pinned epoch 1_700_000_000; `os.clock` reads the monotonic provider. The `os`
   table is always registered on non-Sim profiles with all four members; on
   `DeterministicSim` it is registered iff at least one clock provider is plugged, and
-  infallible VM constructors silently drop a nondeterministic clock provider.
+  infallible VM constructors silently drop nondeterministic input providers. Empty
+  entropy keeps the historical seed-zero `math.random` sequence; an entropy
+  provider selects the initial seed once during VM construction.
 - The public `rustia` facade gains environment presets: `RustiaBuilder::standard()`
   (ReproducibleStandard plus a real stdout print sink on native targets, and the new
   delegation target of `Rustia::builder()`), `deterministic()` (DeterministicSim, no
-  ambient services), and `live()` (real stdout, system clocks, and `loadstring`
-  enabled with the stock compiler). The `.stdout(...)`, `.wall_clock(...)`, and
-  `.monotonic_clock(...)` sockets take a sink closure or a `ServiceClock`
-  (`system()` nondeterministic, `fixed(t)` deterministic, `from_fn(f)` host-asserted),
-  and `build()` returns typed errors for a nondeterministic clock provider on
-  `DeterministicSim` and for `live()` on wasm32. `collectgarbage("count")`/`gcinfo`
-  stay canned until honest memory accounting lands, and `math.random` stays pinned in
-  every profile.
+  ambient services), and `live()` (host stdout, system wall/monotonic clocks,
+  system-seeded `math.random`, and `loadstring` enabled with the stock compiler).
+  The `.stdout(...)`, `.wall_clock(...)`, `.monotonic_clock(...)`, and
+  `.entropy(...)` sockets take a sink closure, `ServiceClock`, or
+  `ServiceEntropy`; fixed/host-asserted deterministic providers and explicitly
+  nondeterministic providers are distinct constructors. Native/WASI adapters are
+  automatic. The default `web-live` feature adapts browser/JavaScript Wasm to
+  `console`, `Date`, `performance`, and `crypto`; bare Wasm disables default
+  features and plugs its inputs. `build()` returns typed errors for live inputs
+  on `DeterministicSim` and for an incomplete requested live environment.
+  `collectgarbage("count")`/`gcinfo` now read the maintained VM-owned logical-live total.
+  Script-triggered and quota-forced collection also reclaims unreachable runtime-compiled
+  programs while preserving active top-level and suspended-coroutine program roots.
 - Provider-less `os.clock()` now reads a deterministic logical clock — executed
   instructions divided by 1_000_000 logical instructions per second — monotonically
   non-decreasing per VM and identical across peers and targets, so sandboxed scripts
@@ -390,6 +498,12 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Changed
 
+- The standalone wasm benchmark adapter now opts out of rustia's browser-live
+  defaults, restoring the documented `--locked` release build without changing
+  its pinned dependency set or pulling unused browser-service dependencies.
+  The Node/V8 512 KiB quota/recovery probe remains covered; the maintained
+  mixed-heap test now supplies the long-running reset and stable-linear-memory
+  evidence.
 - Default `table.sort` comparisons now handle numeric pairs directly in the
   native heap-sort loop, while string ordering, custom comparators, mutation
   checks, and dynamic comparison errors retain their existing paths.
@@ -412,9 +526,59 @@ Current unpublished workspace version: `0.0.1`.
   non-decreasing values derived from executed instructions; a plugged monotonic
   provider overrides it on any profile, and `DeterministicSim` keeps no ambient
   clock unless a provider is plugged.
+- `live()` now behaves like a conventional scripting runtime: it seeds the pinned
+  PCG32 generator from host entropy and backs `os.clock()` with a true monotonic
+  source. `standard()` and `deterministic()` retain the historical seed-zero
+  sequence unless a replay-stable entropy provider is explicitly supplied.
+- Rust-to-Luau conversion is now explicitly fallible: `IntoRustia`,
+  `IntoRustiaMulti`, and the typed `OwnedTable` constructors return `Result`.
+  Integer inputs and serde values/map keys are rejected when conversion to
+  Luau's `f64` number type would round, while exactly representable wide powers
+  remain accepted.
+- `rustia-cli` now follows script-runner output semantics: guest `print` reaches
+  stdout, ordinary chunk return values are ignored (including functions and
+  cyclic tables), regular REPL statements are silent, and only `=expression`
+  shorthand displays its value through Luau `tostring`.
 
 ### Fixed
 
+- Suspended coroutine frames now participate in tracing only after their
+  script-visible coroutine userdata is reachable. The collector follows
+  coroutine-to-coroutine frame references to a fixed point, then reclaims
+  unreachable suspended states and their cyclic object graphs; previously
+  every suspended frame was an unconditional VM root until decision reset.
+- `buffer.readf32`/`readf64` now preserve the exact IEEE-754 payload supplied
+  by the buffer, including NaN sign/payload and negative zero, so immediate
+  read/write round trips are byte-exact. f32 NaNs use an explicit cross-target
+  widening/narrowing rule; arithmetic and ordinary numeric ingress continue
+  to canonicalize engine-produced NaNs.
+- Direct, tail, and stackless self-recursion now honor the configured VM
+  recursion limit instead of the Luau conformance harness's 20,000-call
+  compatibility ceiling. The pinned harness retains its oracle-specific frame
+  accounting behind a conformance-only setting.
+- Generic and generalized iterator calls can now yield through
+  `coroutine.resume`; resumption applies the iterator results and continues at
+  the correct loop edge.
+- Interpolated-string lowering now remaps tokens, lexer errors, AST spans, and
+  later runtime locations to the original source bytes, including nested
+  interpolation.
+- CLI file and stdin execution now accepts raw Luau bytes, preserves source
+  offsets while masking a leading shebang, and resolves REPL runtime diagnostics
+  against the chunk that defined the failing function.
+- Every timed benchmark repetition is checked against the first checksum, and
+  Linode promotion rejects any candidate ledger that changes or truncates the
+  frozen published-history prefix.
+- The `rustia-conformance` crate archive now contains the complete corpus,
+  defaults to that bundled repository, and is package-verified by inventory,
+  checksum, unpacked build, and full-manifest execution.
+- Release preflight and hosted CI now invoke one canonical validation driver,
+  Cargo metadata/build/test/package commands are locked, and the lockfile must
+  begin clean. GitHub Actions are pinned to full commit SHAs.
+- Every package archive now carries both license texts, and the package audit
+  rejects README links whose relative targets are absent from the archive.
+- The standalone browser demo disables host-import features, carries a locked
+  dependency graph, and can be instantiated directly with an empty WebAssembly
+  import object as documented.
 - `os.time(table)` now defaults a missing `hour` field to 12 (noon) instead of 0,
   matching the pinned Luau 0.709 oracle (`VM/src/loslib.cpp` reads the field with
   `getfield(L, "hour", 12)`).

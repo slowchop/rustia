@@ -147,7 +147,9 @@ function validatePackage(pkg, workspaceNames, workspaceVersion) {
 }
 
 function buildReport() {
-  const metadata = JSON.parse(runCargo(["metadata", "--no-deps", "--format-version", "1"]));
+  const metadata = JSON.parse(
+    runCargo(["metadata", "--locked", "--no-deps", "--format-version", "1"]),
+  );
   const packages = workspacePackages(metadata);
   const names = packages.map((pkg) => pkg.name).sort(compareNames);
   if (names.join(",") !== expectedPackages.join(",")) {

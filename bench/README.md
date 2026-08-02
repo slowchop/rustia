@@ -70,7 +70,7 @@ Fixed-N runs that append history must provide `--samples-json`; the harness
 writes that sidecar before appending its summary row.
 
 The local hardening diagnostics, 2026-07-20 accepted dense/OOP comparisons, and completed string-memory evidence are
-recorded in [`../design/56-performance-research.md`](../design/56-performance-research.md),
+recorded in [`design/56-performance-research.md`](https://github.com/slowchop/rustia/blob/main/design/56-performance-research.md),
 including exact identities, paired protocols, confidence intervals, retained artifacts, and the deliberately
 conservative claim posture.
 
@@ -78,7 +78,7 @@ conservative claim posture.
 
 The existing `vm-string-memory` sampler is a focused Rustia A/B evidence tool, not a general engine comparison.
 The first-class memory product is specified in
-[`../design/57-memory-benchmarking.md`](../design/57-memory-benchmarking.md). Its child/supervisor, cgroup-v2
+[`design/57-memory-benchmarking.md`](https://github.com/slowchop/rustia/blob/main/design/57-memory-benchmarking.md). Its child/supervisor, cgroup-v2
 sampling, repeated-epoch analyzer, synthetic controls, deterministic todo workloads, separate history, and
 pending/ready dashboard integration are now implemented; the first dedicated-Linux pre-reclamation cohort is
 published as `pre-reclamation-18b58d8` (110 rows, 990 fresh processes). Throughput and instrumented memory

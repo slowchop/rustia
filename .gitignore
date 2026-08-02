@@ -6,3 +6,4 @@ target/
 *.profraw
 .claude/worktrees/
 private/
+tools/puc51-oracle/build/

@@ -30,7 +30,7 @@
       "publish": false,
       "role": "public-rustia-crate",
       "package_file_audit": {
-        "file_count": 6,
+        "file_count": 8,
         "forbidden_path_violations": 0
       },
       "internal_dependencies": [],
@@ -49,7 +49,7 @@
       "publish": false,
       "role": "public-rustia-crate",
       "package_file_audit": {
-        "file_count": 6,
+        "file_count": 8,
         "forbidden_path_violations": 0
       },
       "internal_dependencies": [
@@ -78,7 +78,7 @@
       "publish": false,
       "role": "public-rustia-crate",
       "package_file_audit": {
-        "file_count": 16,
+        "file_count": 18,
         "forbidden_path_violations": 0
       },
       "internal_dependencies": [],
@@ -97,7 +97,7 @@
       "publish": false,
       "role": "public-rustia-crate",
       "package_file_audit": {
-        "file_count": 8,
+        "file_count": 10,
         "forbidden_path_violations": 0
       },
       "internal_dependencies": [
@@ -136,7 +136,7 @@
       "publish": false,
       "role": "public-rustia-crate",
       "package_file_audit": {
-        "file_count": 18,
+        "file_count": 28,
         "forbidden_path_violations": 0
       },
       "internal_dependencies": [
@@ -180,7 +180,7 @@
       "publish": false,
       "role": "public-rustia-crate",
       "package_file_audit": {
-        "file_count": 6,
+        "file_count": 9,
         "forbidden_path_violations": 0
       },
       "internal_dependencies": [
@@ -209,7 +209,7 @@
       "publish": false,
       "role": "public-rustia-crate",
       "package_file_audit": {
-        "file_count": 8,
+        "file_count": 734,
         "forbidden_path_violations": 0
       },
       "internal_dependencies": [
@@ -253,7 +253,7 @@
       "publish": false,
       "role": "standalone-benchmark",
       "package_file_audit": {
-        "file_count": 1419,
+        "file_count": 1421,
         "forbidden_path_violations": 0
       },
       "internal_dependencies": [

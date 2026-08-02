@@ -12,12 +12,24 @@ categories.workspace = true
 description = "Deterministic Luau interpreter and embedding API"
 publish.workspace = true
 
+[features]
+default = ["web-live"]
+web-live = ["dep:getrandom", "dep:js-sys", "dep:wasm-bindgen", "getrandom/wasm_js"]
+
 [dependencies]
+getrandom = { version = "0.3.4", optional = true }
 rustia-compiler.workspace = true
 rustia-lexer.workspace = true
 rustia-parser.workspace = true
 rustia-vm.workspace = true
 serde.workspace = true
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+js-sys = { version = "0.3", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
+wasm-bindgen-test = "0.3"
 
 [lints]
 workspace = true

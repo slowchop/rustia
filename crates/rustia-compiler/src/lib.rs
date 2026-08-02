@@ -87,6 +87,15 @@ pub struct CompileOptions {
     pub builtins: BuiltinEnvironment,
     pub source_name: Option<String>,
     pub source_line_starts: Vec<usize>,
+    /// PUC Lua 5.1 table-constructor write order (lparser.c `constructor`):
+    /// keyed/named fields write immediately at their source position while
+    /// positional values are buffered and flushed in `LFIELDS_PER_FLUSH` (50)
+    /// batches plus a final flush, so a later positional batch overwrites an
+    /// earlier keyed write to the same index. When false (default), positional
+    /// fields write in source order like reference Luau (whose compiler flushes
+    /// its SETLIST chunk before any keyed field, preserving insertion order).
+    /// Set this only for `Profile::Puc51Compat` guests.
+    pub puc51_constructor_order: bool,
 }
 
 impl CompileOptions {
@@ -1752,18 +1761,33 @@ impl Compiler {
             .iter()
             .filter(|field| matches!(field, TableField::Array { .. }))
             .count();
+        // PUC constructor pre-sizing (OP_NEWTABLE B/C operands): the hash
+        // field count rides along unconditionally; only the Puc51Compat
+        // profile consumes it. aux is 0 so constructor markers can never
+        // collide with the `table.create` builtin arity (1..=2).
+        let hash_field_count = fields.len() - array_field_count;
         if array_field_count == 0 {
-            self.code
-                .push(Instruction::new(Opcode::NewArray, target, 0, 0));
+            self.code.push(Instruction::with_aux(
+                Opcode::NewArray,
+                target,
+                0,
+                0,
+                hash_field_count as i32,
+            ));
         } else {
             self.load_constant_to(target, Constant::Number(array_field_count as f64))?;
+            let hash_register = self.load_constant(Constant::Number(hash_field_count as f64))?;
             self.code.push(Instruction::with_aux(
                 Opcode::TableCreate,
                 target,
                 target,
+                hash_register,
                 0,
-                1,
             ));
+            self.free_register(hash_register);
+        }
+        if self.options.puc51_constructor_order {
+            return self.compile_table_fields_puc_order(fields, target);
         }
         let last_index = fields.len().saturating_sub(1);
         for (index, field) in fields.iter().enumerate() {
@@ -1842,6 +1866,139 @@ impl Compiler {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// PUC 5.1 constructor write order (lparser.c `constructor`): keyed and
+    /// named fields emit their table write immediately at their source
+    /// position, while positional values are evaluated in order into
+    /// consecutive registers and written only when `LFIELDS_PER_FLUSH` (50,
+    /// lopcodes.h) have accumulated and again after the last field. A later
+    /// positional batch therefore overwrites an earlier keyed write to the
+    /// same index (`{1, [1] = "one", 2}` yields `t[1] == 1`), the reverse of
+    /// the default source-order writes.
+    fn compile_table_fields_puc_order(&mut self, fields: &[TableField], target: u8) -> Result<()> {
+        const FIELDS_PER_FLUSH: usize = 50;
+        let mut array_index = 1.0;
+        let mut pending: Vec<u8> = Vec::new();
+        let mut pending_start_index = 1.0f64;
+        let last_index = fields.len().saturating_sub(1);
+        for (index, field) in fields.iter().enumerate() {
+            match field {
+                TableField::Array { value, .. } => {
+                    if index == last_index {
+                        if let Expr::Varargs(span) = value {
+                            self.flush_puc_constructor_pending(
+                                target,
+                                &mut pending,
+                                pending_start_index,
+                            )?;
+                            self.validate_varargs_available(*span)?;
+                            if array_index > i32::MAX as f64 {
+                                return Err(CompileError::at(
+                                    "table constructor vararg index overflow",
+                                    *span,
+                                ));
+                            }
+                            self.code.push(Instruction::with_aux(
+                                Opcode::AppendVarargs,
+                                target,
+                                0,
+                                0,
+                                array_index as i32,
+                            ));
+                            continue;
+                        }
+                        if expr_is_call(value) && !self.call_requires_scalar_return_lowering(value)
+                        {
+                            self.flush_puc_constructor_pending(
+                                target,
+                                &mut pending,
+                                pending_start_index,
+                            )?;
+                            self.compile_append_call_to_table(target, array_index, value)?;
+                            continue;
+                        }
+                    }
+                    let value_register = self.compile_expr(value)?;
+                    if pending.is_empty() {
+                        pending_start_index = array_index;
+                    }
+                    pending.push(value_register);
+                    array_index += 1.0;
+                    if pending.len() == FIELDS_PER_FLUSH {
+                        self.flush_puc_constructor_pending(
+                            target,
+                            &mut pending,
+                            pending_start_index,
+                        )?;
+                    }
+                }
+                TableField::Named { name, value, .. } => {
+                    let key =
+                        self.compiled_string_table_key(name.as_bytes(), value.span(), true)?;
+                    let value_register =
+                        self.compile_expr_with_debug_name(value, Some(name.clone()))?;
+                    self.code
+                        .push(table_set_instruction(target, key, value_register));
+                    self.free_register(value_register);
+                    if let Some(key) = key.register() {
+                        self.free_register(key);
+                    }
+                }
+                TableField::Keyed { key, value, .. } => {
+                    if let Some(Constant::String(bytes)) = const_eval(key) {
+                        let key = self.compiled_string_table_key(&bytes, key.span(), true)?;
+                        let value_register = self.compile_expr(value)?;
+                        self.code
+                            .push(table_set_instruction(target, key, value_register));
+                        self.free_register(value_register);
+                        if let Some(key) = key.register() {
+                            self.free_register(key);
+                        }
+                    } else {
+                        let key_register = self.compile_expr(key)?;
+                        let value_register = self.compile_expr(value)?;
+                        self.code.push(Instruction::new(
+                            Opcode::SetIndex,
+                            target,
+                            key_register,
+                            value_register,
+                        ));
+                        self.free_register(value_register);
+                        self.free_register(key_register);
+                    }
+                }
+            }
+        }
+        self.flush_puc_constructor_pending(target, &mut pending, pending_start_index)
+    }
+
+    /// Emits the buffered positional writes of a PUC-order constructor. The
+    /// pending value registers are consecutive from `pending[0]` because each
+    /// `compile_expr` leaves its result on top of the register file.
+    fn flush_puc_constructor_pending(
+        &mut self,
+        target: u8,
+        pending: &mut Vec<u8>,
+        start_index: f64,
+    ) -> Result<()> {
+        if pending.is_empty() {
+            return Ok(());
+        }
+        for (offset, value_register) in pending.iter().enumerate() {
+            let key_register = self.load_constant(Constant::Number(start_index + offset as f64))?;
+            self.code.push(Instruction::new(
+                Opcode::SetIndex,
+                target,
+                key_register,
+                *value_register,
+            ));
+            self.free_register(key_register);
+        }
+        let base_register = pending[0];
+        pending.clear();
+        self.free_registers_back_to(u16::from(base_register));
         Ok(())
     }
 
@@ -6956,6 +7113,87 @@ mod tests {
     }
 
     #[test]
+    fn compiles_puc51_constructor_write_order() {
+        let fifty_positionals_then_keyed = format!(
+            "local t = {{{}, [1] = 99}} return t[1]",
+            (1..=50)
+                .map(|index| index.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let keyed_between_batches = format!(
+            "local t = {{{}, [1] = 99, {}}} return t[1]",
+            (1..=25)
+                .map(|index| index.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            (26..=50)
+                .map(|index| index.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let cases = [
+            // Keyed writes land immediately; positional flushes overwrite them.
+            ("local t = {1, 2, 3, [1] = 9, 4} return t[1]", 1.0),
+            ("local t = {1, [1] = 9} return t[1]", 1.0),
+            ("local t = {[1] = 9, 1} return t[1]", 1.0),
+            ("local t = {1, x = 5, [1] = 9, 2} return t[1] + t.x", 6.0),
+            // Trailing expansions flush after every keyed write.
+            (
+                "local function f() return 10, 20 end local t = {1, [2] = 9, f()} return t[2]",
+                10.0,
+            ),
+            (
+                "local function g(...) local t = {1, [2] = 9, ...} return t[2] end return g(10, 20)",
+                10.0,
+            ),
+            // The 50-item flush batch is observable: a keyed write after the
+            // 50th positional survives, one inside the batch does not.
+            (fifty_positionals_then_keyed.as_str(), 99.0),
+            (keyed_between_batches.as_str(), 1.0),
+        ];
+
+        for (source, expected) in cases {
+            let chunk = parse_source(source).unwrap();
+            let program = compile_with_options(
+                &chunk,
+                CompileOptions {
+                    puc51_constructor_order: true,
+                    ..CompileOptions::default()
+                },
+            )
+            .unwrap();
+            let mut vm = Vm::new(Profile::Puc51Compat);
+            let result = vm.run(&program).unwrap();
+            assert_eq!(result.as_number(), Some(expected), "source: {source}");
+        }
+    }
+
+    #[test]
+    fn compiles_puc51_constructor_evaluation_order_stays_source_order() {
+        let chunk = parse_source(
+            "local log = {} \
+             local function v(x) log[#log + 1] = x return x end \
+             local t = {v(1), [1] = 9, v(2)} \
+             return #log * 100 + t[1]",
+        )
+        .unwrap();
+        let program = compile_with_options(
+            &chunk,
+            CompileOptions {
+                puc51_constructor_order: true,
+                ..CompileOptions::default()
+            },
+        )
+        .unwrap();
+        let mut vm = Vm::new(Profile::Puc51Compat);
+        let result = vm.run(&program).unwrap();
+        // Both values were evaluated in source order (2 logged) even though the
+        // positional write won the slot.
+        assert_eq!(result.as_number(), Some(201.0));
+    }
+
+    #[test]
     fn compiles_table_index_assignment() {
         let cases = [
             ("local t = {6, 9, 7} t[2] = 10 return t[2]", 10.0),
@@ -8011,6 +8249,142 @@ return lineerror("function a.x.y ()\na=a+1\nend")
     }
 
     #[test]
+    fn direct_self_recursion_obeys_vm_recursion_limit() {
+        for source in [
+            r#"
+local function deep(n)
+    if n > 0 then
+        deep(n - 1)
+    end
+end
+local ok, err = pcall(deep, 100)
+return not ok and err:find("stack overflow") ~= nil
+"#,
+            r#"
+local function deep(n)
+    if n == 0 then
+        return 0
+    end
+    return deep(n - 1)
+end
+local ok, err = pcall(deep, 100)
+return not ok and err:find("stack overflow") ~= nil
+"#,
+        ] {
+            let chunk = parse_source(source).unwrap();
+            let program = compile(&chunk).unwrap();
+            let settings = VmSettings {
+                recursion_limit: 8,
+                ..VmSettings::default()
+            };
+            let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+            let result = vm.run(&program).unwrap();
+            assert_eq!(result.as_bool(), Some(true), "{source}");
+        }
+    }
+
+    #[test]
+    fn conformance_call_limit_preserves_luau_protected_call_shape() {
+        for source in [
+            r#"
+local function infinite()
+    return infinite()
+end
+local ok, err = pcall(infinite)
+return not ok and type(err) == "string"
+"#,
+            r#"
+local function stackover()
+    return pcall(stackover)
+end
+local results = { pcall(stackover) }
+return #results == 10000
+"#,
+        ] {
+            let chunk = parse_source(source).unwrap();
+            let program = compile(&chunk).unwrap();
+            let settings = VmSettings {
+                enable_conformance_luau_call_limit: true,
+                ..VmSettings::default()
+            };
+            let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+            let result = vm.run(&program).unwrap();
+            assert_eq!(result.as_bool(), Some(true), "{source}");
+        }
+    }
+
+    #[test]
+    fn generic_iterator_calls_can_yield_and_resume() {
+        for loop_source in [
+            "for key, value in iterator, nil, nil do output = output .. key .. ':' .. value .. ';' end",
+            "for key, value in iterator do output = output .. key .. ':' .. value .. ';' end",
+            "for key, value in subject do output = output .. key .. ':' .. value .. ';' end",
+        ] {
+            let source = format!(
+                r#"
+local step = 0
+local function iterator(_state, _control)
+    local resumed = coroutine.yield("pause")
+    step += 1
+    if step > 2 then
+        return nil
+    end
+    return step, resumed
+end
+local subject = setmetatable({{}}, {{
+    __iter = function()
+        return iterator, nil, nil
+    end,
+}})
+
+local thread = coroutine.create(function()
+    local output = ""
+    {loop_source}
+    return output
+end)
+
+local ok1, pause1 = coroutine.resume(thread)
+local ok2, pause2 = coroutine.resume(thread, "a")
+local ok3, pause3 = coroutine.resume(thread, "b")
+local ok4, output = coroutine.resume(thread, "done")
+return ok1 and pause1 == "pause"
+    and ok2 and pause2 == "pause"
+    and ok3 and pause3 == "pause"
+    and ok4 and output == "1:a;2:b;"
+"#
+            );
+            let chunk = parse_source(&source).unwrap();
+            let program = compile(&chunk).unwrap();
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            let result = vm.run(&program).unwrap();
+            assert_eq!(result.as_bool(), Some(true), "{source}");
+        }
+
+        let chunk = parse_source(
+            r#"
+local thread = coroutine.create(function()
+    local marker = "before"
+    local function iterator()
+        marker = "after"
+        coroutine.yield("pause")
+        return nil
+    end
+    for _ in iterator do end
+    return marker
+end)
+local ok1, pause = coroutine.resume(thread)
+local ok2, marker = coroutine.resume(thread)
+return ok1 and pause == "pause" and ok2 and marker == "after"
+"#,
+        )
+        .unwrap();
+        let program = compile(&chunk).unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let result = vm.run(&program).unwrap();
+        assert_eq!(result.as_bool(), Some(true));
+    }
+
+    #[test]
     fn tostring_metamethod_recursion_obeys_vm_recursion_limit() {
         let chunk = parse_source(
             "local t = {} setmetatable(t, { __tostring = tostring }) return tostring(t)",
@@ -8697,6 +9071,24 @@ return `x {s}`"#,
                 "{source}"
             );
         }
+    }
+
+    #[test]
+    fn interpolation_rewrite_keeps_runtime_locations_on_original_lines() {
+        let source = "local text = `hello {1 + 2}`\nlocal missing = nil\nreturn missing.field";
+        let chunk = parse_source(source).unwrap();
+        let program = compile_with_options(
+            &chunk,
+            CompileOptions::default().with_source("interpolation.luau", source),
+        )
+        .unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let error = vm.run(&program).unwrap_err();
+        let location = error
+            .location
+            .expect("runtime error should have a source location");
+        assert_eq!(location.source.as_ref(), "interpolation.luau");
+        assert_eq!(location.line, 3);
     }
 
     #[test]
@@ -10308,6 +10700,7 @@ return #s * 1000 + string.byte(s, 256)
     fn test_loadstring_compiler(
         source: &[u8],
         source_name: Option<&[u8]>,
+        _profile: Profile,
     ) -> std::result::Result<Program, String> {
         let source_name = source_name.map_or_else(
             || {

@@ -185,6 +185,82 @@ return {
 }
 
 #[test]
+fn typed_invocations_exchange_rooted_live_values_without_snapshotting() {
+    let mut rustia = configured_vm();
+    let mut host = Host {
+        input: 0,
+        slots: vec![0],
+    };
+    let limits = InvocationLimits::new(100_000);
+
+    let function = rustia
+        .invoke(&mut host, limits, |invocation| {
+            invocation.run_value(
+                "live-function.luau",
+                "return function(value) local result = { value = value }; result.self = result; return value, result end",
+            )
+        })
+        .unwrap()
+        .into_parts()
+        .0
+        .as_function(&rustia)
+        .unwrap()
+        .unwrap();
+    let argument = rustia
+        .invoke(&mut host, limits, |invocation| {
+            invocation.run_value("live-argument.luau", "return { answer = 42 }")
+        })
+        .unwrap()
+        .into_parts()
+        .0;
+
+    let results = rustia
+        .invoke(&mut host, limits, |invocation| {
+            function.call_values_in(invocation, std::slice::from_ref(&argument))
+        })
+        .unwrap()
+        .into_parts()
+        .0;
+    assert!(argument.raw_equal(&mut rustia, &results[0]).unwrap());
+    let result_table = results[1].as_table(&rustia).unwrap().unwrap();
+    let result_value = result_table.get(&mut rustia, "value").unwrap();
+    assert!(argument.raw_equal(&mut rustia, &result_value).unwrap());
+}
+
+#[test]
+fn typed_exports_expose_rooted_live_values() {
+    let mut rustia = configured_vm();
+    let mut host = Host {
+        input: 0,
+        slots: vec![0],
+    };
+    let limits = InvocationLimits::new(100_000);
+    let module = Rustia::<Host>::compile_module(
+        "live-exports.luau",
+        "local shared = { answer = 42 }; return { left = shared, right = shared }",
+    )
+    .unwrap();
+
+    let exports = rustia
+        .invoke(&mut host, limits, |invocation| invocation.install(module))
+        .unwrap()
+        .into_parts()
+        .0;
+    let (left, right) = rustia
+        .invoke(&mut host, limits, |invocation| {
+            Ok((
+                exports.get_live_current_in(invocation, "left")?,
+                exports.get_live_current_in(invocation, "right")?,
+            ))
+        })
+        .unwrap()
+        .into_parts()
+        .0;
+
+    assert!(left.raw_equal(&mut rustia, &right).unwrap());
+}
+
+#[test]
 fn failed_host_call_rolls_back_its_suffix_but_pcall_keeps_completed_calls() {
     let mut rustia = configured_vm();
     rustia
@@ -986,6 +1062,22 @@ fn typed_builder_preserves_profile_validation() {
         })
         .unwrap();
     assert_eq!(*outcome.value(), 7);
+}
+
+#[test]
+fn invocation_run_compiles_source_with_the_vm_profile() {
+    let mut rustia = Rustia::for_host::<Host>(Profile::Puc51Compat);
+    let mut host = Host {
+        input: 0,
+        slots: Vec::new(),
+    };
+
+    let outcome = rustia
+        .invoke(&mut host, InvocationLimits::new(10_000), |invocation| {
+            invocation.run::<f64>("puc-invocation.luau", "local t = {1, [1] = 9} return t[1]")
+        })
+        .unwrap();
+    assert_eq!(*outcome.value(), 1.0);
 }
 
 #[test]

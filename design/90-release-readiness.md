@@ -1,26 +1,41 @@
 # Release Readiness Checklist
 
 This checklist tracks what must be true before any public rustia crate flips
-from `publish = false` to publishable. Updated 2026-07-28; the ordered runtime
+from `publish = false` to publishable. Updated 2026-07-29; the ordered runtime
 blockers below take precedence over packaging polish.
+
+These gates protect memory safety, lifecycle, compatibility, and the environment contract selected by the
+caller. They do not make deterministic execution universal: `standard()` permits explicit nondeterministic
+providers/capabilities, and `live()` is a first-class intentionally non-reproducible builder preset. The same
+general embedding API must remain available to those users.
 
 ## Current Release Blockers (Ordered)
 
-1. Replace quota-mode boundary scans with O(1) incremental accounting, connect
-   script-visible compatibility counters to the same census, and retain broader
-   native/wasm mixed-heap pressure evidence. The per-VM logical-live quota,
-   atomic/catchable OOM path, VM-owned live/reserved/peak telemetry, epoch-safe
-   decision-reset ABI, and focused 600-decision plateau are implemented.
-2. Add a host-owned script-visible `require` resolver/cache with deterministic
-   identity, execute-once behavior, and cycle diagnostics.
-3. Complete the release value surface for binary strings, buffers, vectors,
-   non-scalar/identity keys, opaque identity-safe userdata handles,
-   shared/cyclic table graphs, and a lifetime-safe live serde layer. Full
-   mlua-style `UserData`/`Scope` registration remains a later optional layer.
-4. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
-   transactional extension/module/hot-reload failure behavior, and
-   differential/fuzz coverage before stabilizing and publishing the API.
-5. Close the full correctness/build/golden target matrix from
+The mixed-heap correctness gate is closed by the shared native/Node-V8
+`mixed_heap_pressure` test: 96 epochs and 3,072 waves combine bounded public
+roots, cyclic tables, strings, closures, suspended coroutines, userdata,
+buffers, vectors, weak tables, hot reload, quota/OOM recovery, and decision
+reset under a 2 MiB logical-live limit. Native and wasm runs hold the same
+semantic invariants and exact post-reset VM plateau; warmed wasm linear-memory
+pages also remain constant. This does not claim equal process RSS or allocator
+overhead across targets.
+
+1. Complete the release value ergonomics on the implemented VM/epoch-safe,
+   graph-preserving rooted `Value`/`Table`/`Function` spine. It already covers
+   binary strings, buffers, vectors, non-scalar/identity keys, shared/cyclic
+   tables, mutation, raw equality, and ordinary or typed invocation exchange.
+   Add globals/value/function constructors, a composable chunk builder, live
+   serde, and a concrete opaque-userdata registration contract. Preserve the
+   small typed facade as the simple layer. Full mlua-style `UserData`/`Scope`,
+   async, and an mlua migration shim remain later optional layers unless a
+   concrete release consumer promotes them.
+2. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
+   yieldable `require`, transactional extension/module/hot-reload failure behavior, and
+   differential/coverage-guided fuzz evidence before stabilizing and publishing
+   the API. The stable bounded baseline already mutates 2,048 frontend cases
+   and 2,048 VM byte streams while covering all 131 production opcodes. Exact
+   f32/f64 buffer-bit round trips, including NaN payloads, are covered.
+3. Close the full correctness/build/golden target matrix from
    [`00-constraints.md`](00-constraints.md); Linux remains the only active
    timing source, but not the only correctness target.
 
@@ -28,6 +43,25 @@ The cheap worker-local host-context blocker is closed: `HostSchema` registration
 are persistent, each typed invocation borrows a fresh `HostContext`, and bounded
 record transactions publish to reusable or caller-owned lanes. Capability-tagged
 output/time providers and VM-owned telemetry are also implemented.
+
+The prior module-resolution blocker is also closed: `ServiceModuleResolver`
+plugs a host-owned resolver into script-visible `require`; the host returns a
+canonical identity plus source, successful modules execute once per decision
+epoch, cached values remain GC roots, nested requests receive their referrer's
+source name, cycles report the complete identity path, and reset clears guest
+module programs/results while preserving the resolver configuration.
+`DeterministicSim` admits only a resolver explicitly labeled replay-stable,
+while hardened leaves reject dynamic modules. Resolution and module execution
+share caller fuel; resolver panics poison until reset; failed or multi-result
+modules never enter the cache; and cache admission observes the logical-live
+quota. The cache/reset contract is versioned by
+`RUSTIA_MODULE_RESOLUTION_ABI_VERSION`; replay/package identity must also bind
+the host resolver's content. The CLI's non-deterministic profiles now install a
+fixed-order filesystem adapter with canonical identities, referrer-relative
+nesting, and module-source runtime diagnostics; deterministic CLI execution has no
+ambient loader. Rolling back arbitrary guest global/heap side effects from a
+runtime-failing module and supporting a yieldable `require` continuation remain
+part of the semantic-tail/failure-semantics blocker.
 
 ## Current Policy
 
@@ -55,6 +89,8 @@ output/time providers and VM-owned telemetry are also implemented.
   review artifact is [`crate-metadata.json`](crate-metadata.json).
 - Package file lists must not include private design scratch, `private/`, local
   caches, or generated target output.
+- Every package archive contains `LICENSE-APACHE` and `LICENSE-MIT`; README
+  links are either absolute or resolve to files/directories in that archive.
 - Package file lists are audited by `tools/check-package-files.js`; the
   committed review artifact is [`package-files.json`](package-files.json).
 - Publishability blockers are audited by `tools/check-publishability.js`; the
@@ -128,6 +164,10 @@ output/time providers and VM-owned telemetry are also implemented.
   functions, and hot reload.
 - Owned snapshots expose serde deserialization at the `OwnedValue` level plus
   string-keyed field and array-slot helpers on `OwnedTable`.
+- Rooted live `Value`, `Table`, and `Function` handles preserve VM identity and
+  decision-epoch safety across binary strings, buffers, vectors, rich keys,
+  shared/cyclic tables, mutation, raw equality, and ordinary or typed
+  invocation exchange. Snapshot conversion stays explicit and reports cycles.
 - The first public koto-to-rustia migration guide is tracked in
   [`76-koto-migration.md`](76-koto-migration.md).
 - Current examples:
@@ -139,6 +179,8 @@ output/time providers and VM-owned telemetry are also implemented.
   - `crates/rustia/examples/typed_invocation.rs` covers `HostSchema`, a
     block-local `HostContext`, capability views, namespaced typed functions,
     shared limits, dense records, usage receipts, and `invoke_into`.
+  - `crates/rustia/examples/live_values.rs` covers graph-preserving live table
+    access, mutation, raw identity, and live function arguments/results.
 - Retained `Function` handles and `Exports` expose install generations, and
   failed hot reloads leave the current generation unchanged. `is_current()` /
   `ensure_current()` expose freshness checks, while `Function::call_current()`
@@ -161,8 +203,9 @@ output/time providers and VM-owned telemetry are also implemented.
   guest programs, globals, upvalues, coroutines, tracebacks, coverage, and
   retained roots are discarded; RNG/logical time/GC scheduling restart; fuel
   remains per execution; stale handles fail by epoch; idle-only rejection and
-  a 600-decision native exact post-warmup plateau are covered. The Node/V8
-  wasm32 probe covers the same lifecycle and exact plateau across 300 decisions.
+  a 600-decision native exact post-warmup plateau are covered. The shared
+  mixed-heap lifecycle adds 96 native/Node-V8 epochs with exact post-reset VM
+  accounting and stable warmed wasm linear-memory pages.
 - GC pacing is tuned for Standard profiles only after reclamation works, and
   DeterministicSim collection intervals are treated as deterministic ABI.
 - Host-provided output/time services and internal VM memory telemetry obey each
@@ -172,9 +215,10 @@ output/time providers and VM-owned telemetry are also implemented.
   boundary yields, missing dispatch, and host panic uncatchable by guest
   `pcall`; record savepoints and outer rollback are tested, and a host panic
   poisons the VM until `reset_decision()`.
-- Module resolution/cache, rich value interop, error-phase parity, and public
-  stack/source diagnostics satisfy their focused tests; failed extension/module
-  installation and runtime-failing reload cannot leave undocumented partial state.
+- Module resolution/cache, the remaining live-value ergonomics/serde, error-phase
+  parity, and public stack/source diagnostics satisfy their focused tests;
+  failed extension/module installation and runtime-failing reload cannot leave
+  undocumented partial state.
 - The value-layout and dispatch wasm pre-lock gate is closed with retained V8,
   JavaScriptCore-family, and SpiderMonkey evidence; recurring Node/V8 evidence
   remains current.
@@ -198,13 +242,17 @@ output/time providers and VM-owned telemetry are also implemented.
 
 ## Release Process Gate
 
-- `just release-preflight` passes before any publishability flip. It checks
+- `just release-preflight` and hosted CI invoke the same
+  `tools/run-release-preflight.js` driver before any publishability flip. It checks
   formatting, strict workspace Clippy, release notes, package file lists,
   generated progress HTML, benchmark result freshness, crate metadata, workflow
   policy, example compilation, and the workspace test suite.
 - Hosted CI installs the exact channel from `rust-toolchain.toml` and runs
   `cargo fmt --all -- --check` plus
-  `cargo clippy --workspace --all-targets -- -D warnings`.
+  locked strict workspace Clippy.
+- Every third-party GitHub Action is pinned to a full commit SHA.
+- Cargo metadata, Clippy, examples, tests, and package checks use `--locked`;
+  preflight rejects a dirty `Cargo.lock` before validation.
 - `just check-crate-metadata` passes and `design/crate-metadata.json` is
   current.
 - `just check-workflows` passes and keeps hosted CI validation-only: it pins the
@@ -212,6 +260,16 @@ output/time providers and VM-owned telemetry are also implemented.
 - `.github/workflows/ci.yml` mirrors the release-preflight gate on hosted Linux
   CI, including example compilation, without running fresh benchmark
   measurements.
+- Hosted CI separately cross-compiles the portable `rustia` engine library for
+  macOS arm64/x86_64, Linux x86_64/arm64, Windows x86_64 MSVC, iOS arm64,
+  Android arm64, and `wasm32-unknown-unknown`. It also executes the bare and
+  default web-live wasm adapters through the matching wasm-bindgen test runner
+  on Node 22/V8. These checks do not replace the still-open non-Linux real-host
+  and Firefox/Safari correctness/golden gate.
+- Release preflight formats and strictly lints the separate fuzz workspace,
+  then runs its seed tests plus deterministic 2,048-case frontend and VM
+  mutation sweeps. The VM decoder covers every production opcode exactly once
+  under bounded input, fuel, recursion, and a 512 KiB logical-live limit.
 - The explicit Linode matrix command provisions, measures, validates, deletes,
   and only then promotes a coherent native-plus-wasm Linux result set. Hosted
   workflows do not provision billed resources or publish timings.

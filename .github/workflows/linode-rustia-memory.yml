@@ -1,11 +1,12 @@
 name: Rustia Linode Memory
 
 "on":
-  workflow_run:
-    workflows:
-      - CI
-    types:
-      - completed
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact 40-character commit SHA already present on main
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -17,24 +18,33 @@ concurrency:
 jobs:
   benchmark:
     name: Rustia-only dedicated-Linux memory
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository &&
-      !contains(github.event.workflow_run.head_commit.message, '[skip linode]')
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 55
 
     steps:
-      - name: Checkout successful main commit
-        uses: actions/checkout@v4
+      - name: Checkout trusted main history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: main
           fetch-depth: 0
 
+      - name: Validate and select benchmark commit
+        env:
+          BENCHMARK_COMMIT: ${{ inputs.commit_sha }}
+        run: |
+          if ! [[ "$BENCHMARK_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "commit_sha must be an exact lowercase 40-character commit SHA" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          git cat-file -e "${BENCHMARK_COMMIT}^{commit}"
+          git merge-base --is-ancestor "$BENCHMARK_COMMIT" origin/main
+          git checkout --detach "$BENCHMARK_COMMIT"
+          test "$(git rev-parse HEAD)" = "$BENCHMARK_COMMIT"
+
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
 
@@ -49,7 +59,7 @@ jobs:
 
       - name: Freeze per-commit protocol
         env:
-          BENCHMARK_COMMIT: ${{ github.event.workflow_run.head_sha }}
+          BENCHMARK_COMMIT: ${{ inputs.commit_sha }}
         run: |
           short_commit="${BENCHMARK_COMMIT:0:12}"
           config="bench/cloud/linode-rustia-ci-memory-${short_commit}.json"
@@ -75,7 +85,7 @@ jobs:
       - name: Publish benchmark history and dashboard
         env:
           BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}
-          BENCHMARK_COMMIT: ${{ github.event.workflow_run.head_sha }}
+          BENCHMARK_COMMIT: ${{ inputs.commit_sha }}
         run: |
           test -n "$BENCH_DATA_DEPLOY_KEY"
           ssh_dir="$RUNNER_TEMP/rustia-bench-ssh"

@@ -22,7 +22,8 @@ pub use extension::{
 pub use profile::{GuestSurface, Profile};
 pub use value::{Value, ValueKind};
 pub use vm::{
-    ClockProvider, HardenedLeafProgram, LoadStringCompiler, RetainedValue, StdoutSink, Vm,
-    VmExecution, VmMemoryStats, VmServices, VmSettings, DECISION_RESET_ABI_VERSION,
-    HARDENED_LEAF_GUEST_ABI_VERSION, MAX_RECURSION_LIMIT,
+    ClockProvider, EntropyProvider, HardenedLeafProgram, LoadStringCompiler, ModuleResolver,
+    ResolvedModule, RetainedValue, StdoutSink, Vm, VmExecution, VmMemoryStats, VmServices,
+    VmSettings, DECISION_RESET_ABI_VERSION, HARDENED_LEAF_GUEST_ABI_VERSION, MAX_RECURSION_LIMIT,
+    MODULE_RESOLUTION_ABI_VERSION,
 };

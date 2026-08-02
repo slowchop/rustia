@@ -4,7 +4,7 @@ use crate::value::{
 };
 use crate::{
     CompiledEntry, CompiledModule, Error, Exports, Result, RustiaHostFuelPolicy,
-    RustiaHostFunctionInfo, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
+    RustiaHostFunctionInfo, Value, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
 };
 use rustia_vm::{
     Error as VmError, ErrorKind as VmErrorKind, HostFunctionOp, OpCapability, Value as RawValue,
@@ -1184,7 +1184,7 @@ where
                 .run_in(&module.program, execution, &mut host)
                 .map_err(Error::Vm)?;
             **generation = (**generation).saturating_add(1);
-            let value = vm.retain_value(value);
+            let value = vm.retain_value(value).map_err(Error::Vm)?;
             Ok(Exports::new(value, **generation, vm.decision_epoch()))
         })
     }
@@ -1221,12 +1221,26 @@ where
     where
         Return: FromRustia,
     {
-        let module = crate::Rustia::<C>::compile_module(source_name, source)?;
+        let module = crate::Rustia::<C>::compile_module_with_profile(
+            source_name,
+            source,
+            self.vm.profile(),
+        )?;
         self.scoped(|invocation| {
             let exports = invocation.install(module)?;
             let value = exports.value_in(invocation)?;
             Return::from_rustia(value)
         })
+    }
+
+    /// Runs a named chunk and retains its first result without snapshotting it.
+    pub fn run_value(&mut self, source_name: impl Into<String>, source: &str) -> Result<Value> {
+        let module = crate::Rustia::<C>::compile_module_with_profile(
+            source_name,
+            source,
+            self.vm.profile(),
+        )?;
+        self.scoped(|invocation| invocation.install(module).map(|exports| exports.as_value()))
     }
 
     pub(crate) fn convert_call<Args, Return>(
@@ -1239,8 +1253,8 @@ where
         Return: FromRustiaMulti,
     {
         self.scoped(|invocation| {
-            let raw_args = args
-                .into_rustia_multi()
+            let owned_args = args.into_rustia_multi()?;
+            let raw_args = owned_args
                 .iter()
                 .map(|value| load_owned_value(invocation.vm, value))
                 .collect::<Result<Vec<_>>>()?;

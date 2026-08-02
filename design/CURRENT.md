@@ -2,12 +2,17 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-28.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-29.)
 
 ## One-paragraph state
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
 The current workspace contains the VM/lexer/parser/compiler/public API/CLI/conformance runner, plus an
 executable Luau 0.709 conformance corpus with **0 pending-oracle** and **0 pending-impl** rows. The public
+release gate also formats, strictly lints, and smoke-tests the separate fuzz workspace. Its stable deterministic
+baseline mutates 2,048 frontend cases and 2,048 VM byte streams; the VM decoder covers all 131 production
+opcodes exactly once under bounded input, fuel, recursion, and a 512 KiB logical-live quota. Hosted CI executes
+the bare and default web-live wasm adapters on Node 22/V8 as real WebAssembly runtime tests in addition to
+cross-compiling the declared target matrix; Firefox/Safari browser goldens remain open. The public
 embedding facade from [`75-embedded-api.md`](75-embedded-api.md) is implemented at the first useful level:
 owned values with typed and nested table helpers, source-named run/compile helpers, typed host functions with
 fallible `rustia::Result<T>` returns, pre-install host signature/fuel ABI metadata, retained script function
@@ -26,12 +31,11 @@ GC state, and deterministic collection scheduling restart from construction valu
 fresh per call and typed invocation fuel is explicitly shared. Every retained `Function`/`Exports` clone is
 epoch-checked and becomes stale after reset. Focused tests
 cover active-execution rejection and an exact post-warmup memory plateau across 600 mixed
-table/coroutine/program/retained-export decisions. The wasm32 Node/V8 lifecycle probe runs 300 more decisions
-and verifies module reuse, restored host functions, cleared inputs, RNG restart, stale handles, and the same
-exact plateau in WebAssembly. A second wasm32 probe runs two 300-decision typed hardened-entry cohorts,
-verifies failure rollback and automatic reset, checks ordered effects and return values, holds the hardened
-immutable-prefix reset at an exact VM-owned memory plateau, and proves the second cohort does not grow linear
-memory.
+table/coroutine/program/retained-export decisions. A shared native/Node-V8 mixed-heap test now runs 96
+decision epochs and 3,072 waves under a 2 MiB logical-live quota. It combines bounded public roots, cyclic
+tables, strings, closures, suspended coroutines, userdata, buffers, vectors, weak tables, hot reload, atomic
+OOM recovery, and epoch invalidation; both targets reach the same exact post-reset VM plateau, and warmed wasm
+linear-memory pages remain constant.
 The generic authoritative-leaf layer is now implemented
 ([`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md)):
 `RustiaBuilder::deterministic_leaf()` layers a frozen, allowlisted
@@ -51,7 +55,12 @@ three local 20,000-decision runs; this is workload-specific development evidence
 The host services bus from [`72-host-services.md`](72-host-services.md) is now implemented: facade presets
 `standard()`/`deterministic()`/`live()`, a host stdout sink giving `print` its real Luau composition,
 determinism-labeled wall/monotonic clock providers feeding `os.time`/`os.date`/`os.clock`, and a deterministic
-logical `os.clock` fallback (executed instructions / 1_000_000) replacing the former `0.0`.
+logical `os.clock` fallback (executed instructions / 1_000_000) replacing the former `0.0`. The same bus
+includes determinism-labeled entropy for the initial `math.random` seed: `standard()` and `deterministic()` keep
+seed zero unless a replay-stable provider is explicit, while `live()` takes system entropy, real clocks, stdout,
+and `loadstring`. Native/WASI adapters are automatic; browser `wasm32-unknown-unknown` uses the default
+`web-live` JavaScript adapter (`console`, `Date`, `performance`, `crypto`), and bare Wasm can disable it and
+inject the three input providers.
 The typed record journal assigns one dense sequence across effects and slot writes. A failed/panicking handler
 rolls back its own suffix; an error escaping the invocation publishes nothing; a completed host call remains
 complete if a later guest error is caught by `pcall`. Transactional fuel exhaustion, OOM, count/byte overflow,
@@ -218,7 +227,7 @@ rustia work and what should be deferred or marked out of scope:
 |---:|---|---|
 | 1 | Pinned Standalone Luau Compatibility | Luau 0.709 standalone runtime behavior: parser/compiler/VM/source-visible stdlib, vector-3, flags-off. |
 | 2 | Conformance and Provenance | Compatibility claims need fixtures, upstream links, generated audits, benchmark records, or explicit defer reasons. |
-| 3 | Deterministic Profiles and Replay ABI | `ReproducibleStandard` is reproducible-conformant; `DeterministicSim` is the stricter lockstep/replay subset. |
+| 3 | Selectable Environment Contracts and Replay ABI | `standard()` has reproducible defaults with explicit opt-in nondeterminism, `deterministic()` is the strict lockstep/replay subset, and `live()` intentionally makes no replay guarantee. |
 | 4 | Rollback-Safe Host Boundary | The host owns cross-tick authoritative state, typed slots, rollback capture, ordered effect queues, and commits. |
 | 5 | Layered Rust Embedding API | Small typed facade first; extensions, capabilities, fuel, retained handles, serde, and future interop are layered. |
 | 6 | One Safe Native + Wasm Engine | One semantic engine across native and `wasm32-unknown-unknown`, with no public unsafe-code or target-specific semantic fork. |
@@ -241,38 +250,75 @@ production concern or host-facing facility is finished. The highest-impact gaps 
    storage, and shrinks VM/coroutine/traceback stack capacity. Loaded programs also use generation-safe slots:
    obsolete program bytecode, constants, inline caches, and coverage rows are reclaimed only after no reachable
    closure, coroutine, or retained host value refers to them. Compiled constant atoms stay rooted while their
-   program is live, and stale object/program handles cannot alias replacements. `Vm::memory_stats()` provides a
+   program is live, and stale object/program handles cannot alias replacements. Script-triggered and
+   quota-forced collection now applies the same program cleanup while preserving active top-level and suspended
+   coroutine program roots. `Vm::memory_stats()` provides a
    VM-owned live/reserved census and opt-in instruction-boundary peaks. `VmSettings::memory_limit_bytes` now
    enforces that logical-live boundary with one forced-collection retry, catchable OOM, preflight for large
-   string/table/buffer requests, and candidate-before-commit growing table writes. Script-visible
-   `gcinfo`/`collectgarbage("count")` remain compatibility values until O(1) incremental accounting replaces the
-   correctness-first quota-mode boundary scan. Exact-commit Linode cohort `safe-memory-588b541` retained 99
+   string/table/buffer requests, and candidate-before-commit growing table writes. Heap stores and loaded
+   programs maintain live totals; VM control state uses a cached aggregate with local refresh after structural
+   changes. Quota admission and ordinary instruction boundaries therefore avoid a whole-VM census, while exact
+   reserved telemetry remains on demand. Script-visible `gcinfo`/`collectgarbage("count")` read that same
+   maintained logical-live total. Public retained-root registry nodes are also admitted against the quota and
+   fail atomically rather than letting live-handle creation cross the boundary. Exact-commit Linode cohort
+   `safe-memory-588b541` retained 99
    native samples after confirmed deletion, passed the wasm32 512 KiB quota/recovery probe, tied the 256 KiB
-   best shared peak, and reduced the shared retained mean to 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. Still
-   required before public release: O(1) accounting and broader mixed-heap/native/Wasm pressure coverage.
-   GC interval tuning is not a substitute for those remaining policies.
-2. **Host-provided runtime services and modules.** The output/time provider slice is implemented
+   best shared peak, and reduced the shared retained mean to 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. The
+   maintained native/Node-V8 mixed-heap pressure gate now adds 96 epochs, 3,072 allocation waves, exact reset
+   plateaus, weak/cyclic reclamation, hot reload, public roots, and atomic oversized-allocation recovery.
+   External allocator/page-return and process-RSS history remain measurement work, not missing VM
+   reclamation semantics. GC interval tuning follows this landed evidence.
+2. **Host-provided runtime services and modules.** The output/clock/entropy provider slice is implemented
    ([`72-host-services.md`](72-host-services.md)): `print` composes `tostring` per argument (honoring
    `__tostring`), tab-joins, and writes to a host stdout sink when one is attached; no-argument
    `os.time`/`os.date` read a wall-clock provider with a pinned-epoch fallback; and `os.clock` reads a
-   monotonic-clock provider with a deterministic logical-clock fallback. The typed per-invocation context,
+   monotonic-clock provider with a deterministic logical-clock fallback. Entropy selects the initial
+   `math.random` seed, and native/WASI/browser adapters supply live providers. The typed per-invocation context,
    capability views, shared fuel, bounded ordered record journal, rollback/`pcall` contract, usage receipts,
-   panic poisoning/reset, and atomic typed `HostModule` registration are implemented. Still open:
-   Host-facing VM memory telemetry is now honest for the documented VM-owned logical allocation boundary;
-   script-visible counters still need the O(1) quota counter. Practical multi-file programs also need a
-   host-owned `require` resolver, execute-once cache, and cycle detection; resolution remains host policy rather
-   than a core filesystem API. Guest module/extension installation and hot reload still need documented
-   transactional or isolated failure semantics beyond record-only invocation rollback.
-3. **Complete public value interop.** `OwnedValue` intentionally starts small, but it cannot yet faithfully
-   carry binary strings, buffers, vectors, opaque userdata identity, non-scalar/identity table keys,
-   cyclic/shared table graphs, or zero-copy live values. Add the live-value serde path and identity-safe handles
-   before claiming a general rich embedding boundary; full mlua-style `UserData`/`Scope` registration and async
-   callbacks remain later, optional layers.
+   panic poisoning/reset, and atomic typed `HostModule` registration are implemented. Script-visible `require`
+   is now backed only when the host installs a `ServiceModuleResolver`: resolution returns a canonical identity
+   and source, modules execute once per decision epoch, cache results remain roots, nested requests receive the
+   referrer's source name, cycles report their identity path, reset clears the cache, and module execution shares
+   caller fuel. `DeterministicSim` rejects resolvers not explicitly labeled replay-stable, hardened leaves reject
+   dynamic modules, the behavior is versioned by `RUSTIA_MODULE_RESOLUTION_ABI_VERSION`, and the core VM never
+   reads an ambient filesystem. The separate CLI adapter supplies fixed-order `.luau`/`.lua`/directory-index
+   lookup, canonical cache identities, nested relative resolution, and module-source runtime diagnostics in
+   standard and compatibility profiles; deterministic CLI execution leaves `require` absent. Still open:
+   Host-facing VM memory telemetry and script-visible counters now read the maintained VM-owned logical-live
+   total without a whole-VM census at ordinary instruction boundaries. Guest module/extension installation and
+   hot reload still need documented transactional or isolated failure semantics beyond record-only invocation
+   rollback. Required modules also still cross a non-yieldable native boundary; matching Luau's yieldable
+   `require` needs a continuation that preserves the loading stack and commits the cache only after completion.
+3. **Complete public value interop.** The advanced live-handle spine is implemented: VM/epoch-safe rooted
+   `Value`/`Table`/`Function` handles preserve binary strings, buffers, vectors, identity-bearing keys,
+   shared/cyclic table graphs, mutation, and raw equality without exposing collector lifetimes. Live values
+   can cross ordinary and typed invocations, and `OwnedValue` remains the deliberately small acyclic snapshot
+   layer. Before calling this a complete rich embedding boundary, add `globals()`, value/function constructors,
+   a composable chunk builder, live serde, and a concrete public userdata registration contract. A public
+   `Thread` handle remains intentionally absent until a real host-side scheduler caller defines its contract.
+   Full mlua-style `UserData`/`Scope`, async callbacks, and any mlua migration shim remain later optional
+   layers. These APIs serve every builder preset: `deterministic()` enforces replay restrictions, `standard()`
+   permits explicit nondeterminism over reproducible defaults, and `live()` is a first-class intentionally
+   non-reproducible environment rather than a restricted or second-class mode.
 4. **Semantic-tail and diagnostics hardening.** Continue differential parser/compiler testing, keep valid
    runtime errors catchable at runtime rather than prematurely rejecting them at compile time, and finish
    public stack traces/source diagnostics. Module/extension installation and runtime-failing hot reload also need
    documented transactional or isolated failure semantics; generation counters alone do not roll back partial
-   global/heap changes. New gaps require focused Luau-0.709 oracle fixtures.
+   global/heap changes. The final audit closed untracked `buffer.readf32`/`readf64` NaN-payload loss by
+   separating exact buffer-bit ingress from canonicalized arithmetic results and giving f32 NaNs an explicit
+   cross-target widening/narrowing rule. New gaps require focused Luau-0.709 oracle fixtures.
+
+### Deep-audit reconciliation (2026-07-29)
+
+The multi-agent review and final repository-wide sweep found no remaining `TODO`, `FIXME`, `todo!`, or
+`unimplemented!` marker in production crates, fuzz targets, release tools, or hosted workflows. It did find
+and reconcile three kinds of documentation drift: the implemented memory benchmark was still marked pending
+in the index; resolved conformance decisions (deterministic reference IDs, three-wide vectors, buffer bit
+operations, OOM, recursion, and the absent `load` global) were still labeled open; and a later `__le` row
+contradicted the source-verified Lua-5.1 fallback recorded earlier in the same inventory. The exact remaining
+release boundary is the four numbered gaps above plus the full target/golden and packaging gates in
+[`90-release-readiness.md`](90-release-readiness.md); historical watch-list rows are evidence prompts, not
+silent claims of completion.
 
 ## 🚀 Next actions (cold-start handoff — do in this order)
 **Read order for a fresh agent:** `CLAUDE.md` (auto-loaded) → **this file** → [`02-pillars.md`](02-pillars.md)
@@ -280,51 +326,50 @@ production concern or host-facing facility is finished. The highest-impact gaps 
 → the doc for your task. (A fresh Claude session in this repo also auto-loads the project memory.)
 
 **Action queue:**
-1. **Implement bounded VM object lifetimes against the recorded baseline.** Cohort
-   `pre-reclamation-18b58d8` now freezes the 110-row/990-process cross-engine short-spike/phase/retention
-   baseline from [`57-memory-benchmarking.md`](57-memory-benchmarking.md), including existing workloads,
-   bounded-churn and intentional-retention controls, and dashboard views. Add reachability-based
-   reclamation/reuse for ordinary VM objects, coroutine state, and loaded programs; those stores, retained host
-   roots, stale-handle defenses, VM-owned live/reserved/peak accounting, and logical-live quota/atomic OOM
-   semantics are now active. Decision-reset ABI v1 also provides epoch-safe retained-handle invalidation,
-   deterministic counter restart, reusable allocation containers, and a 600-decision exact plateau. Next
-   optimize quota accounting to O(1) and prove the complete memory path with broader long-lived churn, cyclic
-   graphs, hot reload, retained handles, weak tables, native/wasm parity, and representative mixed-heap evidence
-   before tuning final intervals.
-2. **Finish the remaining host-facing runtime boundary.** The typed schema/context, deterministic record
-   transaction, and hardened stateless-leaf layer are implemented. Add a host-owned module resolver/cache,
-   complete binary/rich-value interop, zero-copy live serde, and transactional
-   install/hot-reload/stack diagnostics. Keep these layered and public-clean; do not leak grabby-specific types
-   or a raw C API.
-3. **Harden the production engine** against the LOCKED decisions ([`30-architecture.md`](30-architecture.md) §1–§4):
+The mixed-heap action is closed: one maintained source now executes 96
+native/Node-V8 epochs and 3,072 waves across cyclic graphs, hot reload, retained
+handles, weak tables, quotas/OOM, exact reset plateaus, and stable warmed wasm
+linear-memory pages. It also exposed and closed unconditional rooting of
+unreachable suspended-coroutine frames.
+
+1. **Finish the host-facing runtime boundary and ordered advanced API track.** Follow
+   [`75-embedded-api.md`](75-embedded-api.md#build-order): build familiar globals/value/function constructors
+   and a composable chunk builder on the implemented graph-preserving live `Value`/`Table`/`Function` spine,
+   then add live serde and transactional install/hot-reload/stack diagnostics. The worker-local/per-call host
+   context is already implemented. Keep the existing typed facade as the simple layer, keep the advanced layer
+   available to all builder presets, and do not leak grabby-specific types, internal GC lifetimes, or a raw C
+   API. `live()` remains the explicit no-reproducibility-guarantee environment; deterministic policy is
+   enforced only by constructors that promise it.
+2. **Harden the production engine** against the LOCKED decisions ([`30-architecture.md`](30-architecture.md) §1–§4):
    keep the 16-byte tagged `Value` firewall, portable `br_table`-friendly dispatch, instruction-count fuel,
    deterministic f64/libm behavior, table-key `-0` normalization, profile-specific GC behavior, and the public
-   workspace's `unsafe_code = "forbid"` gate. Add differential/fuzz coverage for newly discovered compiler and
+   workspace's `unsafe_code = "forbid"` gate. The stable bounded fuzz baseline now mutates the frontend and all
+   131 VM opcodes; continue coverage-guided and differential work for newly discovered compiler and
    runtime-error-phase edges, and close the full native/browser correctness-build-golden matrix without adding
    developer-machine timings to benchmark history.
-4. **Continue measured performance work** using [`56-performance-research.md`](56-performance-research.md).
+3. **Continue measured performance work** using [`56-performance-research.md`](56-performance-research.md).
    The dense-table, constant field/namecall, shared-string, HotIR, and closure-call slices now have accepted
    Linux evidence. Next extend the same verified private HotIR to additional effect/control-flow shapes, pursue
    cached-length and iterator/table refinements, add profile-led superinstructions/O2, and only then productionize
    type-directed wasm/AOT with guards, deopt, and interpreter-equivalence tests.
-5. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
+4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 18 workload entries including
    source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
    a standalone HTML report, an explicit closed wasm pre-lock gate artifact, a wasm target bench for rustia+koto+rhai, a `call_ref`
    versus `br_table` dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle.
    Next work is the actual standalone-project split, the interop/serde/fuel-limit workload tranche, regression
    alerts, and longer-run public history.
-6. **Stabilize and publish the public crates.** Settle the consumer API and semver surface, close the generated
+5. **Stabilize and publish the public crates.** Settle the consumer API and semver surface, close the generated
    release gates, flip `publish = false` in dependency order, and publish honest per-workload documentation.
-7. **Keep the Luau 0.709 conformance corpus green**. The current repo has 694 executable fixtures covering 493
+6. **Keep the Luau 0.709 conformance corpus green**. The current repo has 694 executable fixtures covering 493
    behavior refs with no pending rows; new engine work should add focused fixtures rather than re-opening
    pending inventory.
-8. **Maintain benchmark operations** — hosted CI remains validation-only; the operator-started Linode lifecycle
+7. **Maintain benchmark operations** — hosted CI remains validation-only; the operator-started Linode lifecycle
    is the sole active timing source and must keep its Linux-only completeness and cleanup gates green.
 
 **Pre-release gates:** see the "What's next" section below. Object reclamation/limits and deterministic
-decision reset are implemented; O(1) accounting and broader mixed-heap pressure evidence now precede final GC
-tuning. Benchmark publication and the `LuauIntegerType2` watch remain ongoing gates.
+decision reset, maintained live-memory accounting, and the shared native/Node-V8 mixed-heap pressure gate are
+implemented. Benchmark publication and the `LuauIntegerType2` watch remain ongoing gates.
 
 **Project setup facts:** dual `MIT OR Apache-2.0` (holder Gak Dev Pty Ltd); the public/private boundary +
 `private/` mount are in [`CLAUDE.md`](../CLAUDE.md); no Linear.
@@ -381,16 +426,22 @@ tuning. Benchmark publication and the `LuauIntegerType2` watch remain ongoing ga
   vector width 3, flags-off — see [`05-luau-target.md`](05-luau-target.md). **f64-only is VERIFIED correct**
   (`math.type==nil`; integers are default-OFF even at HEAD 0.727 behind `FFlag::LuauIntegerType2`).
 - **Conformance corpus is executable and pending-free** (review C2 follow-through): the runner reports
-  **694 fixtures**, **493 refs**, all 694 fixtures backed by the Luau 0.709 oracle, **0 pending-oracle**,
+  **712 fixtures**, **511 refs**, 694 of them backed by the Luau 0.709 oracle and 18 by the offline PUC
+  Lua 5.1.5 oracle, **0 pending-oracle**,
   **0 pending-impl**, and **0 rustia-only**. That named executable denominator is authoritative; it does not
   claim a one-to-one audit of every row in the older 709-row design inventory. Future work is focused oracle
   coverage and reconciliation for newly discovered gaps, not treating old model prose as implementation truth.
 
-## Determinism model (one engine, three concrete runtime profiles)
+## Determinism model (one engine, three determinism profiles plus Puc51Compat)
 - **LuauCompat** — a real `Profile` variant that currently selects Luau-style hash iteration and exposes the
   Standard service/capability surface. Further reference-oriented knobs require explicit implementation/tests.
+- **Puc51Compat** (added 2026-07-31) — PUC Lua 5.1.5 source-compat profile: faithful `ltable.c` table layout
+  and `next()` order, PUC `auxsort`, `%.14g` number formatting, constructor pre-sizing, and PUC constructor
+  write order, with ReproducibleStandard host-service rules. Orthogonal to the determinism axis below;
+  parity is pinned by the offline-derived `conformance/fixtures/puc51-compat/` corpus (see
+  [`50-conformance.md`](50-conformance.md)).
 - **ReproducibleStandard** (the recommended public default) — targets the full pinned standalone Luau surface
-  and is pending-free on the current 493-ref denominator, with reproducible choices for unspecified behavior
+  and is pending-free on the current 511-ref denominator, with reproducible choices for unspecified behavior
   (insertion-order iteration, pinned PCG32, Schubfach tostring, libm). Its `os` table is always registered;
   without providers, `os.time`/`os.date` read the pinned epoch and `os.clock()` returns the deterministic
   logical clock (executed instructions / 1_000_000) instead of the former `0.0`
@@ -403,16 +454,19 @@ tuning. Benchmark publication and the `LuauIntegerType2` watch remain ongoing ga
   The invocation makes fuel/OOM/record overflow/yield-boundary failure/missing dispatch/host callback panic
   hard, shares fuel across all nested calls, and publishes bounded records only after the outer operation
   succeeds. Deterministic
-  output/clock providers are admitted: a stdout
+  output/clock/entropy providers are admitted: a stdout
   sink may be attached on any profile, the `os` table (all four members) is registered iff at least one
-  deterministic clock provider is plugged, and a nondeterministic provider is rejected by the facade
-  `build()` and silently dropped by the infallible VM constructors. Weak tables remain supported and are
+  deterministic clock provider is plugged, and replay-stable entropy may select the initial random sequence.
+  A nondeterministic input provider is rejected by the facade `build()` and silently dropped by the infallible
+  VM constructors. Weak tables remain supported and are
   swept on the deterministic
   instruction-count schedule. A sandboxed subset designed for bit-identical replay and verified on the current
   tested matrix. (M2: the Standard modes use an
   **incremental/paced** collection schedule; only DeterministicSim
   uses the full-collect-on-instruction-count trigger.) Scheduling and weak sweeping are implemented; complete
-  ordinary-object/program reclamation, reuse, accounting, limits, and tuning remain open.
+  ordinary-object/program reclamation, reuse, telemetry, limits, maintained quota accounting, and script-visible
+  memory counters are implemented; the maintained mixed-heap pressure gate is green, while interval tuning and
+  external allocator/RSS history remain open.
 
 `GuestSurface::HardenedLeaf` is a narrowing layer on `DeterministicSim`, not a fourth profile. It is the
 authoritative stateless-action contract: sealed allowlisted globals/libraries/host namespaces, no ambient or
@@ -426,12 +480,12 @@ invocation, and a separately versioned guest ABI.
 | [`02-pillars.md`](02-pillars.md) | project pillars, non-goals, and the rabbit-hole decision filter | **canonical** |
 | [`30-architecture.md`](30-architecture.md) | the ADR (8 axes, decided) v3 plus v3.1-v3.3 refinements/corrections | authoritative for design |
 | [`05-luau-target.md`](05-luau-target.md) | the pinned-target spec (Luau 0.709) | **authoritative** ✅ |
-| [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 694 fixtures / 493 refs / 0 pending |
+| [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 712 fixtures / 511 refs / 0 pending |
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
 | [`56-performance-research.md`](56-performance-research.md) | no-unsafe SotA performance stack, top-10 ordered bets, C++ Luau estimates | current research note |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | typed invocation plus the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative + implemented generic seam** ✅ |
-| [`72-host-services.md`](72-host-services.md) | host services bus: stdout sink, determinism-labeled clock providers, facade presets, logical `os.clock` | **implemented** ✅ |
-| [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **typed invocation implemented; advanced interop pending** ✅ |
+| [`72-host-services.md`](72-host-services.md) | host services bus: stdout, determinism-labeled clocks and entropy, native/WASI/browser adapters, facade presets, logical `os.clock` | **implemented** ✅ |
+| [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **typed invocation + live-handle spine implemented; advanced ergonomics/serde pending** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |
 | [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen stateless authoritative guest surface, direct compiled entries, and fast isolated reset | **implemented v1** ✅ |
 | [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/target-first report/package metadata and dedicated Linode lifecycle implemented; standalone split pending** |
@@ -449,41 +503,38 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 | # | finding | status |
 |---|---|---|
 | C1 | pin the Luau target | **RESOLVED** → [`05-luau-target.md`](05-luau-target.md): Luau **0.709** (= our oracle), standalone surface, vector-3, flags-off; **f64-only verified** (`math.type==nil`); int64 is a tripwire on `FFlag::LuauIntegerType2`. |
-| C2 | conformance table not trustworthy | **RESOLVED for current corpus** — runner reports 694 Luau 0.709 oracle-backed fixtures, 493 refs, and 0 pending rows. Keep adding targeted oracle fixtures for new bugs/features. |
+| C2 | conformance table not trustworthy | **RESOLVED for current corpus** — runner reports 712 fixtures (694 Luau 0.709 oracle-backed, 18 offline PUC 5.1.5 oracle-backed), 511 refs, and 0 pending rows. Keep adding targeted oracle fixtures for new bugs/features. |
 | H1 | version drift | **FIXED** (this file + banners). |
 | H2 | "~5× koto" too narrow | **RESOLVED** — drop the blanket number; state **per-workload** (below). |
 | H3 | wasm gate + Wasm 3.0 | **RESOLVED** — Wasm-3.0 assessed (br_table stays; wasm-GC rejected; relaxed-SIMD banned); V8 + Bun/JSC-family + SpiderMonkey production wasm and `call_ref` dispatch measured. |
 | M1 | three named modes | **RESOLVED** — one engine with concrete LuauCompat/ReproducibleStandard(default)/DeterministicSim runtime profiles. |
-| M2 | Standard incremental GC | **RESOLVED as a scheduling/profile decision** — paced/incremental for Standard, full-collect-on-instruction-count for DeterministicSim; complete ordinary-object reclamation/accounting/tuning remains open. |
+| M2 | Standard incremental GC | **RESOLVED as a scheduling/profile decision** — paced/incremental for Standard, full-collect-on-instruction-count for DeterministicSim; maintained live accounting is implemented and final tuning remains open. |
 | M3 | promote inline caches + hot/cold | **RESOLVED** — compact site-scoped live-slot caches plus `GETIMPORT`/`FASTCALL` and dedicated `GETTABLEKS`/`SETTABLEKS`/`NAMECALL` landed; hot/cold remains P1. |
 
 ## What's next (the genuine remaining public-release gates)
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items, in order:
-1. **Broaden the mixed-heap pressure matrix and finish O(1) accounting.** The frozen comparator is
-   `pre-reclamation-18b58d8`; exact-commit cohort `safe-memory-588b541` now validates the bounded native
-   workloads and wasm32 quota/recovery path. Coroutine/program stores, true public-handle rooting, weak tables,
-   cyclic graphs, hot reload, logical-live quotas, and atomic OOM have their first safety coverage. Decision
-   reset now invalidates every prior retained-handle clone by epoch, restarts deterministic state, and plateaus
-   exactly across 600 focused decisions; ordinary retained calls still survive hot reload outside a reset.
-2. **Complete the remaining host service and rich-value boundary:** the worker-local typed invocation seam is
-   implemented, including the hardened stateless leaf and direct compiled-entry path; finish O(1) quota
-   accounting, a host-owned deterministic module resolver/cache,
-   binary/rich/cyclic values, live-value serde, transactional extension/module/hot-reload failure behavior, and
-   stronger traceback diagnostics.
-3. **Tune the GC intervals only after reclamation exists** (Deterministic instruction-count interval =
-   determinism ABI; Standard paced-debt multiplier) on realistic long-lived and mixed heaps.
-4. **Harden compiler/runtime error-phase parity** with focused oracle fixtures plus differential/fuzz testing.
-5. **Close the full correctness/build/golden target matrix.** Linux-only timings remain intentional, but public
+1. **Complete the ordered advanced API boundary:** build globals, constructors, and a composable chunk builder
+   on the implemented graph-preserving live `Value`/`Table`/`Function` spine; add live-value serde,
+   transactional extension/module/hot-reload failure behavior, and stronger traceback diagnostics. The
+   worker-local typed invocation seam, hardened stateless leaf, direct compiled-entry path, binary/rich/cyclic
+   live values, memory telemetry, and quota enforcement are implemented. Preserve the concise typed facade and
+   apply determinism restrictions according to the selected builder: `live()` intentionally promises none.
+2. **Tune the GC intervals against the landed mixed-heap evidence** (Deterministic instruction-count interval =
+   determinism ABI; Standard paced-debt multiplier), without converting the correctness soak into a timing
+   benchmark.
+3. **Harden compiler/runtime error-phase parity** with focused oracle fixtures plus differential and longer
+   coverage-guided fuzz campaigns; the stable all-opcode deterministic mutation baseline is implemented.
+4. **Close the full correctness/build/golden target matrix.** Linux-only timings remain intentional, but public
    release still requires the native and browser targets in [`00-constraints.md`](00-constraints.md) to build
    and reproduce the declared goldens; real Firefox/Safari and non-Linux native coverage is still incomplete.
-6. **Record broader production benchmark baselines** for rustia and each completed external adapter. The exact
+5. **Record broader production benchmark baselines** for rustia and each completed external adapter. The exact
    dense and OOP fixed-work gates, plus the string-focused 512-VM evidence gate, are committed and resolved for
    their declared Linux protocols. Continue using recorded fixed work, paired order, retained raw samples, and
    actual harness-produced final rows; extend the evidence to longer-run public history and realistic mixed heaps
    without generalizing these workload-specific results. Keep `RESULTS.md`, claims, and the static benchmark view
    consuming the same JSONL history.
-7. **Stabilize and publish the crates** in the generated dependency order after release preflight is green.
-8. **Watch `FFlag::LuauIntegerType2`** upstream (the f64-only tripwire).
+6. **Stabilize and publish the crates** in the generated dependency order after release preflight is green.
+7. **Watch `FFlag::LuauIntegerType2`** upstream (the f64-only tripwire).
 
 These span the remaining P1 engine hardening and P4 product/release work. The architecture decisions are
 complete, but implementation is not release-complete. The cross-engine, conformance, and benchmark gates are
