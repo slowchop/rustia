@@ -1065,6 +1065,22 @@ fn typed_builder_preserves_profile_validation() {
 }
 
 #[test]
+fn invocation_run_compiles_source_with_the_vm_profile() {
+    let mut rustia = Rustia::for_host::<Host>(Profile::Puc51Compat);
+    let mut host = Host {
+        input: 0,
+        slots: Vec::new(),
+    };
+
+    let outcome = rustia
+        .invoke(&mut host, InvocationLimits::new(10_000), |invocation| {
+            invocation.run::<f64>("puc-invocation.luau", "local t = {1, [1] = 9} return t[1]")
+        })
+        .unwrap();
+    assert_eq!(*outcome.value(), 1.0);
+}
+
+#[test]
 fn typed_host_modules_are_inspectable_atomic_and_persist_across_reset() {
     let mut rustia = Rustia::for_host::<Host>(Profile::DeterministicSim);
     let rejected = HostModule::<Host>::new("rejected")

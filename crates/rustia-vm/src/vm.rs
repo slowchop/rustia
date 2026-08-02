@@ -102,8 +102,9 @@ pub type LoadStringCompiler = fn(
 
 type SharedStdoutSink = Rc<RefCell<dyn FnMut(&str)>>;
 type SharedEntropyProvider = Rc<RefCell<dyn FnMut() -> u64>>;
-type SharedModuleResolver =
-    Rc<RefCell<dyn FnMut(&str, Option<&str>) -> std::result::Result<ResolvedModule, String>>>;
+type SharedModuleResolver = Rc<
+    RefCell<dyn FnMut(&str, Option<&str>, Profile) -> std::result::Result<ResolvedModule, String>>,
+>;
 
 /// A host-resolved module with its canonical cache identity and compiled body.
 #[derive(Clone, Debug)]
@@ -135,7 +136,20 @@ pub struct ModuleResolver {
 
 impl ModuleResolver {
     pub fn new(
-        resolver: impl FnMut(&str, Option<&str>) -> std::result::Result<ResolvedModule, String>
+        mut resolver: impl FnMut(&str, Option<&str>) -> std::result::Result<ResolvedModule, String>
+            + 'static,
+        deterministic: bool,
+    ) -> Self {
+        Self::new_with_profile(
+            move |requested, referrer, _profile| resolver(requested, referrer),
+            deterministic,
+        )
+    }
+
+    /// Creates a resolver that can compile source according to the requesting
+    /// VM's execution profile.
+    pub fn new_with_profile(
+        resolver: impl FnMut(&str, Option<&str>, Profile) -> std::result::Result<ResolvedModule, String>
             + 'static,
         deterministic: bool,
     ) -> Self {
@@ -154,8 +168,9 @@ impl ModuleResolver {
         &self,
         requested: &str,
         referrer: Option<&str>,
+        profile: Profile,
     ) -> std::result::Result<ResolvedModule, String> {
-        (self.resolver.borrow_mut())(requested, referrer)
+        (self.resolver.borrow_mut())(requested, referrer, profile)
     }
 }
 
@@ -4296,11 +4311,24 @@ impl Vm {
                                 // hash-field count in aux; only the PUC layout
                                 // consumes the pre-sizing hint.
                                 let table = if self.profile.is_puc51_compat() {
-                                    let hash_size = usize::try_from(instruction.aux).unwrap_or(0);
-                                    self.heap.alloc_puc_table_from_parts(
-                                        registers[first..end].to_vec(),
-                                        hash_size,
+                                    let hash_size =
+                                        usize::try_from(instruction.aux).map_err(|_| {
+                                            Error::new(ErrorKind::InvalidProgram {
+                                                reason: "negative table constructor hash hint",
+                                            })
+                                            .at_pc(pc - 1)
+                                        })?;
+                                    let values = &registers[first..end];
+                                    self.ensure_memory_growth(
+                                        VmCell::puc_table_live_bytes(values.len(), hash_size),
+                                        values,
                                     )
+                                    .map_err(|error| error.at_pc(pc - 1))?;
+                                    self.heap
+                                        .try_alloc_puc_table_from_parts(values.to_vec(), hash_size)
+                                        .ok_or_else(|| {
+                                            Error::new(ErrorKind::OutOfMemory).at_pc(pc - 1)
+                                        })?
                                 } else {
                                     self.heap.alloc_array_table(&registers[first..end])
                                 };
@@ -12364,8 +12392,9 @@ impl Vm {
             })
         })?;
         let referrer = requiring_program.source_name.as_deref();
+        let profile = self.profile;
         let resolved = self.catch_host_callback(MODULE_RESOLVER_SERVICE_NAME, || {
-            resolver.resolve(requested, referrer)
+            resolver.resolve(requested, referrer, profile)
         })?;
         let resolved = resolved.map_err(|message| {
             Error::new(ErrorKind::RuntimeError {
@@ -17355,17 +17384,18 @@ impl Vm {
             values
         };
 
-        let initial_storage_len = self.heap.table_storage_len(table).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "table handle is missing",
-            })
-        })?;
+        let initial_mutation_version =
+            self.heap.table_mutation_version(table).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "table handle is missing",
+                })
+            })?;
         if self.profile.is_puc51_compat() {
             self.table_sort_puc51(
                 &mut values,
                 comparator,
                 table,
-                initial_storage_len,
+                initial_mutation_version,
                 program,
                 depth,
                 fuel,
@@ -17389,7 +17419,7 @@ impl Vm {
                 &mut values,
                 comparator,
                 table,
-                initial_storage_len,
+                initial_mutation_version,
                 program,
                 depth,
                 fuel,
@@ -17418,7 +17448,7 @@ impl Vm {
         values: &mut [Value],
         comparator: Option<Value>,
         table: u32,
-        initial_storage_len: usize,
+        initial_mutation_version: u64,
         program: &Program,
         depth: usize,
         fuel: &mut Execution<'_>,
@@ -17432,7 +17462,7 @@ impl Vm {
             values.len() as isize - 1,
             comparator,
             table,
-            initial_storage_len,
+            initial_mutation_version,
             program,
             depth,
             fuel,
@@ -17447,7 +17477,7 @@ impl Vm {
         mut u: isize,
         comparator: Option<Value>,
         table: u32,
-        initial_storage_len: usize,
+        initial_mutation_version: u64,
         program: &Program,
         depth: usize,
         fuel: &mut Execution<'_>,
@@ -17459,7 +17489,7 @@ impl Vm {
                 values[l as usize],
                 comparator,
                 table,
-                initial_storage_len,
+                initial_mutation_version,
                 program,
                 depth,
                 fuel,
@@ -17475,7 +17505,7 @@ impl Vm {
                 values[l as usize],
                 comparator,
                 table,
-                initial_storage_len,
+                initial_mutation_version,
                 program,
                 depth,
                 fuel,
@@ -17486,7 +17516,7 @@ impl Vm {
                 values[mid as usize],
                 comparator,
                 table,
-                initial_storage_len,
+                initial_mutation_version,
                 program,
                 depth,
                 fuel,
@@ -17511,7 +17541,7 @@ impl Vm {
                         pivot,
                         comparator,
                         table,
-                        initial_storage_len,
+                        initial_mutation_version,
                         program,
                         depth,
                         fuel,
@@ -17530,7 +17560,7 @@ impl Vm {
                         probe,
                         comparator,
                         table,
-                        initial_storage_len,
+                        initial_mutation_version,
                         program,
                         depth,
                         fuel,
@@ -17556,7 +17586,7 @@ impl Vm {
                     i - 1,
                     comparator,
                     table,
-                    initial_storage_len,
+                    initial_mutation_version,
                     program,
                     depth,
                     fuel,
@@ -17569,7 +17599,7 @@ impl Vm {
                     u,
                     comparator,
                     table,
-                    initial_storage_len,
+                    initial_mutation_version,
                     program,
                     depth,
                     fuel,
@@ -17585,7 +17615,7 @@ impl Vm {
         values: &mut [Value],
         comparator: Option<Value>,
         table: u32,
-        initial_storage_len: usize,
+        initial_mutation_version: u64,
         program: &Program,
         depth: usize,
         fuel: &mut Execution<'_>,
@@ -17603,7 +17633,7 @@ impl Vm {
                 values.len() - 1,
                 comparator,
                 table,
-                initial_storage_len,
+                initial_mutation_version,
                 program,
                 depth,
                 fuel,
@@ -17620,7 +17650,7 @@ impl Vm {
                 end,
                 comparator,
                 table,
-                initial_storage_len,
+                initial_mutation_version,
                 program,
                 depth,
                 fuel,
@@ -17637,7 +17667,7 @@ impl Vm {
         end: usize,
         comparator: Option<Value>,
         table: u32,
-        initial_storage_len: usize,
+        initial_mutation_version: u64,
         program: &Program,
         depth: usize,
         fuel: &mut Execution<'_>,
@@ -17655,7 +17685,7 @@ impl Vm {
                 values[child],
                 comparator,
                 table,
-                initial_storage_len,
+                initial_mutation_version,
                 program,
                 depth,
                 fuel,
@@ -17668,7 +17698,7 @@ impl Vm {
                     values[child + 1],
                     comparator,
                     table,
-                    initial_storage_len,
+                    initial_mutation_version,
                     program,
                     depth,
                     fuel,
@@ -17691,7 +17721,7 @@ impl Vm {
         rhs: Value,
         comparator: Option<Value>,
         table: u32,
-        initial_storage_len: usize,
+        initial_mutation_version: u64,
         program: &Program,
         depth: usize,
         fuel: &mut Execution<'_>,
@@ -17705,12 +17735,12 @@ impl Vm {
         } else {
             self.less_than(program, lhs, rhs, depth, fuel)?
         };
-        let storage_len = self.heap.table_storage_len(table).ok_or_else(|| {
+        let mutation_version = self.heap.table_mutation_version(table).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "table handle is missing",
             })
         })?;
-        if storage_len != initial_storage_len {
+        if mutation_version != initial_mutation_version {
             return Err(Error::new(ErrorKind::RuntimeError {
                 message: "table modified during sorting".to_owned(),
             }));
@@ -27876,6 +27906,35 @@ mod inline_cache_tests {
             "quota admission must use maintained totals, not a full VM census"
         );
         assert!(vm.memory_stats().live_bytes <= vm.settings.memory_limit_bytes.unwrap());
+    }
+
+    #[test]
+    fn puc_hash_only_constructor_hint_is_checked_before_allocation() {
+        let mut baseline = Vm::new(Profile::Puc51Compat);
+        let limit = baseline.memory_stats().live_bytes + 64 * 1024;
+        let mut vm = Vm::with_settings(
+            Profile::Puc51Compat,
+            VmSettings {
+                memory_limit_bytes: Some(limit),
+                ..VmSettings::default()
+            },
+        );
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::with_aux(Opcode::NewArray, 0, 0, 0, 1_000_000),
+                    Instruction::new(Opcode::Halt, 0, 0, 0),
+                ],
+                1,
+            ),
+            Vec::new(),
+        );
+
+        let error = vm
+            .run(&program)
+            .expect_err("the oversized node hint must fail before allocation");
+        assert!(matches!(error.kind, ErrorKind::OutOfMemory));
+        assert!(vm.memory_stats().live_bytes <= limit);
     }
 
     #[test]

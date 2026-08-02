@@ -45,6 +45,26 @@ fn require_resolves_by_host_identity_and_executes_once() {
 }
 
 #[test]
+fn require_compiles_modules_with_the_requesting_profile() {
+    let resolver = ServiceModuleResolver::from_fn(|requested, _| {
+        assert_eq!(requested, "puc-constructor");
+        Ok(ModuleSource::new(
+            "puc-constructor",
+            "local t = {1, [1] = 9} return t[1]",
+        ))
+    });
+    let mut vm = RustiaBuilder::puc51_compat()
+        .module_resolver(resolver)
+        .build()
+        .expect("PUC resolver");
+
+    let result: f64 = vm
+        .run(r#"return require("puc-constructor")"#)
+        .expect("module result");
+    assert_eq!(result, 1.0);
+}
+
+#[test]
 fn require_passes_nested_referrers_and_caches_empty_results() {
     let calls = Rc::new(RefCell::new(Vec::<(String, Option<String>)>::new()));
     let calls_for_host = Rc::clone(&calls);

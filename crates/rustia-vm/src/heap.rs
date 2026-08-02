@@ -347,6 +347,9 @@ struct TableData {
     readonly: bool,
     metatable: Option<u32>,
     shape_version: u64,
+    /// Increments on every guest-visible table mutation, including writes to
+    /// existing slots that leave the storage shape unchanged.
+    mutation_version: u64,
 }
 
 /// Hash-part storage backing a [`TableData`]. The variant is fixed per VM by
@@ -969,6 +972,7 @@ impl VmCell {
         let table = self.tables.get_mut(handle)?;
         let before = table_data_memory_usage(table);
         let result = mutate(table);
+        table.mutation_version = table.mutation_version.wrapping_add(1);
         let after = table_data_memory_usage(table);
         self.side_usage.adjust(before, after);
         Some(result)
@@ -989,6 +993,7 @@ impl VmCell {
             let table = tables.get_mut(handle)?;
             let before = table_data_memory_usage(table);
             let result = mutate(&root, table);
+            table.mutation_version = table.mutation_version.wrapping_add(1);
             side_usage.adjust(before, table_data_memory_usage(table));
             Some(result)
         })
@@ -1471,6 +1476,7 @@ impl VmCell {
             readonly: false,
             metatable: None,
             shape_version: 0,
+            mutation_version: 0,
         })
         .expect("table slot limit exceeded")
     }
@@ -1491,29 +1497,32 @@ impl VmCell {
         let mut array = Vec::new();
         array.try_reserve_exact(array_size).ok()?;
         array.resize(array_size, fill);
-        Some(self.alloc_puc_table_from_parts(array, hash_size))
+        self.try_alloc_puc_table_from_parts(array, hash_size)
     }
 
     /// PUC-layout table taking an already-materialized array part (the
     /// `NewArray` register-window path); node part is sized like
     /// `setnodevector`.
-    pub(crate) fn alloc_puc_table_from_parts(
+    pub(crate) fn try_alloc_puc_table_from_parts(
         &mut self,
         array: Vec<Value>,
         hash_size: usize,
-    ) -> u32 {
+    ) -> Option<u32> {
         let node_len = puc_node_vector_len(hash_size);
+        let mut nodes = Vec::new();
+        nodes.try_reserve_exact(node_len).ok()?;
+        nodes.resize(node_len, PUC_FREE_NODE);
         self.insert_table_data(TableData {
             array,
             hash: HashPart::Puc(PucHashPart {
-                nodes: vec![PUC_FREE_NODE; node_len],
+                nodes,
                 lastfree: node_len,
             }),
             readonly: false,
             metatable: None,
             shape_version: 0,
+            mutation_version: 0,
         })
-        .expect("table slot limit exceeded")
     }
 
     /// Current array-part size (`sizearray`), not the `#t` border.
@@ -1562,6 +1571,7 @@ impl VmCell {
             let root = root.unlock(mc).borrow();
             puc_resize(&root, &mut candidate, nasize, node_len);
         });
+        candidate.mutation_version = candidate.mutation_version.wrapping_add(1);
         let candidate_usage = table_data_memory_usage(&candidate);
         let growth = candidate_usage
             .live_bytes
@@ -1585,6 +1595,7 @@ impl VmCell {
             readonly: false,
             metatable: None,
             shape_version: 0,
+            mutation_version: 0,
         })
         .expect("table slot limit exceeded")
     }
@@ -1603,6 +1614,7 @@ impl VmCell {
             readonly: false,
             metatable: None,
             shape_version: 0,
+            mutation_version: 0,
         })
     }
 
@@ -1995,16 +2007,17 @@ impl VmCell {
         table: u32,
         values: &[Value],
     ) -> Option<TableNumericArrayWrite> {
-        if self.tables.get(table)?.puc_hash().is_some() {
+        let table_data = self.tables.get(table)?;
+        if table_data.readonly {
+            return Some(TableNumericArrayWrite::Readonly);
+        }
+        if values.len() > table_data.array.len() {
+            return Some(TableNumericArrayWrite::Deferred);
+        }
+        if table_data.puc_hash().is_some() {
             // PUC: array-range keys are never in the node part, so a prefix
             // write that fits the existing array is a pure slot write.
             return self.mutate_table_data(table, |table| {
-                if table.readonly {
-                    return TableNumericArrayWrite::Readonly;
-                }
-                if values.len() > table.array.len() {
-                    return TableNumericArrayWrite::Deferred;
-                }
                 for (offset, value) in values.iter().copied().enumerate() {
                     table.array[offset] = value;
                 }
@@ -2012,13 +2025,6 @@ impl VmCell {
             });
         }
         self.mutate_table_data(table, |table| {
-            if table.readonly {
-                return TableNumericArrayWrite::Readonly;
-            }
-            if values.len() > table.array.len() {
-                return TableNumericArrayWrite::Deferred;
-            }
-
             let HashPart::Log { entries, index } = &mut table.hash else {
                 unreachable!("Log layout checked above")
             };
@@ -2054,48 +2060,52 @@ impl VmCell {
         if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
             return Some(TableNumericArrayWrite::Deferred);
         }
-        if self.tables.get(table)?.puc_hash().is_some() {
+        let table_data = self.tables.get(table)?;
+        if table_data.puc_hash().is_some() {
             // PUC: the array never grows outside rehash, so out-of-range
             // indices defer to the general path (node part); in-range writes
             // keep the metatable/readonly checks.
+            if one_based_index > table_data.array.len() {
+                return Some(TableNumericArrayWrite::Deferred);
+            }
+            let existing = table_data.array[one_based_index - 1];
+            if existing.is_nil() && table_data.metatable.is_some() {
+                return Some(TableNumericArrayWrite::Deferred);
+            }
+            if table_data.readonly {
+                return Some(TableNumericArrayWrite::Readonly);
+            }
             return self.mutate_table_data(table, |table| {
-                if one_based_index > table.array.len() {
-                    return TableNumericArrayWrite::Deferred;
-                }
-                let existing = table.array[one_based_index - 1];
-                if existing.is_nil() && table.metatable.is_some() {
-                    return TableNumericArrayWrite::Deferred;
-                }
-                if table.readonly {
-                    return TableNumericArrayWrite::Readonly;
-                }
                 table.array[one_based_index - 1] = value;
                 TableNumericArrayWrite::Stored
             });
         }
+        let existing = table_data
+            .array
+            .get(one_based_index - 1)
+            .copied()
+            .unwrap_or_else(Value::nil);
+        if existing.is_nil() && table_data.metatable.is_some() {
+            return Some(TableNumericArrayWrite::Deferred);
+        }
+        if table_data.readonly {
+            return Some(TableNumericArrayWrite::Readonly);
+        }
+        if value.is_nil() && one_based_index > table_data.array.len() {
+            // A numeric hash entry can exist beyond the array boundary.
+            return Some(TableNumericArrayWrite::Deferred);
+        }
+        if !value.is_nil() && one_based_index > table_data.array.len() + 1 {
+            return Some(TableNumericArrayWrite::Deferred);
+        }
         self.mutate_table_data(table, |table| {
-            let existing = table
-                .array
-                .get(one_based_index - 1)
-                .copied()
-                .unwrap_or_else(Value::nil);
-            if existing.is_nil() && table.metatable.is_some() {
-                return TableNumericArrayWrite::Deferred;
-            }
-            if table.readonly {
-                return TableNumericArrayWrite::Readonly;
-            }
-
             if value.is_nil() {
-                let Some(slot) = table.array.get_mut(one_based_index - 1) else {
-                    // A numeric hash entry can exist beyond the array boundary.
-                    return TableNumericArrayWrite::Deferred;
-                };
+                let slot = table
+                    .array
+                    .get_mut(one_based_index - 1)
+                    .expect("validated array slot remains available");
                 *slot = Value::nil();
                 return TableNumericArrayWrite::Stored;
-            }
-            if one_based_index > table.array.len() + 1 {
-                return TableNumericArrayWrite::Deferred;
             }
             if one_based_index > table.array.len() {
                 table.array.resize(one_based_index, Value::nil());
@@ -2185,6 +2195,7 @@ impl VmCell {
             return Some(TableStringHashWrite::Readonly);
         }
         entry.value = value;
+        table.mutation_version = table.mutation_version.wrapping_add(1);
         Some(TableStringHashWrite::Stored)
     }
 
@@ -2342,6 +2353,7 @@ impl VmCell {
         } else {
             set_table_data(&mut candidate, table_key, key_value, value);
         }
+        candidate.mutation_version = candidate.mutation_version.wrapping_add(1);
         let candidate_usage = table_data_memory_usage(&candidate);
         let table_growth = candidate_usage
             .live_bytes
@@ -2413,6 +2425,7 @@ impl VmCell {
                 remove_hash_key(entries, index, &mut candidate.shape_version, key);
             }
         }
+        candidate.mutation_version = candidate.mutation_version.wrapping_add(1);
         let candidate_usage = table_data_memory_usage(&candidate);
         let growth = candidate_usage
             .live_bytes
@@ -2470,7 +2483,10 @@ impl VmCell {
             self.tables.get(metatable)?;
         }
         let table = self.tables.get_mut(table)?;
-        table.metatable = metatable;
+        if table.metatable != metatable {
+            table.metatable = metatable;
+            table.mutation_version = table.mutation_version.wrapping_add(1);
+        }
         Some(())
     }
 
@@ -2495,6 +2511,10 @@ impl VmCell {
             HashPart::Puc(puc) => puc.nodes.len(),
         };
         Some(table.array.len().saturating_add(hash_len))
+    }
+
+    pub(crate) fn table_mutation_version(&mut self, table: u32) -> Option<u64> {
+        self.tables.get(table).map(|table| table.mutation_version)
     }
 
     pub fn table_clear(&mut self, table: u32) -> Option<()> {
@@ -2704,7 +2724,10 @@ impl VmCell {
     pub fn table_freeze(&mut self, table: u32) -> Option<bool> {
         let table = self.tables.get_mut(table)?;
         let was_readonly = table.readonly;
-        table.readonly = true;
+        if !was_readonly {
+            table.readonly = true;
+            table.mutation_version = table.mutation_version.wrapping_add(1);
+        }
         Some(was_readonly)
     }
 
@@ -4148,10 +4171,12 @@ fn mark_heap_ref(reference: HeapRef, live: &mut HeapLiveSet, queue: &mut Vec<Hea
 }
 
 fn sweep_weak_table(table: &mut TableData, mode: WeakMode, live: &HeapLiveSet) {
+    let mut changed = false;
     if mode.values {
         for value in &mut table.array {
             if weak_value_is_collectable(*value) && !live.contains_value(*value) {
                 *value = Value::nil();
+                changed = true;
             }
         }
     }
@@ -4173,13 +4198,13 @@ fn sweep_weak_table(table: &mut TableData, mode: WeakMode, live: &HeapLiveSet) {
             if entries.len() != hash_len {
                 table.shape_version = table.shape_version.saturating_add(1);
                 rebuild_hash_index(entries, index);
+                changed = true;
             }
         }
         HashPart::Puc(puc) => {
             // PUC never removes nodes outside rehash: swept entries become
             // tombstones, and dead collectable keys become dead-key nodes
             // (LUA_TDEADKEY), which still answer next() lookups.
-            let mut changed = false;
             for node in &mut puc.nodes {
                 let PucNodeKey::Live(key) = node.key else {
                     continue;
@@ -4207,6 +4232,9 @@ fn sweep_weak_table(table: &mut TableData, mode: WeakMode, live: &HeapLiveSet) {
                 table.shape_version = table.shape_version.saturating_add(1);
             }
         }
+    }
+    if changed {
+        table.mutation_version = table.mutation_version.wrapping_add(1);
     }
 }
 
@@ -4605,6 +4633,7 @@ mod tests {
             readonly: false,
             metatable: None,
             shape_version: 0,
+            mutation_version: 0,
         }
     }
 

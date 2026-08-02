@@ -461,15 +461,39 @@ where
         Self::compile_module_bytes(source_name, source.as_bytes())
     }
 
+    /// Compiles a reusable module with code generation appropriate for
+    /// `profile`. Use this when the module will be installed into a VM whose
+    /// profile is known ahead of time.
+    pub fn compile_module_with_profile(
+        source_name: impl Into<String>,
+        source: &str,
+        profile: Profile,
+    ) -> Result<CompiledModule> {
+        Self::compile_module_bytes_with_profile(source_name, source.as_bytes(), profile)
+    }
+
     /// Compiles with the standard (source-order) table-constructor write
     /// order. `Profile::Puc51Compat` hosts need PUC write order instead;
     /// compile through the instance run helpers (which read the VM profile) or
-    /// pass [`CompileOptions::puc51_constructor_order`] yourself.
+    /// use [`compile_module_bytes_with_profile`](Self::compile_module_bytes_with_profile).
     pub fn compile_module_bytes(
         source_name: impl Into<String>,
         source: &[u8],
     ) -> Result<CompiledModule> {
         Self::compile_module_bytes_with_constructor_order(source_name, source, false)
+    }
+
+    /// Byte-oriented form of [`compile_module_with_profile`](Self::compile_module_with_profile).
+    pub fn compile_module_bytes_with_profile(
+        source_name: impl Into<String>,
+        source: &[u8],
+        profile: Profile,
+    ) -> Result<CompiledModule> {
+        Self::compile_module_bytes_with_constructor_order(
+            source_name,
+            source,
+            profile == Profile::Puc51Compat,
+        )
     }
 
     fn compile_module_bytes_with_constructor_order(
@@ -701,7 +725,7 @@ impl Rustia<()> {
     }
 
     pub fn hot_reload(&mut self, source_name: impl Into<String>, source: &str) -> Result<Exports> {
-        let module = Self::compile_module(source_name, source)?;
+        let module = Self::compile_module_with_profile(source_name, source, self.vm.profile())?;
         self.install(module)
     }
 

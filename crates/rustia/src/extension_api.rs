@@ -533,10 +533,10 @@ impl ServiceModuleResolver {
             + 'static,
         deterministic: bool,
     ) -> Self {
-        let provider = ModuleResolver::new(
-            move |requested, referrer| {
+        let provider = ModuleResolver::new_with_profile(
+            move |requested, referrer, profile| {
                 let module = resolver(requested, referrer)?;
-                compile_module_source(module)
+                compile_module_source(module, profile)
             },
             deterministic,
         );
@@ -548,14 +548,20 @@ impl ServiceModuleResolver {
     }
 }
 
-fn compile_module_source(module: ModuleSource) -> std::result::Result<ResolvedModule, String> {
+fn compile_module_source(
+    module: ModuleSource,
+    profile: Profile,
+) -> std::result::Result<ResolvedModule, String> {
     if module.identity.is_empty() {
         return Err("module identity must not be empty".to_owned());
     }
     let chunk = rustia_parser::parse_source_bytes(&module.source)
         .map_err(|error| format!("{}:1: {error}", module.source_name))?;
-    let options =
-        CompileOptions::default().with_source_bytes(module.source_name.clone(), &module.source);
+    let options = CompileOptions {
+        puc51_constructor_order: profile == Profile::Puc51Compat,
+        ..CompileOptions::default()
+    }
+    .with_source_bytes(module.source_name.clone(), &module.source);
     let program = compile_with_options(&chunk, options)
         .map_err(|error| format!("{}:1: {error}", module.source_name))?;
     Ok(ResolvedModule::new(module.identity, program))

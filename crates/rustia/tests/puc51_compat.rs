@@ -70,3 +70,56 @@ fn puc51_compat_table_create_builtin_is_not_a_constructor_hint() {
         .unwrap();
     assert_eq!(aliased, 0.0);
 }
+
+#[test]
+fn puc51_compat_profile_codegen_is_used_by_hot_reload_and_precompiled_modules() {
+    let mut rustia = RustiaBuilder::puc51_compat().build().unwrap();
+    let source = "local t = {1, [1] = 9} return { slot = t[1] }";
+
+    let reloaded = rustia.hot_reload("reload.luau", source).unwrap();
+    assert_eq!(reloaded.get::<f64>(&mut rustia, "slot").unwrap(), 1.0);
+
+    let module = rustia::Rustia::<()>::compile_module_with_profile(
+        "precompiled.luau",
+        source,
+        rustia::Profile::Puc51Compat,
+    )
+    .unwrap();
+    let installed = rustia.install(module).unwrap();
+    assert_eq!(installed.get::<f64>(&mut rustia, "slot").unwrap(), 1.0);
+}
+
+#[test]
+fn puc51_compat_sort_rejects_existing_slot_writes_from_comparator() {
+    let mut rustia = RustiaBuilder::puc51_compat().build().unwrap();
+    let rejected: bool = rustia
+        .run(
+            "local t = {3, 2, 1} \
+             local ok, err = pcall(table.sort, t, function(a, b) \
+                 t[1] = 99 \
+                 return a < b \
+             end) \
+             return not ok and string.find(err, 'table modified during sorting', 1, true) ~= nil",
+        )
+        .unwrap();
+    assert!(rejected);
+}
+
+#[test]
+fn puc51_compat_sort_allows_comparator_writes_redirected_by_newindex() {
+    let mut rustia = RustiaBuilder::puc51_compat().build().unwrap();
+    let sorted: bool = rustia
+        .run(
+            "local redirected = {} \
+             local t = setmetatable({3, 2, 1}, { \
+                 __newindex = function(_, key, value) redirected[key] = value end \
+             }) \
+             table.sort(t, function(a, b) \
+                 t[4] = 99 \
+                 return a < b \
+             end) \
+             return t[1] == 1 and redirected[4] == 99",
+        )
+        .unwrap();
+    assert!(sorted);
+}

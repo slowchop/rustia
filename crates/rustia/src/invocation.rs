@@ -1221,7 +1221,11 @@ where
     where
         Return: FromRustia,
     {
-        let module = crate::Rustia::<C>::compile_module(source_name, source)?;
+        let module = crate::Rustia::<C>::compile_module_with_profile(
+            source_name,
+            source,
+            self.vm.profile(),
+        )?;
         self.scoped(|invocation| {
             let exports = invocation.install(module)?;
             let value = exports.value_in(invocation)?;
@@ -1231,7 +1235,11 @@ where
 
     /// Runs a named chunk and retains its first result without snapshotting it.
     pub fn run_value(&mut self, source_name: impl Into<String>, source: &str) -> Result<Value> {
-        let module = crate::Rustia::<C>::compile_module(source_name, source)?;
+        let module = crate::Rustia::<C>::compile_module_with_profile(
+            source_name,
+            source,
+            self.vm.profile(),
+        )?;
         self.scoped(|invocation| invocation.install(module).map(|exports| exports.as_value()))
     }
 
