@@ -1245,6 +1245,9 @@ impl VmCell {
             }
             while table.array.last().is_some_and(|value| value.is_nil()) {
                 table.array.pop();
+                // Popping trailing nils moves the observable length border,
+                // so version consumers (iteration guards) must see a bump.
+                table.mutation_version = table.mutation_version.wrapping_add(1);
             }
             table.array.shrink_to_fit();
             let HashPart::Log { entries, index } = &mut table.hash else {
@@ -5311,6 +5314,28 @@ mod tests {
         assert_eq!(entries.capacity(), 0);
         assert!(index.is_empty());
         assert_eq!(index.capacity(), 0);
+    }
+
+    #[test]
+    fn quiescent_trailing_nil_pop_bumps_mutation_version() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[
+            Value::number(1.0),
+            Value::number(2.0),
+            Value::nil(),
+            Value::number(4.0),
+            Value::nil(),
+        ]);
+        assert_eq!(heap.array_len(table), Some(2));
+        let before = heap.table_mutation_version(table).expect("table version");
+
+        heap.collect_weak_tables_with_roots(&[Value::table(table)]);
+        heap.release_spare_capacity();
+
+        // The trailing nil pop moves the observable border to 4; version
+        // consumers (iteration guards) must observe the mutation.
+        assert_eq!(heap.array_len(table), Some(4));
+        assert_ne!(heap.table_mutation_version(table), Some(before));
     }
 
     #[test]
