@@ -1111,7 +1111,9 @@ impl FunctionInlineCaches {
             .map(|instruction| match instruction.op {
                 Opcode::GetImport | Opcode::NameCall => SITE_CACHE_IMPORT_EMPTY,
                 Opcode::FastCall => SITE_CACHE_FAST_CALL_EMPTY,
-                Opcode::Call => SITE_CACHE_CLOSURE_CALL_EMPTY,
+                Opcode::Call | Opcode::GenericCallLoop | Opcode::GeneralizedIterLoop => {
+                    SITE_CACHE_CLOSURE_CALL_EMPTY
+                }
                 opcode if opcode_uses_table_inline_cache(opcode) => SITE_CACHE_TABLE_EMPTY,
                 _ => SITE_CACHE_INELIGIBLE,
             })
@@ -4388,6 +4390,7 @@ impl Vm {
                                         instruction,
                                         context.depth,
                                         fuel,
+                                        None,
                                     )
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 match step {
@@ -4433,6 +4436,11 @@ impl Vm {
                                         instruction,
                                         context.depth,
                                         fuel,
+                                        program_id.map(|program| IteratorLeafSite {
+                                            program,
+                                            prototype: context.prototype,
+                                            pc: pc - 1,
+                                        }),
                                     )
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 match step {
@@ -4524,6 +4532,11 @@ impl Vm {
                                         instruction,
                                         context.depth,
                                         fuel,
+                                        program_id.map(|program| IteratorLeafSite {
+                                            program,
+                                            prototype: context.prototype,
+                                            pc: pc - 1,
+                                        }),
                                     )
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 match step {
@@ -18258,6 +18271,7 @@ impl Vm {
         instruction: Instruction,
         depth: usize,
         fuel: &mut Execution<'_>,
+        site: Option<IteratorLeafSite>,
     ) -> Result<CallIteratorStep> {
         let window = CallIteratorRegisters::generic(instruction.a, instruction.c)?;
         window.validate(registers.len(), "generic call iterator")?;
@@ -18269,6 +18283,7 @@ impl Vm {
             depth,
             fuel,
             invalid_callee: InvalidIteratorCallee::Iterate,
+            site,
         })
     }
 
@@ -18299,6 +18314,7 @@ impl Vm {
                         depth,
                         fuel,
                         invalid_callee: InvalidIteratorCallee::Call,
+                        site: None,
                     });
                 }
                 if subject.kind() == ValueKind::Table {
@@ -18332,6 +18348,7 @@ impl Vm {
                     depth,
                     fuel,
                     invalid_callee: InvalidIteratorCallee::Call,
+                    site: None,
                 })
             }
             _ => Err(iteration_error(subject)),
@@ -18346,6 +18363,7 @@ impl Vm {
         instruction: Instruction,
         depth: usize,
         fuel: &mut Execution<'_>,
+        site: Option<IteratorLeafSite>,
     ) -> Result<CallIteratorStep> {
         let window = GeneralizedIteratorRegisters::new(instruction.a, instruction.c)?;
         window.validate(registers.len())?;
@@ -18359,6 +18377,7 @@ impl Vm {
                 depth,
                 fuel,
                 invalid_callee: InvalidIteratorCallee::Call,
+                site,
             })
         } else if mode == GENERALIZED_ITERATOR_MODE_TABLE {
             self.table_iterator_step(registers, register_cells, window.call)
@@ -18410,6 +18429,7 @@ impl Vm {
             depth,
             fuel,
             invalid_callee,
+            site,
         } = context;
         let iterator = get_register(registers, window.iterator)?;
         if invalid_callee == InvalidIteratorCallee::Iterate
@@ -18431,6 +18451,19 @@ impl Vm {
         )? {
             return Ok(CallIteratorStep::Complete(advanced));
         }
+        if let Some(site) = site {
+            if let Some(advanced) = self.try_leaf_iterator_step(
+                site,
+                iterator,
+                registers,
+                register_cells,
+                window,
+                depth,
+                fuel,
+            )? {
+                return Ok(CallIteratorStep::Complete(advanced));
+            }
+        }
         let results = match self.call_value_with_site_resumable(
             program,
             iterator,
@@ -18445,6 +18478,110 @@ impl Vm {
         self.sync_register_cells(registers, register_cells)?;
         apply_call_iterator_results(registers, register_cells, window, &results)
             .map(CallIteratorStep::Complete)
+    }
+
+    /// Per-site leaf fast path for closure iterators. Mirrors
+    /// `try_closure_call_scalar`: a committed leaf neither allocates, collects,
+    /// invokes guest code, nor yields, so the step can skip the generic call
+    /// frame, result packing, and the caller cell sync while keeping exact
+    /// logical instruction accounting. The cache lane is keyed by the
+    /// iterator's program/prototype; captures are re-read from the live handle
+    /// every step, so a swapped closure instance of the same prototype stays
+    /// correct and any other iterator shape falls back to the generic call.
+    #[allow(clippy::too_many_arguments)]
+    fn try_leaf_iterator_step(
+        &mut self,
+        site: IteratorLeafSite,
+        iterator: Value,
+        registers: &mut [Value],
+        register_cells: &mut [Option<u32>],
+        window: CallIteratorRegisters,
+        depth: usize,
+        fuel: &mut Execution<'_>,
+    ) -> Result<Option<bool>> {
+        let Some(handle) = iterator.as_function() else {
+            return Ok(None);
+        };
+        let Some(FunctionKind::Bytecode {
+            program: Some(callee_program),
+            prototype: callee_prototype,
+        }) = self.heap.function_kind(handle)
+        else {
+            return Ok(None);
+        };
+        if !self.closure_call_fast_path_enabled()
+            || self.settings.initial_fuel.is_some()
+            || fuel.state.fuel.is_some()
+            || self.settings.enable_conformance_coverage
+            || self.heap.has_allocation_debt()
+        {
+            return Ok(None);
+        }
+        let cached = self.closure_call_inline_cache(
+            site.program,
+            site.prototype,
+            site.pc,
+            callee_program,
+            callee_prototype,
+        );
+        let (plan, cache_hit) = if let Some(entry) = cached {
+            #[cfg(test)]
+            self.record_closure_call_prototype_hit(site.program);
+            (entry.plan, true)
+        } else {
+            let Some(plan) = self
+                .dynamic_programs
+                .get(callee_program)
+                .and_then(|program| program.leaf_call_plan(callee_prototype))
+            else {
+                return Ok(None);
+            };
+            (plan, false)
+        };
+        if self.weak_collection_due_within(plan.maximum_instruction_count().saturating_add(1))
+            || self.recursion_depth_exceeded(depth.saturating_add(1))
+        {
+            return Ok(None);
+        }
+        if !cache_hit {
+            self.set_closure_call_inline_cache(
+                site.program,
+                site.prototype,
+                site.pc,
+                ClosureCallCacheEntry {
+                    callee_program,
+                    callee_prototype,
+                    plan,
+                },
+            );
+        }
+        let Some((first_capture, second_capture)) =
+            selected_leaf_captures(plan, |index| self.heap.function_capture(handle, index))
+        else {
+            #[cfg(test)]
+            self.record_closure_call_guard_exit(site.program);
+            return Ok(None);
+        };
+        let Some(outcome) = self.try_leaf_call_outcome(plan, first_capture, second_capture)? else {
+            #[cfg(test)]
+            self.record_closure_call_guard_exit(site.program);
+            return Ok(None);
+        };
+        #[cfg(test)]
+        self.record_closure_call_fast_entry(site.program);
+        self.executed_instructions = self
+            .executed_instructions
+            .wrapping_add(u64::from(outcome.instruction_count));
+        // The generic step refreshes every cell-backed caller register after
+        // the call; a committed leaf can only have mutated this one cell.
+        sync_leaf_mutation_to_registers(
+            registers,
+            register_cells,
+            outcome.mutation_cell,
+            outcome.first,
+        );
+        let results = leaf_outcome_return_values(outcome);
+        apply_call_iterator_results(registers, register_cells, window, &results).map(Some)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -22819,6 +22956,16 @@ struct CallIteratorStepContext<'a, 'call> {
     depth: usize,
     fuel: &'a mut Execution<'call>,
     invalid_callee: InvalidIteratorCallee,
+    site: Option<IteratorLeafSite>,
+}
+
+/// Call-site identity of a loop opcode (`GENERICCALLLOOP`/`GENERALIZEDITERLOOP`)
+/// used to key the per-site leaf-iterator cache.
+#[derive(Clone, Copy)]
+struct IteratorLeafSite {
+    program: u32,
+    prototype: Option<u32>,
+    pc: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -27212,6 +27359,118 @@ mod inline_cache_tests {
         assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 3);
         assert_eq!(fast.dynamic_programs[0].closure_call_guard_exits, 0);
         assert_eq!(interpreted.dynamic_programs[0].closure_call_fast_entries, 0);
+    }
+
+    /// The array-iterator leaf plus a `Halt` tail: unreachable, but the exact
+    /// shape match rejects it, so loops over it stay on the generic path.
+    fn non_leaf_iterator_closure() -> Function {
+        let mut function = closure_call_array_iterator_program().functions[0].clone();
+        function.code.push(Instruction::new(Opcode::Halt, 0, 0, 0));
+        function
+    }
+
+    fn generalized_iter_leaf_program(closure: Function, generic_call: bool) -> Program {
+        let leaf_index = 0_i32;
+        let (prep, loop_op) = if generic_call {
+            (Opcode::GenericCallPrep, Opcode::GenericCallLoop)
+        } else {
+            (Opcode::GeneralizedIterPrep, Opcode::GeneralizedIterLoop)
+        };
+        let code = if generic_call {
+            vec![
+                Instruction::new(Opcode::LoadConst, 0, 0, 1),
+                Instruction::new(Opcode::LoadConst, 1, 0, 2),
+                Instruction::new(Opcode::LoadConst, 2, 0, 3),
+                Instruction::new(Opcode::NewArray, 3, 1, 2),
+                Instruction::with_aux(Opcode::LoadFunction, 4, 0, 0, leaf_index),
+                Instruction::new(Opcode::Move, 5, 4, 0),
+                Instruction::new(Opcode::LoadConst, 10, 0, 1),
+                Instruction::with_aux(prep, 5, 0, 2, 10),
+                Instruction::new(Opcode::Add, 10, 10, 9),
+                Instruction::with_aux(loop_op, 5, 0, 2, 8),
+                Instruction::new(Opcode::Return, 10, 1, 0),
+                Instruction::new(Opcode::Halt, 0, 0, 0),
+            ]
+        } else {
+            vec![
+                Instruction::new(Opcode::LoadConst, 0, 0, 1),
+                Instruction::new(Opcode::LoadConst, 1, 0, 2),
+                Instruction::new(Opcode::LoadConst, 2, 0, 3),
+                Instruction::new(Opcode::NewArray, 3, 1, 2),
+                Instruction::with_aux(Opcode::LoadFunction, 4, 0, 0, leaf_index),
+                Instruction::new(Opcode::LoadConst, 11, 0, 1),
+                Instruction::new(Opcode::Move, 5, 4, 0),
+                Instruction::with_aux(prep, 5, 0, 2, 10),
+                Instruction::new(Opcode::Add, 11, 11, 10),
+                Instruction::with_aux(loop_op, 5, 0, 2, 8),
+                Instruction::new(Opcode::Return, 11, 1, 0),
+                Instruction::new(Opcode::Halt, 0, 0, 0),
+            ]
+        };
+        let register_count = code
+            .iter()
+            .map(|instruction| {
+                u32::from(instruction.a)
+                    .max(u32::from(instruction.b))
+                    .max(u32::from(instruction.c))
+            })
+            .max()
+            .unwrap()
+            + 1;
+        Program::with_functions(
+            Function::new(code, register_count as usize),
+            vec![
+                Constant::Number(1.0),
+                Constant::Number(0.0),
+                Constant::Number(10.0),
+                Constant::Number(20.0),
+            ],
+            vec![closure],
+        )
+    }
+
+    fn leaf_iterator_closure() -> Function {
+        closure_call_array_iterator_program().functions[0].clone()
+    }
+
+    #[test]
+    fn generalized_iter_loop_commits_leaf_iterator_steps_from_site_cache() {
+        for generic_call in [false, true] {
+            let program = generalized_iter_leaf_program(leaf_iterator_closure(), generic_call);
+            let mut fast = Vm::new(Profile::ReproducibleStandard);
+            fast.closure_call_mode = ClosureCallTestMode::Force;
+            let fast_result = fast.run(&program).unwrap();
+
+            let mut interpreted = Vm::new(Profile::ReproducibleStandard);
+            interpreted.closure_call_mode = ClosureCallTestMode::Off;
+            let interpreted_result = interpreted.run(&program).unwrap();
+
+            assert_eq!(fast_result.as_number(), Some(30.0));
+            assert_eq!(fast_result.as_number(), interpreted_result.as_number());
+            assert_eq!(
+                fast.executed_instructions, interpreted.executed_instructions,
+                "leaf iterator steps keep exact logical instruction accounting"
+            );
+            let fast_loaded = &fast.dynamic_programs[0];
+            assert_eq!(fast_loaded.closure_call_cache_fills, 1);
+            assert_eq!(fast_loaded.closure_call_prototype_hits, 1);
+            assert_eq!(fast_loaded.closure_call_fast_entries, 2);
+            assert_eq!(fast_loaded.closure_call_guard_exits, 0);
+            assert_eq!(interpreted.dynamic_programs[0].closure_call_fast_entries, 0);
+        }
+    }
+
+    #[test]
+    fn generalized_iter_loop_falls_back_for_non_leaf_iterators() {
+        for generic_call in [false, true] {
+            let program = generalized_iter_leaf_program(non_leaf_iterator_closure(), generic_call);
+            let mut fast = Vm::new(Profile::ReproducibleStandard);
+            fast.closure_call_mode = ClosureCallTestMode::Force;
+            assert_eq!(fast.run(&program).unwrap().as_number(), Some(30.0));
+            let loaded = &fast.dynamic_programs[0];
+            assert_eq!(loaded.closure_call_cache_fills, 0);
+            assert_eq!(loaded.closure_call_fast_entries, 0);
+        }
     }
 
     #[test]
