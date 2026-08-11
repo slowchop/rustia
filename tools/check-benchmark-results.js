@@ -12,7 +12,31 @@ const expectedResults = path.join(root, "bench", "RESULTS.md");
 const expectedJson = path.join(root, "bench", "current-results.json");
 const expectedClaims = path.join(root, "bench", "CLAIMS.md");
 const dedicatedLinuxTarget = "linux-x86_64";
+// Cohorts whose rows must retain the extended harness provenance (prepare /
+// first-call / cold-start timings and verified mlua-luau native-JIT identity).
+const extendedProvenanceCohorts = new Set([
+  "34f6deff4a42501b6d66d257249eecfcbca1976a",
+  "83bc2f370ee4149b6fa6e11eca951b41b4cccbd2",
+]);
 const expectedEngineCohorts = new Map([
+  [
+    "34f6deff4a42501b6d66d257249eecfcbca1976a",
+    new Map([
+      ["rustia", "luau"],
+      ["boa", "javascript"],
+      ["koto", "koto"],
+      ["luaur", "luau"],
+      ["mlua-luau", "luau"],
+      ["mlua-luau-jit", "luau"],
+      ["rhai", "rhai"],
+      ["roto", "roto"],
+      ["ruau", "luau"],
+      ["rquickjs", "javascript"],
+      ["wasmi", "wasm"],
+      ["wasmtime", "wasm"],
+      ["mlua-lua54", "lua54"],
+    ]),
+  ],
   [
     "83bc2f370ee4149b6fa6e11eca951b41b4cccbd2",
     new Map([
@@ -263,7 +287,7 @@ function validateDedicatedLinuxMatrix() {
     if (row.dialect !== expectedDialect) {
       fail(`${label}.dialect must be ${JSON.stringify(expectedDialect)} for ${row.engine}`);
     }
-    if (cohortCommit === "83bc2f370ee4149b6fa6e11eca951b41b4cccbd2") {
+    if (extendedProvenanceCohorts.has(cohortCommit)) {
       for (const field of [
         "prepare_ns_min", "prepare_ns_median", "first_call_ns_min", "first_call_ns_median",
         "cold_start_ns_min", "cold_start_ns_median",
