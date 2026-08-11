@@ -309,7 +309,7 @@
           "name": "Tables/metatables",
           "complete": 80,
           "confidence": 75,
-          "state": "Broad table, metatable, iteration, and stdlib behavior is conformance-covered. Logical deletion preserves tombstone insertion semantics, larger hash parts use a deterministic side index, and shape-revalidated positive string-slot caches cover global/index reads and writes plus dedicated GETTABLEKS, SETTABLEKS, and NAMECALL field/method paths. Exact OOP candidate ns/unit is 65.959% lower under its accepted Linux protocol; that comparison also includes the weak-table GC-scan correction. A mutation-version-keyed length-border cache was exactly gated on dedicated Linux and reverted after measuring no win on the dense or sparse workloads; quiescent trailing-nil release now bumps the table mutation version for iteration-guard coherence.",
+          "state": "Broad table, metatable, iteration, and stdlib behavior is conformance-covered. Logical deletion preserves tombstone insertion semantics, larger hash parts use a deterministic side index, and shape-revalidated positive string-slot caches cover global/index reads and writes plus dedicated GETTABLEKS, SETTABLEKS, and NAMECALL field/method paths. Exact OOP candidate ns/unit is 65.959% lower under its accepted Linux protocol; that comparison also includes the weak-table GC-scan correction. A mutation-version-keyed length-border cache was exactly gated on dedicated Linux and reverted after measuring no win on the dense or sparse workloads; quiescent trailing-nil release now bumps the table mutation version for sort-guard coherence.",
           "future_plan": "Keep the full suite and exact protocol green, then broaden adaptive specialization."
         },
         {

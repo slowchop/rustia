@@ -1246,7 +1246,8 @@ impl VmCell {
             while table.array.last().is_some_and(|value| value.is_nil()) {
                 table.array.pop();
                 // Popping trailing nils moves the observable length border,
-                // so version consumers (iteration guards) must see a bump.
+                // so version consumers (the table.sort mutation guard) must
+                // see a bump.
                 table.mutation_version = table.mutation_version.wrapping_add(1);
             }
             table.array.shrink_to_fit();
@@ -5332,8 +5333,9 @@ mod tests {
         heap.collect_weak_tables_with_roots(&[Value::table(table)]);
         heap.release_spare_capacity();
 
-        // The trailing nil pop moves the observable border to 4; version
-        // consumers (iteration guards) must observe the mutation.
+        // The trailing nil pop moves the observable border to 4; the
+        // table.sort mutation guard (the live version consumer) must observe
+        // the mutation.
         assert_eq!(heap.array_len(table), Some(4));
         assert_ne!(heap.table_mutation_version(table), Some(before));
     }

@@ -500,7 +500,7 @@ sparse, +20.97% closures, +16.10% generic iteration, and +17.32% stdlib. Evidenc
 Verdict: the bet's premise — that length-border recomputation is a material, cacheable cost on table-heavy
 code — is falsified on the two most length-heavy tracked workloads. The change was reverted at `74340c4`;
 the spare-capacity mutation-version bump survives as a standalone correctness fix for the pre-existing
-version consumers (iteration guards), pinned by a regression test. Cached length boundaries are closed;
+version consumers (the `table.sort` mutation guard), pinned by a regression test. Cached length boundaries are closed;
 reopen only with a workload that demonstrates cache hits in a measured hot phase.
 
 ## Estimate vs C++ Luau

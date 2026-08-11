@@ -37,7 +37,8 @@ Current unpublished workspace version: `0.0.1`.
 
 - Quiescent spare-capacity release now bumps a table's mutation version when
   it pops trailing array nils: the pop moves the observable length border,
-  and version consumers (iteration guards) previously saw no mutation. A
+  and version consumers (the `table.sort` mutation guard) previously saw no
+  mutation. A
   regression test pins the border movement and the version bump.
 
 - The exact-commit `34f6deff4a42501b6d66d257249eecfcbca1976a` cross-engine
