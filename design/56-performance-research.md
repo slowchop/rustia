@@ -10,11 +10,9 @@
 The public cross-engine benchmark posture is still conservative: rustia remains behind `mlua-luau` and Luaur
 on every workload. `mlua-luau` wraps the reference C++ runtime; Luaur is a separate pure-Rust Luau
 implementation. The current exact-commit
-`a5629199643847c0da78792644ad3656887bee21` Linux matrix places Luaur 2.768x-6.030x faster by minimum time with a
-3.833x five-workload minimum-time geometric mean, and `mlua-luau` 2.796x-4.880x faster by minimum time with a
-3.494x geometric mean. Rustia beats the Rust-native Ruau adapter on four of five workloads by minimum time. The targeted `closures_upvalues` median moved from
-270.427 to 229.766 ns/call (15.036% lower latency; 1.177x throughput), with every new sample below every prior
-sample. The snapshots used separate but identically specified dedicated instances, so movements are follow-up
+`34f6deff4a42501b6d66d257249eecfcbca1976a` Linux matrix places Luaur 2.615x-7.135x faster by minimum time with a
+4.336x five-workload minimum-time geometric mean, and `mlua-luau` 2.615x-5.880x faster by minimum time with a
+3.944x geometric mean. Rustia beats the Rust-native Ruau adapter on three of five workloads by minimum time. The snapshots used separate but identically specified dedicated instances, so movements are follow-up
 signals rather than same-host causal attribution. All timed groups passed on their first attempts, and the
 Linode was confirmed deleted before promotion. Exact same-engine Linux A/B evidence for earlier slices is
 retained separately; none of these results turns into a blanket cross-engine headline. This remains a catch-up
@@ -64,7 +62,7 @@ cross-RHS fuel/GC phase, and synthetic instruction/GC steps preserve the unfused
 `__index` and all other fallback cases still use ordinary metamethod
 semantics; this opcode is a lowering fast path, not a claim of full Luau `__namecall` context support.
 
-The remaining avoidable costs include small-table scans, cached length-boundary work, no fused
+The remaining avoidable costs include small-table scans, no fused
 `GETIMPORT`+`FASTCALL` form, remaining dispatch and register tolls, no shared frozen standard-library state, and
 no type-directed hot tier. A profiled hot-loop candidate now bypasses `gc-arena` when allocation debt is already
 zero and refreshes weak-table root snapshots only before a possible collection boundary or guest-code entry.
@@ -93,8 +91,10 @@ with compact `u32` slots, reduced the table index to at most 50% load, added a 4
 16-byte filled live-slot records, and stopped a monomorphic site from thrashing across atom changes. Shared
 compiled constant storage, 13-byte inline literal/runtime strings, constant-key `GETTABLEKS`/`SETTABLEKS`, and two-lane
 live `NAMECALL` lookup have now landed. A first focused hot-loop-hygiene correction also moves ordinary fuel
-classification to a base-cost lookup and gives numeric table access and ordering number-first paths. Next add
-cached length boundaries and profile the remaining small-table scan and dispatch costs.
+classification to a base-cost lookup and gives numeric table access and ordering number-first paths. Cached
+length boundaries were implemented and exactly gated, then reverted after the accepted protocol measured no
+win on either length-heavy workload (see the falsified-bet evidence below); next profile the remaining
+small-table scan and dispatch costs.
 Current plan delta: implementation and the controlled dense-table material-regression gate are complete. The
 accepted exact-commit Linode v2 comparison measured 2.42% lower corrective-candidate ns/unit, with a conservative
 nominal 95% interval of -3.35% to -1.57%, and published three actual final-binary rows plus raw evidence. That
@@ -458,11 +458,56 @@ time. The VM was
 confirmed deleted before promotion with a $0.108 rounded compute ceiling. Evidence is retained under
 [`../bench/evidence/matrix/a5629199643847c0da78792644ad3656887bee21/`](../bench/evidence/matrix/a5629199643847c0da78792644ad3656887bee21/).
 
+### Cached length boundaries — exact gates accepted, bet falsified, reverted
+
+Exact commit `34f6deff4a42501b6d66d257249eecfcbca1976a` cached each table's length border in a
+`mutation_version`-stamped slot consulted by `#t` reads and by the internal border computations of
+`table.insert`/`table.remove`; every mutation path invalidates by bumping the version. The slice also
+required a fix bumping that version when quiescent spare-capacity release pops trailing array nils. A local
+developer-host ABBA/BAAB screen was directionally +2.85% candidate ns/unit (hierarchical nominal interval
+-0.19% to +4.79%); that screen is diagnostic only and not a public claim.
+
+The first accepted Linode v2 run compared baseline `ed26fb2f26be2b7dc851e4ee043c4ccad56ac547` with the exact
+candidate on `dense_tables`, using byte-identical harness, workload, lockfile, and toolchain inputs, fixed
+`n=1500`, 15 repetitions per leg, four ABBA/BAAB legs per build, and checksum
+`number:193302491.00000000000000000`. Qualification spread was 1.0041% against the 3% ceiling, and every
+timed leg passed its idle gate with zero contaminants and zero steal. The pooled baseline and candidate
+medians were 38,712.969 and 39,393.119 ns/unit, a +1.7569% candidate delta. The conservative nominal 95%
+interval was +0.0238% to +3.6313% (pooled +1.1457% to +3.0797%), excluding the predeclared +5% material
+regression but also excluding any dense win: constant mutation during the build phases keeps the version
+counter advancing, so the cache almost never hits and only pays its validation cost. The VM was confirmed
+deleted before export with a $0.054 rounded compute ceiling. The three remote final rows were intentionally
+left unpromoted because public history admits only complete engine-times-workload cohorts; the targeted
+evidence is retained in the run state.
+
+The second accepted Linode v2 run compared the same baseline with `ef9e07078deb287af4ff08807bbdb839aff62f55`
+(code-identical to the candidate, pinned to post-promotion history) on `sparse_tables`, fixed `n=1202`,
+checksum `number:1506346400.00000000000000000`, and bootstrap seed 780221945. The pooled medians were
+99,211.592 and 99,822.523 ns/unit, a +0.6158% delta whose conservative nominal 95% interval of -4.2547% to
++2.0325% (pooled -0.3966% to +1.6532%) straddles zero: statistically neutral on the workload whose border
+churn was the bet's best case. All legs passed their idle gates with zero steal, and the VM was confirmed
+deleted with a $0.054 rounded compute ceiling. An earlier attempt at this run failed a provenance check
+(candidate-side history pin) before any measurement and was destroyed unused.
+
+The exact-commit `34f6deff4a42501b6d66d257249eecfcbca1976a` cross-engine matrix then replaced the public
+Linux snapshot (65 native rows, 15 wasm rows); all four timed groups were accepted on their first timed
+attempt with zero timed steal, and the VM was confirmed deleted after 1,560 seconds with a $0.108 rounded
+compute ceiling. Versus the preceding `83bc2f3` snapshot — 86 commits earlier, so these are cross-cohort
+stability signals rather than single-change attribution — rustia median ns/unit moved -7.07% dense, +8.06%
+sparse, +20.97% closures, +16.10% generic iteration, and +17.32% stdlib. Evidence is retained under
+[`../bench/evidence/matrix/34f6deff4a42501b6d66d257249eecfcbca1976a/`](../bench/evidence/matrix/34f6deff4a42501b6d66d257249eecfcbca1976a/).
+
+Verdict: the bet's premise — that length-border recomputation is a material, cacheable cost on table-heavy
+code — is falsified on the two most length-heavy tracked workloads. The change was reverted at `74340c4`;
+the spare-capacity mutation-version bump survives as a standalone correctness fix for the pre-existing
+version consumers (iteration guards), pinned by a regression test. Cached length boundaries are closed;
+reopen only with a workload that demonstrates cache hits in a measured hot phase.
+
 ## Estimate vs C++ Luau
 
 | state | likely position vs C++ Luau interpreter |
 |---|---|
-| Current public cross-engine snapshot | The two faster Luau adapters are 2.768x-6.030x faster on the five tracked workloads, with 3.494x (`mlua-luau`, reference C++) and 3.833x (pure-Rust Luaur) geometric means. Rustia beats Rust-native Ruau on four of five by minimum time. |
+| Current public cross-engine snapshot | The two faster Luau adapters are 2.615x-7.135x faster on the five tracked workloads, with 3.944x (`mlua-luau`, reference C++) and 4.336x (pure-Rust Luaur) geometric means. Rustia beats Rust-native Ruau on three of five by minimum time. |
 | Full tables + shared atoms + broader ICs + FASTCALL/GETIMPORT | Could close most table/global/stdlib gaps; target 0.5x-1.0x Luau on many interpreter workloads. |
 | Extend HotIR + hot-loop hygiene + superinstructions + O2 optimizer | Plausible 0.8x-1.5x Luau interpreter on favorable workloads, but only measurement can bless this. |
 | Add type-directed wasm/AOT tier | Hot type-stable kernels can plausibly beat the C++ Luau interpreter by multiples; this is the main better-than-Luau-interpreter route. |

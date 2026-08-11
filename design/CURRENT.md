@@ -217,6 +217,18 @@ first-call, combined cold-start, and warmed steady-state samples are all retaine
 cold cost is 677.26 microseconds versus 385.10 microseconds for the reference interpreter. All four timed groups
 passed on their first attempt, the primary group observed one steal tick (0.00867%), and the VM was confirmed
 deleted after 1,558 seconds before the 65 native rows, 15 wasm rows, and evidence were promoted.
+The current exact-commit `34f6deff4a42501b6d66d257249eecfcbca1976a` matrix was measured with the cached
+table length-border slice present. That slice's targeted dense_tables Linode A/B measured +1.7569% candidate
+ns/unit (conservative interval +0.02% to +3.63%, regression excluded but no win), and its sparse_tables A/B
+measured +0.6158% (interval -4.25% to +2.03%, neutral), so the bet was falsified and the cache was reverted
+at `74340c4`; only its spare-capacity mutation-version correctness fix survives. Versus the preceding
+`83bc2f3` snapshot — 86 commits earlier, so per-workload movements are stability signals, not single-change
+attribution — rustia median ns/unit moved -7.07% dense, +8.06% sparse, +20.97% closures, +16.10% generic
+iteration, and +17.32% stdlib. The generated current five-workload minimum-time gaps are 3.944x to
+`mlua-luau` and 4.336x to Luaur, and rustia beats Ruau on three of five workloads by minimum time. All four
+timed groups were accepted on their first timed attempt with zero timed steal, and the VM was confirmed
+deleted after 1,560 seconds before the 65 native rows, 15 wasm rows, and evidence were promoted, with a
+$0.108 rounded compute ceiling.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
 ## Project pillars
@@ -349,8 +361,9 @@ unreachable suspended-coroutine frames.
    developer-machine timings to benchmark history.
 3. **Continue measured performance work** using [`56-performance-research.md`](56-performance-research.md).
    The dense-table, constant field/namecall, shared-string, HotIR, and closure-call slices now have accepted
-   Linux evidence. Next extend the same verified private HotIR to additional effect/control-flow shapes, pursue
-   cached-length and iterator/table refinements, add profile-led superinstructions/O2, and only then productionize
+   Linux evidence; the cached length-boundary slice was exactly gated, falsified (no win on dense or
+   sparse), and reverted. Next extend the same verified private HotIR to additional effect/control-flow shapes, pursue
+   iterator/table refinements, add profile-led superinstructions/O2, and only then productionize
    type-directed wasm/AOT with guards, deopt, and interpreter-equivalence tests.
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 18 workload entries including
@@ -378,8 +391,8 @@ implemented. Benchmark publication and the `LuauIntegerType2` watch remain ongoi
 - **Perf — state it PER-WORKLOAD, not as a blanket "~5× koto"** (review H2). The historical 11-workload seed
   found reference Luau **~4.7–9× faster than koto** on tables/closures/coroutines/stdlib-math, approximately at
   parity on generic iteration, and slower than koto on pcall/xpcall; those results set must-match workloads, not
-  a rustia claim. In the current five-workload Linux snapshot, rustia trails `mlua-luau` by 2.796x-4.880x by
-  minimum time with a 3.494x geometric mean, and the generated gate approves no blanket speed headline. Two distinct historical
+  a rustia claim. In the current five-workload Linux snapshot, rustia trails `mlua-luau` by 2.615x-5.880x by
+  minimum time with a 3.944x geometric mean, and the generated gate approves no blanket speed headline. Two distinct historical
   koto multipliers remain useful context: the **float-path ~5–9×** (measured) and the
   **deterministic-path ~30–40×** (the sim's *real* incumbent — host fxmul/curve, per `ai_bakeoff`). The fused-op
   sub-µs (~0.2 µs) is **bespoke/private-fork, kernel-specific**. The committed benchmark crate now has five
@@ -414,9 +427,11 @@ implemented. Benchmark publication and the `LuauIntegerType2` watch remain ongoi
   9.20x to 8.54x. The landed private HotIR then retained native aggregate performance on its exact Linux gate
   (+0.47% normalized geometric mean versus the preceding snapshot). The subsequent prototype-polymorphic
   closure-call/direct-immutable-upvalue slice reduced `closures_upvalues` Linux median latency by 15.036%
-  (270.427 to 229.766 ns/call) and leaves the current generated minimum-time geometric-mean gaps at 3.494x
-  against `mlua-luau` and 3.833x against Luaur; rustia beats Ruau on four of five tracked workloads by minimum
-  time. The local -29.31% dense result did not reproduce on Linux and remains directional only. These are workload- and
+  (270.427 to 229.766 ns/call). The cached length-border slice was then exactly gated, measured no win on
+  either length-heavy workload (+1.76% dense and +0.62% sparse candidate deltas), and was reverted; its
+  spare-capacity mutation-version correctness fix survives. The current generated minimum-time
+  geometric-mean gaps are 3.944x against `mlua-luau` and 4.336x against Luaur; rustia beats Ruau on three of
+  five tracked workloads by minimum time. The local -29.31% dense result did not reproduce on Linux and remains directional only. These are workload- and
   protocol-specific results, not blanket speed or RSS claims. Next come bounded object reclamation/quotas,
   broader long-run history, Linux-specific profiling of HotIR, verified multi-effect/control-flow HotIR growth,
   superinstructions/O2, and type-directed wasm/AOT. Native copy-and-patch/JIT

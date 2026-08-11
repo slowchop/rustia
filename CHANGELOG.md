@@ -35,6 +35,30 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Fixed
 
+- Quiescent spare-capacity release now bumps a table's mutation version when
+  it pops trailing array nils: the pop moves the observable length border,
+  and version consumers (iteration guards) previously saw no mutation. A
+  regression test pins the border movement and the version bump.
+
+- The exact-commit `34f6deff4a42501b6d66d257249eecfcbca1976a` cross-engine
+  Linode matrix replaced the public Linux snapshot (65 native rows, 15 wasm
+  rows) with all four timed groups accepted on their first timed attempt and
+  zero timed steal. Versus the preceding `83bc2f3` snapshot — 86 commits
+  earlier, so movements are stability signals rather than single-change
+  attribution — rustia median ns/unit moved -7.07% dense, +8.06% sparse,
+  +20.97% closures, +16.10% generic iteration, and +17.32% stdlib, and the
+  generated minimum-time `mlua-luau` geometric-mean gap is 3.944x. The VM was
+  confirmed deleted before evidence and results promotion.
+
+- A mutation-version-keyed cached table length-border slice was implemented
+  and exactly gated, then reverted after the accepted protocol falsified its
+  premise: the dense_tables Linode A/B measured +1.7569% candidate ns/unit
+  (conservative nominal 95% interval +0.02% to +3.63% — regression excluded,
+  no win) and the sparse_tables A/B measured +0.6158% (interval -4.25% to
+  +2.03% — neutral). Recorded as falsified-bet evidence in
+  `design/56-performance-research.md`, not as a speed claim; only the
+  spare-capacity mutation-version fix above survives.
+
 - The fixed-run Linode promotion validator now accepts the harness's current
   24-key history row schema instead of the stale 13-key shape that previously
   forced an automatic promotion rollback after an accepted remote run.
