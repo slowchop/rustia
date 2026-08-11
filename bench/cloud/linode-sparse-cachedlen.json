@@ -16,8 +16,8 @@
   },
   "source": {
     "baseline_commit": "ed26fb2f26be2b7dc851e4ee043c4ccad56ac547",
-    "candidate_commit": "34f6deff4a42501b6d66d257249eecfcbca1976a",
-    "harness_commit": "34f6deff4a42501b6d66d257249eecfcbca1976a",
+    "candidate_commit": "ef9e07078deb287af4ff08807bbdb839aff62f55",
+    "harness_commit": "ef9e07078deb287af4ff08807bbdb839aff62f55",
     "expected_sha256": {
       "baseline_original_harness": "084a6a5b3626a85728ea9be1177b50c218b31d535a0ea2125c088113fb72a6e5",
       "overlay_harness": "084a6a5b3626a85728ea9be1177b50c218b31d535a0ea2125c088113fb72a6e5",
