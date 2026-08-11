@@ -229,6 +229,12 @@ iteration, and +17.32% stdlib. The generated current five-workload minimum-time 
 timed groups were accepted on their first timed attempt with zero timed steal, and the VM was confirmed
 deleted after 1,560 seconds before the 65 native rows, 15 wasm rows, and evidence were promoted, with a
 $0.108 rounded compute ceiling.
+Two further exact-gated bets were falsified since: a GETIMPORT+FASTCALL fusion opcode was reverted
+uncommitted after local screening showed a ~0.02% tracked-suite ceiling and a ~3% loss on a
+dispatch-dominated synthetic, and a per-call-site generalized-iterator leaf-step cache was reverted at
+`bbe0c5c` after its accepted generic_iteration Linode A/B measured +3.3591% candidate ns/unit
+(conservative interval +1.58% to +4.87%). Both are recorded as falsified-bet evidence in
+[`56-performance-research.md`](56-performance-research.md), not as speed claims.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
 ## Project pillars

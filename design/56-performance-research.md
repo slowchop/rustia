@@ -534,6 +534,37 @@ uncommitted (`git restore` of the six touched files; gates re-verified green). G
 closed; reopen only with a tracked workload that makes pure-arg dotted stdlib calls in a measured hot
 phase, or with a normalization scheme that provably undercuts one plain dispatch iteration.
 
+### Generalized-iterator leaf site cache — exact gates accepted remotely, bet falsified, reverted
+
+Commit `d9a01672ad97b8d472f19cb4424773e26abe7bb0` served the leaf step of generalized-iterator loops
+(`GeneralizedIterLoop`/`GenericCallLoop`) from a per-call-site cache, avoiding a repeated
+metamethod-resolution walk once a site had stabilized on a plain table leaf iterator. The slice added two
+inline-cache tests and passed the full local gate suite. A local developer-host screen was directionally
+-5.4% candidate ns/unit with identical checksums; that screen is diagnostic only and not a public claim.
+
+The accepted Linode v2 run compared baseline `9078ce254bb59ea29150d24398f8ac5bed307231` with the exact
+candidate on `generic_iteration`, using byte-identical harness, workload, lockfile, and toolchain inputs,
+fixed `n=4000`, 15 repetitions per leg, four ABBA/BAAB legs per build, checksum
+`number:91580000.00000000000000000`, and bootstrap seed 1786486825. Candidate-only qualification spread was
+0.49% against the 3% ceiling, and every timed leg passed its idle gate with zero contaminants and zero
+steal. The pooled baseline and candidate medians were 14,240.972 and 14,719.340 ns/unit, a +3.3591%
+candidate delta. The conservative nominal 95% interval was +1.5799% to +4.8655% (pooled +2.2312% to
++4.1613%): it excludes the predeclared +5% material regression, but it also excludes zero and any win —
+the site cache is a statistically clear slowdown on the controlled host, in the opposite direction from the
+developer-host screen. An earlier attempt at this run failed host qualification before the measurement
+phase (pilot spread 4.893% against the 3% ceiling, inflated by post-build load settling) and was destroyed
+unused. On the accepted run the VM was confirmed deleted before promotion with a $0.054 rounded compute
+ceiling; the local promotion of the three remote final rows was attempted and rolled back by the history
+cohort guard, because public history admits only complete engine-times-workload cohorts. Targeted evidence
+is retained in the run state.
+
+Verdict: the bet's premise — that the leaf-step metamethod walk is a material, cacheable cost in
+generalized iteration — is falsified on the tracked `generic_iteration` workload. The change was reverted
+at `bbe0c5c`, restoring `vm.rs` byte-identical to the baseline with all 171 `rustia-vm` tests green.
+Generalized-iterator leaf caching is closed; reopen only with a profile that isolates the leaf-step walk
+(as distinct from call dispatch) at a material share on a tracked workload, and an explanation for why the
+developer-host screen inverts on the controlled host.
+
 ## Estimate vs C++ Luau
 
 | state | likely position vs C++ Luau interpreter |

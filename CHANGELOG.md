@@ -60,6 +60,14 @@ Current unpublished workspace version: `0.0.1`.
   `design/56-performance-research.md`, not as a speed claim; only the
   spare-capacity mutation-version fix above survives.
 
+- A per-call-site generalized-iterator leaf-step cache slice was implemented
+  and exactly gated, then reverted after the accepted protocol falsified its
+  premise: the generic_iteration Linode A/B measured +3.3591% candidate ns/unit
+  (conservative nominal 95% interval +1.58% to +4.87% — the predeclared +5%
+  material regression excluded, but zero and any win also excluded). Recorded
+  as falsified-bet evidence in `design/56-performance-research.md`, not as a
+  speed claim.
+
 - The fixed-run Linode promotion validator now accepts the harness's current
   24-key history row schema instead of the stale 13-key shape that previously
   forced an automatic promotion rollback after an accepted remote run.
