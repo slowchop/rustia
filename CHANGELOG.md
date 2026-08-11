@@ -35,6 +35,14 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Fixed
 
+- The fixed-run Linode promotion validator now accepts the harness's current
+  24-key history row schema instead of the stale 13-key shape that previously
+  forced an automatic promotion rollback after an accepted remote run.
+- History era splitting in the results renderer now tries the widest gaps
+  first and skips any split whose newer side lacks full five-workload
+  coverage, so a partial tail cohort can no longer poison the rendered
+  current-results report; output is byte-identical on existing history.
+
 - One-argument `table.create(n)` under `Profile::Puc51Compat` no longer
   collides with compiler constructor pre-sizing hints: constructor
   `TableCreate` instructions now mark with `aux == 0` (the builtin's arity is
