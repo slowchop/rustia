@@ -503,6 +503,37 @@ the spare-capacity mutation-version bump survives as a standalone correctness fi
 version consumers (the `table.sort` mutation guard), pinned by a regression test. Cached length boundaries are closed;
 reopen only with a workload that demonstrates cache hits in a measured hot phase.
 
+### GETIMPORT+FASTCALL fusion — exact gates accepted locally, bet falsified, reverted uncommitted
+
+A new `ImportFastCall` opcode fused dotted stdlib import resolution with the immediately following
+`FASTCALL`, packing `descriptor_index << 8 | argc` into `aux`, charging `2 * path_length` fuel atomically,
+reusing all `GETIMPORT` descriptor guards and per-lane import caches, and adding a fused inline-cache kind
+(shared per-lane import lanes plus the native callee entry). Fusion was gated to side-effect-free argument
+lists (constants and plain local reads) because fusing moves callee resolution after argument evaluation.
+The full local gate suite passed: fmt, clippy `-D warnings`, workspace tests (including new emission,
+purity-gate, monkey-patch, `__call`-fallback, host-replacement, encoding-validation, and fuel-equivalence
+tests), the 712-fixture conformance run, and the fuzz workspace with the new opcode in the bounded decoder.
+
+The bet was then screened locally before any Linode spend. The tracked-suite analysis showed almost no
+fusable hot calls: the idiomatic alias pattern (`local floor = math.floor`) already hoists `GETIMPORT` out
+of loops, and the remaining dotted calls either carry impure arguments (`string.format("%.4f", r.x)`,
+`coroutine.wrap(function() ...)`) or sit under specialized opcodes (`math.floor`, `math.max`). The best
+runnable suite case is one fused `table.concat(parts)` per 42,000-140,000 ns unit (~0.02% ceiling). On a
+dotted-call-heavy synthetic (`string.gsub` with pure args, 200k iterations) the fused build was a wash, and
+on a dispatch-dominated synthetic (`math.frexp(i)`, 1M iterations) an interleaved ABBA/BAAB screen showed
+the fused build consistently ~3% slower (medians ~145.5 vs ~141 ms): the pre-dispatch normalization dance
+(synthesizing the `GETIMPORT` and `FASTCALL` instructions, splitting `aux`, the extra root-anchored
+collection step) costs about what the single eliminated dispatch iteration was worth. That screen is
+diagnostic only and not a public claim.
+
+Verdict: the bet's premise — that eliminating one dispatch per dotted stdlib call is a material win — is
+falsified for this VM's dispatch economics, and no tracked workload can even detect the change. The Linode
+A/B was deliberately not run: the suite ceiling is ~0.02% and the best-case local synthetic was already
+negative, so a billable remote run could only confirm the falsification. All fusion code was reverted
+uncommitted (`git restore` of the six touched files; gates re-verified green). GETIMPORT+FASTCALL fusion is
+closed; reopen only with a tracked workload that makes pure-arg dotted stdlib calls in a measured hot
+phase, or with a normalization scheme that provably undercuts one plain dispatch iteration.
+
 ## Estimate vs C++ Luau
 
 | state | likely position vs C++ Luau interpreter |
