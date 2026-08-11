@@ -350,6 +350,10 @@ struct TableData {
     /// Increments on every guest-visible table mutation, including writes to
     /// existing slots that leave the storage shape unchanged.
     mutation_version: u64,
+    /// Cached `#t` array border paired with the mutation version it was
+    /// computed at; `None` until the first length query. Border 0 is a valid
+    /// cache entry, and the border is capped by `MAX_LUAU_ARRAY_INDEX`.
+    cached_boundary: Option<(u32, u64)>,
 }
 
 /// Hash-part storage backing a [`TableData`]. The variant is fixed per VM by
@@ -1243,8 +1247,16 @@ impl VmCell {
                 // border semantics and main-position layout.
                 continue;
             }
+            let mut popped_trailing_nils = false;
             while table.array.last().is_some_and(|value| value.is_nil()) {
                 table.array.pop();
+                popped_trailing_nils = true;
+            }
+            if popped_trailing_nils {
+                // Popping trailing nils moves the observable `#t` border, so
+                // this must invalidate the cached boundary like any other
+                // table mutation.
+                table.mutation_version = table.mutation_version.wrapping_add(1);
             }
             table.array.shrink_to_fit();
             let HashPart::Log { entries, index } = &mut table.hash else {
@@ -1477,6 +1489,7 @@ impl VmCell {
             metatable: None,
             shape_version: 0,
             mutation_version: 0,
+            cached_boundary: None,
         })
         .expect("table slot limit exceeded")
     }
@@ -1522,6 +1535,7 @@ impl VmCell {
             metatable: None,
             shape_version: 0,
             mutation_version: 0,
+            cached_boundary: None,
         })
     }
 
@@ -1596,6 +1610,7 @@ impl VmCell {
             metatable: None,
             shape_version: 0,
             mutation_version: 0,
+            cached_boundary: None,
         })
         .expect("table slot limit exceeded")
     }
@@ -1615,6 +1630,7 @@ impl VmCell {
             metatable: None,
             shape_version: 0,
             mutation_version: 0,
+            cached_boundary: None,
         })
     }
 
@@ -2501,7 +2517,7 @@ impl VmCell {
     }
 
     pub fn array_len(&mut self, table: u32) -> Option<usize> {
-        self.tables.get(table).map(table_array_boundary_len)
+        self.tables.get_mut(table).map(cached_table_border)
     }
 
     pub fn table_storage_len(&mut self, table: u32) -> Option<usize> {
@@ -2545,7 +2561,7 @@ impl VmCell {
             // luaB_tinsert shape: shifting goes through get/set, so
             // out-of-array indices land in the node part.
             return self.mutate_table_data_with_root(table, |root, table| {
-                let len = table_array_boundary_len(table);
+                let len = cached_table_border(table);
 
                 if position >= 1 {
                     let position = position as usize;
@@ -2560,7 +2576,7 @@ impl VmCell {
             });
         }
         self.mutate_table_data(table, |table| {
-            let len = table_array_boundary_len(table);
+            let len = cached_table_border(table);
 
             if position >= 1 {
                 let position = position as usize;
@@ -2579,7 +2595,7 @@ impl VmCell {
         if self.tables.get(table)?.readonly {
             return None;
         }
-        let len = table_array_boundary_len(self.tables.get(table)?);
+        let len = cached_table_border(self.tables.get_mut(table)?);
         if !(1..=i32::try_from(len).ok()?).contains(&position) {
             return Some(None);
         }
@@ -4334,6 +4350,21 @@ fn table_array_boundary_len(table: &TableData) -> usize {
     usize::from(table.array[base].kind() != ValueKind::Nil) + base
 }
 
+/// Validates `table`'s cached `#t` border against its current mutation
+/// version, recomputing (and re-caching) through the pure boundary scan on a
+/// version mismatch or a cold cache.
+fn cached_table_border(table: &mut TableData) -> usize {
+    if let Some((border, version)) = table.cached_boundary {
+        if version == table.mutation_version {
+            return border as usize;
+        }
+    }
+    let border = table_array_boundary_len(table);
+    debug_assert!(border <= MAX_LUAU_ARRAY_INDEX);
+    table.cached_boundary = Some((border as u32, table.mutation_version));
+    border
+}
+
 fn table_unbound_search(table: &TableData, lower: usize) -> usize {
     let Some(mut upper) = lower.checked_add(1) else {
         return lower;
@@ -4634,6 +4665,7 @@ mod tests {
             metatable: None,
             shape_version: 0,
             mutation_version: 0,
+            cached_boundary: None,
         }
     }
 
@@ -5983,5 +6015,252 @@ mod tests {
         );
         assert_eq!(puc_array_len(&heap, sparse), 0);
         assert_eq!(puc_node_snapshot(&heap, sparse).len(), 1);
+    }
+
+    // =========================================================================
+    // Cached table length boundary
+    // =========================================================================
+
+    /// Fresh, uncached `#t` border oracle: the pure boundary scan over the
+    /// table's current storage, bypassing the cache.
+    fn fresh_table_border(heap: &VmCell, table: u32) -> usize {
+        table_array_boundary_len(heap.tables.get(table).expect("table exists"))
+    }
+
+    /// Asserts the cached `array_len` agrees with a fresh border computation,
+    /// that the cache entry stores the current mutation version, and that a
+    /// second read on the unmutated table serves the same cache entry.
+    fn assert_cached_len_matches(heap: &mut VmCell, table: u32) -> usize {
+        let expected = fresh_table_border(heap, table);
+        assert_eq!(heap.array_len(table), Some(expected));
+        let version = heap
+            .tables
+            .get(table)
+            .expect("table exists")
+            .mutation_version;
+        let cached = heap
+            .tables
+            .get(table)
+            .expect("table exists")
+            .cached_boundary;
+        assert_eq!(cached, Some((expected as u32, version)));
+        assert_eq!(heap.array_len(table), Some(expected));
+        assert_eq!(
+            heap.tables
+                .get(table)
+                .expect("table exists")
+                .cached_boundary,
+            cached,
+            "an unmutated table must keep serving the same cache entry"
+        );
+        expected
+    }
+
+    #[test]
+    fn cached_array_len_tracks_a_mutation_battery() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+
+        // Empty table: border 0 must be a representable cache entry.
+        assert_eq!(assert_cached_len_matches(&mut heap, table), 0);
+
+        for index in 1..=4_u32 {
+            assert_eq!(
+                heap.table_set(
+                    table,
+                    Value::number(f64::from(index)),
+                    Value::number(f64::from(index)),
+                ),
+                Some(())
+            );
+            assert_eq!(assert_cached_len_matches(&mut heap, table), index as usize);
+        }
+
+        assert_eq!(heap.table_insert(table, 2, Value::number(9.0)), Some(()));
+        assert_cached_len_matches(&mut heap, table);
+
+        assert_eq!(
+            heap.table_remove(table, 5)
+                .flatten()
+                .and_then(Value::as_number),
+            Some(4.0)
+        );
+        assert_cached_len_matches(&mut heap, table);
+
+        // Nil out an array slot, punching a hole into the prefix.
+        assert_eq!(
+            heap.table_set(table, Value::number(3.0), Value::nil()),
+            Some(())
+        );
+        assert_cached_len_matches(&mut heap, table);
+
+        // A numeric key past the array part lives in the hash part.
+        assert_eq!(
+            heap.table_set(table, Value::number(100.0), Value::number(1.0)),
+            Some(())
+        );
+        assert_cached_len_matches(&mut heap, table);
+
+        assert_eq!(heap.table_clear(table), Some(()));
+        assert_eq!(assert_cached_len_matches(&mut heap, table), 0);
+    }
+
+    #[test]
+    fn capacity_release_recomputes_a_shifted_cached_border() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+        // Build [1, 2, nil, 4, nil] through the normal set paths: sequential
+        // writes grow the array part, nil stores punch holes back out.
+        for index in 1..=5_u32 {
+            assert_eq!(
+                heap.table_set(
+                    table,
+                    Value::number(f64::from(index)),
+                    Value::number(f64::from(index)),
+                ),
+                Some(())
+            );
+        }
+        assert_eq!(
+            heap.table_set(table, Value::number(3.0), Value::nil()),
+            Some(())
+        );
+        assert_eq!(
+            heap.table_set(table, Value::number(5.0), Value::nil()),
+            Some(())
+        );
+        assert_eq!(assert_cached_len_matches(&mut heap, table), 2);
+
+        heap.collect_weak_tables_with_roots(&[Value::table(table)]);
+        heap.release_spare_capacity();
+
+        // Popping the trailing nil leaves [1, 2, nil, 4] whose last slot is
+        // non-nil, so the border moves to 4; a cache left stale by the
+        // missing mutation-version bump would still answer 2.
+        assert_eq!(assert_cached_len_matches(&mut heap, table), 4);
+    }
+
+    #[test]
+    fn weak_value_sweep_recomputes_the_cached_border() {
+        let mut heap = VmCell::new();
+        let weak = heap.alloc_array_table(&[]);
+        let metatable = heap.alloc_array_table(&[]);
+        let mode = heap.intern_string("__mode");
+        let value_mode = heap.intern_string("v");
+        heap.table_set(
+            metatable,
+            Value::string_atom(mode),
+            Value::string_atom(value_mode),
+        )
+        .expect("weak mode should be writable");
+        heap.table_set_metatable(weak, Some(metatable))
+            .expect("weak table should accept its metatable");
+
+        // Numeric entries in the array part plus one past it, all holding
+        // otherwise-unreachable tables.
+        for index in 1..=4_u32 {
+            let target = heap.alloc_array_table(&[Value::number(f64::from(index))]);
+            assert_eq!(
+                heap.table_set(weak, Value::number(f64::from(index)), Value::table(target),),
+                Some(())
+            );
+        }
+        let past_array = heap.alloc_array_table(&[]);
+        assert_eq!(
+            heap.table_set(weak, Value::number(100.0), Value::table(past_array)),
+            Some(())
+        );
+        assert_eq!(assert_cached_len_matches(&mut heap, weak), 4);
+
+        heap.collect_weak_tables_with_roots(&[Value::table(weak)]);
+
+        // The sweep nils every weak value; the border must be recomputed
+        // rather than served stale from the cache.
+        assert_eq!(assert_cached_len_matches(&mut heap, weak), 0);
+    }
+
+    #[test]
+    fn puc_cached_array_len_matches_fresh_border_through_rehash() {
+        let mut heap = puc_heap();
+        let table = heap.alloc_array_table(&[]);
+        assert_eq!(assert_cached_len_matches(&mut heap, table), 0);
+
+        // Rehash growth: keys 1..=3 end up in an array part sized 4.
+        for index in 1..=3_u32 {
+            assert_eq!(
+                heap.table_set(
+                    table,
+                    Value::number(f64::from(index)),
+                    Value::number(f64::from(index)),
+                ),
+                Some(())
+            );
+            assert_cached_len_matches(&mut heap, table);
+        }
+        assert_eq!(puc_array_len(&heap, table), 4);
+
+        // Tombstone-creating nil store to an absent string key.
+        let tombstone = Value::short_string(b"tomb-key").expect("short string");
+        assert_eq!(heap.table_set(table, tombstone, Value::nil()), Some(()));
+        assert_cached_len_matches(&mut heap, table);
+
+        // Nil out an array slot, then write it back.
+        assert_eq!(
+            heap.table_set(table, Value::number(2.0), Value::nil()),
+            Some(())
+        );
+        assert_cached_len_matches(&mut heap, table);
+        assert_eq!(
+            heap.table_set(table, Value::number(2.0), Value::number(20.0)),
+            Some(())
+        );
+        assert_cached_len_matches(&mut heap, table);
+
+        // A sparse numeric key lives in the node part and triggers rehash
+        // decisions without moving the array border.
+        assert_eq!(
+            heap.table_set(table, Value::number(100.0), Value::number(1.0)),
+            Some(())
+        );
+        assert_cached_len_matches(&mut heap, table);
+
+        // table_insert/table_remove shift through the same cached border.
+        assert_eq!(heap.table_insert(table, 1, Value::number(9.0)), Some(()));
+        assert_cached_len_matches(&mut heap, table);
+        assert!(heap.table_remove(table, 1).is_some());
+        assert_cached_len_matches(&mut heap, table);
+    }
+
+    #[test]
+    fn cloned_table_inherits_a_still_valid_cached_border() {
+        let mut heap = VmCell::new();
+        let source =
+            heap.alloc_array_table(&[Value::number(1.0), Value::number(2.0), Value::number(3.0)]);
+        assert_eq!(assert_cached_len_matches(&mut heap, source), 3);
+        let source_cache = heap
+            .tables
+            .get(source)
+            .expect("source exists")
+            .cached_boundary;
+
+        let clone = heap.table_clone(source).expect("clone");
+        // The clone inherits the cache entry, which stays valid because the
+        // contents and mutation version are identical.
+        assert_eq!(
+            heap.tables
+                .get(clone)
+                .expect("clone exists")
+                .cached_boundary,
+            source_cache
+        );
+        assert_eq!(assert_cached_len_matches(&mut heap, clone), 3);
+
+        // Mutating the clone leaves the source border (and cache) untouched.
+        assert_eq!(
+            heap.table_set(clone, Value::number(4.0), Value::number(4.0)),
+            Some(())
+        );
+        assert_eq!(assert_cached_len_matches(&mut heap, clone), 4);
+        assert_eq!(assert_cached_len_matches(&mut heap, source), 3);
     }
 }
