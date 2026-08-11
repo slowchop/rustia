@@ -1081,22 +1081,26 @@ function rustiaHistoryEras(rows, reference) {
     .slice()
     .sort(compareRunTime);
   const timestamps = unique(rustiaRows.map((row) => String(row.timestamp_unix))).map(Number).sort((left, right) => left - right);
-  let splitAt = null;
-  let largestGap = 0;
+  const gaps = [];
   for (let index = 1; index < timestamps.length; index += 1) {
-    const gap = timestamps[index] - timestamps[index - 1];
-    if (gap > largestGap) {
-      largestGap = gap;
-      splitAt = timestamps[index];
+    gaps.push({ gap: timestamps[index] - timestamps[index - 1], splitAt: timestamps[index] });
+  }
+  gaps.sort((left, right) => right.gap - left.gap);
+  for (const { gap, splitAt } of gaps) {
+    if (gap < 24 * 60 * 60) break;
+    const current = rustiaRows.filter((row) => row.timestamp_unix >= splitAt);
+    // A single-workload acceptance append (for example a dense-only fixed
+    // run) must not become its own era: every displayed era needs full
+    // required-workload coverage, so fall through to the next widest gap.
+    if (!REQUIRED_COMMON_WORKLOADS.every((workload) => current.some((row) => row.workload === workload))) {
+      continue;
     }
+    return [
+      rustiaHistoryEra("Earlier Linux history", "Earlier host/protocol era; kept on its own scale", rustiaRows.filter((row) => row.timestamp_unix < splitAt), reference),
+      rustiaHistoryEra("Current dedicated Linux history", "Controlled matrix era; this is the chart to use for current progress", current, reference),
+    ];
   }
-  if (splitAt == null || largestGap < 24 * 60 * 60) {
-    return [rustiaHistoryEra("Comparable Linux history", "All recorded Linux runs", rustiaRows, reference)];
-  }
-  return [
-    rustiaHistoryEra("Earlier Linux history", "Earlier host/protocol era; kept on its own scale", rustiaRows.filter((row) => row.timestamp_unix < splitAt), reference),
-    rustiaHistoryEra("Current dedicated Linux history", "Controlled matrix era; this is the chart to use for current progress", rustiaRows.filter((row) => row.timestamp_unix >= splitAt), reference),
-  ];
+  return [rustiaHistoryEra("Comparable Linux history", "All recorded Linux runs", rustiaRows, reference)];
 }
 
 function rustiaHistoryEra(title, description, rows, reference) {
