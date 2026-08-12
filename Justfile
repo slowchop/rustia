@@ -54,6 +54,7 @@ check-benchmark-results:
     node tools/run-wasm-dispatch-gate.js self-test
     node tools/check-benchmark-results.js
     node tools/check-wasm-gate-results.js
+    node tools/render-benchmark-operations-status.js --check
     node tools/check-current-report-summary.js
     node bench/render-current-results.js --check
     node bench/render-claims.js --check
@@ -222,6 +223,7 @@ bench-scaleway-destroy run_id="":
 
 gen-current-results:
     cargo run -p script-bench-harness -- --refresh-results
+    node tools/render-benchmark-operations-status.js
     node bench/render-current-results.js
     node bench/render-claims.js
 

@@ -131,6 +131,12 @@ failures.
 CI wiring now includes pinned-toolchain formatting and strict Clippy gates, hosted release-preflight checks,
 and explicit public-example compilation. Hosted workflows validate committed benchmark artifacts but never take
 fresh timings; those come only from the explicit ephemeral Linode Linux lifecycle.
+The operational rollout is specified in
+[`81-benchmark-operations.md`](81-benchmark-operations.md): shared, normally
+CPU-busy self-hosted runners remain valid for correctness and artifact work but
+are not timing authorities; the generated benchmark report now exposes
+machine-readable progress freshness plus explicit landscape/publication pause
+state instead of appearing silently current.
 The benchmark harness prepares fresh engine/workload state for calibration and every recorded repetition, warms
 that state once outside the timer, and can write execution-ordered raw samples to a separate
 `rustia.bench.raw-samples.v1` JSON sidecar. `--fixed-n` bypasses calibration and uses exactly the selected work for

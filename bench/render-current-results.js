@@ -13,6 +13,7 @@ const wasmDispatchPath = path.join(__dirname, "wasm", "dispatch-current-results.
 const cohortEvidencePath = path.join(__dirname, "history", "evidence");
 const memoryResultsPath = path.join(__dirname, "memory", "current-results.json");
 const memoryHistoryPath = path.join(__dirname, "memory", "history", "runs.jsonl");
+const operationsStatusPath = path.join(__dirname, "operations-status.json");
 const outputPath = path.join(__dirname, "current-results.html");
 const checkOnly = process.argv.includes("--check");
 const REQUIRED_COMMON_WORKLOADS = Object.freeze([
@@ -87,6 +88,47 @@ function readData() {
   data.rows.forEach(validateRow);
   validateMetadataMatchesRows(data);
   return data;
+}
+
+function readOperationsStatus(data) {
+  let status;
+  try {
+    status = JSON.parse(fs.readFileSync(operationsStatusPath, "utf8"));
+  } catch (error) {
+    fail(`could not parse ${relative(operationsStatusPath)}: ${error.message}`);
+  }
+  if (status.schema !== "rustia.bench.operations-status.v1" || status.schema_version !== 1) {
+    fail(`${relative(operationsStatusPath)} must use rustia.bench.operations-status.v1`);
+  }
+  if (status.runner?.environment !== "self-hosted-shared" || status.runner?.timing_authority !== false) {
+    fail("benchmark operations must keep shared self-hosted runners non-authoritative for timing");
+  }
+  if (status.measurement?.mode !== "operator-started-qualified-host" ||
+      status.measurement?.scheduled_billing_allowed !== false) {
+    fail("benchmark operations must require explicit qualified-host measurement without scheduled billing");
+  }
+  const states = new Set(["current", "pending", "stale", "paused"]);
+  for (const lane of ["publication", "progress", "landscape"]) {
+    if (!states.has(status[lane]?.state)) fail(`${lane}.state is invalid`);
+    if (typeof status[lane]?.next_action !== "string" || status[lane].next_action.trim() === "") {
+      fail(`${lane}.next_action must be a non-empty string`);
+    }
+  }
+  const measuredCommit = data.metadata.commits.length === 1 ? data.metadata.commits[0] : null;
+  if (status.progress.measured_commit !== measuredCommit || status.landscape.measured_commit !== measuredCommit) {
+    fail("benchmark operations measured commits must match the current result cohort");
+  }
+  if (!/^[0-9a-f]{40}$/.test(status.progress.latest_relevant_commit)) {
+    fail("progress.latest_relevant_commit must be an exact commit");
+  }
+  if (!Number.isSafeInteger(status.progress.pending_relevant_commit_count) ||
+      status.progress.pending_relevant_commit_count < 0) {
+    fail("progress.pending_relevant_commit_count must be a non-negative integer");
+  }
+  if ((status.progress.state === "current") !== (status.progress.pending_relevant_commit_count === 0)) {
+    fail("progress state and pending relevant commit count disagree");
+  }
+  return status;
 }
 
 function readHistory() {
@@ -2282,7 +2324,64 @@ function targetRuntimeLabel(row) {
   return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.runtime)}</span></span>`;
 }
 
-function render(data, wasmResults, wasmDispatchResults, memoryResults, memoryHistory, historyRecords, cohorts, historyBackfills = []) {
+function operationsStateLabel(state) {
+  return {
+    current: "Current",
+    pending: "Pending",
+    stale: "Stale",
+    paused: "Paused",
+  }[state] ?? state;
+}
+
+function operationsStatusSection(status) {
+  const progress = status.progress;
+  const landscape = status.landscape;
+  const publication = status.publication;
+  const pendingLabel = progress.pending_relevant_commit_count === 1 ? "commit" : "commits";
+  return `
+    <section class="panel operations-panel" id="operations-status">
+      <div class="operations-banner state-${escapeHtml(publication.state)}">
+        <div>
+          <p class="eyebrow">Benchmark operations</p>
+          <h2>Automatic publication is ${escapeHtml(publication.state)}</h2>
+          <p>${escapeHtml(publication.reason)}</p>
+        </div>
+        <span class="operations-state state-${escapeHtml(publication.state)}">${escapeHtml(operationsStateLabel(publication.state))}</span>
+      </div>
+      <div class="operations-grid">
+        <article class="operations-card">
+          <div class="operations-card-head">
+            <h3>Rustia progress</h3>
+            <span class="operations-state state-${escapeHtml(progress.state)}">${escapeHtml(operationsStateLabel(progress.state))}</span>
+          </div>
+          <p>Measured ${formatTime(progress.measured_at_unix)} at <code>${escapeHtml(progress.measured_commit.slice(0, 7))}</code>.</p>
+          <p><strong>${formatInteger(progress.pending_relevant_commit_count)} relevant ${pendingLabel} waiting</strong>; newest <code>${escapeHtml(progress.latest_relevant_commit.slice(0, 7))}</code>.</p>
+          <p class="operations-next">Next: ${escapeHtml(progress.next_action)}</p>
+        </article>
+        <article class="operations-card">
+          <div class="operations-card-head">
+            <h3>Current engine landscape</h3>
+            <span class="operations-state state-${escapeHtml(landscape.state)}">${escapeHtml(operationsStateLabel(landscape.state))}</span>
+          </div>
+          <p>Last full cohort measured ${formatTime(landscape.measured_at_unix)} at <code>${escapeHtml(landscape.measured_commit.slice(0, 7))}</code>.</p>
+          <p>${escapeHtml(landscape.reason)}</p>
+          <p class="operations-next">Next: ${escapeHtml(landscape.next_action)}</p>
+        </article>
+        <article class="operations-card">
+          <div class="operations-card-head">
+            <h3>Runner and publication policy</h3>
+            <span class="operations-state state-${escapeHtml(publication.state)}">${escapeHtml(operationsStateLabel(publication.state))}</span>
+          </div>
+          <p>Shared self-hosted runners may build, test correctness, validate evidence, detect updates, and publish accepted artifacts.</p>
+          <p><strong>They are not timing authorities.</strong> Fresh measurements require an explicit qualified-host lifecycle; scheduled billing is disabled.</p>
+          <p class="operations-next">Next: ${escapeHtml(publication.next_action)}</p>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
+function render(data, operationsStatus, wasmResults, wasmDispatchResults, memoryResults, memoryHistory, historyRecords, cohorts, historyBackfills = []) {
   const wasmRows = wasmTargetRows(wasmResults);
   const summary = summarize(data, wasmRows);
   const history = summarizeHistory(historyRecords);
@@ -2374,6 +2473,88 @@ function render(data, wasmResults, wasmDispatchResults, memoryResults, memoryHis
       margin: 0;
       color: var(--muted);
       font-size: 13px;
+    }
+
+    .operations-banner {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      padding: 20px;
+      border-bottom: 1px solid var(--line);
+      background: #fff7ed;
+    }
+
+    .operations-banner h2 {
+      margin-bottom: 6px;
+      font-size: 25px;
+    }
+
+    .operations-banner p:last-child {
+      max-width: 780px;
+      margin-bottom: 0;
+      color: var(--muted);
+    }
+
+    .operations-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .operations-card {
+      min-width: 0;
+      padding: 18px 20px;
+      border-right: 1px solid var(--line);
+    }
+
+    .operations-card:last-child {
+      border-right: 0;
+    }
+
+    .operations-card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+
+    .operations-card h3 {
+      margin-bottom: 0;
+      font-size: 17px;
+    }
+
+    .operations-card p {
+      margin-bottom: 9px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .operations-card .operations-next {
+      margin-bottom: 0;
+      color: var(--text);
+    }
+
+    .operations-state {
+      display: inline-flex;
+      flex: 0 0 auto;
+      padding: 4px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+
+    .state-current {
+      background: #dff7ed;
+      color: #047857;
+    }
+
+    .state-pending,
+    .state-stale,
+    .state-paused {
+      background: #fff1d6;
+      color: #92400e;
     }
 
     code {
@@ -3212,6 +3393,19 @@ function render(data, wasmResults, wasmDispatchResults, memoryResults, memoryHis
     }
 
     @media (max-width: 780px) {
+      .operations-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .operations-card {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .operations-card:last-child {
+        border-bottom: 0;
+      }
+
       main {
         width: min(100% - 20px, 1180px);
         padding-top: 18px;
@@ -3311,6 +3505,7 @@ function render(data, wasmResults, wasmDispatchResults, memoryResults, memoryHis
     </section>
 
     <nav class="nav" aria-label="Targets">
+      <a href="#operations-status">Operations Status</a>
       <a href="#linux-comparison">Linux Comparison</a>
       <a href="#memory">Memory</a>
       <a href="#memory-history">Memory History</a>
@@ -3319,6 +3514,7 @@ function render(data, wasmResults, wasmDispatchResults, memoryResults, memoryHis
       <a href="#history">History</a>
     </nav>
 
+    ${operationsStatusSection(operationsStatus)}
     ${linuxComparisonSection(summary.linuxComparisonViews)}
     ${memoryResultsSection(memoryResults)}
     ${memoryHistorySection(memoryHistory)}
@@ -3326,7 +3522,7 @@ function render(data, wasmResults, wasmDispatchResults, memoryResults, memoryHis
     ${claimGateSection(claimRows)}
       ${historySection(history, historyBackfills, data.rows)}
 
-    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Memory <code>${escapeHtml(relative(memoryResultsPath))}</code> with history <code>${escapeHtml(relative(memoryHistoryPath))}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. Performance history <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Operations <code>${escapeHtml(relative(operationsStatusPath))}</code>. Memory <code>${escapeHtml(relative(memoryResultsPath))}</code> with history <code>${escapeHtml(relative(memoryHistoryPath))}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. Performance history <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
   <script>
     (() => {
@@ -3403,6 +3599,7 @@ function render(data, wasmResults, wasmDispatchResults, memoryResults, memoryHis
 
 function main() {
   const data = readData();
+  const operationsStatus = readOperationsStatus(data);
   const historyRecords = readHistory();
   const historyBackfills = readHistoryBackfills();
   const wasmResults = readWasmResults();
@@ -3410,7 +3607,7 @@ function main() {
   const memoryResults = readMemoryResults();
   const memoryHistory = readMemoryHistory();
   const cohorts = readCohortEvidence();
-  const html = render(data, wasmResults, wasmDispatchResults, memoryResults, memoryHistory, historyRecords, cohorts, historyBackfills).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
+  const html = render(data, operationsStatus, wasmResults, wasmDispatchResults, memoryResults, memoryHistory, historyRecords, cohorts, historyBackfills).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
   const output = `${html}\n`;
   if (checkOnly) {
     let current;
@@ -3444,6 +3641,7 @@ module.exports = {
   memoryComparisonCharts,
   memoryHistoryModel,
   memoryHistorySection,
+  operationsStatusSection,
   summarizeLanguageTargets,
   wasmTargetRows,
 };

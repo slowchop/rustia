@@ -85,6 +85,88 @@
       font-size: 13px;
     }
 
+    .operations-banner {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      padding: 20px;
+      border-bottom: 1px solid var(--line);
+      background: #fff7ed;
+    }
+
+    .operations-banner h2 {
+      margin-bottom: 6px;
+      font-size: 25px;
+    }
+
+    .operations-banner p:last-child {
+      max-width: 780px;
+      margin-bottom: 0;
+      color: var(--muted);
+    }
+
+    .operations-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .operations-card {
+      min-width: 0;
+      padding: 18px 20px;
+      border-right: 1px solid var(--line);
+    }
+
+    .operations-card:last-child {
+      border-right: 0;
+    }
+
+    .operations-card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+
+    .operations-card h3 {
+      margin-bottom: 0;
+      font-size: 17px;
+    }
+
+    .operations-card p {
+      margin-bottom: 9px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .operations-card .operations-next {
+      margin-bottom: 0;
+      color: var(--text);
+    }
+
+    .operations-state {
+      display: inline-flex;
+      flex: 0 0 auto;
+      padding: 4px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+
+    .state-current {
+      background: #dff7ed;
+      color: #047857;
+    }
+
+    .state-pending,
+    .state-stale,
+    .state-paused {
+      background: #fff1d6;
+      color: #92400e;
+    }
+
     code {
       padding: 2px 6px;
       border-radius: 6px;
@@ -921,6 +1003,19 @@
     }
 
     @media (max-width: 780px) {
+      .operations-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .operations-card {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .operations-card:last-child {
+        border-bottom: 0;
+      }
+
       main {
         width: min(100% - 20px, 1180px);
         padding-top: 18px;
@@ -1020,6 +1115,7 @@
     </section>
 
     <nav class="nav" aria-label="Targets">
+      <a href="#operations-status">Operations Status</a>
       <a href="#linux-comparison">Linux Comparison</a>
       <a href="#memory">Memory</a>
       <a href="#memory-history">Memory History</a>
@@ -1027,6 +1123,47 @@
       <a href="#claim-gate">Claim Gate</a>
       <a href="#history">History</a>
     </nav>
+
+
+    <section class="panel operations-panel" id="operations-status">
+      <div class="operations-banner state-paused">
+        <div>
+          <p class="eyebrow">Benchmark operations</p>
+          <h2>Automatic publication is paused</h2>
+          <p>Artifact-only publication has not yet been restored after removal of the former benchmark workflow.</p>
+        </div>
+        <span class="operations-state state-paused">Paused</span>
+      </div>
+      <div class="operations-grid">
+        <article class="operations-card">
+          <div class="operations-card-head">
+            <h3>Rustia progress</h3>
+            <span class="operations-state state-pending">Pending</span>
+          </div>
+          <p>Measured 2026-08-11 08:13:18 UTC at <code>34f6def</code>.</p>
+          <p><strong>5 relevant commits waiting</strong>; newest <code>bbe0c5c</code>.</p>
+          <p class="operations-next">Next: Run the newest pending performance-relevant commit on the explicit qualified Linode lifecycle.</p>
+        </article>
+        <article class="operations-card">
+          <div class="operations-card-head">
+            <h3>Current engine landscape</h3>
+            <span class="operations-state state-paused">Paused</span>
+          </div>
+          <p>Last full cohort measured 2026-08-11 08:13:18 UTC at <code>34f6def</code>.</p>
+          <p>Immutable latest-stable landscape campaigns and engine-version bridges are not implemented yet.</p>
+          <p class="operations-next">Next: Add version provenance, immutable landscape snapshots, and old/new reference bridge validation before enabling monthly refreshes.</p>
+        </article>
+        <article class="operations-card">
+          <div class="operations-card-head">
+            <h3>Runner and publication policy</h3>
+            <span class="operations-state state-paused">Paused</span>
+          </div>
+          <p>Shared self-hosted runners may build, test correctness, validate evidence, detect updates, and publish accepted artifacts.</p>
+          <p><strong>They are not timing authorities.</strong> Fresh measurements require an explicit qualified-host lifecycle; scheduled billing is disabled.</p>
+          <p class="operations-next">Next: Implement a validation-and-publication workflow that cannot invoke benchmark measurement or cloud creation.</p>
+        </article>
+      </div>
+    </section>
 
 
     <section class="panel metric-panel" id="linux-comparison">
@@ -3749,7 +3886,7 @@
     </section>
 
 
-    <p class="footnote">Schema <code>rustia.bench.current-results.v1</code>. Memory <code>bench/memory/current-results.json</code> with history <code>bench/memory/history/runs.jsonl</code>. Wasm sources <code>bench/wasm/current-results.json</code> and <code>bench/wasm/dispatch-current-results.json</code>. Performance history <code>bench/history/runs.jsonl</code> (jsonl-v1). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>rustia.bench.current-results.v1</code>. Operations <code>bench/operations-status.json</code>. Memory <code>bench/memory/current-results.json</code> with history <code>bench/memory/history/runs.jsonl</code>. Wasm sources <code>bench/wasm/current-results.json</code> and <code>bench/wasm/dispatch-current-results.json</code>. Performance history <code>bench/history/runs.jsonl</code> (jsonl-v1). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
   <script>
     (() => {

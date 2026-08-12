@@ -13,6 +13,7 @@ const {
   memoryComparisonCharts,
   memoryHistoryModel,
   memoryHistorySection,
+  operationsStatusSection,
   summarizeLanguageTargets,
   wasmTargetRows,
 } = require("../bench/render-current-results.js");
@@ -46,6 +47,35 @@ function count(text, fragment) {
 }
 
 function main() {
+  const operationsHtml = operationsStatusSection({
+    runner: { environment: "self-hosted-shared", timing_authority: false },
+    measurement: { mode: "operator-started-qualified-host", scheduled_billing_allowed: false },
+    publication: {
+      state: "paused",
+      reason: "Publication reason.",
+      next_action: "Restore artifact-only publication.",
+    },
+    progress: {
+      state: "pending",
+      measured_commit: "a".repeat(40),
+      measured_at_unix: 100,
+      latest_relevant_commit: "b".repeat(40),
+      pending_relevant_commit_count: 2,
+      next_action: "Measure the pending commit.",
+    },
+    landscape: {
+      state: "paused",
+      measured_commit: "a".repeat(40),
+      measured_at_unix: 100,
+      reason: "Landscape reason.",
+      next_action: "Implement landscape campaigns.",
+    },
+  });
+  assert.match(operationsHtml, /Automatic publication is paused/);
+  assert.match(operationsHtml, /2 relevant commits waiting/);
+  assert.match(operationsHtml, /They are not timing authorities/);
+  assert.match(operationsHtml, /scheduled billing is disabled/);
+
   assert.deepEqual(
     ["javascript", "koto", "lua54", "luau", "rhai", "roto", "wasm"].map(languageLabel),
     ["JavaScript", "Koto", "Lua 5.4", "Luau", "Rhai", "Roto", "WebAssembly"],

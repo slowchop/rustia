@@ -8,6 +8,14 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- Benchmark operations now have a versioned policy, generated machine-readable
+  freshness status, and a prominent generated-dashboard notice. The status
+  records pending Rustia performance commits while explicitly marking current-
+  engine landscape refreshes and artifact-only publication as paused. Shared,
+  CPU-busy self-hosted Actions runners remain available for builds,
+  correctness, validation, relevance detection, and publication, but are
+  explicitly non-authoritative for timing and cannot schedule billed hosts.
+
 - A new `Profile::Puc51Compat` PUC Lua 5.1.5 compatibility profile: a faithful
   `ltable.c` table backend (array part + node part with main-position chaining,
   Brent-style relocation, `computesizes` rehash, tombstone deletion, `luaH_next`

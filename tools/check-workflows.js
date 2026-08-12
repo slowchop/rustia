@@ -208,6 +208,7 @@ function checkReleasePreflight(text) {
     '"tools/merge-rustia-ci-memory-data.js"',
     '"tools/check-benchmark-results.js"',
     '"tools/check-wasm-gate-results.js"',
+    '"tools/render-benchmark-operations-status.js", "--check"',
     '"tools/check-current-report-summary.js"',
     '"bench/render-current-results.js"',
     '"bench/render-claims.js"',

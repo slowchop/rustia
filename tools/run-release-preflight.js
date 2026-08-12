@@ -57,6 +57,7 @@ node("tools/run-wasm-dispatch-gate.js", "self-test");
 node("tools/merge-rustia-ci-memory-data.js", "self-test");
 node("tools/check-benchmark-results.js");
 node("tools/check-wasm-gate-results.js");
+node("tools/render-benchmark-operations-status.js", "--check");
 node("tools/check-current-report-summary.js");
 node("bench/render-current-results.js", "--check");
 node("bench/render-claims.js", "--check");

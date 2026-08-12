@@ -1,0 +1,44 @@
+{
+  "schema": "rustia.bench.operations-policy.v1",
+  "schema_version": 1,
+  "runner": {
+    "environment": "self-hosted-shared",
+    "timing_authority": false,
+    "allowed_roles": [
+      "build",
+      "correctness-test",
+      "artifact-validation",
+      "relevance-detection",
+      "dependency-update-detection",
+      "artifact-publication"
+    ]
+  },
+  "measurement": {
+    "mode": "operator-started-qualified-host",
+    "scheduled_billing_allowed": false
+  },
+  "publication": {
+    "state": "paused",
+    "reason": "Artifact-only publication has not yet been restored after removal of the former benchmark workflow.",
+    "next_action": "Implement a validation-and-publication workflow that cannot invoke benchmark measurement or cloud creation."
+  },
+  "progress": {
+    "relevant_paths": [
+      "Cargo.lock",
+      "Cargo.toml",
+      "rust-toolchain.toml",
+      "crates/rustia/src",
+      "crates/rustia-compiler/src",
+      "crates/rustia-lexer/src",
+      "crates/rustia-parser/src",
+      "crates/rustia-vm/src"
+    ],
+    "next_action": "Run the newest pending performance-relevant commit on the explicit qualified Linode lifecycle."
+  },
+  "landscape": {
+    "state": "paused",
+    "refresh_interval_days": 35,
+    "reason": "Immutable latest-stable landscape campaigns and engine-version bridges are not implemented yet.",
+    "next_action": "Add version provenance, immutable landscape snapshots, and old/new reference bridge validation before enabling monthly refreshes."
+  }
+}
