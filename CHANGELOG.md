@@ -234,8 +234,9 @@ Current unpublished workspace version: `0.0.1`.
   stress peak, second for stress retention, second for todo peak, and third for
   todo retention. Its shared-workload retained mean is 14.4 KiB versus
   mlua/Luau/JIT's 24.8 KiB.
-- Luau 0.709 conformance tracking is pending-free, with the current manifest at
-  694 fixtures and 493 behavior refs.
+- Executable conformance tracking is pending-free at 712 fixtures and 511
+  behavior refs: 694/493 are Luau 0.709 oracle-backed and 18/18 are offline
+  PUC 5.1.5 oracle-backed.
 - VM strings and larger insertion-ordered table hash parts now use compact
   deterministic open-addressed `u32` side indices. The table index is built at
   16 hash entries, kept at or below 50% load, and releases its allocation after

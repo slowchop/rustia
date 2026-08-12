@@ -2,7 +2,7 @@
 
 > ⚠️ **Read [`CURRENT.md`](CURRENT.md) first — it is the single canonical state.** This index and the dated
 > docs are staged snapshots and can lag; `CURRENT.md` wins on any disagreement. (Drift fixed per review H1.)
-> **Status note (2026-07-29):** the broad production VM/compiler/API slice, pending-free pinned conformance
+> **Status note (2026-08-13):** the broad production VM/compiler/API slice, pending-free pinned conformance
 > corpus, 12-adapter Linux benchmark snapshot, cross-engine wasm pre-lock gate, and host output/time services
 > slice are in-tree. Historical spike
 > multipliers are not current product claims. Bounded object/program lifetimes, quotas/OOM, and deterministic
@@ -33,7 +33,7 @@ docs are design intent.
 | [`25-review-raw.json`](25-review-raw.json) | 5-lens adversarial review of the ADR + P0 superinstruction measurement (raw) | **✅** |
 | [`35-axes-raw.json`](35-axes-raw.json) | 5-agent exploration of the open axes (scope, snapshot, value-repr, GC, embedding API) — raw | **✅** |
 | [`30-architecture.md`](30-architecture.md) | the architecture decision record + build plan — **v3 plus v3.1-v3.3 refinements, all 8 axes resolved** | **[ARCHITECTURE v3.3]** ✅ |
-| [`50-conformance.md`](50-conformance.md) | historical 709-row behavior inventory; executable Luau-0.709 truth is 694 fixtures / 493 refs / 0 pending | **[INVENTORY + LIVE CORPUS]** ✅ |
+| [`50-conformance.md`](50-conformance.md) | historical 709-row behavior inventory; executable truth is 712 fixtures / 511 refs / 0 pending (694/493 Luau 0.709 plus 18/18 PUC 5.1.5) | **[INVENTORY + LIVE CORPUS]** ✅ |
 | [`55-improvements.md`](55-improvements.md) | **10 adopted design improvements**, each verified still-conformant (dual-part table, string interning, FASTCALL, libm-enforcement, …) | **[IMPROVEMENTS v1]** ✅ |
 | [`56-performance-research.md`](56-performance-research.md) | safe-Rust performance sequence, landed HotIR/closure fast paths, current Linux evidence, and measurement protocol | **[PERFORMANCE RESEARCH v2.0]** |
 | [`57-memory-benchmarking.md`](57-memory-benchmarking.md) | implemented cross-engine short-spike, phase, plateau/growth, pressure, and dashboard protocol plus native/Node-V8 mixed-heap reclamation evidence | **[IMPLEMENTED; HISTORY EXPANSION ONGOING]** |
@@ -44,6 +44,7 @@ docs are design intent.
 | [`76-koto-migration.md`](76-koto-migration.md) | public koto-to-rustia migration guide for the implemented embedding facade | **[GUIDE]** |
 | [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen authoritative guest surface, stateless compiled entries, and fast isolated reset | **[IMPLEMENTED v1]** ✅ |
 | [`80-bench-suite.md`](80-bench-suite.md) | 12-adapter Linux/wasm benchmark product, evidence protocol, generated report, and standalone split plan | **[IMPLEMENTED; SPLIT PENDING]** |
+| [`81-benchmark-operations.md`](81-benchmark-operations.md) | qualified-host measurement, freshness/publication state, landscape refresh, and no-scheduled-billing policy | **[ROLLING OUT]** |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **[CHECKLIST]** |
 | [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **[POLICY]** |
 | [`crate-metadata.json`](crate-metadata.json) | generated cargo metadata policy audit for every workspace package | **[GENERATED]** |
@@ -51,7 +52,7 @@ docs are design intent.
 | [`publishability.json`](publishability.json) | generated publishability blocker audit for every workspace package | **[GENERATED]** |
 
 **TL;DR of where we are:** the architecture is decided and a substantial safe-Rust Luau 0.709 engine exists:
-694 fixtures / 493 refs / 0 pending, a typed embedding facade with host-pluggable output/clock services and
+712 fixtures / 511 refs / 0 pending (694/493 Luau 0.709 plus 18/18 PUC 5.1.5), a typed embedding facade with host-pluggable output/clock services and
 canonical-identity module resolution,
 block-local invocation contexts, capability views, shared fuel, and bounded record transactions,
 CLI, deterministic profiles, reusable

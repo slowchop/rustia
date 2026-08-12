@@ -264,8 +264,9 @@ API parity release-critical work.
 
 ## Known functionality gaps (honest release boundary)
 
-The pending-free conformance corpus proves the named 493-behavior denominator; it does **not** mean that every
-production concern or host-facing facility is finished. The highest-impact gaps are:
+The pending-free conformance corpus proves the named 511-behavior denominator: 493 Luau 0.709 refs plus 18
+offline PUC 5.1.5 compatibility refs. It does **not** mean that every production concern or host-facing
+facility is finished. The highest-impact gaps are:
 
 1. **Bounded object lifetime and memory policy.** Ordinary reachability now reclaims and generation-safely
    reuses tables, functions, upvalues, atomized runtime strings, userdata, buffers, and vectors. Public retained
@@ -386,9 +387,9 @@ unreachable suspended-coroutine frames.
    alerts, and longer-run public history.
 5. **Stabilize and publish the public crates.** Settle the consumer API and semver surface, close the generated
    release gates, flip `publish = false` in dependency order, and publish honest per-workload documentation.
-6. **Keep the Luau 0.709 conformance corpus green**. The current repo has 694 executable fixtures covering 493
-   behavior refs with no pending rows; new engine work should add focused fixtures rather than re-opening
-   pending inventory.
+6. **Keep the executable conformance corpus green**. The current repo has 712 executable fixtures covering 511
+   behavior refs with no pending rows: 694/493 are Luau 0.709 oracle-backed and 18/18 are offline PUC 5.1.5
+   oracle-backed. New engine work should add focused fixtures rather than re-opening pending inventory.
 7. **Maintain benchmark operations** — hosted CI remains validation-only; the operator-started Linode lifecycle
    is the sole active timing source and must keep its Linux-only completeness and cleanup gates green.
 

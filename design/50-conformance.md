@@ -1,8 +1,9 @@
 # rustia — Luau conformance decisions (per-behavior table)
 
-> **HISTORICAL DESIGN INVENTORY; EXECUTABLE CORPUS IS AUTHORITATIVE (updated 2026-07-23).** This file began as
-> a 709-row model-assisted inventory, and its older body prose can still lag implementation. The live Luau-0.709
-> ground truth is now the executable corpus: **694 fixtures / 493 refs / 0 pending**, all oracle-backed and
+> **HISTORICAL DESIGN INVENTORY; EXECUTABLE CORPUS IS AUTHORITATIVE (updated 2026-08-13).** This file began as
+> a 709-row model-assisted inventory, and its older body prose can still lag implementation. The live executable
+> ground truth is now **712 fixtures / 511 refs / 0 pending**: 694/493 are Luau 0.709 oracle-backed and 18/18
+> are offline PUC 5.1.5 oracle-backed. The corpus is
 > enforced by project-status checks. The CORRECTIONS block below still supersedes contradictory historical rows;
 > that named executable denominator does not imply a one-to-one audit of every historical inventory row. New or
 > disputed behavior claims require a focused oracle fixture. Pinned target:
