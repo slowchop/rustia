@@ -17,8 +17,27 @@ const dedicatedLinuxTarget = "linux-x86_64";
 const extendedProvenanceCohorts = new Set([
   "34f6deff4a42501b6d66d257249eecfcbca1976a",
   "83bc2f370ee4149b6fa6e11eca951b41b4cccbd2",
+  "bbe0c5c30ff0eaedba519d37638f4b91644e94a7",
 ]);
 const expectedEngineCohorts = new Map([
+  [
+    "bbe0c5c30ff0eaedba519d37638f4b91644e94a7",
+    new Map([
+      ["rustia", "luau"],
+      ["boa", "javascript"],
+      ["koto", "koto"],
+      ["luaur", "luau"],
+      ["mlua-luau", "luau"],
+      ["mlua-luau-jit", "luau"],
+      ["rhai", "rhai"],
+      ["roto", "roto"],
+      ["ruau", "luau"],
+      ["rquickjs", "javascript"],
+      ["wasmi", "wasm"],
+      ["wasmtime", "wasm"],
+      ["mlua-lua54", "lua54"],
+    ]),
+  ],
   [
     "34f6deff4a42501b6d66d257249eecfcbca1976a",
     new Map([
