@@ -7,6 +7,7 @@ use rustia_parser::{
 use rustia_vm::bytecode::{
     Constant, Function, Instruction, InstructionSource, Opcode, Program, RuntimeType,
     UpvalueDescriptor, ASSERT_MESSAGE_MISSING_ARGUMENT, ASSERT_MESSAGE_NONE,
+    ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS,
 };
 use rustia_vm::number::{binary, NumericOp};
 use std::collections::{BTreeMap, BTreeSet};
@@ -2507,11 +2508,16 @@ impl Compiler {
 
         let visible_count = u8::try_from(variables.len())
             .map_err(|_| CompileError::at("generic for has too many visible variables", span))?;
+        let caller_cell_mode = if self.captured_registers.is_empty() {
+            ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS
+        } else {
+            0
+        };
         let prep_jump = self.code.len();
         self.code.push(Instruction::with_aux(
             Opcode::GenericCallPrep,
             iterator_register,
-            0,
+            caller_cell_mode,
             visible_count,
             0,
         ));
@@ -2527,7 +2533,7 @@ impl Compiler {
         self.code.push(Instruction::with_aux(
             Opcode::GenericCallLoop,
             iterator_register,
-            0,
+            caller_cell_mode,
             visible_count,
             body_start,
         ));
@@ -2577,11 +2583,16 @@ impl Compiler {
 
         let visible_count = u8::try_from(variables.len())
             .map_err(|_| CompileError::at("generic for has too many visible variables", span))?;
+        let caller_cell_mode = if self.captured_registers.is_empty() {
+            ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS
+        } else {
+            0
+        };
         let prep_jump = self.code.len();
         self.code.push(Instruction::with_aux(
             Opcode::GeneralizedIterPrep,
             iterator_register,
-            0,
+            caller_cell_mode,
             visible_count,
             0,
         ));
@@ -2597,7 +2608,7 @@ impl Compiler {
         self.code.push(Instruction::with_aux(
             Opcode::GeneralizedIterLoop,
             iterator_register,
-            0,
+            caller_cell_mode,
             visible_count,
             body_start,
         ));

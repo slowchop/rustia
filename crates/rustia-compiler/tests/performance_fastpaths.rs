@@ -1,5 +1,6 @@
 use rustia_compiler::compile;
 use rustia_parser::parse_source;
+use rustia_vm::bytecode::ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS;
 use rustia_vm::{ErrorKind, Opcode, Profile, Program, Vm, VmSettings};
 use std::num::NonZeroU64;
 
@@ -228,6 +229,70 @@ fn native_next_and_inext_iterator_fast_paths_preserve_loop_cells() {
     );
     let mut vm = Vm::new(Profile::ReproducibleStandard);
     assert_eq!(vm.run(&invalid).unwrap().as_bool(), Some(false));
+}
+
+#[test]
+fn iterator_calls_skip_cell_sync_only_when_the_caller_has_no_captured_locals() {
+    let no_captures = compile_source(
+        r#"
+            local function iterator() return nil end
+            for _ in iterator do end
+            for _ in iterator, nil, nil do end
+            return 1
+        "#,
+    );
+    let no_capture_modes = no_captures
+        .main
+        .code
+        .iter()
+        .filter(|instruction| {
+            matches!(
+                instruction.op,
+                Opcode::GeneralizedIterPrep
+                    | Opcode::GeneralizedIterLoop
+                    | Opcode::GenericCallPrep
+                    | Opcode::GenericCallLoop
+            )
+        })
+        .map(|instruction| instruction.b)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        no_capture_modes,
+        vec![ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS; 4]
+    );
+
+    let captured = compile_source(
+        r#"
+            local count = 0
+            local function iterator()
+                count += 1
+                if count <= 3 then return count end
+            end
+            local sum = 0
+            for value in iterator do sum += value end
+            return count * 10 + sum
+        "#,
+    );
+    let captured_modes = captured
+        .main
+        .code
+        .iter()
+        .filter(|instruction| {
+            matches!(
+                instruction.op,
+                Opcode::GeneralizedIterPrep | Opcode::GeneralizedIterLoop
+            )
+        })
+        .map(|instruction| instruction.b)
+        .collect::<Vec<_>>();
+    assert_eq!(captured_modes, vec![0; 2]);
+    assert_eq!(
+        Vm::new(Profile::ReproducibleStandard)
+            .run(&captured)
+            .unwrap()
+            .as_number(),
+        Some(46.0)
+    );
 }
 
 #[test]

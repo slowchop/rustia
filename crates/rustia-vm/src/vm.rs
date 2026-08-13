@@ -4,7 +4,7 @@
 use crate::bytecode::InstructionSource;
 use crate::bytecode::{
     Constant, Function, Instruction, Opcode, Program, RuntimeType, UpvalueDescriptor,
-    ASSERT_MESSAGE_MISSING_ARGUMENT, ASSERT_MESSAGE_NONE,
+    ASSERT_MESSAGE_MISSING_ARGUMENT, ASSERT_MESSAGE_NONE, ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS,
 };
 use crate::error::{Error, ErrorKind, ErrorLocation, Result};
 use crate::extension::{
@@ -18269,6 +18269,7 @@ impl Vm {
             depth,
             fuel,
             invalid_callee: InvalidIteratorCallee::Iterate,
+            sync_caller_cells: instruction.b != ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS,
         })
     }
 
@@ -18289,7 +18290,9 @@ impl Vm {
             ValueKind::Table | ValueKind::Userdata => {
                 if let Some(method) = self.metamethod_for_value(subject, "__iter")? {
                     let results = self.call_value(program, method, &[subject], depth, fuel)?;
-                    self.sync_register_cells(registers, register_cells)?;
+                    if instruction.b != ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS {
+                        self.sync_register_cells(registers, register_cells)?;
+                    }
                     self.prepare_call_iterator_from_results(registers, window.call, results)?;
                     return self.call_iterator_step(CallIteratorStepContext {
                         program,
@@ -18299,6 +18302,7 @@ impl Vm {
                         depth,
                         fuel,
                         invalid_callee: InvalidIteratorCallee::Call,
+                        sync_caller_cells: instruction.b != ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS,
                     });
                 }
                 if subject.kind() == ValueKind::Table {
@@ -18332,6 +18336,7 @@ impl Vm {
                     depth,
                     fuel,
                     invalid_callee: InvalidIteratorCallee::Call,
+                    sync_caller_cells: instruction.b != ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS,
                 })
             }
             _ => Err(iteration_error(subject)),
@@ -18359,6 +18364,7 @@ impl Vm {
                 depth,
                 fuel,
                 invalid_callee: InvalidIteratorCallee::Call,
+                sync_caller_cells: instruction.b != ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS,
             })
         } else if mode == GENERALIZED_ITERATOR_MODE_TABLE {
             self.table_iterator_step(registers, register_cells, window.call)
@@ -18410,6 +18416,7 @@ impl Vm {
             depth,
             fuel,
             invalid_callee,
+            sync_caller_cells,
         } = context;
         let iterator = get_register(registers, window.iterator)?;
         if invalid_callee == InvalidIteratorCallee::Iterate
@@ -18442,7 +18449,9 @@ impl Vm {
             VmFlow::Return(results) => results,
             VmFlow::Yield(suspension) => return Ok(CallIteratorStep::Yield(suspension)),
         };
-        self.sync_register_cells(registers, register_cells)?;
+        if sync_caller_cells {
+            self.sync_register_cells(registers, register_cells)?;
+        }
         apply_call_iterator_results(registers, register_cells, window, &results)
             .map(CallIteratorStep::Complete)
     }
@@ -22819,6 +22828,7 @@ struct CallIteratorStepContext<'a, 'call> {
     depth: usize,
     fuel: &'a mut Execution<'call>,
     invalid_callee: InvalidIteratorCallee,
+    sync_caller_cells: bool,
 }
 
 #[derive(Clone, Copy)]

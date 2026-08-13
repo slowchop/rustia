@@ -232,6 +232,12 @@ pub enum Opcode {
     NameCall = 130,
 }
 
+/// Iterator-call instruction `b` lane emitted when the caller has no captured locals.
+///
+/// Zero retains the legacy conservative behavior, so existing and hand-authored bytecode still
+/// synchronizes its register cells after a guest iterator call.
+pub const ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS: u8 = 1;
+
 pub const ASSERT_MESSAGE_NONE: i32 = -1;
 pub const ASSERT_MESSAGE_MISSING_ARGUMENT: i32 = -2;
 
