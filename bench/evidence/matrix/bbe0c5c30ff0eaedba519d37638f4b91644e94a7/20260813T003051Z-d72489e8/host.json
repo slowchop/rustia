@@ -1,0 +1,15 @@
+{
+  "schema": "rustia.bench.matrix-host.v1",
+  "captured_at": "2026-08-13T00:45:27.582Z",
+  "platform": "linux",
+  "arch": "x86_64",
+  "uname": "Linux localhost 6.8.0-134-generic #134-Ubuntu SMP PREEMPT_DYNAMIC Fri Jun 26 18:43:11 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux",
+  "os_release": "PRETTY_NAME=\"Ubuntu 24.04.4 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.4 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n",
+  "virtualization": "kvm",
+  "cpu_model": "AMD EPYC 7713 64-Core Processor",
+  "cpuinfo_sha256": "f9b24312d5ae56fa3aa0f8b875557178e9579224fb498f0b568918426550dec6",
+  "benchmark_cpu": 3,
+  "rustc_vv": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.95.0\nLLVM version: 22.1.2",
+  "cargo_version": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+  "taskset_version": "taskset from util-linux 2.39.3"
+}
