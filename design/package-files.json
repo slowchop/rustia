@@ -17,7 +17,7 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 1444,
+      "file_count": 1445,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
@@ -58,6 +58,7 @@
         "cloud/linode-generic-iter-leaf.json",
         "cloud/linode-history-backfill-57dfaff.json",
         "cloud/linode-oop-f208c12.json",
+        "cloud/linode-register-bookkeeping.json",
         "cloud/linode-rustia-memory-588b541.json",
         "cloud/linode-sparse-cachedlen.json",
         "cloud/linode-vm-string-memory-1370d6c.json",
