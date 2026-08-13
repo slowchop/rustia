@@ -42,9 +42,13 @@ Current unpublished workspace version: `0.0.1`.
   refresh, fuel charging, and collection polling are skipped — and the
   candidacy predicate is a single indexed table instead of a compare chain.
   A dynamic opcode histogram showed the two opcodes at 42-61% of executed
-  instructions on four tracked workloads. Local interleaved screens were
-  directionally positive (diagnostic only, not a public speed claim);
-  controlled-host A/B evidence is pending.
+  instructions on four tracked workloads. A controlled dedicated-host A/B
+  (baseline `6d22fa3`, `generic_iteration`, fixed `n=4000`, interleaved
+  ABBA/BAAB) measured -8.45% candidate median ns/unit with a conservative 95%
+  interval of -9.06% to -7.35%; evidence under
+  `bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/`. The
+  single-workload rows stay out of public history per the dedicated-cohort
+  policy and land in the published results with the next full-matrix cohort.
 
 - `LoadStringCompiler` now receives the VM's `Profile` as a third parameter so
   runtime-compiled chunks honor profile-dependent codegen (currently the PUC

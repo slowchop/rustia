@@ -1,0 +1,114 @@
+{
+  "provider": "linode",
+  "linode_id": null,
+  "linode_label": "rustia-bench-f412e2da-3650d1be",
+  "created_at": "2026-08-13T02:51:31",
+  "status": "running",
+  "region": "ap-southeast",
+  "size_slug": "g6-dedicated-2",
+  "image": "linode/ubuntu24.04",
+  "vcpus": 2,
+  "memory_mib": 4096,
+  "disk_gib": 80,
+  "public_ipv4": "REDACTED",
+  "backups_enabled": false,
+  "interface_generation": "legacy_config",
+  "maintenance_policy": "linode/power_off_on",
+  "catalog_plan": {
+    "schema": "rustia.linode-fixed-benchmark.v2",
+    "provider": "linode",
+    "protocol_mode": "acceptance",
+    "region": {
+      "id": "ap-southeast",
+      "label": "Sydney, AU",
+      "country": "au",
+      "status": "ok"
+    },
+    "image": {
+      "id": "linode/ubuntu24.04",
+      "label": "Ubuntu 24.04 LTS",
+      "vendor": "Ubuntu",
+      "created": "2024-04-25T13:00:11",
+      "updated": "2026-07-16T14:18:54",
+      "status": "available",
+      "is_public": true
+    },
+    "size": {
+      "id": "g6-dedicated-2",
+      "description": "Dedicated 4GB",
+      "class": "dedicated",
+      "vcpus": 2,
+      "memory_mib": 4096,
+      "disk_gib": 80,
+      "price_hourly_usd": 0.054,
+      "price_monthly_usd": 36,
+      "regional_price": false
+    },
+    "billable_lifetime_limit_minutes": 55,
+    "billing_increment_minutes": 60,
+    "planned_compute_cost_ceiling_usd": 0.054,
+    "cleanup_reserve_minutes": 8,
+    "billing_caveat": "Linode usage is rounded up to a whole hour; deletion, not shutdown, stops further accrual, and an API outage can delay confirmed deletion",
+    "source": {
+      "orchestration_commit": "c900759f897115b977d3aab764b90c7c95b60187",
+      "config_path": "bench/cloud/linode-register-bookkeeping.json",
+      "config_sha256": "a46855e127cb00acfb2ce26543fc8126e9fb5c5d1ed9194d0080d55234587205",
+      "coordinator_sha256": "0b261b050ad4aedbfd5b6b41dfa03c1aea2c70e69bd757c28a655bc4a78f90eb",
+      "remote_runner_sha256": "db821f5488b06417519523f4c380748648024fd0a46b18176e966c765d485186",
+      "verified_source_hashes": {
+        "baseline original harness": "084a6a5b3626a85728ea9be1177b50c218b31d535a0ea2125c088113fb72a6e5",
+        "candidate overlay harness": "084a6a5b3626a85728ea9be1177b50c218b31d535a0ea2125c088113fb72a6e5",
+        "baseline workload": "c1a796e02ce8ded0f6a407b8f73b69bd326e58e2ddfa45ee20200f48503e7d05",
+        "candidate workload": "c1a796e02ce8ded0f6a407b8f73b69bd326e58e2ddfa45ee20200f48503e7d05",
+        "baseline Cargo.lock": "781ca5604e488e2c2f1b0e0b67142fcdd009f2a3c5af2a25b482fd7770206255",
+        "candidate Cargo.lock": "781ca5604e488e2c2f1b0e0b67142fcdd009f2a3c5af2a25b482fd7770206255",
+        "baseline toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
+        "candidate toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
+        "analyzer": "a66c145df59913813d8df6cb82c563dbec38d3b63671e2db8c27555fe443ea60",
+        "current history": "30fdeb4a14490b614cbaec48adcef082f0f4659e525e5f361b8cae791eebac01"
+      }
+    },
+    "comparison": {
+      "baseline_commit": "6d22fa39464499b61084a23c00b5f0f7eba2be9f",
+      "candidate_commit": "f412e2dadd4568b4ba35158090978c79413fd0f7",
+      "harness_overlay_commit": "f412e2dadd4568b4ba35158090978c79413fd0f7",
+      "workload": "generic_iteration",
+      "fixed_n": 4000,
+      "repetitions": 15,
+      "order": [
+        {
+          "variant": "baseline",
+          "file": "regs-abba-A1.json"
+        },
+        {
+          "variant": "candidate",
+          "file": "regs-abba-B1.json"
+        },
+        {
+          "variant": "candidate",
+          "file": "regs-abba-B2.json"
+        },
+        {
+          "variant": "baseline",
+          "file": "regs-abba-A2.json"
+        },
+        {
+          "variant": "candidate",
+          "file": "regs-baab-B3.json"
+        },
+        {
+          "variant": "baseline",
+          "file": "regs-baab-A3.json"
+        },
+        {
+          "variant": "baseline",
+          "file": "regs-baab-A4.json"
+        },
+        {
+          "variant": "candidate",
+          "file": "regs-baab-B4.json"
+        }
+      ]
+    }
+  }
+}

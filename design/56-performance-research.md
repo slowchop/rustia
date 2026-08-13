@@ -565,7 +565,7 @@ Generalized-iterator leaf caching is closed; reopen only with a profile that iso
 (as distinct from call dispatch) at a material share on a tracked workload, and an explanation for why the
 developer-host screen inverts on the controlled host.
 
-### Common fast path for register bookkeeping — implemented, screened, awaiting controlled A/B
+### Common fast path for register bookkeeping — implemented, accepted on the controlled host
 
 A fresh `samply` profile of `generic_iteration` on the post-revert build attributed ~9-11% to
 `update_current_gc_roots` rebuilds and ~8% to per-instruction collection polling, both dominated by
@@ -582,9 +582,18 @@ conformance run, and the fuzz workspace.
 
 A local interleaved ABBA/BAAB screen (two rounds per workload, 15 repetitions per leg, fixed `n=1500`)
 measured -9.2% `generic_iteration`, -2.0% `dense_tables`, -16.1% `closures_upvalues`, and -5.0%
-`oop_metamethods` candidate ns/unit. That screen is diagnostic only and not a public claim; the two
-preceding bets in this file were both falsified by exactly this screen-to-controlled-host gap, so the
-change is gated on an accepted Linode A/B before any public wording.
+`oop_metamethods` candidate ns/unit — diagnostic only, and the two preceding bets in this file were both
+falsified by exactly this screen-to-controlled-host gap, so the change was gated on an accepted Linode A/B
+before any public wording.
+
+That controlled A/B (baseline `6d22fa3` vs candidate `f412e2d`, `generic_iteration`, fixed `n=4000`,
+interleaved ABBA/BAAB, four legs per side, 20,000 bootstrap iterations, dedicated Linode with the standard
+idle/steal host gates) is **accepted**: candidate pooled median -8.4508% ns/unit with a conservative 95%
+interval of -9.064% to -7.348% (`material_regression_excluded`), checksums identical on every leg, and the
+instance destroyed 26 minutes after create. Evidence:
+`bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/analysis.json`. Per the dedicated-cohort
+policy the single-workload rows stay out of public history; the win lands in `bench/RESULTS.md` with the
+next full-matrix cohort. This is the first profile-led bet in this file to survive the controlled host.
 
 ## Estimate vs C++ Luau
 

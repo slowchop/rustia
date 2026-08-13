@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "schema": "rustia.bench.fixed-sample-analysis.v1",
+  "identity": {
+    "target": "linux-x86_64",
+    "engine": "rustia",
+    "dialect": "luau",
+    "workload": "generic_iteration",
+    "unit": "__iter(32)+pairs(5)+ipairs(32) pass",
+    "fixed_n": 4000,
+    "reps_per_leg": 15,
+    "legs_per_group": 4,
+    "checksum": "number:91580000.00000000000000000"
+  },
+  "method": {
+    "leg_median": "script-bench-harness upper-middle order statistic",
+    "pooled_quantiles": "Hyndman/Fan type 7 linear interpolation",
+    "comparison": "candidate pooled median / baseline pooled median - 1",
+    "confidence_interval": "conservative envelope of seeded pooled and hierarchical percentile intervals",
+    "nominal_confidence_level": 0.95,
+    "bootstrap_iterations": 20000,
+    "bootstrap_seed_uint32": 873861170,
+    "pooled_resampling_unit": "samples independently within each pooled group",
+    "hierarchical_resampling_unit": "legs with replacement, then repetitions with replacement within each selected leg",
+    "coverage_caveat": "95% is nominal: the pooled interval assumes IID repetitions; the hierarchical sensitivity interval models observed leg clustering but cannot cover unobserved host states",
+    "expected_legs": 4,
+    "require_full_commits": true
+  },
+  "baseline": {
+    "commit": "6d22fa39464499b61084a23c00b5f0f7eba2be9f",
+    "leg_count": 4,
+    "sample_count": 60,
+    "legs": [
+      {
+        "leg": 1,
+        "file": "bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/regs-abba-A1.json",
+        "timestamp_unix": 1786590163,
+        "median_ns_per_unit": 13935.07025
+      },
+      {
+        "leg": 2,
+        "file": "bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/regs-abba-A2.json",
+        "timestamp_unix": 1786590378,
+        "median_ns_per_unit": 13767.58
+      },
+      {
+        "leg": 3,
+        "file": "bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/regs-baab-A3.json",
+        "timestamp_unix": 1786590522,
+        "median_ns_per_unit": 13765.981
+      },
+      {
+        "leg": 4,
+        "file": "bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/regs-baab-A4.json",
+        "timestamp_unix": 1786590593,
+        "median_ns_per_unit": 13909.60725
+      }
+    ],
+    "pooled_ns_per_unit": {
+      "sample_count": 60,
+      "min": 13537.36725,
+      "q1": 13763.82275,
+      "median": 13886.220625,
+      "q3": 13944.8841875,
+      "max": 15419.593
+    }
+  },
+  "candidate": {
+    "commit": "f412e2dadd4568b4ba35158090978c79413fd0f7",
+    "leg_count": 4,
+    "sample_count": 60,
+    "legs": [
+      {
+        "leg": 1,
+        "file": "bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/regs-abba-B1.json",
+        "timestamp_unix": 1786590235,
+        "median_ns_per_unit": 12786.32875
+      },
+      {
+        "leg": 2,
+        "file": "bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/regs-abba-B2.json",
+        "timestamp_unix": 1786590306,
+        "median_ns_per_unit": 12760.43975
+      },
+      {
+        "leg": 3,
+        "file": "bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/regs-baab-B3.json",
+        "timestamp_unix": 1786590450,
+        "median_ns_per_unit": 12670.32275
+      },
+      {
+        "leg": 4,
+        "file": "bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/regs-baab-B4.json",
+        "timestamp_unix": 1786590665,
+        "median_ns_per_unit": 12670.65775
+      }
+    ],
+    "pooled_ns_per_unit": {
+      "sample_count": 60,
+      "min": 12488.66175,
+      "q1": 12633.6348125,
+      "median": 12712.72975,
+      "q3": 12837.49725,
+      "max": 15953.21025
+    }
+  },
+  "comparison": {
+    "candidate_delta_percent": -8.45075781733808,
+    "pooled_bootstrap_ci_95_percent": {
+      "lower": -8.94489933908953,
+      "upper": -7.75914526559735
+    },
+    "hierarchical_bootstrap_ci_95_percent": {
+      "lower": -9.0640160638953,
+      "upper": -7.34767712385755
+    },
+    "bootstrap_ci_95_percent": {
+      "lower": -9.0640160638953,
+      "upper": -7.34767712385755
+    },
+    "material_regression_threshold_percent": 5,
+    "verdict": {
+      "status": "material_regression_excluded",
+      "rule": "ci_upper_percent < material_regression_threshold_percent"
+    }
+  }
+}
