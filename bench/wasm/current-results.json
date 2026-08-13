@@ -3,11 +3,11 @@
   "schema": "rustia.bench.wasm-gate-current-results.v1",
   "source": "script-bench-harness",
   "updated": "2026-08-13",
-  "commit": "bbe0c5c30ff0eaedba519d37638f4b91644e94a7",
+  "commit": "f412e2dadd4568b4ba35158090978c79413fd0f7",
   "wasm": {
     "manifest": "bench/wasm/adapter-runner/Cargo.toml",
     "artifact": "bench/wasm/adapter-runner/target/wasm32-unknown-unknown/release/script_bench_wasm_adapter.wasm",
-    "bytes": 8545651
+    "bytes": 8544566
   },
   "requirements": {
     "v8-production-rustia-wasm": true,
@@ -19,8 +19,8 @@
       "schema_version": 1,
       "schema": "rustia.bench.wasm-runtime-results.v1",
       "source": "script-bench-harness",
-      "timestamp_unix": 1786582466,
-      "commit": "bbe0c5c30ff0eaedba519d37638f4b91644e94a7",
+      "timestamp_unix": 1786658295,
+      "commit": "f412e2dadd4568b4ba35158090978c79413fd0f7",
       "target": "wasm32-v8-node-linux-x64",
       "runtime": {
         "name": "node",
@@ -36,7 +36,7 @@
       },
       "wasm": {
         "path": "bench/wasm/adapter-runner/target/wasm32-unknown-unknown/release/script_bench_wasm_adapter.wasm",
-        "bytes": 8545651,
+        "bytes": 8544566,
         "bench_abi_version": 1
       },
       "rows": [
@@ -45,60 +45,60 @@
           "dialect": "luau",
           "workload": "dense_tables",
           "unit": "build+sum+sort of 256-elem array",
-          "n": 254,
+          "n": 326,
           "reps": 5,
-          "ns_per_unit_min": 183465.37795275572,
-          "ns_per_unit_median": 193024.16929133862,
-          "units_per_sec": 5450.619681809995,
-          "checksum": "number:32796724.00000000000000000"
+          "ns_per_unit_min": 184810.77914110429,
+          "ns_per_unit_median": 188499.11042944808,
+          "units_per_sec": 5410.939798248961,
+          "checksum": "number:42025781.00000000000000000"
         },
         {
           "engine": "rustia",
           "dialect": "luau",
           "workload": "sparse_tables",
           "unit": "fill+read 128 hash entries",
-          "n": 256,
+          "n": 64,
           "reps": 5,
-          "ns_per_unit_min": 134661.87500000081,
-          "ns_per_unit_median": 381841.6250000003,
-          "units_per_sec": 7426.006804078689,
-          "checksum": "number:68956160.00000000000000000"
+          "ns_per_unit_min": 394441.53125000093,
+          "ns_per_unit_median": 412504.90625000146,
+          "units_per_sec": 2535.2299917074156,
+          "checksum": "number:4459520.00000000000000000"
         },
         {
           "engine": "rustia",
           "dialect": "luau",
           "workload": "closures_upvalues",
           "unit": "one upvalue-mutating closure call",
-          "n": 202765,
+          "n": 74054,
           "reps": 5,
-          "ns_per_unit_min": 367.68536483120846,
-          "ns_per_unit_median": 368.33149212142155,
-          "units_per_sec": 2719716.62635815,
-          "checksum": "number:11564518020.00000000000000000"
+          "ns_per_unit_min": 325.5120992789025,
+          "ns_per_unit_median": 336.8851378723629,
+          "units_per_sec": 3072082.4270903324,
+          "checksum": "number:1542873438.00000000000000000"
         },
         {
           "engine": "rustia",
           "dialect": "luau",
           "workload": "generic_iteration",
           "unit": "__iter(32)+pairs(5)+ipairs(32) pass",
-          "n": 1280,
+          "n": 4268,
           "reps": 5,
-          "ns_per_unit_min": 22254.26718749972,
-          "ns_per_unit_median": 23208.40078124995,
-          "units_per_sec": 44935.2023849926,
-          "checksum": "number:29305600.00000000000000000"
+          "ns_per_unit_min": 18785.129334582918,
+          "ns_per_unit_median": 19074.29943767574,
+          "units_per_sec": 53233.59675565432,
+          "checksum": "number:97715860.00000000000000000"
         },
         {
           "engine": "rustia",
           "dialect": "luau",
           "workload": "stdlib_math_table",
           "unit": "math fastcalls + buffered push",
-          "n": 34597,
+          "n": 37097,
           "reps": 5,
-          "ns_per_unit_min": 1975.2569586958455,
-          "ns_per_unit_median": 2004.752261756794,
-          "units_per_sec": 506263.24620582303,
-          "checksum": "number:310992.29078947240486741"
+          "ns_per_unit_min": 1803.7728118176594,
+          "ns_per_unit_median": 1831.6268700973121,
+          "units_per_sec": 554393.5430495271,
+          "checksum": "number:336135.09113260061712936"
         }
       ]
     },
@@ -106,8 +106,8 @@
       "schema_version": 1,
       "schema": "rustia.bench.wasm-runtime-results.v1",
       "source": "script-bench-harness",
-      "timestamp_unix": 1786582469,
-      "commit": "bbe0c5c30ff0eaedba519d37638f4b91644e94a7",
+      "timestamp_unix": 1786658298,
+      "commit": "f412e2dadd4568b4ba35158090978c79413fd0f7",
       "target": "wasm32-v8-node-linux-x64",
       "runtime": {
         "name": "node",
@@ -123,7 +123,7 @@
       },
       "wasm": {
         "path": "bench/wasm/adapter-runner/target/wasm32-unknown-unknown/release/script_bench_wasm_adapter.wasm",
-        "bytes": 8545651,
+        "bytes": 8544566,
         "bench_abi_version": 1
       },
       "rows": [
@@ -132,60 +132,60 @@
           "dialect": "koto",
           "workload": "dense_tables",
           "unit": "build+sum+sort of 256-elem array",
-          "n": 30,
+          "n": 28,
           "reps": 5,
-          "ns_per_unit_min": 346120.2666666698,
-          "ns_per_unit_median": 348860.6999999926,
-          "units_per_sec": 2889.1691596986066,
-          "checksum": "number:3867007.00000000000000000"
+          "ns_per_unit_min": 355355.67857142986,
+          "ns_per_unit_median": 822025.9999999858,
+          "units_per_sec": 2814.081947473341,
+          "checksum": "number:3608705.00000000000000000"
         },
         {
           "engine": "koto",
           "dialect": "koto",
           "workload": "sparse_tables",
           "unit": "fill+read 128 hash entries",
-          "n": 574,
+          "n": 530,
           "reps": 5,
-          "ns_per_unit_min": 177030.61498257847,
-          "ns_per_unit_median": 177812.3641114981,
-          "units_per_sec": 5648.740474060996,
-          "checksum": "number:343252000.00000000000000000"
+          "ns_per_unit_min": 184574.11320754682,
+          "ns_per_unit_median": 185004.97358490547,
+          "units_per_sec": 5417.8778520015785,
+          "checksum": "number:292687200.00000000000000000"
         },
         {
           "engine": "koto",
           "dialect": "koto",
           "workload": "closures_upvalues",
           "unit": "one upvalue-mutating closure call",
-          "n": 164237,
+          "n": 156605,
           "reps": 5,
-          "ns_per_unit_min": 416.71234252939394,
-          "ns_per_unit_median": 420.3835372053804,
-          "units_per_sec": 2399736.9358683256,
-          "checksum": "number:1478118.00000000000000000"
+          "ns_per_unit_min": 429.5843300022361,
+          "ns_per_unit_median": 430.5294722390732,
+          "units_per_sec": 2327831.650644228,
+          "checksum": "number:1409430.00000000000000000"
         },
         {
           "engine": "koto",
           "dialect": "koto",
           "workload": "generic_iteration",
           "unit": "__iter(32)+pairs(5)+ipairs(32) pass",
-          "n": 9174,
+          "n": 8541,
           "reps": 5,
-          "ns_per_unit_min": 8673.22443863093,
-          "ns_per_unit_median": 8702.542402441648,
-          "units_per_sec": 115297.37378246033,
-          "checksum": "number:210038730.00000000000000000"
+          "ns_per_unit_min": 9099.802716309563,
+          "ns_per_unit_median": 9159.179955508725,
+          "units_per_sec": 109892.49230730042,
+          "checksum": "number:195546195.00000000000000000"
         },
         {
           "engine": "koto",
           "dialect": "koto",
           "workload": "stdlib_math_table",
           "unit": "math fastcalls + buffered push",
-          "n": 31656,
+          "n": 30186,
           "reps": 5,
-          "ns_per_unit_min": 1923.1201667930354,
-          "ns_per_unit_median": 1964.4429176143663,
-          "units_per_sec": 519988.30716209696,
-          "checksum": "number:283815.02894886193098500"
+          "ns_per_unit_min": 1978.8477108593445,
+          "ns_per_unit_median": 2023.064566355256,
+          "units_per_sec": 505344.59752121853,
+          "checksum": "number:271593.55517945112660527"
         }
       ]
     },
@@ -193,8 +193,8 @@
       "schema_version": 1,
       "schema": "rustia.bench.wasm-runtime-results.v1",
       "source": "script-bench-harness",
-      "timestamp_unix": 1786582472,
-      "commit": "bbe0c5c30ff0eaedba519d37638f4b91644e94a7",
+      "timestamp_unix": 1786658301,
+      "commit": "f412e2dadd4568b4ba35158090978c79413fd0f7",
       "target": "wasm32-v8-node-linux-x64",
       "runtime": {
         "name": "node",
@@ -210,7 +210,7 @@
       },
       "wasm": {
         "path": "bench/wasm/adapter-runner/target/wasm32-unknown-unknown/release/script_bench_wasm_adapter.wasm",
-        "bytes": 8545651,
+        "bytes": 8544566,
         "bench_abi_version": 1
       },
       "rows": [
@@ -221,9 +221,9 @@
           "unit": "build+sum+sort of 256-elem array",
           "n": 24,
           "reps": 5,
-          "ns_per_unit_min": 425820.33333333884,
-          "ns_per_unit_median": 433873.2916666761,
-          "units_per_sec": 2348.4082880024994,
+          "ns_per_unit_min": 424098.916666632,
+          "ns_per_unit_median": 433817.9166666881,
+          "units_per_sec": 2357.940472613992,
           "checksum": "number:3093173.00000000000000000"
         },
         {
@@ -231,24 +231,24 @@
           "dialect": "rhai",
           "workload": "sparse_tables",
           "unit": "fill+read 128 hash entries",
-          "n": 240,
+          "n": 256,
           "reps": 5,
-          "ns_per_unit_min": 397790.5541666663,
-          "ns_per_unit_median": 400837.5833333351,
-          "units_per_sec": 2513.8857359117183,
-          "checksum": "number:60153600.00000000000000000"
+          "ns_per_unit_min": 397676.29687500163,
+          "ns_per_unit_median": 398433.92968749924,
+          "units_per_sec": 2514.608006205414,
+          "checksum": "number:68423680.00000000000000000"
         },
         {
           "engine": "rhai",
           "dialect": "rhai",
           "workload": "closures_upvalues",
           "unit": "one upvalue-mutating closure call",
-          "n": 55758,
+          "n": 54530,
           "reps": 5,
-          "ns_per_unit_min": 1634.2277520714513,
-          "ns_per_unit_median": 1646.699271853378,
-          "units_per_sec": 611909.8141201303,
-          "checksum": "number:501810.00000000000000000"
+          "ns_per_unit_min": 1607.2521181001202,
+          "ns_per_unit_median": 1618.9507060333783,
+          "units_per_sec": 622179.923571709,
+          "checksum": "number:490758.00000000000000000"
         },
         {
           "engine": "rhai",
@@ -257,9 +257,9 @@
           "unit": "__iter(32)+pairs(5)+ipairs(32) pass",
           "n": 8192,
           "reps": 5,
-          "ns_per_unit_min": 13045.77661132822,
-          "ns_per_unit_median": 13270.93859863282,
-          "units_per_sec": 76653.15985340852,
+          "ns_per_unit_min": 13383.380249023525,
+          "ns_per_unit_median": 13478.31042480463,
+          "units_per_sec": 74719.53881553667,
           "checksum": "number:187555840.00000000000000000"
         },
         {
@@ -269,9 +269,9 @@
           "unit": "math fastcalls + buffered push",
           "n": 16384,
           "reps": 5,
-          "ns_per_unit_min": 4162.932250976525,
-          "ns_per_unit_median": 4182.428344726596,
-          "units_per_sec": 240215.2953042711,
+          "ns_per_unit_min": 4212.169006347688,
+          "ns_per_unit_median": 4246.678466796827,
+          "units_per_sec": 237407.37812110863,
           "checksum": "number:144026.86163056202349253"
         }
       ]

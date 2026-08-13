@@ -23,18 +23,18 @@
     "next_action": "Implement a validation-and-publication workflow that cannot invoke benchmark measurement or cloud creation."
   },
   "progress": {
-    "state": "pending",
-    "measured_commit": "bbe0c5c30ff0eaedba519d37638f4b91644e94a7",
-    "measured_at_unix": 1786582423,
+    "state": "current",
+    "measured_commit": "f412e2dadd4568b4ba35158090978c79413fd0f7",
+    "measured_at_unix": 1786658253,
     "latest_relevant_commit": "f412e2dadd4568b4ba35158090978c79413fd0f7",
     "latest_relevant_committed_at_unix": 1786589224,
-    "pending_relevant_commit_count": 2,
-    "next_action": "Run the newest pending performance-relevant commit on the explicit qualified Linode lifecycle."
+    "pending_relevant_commit_count": 0,
+    "next_action": "No progress measurement is currently required."
   },
   "landscape": {
     "state": "paused",
-    "measured_commit": "bbe0c5c30ff0eaedba519d37638f4b91644e94a7",
-    "measured_at_unix": 1786582423,
+    "measured_commit": "f412e2dadd4568b4ba35158090978c79413fd0f7",
+    "measured_at_unix": 1786658253,
     "refresh_interval_days": 35,
     "reason": "Immutable latest-stable landscape campaigns and engine-version bridges are not implemented yet.",
     "next_action": "Add version provenance, immutable landscape snapshots, and old/new reference bridge validation before enabling monthly refreshes."
