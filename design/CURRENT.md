@@ -241,6 +241,10 @@ dispatch-dominated synthetic, and a per-call-site generalized-iterator leaf-step
 `bbe0c5c` after its accepted generic_iteration Linode A/B measured +3.3591% candidate ns/unit
 (conservative interval +1.58% to +4.87%). Both are recorded as falsified-bet evidence in
 [`56-performance-research.md`](56-performance-research.md), not as speed claims.
+A follow-up profile-driven slice promotes the pure register-bookkeeping opcodes `Move` and
+`ClearLocalCell` (42-61% of executed instructions on four tracked workloads) into the common-instruction
+fast path; local interleaved screens are directionally positive (diagnostic only) and the controlled-host
+A/B is pending.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
 ## Project pillars

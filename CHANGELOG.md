@@ -36,6 +36,16 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Changed
 
+- The interpreter's common-instruction fast path now also serves `Move` and
+  `ClearLocalCell` — pure register bookkeeping that provably cannot allocate,
+  invoke guest code, or trigger collection, so the slow path's GC-root
+  refresh, fuel charging, and collection polling are skipped — and the
+  candidacy predicate is a single indexed table instead of a compare chain.
+  A dynamic opcode histogram showed the two opcodes at 42-61% of executed
+  instructions on four tracked workloads. Local interleaved screens were
+  directionally positive (diagnostic only, not a public speed claim);
+  controlled-host A/B evidence is pending.
+
 - `LoadStringCompiler` now receives the VM's `Profile` as a third parameter so
   runtime-compiled chunks honor profile-dependent codegen (currently the PUC
   constructor write order under `Profile::Puc51Compat`). Update custom

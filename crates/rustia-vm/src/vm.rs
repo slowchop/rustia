@@ -91,6 +91,25 @@ const OPCODE_FUEL_OR_SPECIAL: [u8; OPCODE_TAG_SPACE] = {
     costs
 };
 
+// Opcodes `try_common_instruction` can serve without the slow path's root
+// refresh, fuel charging, or collection polling. A single indexed load stays
+// cheaper than a compare chain as the set grows.
+const COMMON_FAST_PATH_CANDIDATE: [bool; OPCODE_TAG_SPACE] = {
+    let mut candidates = [false; OPCODE_TAG_SPACE];
+    candidates[Opcode::Add as usize] = true;
+    candidates[Opcode::Sub as usize] = true;
+    candidates[Opcode::Mul as usize] = true;
+    candidates[Opcode::Div as usize] = true;
+    candidates[Opcode::FloorDiv as usize] = true;
+    candidates[Opcode::Mod as usize] = true;
+    candidates[Opcode::Pow as usize] = true;
+    candidates[Opcode::GetIndex as usize] = true;
+    candidates[Opcode::SetIndex as usize] = true;
+    candidates[Opcode::Move as usize] = true;
+    candidates[Opcode::ClearLocalCell as usize] = true;
+    candidates
+};
+
 /// Runtime chunk compiler for `loadstring`. The VM passes its own [`Profile`]
 /// so the compiler can honor profile-dependent codegen (e.g. PUC 5.1
 /// table-constructor write order under [`Profile::Puc51Compat`]).
@@ -3579,18 +3598,8 @@ impl Vm {
                             }
                         }
 
-                        let is_common_fast_path_candidate = matches!(
-                            instruction.op,
-                            Opcode::Add
-                                | Opcode::Sub
-                                | Opcode::Mul
-                                | Opcode::Div
-                                | Opcode::FloorDiv
-                                | Opcode::Mod
-                                | Opcode::Pow
-                                | Opcode::GetIndex
-                                | Opcode::SetIndex
-                        );
+                        let is_common_fast_path_candidate =
+                            COMMON_FAST_PATH_CANDIDATE[instruction.op as usize];
                         let can_try_common_fast_path = is_common_fast_path_candidate
                             && fuel.state.fuel.is_none()
                             && !self.settings.enable_conformance_coverage
@@ -3599,7 +3608,11 @@ impl Vm {
                         if can_try_common_fast_path {
                             self.executed_instructions = self.executed_instructions.wrapping_add(1);
                             if self
-                                .try_common_instruction(&mut registers, instruction)
+                                .try_common_instruction(
+                                    &mut registers,
+                                    &mut register_cells,
+                                    instruction,
+                                )
                                 .map_err(|error| {
                                     attach_instruction_source(program, function, pc, error)
                                 })?
@@ -8081,9 +8094,23 @@ impl Vm {
     fn try_common_instruction(
         &mut self,
         registers: &mut [Value],
+        register_cells: &mut [Option<u32>],
         instruction: Instruction,
     ) -> Result<bool> {
         match instruction.op {
+            // Pure register bookkeeping: no allocation, no guest code, no GC
+            // trigger, so the slow path's root refresh and collection polling
+            // are provably unnecessary.
+            Opcode::Move => {
+                let value = get_register(registers, instruction.b)?;
+                set_register(registers, instruction.a, value)?;
+                Ok(true)
+            }
+            Opcode::ClearLocalCell => {
+                clear_register_cell(register_cells, instruction.a)?;
+                set_register(registers, instruction.a, Value::nil())?;
+                Ok(true)
+            }
             Opcode::Add
             | Opcode::Sub
             | Opcode::Mul
@@ -26514,6 +26541,27 @@ mod inline_cache_tests {
                 hosts: &mut host_dispatcher,
             };
         };
+    }
+
+    #[test]
+    fn common_fast_path_candidate_table_matches_implemented_arms() {
+        let mut expected = [false; OPCODE_TAG_SPACE];
+        for op in [
+            Opcode::Add,
+            Opcode::Sub,
+            Opcode::Mul,
+            Opcode::Div,
+            Opcode::FloorDiv,
+            Opcode::Mod,
+            Opcode::Pow,
+            Opcode::GetIndex,
+            Opcode::SetIndex,
+            Opcode::Move,
+            Opcode::ClearLocalCell,
+        ] {
+            expected[op as usize] = true;
+        }
+        assert_eq!(COMMON_FAST_PATH_CANDIDATE, expected);
     }
 
     #[test]

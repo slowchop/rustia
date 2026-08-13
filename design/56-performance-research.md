@@ -565,6 +565,27 @@ Generalized-iterator leaf caching is closed; reopen only with a profile that iso
 (as distinct from call dispatch) at a material share on a tracked workload, and an explanation for why the
 developer-host screen inverts on the controlled host.
 
+### Common fast path for register bookkeeping — implemented, screened, awaiting controlled A/B
+
+A fresh `samply` profile of `generic_iteration` on the post-revert build attributed ~9-11% to
+`update_current_gc_roots` rebuilds and ~8% to per-instruction collection polling, both dominated by
+bookkeeping for instructions that can never need it. A throwaway dynamic opcode histogram (patched in,
+measured, reverted uncommitted) showed `Move` and `ClearLocalCell` — pure register operations that cannot
+allocate, invoke guest code, or trigger collection — at 42-60% of all executed instructions across
+`generic_iteration` (70.6%), `dense_tables` (55.2%), `closures_upvalues` (60.0%), and
+`stdlib_math_table` (57.5%). Both were promoted into `try_common_instruction`, which already serves the
+arithmetic and numeric-index opcodes under the same admission gates (unlimited fuel, coverage off, no
+pending allocation debt, no weak collection due), and the candidacy predicate moved from a compare chain
+to a single indexed table (`COMMON_FAST_PATH_CANDIDATE`), pinned to the implemented arm set by a unit
+test. The full local gate suite passed: fmt, clippy `-D warnings`, workspace tests, the 712-fixture
+conformance run, and the fuzz workspace.
+
+A local interleaved ABBA/BAAB screen (two rounds per workload, 15 repetitions per leg, fixed `n=1500`)
+measured -9.2% `generic_iteration`, -2.0% `dense_tables`, -16.1% `closures_upvalues`, and -5.0%
+`oop_metamethods` candidate ns/unit. That screen is diagnostic only and not a public claim; the two
+preceding bets in this file were both falsified by exactly this screen-to-controlled-host gap, so the
+change is gated on an accepted Linode A/B before any public wording.
+
 ## Estimate vs C++ Luau
 
 | state | likely position vs C++ Luau interpreter |
