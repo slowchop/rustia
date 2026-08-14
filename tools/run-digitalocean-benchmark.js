@@ -11,7 +11,7 @@ const { spawn, spawnSync } = require("node:child_process");
 const REPO = path.resolve(__dirname, "..");
 const DEFAULT_CONFIG = path.join(
   REPO,
-  "bench/cloud/digitalocean-dense-ed65077.json",
+  "bench/cloud/digitalocean-region-b861ee9.json",
 );
 const TRIAL_CONFIGS = Object.freeze({
   "basic-2c4g": path.join(REPO, "bench/cloud/digitalocean-trial-basic-2c4g.json"),
