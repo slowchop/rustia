@@ -227,7 +227,7 @@ The current DigitalOcean Region Engine v1 follow-up is frozen in
 It compares exact pre-region baseline `7a69d1c` with candidate `b861ee9` on
 `generic_iteration` using the same fixed-work paired protocol and strict
 idle/steal gates described below. Its exact Basic Intel 2-vCPU/4-GiB shape in
-Frankfurt replaces a rejected, fully cleaned-up regular-Basic Sydney placement;
+New York replaces rejected, fully cleaned-up Sydney and Frankfurt placements;
 the plan fails instead of substituting a different size or region. The earlier dense-table follow-up for baseline
 `dac4ec2295f77587c79f04e4ff0a09cb99912f96` and candidate
 `ed65077c2e779ec6a641b8ca2f8c8258b2508a2d` is encoded in
