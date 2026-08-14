@@ -1016,7 +1016,7 @@ async function deleteSshKey(state, config) {
       return;
     }
   }
-  const result = await run(
+  await run(
     "doctl",
     [
       "compute",
@@ -1029,14 +1029,45 @@ async function deleteSshKey(state, config) {
     ],
     { allowFailure: true, announce: true, timeoutMs: API_TIMEOUT_MS },
   );
-  const remaining = (await listSshKeys(config)).find((entry) => entry && entry.id === state.ssh_key_id);
-  if (!remaining) {
-    state.ssh_key_deleted_at = new Date().toISOString();
-    saveState(state);
-    return;
+
+  // DigitalOcean's key list can briefly lag a successful delete. Reconcile it
+  // like Droplet deletion instead of treating the first stale list response as
+  // a cleanup failure. A successful list that omits the owned id is the proof
+  // of absence; failed reads and DELETE 404s are only retry signals.
+  const confirmationDeadline = Date.now() + DELETE_CONFIRM_TIMEOUT_MS;
+  while (Date.now() < confirmationDeadline) {
+    try {
+      const present = (await listSshKeys(config)).some(
+        (entry) => entry && entry.id === state.ssh_key_id,
+      );
+      if (!present) {
+        state.ssh_key_deleted_at = new Date().toISOString();
+        saveState(state);
+        return;
+      }
+      await run(
+        "doctl",
+        [
+          "compute",
+          "ssh-key",
+          "delete",
+          String(state.ssh_key_id),
+          "--force",
+          "--context",
+          config.provider.context,
+        ],
+        { allowFailure: true, timeoutMs: API_TIMEOUT_MS },
+      );
+    } catch {
+      // A failed read is not proof of deletion; retry until a successful list confirms absence.
+    }
+    const delay = Math.min(3000, Math.max(0, confirmationDeadline - Date.now()));
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
   }
-  const detail = result.stderr.toString("utf8").trim();
-  fail(`could not confirm deletion of owned SSH key ${state.ssh_key_id}${detail ? `: ${detail}` : ""}`);
+  fail(
+    `could not confirm deletion of owned SSH key ${state.ssh_key_id}; run ` +
+      `\`just bench-do-destroy ${state.run_id}\` and do not assume cleanup completed`,
+  );
 }
 
 async function deleteDroplet(state, config) {
