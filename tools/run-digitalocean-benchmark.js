@@ -2134,7 +2134,7 @@ async function selfTest(config) {
       memory: 4096,
       disk: 25,
       available: true,
-      regions: ["nyc2"],
+      regions: [config.provider.region],
       price_hourly: 0.0625,
     },
     {
@@ -2144,7 +2144,7 @@ async function selfTest(config) {
       memory: 4096,
       disk: 80,
       available: true,
-      regions: ["nyc2"],
+      regions: [config.provider.region],
       price_hourly: 0.0357,
     },
     {
@@ -2154,7 +2154,7 @@ async function selfTest(config) {
       memory: 4096,
       disk: 80,
       available: true,
-      regions: ["nyc2"],
+      regions: [config.provider.region],
       price_hourly: 0.04167,
     },
     {
@@ -2164,7 +2164,7 @@ async function selfTest(config) {
       memory: 8192,
       disk: 160,
       available: true,
-      regions: ["nyc2"],
+      regions: [config.provider.region],
       price_hourly: 0.07143,
     },
     {
@@ -2174,7 +2174,7 @@ async function selfTest(config) {
       memory: 8192,
       disk: 160,
       available: true,
-      regions: ["nyc2"],
+      regions: [config.provider.region],
       price_hourly: 0.08333,
     },
   ];
