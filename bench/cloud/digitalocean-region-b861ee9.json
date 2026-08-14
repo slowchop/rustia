@@ -5,11 +5,11 @@
     "region": "syd1",
     "image_slug": "ubuntu-24-04-x64",
     "size": {
-      "description": "Basic Intel",
+      "description": "Basic",
       "vcpus": 2,
       "memory_mib": 4096,
       "disk_gib": 80,
-      "max_hourly_price_usd": 0.04167
+      "max_hourly_price_usd": 0.03571
     },
     "max_runtime_minutes": 90
   },

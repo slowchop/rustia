@@ -226,7 +226,9 @@ The current DigitalOcean Region Engine v1 follow-up is frozen in
 [`cloud/digitalocean-region-b861ee9.json`](cloud/digitalocean-region-b861ee9.json).
 It compares exact pre-region baseline `7a69d1c` with candidate `b861ee9` on
 `generic_iteration` using the same fixed-work paired protocol and strict
-idle/steal gates described below. The earlier dense-table follow-up for baseline
+idle/steal gates described below. Its exact regular Basic 2-vCPU/4-GiB shape is
+the currently available Sydney option; the plan fails instead of substituting a
+different size. The earlier dense-table follow-up for baseline
 `dac4ec2295f77587c79f04e4ff0a09cb99912f96` and candidate
 `ed65077c2e779ec6a641b8ca2f8c8258b2508a2d` is encoded in
 [`cloud/digitalocean-dense-ed65077.json`](cloud/digitalocean-dense-ed65077.json)
