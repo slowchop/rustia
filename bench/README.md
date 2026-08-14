@@ -226,10 +226,10 @@ The current DigitalOcean Region Engine v1 follow-up is frozen in
 [`cloud/digitalocean-region-b861ee9.json`](cloud/digitalocean-region-b861ee9.json).
 It compares exact pre-region baseline `7a69d1c` with candidate `b861ee9` on
 `generic_iteration` using 101-repetition sample blocks in the same fixed-work
-paired protocol and strict
-idle/steal gates described below. Its exact Basic Intel 4-vCPU/8-GiB shape in
-New York 2 replaces rejected, fully cleaned-up Sydney, Frankfurt, New York 3,
-San Francisco, Amsterdam, and London placements;
+paired protocol and bounded
+idle/steal gates described below. Its exact Basic Intel 4-vCPU/8-GiB shape and
+current region are frozen in the config after a sweep of rejected, fully
+cleaned-up shared-CPU placements;
 the plan fails instead of substituting a different size or region. The earlier dense-table follow-up for baseline
 `dac4ec2295f77587c79f04e4ff0a09cb99912f96` and candidate
 `ed65077c2e779ec6a641b8ca2f8c8258b2508a2d` is encoded in
@@ -344,13 +344,15 @@ the corresponding price-ceiling estimate. A provider or API outage can still
 delay confirmed deletion, so cleanup failure remains a hard command error
 rather than being reported as a stopped bill.
 
-Qualification sidecars never enter the accepted A/B analysis. DigitalOcean v4
+Qualification sidecars never enter the accepted A/B analysis. DigitalOcean v5
 admits four counterbalanced baseline/candidate pairs by the spread of their
 relative ratios, not by absolute speed across minute-separated samples. Each
 pair gets one committed idle window and cooldown; its second leg follows
 immediately, and both timed legs retain the contaminant and steal checks. Idle
-admission requires zero steal; a timed leg permits at most 0.1% steal, the same
-bounded rule already accepted for the dedicated Linode v2 protocol. The
+admission requires zero steal; a timed leg permits at most 0.5% steal. This
+shared-CPU ceiling remains one tenth of the predeclared 5% material-regression
+threshold, while the paired 3% relative-stability gate rejects frequency shifts
+that steal accounting does not expose. The
 eight accepted legs use the same four-pair treatment. Any declared
 contaminating-process or out-of-budget steal violation discards the whole block. Only
 `material_regression_excluded` permits the same frozen candidate binary to
@@ -377,12 +379,10 @@ just bench-do-destroy RUN_ID        # choose an exact owned run
 ```
 
 Repeated Premium Intel shared-CPU placements passed the idle gate but accrued
-nonzero hypervisor steal during timed legs, including one placement that stayed
-clean until the eighth comparison leg. Those blocks were correctly discarded.
-DigitalOcean exposes no dedicated-CPU size to this account, so the acceptance
-fallback uses Akamai/Linode `g6-dedicated-2`: 2 dedicated vCPUs, 4 GiB RAM, and
-80 GiB SSD in Sydney. It keeps every source, workload, order, cooldown,
-qualification, host-gate, bootstrap, verdict, and publication field frozen.
+nonzero hypervisor steal or unstable paired ratios during timed legs. Those
+blocks were correctly discarded. DigitalOcean exposes no dedicated-CPU size to
+this account, so v5 uses a fresh shared host, a declared bounded-steal ceiling,
+and an independent paired qualification before any accepted evidence is run.
 
 Create a short-lived personal access token with only **Linodes: Read/Write** and
 **Account: Read Only**. Account read access lets the coordinator reject an

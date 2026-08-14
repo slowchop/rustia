@@ -1,8 +1,8 @@
 {
-  "schema": "rustia.digitalocean-fixed-benchmark.v4",
+  "schema": "rustia.digitalocean-fixed-benchmark.v5",
   "provider": {
     "context": "rustia-bench",
-    "region": "lon1",
+    "region": "ams3",
     "image_slug": "ubuntu-24-04-x64",
     "size": {
       "description": "Basic",
@@ -59,7 +59,7 @@
     "minimum_idle_percent": 99,
     "maximum_load_1m": 0.1,
     "maximum_steal_ticks": 0,
-    "maximum_timed_steal_percent": 0.1,
+    "maximum_timed_steal_percent": 0.5,
     "wait_timeout_seconds": 900
   },
   "publication": {

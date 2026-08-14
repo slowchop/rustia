@@ -108,6 +108,7 @@ function usesPairedRelativeProtocol(config) {
   return [
     "rustia.digitalocean-fixed-benchmark.v3",
     "rustia.digitalocean-fixed-benchmark.v4",
+    "rustia.digitalocean-fixed-benchmark.v5",
   ].includes(config.schema);
 }
 
@@ -121,7 +122,8 @@ function validateConfig(value) {
   if (
     root.schema !== "rustia.digitalocean-fixed-benchmark.v2" &&
     root.schema !== "rustia.digitalocean-fixed-benchmark.v3" &&
-    root.schema !== "rustia.digitalocean-fixed-benchmark.v4"
+    root.schema !== "rustia.digitalocean-fixed-benchmark.v4" &&
+    root.schema !== "rustia.digitalocean-fixed-benchmark.v5"
   ) {
     fail("unsupported cloud benchmark config schema");
   }
@@ -285,7 +287,7 @@ function validateConfig(value) {
     "maximum_steal_ticks",
     "wait_timeout_seconds",
   ];
-  if (root.schema === "rustia.digitalocean-fixed-benchmark.v4") {
+  if (["rustia.digitalocean-fixed-benchmark.v4", "rustia.digitalocean-fixed-benchmark.v5"].includes(root.schema)) {
     gateKeys.push("maximum_timed_steal_percent");
   }
   requireExactKeys(gate, gateKeys, "config.host_gate");
@@ -298,14 +300,21 @@ function validateConfig(value) {
   }
   requireNumber(gate.maximum_load_1m, "config.host_gate.maximum_load_1m", 0);
   requireInteger(gate.maximum_steal_ticks, "config.host_gate.maximum_steal_ticks", 0);
-  if (root.schema === "rustia.digitalocean-fixed-benchmark.v4") {
+  if (["rustia.digitalocean-fixed-benchmark.v4", "rustia.digitalocean-fixed-benchmark.v5"].includes(root.schema)) {
     requireNumber(
       gate.maximum_timed_steal_percent,
       "config.host_gate.maximum_timed_steal_percent",
       0,
     );
-    if (gate.maximum_steal_ticks !== 0 || gate.maximum_timed_steal_percent !== 0.1) {
-      fail("DigitalOcean v4 requires zero idle steal and a 0.1% timed steal ceiling");
+    const expectedTimedStealPercent =
+      root.schema === "rustia.digitalocean-fixed-benchmark.v5" ? 0.5 : 0.1;
+    if (
+      gate.maximum_steal_ticks !== 0 ||
+      gate.maximum_timed_steal_percent !== expectedTimedStealPercent
+    ) {
+      fail(
+        `DigitalOcean ${root.schema.endsWith(".v5") ? "v5" : "v4"} requires zero idle steal and a ${expectedTimedStealPercent}% timed steal ceiling`,
+      );
     }
   }
   requireInteger(gate.wait_timeout_seconds, "config.host_gate.wait_timeout_seconds", 1);

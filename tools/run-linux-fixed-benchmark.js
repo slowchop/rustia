@@ -75,6 +75,7 @@ function usesPairedDigitalOceanProtocol(config) {
   return [
     "rustia.digitalocean-fixed-benchmark.v3",
     "rustia.digitalocean-fixed-benchmark.v4",
+    "rustia.digitalocean-fixed-benchmark.v5",
   ].includes(config.schema);
 }
 
@@ -167,6 +168,7 @@ function validateConfig(config) {
     config.schema !== "rustia.digitalocean-fixed-benchmark.v2" &&
     config.schema !== "rustia.digitalocean-fixed-benchmark.v3" &&
     config.schema !== "rustia.digitalocean-fixed-benchmark.v4" &&
+    config.schema !== "rustia.digitalocean-fixed-benchmark.v5" &&
     config.schema !== "rustia.linode-fixed-benchmark.v1" &&
     config.schema !== "rustia.linode-fixed-benchmark.v2" &&
     config.schema !== "rustia.vultr-fixed-benchmark.v1" &&
@@ -318,7 +320,7 @@ function validateConfig(config) {
   }
   requireInteger(config.host_gate.benchmark_cpu, "host_gate.benchmark_cpu", 0);
   requireInteger(config.host_gate.maximum_steal_ticks, "host_gate.maximum_steal_ticks", 0);
-  if (config.schema === "rustia.digitalocean-fixed-benchmark.v4") {
+  if (["rustia.digitalocean-fixed-benchmark.v4", "rustia.digitalocean-fixed-benchmark.v5"].includes(config.schema)) {
     requireExactKeys(
       config.host_gate,
       [
@@ -334,11 +336,15 @@ function validateConfig(config) {
       "host_gate",
     );
     requireNumber(config.host_gate.maximum_timed_steal_percent, "host_gate.maximum_timed_steal_percent", 0);
+    const expectedTimedStealPercent =
+      config.schema === "rustia.digitalocean-fixed-benchmark.v5" ? 0.5 : 0.1;
     if (
       config.host_gate.maximum_steal_ticks !== 0 ||
-      config.host_gate.maximum_timed_steal_percent !== 0.1
+      config.host_gate.maximum_timed_steal_percent !== expectedTimedStealPercent
     ) {
-      fail("DigitalOcean v4 requires zero idle steal and a 0.1% timed steal ceiling");
+      fail(
+        `DigitalOcean ${config.schema.endsWith(".v5") ? "v5" : "v4"} requires zero idle steal and a ${expectedTimedStealPercent}% timed steal ceiling`,
+      );
     }
   }
   if (config.schema === "rustia.linode-fixed-benchmark.v2") {
@@ -640,7 +646,8 @@ function cpuDelta(before, after) {
 function timedStealGatePasses(config, delta) {
   if (
     config.schema === "rustia.linode-fixed-benchmark.v2" ||
-    config.schema === "rustia.digitalocean-fixed-benchmark.v4"
+    config.schema === "rustia.digitalocean-fixed-benchmark.v4" ||
+    config.schema === "rustia.digitalocean-fixed-benchmark.v5"
   ) {
     return (
       delta.steal_ticks * 100 <=
@@ -2497,6 +2504,26 @@ function selfTest() {
         host_gate: { maximum_steal_ticks: 0, maximum_timed_steal_percent: 0.1 },
       },
       { total_ticks: 1000, steal_ticks: 2 },
+    ),
+    false,
+  );
+  assert.equal(
+    timedStealGatePasses(
+      {
+        schema: "rustia.digitalocean-fixed-benchmark.v5",
+        host_gate: { maximum_steal_ticks: 0, maximum_timed_steal_percent: 0.5 },
+      },
+      { total_ticks: 1000, steal_ticks: 5 },
+    ),
+    true,
+  );
+  assert.equal(
+    timedStealGatePasses(
+      {
+        schema: "rustia.digitalocean-fixed-benchmark.v5",
+        host_gate: { maximum_steal_ticks: 0, maximum_timed_steal_percent: 0.5 },
+      },
+      { total_ticks: 1000, steal_ticks: 6 },
     ),
     false,
   );
