@@ -2078,7 +2078,7 @@ async function selfTest(config) {
       memory: 4096,
       disk: 25,
       available: true,
-      regions: ["sfo3"],
+      regions: ["ams3"],
       price_hourly: 0.0625,
     },
     {
@@ -2088,7 +2088,7 @@ async function selfTest(config) {
       memory: 4096,
       disk: 80,
       available: true,
-      regions: ["sfo3"],
+      regions: ["ams3"],
       price_hourly: 0.0357,
     },
     {
@@ -2098,7 +2098,7 @@ async function selfTest(config) {
       memory: 4096,
       disk: 80,
       available: true,
-      regions: ["sfo3"],
+      regions: ["ams3"],
       price_hourly: 0.04167,
     },
     {
@@ -2108,11 +2108,21 @@ async function selfTest(config) {
       memory: 8192,
       disk: 160,
       available: true,
-      regions: ["sfo3"],
+      regions: ["ams3"],
       price_hourly: 0.07143,
     },
+    {
+      slug: "s-4vcpu-8gb-intel",
+      description: "Basic Intel",
+      vcpus: 4,
+      memory: 8192,
+      disk: 160,
+      available: true,
+      regions: ["ams3"],
+      price_hourly: 0.08333,
+    },
   ];
-  assert.equal(selectSize(fixture, config).slug, "s-2vcpu-8gb-160gb-intel");
+  assert.equal(selectSize(fixture, config).slug, "s-4vcpu-8gb-intel");
   const basicTrial = loadConfig(TRIAL_CONFIGS["basic-2c4g"]);
   const premiumTrial = loadConfig(TRIAL_CONFIGS["premium-intel-2c4g"]);
   assert.deepEqual(premiumTrial.provider, config.provider);
@@ -2128,23 +2138,23 @@ async function selfTest(config) {
     assert.equal(trialConfig.publication.final_measurements, config.publication.final_measurements);
   }
   assert.equal(selectSize(fixture, basicTrial).slug, "s-2vcpu-4gb");
-  assert.equal(selectSize(fixture, premiumTrial).slug, "s-2vcpu-8gb-160gb-intel");
+  assert.equal(selectSize(fixture, premiumTrial).slug, "s-4vcpu-8gb-intel");
   const plannedShape = {
-    region: "sfo3",
+    region: "ams3",
     image: { id: 123 },
-    size: { slug: "s-2vcpu-8gb-160gb-intel", vcpus: 2, memory_mib: 8192, disk_gib: 160 },
+    size: { slug: "s-4vcpu-8gb-intel", vcpus: 4, memory_mib: 8192, disk_gib: 160 },
   };
   const actualShape = {
-    region: { slug: "sfo3" },
+    region: { slug: "ams3" },
     image: { id: 123 },
-    size_slug: "s-2vcpu-8gb-160gb-intel",
-    vcpus: 2,
+    size_slug: "s-4vcpu-8gb-intel",
+    vcpus: 4,
     memory: 8192,
     disk: 160,
   };
   verifyDropletMatchesPlan(actualShape, plannedShape);
   assert.throws(() => verifyDropletMatchesPlan({ ...actualShape, disk: 81 }, plannedShape));
-  assert.throws(() => selectSize([...fixture, { ...fixture[3], slug: "ambiguous" }], config));
+  assert.throws(() => selectSize([...fixture, { ...fixture[4], slug: "ambiguous" }], config));
   assert.throws(() =>
     validateConfig({
       ...config,

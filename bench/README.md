@@ -226,8 +226,9 @@ The current DigitalOcean Region Engine v1 follow-up is frozen in
 [`cloud/digitalocean-region-b861ee9.json`](cloud/digitalocean-region-b861ee9.json).
 It compares exact pre-region baseline `7a69d1c` with candidate `b861ee9` on
 `generic_iteration` using the same fixed-work paired protocol and strict
-idle/steal gates described below. Its exact Basic Intel 2-vCPU/8-GiB shape in
-San Francisco replaces rejected, fully cleaned-up Sydney, Frankfurt, and New York placements;
+idle/steal gates described below. Its exact Basic Intel 4-vCPU/8-GiB shape in
+Amsterdam replaces rejected, fully cleaned-up Sydney, Frankfurt, New York, and
+San Francisco placements;
 the plan fails instead of substituting a different size or region. The earlier dense-table follow-up for baseline
 `dac4ec2295f77587c79f04e4ff0a09cb99912f96` and candidate
 `ed65077c2e779ec6a641b8ca2f8c8258b2508a2d` is encoded in
