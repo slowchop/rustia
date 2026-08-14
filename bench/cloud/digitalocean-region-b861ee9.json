@@ -1,5 +1,5 @@
 {
-  "schema": "rustia.digitalocean-fixed-benchmark.v2",
+  "schema": "rustia.digitalocean-fixed-benchmark.v3",
   "provider": {
     "context": "rustia-bench",
     "region": "ams3",
@@ -49,8 +49,8 @@
     "expected_legs_per_group": 4
   },
   "qualification": {
-    "candidate_pilot_legs": 3,
-    "max_median_spread_percent": 3
+    "paired_pilot_rounds": 4,
+    "max_ratio_spread_percent": 3
   },
   "host_gate": {
     "benchmark_cpu": 1,

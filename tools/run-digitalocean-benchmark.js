@@ -111,7 +111,10 @@ function validateConfig(value) {
     ["schema", "provider", "source", "measurement", "qualification", "host_gate", "publication"],
     "config",
   );
-  if (root.schema !== "rustia.digitalocean-fixed-benchmark.v2") {
+  if (
+    root.schema !== "rustia.digitalocean-fixed-benchmark.v2" &&
+    root.schema !== "rustia.digitalocean-fixed-benchmark.v3"
+  ) {
     fail("unsupported cloud benchmark config schema");
   }
 
@@ -233,17 +236,36 @@ function validateConfig(value) {
   }
 
   const qualification = requireObject(root.qualification, "config.qualification");
-  requireExactKeys(
-    qualification,
-    ["candidate_pilot_legs", "max_median_spread_percent"],
-    "config.qualification",
-  );
-  requireInteger(qualification.candidate_pilot_legs, "config.qualification.candidate_pilot_legs", 2);
-  requireNumber(
-    qualification.max_median_spread_percent,
-    "config.qualification.max_median_spread_percent",
-    0,
-  );
+  if (root.schema === "rustia.digitalocean-fixed-benchmark.v3") {
+    requireExactKeys(
+      qualification,
+      ["paired_pilot_rounds", "max_ratio_spread_percent"],
+      "config.qualification",
+    );
+    requireInteger(qualification.paired_pilot_rounds, "config.qualification.paired_pilot_rounds", 2);
+    requireNumber(
+      qualification.max_ratio_spread_percent,
+      "config.qualification.max_ratio_spread_percent",
+      0,
+    );
+    for (let index = 0; index < measurement.run_order.length; index += 2) {
+      if (measurement.run_order[index].variant === measurement.run_order[index + 1].variant) {
+        fail("DigitalOcean v3 run-order pairs must contain one baseline and one candidate leg");
+      }
+    }
+  } else {
+    requireExactKeys(
+      qualification,
+      ["candidate_pilot_legs", "max_median_spread_percent"],
+      "config.qualification",
+    );
+    requireInteger(qualification.candidate_pilot_legs, "config.qualification.candidate_pilot_legs", 2);
+    requireNumber(
+      qualification.max_median_spread_percent,
+      "config.qualification.max_median_spread_percent",
+      0,
+    );
+  }
 
   const gate = requireObject(root.host_gate, "config.host_gate");
   requireExactKeys(
@@ -1332,6 +1354,12 @@ function diagnosticSummary(config, state, downloadDirectory) {
   let pilotLegs = qualification && Array.isArray(qualification.pilot_legs)
     ? qualification.pilot_legs
     : [];
+  const pilotPairs = qualification && Array.isArray(qualification.pilot_pairs)
+    ? qualification.pilot_pairs
+    : [];
+  if (pilotLegs.length === 0 && pilotPairs.length > 0) {
+    pilotLegs = pilotPairs.flatMap((pair) => [pair.baseline, pair.candidate].filter(Boolean));
+  }
   if (pilotLegs.length === 0 && fs.existsSync(qualificationDirectory)) {
     pilotLegs = fs
       .readdirSync(qualificationDirectory)
@@ -1357,10 +1385,13 @@ function diagnosticSummary(config, state, downloadDirectory) {
     status.status === "diagnostic_complete" && qualification?.passed === true;
   const extraAcceptanceLegs =
     config.measurement.run_order.length + config.publication.final_measurements;
+  const qualificationLegs = config.schema === "rustia.digitalocean-fixed-benchmark.v3"
+    ? config.qualification.paired_pilot_rounds * 2
+    : config.qualification.candidate_pilot_legs;
   const projectedAcceptanceSeconds =
     qualificationPassed && billableSecondsUpperBound !== null && Number.isFinite(qualificationSeconds)
       ? billableSecondsUpperBound +
-        (qualificationSeconds / config.qualification.candidate_pilot_legs) * extraAcceptanceLegs
+        (qualificationSeconds / qualificationLegs) * extraAcceptanceLegs
       : null;
   const acceptanceConfig = loadConfig(DEFAULT_CONFIG);
   const acceptanceWorkBudgetSeconds =
@@ -1398,6 +1429,13 @@ function diagnosticSummary(config, state, downloadDirectory) {
     pilot_median_spread_percent:
       qualification && Number.isFinite(qualification.median_spread_percent)
         ? qualification.median_spread_percent
+        : null,
+    pilot_pair_candidate_over_baseline_ratios: pilotPairs.map(
+      (pair) => pair.candidate_over_baseline_ratio,
+    ),
+    pilot_ratio_spread_percent:
+      qualification && Number.isFinite(qualification.ratio_spread_percent)
+        ? qualification.ratio_spread_percent
         : null,
     qualification_passed: qualificationPassed,
     projection_within_acceptance_budget: projectionWithinAcceptanceBudget,
@@ -2166,6 +2204,21 @@ async function selfTest(config) {
       ...config,
       publication: { ...config.publication, mode: "unsafe" },
     }),
+  );
+  assert.throws(() =>
+    validateConfig({
+      ...config,
+      measurement: {
+        ...config.measurement,
+        run_order: config.measurement.run_order.map((leg, index) =>
+          index === 1 ? { ...leg, variant: "baseline" } : leg,
+        ),
+      },
+    }),
+  );
+  assert.equal(
+    loadConfig(path.join(REPO, "bench/cloud/digitalocean-dense-ed65077.json")).schema,
+    "rustia.digitalocean-fixed-benchmark.v2",
   );
   const runner = await run("node", [REMOTE_RUNNER, "self-test"]);
   assert.match(outputText(runner), /self-test passed/);

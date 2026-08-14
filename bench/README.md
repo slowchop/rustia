@@ -241,7 +241,7 @@ actual-bare-metal fallback
 exact-machine Scaleway fallback
 [`cloud/scaleway-dense-ed65077.json`](cloud/scaleway-dense-ed65077.json).
 It predeclares the source hashes, fixed work, repetitions, eight-leg order,
-bootstrap interpretation, candidate-only stability qualification, Linux host
+bootstrap interpretation, paired relative-stability qualification, Linux host
 gate, CPU pin, cooldown, and conditional three-run publication rule.
 
 The accepted OOP comparison is frozen separately in
@@ -292,8 +292,8 @@ differently priced, or alternate-region VM:
 just bench-do-plan
 ```
 
-Two tracked diagnostic profiles compare the useful shared-CPU alternatives:
-regular Basic and Premium Intel, both with 2 vCPUs and 4 GiB of RAM. The
+Two tracked diagnostic profiles compare useful shared-CPU alternatives:
+regular Basic with 2 vCPUs/4 GiB and the current Intel pool with 4 vCPUs/8 GiB. The
 acceptance config freezes the qualifying cost-aware matrix winner; rerun the
 read-only plans and billable trials by profile name when price, availability,
 or host consistency needs to be reevaluated:
@@ -307,17 +307,16 @@ just bench-do-trials
 
 `bench-do-trials` intentionally runs the two profiles sequentially so their
 cold setup/build cost can be compared; the two committed 90-minute ceilings
-sum to $0.116070 at current rates. Each trial builds the
-same exact baseline and candidate, runs only the three candidate qualification
-legs, records CPU identity, build time, stability spread, billable lifetime,
+sum to $0.178560 at current rates. Each trial builds the
+same exact baseline and candidate, runs only the four paired qualification
+rounds, records CPU identity, build time, relative-ratio stability, billable lifetime,
 conservative charge upper bound, and projected full-acceptance charge, then
 confirms destruction. A failed qualification is reported as ineligible, and
 the matrix fails if neither profile qualifies. Diagnostic mode is validated
 independently on the guest and coordinator: it cannot run the
 eight-leg comparison, append history, or promote evidence into the repository.
-The 2-GiB, extra-disk, and 4-vCPU shared shapes are excluded because their
-sub-cent savings or extra parallel build capacity do not repay the added OOM
-risk or hourly rate during the protocol's fixed cooldown windows.
+The 2-GiB and extra-disk shapes remain excluded because their sub-cent savings
+do not repay the added OOM risk or hourly rate during the protocol's fixed cooldown windows.
 These trials screen one discarded shared host per profile; the eventual
 acceptance command provisions a new host and repeats qualification rather than
 treating a trial as a guarantee about future shared-CPU placement.
@@ -345,9 +344,13 @@ the corresponding price-ceiling estimate. A provider or API outage can still
 delay confirmed deletion, so cleanup failure remains a hard command error
 rather than being reported as a stopped bill.
 
-Qualification sidecars never enter the accepted A/B analysis. Every accepted
-leg runs on CPU 1 after the committed idle window and cooldown; any declared
-contaminating-process or out-of-budget steal violation discards the whole eight-leg block. Only
+Qualification sidecars never enter the accepted A/B analysis. DigitalOcean v3
+admits four counterbalanced baseline/candidate pairs by the spread of their
+relative ratios, not by absolute speed across minute-separated samples. Each
+pair gets one committed idle window and cooldown; its second leg follows
+immediately, and both timed legs retain the contaminant and steal checks. The
+eight accepted legs use the same four-pair treatment. Any declared
+contaminating-process or out-of-budget steal violation discards the whole block. Only
 `material_regression_excluded` permits the same frozen candidate binary to
 append three real rows. An accepted run adds the evidence directory and exact
 append-only history locally, regenerates the history-derived reports, and runs

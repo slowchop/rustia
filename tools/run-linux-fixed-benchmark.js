@@ -158,6 +158,7 @@ function validateConfig(config) {
   const kind = protocolKind(config);
   if (
     config.schema !== "rustia.digitalocean-fixed-benchmark.v2" &&
+    config.schema !== "rustia.digitalocean-fixed-benchmark.v3" &&
     config.schema !== "rustia.linode-fixed-benchmark.v1" &&
     config.schema !== "rustia.linode-fixed-benchmark.v2" &&
     config.schema !== "rustia.vultr-fixed-benchmark.v1" &&
@@ -291,7 +292,22 @@ function validateConfig(config) {
   }
   requireInteger(config.measurement.fixed_n, "measurement.fixed_n", 1);
   requireInteger(config.measurement.repetitions, "measurement.repetitions", 1);
-  requireInteger(config.qualification.candidate_pilot_legs, "qualification.candidate_pilot_legs", 2);
+  if (config.schema === "rustia.digitalocean-fixed-benchmark.v3") {
+    requireExactKeys(
+      config.qualification,
+      ["paired_pilot_rounds", "max_ratio_spread_percent"],
+      "qualification",
+    );
+    requireInteger(config.qualification.paired_pilot_rounds, "qualification.paired_pilot_rounds", 2);
+    requireNumber(config.qualification.max_ratio_spread_percent, "qualification.max_ratio_spread_percent", 0);
+    for (let index = 0; index < config.measurement.run_order.length; index += 2) {
+      if (config.measurement.run_order[index].variant === config.measurement.run_order[index + 1].variant) {
+        fail("DigitalOcean v3 run-order pairs must contain one baseline and one candidate leg");
+      }
+    }
+  } else {
+    requireInteger(config.qualification.candidate_pilot_legs, "qualification.candidate_pilot_legs", 2);
+  }
   requireInteger(config.host_gate.benchmark_cpu, "host_gate.benchmark_cpu", 0);
   requireInteger(config.host_gate.maximum_steal_ticks, "host_gate.maximum_steal_ticks", 0);
   if (config.schema === "rustia.linode-fixed-benchmark.v2") {
@@ -777,8 +793,13 @@ async function runMonitoredBenchmark({
   gateFile,
   gateRecords,
   acceptedBlock,
+  skipPreLegGate = false,
 }) {
-  await waitForIdle(config, label, gateFile, gateRecords);
+  if (skipPreLegGate) {
+    log(`${label}: continuing the admitted pair without a second cooldown`);
+  } else {
+    await waitForIdle(config, label, gateFile, gateRecords);
+  }
   const cpu = config.host_gate.benchmark_cpu;
   const before = readCpuSample(cpu);
   const observed = [];
@@ -1642,6 +1663,81 @@ async function runPilot(config, build, gateFile, gateRecords) {
   return result;
 }
 
+function pairedPilotOrder(round) {
+  return [["baseline", "candidate"], ["candidate", "baseline"], ["candidate", "baseline"], ["baseline", "candidate"]][
+    (round - 1) % 4
+  ];
+}
+
+function relativeSpreadPercent(values) {
+  if (!Array.isArray(values) || values.length < 2 || values.some((value) => !Number.isFinite(value) || value <= 0)) {
+    fail("relative spread requires at least two positive finite values");
+  }
+  return ((Math.max(...values) - Math.min(...values)) / Math.min(...values)) * 100;
+}
+
+async function runPairedPilot(config, build, gateFile, gateRecords) {
+  fs.mkdirSync(PILOT, { recursive: true });
+  const pairs = [];
+  for (let round = 1; round <= config.qualification.paired_pilot_rounds; round += 1) {
+    const summaries = {};
+    for (const [position, variant] of pairedPilotOrder(round).entries()) {
+      const baseline = variant === "baseline";
+      const binary = baseline ? build.baselineBinary : build.candidateBinary;
+      const commit = baseline ? config.source.baseline_commit : config.source.candidate_commit;
+      const file = path.join(PILOT, `paired-pilot-${round}-${variant}.json`);
+      await runMonitoredBenchmark({
+        config,
+        label: `qualification-pair-${round}-${variant}`,
+        binary,
+        args: [...commonArgs(config), "--commit", commit, "--samples-json", file],
+        cwd: SOURCE_B,
+        gateFile,
+        gateRecords,
+        acceptedBlock: false,
+        skipPreLegGate: position === 1,
+      });
+      summaries[variant] = sidecarSummary(file, {
+        commit,
+        target: "linux-x86_64",
+        engine: "rustia",
+        workload: config.measurement.workload,
+        n: config.measurement.fixed_n,
+        n_selection: "fixed",
+        reps: config.measurement.repetitions,
+        checksum: config.measurement.expected_checksum,
+      });
+    }
+    pairs.push({
+      round,
+      order: pairedPilotOrder(round),
+      baseline: summaries.baseline,
+      candidate: summaries.candidate,
+      candidate_over_baseline_ratio:
+        summaries.candidate.harness_median / summaries.baseline.harness_median,
+    });
+  }
+  const ratios = pairs.map((pair) => pair.candidate_over_baseline_ratio);
+  const spread = relativeSpreadPercent(ratios);
+  const result = {
+    schema: "rustia.bench.cloud-paired-qualification.v1",
+    pilot_pairs: pairs,
+    ratio_spread_percent: spread,
+    maximum_ratio_spread_percent: config.qualification.max_ratio_spread_percent,
+    passed: spread <= config.qualification.max_ratio_spread_percent,
+    note: "qualification-only paired runs; never accepted as A/B evidence or public history",
+  };
+  writeJson(path.join(PILOT, "qualification.json"), result);
+  if (!result.passed) {
+    throw new ControlledStop(
+      "host_qualification_failed",
+      `paired candidate/baseline ratio spread ${spread.toFixed(3)}% exceeded ` +
+        `${config.qualification.max_ratio_spread_percent}%`,
+    );
+  }
+  return result;
+}
+
 async function runComparison(config, build, evidenceDirectory, gateFile, gateRecords) {
   const summaries = [];
   for (const [index, leg] of config.measurement.run_order.entries()) {
@@ -1658,6 +1754,8 @@ async function runComparison(config, build, evidenceDirectory, gateFile, gateRec
       gateFile,
       gateRecords,
       acceptedBlock: true,
+      skipPreLegGate:
+        config.schema === "rustia.digitalocean-fixed-benchmark.v3" && index % 2 === 1,
     });
     summaries.push({
       variant: leg.variant,
@@ -2143,11 +2241,18 @@ async function execute(configFile, providerFile, bundle) {
         finished_at: new Date().toISOString(),
       };
     } else {
-    log("running predeclared candidate-only host stability qualification");
+    const pairedQualification = config.schema === "rustia.digitalocean-fixed-benchmark.v3";
+    log(
+      pairedQualification
+        ? "running predeclared paired relative-stability qualification"
+        : "running predeclared candidate-only host stability qualification",
+    );
     const qualificationStarted = Date.now();
     let qualification;
     try {
-      qualification = await runPilot(config, build, gateFile, gateRecords);
+      qualification = pairedQualification
+        ? await runPairedPilot(config, build, gateFile, gateRecords)
+        : await runPilot(config, build, gateFile, gateRecords);
     } finally {
       phaseTimings.qualification_seconds = Number(
         ((Date.now() - qualificationStarted) / 1000).toFixed(3),
@@ -2334,6 +2439,11 @@ function selfTest() {
     false,
   );
   assert.equal(quantileSorted([1, 2, 3, 4], 0.25), 1.75);
+  assert.deepEqual(pairedPilotOrder(1), ["baseline", "candidate"]);
+  assert.deepEqual(pairedPilotOrder(2), ["candidate", "baseline"]);
+  assert.deepEqual(pairedPilotOrder(5), ["baseline", "candidate"]);
+  assert.equal(relativeSpreadPercent([1, 1.01, 0.99]), (1.01 - 0.99) / 0.99 * 100);
+  assert.throws(() => relativeSpreadPercent([1]));
   assert.equal(matchesHistoryPrecision(1.234568, 1.23456789), true);
   assert.equal(matchesHistoryPrecision(1.23457, 1.23456789), false);
   assert.throws(() => readCpuSampleFromText("cpu0 1 2 3\n", 1));
