@@ -13,6 +13,7 @@ const {
   memoryComparisonCharts,
   memoryHistoryModel,
   memoryHistorySection,
+  optimizationEvidenceSection,
   operationsStatusSection,
   summarizeLanguageTargets,
   wasmTargetRows,
@@ -75,6 +76,25 @@ function main() {
   assert.match(operationsHtml, /2 relevant commits waiting/);
   assert.match(operationsHtml, /They are not timing authorities/);
   assert.match(operationsHtml, /scheduled billing is disabled/);
+
+  const optimizationHtml = optimizationEvidenceSection([{
+    workload: "generic_iteration",
+    createdAt: "2026-08-14T08:00:35.308Z",
+    baselineCommit: "a".repeat(40),
+    candidateCommit: "b".repeat(40),
+    delta: 1.31805462010519,
+    lower: -4.57625251012931,
+    upper: 3.93058467710712,
+    legCount: 8,
+    sampleCount: 808,
+    verdict: "material_regression_excluded",
+    published: true,
+  }]);
+  assert.match(optimizationHtml, /Accepted Optimization Checks/);
+  assert.match(optimizationHtml, /\+1\.32%/);
+  assert.match(optimizationHtml, /-4\.58% to \+3\.93%/);
+  assert.match(optimizationHtml, /Material regression excluded/);
+  assert.match(optimizationHtml, /8 legs · 808 samples/);
 
   assert.deepEqual(
     ["javascript", "koto", "lua54", "luau", "rhai", "roto", "wasm"].map(languageLabel),

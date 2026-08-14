@@ -382,9 +382,11 @@ unreachable suspended-coroutine frames.
    The dense-table, constant field/namecall, shared-string, HotIR, and closure-call slices now have accepted
    Linux evidence; the cached length-boundary slice was exactly gated, falsified (no win on dense or
    sparse), and reverted. Region Engine v1 is implemented as private effect-certified consecutive-instruction
-   metadata with exact deoptimization and deterministic-policy fallback; its controlled DigitalOcean A/B is
-   pending, so it carries no speed claim yet. After that verdict, extend the same verified private HotIR to
-   additional effect/control-flow shapes, pursue iterator/table refinements, add profile-led superinstructions/O2, and only then productionize
+   metadata with exact deoptimization and deterministic-policy fallback. Its accepted controlled DigitalOcean
+   A/B measured +1.3181% candidate ns/unit with a conservative 95% interval of -4.5763% to +3.9306%, excluding
+   a material 5% regression without establishing a speedup. Treat the slice as performance-neutral within the
+   measured interval; next extend verified private HotIR only where profiles identify stronger regions, pursue
+   iterator/table refinements, add profile-led superinstructions/O2, and only then productionize
    type-directed wasm/AOT with guards, deopt, and interpreter-equivalence tests.
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 18 workload entries including
@@ -398,8 +400,9 @@ unreachable suspended-coroutine frames.
 6. **Keep the executable conformance corpus green**. The current repo has 712 executable fixtures covering 511
    behavior refs with no pending rows: 694/493 are Luau 0.709 oracle-backed and 18/18 are offline PUC 5.1.5
    oracle-backed. New engine work should add focused fixtures rather than re-opening pending inventory.
-7. **Maintain benchmark operations** — hosted CI remains validation-only; the operator-started Linode lifecycle
-   is the sole active timing source and must keep its Linux-only completeness and cleanup gates green.
+7. **Maintain benchmark operations** — hosted CI remains validation-only. Operator-started cloud lifecycles are
+   the timing authority: dedicated Linode for complete Linux/wasm matrices and qualified DigitalOcean A/B for
+   fixed-work optimization decisions. Both must keep their provenance, completeness, and cleanup gates green.
 
 **Pre-release gates:** see the "What's next" section below. Object reclamation/limits and deterministic
 decision reset, maintained live-memory accounting, and the shared native/Node-V8 mixed-heap pressure gate are
@@ -574,5 +577,5 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
 
 These span the remaining P1 engine hardening and P4 product/release work. The architecture decisions are
 complete, but implementation is not release-complete. The cross-engine, conformance, and benchmark gates are
-already active; Linode credentials and an explicit operator start remain the external operational prerequisites
-for fresh performance measurements.
+already active; cloud-provider credentials and an explicit operator start remain the external operational
+prerequisites for fresh performance measurements.

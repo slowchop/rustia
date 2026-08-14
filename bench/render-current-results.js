@@ -2382,6 +2382,56 @@ function operationsStatusSection(status) {
   `;
 }
 
+function optimizationEvidenceSection(cohorts) {
+  if (cohorts.length === 0) {
+    return `
+      <section class="panel" id="optimization-checks">
+        <div class="section-head">
+          <div>
+            <h2>Accepted Optimization Checks</h2>
+            <p>No accepted fixed-work A/B comparisons are available yet.</p>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+  const rows = cohorts.slice().reverse();
+  return `
+    <section class="panel" id="optimization-checks">
+      <div class="section-head">
+        <div>
+          <h2>Accepted Optimization Checks</h2>
+          <p>Independent fixed-work A/B evidence. Negative deltas are faster; intervals are the conservative 95% bootstrap envelope. These checks do not replace the complete engine-comparison cohort.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Workload</th><th>Candidate</th><th>Measured delta</th><th>95% interval</th><th>Verdict</th><th>Evidence</th></tr></thead>
+          <tbody>
+            ${rows.map((cohort) => {
+              const deltaClass = cohort.delta < 0 ? "trend trend-good" : cohort.delta > 0 ? "trend trend-bad" : "trend trend-flat";
+              const verdict = cohort.verdict === "material_regression_excluded"
+                ? "Material regression excluded"
+                : cohort.verdict;
+              return `
+                <tr>
+                  <td>${escapeHtml(new Date(cohort.createdAt).toISOString().slice(0, 10))}</td>
+                  <td>${escapeHtml(cohort.workload)}</td>
+                  <td><code>${escapeHtml(cohort.candidateCommit.slice(0, 7))}</code></td>
+                  <td><span class="${deltaClass}">${cohort.delta > 0 ? "+" : ""}${cohort.delta.toFixed(2)}%</span></td>
+                  <td>${cohort.lower.toFixed(2)}% to ${cohort.upper > 0 ? "+" : ""}${cohort.upper.toFixed(2)}%</td>
+                  <td>${escapeHtml(verdict)}</td>
+                  <td>${formatInteger(cohort.legCount)} legs · ${formatInteger(cohort.sampleCount)} samples</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
 function render(data, operationsStatus, wasmResults, wasmDispatchResults, memoryResults, memoryHistory, historyRecords, cohorts, historyBackfills = []) {
   const wasmRows = wasmTargetRows(wasmResults);
   const summary = summarize(data, wasmRows);
@@ -3508,6 +3558,7 @@ function render(data, operationsStatus, wasmResults, wasmDispatchResults, memory
 
     <nav class="nav" aria-label="Targets">
       <a href="#operations-status">Operations Status</a>
+      <a href="#optimization-checks">Optimization Checks</a>
       <a href="#linux-comparison">Linux Comparison</a>
       <a href="#memory">Memory</a>
       <a href="#memory-history">Memory History</a>
@@ -3517,6 +3568,7 @@ function render(data, operationsStatus, wasmResults, wasmDispatchResults, memory
     </nav>
 
     ${operationsStatusSection(operationsStatus)}
+    ${optimizationEvidenceSection(cohorts)}
     ${linuxComparisonSection(summary.linuxComparisonViews)}
     ${memoryResultsSection(memoryResults)}
     ${memoryHistorySection(memoryHistory)}
@@ -3643,6 +3695,7 @@ module.exports = {
   memoryComparisonCharts,
   memoryHistoryModel,
   memoryHistorySection,
+  optimizationEvidenceSection,
   operationsStatusSection,
   summarizeLanguageTargets,
   wasmTargetRows,

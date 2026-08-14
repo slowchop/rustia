@@ -1545,14 +1545,13 @@ async function promoteAcceptedResult(config, state, downloadDirectory) {
   }
 
   const evidenceStage = `${evidenceDestination}.incoming-${state.run_id}`;
-  const historyStage = `${historyDestination}.incoming-${state.run_id}`;
   const generatedFiles = [
     path.join(REPO, "bench/RESULTS.md"),
     path.join(REPO, "bench/current-results.json"),
     path.join(REPO, "bench/current-results.html"),
     path.join(REPO, "bench/CLAIMS.md"),
   ];
-  const snapshots = [historyDestination, ...generatedFiles].map((file) => {
+  const snapshots = generatedFiles.map((file) => {
     if (!fs.existsSync(file)) return { file, existed: false };
     return {
       file,
@@ -1562,17 +1561,13 @@ async function promoteAcceptedResult(config, state, downloadDirectory) {
     };
   });
   let evidenceCommitted = false;
-  let historyCommitted = false;
   try {
     fs.cpSync(evidenceSource, evidenceStage, { recursive: true, errorOnExist: true });
-    fs.copyFileSync(historySource, historyStage, fs.constants.COPYFILE_EXCL);
     throwIfInterrupted();
     state.promotion_started_at = new Date().toISOString();
     saveState(state);
     fs.renameSync(evidenceStage, evidenceDestination);
     evidenceCommitted = true;
-    fs.renameSync(historyStage, historyDestination);
-    historyCommitted = true;
     await run("env", ["-u", "RUSTC_WRAPPER", "just", "gen-current-results"], {
       capture: false,
       announce: true,
@@ -1583,17 +1578,14 @@ async function promoteAcceptedResult(config, state, downloadDirectory) {
     });
   } catch (error) {
     fs.rmSync(evidenceStage, { recursive: true, force: true });
-    fs.rmSync(historyStage, { force: true });
     if (evidenceCommitted) {
       fs.rmSync(evidenceDestination, { recursive: true, force: true });
     }
-    if (historyCommitted) {
-      for (const snapshot of snapshots) {
-        if (snapshot.existed) {
-          writeBytesAtomic(snapshot.file, snapshot.bytes, snapshot.mode);
-        } else {
-          fs.rmSync(snapshot.file, { force: true });
-        }
+    for (const snapshot of snapshots) {
+      if (snapshot.existed) {
+        writeBytesAtomic(snapshot.file, snapshot.bytes, snapshot.mode);
+      } else {
+        fs.rmSync(snapshot.file, { force: true });
       }
     }
     state.promotion_rolled_back_at = new Date().toISOString();
@@ -1604,8 +1596,9 @@ async function promoteAcceptedResult(config, state, downloadDirectory) {
   state.promoted_at = new Date().toISOString();
   saveState(state);
   process.stdout.write(
-    `Accepted evidence promoted to ${path.relative(REPO, evidenceDestination)} and ` +
-      `${config.publication.final_measurements} actual history rows appended.\n`,
+    `Accepted evidence promoted to ${path.relative(REPO, evidenceDestination)}; ` +
+      `${config.publication.final_measurements} actual candidate measurements were retained as sidecars ` +
+      "without replacing the complete public matrix cohort.\n",
   );
   return true;
 }

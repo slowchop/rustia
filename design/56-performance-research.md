@@ -595,7 +595,7 @@ instance destroyed 26 minutes after create. Evidence:
 policy the single-workload rows stay out of public history; the win lands in `bench/RESULTS.md` with the
 next full-matrix cohort. This is the first profile-led bet in this file to survive the controlled host.
 
-### Region Engine v1 — implemented, controlled DigitalOcean gate pending
+### Region Engine v1 — implemented, controlled DigitalOcean gate accepted
 
 The next interpreter slice builds private two-byte-per-PC suffix metadata for
 consecutive instructions whose successful common path has an explicit effect
@@ -620,11 +620,28 @@ may coexist in one function without changing either tier's admission policy.
 Focused tests compare region-on and region-off results and instruction counts,
 pin exact guard-exit error sites, force fuel and coverage fallback, sweep
 deterministic collection intervals, verify primitive-only constant admission,
-and exercise Region Engine alongside HotIR. Local work is deliberately limited
-to correctness/build validation because the developer machine is not a timing
-authority. The performance verdict is pending an exact-commit, paired
-DigitalOcean A/B with checksum, idle, steal, provenance, and confirmed-destroy
-gates; no speed claim is made before that result.
+and exercise Region Engine alongside HotIR. Local work remains deliberately
+limited to correctness/build validation because the developer machine is not a
+timing authority.
+
+The accepted exact-commit DigitalOcean v6 comparison measured baseline
+`7a69d1c6cfea26e41c8cb68d95608e35c53d124e` against candidate
+`b861ee998ebb986b662cd6249e61169f86d685ac` on `generic_iteration` at fixed
+`n=4000`. Four qualification pairs passed the within-order stability gate at a
+maximum 3.5343% spread; the raw cross-order spread of 6.9071% remains recorded
+for audit. The independent eight-leg ABBA/BAAB comparison produced a +1.3181%
+candidate ns/unit point estimate and a conservative 95% interval of -4.5763%
+to +3.9306%. This is `material_regression_excluded`: it rules out the declared
+5% regression, but the interval includes zero and therefore establishes no
+speedup. Checksums matched, all 808 comparison samples are retained, and the
+droplet was confirmed destroyed. Evidence:
+`bench/history/evidence/b861ee998ebb986b662cd6249e61169f86d685ac/analysis.json`.
+
+Region Engine v1 is therefore safe to retain as performance-neutral within the
+measured interval, not as the large jump sought. Further region expansion
+should be profile-led and gated independently; superinstructions, broader
+HotIR/control-flow regions, and lower-overhead hot-loop execution remain the
+more promising routes to a material interpreter gain.
 
 ## Estimate vs C++ Luau
 

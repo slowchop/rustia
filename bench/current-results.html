@@ -1117,6 +1117,7 @@
 
     <nav class="nav" aria-label="Targets">
       <a href="#operations-status">Operations Status</a>
+      <a href="#optimization-checks">Optimization Checks</a>
       <a href="#linux-comparison">Linux Comparison</a>
       <a href="#memory">Memory</a>
       <a href="#memory-history">Memory History</a>
@@ -1163,6 +1164,64 @@
           <p><strong>They are not timing authorities.</strong> Fresh measurements require an explicit qualified-host lifecycle; scheduled billing is disabled.</p>
           <p class="operations-next">Next: Keep the artifact-only publisher healthy and investigate any failed publication before accepting newer public results.</p>
         </article>
+      </div>
+    </section>
+
+
+    <section class="panel" id="optimization-checks">
+      <div class="section-head">
+        <div>
+          <h2>Accepted Optimization Checks</h2>
+          <p>Independent fixed-work A/B evidence. Negative deltas are faster; intervals are the conservative 95% bootstrap envelope. These checks do not replace the complete engine-comparison cohort.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Workload</th><th>Candidate</th><th>Measured delta</th><th>95% interval</th><th>Verdict</th><th>Evidence</th></tr></thead>
+          <tbody>
+
+                <tr>
+                  <td>2026-08-14</td>
+                  <td>generic_iteration</td>
+                  <td><code>b861ee9</code></td>
+                  <td><span class="trend trend-bad">+1.32%</span></td>
+                  <td>-4.58% to +3.93%</td>
+                  <td>Material regression excluded</td>
+                  <td>8 legs · 808 samples</td>
+                </tr>
+
+                <tr>
+                  <td>2026-08-13</td>
+                  <td>generic_iteration</td>
+                  <td><code>f412e2d</code></td>
+                  <td><span class="trend trend-good">-8.45%</span></td>
+                  <td>-9.06% to -7.35%</td>
+                  <td>Material regression excluded</td>
+                  <td>8 legs · 120 samples</td>
+                </tr>
+
+                <tr>
+                  <td>2026-07-20</td>
+                  <td>oop_metamethods</td>
+                  <td><code>f208c12</code></td>
+                  <td><span class="trend trend-good">-65.96%</span></td>
+                  <td>-66.39% to -65.55%</td>
+                  <td>Material regression excluded</td>
+                  <td>8 legs · 120 samples</td>
+                </tr>
+
+                <tr>
+                  <td>2026-07-20</td>
+                  <td>dense_tables</td>
+                  <td><code>ed65077</code></td>
+                  <td><span class="trend trend-good">-2.42%</span></td>
+                  <td>-3.35% to -1.57%</td>
+                  <td>Material regression excluded</td>
+                  <td>8 legs · 120 samples</td>
+                </tr>
+
+          </tbody>
+        </table>
       </div>
     </section>
 

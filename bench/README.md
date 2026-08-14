@@ -358,9 +358,11 @@ accepted comparison must independently exclude. The eight accepted legs use
 the same four-pair treatment. Any declared
 contaminating-process or out-of-budget steal violation discards the whole block. Only
 `material_regression_excluded` permits the same frozen candidate binary to
-append three real rows. An accepted run adds the evidence directory and exact
-append-only history locally, regenerates the history-derived reports, and runs
-the benchmark artifact checks. An inconclusive, regressing, unstable, or
+produce three real candidate rows, retained as raw sidecars in the evidence
+directory. The local promotion leaves the complete single-revision public
+matrix history unchanged, regenerates the dashboard with the accepted A/B
+comparison, and runs the benchmark artifact checks. An inconclusive,
+regressing, unstable, or
 contaminated run leaves diagnostics under `.rustia-benchmark-state/` and does
 not alter public history.
 

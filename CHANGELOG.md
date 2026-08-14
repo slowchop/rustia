@@ -17,8 +17,11 @@ Current unpublished workspace version: `0.0.1`.
   boundaries retain the ordinary interpreter path. Focused equivalence tests
   cover successful regions, guard exits and source locations, fuel and
   coverage fallback, deterministic collection cadence, and coexistence with
-  HotIR. Performance remains unclaimed until the committed candidate passes a
-  controlled DigitalOcean A/B.
+  HotIR. The accepted controlled DigitalOcean A/B measured +1.3181% candidate
+  ns/unit with a conservative 95% interval from -4.5763% to +3.9306%. That
+  excludes a material 5% regression but does not establish a speedup; evidence
+  is retained under
+  `bench/history/evidence/b861ee998ebb986b662cd6249e61169f86d685ac/`.
 
 - Benchmark operations now have a versioned policy, generated machine-readable
   freshness status, and a prominent generated-dashboard notice. The status
@@ -54,6 +57,12 @@ Current unpublished workspace version: `0.0.1`.
   instability; raw cross-order spread remains recorded for audit. The 5%
   stability ceiling, 0.5% timed-steal ceiling, and independent eight-leg
   acceptance test are unchanged.
+
+- Fixed-work optimization acceptance now promotes evidence without appending a
+  partial single-workload cohort to `bench/history/runs.jsonl`. The public
+  dashboard gains an accepted-optimization table for the exact A/B delta,
+  conservative confidence interval, verdict, and sample count while preserving
+  the latest complete cross-engine matrix.
 
 - DigitalOcean's paired acceptance protocol now rejects an irrevocably unstable
   host as soon as the observed ratio spread exceeds its frozen limit. Protocol
