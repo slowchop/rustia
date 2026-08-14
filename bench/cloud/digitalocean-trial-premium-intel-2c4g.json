@@ -2,14 +2,14 @@
   "schema": "rustia.digitalocean-fixed-benchmark.v2",
   "provider": {
     "context": "rustia-bench",
-    "region": "nyc3",
+    "region": "sfo3",
     "image_slug": "ubuntu-24-04-x64",
     "size": {
       "description": "Basic Intel",
       "vcpus": 2,
-      "memory_mib": 4096,
-      "disk_gib": 80,
-      "max_hourly_price_usd": 0.04167
+      "memory_mib": 8192,
+      "disk_gib": 160,
+      "max_hourly_price_usd": 0.07143
     },
     "max_runtime_minutes": 90
   },
