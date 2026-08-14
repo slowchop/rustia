@@ -1710,6 +1710,19 @@ function relativeSpreadPercent(values) {
   return ((Math.max(...values) - Math.min(...values)) / Math.min(...values)) * 100;
 }
 
+function pairedQualificationResult(config, pairs) {
+  const ratios = pairs.map((pair) => pair.candidate_over_baseline_ratio);
+  const spread = relativeSpreadPercent(ratios);
+  return {
+    schema: "rustia.bench.cloud-paired-qualification.v1",
+    pilot_pairs: pairs,
+    ratio_spread_percent: spread,
+    maximum_ratio_spread_percent: config.qualification.max_ratio_spread_percent,
+    passed: spread <= config.qualification.max_ratio_spread_percent,
+    note: "qualification-only paired runs; never accepted as A/B evidence or public history",
+  };
+}
+
 async function runPairedPilot(config, build, gateFile, gateRecords) {
   fs.mkdirSync(PILOT, { recursive: true });
   const pairs = [];
@@ -1750,25 +1763,20 @@ async function runPairedPilot(config, build, gateFile, gateRecords) {
       candidate_over_baseline_ratio:
         summaries.candidate.harness_median / summaries.baseline.harness_median,
     });
+    if (pairs.length >= 2) {
+      const partialResult = pairedQualificationResult(config, pairs);
+      if (!partialResult.passed) {
+        writeJson(path.join(PILOT, "qualification.json"), partialResult);
+        throw new ControlledStop(
+          "host_qualification_failed",
+          `paired candidate/baseline ratio spread ${partialResult.ratio_spread_percent.toFixed(3)}% exceeded ` +
+            `${config.qualification.max_ratio_spread_percent}% after ${pairs.length} pairs`,
+        );
+      }
+    }
   }
-  const ratios = pairs.map((pair) => pair.candidate_over_baseline_ratio);
-  const spread = relativeSpreadPercent(ratios);
-  const result = {
-    schema: "rustia.bench.cloud-paired-qualification.v1",
-    pilot_pairs: pairs,
-    ratio_spread_percent: spread,
-    maximum_ratio_spread_percent: config.qualification.max_ratio_spread_percent,
-    passed: spread <= config.qualification.max_ratio_spread_percent,
-    note: "qualification-only paired runs; never accepted as A/B evidence or public history",
-  };
+  const result = pairedQualificationResult(config, pairs);
   writeJson(path.join(PILOT, "qualification.json"), result);
-  if (!result.passed) {
-    throw new ControlledStop(
-      "host_qualification_failed",
-      `paired candidate/baseline ratio spread ${spread.toFixed(3)}% exceeded ` +
-        `${config.qualification.max_ratio_spread_percent}%`,
-    );
-  }
   return result;
 }
 
@@ -2498,6 +2506,26 @@ function selfTest() {
   assert.deepEqual(pairedPilotOrder(5), ["baseline", "candidate"]);
   assert.equal(relativeSpreadPercent([1, 1.01, 0.99]), (1.01 - 0.99) / 0.99 * 100);
   assert.throws(() => relativeSpreadPercent([1]));
+  assert.equal(
+    pairedQualificationResult(
+      { qualification: { max_ratio_spread_percent: 3 } },
+      [
+        { candidate_over_baseline_ratio: 0.99 },
+        { candidate_over_baseline_ratio: 1.01 },
+      ],
+    ).passed,
+    true,
+  );
+  assert.equal(
+    pairedQualificationResult(
+      { qualification: { max_ratio_spread_percent: 3 } },
+      [
+        { candidate_over_baseline_ratio: 0.95 },
+        { candidate_over_baseline_ratio: 1.05 },
+      ],
+    ).passed,
+    false,
+  );
   assert.equal(matchesHistoryPrecision(1.234568, 1.23456789), true);
   assert.equal(matchesHistoryPrecision(1.23457, 1.23456789), false);
   assert.throws(() => readCpuSampleFromText("cpu0 1 2 3\n", 1));
