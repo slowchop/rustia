@@ -2,7 +2,7 @@
   "schema": "rustia.digitalocean-fixed-benchmark.v4",
   "provider": {
     "context": "rustia-bench",
-    "region": "fra1",
+    "region": "ams3",
     "image_slug": "ubuntu-24-04-x64",
     "size": {
       "description": "Basic Intel",
