@@ -71,6 +71,13 @@ function fail(message) {
   throw new Error(message);
 }
 
+function usesPairedDigitalOceanProtocol(config) {
+  return [
+    "rustia.digitalocean-fixed-benchmark.v3",
+    "rustia.digitalocean-fixed-benchmark.v4",
+  ].includes(config.schema);
+}
+
 function log(message) {
   const line = `[${new Date().toISOString()}] ${message}`;
   process.stdout.write(`${line}\n`);
@@ -159,6 +166,7 @@ function validateConfig(config) {
   if (
     config.schema !== "rustia.digitalocean-fixed-benchmark.v2" &&
     config.schema !== "rustia.digitalocean-fixed-benchmark.v3" &&
+    config.schema !== "rustia.digitalocean-fixed-benchmark.v4" &&
     config.schema !== "rustia.linode-fixed-benchmark.v1" &&
     config.schema !== "rustia.linode-fixed-benchmark.v2" &&
     config.schema !== "rustia.vultr-fixed-benchmark.v1" &&
@@ -292,7 +300,7 @@ function validateConfig(config) {
   }
   requireInteger(config.measurement.fixed_n, "measurement.fixed_n", 1);
   requireInteger(config.measurement.repetitions, "measurement.repetitions", 1);
-  if (config.schema === "rustia.digitalocean-fixed-benchmark.v3") {
+  if (usesPairedDigitalOceanProtocol(config)) {
     requireExactKeys(
       config.qualification,
       ["paired_pilot_rounds", "max_ratio_spread_percent"],
@@ -310,6 +318,29 @@ function validateConfig(config) {
   }
   requireInteger(config.host_gate.benchmark_cpu, "host_gate.benchmark_cpu", 0);
   requireInteger(config.host_gate.maximum_steal_ticks, "host_gate.maximum_steal_ticks", 0);
+  if (config.schema === "rustia.digitalocean-fixed-benchmark.v4") {
+    requireExactKeys(
+      config.host_gate,
+      [
+        "benchmark_cpu",
+        "cooldown_seconds",
+        "idle_window_seconds",
+        "minimum_idle_percent",
+        "maximum_load_1m",
+        "maximum_steal_ticks",
+        "maximum_timed_steal_percent",
+        "wait_timeout_seconds",
+      ],
+      "host_gate",
+    );
+    requireNumber(config.host_gate.maximum_timed_steal_percent, "host_gate.maximum_timed_steal_percent", 0);
+    if (
+      config.host_gate.maximum_steal_ticks !== 0 ||
+      config.host_gate.maximum_timed_steal_percent !== 0.1
+    ) {
+      fail("DigitalOcean v4 requires zero idle steal and a 0.1% timed steal ceiling");
+    }
+  }
   if (config.schema === "rustia.linode-fixed-benchmark.v2") {
     validateLinodeHostGate(config);
   }
@@ -607,7 +638,10 @@ function cpuDelta(before, after) {
 }
 
 function timedStealGatePasses(config, delta) {
-  if (config.schema === "rustia.linode-fixed-benchmark.v2") {
+  if (
+    config.schema === "rustia.linode-fixed-benchmark.v2" ||
+    config.schema === "rustia.digitalocean-fixed-benchmark.v4"
+  ) {
     return (
       delta.steal_ticks * 100 <=
       config.host_gate.maximum_timed_steal_percent * delta.total_ticks
@@ -1755,7 +1789,7 @@ async function runComparison(config, build, evidenceDirectory, gateFile, gateRec
       gateRecords,
       acceptedBlock: true,
       skipPreLegGate:
-        config.schema === "rustia.digitalocean-fixed-benchmark.v3" && index % 2 === 1,
+        usesPairedDigitalOceanProtocol(config) && index % 2 === 1,
     });
     summaries.push({
       variant: leg.variant,
@@ -2241,7 +2275,7 @@ async function execute(configFile, providerFile, bundle) {
         finished_at: new Date().toISOString(),
       };
     } else {
-    const pairedQualification = config.schema === "rustia.digitalocean-fixed-benchmark.v3";
+    const pairedQualification = usesPairedDigitalOceanProtocol(config);
     log(
       pairedQualification
         ? "running predeclared paired relative-stability qualification"
@@ -2435,6 +2469,26 @@ function selfTest() {
         host_gate: { maximum_steal_ticks: 0, maximum_timed_steal_percent: 0.1 },
       },
       { total_ticks: 1000, steal_ticks: 1 },
+    ),
+    false,
+  );
+  assert.equal(
+    timedStealGatePasses(
+      {
+        schema: "rustia.digitalocean-fixed-benchmark.v4",
+        host_gate: { maximum_steal_ticks: 0, maximum_timed_steal_percent: 0.1 },
+      },
+      { total_ticks: 1310, steal_ticks: 1 },
+    ),
+    true,
+  );
+  assert.equal(
+    timedStealGatePasses(
+      {
+        schema: "rustia.digitalocean-fixed-benchmark.v4",
+        host_gate: { maximum_steal_ticks: 0, maximum_timed_steal_percent: 0.1 },
+      },
+      { total_ticks: 1000, steal_ticks: 2 },
     ),
     false,
   );

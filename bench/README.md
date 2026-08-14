@@ -344,11 +344,13 @@ the corresponding price-ceiling estimate. A provider or API outage can still
 delay confirmed deletion, so cleanup failure remains a hard command error
 rather than being reported as a stopped bill.
 
-Qualification sidecars never enter the accepted A/B analysis. DigitalOcean v3
+Qualification sidecars never enter the accepted A/B analysis. DigitalOcean v4
 admits four counterbalanced baseline/candidate pairs by the spread of their
 relative ratios, not by absolute speed across minute-separated samples. Each
 pair gets one committed idle window and cooldown; its second leg follows
-immediately, and both timed legs retain the contaminant and steal checks. The
+immediately, and both timed legs retain the contaminant and steal checks. Idle
+admission requires zero steal; a timed leg permits at most 0.1% steal, the same
+bounded rule already accepted for the dedicated Linode v2 protocol. The
 eight accepted legs use the same four-pair treatment. Any declared
 contaminating-process or out-of-budget steal violation discards the whole block. Only
 `material_regression_excluded` permits the same frozen candidate binary to

@@ -104,6 +104,13 @@ function requireExactKeys(value, expected, location) {
   }
 }
 
+function usesPairedRelativeProtocol(config) {
+  return [
+    "rustia.digitalocean-fixed-benchmark.v3",
+    "rustia.digitalocean-fixed-benchmark.v4",
+  ].includes(config.schema);
+}
+
 function validateConfig(value) {
   const root = requireObject(value, "config");
   requireExactKeys(
@@ -113,7 +120,8 @@ function validateConfig(value) {
   );
   if (
     root.schema !== "rustia.digitalocean-fixed-benchmark.v2" &&
-    root.schema !== "rustia.digitalocean-fixed-benchmark.v3"
+    root.schema !== "rustia.digitalocean-fixed-benchmark.v3" &&
+    root.schema !== "rustia.digitalocean-fixed-benchmark.v4"
   ) {
     fail("unsupported cloud benchmark config schema");
   }
@@ -236,7 +244,7 @@ function validateConfig(value) {
   }
 
   const qualification = requireObject(root.qualification, "config.qualification");
-  if (root.schema === "rustia.digitalocean-fixed-benchmark.v3") {
+  if (usesPairedRelativeProtocol(root)) {
     requireExactKeys(
       qualification,
       ["paired_pilot_rounds", "max_ratio_spread_percent"],
@@ -268,19 +276,19 @@ function validateConfig(value) {
   }
 
   const gate = requireObject(root.host_gate, "config.host_gate");
-  requireExactKeys(
-    gate,
-    [
-      "benchmark_cpu",
-      "cooldown_seconds",
-      "idle_window_seconds",
-      "minimum_idle_percent",
-      "maximum_load_1m",
-      "maximum_steal_ticks",
-      "wait_timeout_seconds",
-    ],
-    "config.host_gate",
-  );
+  const gateKeys = [
+    "benchmark_cpu",
+    "cooldown_seconds",
+    "idle_window_seconds",
+    "minimum_idle_percent",
+    "maximum_load_1m",
+    "maximum_steal_ticks",
+    "wait_timeout_seconds",
+  ];
+  if (root.schema === "rustia.digitalocean-fixed-benchmark.v4") {
+    gateKeys.push("maximum_timed_steal_percent");
+  }
+  requireExactKeys(gate, gateKeys, "config.host_gate");
   requireInteger(gate.benchmark_cpu, "config.host_gate.benchmark_cpu", 0);
   requireInteger(gate.cooldown_seconds, "config.host_gate.cooldown_seconds", 1);
   requireInteger(gate.idle_window_seconds, "config.host_gate.idle_window_seconds", 1);
@@ -290,6 +298,16 @@ function validateConfig(value) {
   }
   requireNumber(gate.maximum_load_1m, "config.host_gate.maximum_load_1m", 0);
   requireInteger(gate.maximum_steal_ticks, "config.host_gate.maximum_steal_ticks", 0);
+  if (root.schema === "rustia.digitalocean-fixed-benchmark.v4") {
+    requireNumber(
+      gate.maximum_timed_steal_percent,
+      "config.host_gate.maximum_timed_steal_percent",
+      0,
+    );
+    if (gate.maximum_steal_ticks !== 0 || gate.maximum_timed_steal_percent !== 0.1) {
+      fail("DigitalOcean v4 requires zero idle steal and a 0.1% timed steal ceiling");
+    }
+  }
   requireInteger(gate.wait_timeout_seconds, "config.host_gate.wait_timeout_seconds", 1);
 
   const publication = requireObject(root.publication, "config.publication");
@@ -1385,7 +1403,7 @@ function diagnosticSummary(config, state, downloadDirectory) {
     status.status === "diagnostic_complete" && qualification?.passed === true;
   const extraAcceptanceLegs =
     config.measurement.run_order.length + config.publication.final_measurements;
-  const qualificationLegs = config.schema === "rustia.digitalocean-fixed-benchmark.v3"
+  const qualificationLegs = usesPairedRelativeProtocol(config)
     ? config.qualification.paired_pilot_rounds * 2
     : config.qualification.candidate_pilot_legs;
   const projectedAcceptanceSeconds =
@@ -2203,6 +2221,12 @@ async function selfTest(config) {
     validateConfig({
       ...config,
       publication: { ...config.publication, mode: "unsafe" },
+    }),
+  );
+  assert.throws(() =>
+    validateConfig({
+      ...config,
+      host_gate: { ...config.host_gate, maximum_timed_steal_percent: 0.2 },
     }),
   );
   assert.throws(() =>
