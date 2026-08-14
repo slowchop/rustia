@@ -2116,7 +2116,7 @@ async function selfTest(config) {
       memory: 4096,
       disk: 25,
       available: true,
-      regions: ["ams3"],
+      regions: ["lon1"],
       price_hourly: 0.0625,
     },
     {
@@ -2126,7 +2126,7 @@ async function selfTest(config) {
       memory: 4096,
       disk: 80,
       available: true,
-      regions: ["ams3"],
+      regions: ["lon1"],
       price_hourly: 0.0357,
     },
     {
@@ -2136,7 +2136,7 @@ async function selfTest(config) {
       memory: 4096,
       disk: 80,
       available: true,
-      regions: ["ams3"],
+      regions: ["lon1"],
       price_hourly: 0.04167,
     },
     {
@@ -2146,7 +2146,7 @@ async function selfTest(config) {
       memory: 8192,
       disk: 160,
       available: true,
-      regions: ["ams3"],
+      regions: ["lon1"],
       price_hourly: 0.07143,
     },
     {
@@ -2156,7 +2156,7 @@ async function selfTest(config) {
       memory: 8192,
       disk: 160,
       available: true,
-      regions: ["ams3"],
+      regions: ["lon1"],
       price_hourly: 0.08333,
     },
   ];
@@ -2178,12 +2178,12 @@ async function selfTest(config) {
   assert.equal(selectSize(fixture, basicTrial).slug, "s-2vcpu-4gb");
   assert.equal(selectSize(fixture, premiumTrial).slug, "s-4vcpu-8gb-intel");
   const plannedShape = {
-    region: "ams3",
+    region: "lon1",
     image: { id: 123 },
     size: { slug: "s-4vcpu-8gb-intel", vcpus: 4, memory_mib: 8192, disk_gib: 160 },
   };
   const actualShape = {
-    region: { slug: "ams3" },
+    region: { slug: "lon1" },
     image: { id: 123 },
     size_slug: "s-4vcpu-8gb-intel",
     vcpus: 4,
