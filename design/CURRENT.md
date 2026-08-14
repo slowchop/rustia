@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-07-29.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-08-14.)
 
 ## One-paragraph state
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
@@ -381,8 +381,10 @@ unreachable suspended-coroutine frames.
 3. **Continue measured performance work** using [`56-performance-research.md`](56-performance-research.md).
    The dense-table, constant field/namecall, shared-string, HotIR, and closure-call slices now have accepted
    Linux evidence; the cached length-boundary slice was exactly gated, falsified (no win on dense or
-   sparse), and reverted. Next extend the same verified private HotIR to additional effect/control-flow shapes, pursue
-   iterator/table refinements, add profile-led superinstructions/O2, and only then productionize
+   sparse), and reverted. Region Engine v1 is implemented as private effect-certified consecutive-instruction
+   metadata with exact deoptimization and deterministic-policy fallback; its controlled DigitalOcean A/B is
+   pending, so it carries no speed claim yet. After that verdict, extend the same verified private HotIR to
+   additional effect/control-flow shapes, pursue iterator/table refinements, add profile-led superinstructions/O2, and only then productionize
    type-directed wasm/AOT with guards, deopt, and interpreter-equivalence tests.
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 18 workload entries including

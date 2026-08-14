@@ -8,6 +8,18 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- Region Engine v1 precomputes private side metadata for consecutive,
+  effect-certified primitive-constant, register-bookkeeping, guarded-numeric,
+  and guarded dense-array instructions. One region admission amortizes the
+  interpreter's repeated policy and dispatch checks while keeping public
+  bytecode authoritative. Dynamic guard misses resume at the exact failing
+  instruction, and fuel, coverage, allocation-debt, and deterministic-GC
+  boundaries retain the ordinary interpreter path. Focused equivalence tests
+  cover successful regions, guard exits and source locations, fuel and
+  coverage fallback, deterministic collection cadence, and coexistence with
+  HotIR. Performance remains unclaimed until the committed candidate passes a
+  controlled DigitalOcean A/B.
+
 - Benchmark operations now have a versioned policy, generated machine-readable
   freshness status, and a prominent generated-dashboard notice. The status
   records pending Rustia performance commits while explicitly marking current-

@@ -11,6 +11,7 @@ mod heap;
 mod hot_ir;
 pub mod number;
 pub mod profile;
+mod region;
 mod value;
 pub mod vm;
 

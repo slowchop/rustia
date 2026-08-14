@@ -21,6 +21,10 @@ use crate::hot_ir::{recognize_hot_ir_loops, HotIr, HotIrNumber, HotIrOpKind, Hot
 use crate::hot_ir::{HotIrArrayWrite, HotIrCellClear, HotIrNumberId, HotIrOp, HotIrRegisterWrite};
 use crate::number::{binary, canonicalize_number, NumericOp};
 use crate::profile::{GuestSurface, Profile};
+use crate::region::{
+    build_common_region_map, common_region_at, CommonRegion, COMMON_REGION_CANDIDATE,
+    REGION_OPCODE_CANDIDATE,
+};
 use crate::value::{Value, ValueKind};
 use smallvec::SmallVec;
 use std::cell::RefCell;
@@ -89,25 +93,6 @@ const OPCODE_FUEL_OR_SPECIAL: [u8; OPCODE_TAG_SPACE] = {
     costs[Opcode::SetTableKs as usize] = 0;
     costs[Opcode::NameCall as usize] = 0;
     costs
-};
-
-// Opcodes `try_common_instruction` can serve without the slow path's root
-// refresh, fuel charging, or collection polling. A single indexed load stays
-// cheaper than a compare chain as the set grows.
-const COMMON_FAST_PATH_CANDIDATE: [bool; OPCODE_TAG_SPACE] = {
-    let mut candidates = [false; OPCODE_TAG_SPACE];
-    candidates[Opcode::Add as usize] = true;
-    candidates[Opcode::Sub as usize] = true;
-    candidates[Opcode::Mul as usize] = true;
-    candidates[Opcode::Div as usize] = true;
-    candidates[Opcode::FloorDiv as usize] = true;
-    candidates[Opcode::Mod as usize] = true;
-    candidates[Opcode::Pow as usize] = true;
-    candidates[Opcode::GetIndex as usize] = true;
-    candidates[Opcode::SetIndex as usize] = true;
-    candidates[Opcode::Move as usize] = true;
-    candidates[Opcode::ClearLocalCell as usize] = true;
-    candidates
 };
 
 /// Runtime chunk compiler for `loadstring`. The VM passes its own [`Profile`]
@@ -510,6 +495,8 @@ pub struct Vm {
     #[cfg(test)]
     hot_ir_mode: HotIrTestMode,
     #[cfg(test)]
+    region_mode: RegionTestMode,
+    #[cfg(test)]
     closure_call_mode: ClosureCallTestMode,
 }
 
@@ -620,6 +607,13 @@ enum HotIrTestMode {
 
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RegionTestMode {
+    Off,
+    Auto,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ClosureCallTestMode {
     Off,
     Auto,
@@ -645,6 +639,12 @@ struct LoadedProgram {
     hot_ir_iterations: u64,
     #[cfg(test)]
     hot_ir_guard_exits: u64,
+    #[cfg(test)]
+    region_entries: u64,
+    #[cfg(test)]
+    region_instructions: u64,
+    #[cfg(test)]
+    region_guard_exits: u64,
     #[cfg(test)]
     closure_call_cache_fills: u64,
     #[cfg(test)]
@@ -930,6 +930,12 @@ impl LoadedProgram {
             #[cfg(test)]
             hot_ir_guard_exits: 0,
             #[cfg(test)]
+            region_entries: 0,
+            #[cfg(test)]
+            region_instructions: 0,
+            #[cfg(test)]
+            region_guard_exits: 0,
+            #[cfg(test)]
             closure_call_cache_fills: 0,
             #[cfg(test)]
             closure_call_prototype_hits: 0,
@@ -1066,6 +1072,26 @@ impl LoadedProgram {
         }
     }
 
+    fn common_region(&self, prototype: Option<u32>, pc: usize) -> Option<CommonRegion> {
+        match prototype {
+            Some(prototype) => self
+                .function_inline_caches
+                .get(prototype as usize)?
+                .common_region(pc),
+            None => self.main_inline_caches.common_region(pc),
+        }
+    }
+
+    fn has_common_regions(&self, prototype: Option<u32>) -> bool {
+        match prototype {
+            Some(prototype) => self
+                .function_inline_caches
+                .get(prototype as usize)
+                .is_some_and(FunctionInlineCaches::has_common_regions),
+            None => self.main_inline_caches.has_common_regions(),
+        }
+    }
+
     fn constant_atom(&self, index: usize) -> Option<u32> {
         self.constant_atoms.get(index).copied()?.checked_sub(1)
     }
@@ -1111,6 +1137,7 @@ struct FunctionInlineCaches {
     #[allow(clippy::box_collection)]
     closure_call_entries: Option<Box<Vec<ClosureCallInlineCache>>>,
     leaf_call_plan: Option<LeafCallPlan>,
+    common_region_by_pc: Option<Box<[u16]>>,
     hot_ir_by_pc: Option<Box<[u32]>>,
     hot_irs: Vec<Arc<HotIr>>,
 }
@@ -1120,6 +1147,12 @@ struct HotIrInputs {
     index_register: u8,
     visible_register: u8,
     next: f64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CommonRegionOutcome {
+    Complete { next_pc: usize },
+    GuardExit { pc: usize },
 }
 
 impl FunctionInlineCaches {
@@ -1136,6 +1169,7 @@ impl FunctionInlineCaches {
             })
             .collect();
         let hot_irs = recognize_hot_ir_loops(program, function);
+        let common_region_by_pc = build_common_region_map(program, function);
         let hot_ir_by_pc = if hot_irs.is_empty() {
             None
         } else {
@@ -1155,6 +1189,7 @@ impl FunctionInlineCaches {
             native_call_entries: Vec::new(),
             closure_call_entries: None,
             leaf_call_plan,
+            common_region_by_pc,
             hot_ir_by_pc,
             hot_irs,
         }
@@ -1175,6 +1210,9 @@ impl FunctionInlineCaches {
         if let Some(by_pc) = &self.hot_ir_by_pc {
             usage.add_boxed_slice(by_pc);
         }
+        if let Some(by_pc) = &self.common_region_by_pc {
+            usage.add_boxed_slice(by_pc);
+        }
         usage.add_vec(&self.hot_irs);
         for hot_ir in &self.hot_irs {
             let bytes = hot_ir.memory_bytes();
@@ -1185,6 +1223,16 @@ impl FunctionInlineCaches {
     fn hot_ir(&self, pc: usize) -> Option<Arc<HotIr>> {
         let index = *self.hot_ir_by_pc.as_ref()?.get(pc)?;
         (index != u32::MAX).then(|| self.hot_irs.get(index as usize).cloned())?
+    }
+
+    #[inline]
+    fn common_region(&self, pc: usize) -> Option<CommonRegion> {
+        common_region_at(self.common_region_by_pc.as_deref(), pc)
+    }
+
+    #[inline]
+    fn has_common_regions(&self) -> bool {
+        self.common_region_by_pc.is_some()
     }
 
     fn table_inline_cache(&self, pc: usize) -> Option<TableStringInlineCache> {
@@ -2183,6 +2231,8 @@ impl Vm {
             #[cfg(test)]
             hot_ir_mode: HotIrTestMode::Auto,
             #[cfg(test)]
+            region_mode: RegionTestMode::Auto,
+            #[cfg(test)]
             closure_call_mode: ClosureCallTestMode::Auto,
         };
         vm.sync_control_memory();
@@ -2195,6 +2245,18 @@ impl Vm {
         #[cfg(test)]
         {
             self.hot_ir_mode != HotIrTestMode::Off
+        }
+        #[cfg(not(test))]
+        {
+            true
+        }
+    }
+
+    #[inline]
+    fn region_enabled(&self) -> bool {
+        #[cfg(test)]
+        {
+            self.region_mode != RegionTestMode::Off
         }
         #[cfg(not(test))]
         {
@@ -3312,6 +3374,11 @@ impl Vm {
                 }));
             }
 
+            let common_regions_enabled = self.region_enabled()
+                && program_id.is_some_and(|program_id| {
+                    self.has_common_regions(program_id, context.prototype)
+                });
+
             let allow_stackless_self_calls = resumed.is_none();
             let stackless_recursion_limit = self.stackless_recursion_limit();
             let mut stackless_self_calls;
@@ -3522,7 +3589,7 @@ impl Vm {
 
                 let loop_result = (|| -> VmFlowResult<ReturnValues> {
                     loop {
-                        let instruction = *function.code.get(pc).ok_or_else(|| {
+                        let mut instruction = *function.code.get(pc).ok_or_else(|| {
                             Error::new(ErrorKind::InvalidProgram {
                                 reason: "program counter ran off the end of the function",
                             })
@@ -3599,13 +3666,72 @@ impl Vm {
                         }
 
                         let is_common_fast_path_candidate =
-                            COMMON_FAST_PATH_CANDIDATE[instruction.op as usize];
-                        let can_try_common_fast_path = is_common_fast_path_candidate
+                            COMMON_REGION_CANDIDATE[instruction.op as usize];
+                        let is_region_opcode_candidate = common_regions_enabled
+                            && REGION_OPCODE_CANDIDATE[instruction.op as usize];
+                        let next_is_region_opcode_candidate = is_region_opcode_candidate
+                            && function
+                                .code
+                                .get(pc.saturating_add(1))
+                                .is_some_and(|next| REGION_OPCODE_CANDIDATE[next.op as usize]);
+                        let mut region_guard_exit = false;
+                        if is_region_opcode_candidate
+                            && next_is_region_opcode_candidate
+                            && fuel.state.fuel.is_none()
+                            && !self.settings.enable_conformance_coverage
+                            && !self.heap.has_allocation_debt()
+                        {
+                            if let Some(program_id) = program_id {
+                                if let Some(region) =
+                                    self.common_region(program_id, context.prototype, pc)
+                                {
+                                    if !self.weak_collection_due_within(region.instruction_count())
+                                    {
+                                        match self.try_common_region(
+                                            program,
+                                            function,
+                                            program_id,
+                                            region,
+                                            &mut registers,
+                                            &mut register_cells,
+                                        )? {
+                                            CommonRegionOutcome::Complete { next_pc } => {
+                                                pc = next_pc;
+                                                continue;
+                                            }
+                                            CommonRegionOutcome::GuardExit { pc: exit_pc } => {
+                                                pc = exit_pc;
+                                                instruction = *function.code.get(pc).ok_or_else(|| {
+                                                    Error::new(ErrorKind::InvalidProgram {
+                                                        reason: "region guard exited beyond function code",
+                                                    })
+                                                    .at_pc(pc)
+                                                })?;
+                                                self.update_current_gc_roots(
+                                                    &registers,
+                                                    &register_cells,
+                                                    &varargs,
+                                                    &pending_return_prefixes,
+                                                );
+                                                region_guard_exit = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        let can_try_common_fast_path = !region_guard_exit
+                            && is_common_fast_path_candidate
                             && fuel.state.fuel.is_none()
                             && !self.settings.enable_conformance_coverage
                             && !self.heap.has_allocation_debt()
                             && !self.weak_collection_due_within(1);
-                        if can_try_common_fast_path {
+                        if region_guard_exit {
+                            // The region already performed this instruction's
+                            // accounting and refreshed roots before deopt. Run
+                            // only its semantic implementation below.
+                        } else if can_try_common_fast_path {
                             self.executed_instructions = self.executed_instructions.wrapping_add(1);
                             if self
                                 .try_common_instruction(
@@ -8196,6 +8322,103 @@ impl Vm {
         }
     }
 
+    #[inline(always)]
+    fn try_region_instruction(
+        &mut self,
+        program: &Program,
+        program_id: u32,
+        registers: &mut [Value],
+        register_cells: &mut [Option<u32>],
+        instruction: Instruction,
+    ) -> Result<bool> {
+        let constant_index = match instruction.op {
+            Opcode::LoadConst => Some(usize::from(instruction.c)),
+            Opcode::LoadConstWide if instruction.aux >= 0 => Some(instruction.aux as usize),
+            Opcode::LoadConstWide => {
+                return Err(Error::new(ErrorKind::InvalidProgram {
+                    reason: "negative wide constant index",
+                }));
+            }
+            _ => None,
+        };
+        if let Some(constant_index) = constant_index {
+            if !matches!(
+                program.constants().get(constant_index),
+                Some(Constant::Nil | Constant::Boolean(_) | Constant::Number(_))
+            ) {
+                return Ok(false);
+            }
+            let value = self.load_constant(program, Some(program_id), constant_index)?;
+            set_register(registers, instruction.a, value)?;
+            return Ok(true);
+        }
+        self.try_common_instruction(registers, register_cells, instruction)
+    }
+
+    /// Execute a preverified consecutive region under one policy admission.
+    /// Each operation commits in source order. A dynamic guard miss has not
+    /// mutated the current instruction, so only that instruction deoptimizes
+    /// through the semantic dispatch below the caller.
+    #[inline]
+    fn try_common_region(
+        &mut self,
+        program: &Program,
+        function: &Function,
+        program_id: u32,
+        region: CommonRegion,
+        registers: &mut [Value],
+        register_cells: &mut [Option<u32>],
+    ) -> Result<CommonRegionOutcome> {
+        #[cfg(not(test))]
+        let _ = program_id;
+        let instructions = function
+            .code
+            .get(region.start_pc..region.end_pc())
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "common region extends beyond function code",
+                })
+                .at_pc(region.start_pc)
+            })?;
+
+        for (offset, instruction) in instructions.iter().copied().enumerate() {
+            let pc = region.start_pc + offset;
+            match self.try_region_instruction(
+                program,
+                program_id,
+                registers,
+                register_cells,
+                instruction,
+            ) {
+                Ok(true) => {}
+                Ok(false) => {
+                    let instruction_count = offset as u64 + 1;
+                    self.executed_instructions =
+                        self.executed_instructions.wrapping_add(instruction_count);
+                    #[cfg(test)]
+                    self.record_region_execution(program_id, instruction_count, true);
+                    return Ok(CommonRegionOutcome::GuardExit { pc });
+                }
+                Err(error) => {
+                    let instruction_count = offset as u64 + 1;
+                    self.executed_instructions =
+                        self.executed_instructions.wrapping_add(instruction_count);
+                    #[cfg(test)]
+                    self.record_region_execution(program_id, instruction_count, true);
+                    return Err(attach_instruction_source(program, function, pc, error));
+                }
+            }
+        }
+
+        let instruction_count = region.instruction_count();
+        self.executed_instructions = self.executed_instructions.wrapping_add(instruction_count);
+        #[cfg(test)]
+        self.record_region_execution(program_id, instruction_count, false);
+        Ok(CommonRegionOutcome::Complete {
+            next_pc: region.end_pc(),
+        })
+    }
+
     /// Execute as many complete, policy-invisible HotIR iterations as possible. Every fallible
     /// operation and effect operand is evaluated before the loop index, registers, cells, or
     /// table are mutated, so a failed guard resumes at the original `ForLoop` without repair.
@@ -9912,6 +10135,23 @@ impl Vm {
         self.dynamic_programs.get(program_id)?.hot_ir(prototype, pc)
     }
 
+    fn common_region(
+        &self,
+        program_id: u32,
+        prototype: Option<u32>,
+        pc: usize,
+    ) -> Option<CommonRegion> {
+        self.dynamic_programs
+            .get(program_id)?
+            .common_region(prototype, pc)
+    }
+
+    fn has_common_regions(&self, program_id: u32, prototype: Option<u32>) -> bool {
+        self.dynamic_programs
+            .get(program_id)
+            .is_some_and(|program| program.has_common_regions(prototype))
+    }
+
     fn table_inline_cache(
         &self,
         program_id: u32,
@@ -10096,6 +10336,24 @@ impl Vm {
     fn record_hot_ir_guard_exit(&mut self, program_id: u32) {
         if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.hot_ir_guard_exits = program.hot_ir_guard_exits.saturating_add(1);
+        }
+    }
+
+    #[cfg(test)]
+    fn record_region_execution(
+        &mut self,
+        program_id: u32,
+        instruction_count: u64,
+        guard_exit: bool,
+    ) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
+            program.region_entries = program.region_entries.saturating_add(1);
+            program.region_instructions = program
+                .region_instructions
+                .saturating_add(instruction_count);
+            if guard_exit {
+                program.region_guard_exits = program.region_guard_exits.saturating_add(1);
+            }
         }
     }
 
@@ -26544,7 +26802,7 @@ mod inline_cache_tests {
     }
 
     #[test]
-    fn common_fast_path_candidate_table_matches_implemented_arms() {
+    fn common_region_candidate_table_matches_implemented_arms() {
         let mut expected = [false; OPCODE_TAG_SPACE];
         for op in [
             Opcode::Add,
@@ -26561,7 +26819,156 @@ mod inline_cache_tests {
         ] {
             expected[op as usize] = true;
         }
-        assert_eq!(COMMON_FAST_PATH_CANDIDATE, expected);
+        assert_eq!(COMMON_REGION_CANDIDATE, expected);
+    }
+
+    fn common_region_program() -> Program {
+        Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                    Instruction::new(Opcode::Move, 2, 0, 0),
+                    Instruction::new(Opcode::Move, 3, 1, 0),
+                    Instruction::new(Opcode::Add, 4, 2, 3),
+                    Instruction::new(Opcode::Move, 5, 4, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
+                    Instruction::new(Opcode::Return, 5, 1, 0),
+                    Instruction::new(Opcode::Halt, 0, 0, 0),
+                ],
+                6,
+            ),
+            vec![Constant::Number(2.0), Constant::Number(3.0)],
+        )
+    }
+
+    #[test]
+    fn common_region_matches_instruction_dispatch_and_policy_fallbacks() {
+        let program = common_region_program();
+        let mut region = Vm::new(Profile::ReproducibleStandard);
+        let region_result = region.run(&program).unwrap();
+        assert_eq!(region_result.as_number(), Some(5.0));
+        assert_eq!(region.dynamic_programs[0].region_entries, 1);
+        assert_eq!(region.dynamic_programs[0].region_instructions, 6);
+        assert_eq!(region.dynamic_programs[0].region_guard_exits, 0);
+
+        let mut dispatched = Vm::new(Profile::ReproducibleStandard);
+        dispatched.region_mode = RegionTestMode::Off;
+        let dispatched_result = dispatched.run(&program).unwrap();
+        assert_eq!(region_result.as_number(), dispatched_result.as_number());
+        assert_eq!(
+            region.executed_instructions,
+            dispatched.executed_instructions
+        );
+        assert_eq!(dispatched.dynamic_programs[0].region_entries, 0);
+
+        let mut fuelled = Vm::with_settings(
+            Profile::ReproducibleStandard,
+            VmSettings {
+                initial_fuel: Some(100),
+                ..VmSettings::default()
+            },
+        );
+        assert_eq!(fuelled.run(&program).unwrap().as_number(), Some(5.0));
+        assert_eq!(fuelled.dynamic_programs[0].region_entries, 0);
+
+        let mut covered = Vm::with_settings(
+            Profile::ReproducibleStandard,
+            VmSettings {
+                enable_conformance_coverage: true,
+                ..VmSettings::default()
+            },
+        );
+        assert_eq!(covered.run(&program).unwrap().as_number(), Some(5.0));
+        assert_eq!(covered.dynamic_programs[0].region_entries, 0);
+    }
+
+    #[test]
+    fn common_region_guard_exit_resumes_exact_instruction_and_error_site() {
+        let function = Function::new(
+            vec![
+                Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                Instruction::new(Opcode::Move, 2, 0, 0),
+                Instruction::new(Opcode::Add, 3, 2, 1),
+                Instruction::new(Opcode::Move, 4, 3, 0),
+                Instruction::new(Opcode::Return, 4, 1, 0),
+            ],
+            5,
+        )
+        .with_source_map(vec![InstructionSource { pc: 3, line: 42 }]);
+        let program = Program::new(
+            function,
+            vec![Constant::Number(1.0), Constant::String(b"x".to_vec())],
+        )
+        .with_source_name(Some("region-guard.luau".to_owned()));
+
+        let mut region = Vm::new(Profile::ReproducibleStandard);
+        let region_error = region.run(&program).unwrap_err();
+        assert_eq!(region.dynamic_programs[0].region_entries, 1);
+        assert_eq!(region.dynamic_programs[0].region_instructions, 2);
+        assert_eq!(region.dynamic_programs[0].region_guard_exits, 1);
+
+        let mut dispatched = Vm::new(Profile::ReproducibleStandard);
+        dispatched.region_mode = RegionTestMode::Off;
+        let dispatched_error = dispatched.run(&program).unwrap_err();
+        assert_eq!(
+            std::mem::discriminant(&region_error.kind),
+            std::mem::discriminant(&dispatched_error.kind)
+        );
+        assert_eq!(region_error.pc, dispatched_error.pc);
+        assert_eq!(region_error.location, dispatched_error.location);
+        assert_eq!(region_error.pc, Some(3));
+        assert_eq!(region_error.location.unwrap().line, 42);
+        assert_eq!(
+            region.executed_instructions,
+            dispatched.executed_instructions
+        );
+    }
+
+    #[test]
+    fn common_region_preserves_deterministic_collection_cadence() {
+        let mut code = (0..16)
+            .map(|index| Instruction::new(Opcode::LoadConst, index, 0, 0))
+            .collect::<Vec<_>>();
+        code.extend([
+            Instruction::new(Opcode::Move, 16, 0, 0),
+            Instruction::new(Opcode::Move, 17, 1, 0),
+            Instruction::new(Opcode::Add, 18, 16, 17),
+            Instruction::new(Opcode::Move, 19, 18, 0),
+            Instruction::new(Opcode::ClearLocalCell, 17, 0, 0),
+            Instruction::new(Opcode::Return, 19, 1, 0),
+        ]);
+        let program = Program::new(Function::new(code, 20), vec![Constant::Number(2.0)]);
+        let mut saw_region = false;
+        for interval in 1..=24 {
+            let interval = NonZeroU64::new(interval).unwrap();
+            let settings = VmSettings {
+                deterministic_gc_interval: interval,
+                ..VmSettings::default()
+            };
+            let mut region = Vm::with_settings(Profile::DeterministicSim, settings.clone());
+            let region_result = region.run(&program).unwrap();
+            let mut dispatched = Vm::with_settings(Profile::DeterministicSim, settings);
+            dispatched.region_mode = RegionTestMode::Off;
+            let dispatched_result = dispatched.run(&program).unwrap();
+
+            assert_eq!(region_result.as_number(), dispatched_result.as_number());
+            assert_eq!(
+                region.executed_instructions,
+                dispatched.executed_instructions
+            );
+            assert_eq!(
+                region.deterministic_collection_count(),
+                dispatched.deterministic_collection_count()
+            );
+            assert_eq!(
+                region.next_weak_collection_instruction,
+                dispatched.next_weak_collection_instruction
+            );
+            saw_region |= region.dynamic_programs[0].region_entries > 0;
+        }
+        assert!(saw_region);
     }
 
     #[test]
@@ -26666,6 +27073,7 @@ mod inline_cache_tests {
         assert_eq!(fast.run(&program).unwrap().as_number(), Some(64.0));
         assert!(fast.dynamic_programs[0].hot_ir_entries > 0);
         assert!(fast.dynamic_programs[0].hot_ir_iterations > 0);
+        assert!(fast.dynamic_programs[0].region_entries > 0);
 
         let mut interpreted = Vm::new(Profile::ReproducibleStandard);
         interpreted.hot_ir_mode = HotIrTestMode::Off;

@@ -595,6 +595,37 @@ instance destroyed 26 minutes after create. Evidence:
 policy the single-workload rows stay out of public history; the win lands in `bench/RESULTS.md` with the
 next full-matrix cohort. This is the first profile-led bet in this file to survive the controlled host.
 
+### Region Engine v1 — implemented, controlled DigitalOcean gate pending
+
+The next interpreter slice builds private two-byte-per-PC suffix metadata for
+consecutive instructions whose successful common path has an explicit effect
+certificate: immutable nil/boolean/number constant loads, register moves and
+cell cleanup, guarded numeric arithmetic, guarded present-array reads, and
+guarded writes to existing array slots. Public bytecode remains authoritative;
+the metadata identifies only a start and bounded length. Runs shorter than two
+instructions allocate no region metadata, while every eligible interior suffix
+of a longer run remains an entry so execution can resume after a temporary
+fuel, collection, or allocation-debt boundary.
+
+One region admission checks unlimited fuel, disabled coverage, no allocation
+debt, and no deterministic weak-collection boundary across the entire logical
+instruction count. Successful instructions commit in source order. A dynamic
+type/table/index guard miss occurs before the failing instruction mutates
+observable state, records that instruction exactly once, refreshes roots, and
+resumes its ordinary semantic implementation at the same PC. Structured errors
+retain the same PC and source location. The existing single-instruction fast
+path remains the fallback for isolated candidates, and Region Engine and HotIR
+may coexist in one function without changing either tier's admission policy.
+
+Focused tests compare region-on and region-off results and instruction counts,
+pin exact guard-exit error sites, force fuel and coverage fallback, sweep
+deterministic collection intervals, verify primitive-only constant admission,
+and exercise Region Engine alongside HotIR. Local work is deliberately limited
+to correctness/build validation because the developer machine is not a timing
+authority. The performance verdict is pending an exact-commit, paired
+DigitalOcean A/B with checksum, idle, steal, provenance, and confirmed-destroy
+gates; no speed claim is made before that result.
+
 ## Estimate vs C++ Luau
 
 | state | likely position vs C++ Luau interpreter |
