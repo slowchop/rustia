@@ -228,8 +228,8 @@ It compares exact pre-region baseline `7a69d1c` with candidate `b861ee9` on
 `generic_iteration` using 101-repetition sample blocks in the same fixed-work
 paired protocol and strict
 idle/steal gates described below. Its exact Basic Intel 4-vCPU/8-GiB shape in
-London replaces rejected, fully cleaned-up Sydney, Frankfurt, New York, San
-Francisco, and Amsterdam placements;
+New York 2 replaces rejected, fully cleaned-up Sydney, Frankfurt, New York 3,
+San Francisco, Amsterdam, and London placements;
 the plan fails instead of substituting a different size or region. The earlier dense-table follow-up for baseline
 `dac4ec2295f77587c79f04e4ff0a09cb99912f96` and candidate
 `ed65077c2e779ec6a641b8ca2f8c8258b2508a2d` is encoded in

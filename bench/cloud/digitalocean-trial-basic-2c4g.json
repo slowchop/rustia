@@ -2,7 +2,7 @@
   "schema": "rustia.digitalocean-fixed-benchmark.v3",
   "provider": {
     "context": "rustia-bench",
-    "region": "lon1",
+    "region": "nyc2",
     "image_slug": "ubuntu-24-04-x64",
     "size": {
       "description": "Basic",
