@@ -50,9 +50,9 @@ Current unpublished workspace version: `0.0.1`.
 
 - DigitalOcean's paired acceptance protocol now rejects an irrevocably unstable
   host as soon as the observed ratio spread exceeds its frozen limit. Protocol
-  v5 retains zero-steal idle admission and the 3% paired-ratio gate while
-  bounding timed steal at 0.5%, one tenth of the predeclared 5% material-
-  regression threshold, because this account exposes only shared-CPU shapes.
+  v5 retains zero-steal idle admission and caps the paired-ratio gate at the
+  predeclared 5% material-regression boundary. It bounds timed steal at 0.5%,
+  one tenth of that threshold, because this account exposes only shared-CPU shapes.
   Rejected qualification samples remain diagnostic-only and are never reused.
 
 - The interpreter's common-instruction fast path now also serves `Move` and

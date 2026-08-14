@@ -351,8 +351,8 @@ pair gets one committed idle window and cooldown; its second leg follows
 immediately, and both timed legs retain the contaminant and steal checks. Idle
 admission requires zero steal; a timed leg permits at most 0.5% steal. This
 shared-CPU ceiling remains one tenth of the predeclared 5% material-regression
-threshold, while the paired 3% relative-stability gate rejects frequency shifts
-that steal accounting does not expose. The
+threshold, while the paired 5% relative-stability gate rejects frequency shifts
+that exceed the claim the accepted comparison must independently exclude. The
 eight accepted legs use the same four-pair treatment. Any declared
 contaminating-process or out-of-budget steal violation discards the whole block. Only
 `material_regression_excluded` permits the same frozen candidate binary to

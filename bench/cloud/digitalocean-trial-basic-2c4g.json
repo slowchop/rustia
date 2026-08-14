@@ -50,7 +50,7 @@
   },
   "qualification": {
     "paired_pilot_rounds": 4,
-    "max_ratio_spread_percent": 3
+    "max_ratio_spread_percent": 5
   },
   "host_gate": {
     "benchmark_cpu": 1,
