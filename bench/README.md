@@ -225,7 +225,8 @@ Record the following provenance beside any published interpretation:
 The current DigitalOcean Region Engine v1 follow-up is frozen in
 [`cloud/digitalocean-region-b861ee9.json`](cloud/digitalocean-region-b861ee9.json).
 It compares exact pre-region baseline `7a69d1c` with candidate `b861ee9` on
-`generic_iteration` using the same fixed-work paired protocol and strict
+`generic_iteration` using 101-repetition sample blocks in the same fixed-work
+paired protocol and strict
 idle/steal gates described below. Its exact Basic Intel 4-vCPU/8-GiB shape in
 Amsterdam replaces rejected, fully cleaned-up Sydney, Frankfurt, New York, and
 San Francisco placements;

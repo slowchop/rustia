@@ -31,7 +31,7 @@
     "workload": "generic_iteration",
     "workload_path": "bench/workloads/luau/09_generic_iteration.luau",
     "fixed_n": 4000,
-    "repetitions": 15,
+    "repetitions": 101,
     "expected_checksum": "number:91580000.00000000000000000",
     "run_order": [
       { "variant": "baseline", "file": "region-abba-A1.json" },
