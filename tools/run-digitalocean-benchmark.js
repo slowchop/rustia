@@ -2047,7 +2047,7 @@ async function selfTest(config) {
       memory: 4096,
       disk: 25,
       available: true,
-      regions: ["syd1"],
+      regions: ["fra1"],
       price_hourly: 0.0625,
     },
     {
@@ -2057,7 +2057,7 @@ async function selfTest(config) {
       memory: 4096,
       disk: 80,
       available: true,
-      regions: ["syd1"],
+      regions: ["fra1"],
       price_hourly: 0.0357,
     },
     {
@@ -2067,14 +2067,14 @@ async function selfTest(config) {
       memory: 4096,
       disk: 80,
       available: true,
-      regions: ["syd1"],
+      regions: ["fra1"],
       price_hourly: 0.04167,
     },
   ];
-  assert.equal(selectSize(fixture, config).slug, "s-2vcpu-4gb");
+  assert.equal(selectSize(fixture, config).slug, "s-2vcpu-4gb-intel");
   const basicTrial = loadConfig(TRIAL_CONFIGS["basic-2c4g"]);
   const premiumTrial = loadConfig(TRIAL_CONFIGS["premium-intel-2c4g"]);
-  assert.deepEqual(basicTrial.provider, config.provider);
+  assert.deepEqual(premiumTrial.provider, config.provider);
   for (const trialConfig of [basicTrial, premiumTrial]) {
     assert.equal(trialConfig.publication.mode, "diagnostic");
     for (const field of ["source", "measurement", "qualification", "host_gate"]) {
@@ -2089,12 +2089,12 @@ async function selfTest(config) {
   assert.equal(selectSize(fixture, basicTrial).slug, "s-2vcpu-4gb");
   assert.equal(selectSize(fixture, premiumTrial).slug, "s-2vcpu-4gb-intel");
   const plannedShape = {
-    region: "syd1",
+    region: "fra1",
     image: { id: 123 },
     size: { slug: "s-2vcpu-4gb", vcpus: 2, memory_mib: 4096, disk_gib: 80 },
   };
   const actualShape = {
-    region: { slug: "syd1" },
+    region: { slug: "fra1" },
     image: { id: 123 },
     size_slug: "s-2vcpu-4gb",
     vcpus: 2,
@@ -2103,7 +2103,7 @@ async function selfTest(config) {
   };
   verifyDropletMatchesPlan(actualShape, plannedShape);
   assert.throws(() => verifyDropletMatchesPlan({ ...actualShape, disk: 81 }, plannedShape));
-  assert.throws(() => selectSize([...fixture, { ...fixture[1], slug: "ambiguous" }], config));
+  assert.throws(() => selectSize([...fixture, { ...fixture[2], slug: "ambiguous" }], config));
   assert.throws(() =>
     validateConfig({
       ...config,
