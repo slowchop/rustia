@@ -18,9 +18,9 @@
     "scheduled_billing_allowed": false
   },
   "publication": {
-    "state": "paused",
-    "reason": "Artifact-only publication has not yet been restored after removal of the former benchmark workflow.",
-    "next_action": "Implement a validation-and-publication workflow that cannot invoke benchmark measurement or cloud creation."
+    "state": "active",
+    "reason": "Accepted committed benchmark artifacts are validated and published automatically without taking measurements or creating cloud resources.",
+    "next_action": "Keep the artifact-only publisher healthy and investigate any failed publication before accepting newer public results."
   },
   "progress": {
     "state": "current",

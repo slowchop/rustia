@@ -8,6 +8,7 @@ const root = path.resolve(__dirname, "..");
 const workflowDir = path.join(root, ".github", "workflows");
 const ciPath = path.join(workflowDir, "ci.yml");
 const rustiaMemoryPath = path.join(workflowDir, "linode-rustia-memory.yml");
+const benchmarkPublicationPath = path.join(workflowDir, "publish-benchmark-data.yml");
 const rustToolchainPath = path.join(root, "rust-toolchain.toml");
 const releasePreflightPath = path.join(root, "tools", "run-release-preflight.js");
 
@@ -255,8 +256,39 @@ function checkRustiaMemory(text) {
   checkActionPins(text, label);
 }
 
+function checkBenchmarkPublication(text) {
+  const label = ".github/workflows/publish-benchmark-data.yml";
+  requireIncludes(text, "name: Publish Benchmark Data\n", label);
+  requireIncludes(text, "push:\n    branches:\n      - main\n    paths:\n", label);
+  requireIncludes(text, "workflow_dispatch:\n", label);
+  requireIncludes(text, "permissions:\n  contents: read\n", label);
+  requireIncludes(text, "cancel-in-progress: false\n", label);
+  requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
+  requireIncludes(text, "ref: main", label);
+  requireIncludes(text, "node tools/check-benchmark-results.js", label);
+  requireIncludes(text, "node tools/check-wasm-gate-results.js", label);
+  requireIncludes(text, "node tools/render-benchmark-operations-status.js --check", label);
+  requireIncludes(text, "BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
+  requireIncludes(text, "git@github.com:slowchop/rustia-bench-data.git", label);
+  requireIncludes(text, "bench/operations-status.json", label);
+  requireIncludes(text, "node tools/render-benchmark-data-readme.js", label);
+  requireIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
+  requireIncludes(text, "git -C \"$pages_dir\" push origin HEAD:gh-pages", label);
+  for (const forbidden of [
+    "LINODE_TOKEN",
+    "run-linode-benchmark.js bench",
+    "run-digitalocean-benchmark.js bench",
+    "run-vultr-benchmark.js bench",
+    "run-scaleway-benchmark.js bench",
+    "workflow_run",
+    "pull_request_target",
+    "contents: write",
+  ]) forbidIncludes(text, forbidden, label);
+  checkActionPins(text, label);
+}
+
 const files = workflowFiles();
-for (const required of ["ci.yml", "linode-rustia-memory.yml"]) {
+for (const required of ["ci.yml", "linode-rustia-memory.yml", "publish-benchmark-data.yml"]) {
   if (!files.includes(required)) {
     fail(`missing .github/workflows/${required}`);
   }
@@ -267,6 +299,7 @@ if (files.includes("benchmarks.yml")) {
 checkRunnerLabels(files);
 checkCi(readWorkflow(ciPath));
 checkRustiaMemory(readWorkflow(rustiaMemoryPath));
+checkBenchmarkPublication(readWorkflow(benchmarkPublicationPath));
 checkReleasePreflight(readWorkflow(releasePreflightPath));
 
 console.log(`workflow policy ok for ${files.length} workflow file(s)`);

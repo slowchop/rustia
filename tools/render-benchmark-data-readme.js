@@ -426,6 +426,7 @@ function render(data, historyCount, wasmData) {
   lines.push("- [`bench/RESULTS.md`](bench/RESULTS.md): generated detailed result table");
   lines.push("- [`bench/current-results.html`](bench/current-results.html): standalone rendered report");
   lines.push("- [`bench/CLAIMS.md`](bench/CLAIMS.md): generated public-claim gate");
+  lines.push("- [`bench/operations-status.json`](bench/operations-status.json): publication, progress, and landscape freshness");
   if (wasm) {
     lines.push("- [`bench/wasm/current-results.json`](bench/wasm/current-results.json): wasm adapter result snapshot");
     lines.push("- [`bench/wasm/dispatch-current-results.json`](bench/wasm/dispatch-current-results.json): wasm dispatch microbenchmark snapshot");

@@ -107,7 +107,7 @@ function readOperationsStatus(data) {
       status.measurement?.scheduled_billing_allowed !== false) {
     fail("benchmark operations must require explicit qualified-host measurement without scheduled billing");
   }
-  const states = new Set(["current", "pending", "stale", "paused"]);
+  const states = new Set(["active", "current", "pending", "stale", "paused"]);
   for (const lane of ["publication", "progress", "landscape"]) {
     if (!states.has(status[lane]?.state)) fail(`${lane}.state is invalid`);
     if (typeof status[lane]?.next_action !== "string" || status[lane].next_action.trim() === "") {
@@ -2326,6 +2326,7 @@ function targetRuntimeLabel(row) {
 
 function operationsStateLabel(state) {
   return {
+    active: "Active",
     current: "Current",
     pending: "Pending",
     stale: "Stale",
@@ -2545,6 +2546,7 @@ function render(data, operationsStatus, wasmResults, wasmDispatchResults, memory
       line-height: 1.2;
     }
 
+    .state-active,
     .state-current {
       background: #dff7ed;
       color: #047857;

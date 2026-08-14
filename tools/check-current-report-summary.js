@@ -51,9 +51,9 @@ function main() {
     runner: { environment: "self-hosted-shared", timing_authority: false },
     measurement: { mode: "operator-started-qualified-host", scheduled_billing_allowed: false },
     publication: {
-      state: "paused",
+      state: "active",
       reason: "Publication reason.",
-      next_action: "Restore artifact-only publication.",
+      next_action: "Keep artifact publication healthy.",
     },
     progress: {
       state: "pending",
@@ -71,7 +71,7 @@ function main() {
       next_action: "Implement landscape campaigns.",
     },
   });
-  assert.match(operationsHtml, /Automatic publication is paused/);
+  assert.match(operationsHtml, /Automatic publication is active/);
   assert.match(operationsHtml, /2 relevant commits waiting/);
   assert.match(operationsHtml, /They are not timing authorities/);
   assert.match(operationsHtml, /scheduled billing is disabled/);

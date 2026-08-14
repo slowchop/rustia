@@ -155,6 +155,7 @@
       line-height: 1.2;
     }
 
+    .state-active,
     .state-current {
       background: #dff7ed;
       color: #047857;
@@ -1126,13 +1127,13 @@
 
 
     <section class="panel operations-panel" id="operations-status">
-      <div class="operations-banner state-paused">
+      <div class="operations-banner state-active">
         <div>
           <p class="eyebrow">Benchmark operations</p>
-          <h2>Automatic publication is paused</h2>
-          <p>Artifact-only publication has not yet been restored after removal of the former benchmark workflow.</p>
+          <h2>Automatic publication is active</h2>
+          <p>Accepted committed benchmark artifacts are validated and published automatically without taking measurements or creating cloud resources.</p>
         </div>
-        <span class="operations-state state-paused">Paused</span>
+        <span class="operations-state state-active">Active</span>
       </div>
       <div class="operations-grid">
         <article class="operations-card">
@@ -1156,11 +1157,11 @@
         <article class="operations-card">
           <div class="operations-card-head">
             <h3>Runner and publication policy</h3>
-            <span class="operations-state state-paused">Paused</span>
+            <span class="operations-state state-active">Active</span>
           </div>
           <p>Shared self-hosted runners may build, test correctness, validate evidence, detect updates, and publish accepted artifacts.</p>
           <p><strong>They are not timing authorities.</strong> Fresh measurements require an explicit qualified-host lifecycle; scheduled billing is disabled.</p>
-          <p class="operations-next">Next: Implement a validation-and-publication workflow that cannot invoke benchmark measurement or cloud creation.</p>
+          <p class="operations-next">Next: Keep the artifact-only publisher healthy and investigate any failed publication before accepting newer public results.</p>
         </article>
       </div>
     </section>

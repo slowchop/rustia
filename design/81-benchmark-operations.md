@@ -1,6 +1,6 @@
 # Benchmark operations and public freshness
 
-> **Status: [ROLLING OUT] (2026-08-12).** This document defines how Rustia
+> **Status: [ROLLING OUT] (2026-08-14).** This document defines how Rustia
 > performance evidence is measured, refreshed, and published. It complements
 > [`80-bench-suite.md`](80-bench-suite.md), which defines the harness and
 > measurement protocol.
@@ -131,7 +131,7 @@ look continuously updated when measurement or publication is paused.
 
 1. **Complete:** add generated freshness metadata and a prominent public
    paused/pending status.
-2. Restore artifact-only automatic publication.
+2. **Complete:** restore artifact-only automatic publication.
 3. Separate progress history from immutable landscape snapshots.
 4. Add complete engine-version provenance and version-bridge validation.
 5. Add weekly stable-engine update proposals.

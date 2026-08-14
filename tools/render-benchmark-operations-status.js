@@ -62,8 +62,11 @@ function validatePolicy(policy) {
   if (policy.measurement?.scheduled_billing_allowed !== false) {
     fail("scheduled benchmark billing must remain disabled");
   }
-  if (policy.publication?.state !== "paused" || policy.landscape?.state !== "paused") {
-    fail("initial rollout must explicitly keep publication and landscape paused");
+  if (policy.publication?.state !== "active") {
+    fail("artifact-only publication must remain active");
+  }
+  if (policy.landscape?.state !== "paused") {
+    fail("the unimplemented landscape lane must remain paused");
   }
   for (const [label, value] of [
     ["publication.reason", policy.publication.reason],

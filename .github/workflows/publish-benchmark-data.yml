@@ -1,0 +1,124 @@
+name: Publish Benchmark Data
+
+"on":
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-benchmark-data.yml
+      - bench/CLAIMS.md
+      - bench/RESULTS.md
+      - bench/current-results.html
+      - bench/current-results.json
+      - bench/history/runs.jsonl
+      - bench/operations-policy.json
+      - bench/operations-status.json
+      - bench/render-claims.js
+      - bench/render-current-results.js
+      - bench/wasm-gate.json
+      - bench/wasm/current-results.json
+      - bench/wasm/dispatch-current-results.json
+      - tools/check-benchmark-results.js
+      - tools/check-wasm-gate-results.js
+      - tools/render-benchmark-data-readme.js
+      - tools/render-benchmark-operations-status.js
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rustia-benchmark-data-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Validate and publish accepted artifacts
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout trusted main history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal
+
+      - name: Use pinned Rust toolchain
+        run: rustup default 1.95.0
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Validate committed benchmark artifacts
+        run: |
+          node tools/check-benchmark-results.js
+          node tools/check-wasm-gate-results.js
+          node tools/render-benchmark-operations-status.js --check
+          node tools/check-current-report-summary.js
+          node bench/render-current-results.js --check
+          node bench/render-claims.js --check
+
+      - name: Publish data repository and Pages
+        env:
+          BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}
+        run: |
+          test -n "$BENCH_DATA_DEPLOY_KEY"
+          source_commit="$(git rev-parse HEAD)"
+          ssh_dir="$RUNNER_TEMP/rustia-bench-ssh"
+          data_dir="$RUNNER_TEMP/rustia-bench-data"
+          pages_dir="$RUNNER_TEMP/rustia-bench-pages"
+          install -d -m 700 "$ssh_dir"
+          install -m 600 /dev/null "$ssh_dir/id_ed25519"
+          printf '%s\n' "$BENCH_DATA_DEPLOY_KEY" > "$ssh_dir/id_ed25519"
+          unset BENCH_DATA_DEPLOY_KEY
+          export GIT_SSH_COMMAND="ssh -i $ssh_dir/id_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+
+          git clone --branch main git@github.com:slowchop/rustia-bench-data.git "$data_dir"
+          install -d "$data_dir/bench/history" "$data_dir/bench/wasm"
+          for artifact in \
+            bench/CLAIMS.md \
+            bench/RESULTS.md \
+            bench/current-results.json \
+            bench/history/runs.jsonl \
+            bench/operations-status.json \
+            bench/wasm-gate.json \
+            bench/wasm/current-results.json \
+            bench/wasm/dispatch-current-results.json; do
+            install -m 644 "$artifact" "$data_dir/$artifact"
+          done
+
+          install -m 644 "$data_dir/bench/memory/current-results.json" bench/memory/current-results.json
+          install -m 644 "$data_dir/bench/memory/history/runs.jsonl" bench/memory/history/runs.jsonl
+          node bench/render-current-results.js
+          install -m 644 bench/current-results.html "$data_dir/bench/current-results.html"
+          node tools/render-benchmark-data-readme.js \
+            --source "$data_dir/bench/current-results.json" \
+            --history "$data_dir/bench/history/runs.jsonl" \
+            --wasm-source "$data_dir/bench/wasm/current-results.json" \
+            --output "$data_dir/README.md"
+
+          git -C "$data_dir" config user.name "rustia-benchmark"
+          git -C "$data_dir" config user.email "benchmark@rustia.invalid"
+          git -C "$data_dir" add README.md bench
+          if ! git -C "$data_dir" diff --cached --quiet; then
+            git -C "$data_dir" commit -m "Publish benchmark data ${source_commit:0:12}"
+            git -C "$data_dir" push origin HEAD:main
+          fi
+
+          git -C "$data_dir" fetch origin gh-pages
+          git -C "$data_dir" worktree add --detach "$pages_dir" origin/gh-pages
+          install -m 644 bench/current-results.html "$pages_dir/index.html"
+          git -C "$pages_dir" config user.name "rustia-benchmark"
+          git -C "$pages_dir" config user.email "benchmark@rustia.invalid"
+          git -C "$pages_dir" add index.html
+          if ! git -C "$pages_dir" diff --cached --quiet; then
+            git -C "$pages_dir" commit -m "Publish benchmark data ${source_commit:0:12}"
+            git -C "$pages_dir" push origin HEAD:gh-pages
+          fi
