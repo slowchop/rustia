@@ -1,5 +1,5 @@
 {
-  "schema": "rustia.digitalocean-fixed-benchmark.v5",
+  "schema": "rustia.digitalocean-fixed-benchmark.v6",
   "provider": {
     "context": "rustia-bench",
     "region": "nyc2",

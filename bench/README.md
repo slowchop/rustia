@@ -344,16 +344,18 @@ the corresponding price-ceiling estimate. A provider or API outage can still
 delay confirmed deletion, so cleanup failure remains a hard command error
 rather than being reported as a stopped bill.
 
-Qualification sidecars never enter the accepted A/B analysis. DigitalOcean v5
-admits four counterbalanced baseline/candidate pairs by the spread of their
-relative ratios, not by absolute speed across minute-separated samples. Each
-pair gets one committed idle window and cooldown; its second leg follows
-immediately, and both timed legs retain the contaminant and steal checks. Idle
-admission requires zero steal; a timed leg permits at most 0.5% steal. This
-shared-CPU ceiling remains one tenth of the predeclared 5% material-regression
-threshold, while the paired 5% relative-stability gate rejects frequency shifts
-that exceed the claim the accepted comparison must independently exclude. The
-eight accepted legs use the same four-pair treatment. Any declared
+Qualification sidecars never enter the accepted A/B analysis. DigitalOcean v6
+admits four counterbalanced baseline/candidate pairs by comparing the repeated
+relative ratios within each matching order. This preserves the intended AB/BA
+counterbalance instead of misclassifying a repeatable second-leg frequency
+effect as host instability. Each pair gets one committed idle window and
+cooldown; its second leg follows immediately, and both timed legs retain the
+contaminant and steal checks. Idle admission requires zero steal; a timed leg
+permits at most 0.5% steal. This shared-CPU ceiling remains one tenth of the
+predeclared 5% material-regression threshold, while the within-order 5%
+relative-stability gate rejects frequency shifts that exceed the claim the
+accepted comparison must independently exclude. The eight accepted legs use
+the same four-pair treatment. Any declared
 contaminating-process or out-of-budget steal violation discards the whole block. Only
 `material_regression_excluded` permits the same frozen candidate binary to
 append three real rows. An accepted run adds the evidence directory and exact
@@ -381,7 +383,7 @@ just bench-do-destroy RUN_ID        # choose an exact owned run
 Repeated Premium Intel shared-CPU placements passed the idle gate but accrued
 nonzero hypervisor steal or unstable paired ratios during timed legs. Those
 blocks were correctly discarded. DigitalOcean exposes no dedicated-CPU size to
-this account, so v5 uses a fresh shared host, a declared bounded-steal ceiling,
+this account, so v6 uses a fresh shared host, a declared bounded-steal ceiling,
 and an independent paired qualification before any accepted evidence is run.
 
 Create a short-lived personal access token with only **Linodes: Read/Write** and

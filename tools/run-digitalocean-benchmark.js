@@ -109,6 +109,7 @@ function usesPairedRelativeProtocol(config) {
     "rustia.digitalocean-fixed-benchmark.v3",
     "rustia.digitalocean-fixed-benchmark.v4",
     "rustia.digitalocean-fixed-benchmark.v5",
+    "rustia.digitalocean-fixed-benchmark.v6",
   ].includes(config.schema);
 }
 
@@ -123,7 +124,8 @@ function validateConfig(value) {
     root.schema !== "rustia.digitalocean-fixed-benchmark.v2" &&
     root.schema !== "rustia.digitalocean-fixed-benchmark.v3" &&
     root.schema !== "rustia.digitalocean-fixed-benchmark.v4" &&
-    root.schema !== "rustia.digitalocean-fixed-benchmark.v5"
+    root.schema !== "rustia.digitalocean-fixed-benchmark.v5" &&
+    root.schema !== "rustia.digitalocean-fixed-benchmark.v6"
   ) {
     fail("unsupported cloud benchmark config schema");
   }
@@ -258,6 +260,12 @@ function validateConfig(value) {
       "config.qualification.max_ratio_spread_percent",
       0,
     );
+    if (
+      root.schema === "rustia.digitalocean-fixed-benchmark.v6" &&
+      qualification.paired_pilot_rounds !== 4
+    ) {
+      fail("DigitalOcean v6 requires exactly four paired pilot rounds");
+    }
     for (let index = 0; index < measurement.run_order.length; index += 2) {
       if (measurement.run_order[index].variant === measurement.run_order[index + 1].variant) {
         fail("DigitalOcean v3 run-order pairs must contain one baseline and one candidate leg");
@@ -287,7 +295,7 @@ function validateConfig(value) {
     "maximum_steal_ticks",
     "wait_timeout_seconds",
   ];
-  if (["rustia.digitalocean-fixed-benchmark.v4", "rustia.digitalocean-fixed-benchmark.v5"].includes(root.schema)) {
+  if (["rustia.digitalocean-fixed-benchmark.v4", "rustia.digitalocean-fixed-benchmark.v5", "rustia.digitalocean-fixed-benchmark.v6"].includes(root.schema)) {
     gateKeys.push("maximum_timed_steal_percent");
   }
   requireExactKeys(gate, gateKeys, "config.host_gate");
@@ -300,20 +308,20 @@ function validateConfig(value) {
   }
   requireNumber(gate.maximum_load_1m, "config.host_gate.maximum_load_1m", 0);
   requireInteger(gate.maximum_steal_ticks, "config.host_gate.maximum_steal_ticks", 0);
-  if (["rustia.digitalocean-fixed-benchmark.v4", "rustia.digitalocean-fixed-benchmark.v5"].includes(root.schema)) {
+  if (["rustia.digitalocean-fixed-benchmark.v4", "rustia.digitalocean-fixed-benchmark.v5", "rustia.digitalocean-fixed-benchmark.v6"].includes(root.schema)) {
     requireNumber(
       gate.maximum_timed_steal_percent,
       "config.host_gate.maximum_timed_steal_percent",
       0,
     );
     const expectedTimedStealPercent =
-      root.schema === "rustia.digitalocean-fixed-benchmark.v5" ? 0.5 : 0.1;
+      ["rustia.digitalocean-fixed-benchmark.v5", "rustia.digitalocean-fixed-benchmark.v6"].includes(root.schema) ? 0.5 : 0.1;
     if (
       gate.maximum_steal_ticks !== 0 ||
       gate.maximum_timed_steal_percent !== expectedTimedStealPercent
     ) {
       fail(
-        `DigitalOcean ${root.schema.endsWith(".v5") ? "v5" : "v4"} requires zero idle steal and a ${expectedTimedStealPercent}% timed steal ceiling`,
+        `DigitalOcean ${root.schema.split(".").at(-1)} requires zero idle steal and a ${expectedTimedStealPercent}% timed steal ceiling`,
       );
     }
   }

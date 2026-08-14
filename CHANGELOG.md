@@ -48,6 +48,13 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Changed
 
+- DigitalOcean protocol v6 now evaluates paired-host stability within matching
+  AB/BA orders. This retains the four-pair counterbalance while preventing a
+  repeatable second-leg frequency effect from being mistaken for random host
+  instability; raw cross-order spread remains recorded for audit. The 5%
+  stability ceiling, 0.5% timed-steal ceiling, and independent eight-leg
+  acceptance test are unchanged.
+
 - DigitalOcean's paired acceptance protocol now rejects an irrevocably unstable
   host as soon as the observed ratio spread exceeds its frozen limit. Protocol
   v5 retains zero-steal idle admission and caps the paired-ratio gate at the
