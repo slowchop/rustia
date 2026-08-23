@@ -66,8 +66,10 @@ function usesLines(text) {
 function checkActionPins(text, label) {
   for (const line of usesLines(text)) {
     const action = line.slice("uses: ".length).split(/\s+/, 1)[0];
-    if (!/^actions\/[a-z0-9-]+@[0-9a-f]{40}$/.test(action)) {
-      fail(`${label} action must be pinned to a full actions/* commit SHA: ${line}`);
+    const official = /^actions\/[a-z0-9-]+@[0-9a-f]{40}$/.test(action);
+    const rustToolchain = action === "actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659";
+    if (!official && !rustToolchain) {
+      fail(`${label} action must be an approved action pinned to a full commit SHA: ${line}`);
     }
   }
 }
@@ -88,12 +90,23 @@ function checkRunnerLabels(files) {
       if (value.startsWith("[")) {
         fail(`${label} must use expanded runs-on form so runner labels are reviewable`);
       }
-      if (value === "") fail(`${label} must not use a self-hosted/list-form runner`);
+      if (value === "") {
+        const runnerBlock = lines.slice(index, index + 3).join("\n");
+        const expected = [
+          "    runs-on:",
+          "      group: general-linux",
+          "      labels: [self-hosted, Linux, X64, general-linux]",
+        ].join("\n");
+        if (file !== "ci.yml" || runnerBlock !== expected) {
+          fail(`${label} expanded runs-on block must select the reviewed general-linux group and labels`);
+        }
+        continue;
+      }
       if (!hostedRunners.has(value)) {
         fail(`${label} hosted runs-on value must be one of ${[...hostedRunners].join(", ")}, got ${value}`);
       }
     }
-    forbidIncludes(text, "self-hosted", label);
+    if (file !== "ci.yml") forbidIncludes(text, "self-hosted", label);
     forbidIncludes(text, "cargo run -p script-bench-harness", label);
     forbidIncludes(text, "node tools/run-wasm-gate.js", label);
     forbidIncludes(text, "node tools/run-wasm-dispatch-gate.js", label);
@@ -107,13 +120,21 @@ function checkCi(text) {
   requireIncludes(text, "name: CI\n", label);
   requireIncludes(text, "\"on\":\n  pull_request:\n  push:\n", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
-  requireIncludes(text, "runs-on: ubuntu-latest", label);
   requireIncludes(
     text,
-    `rustup toolchain install ${rustChannel} --profile minimal --component clippy --component rustfmt`,
+    "runs-on:\n      group: general-linux\n      labels: [self-hosted, Linux, X64, general-linux]",
     label,
   );
-  requireIncludes(text, `rustup default ${rustChannel}`, label);
+  requireIncludes(text, "max-parallel: 2\n", label);
+  requireIncludes(text, "persist-credentials: false\n", label);
+  requireIncludes(
+    text,
+    "uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659",
+    label,
+  );
+  requireIncludes(text, `toolchain: ${rustChannel}`, label);
+  requireIncludes(text, "components: clippy, rustfmt", label);
+  requireIncludes(text, "cache: false", label);
   forbidIncludes(text, "rustup toolchain install stable", label);
   forbidIncludes(text, "rustup default stable", label);
   requireIncludes(text, "node tools/run-release-preflight.js", label);
@@ -137,11 +158,7 @@ function checkCi(text) {
   ]) {
     requireIncludes(text, `          - ${target}\n`, label);
   }
-  requireIncludes(
-    text,
-    `rustup toolchain install ${rustChannel} --profile minimal --target \${{ matrix.target }}`,
-    label,
-  );
+  requireIncludes(text, "target: ${{ matrix.target }}", label);
   requireIncludes(
     text,
     "cargo check --locked -p rustia --lib --target ${{ matrix.target }}",
