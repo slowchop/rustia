@@ -1,0 +1,70 @@
+{
+  "schema": "rustia.digitalocean-fixed-benchmark.v6",
+  "provider": {
+    "context": "rustia-bench",
+    "region": "nyc2",
+    "image_slug": "ubuntu-24-04-x64",
+    "size": {
+      "description": "Basic Intel",
+      "vcpus": 4,
+      "memory_mib": 8192,
+      "disk_gib": 160,
+      "max_hourly_price_usd": 0.08333
+    },
+    "max_runtime_minutes": 90
+  },
+  "source": {
+    "baseline_commit": "9695a62cdfab196210d4d4f12a64ffe59354d314",
+    "candidate_commit": "84e732add4863150bd993f3354b274ab9c3ee41a",
+    "harness_commit": "84e732add4863150bd993f3354b274ab9c3ee41a",
+    "expected_sha256": {
+      "baseline_original_harness": "084a6a5b3626a85728ea9be1177b50c218b31d535a0ea2125c088113fb72a6e5",
+      "overlay_harness": "084a6a5b3626a85728ea9be1177b50c218b31d535a0ea2125c088113fb72a6e5",
+      "workload": "c1a796e02ce8ded0f6a407b8f73b69bd326e58e2ddfa45ee20200f48503e7d05",
+      "cargo_lock": "781ca5604e488e2c2f1b0e0b67142fcdd009f2a3c5af2a25b482fd7770206255",
+      "toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
+      "analyzer": "a66c145df59913813d8df6cb82c563dbec38d3b63671e2db8c27555fe443ea60",
+      "history_before": "3f61432be580008ac5cab8d886448615022376e7b65395e540bd9ed5c34d0a56"
+    }
+  },
+  "measurement": {
+    "workload": "generic_iteration",
+    "workload_path": "bench/workloads/luau/09_generic_iteration.luau",
+    "fixed_n": 4000,
+    "repetitions": 101,
+    "expected_checksum": "number:91580000.00000000000000000",
+    "run_order": [
+      { "variant": "baseline", "file": "core2r-abba-A1.json" },
+      { "variant": "candidate", "file": "core2r-abba-B1.json" },
+      { "variant": "candidate", "file": "core2r-abba-B2.json" },
+      { "variant": "baseline", "file": "core2r-abba-A2.json" },
+      { "variant": "candidate", "file": "core2r-baab-B3.json" },
+      { "variant": "baseline", "file": "core2r-baab-A3.json" },
+      { "variant": "baseline", "file": "core2r-baab-A4.json" },
+      { "variant": "candidate", "file": "core2r-baab-B4.json" }
+    ],
+    "bootstrap_repetitions": 20000,
+    "bootstrap_seed": 2026082402,
+    "material_regression_threshold_percent": 5,
+    "expected_legs_per_group": 4
+  },
+  "qualification": {
+    "paired_pilot_rounds": 4,
+    "max_ratio_spread_percent": 5
+  },
+  "host_gate": {
+    "benchmark_cpu": 1,
+    "cooldown_seconds": 60,
+    "idle_window_seconds": 10,
+    "minimum_idle_percent": 99,
+    "maximum_load_1m": 0.1,
+    "maximum_steal_ticks": 0,
+    "maximum_timed_steal_percent": 0.5,
+    "wait_timeout_seconds": 900
+  },
+  "publication": {
+    "mode": "acceptance",
+    "required_verdict": "material_regression_excluded",
+    "final_measurements": 3
+  }
+}
