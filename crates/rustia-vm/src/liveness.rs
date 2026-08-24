@@ -355,6 +355,11 @@ impl LogicalReceipts {
         self.units.get(pc).copied().unwrap_or(1)
     }
 
+    /// The full per-instruction unit stream.
+    pub fn units(&self) -> &[u32] {
+        &self.units
+    }
+
     pub fn logical_len(&self, start_pc: usize, end_pc: usize) -> u64 {
         match self.units.get(start_pc..end_pc) {
             Some(units) => units.iter().map(|unit| u64::from(*unit)).sum(),

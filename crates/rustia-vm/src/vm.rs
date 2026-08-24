@@ -1196,7 +1196,14 @@ impl FunctionInlineCaches {
                 _ => SITE_CACHE_INELIGIBLE,
             })
             .collect();
-        let hot_irs = recognize_hot_ir_loops(program, function);
+        // HotIR iteration accounting assumes one logical unit per matched
+        // PC; programs carrying an optimized logical-unit schedule stay on
+        // the tape and scalar dispatcher, which charge exact units.
+        let hot_irs = if program.logical_units().is_none() {
+            recognize_hot_ir_loops(program, function)
+        } else {
+            Vec::new()
+        };
         let hot_ir_backedges: Vec<usize> =
             hot_irs.iter().map(|hot_ir| hot_ir.backedge_pc).collect();
         let execution_tape = FunctionTape::build(program, function, &hot_ir_backedges);
@@ -1496,6 +1503,11 @@ impl LeafCallPlan {
 }
 
 fn recognize_leaf_call_plan(program: &Program, function: &Function) -> Option<LeafCallPlan> {
+    // Leaf-call plans replay a callee body at one logical unit per
+    // instruction; unit-carrying programs use ordinary frames instead.
+    if program.logical_units().is_some() {
+        return None;
+    }
     recognize_upvalue_counter_plan(function)
         .or_else(|| recognize_array_iterator_plan(program, function))
 }
@@ -3424,6 +3436,11 @@ impl Vm {
                 None
             };
             let execution_tape = execution_tape.as_deref();
+            // Optimized programs carry per-instruction logical units; charging
+            // by them restores the unoptimized fuel/deterministic-GC schedule
+            // (the C2.3 receipt contract). `None` is the identity schedule.
+            let frame_logical_units: Option<&[u32]> =
+                program.logical_units_for(context.prototype.map(|index| index as usize));
 
             let allow_stackless_self_calls = resumed.is_none();
             let stackless_recursion_limit = self.stackless_recursion_limit();
@@ -3722,6 +3739,7 @@ impl Vm {
                                     function,
                                     program_id,
                                     tape,
+                                    frame_logical_units,
                                     pc,
                                     &mut registers,
                                     &mut register_cells,
@@ -3757,9 +3775,16 @@ impl Vm {
                             // accounting and refreshed roots before deopt. Run
                             // only its semantic implementation below.
                         } else {
+                            // Folded logical instructions all have fuel cost
+                            // one, so the restored schedule is the
+                            // instruction's own cost plus its extra units.
+                            let extra_units = frame_logical_units.map_or(0, |units| {
+                                u64::from(units.get(pc).copied().unwrap_or(1)).saturating_sub(1)
+                            });
                             let fuel_cost = self
                                 .instruction_fuel_cost(instruction)
-                                .map_err(|e| e.at_pc(pc))?;
+                                .map_err(|e| e.at_pc(pc))?
+                                .saturating_add(extra_units);
                             charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, fuel_cost)
                                 .map_err(|error| error.at_pc(pc))?;
                             let weak_collection_due = self.weak_collection_due_within(fuel_cost);
@@ -3774,7 +3799,10 @@ impl Vm {
                                     &pending_return_prefixes,
                                 );
                             }
-                            self.executed_instructions = self.executed_instructions.wrapping_add(1);
+                            self.executed_instructions = self
+                                .executed_instructions
+                                .wrapping_add(1)
+                                .wrapping_add(extra_units);
                             self.maybe_collect()?;
                             self.record_coverage_hit(program_id, context.prototype, function, pc);
                             self.record_opcode_execution(instruction.op);
@@ -8323,6 +8351,7 @@ impl Vm {
         _function: &Function,
         program_id: Option<u32>,
         tape: &FunctionTape,
+        logical_units: Option<&[u32]>,
         entry_pc: usize,
         registers: &mut [Value],
         register_cells: &mut [Option<u32>],
@@ -8335,6 +8364,20 @@ impl Vm {
             return Ok(TapeOutcome::Complete { next_pc: entry_pc });
         }
         let mut pc = entry_pc;
+        // Per-instruction logical units (identity when no schedule is
+        // attached). Charging by units keeps fuel and deterministic-GC
+        // scheduling on the unoptimized logical lattice.
+        let unit_at = |pc: usize| -> u64 {
+            logical_units.map_or(1, |units| u64::from(units.get(pc).copied().unwrap_or(1)))
+        };
+        let units_over = |start: usize, count: usize| -> u64 {
+            match logical_units {
+                None => count as u64,
+                Some(units) => (start..start.saturating_add(count))
+                    .map(|pc| u64::from(units.get(pc).copied().unwrap_or(1)))
+                    .sum(),
+            }
+        };
         #[cfg(test)]
         let mut total: u64 = 0;
         #[cfg(test)]
@@ -8350,17 +8393,23 @@ impl Vm {
             let run = u64::from(tape.run_from(pc));
             // Admit only the exact block prefix that cannot contain a
             // deterministic collection boundary; the boundary instruction and
-            // any non-tape successor run through scalar semantics.
+            // any non-tape successor run through scalar semantics. The
+            // boundary budget is in logical units, the run bound in tape ops.
             let boundary_distance = self
                 .next_weak_collection_instruction
                 .wrapping_sub(self.executed_instructions);
-            let admitted = run.min(boundary_distance.saturating_sub(1));
-            if admitted == 0 {
+            let admitted = boundary_distance.saturating_sub(1);
+            if run == 0 || admitted == 0 {
                 finish_complete!();
             }
             let mut done: u64 = 0;
+            let mut ops_done: u64 = 0;
             let mut guard_missed = false;
-            'window: while done < admitted {
+            'window: while ops_done < run {
+                let unit = unit_at(pc);
+                if done + unit > admitted {
+                    break 'window;
+                }
                 match tape.op(pc) {
                     TapeOp::Exit => {
                         // Defensive only: run suffixes never cover Exit ops.
@@ -8379,7 +8428,8 @@ impl Vm {
                             break 'window;
                         };
                         *slot = value;
-                        done += 1;
+                        done += unit;
+                        ops_done += 1;
                         pc += 1;
                     }
                     TapeOp::ClearLocalCell { register } => {
@@ -8393,7 +8443,8 @@ impl Vm {
                         };
                         *cell = None;
                         *slot = Value::nil();
-                        done += 1;
+                        done += unit;
+                        ops_done += 1;
                         pc += 1;
                     }
                     TapeOp::LoadPrimitive {
@@ -8406,7 +8457,8 @@ impl Vm {
                             break 'window;
                         };
                         *slot = value;
-                        done += 1;
+                        done += unit;
+                        ops_done += 1;
                         pc += 1;
                     }
                     TapeOp::Numeric {
@@ -8430,7 +8482,8 @@ impl Vm {
                             break 'window;
                         };
                         *slot = Value::number(binary(operation, lhs, rhs));
-                        done += 1;
+                        done += unit;
+                        ops_done += 1;
                         pc += 1;
                     }
                     TapeOp::NumericNegate {
@@ -8449,7 +8502,8 @@ impl Vm {
                             break 'window;
                         };
                         *slot = Value::number(binary(NumericOp::Neg, number, 0.0));
-                        done += 1;
+                        done += unit;
+                        ops_done += 1;
                         pc += 1;
                     }
                     TapeOp::Not {
@@ -8465,7 +8519,8 @@ impl Vm {
                             break 'window;
                         };
                         *slot = Value::boolean(!value.truthy());
-                        done += 1;
+                        done += unit;
+                        ops_done += 1;
                         pc += 1;
                     }
                     TapeOp::Compare {
@@ -8507,7 +8562,8 @@ impl Vm {
                             break 'window;
                         };
                         *slot = Value::boolean(result);
-                        done += 1;
+                        done += unit;
+                        ops_done += 1;
                         pc += 1;
                     }
                     TapeOp::DenseArrayGet {
@@ -8539,7 +8595,8 @@ impl Vm {
                             break 'window;
                         };
                         *slot = value;
-                        done += 1;
+                        done += unit;
+                        ops_done += 1;
                         pc += 1;
                     }
                     TapeOp::DenseArraySet {
@@ -8566,7 +8623,8 @@ impl Vm {
                             guard_missed = true;
                             break 'window;
                         }
-                        done += 1;
+                        done += unit;
+                        ops_done += 1;
                         pc += 1;
                     }
                     TapeOp::Receipt { index } => {
@@ -8575,14 +8633,17 @@ impl Vm {
                             break 'window;
                         };
                         let count = plan.instruction_count();
-                        if done + count <= admitted
+                        let receipt_units = units_over(pc, count as usize);
+                        if ops_done + count <= run
+                            && done + receipt_units <= admitted
                             && self.try_register_block(registers, register_cells, plan)
                         {
                             #[cfg(test)]
                             {
                                 total_receipts += 1;
                             }
-                            done += count;
+                            done += receipt_units;
+                            ops_done += count;
                             pc += count as usize;
                         } else {
                             // Guard miss or a window cut: execute the
@@ -8600,12 +8661,14 @@ impl Vm {
                                 break 'window;
                             };
                             *slot = value;
-                            done += 1;
+                            done += unit;
+                            ops_done += 1;
                             pc += 1;
                         }
                     }
                     TapeOp::Jump { target } => {
-                        done += 1;
+                        done += unit;
+                        ops_done += 1;
                         pc = target as usize;
                         break 'window;
                     }
@@ -8614,7 +8677,8 @@ impl Vm {
                             guard_missed = true;
                             break 'window;
                         };
-                        done += 1;
+                        done += unit;
+                        ops_done += 1;
                         pc = if value.truthy() {
                             target as usize
                         } else {
@@ -8627,7 +8691,8 @@ impl Vm {
                             guard_missed = true;
                             break 'window;
                         };
-                        done += 1;
+                        done += unit;
+                        ops_done += 1;
                         pc = if value.truthy() {
                             pc + 1
                         } else {
@@ -8655,11 +8720,13 @@ impl Vm {
                             pc,
                         ) {
                             Ok(true) => {
-                                done += 1;
+                                done += unit;
+                                ops_done += 1;
                                 pc = target as usize;
                             }
                             Ok(false) => {
-                                done += 1;
+                                done += unit;
+                                ops_done += 1;
                                 pc += 1;
                             }
                             Err(_) => {
@@ -8673,7 +8740,7 @@ impl Vm {
                 }
             }
             if guard_missed {
-                let accounted = done.wrapping_add(1);
+                let accounted = done.wrapping_add(unit_at(pc));
                 self.executed_instructions = self.executed_instructions.wrapping_add(accounted);
                 #[cfg(test)]
                 self.record_tape_execution(
@@ -8689,7 +8756,7 @@ impl Vm {
                 total = total.wrapping_add(done);
             }
             self.executed_instructions = self.executed_instructions.wrapping_add(done);
-            if done == 0 {
+            if ops_done == 0 {
                 finish_complete!();
             }
         }

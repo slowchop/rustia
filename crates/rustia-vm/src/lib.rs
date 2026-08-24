@@ -18,7 +18,7 @@ mod tape;
 mod value;
 pub mod vm;
 
-pub use bytecode::{Constant, Function, Instruction, Opcode, Program};
+pub use bytecode::{Constant, Function, Instruction, Opcode, Program, ProgramLogicalUnits};
 pub use error::{Error, ErrorKind, Result};
 pub use extension::{
     ExtensionHandler, ExtensionOp, HostFunctionHandler, HostFunctionOp, OpCapability,

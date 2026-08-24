@@ -12,6 +12,74 @@ pub struct Program {
     constants: Arc<ConstantStorage>,
     pub functions: Vec<Function>,
     pub source_name: Option<Arc<str>>,
+    /// Optional per-instruction logical-unit schedule produced by an
+    /// optimizing lowering (`None` for the identity schedule). See
+    /// [`ProgramLogicalUnits`].
+    logical_units: Option<Arc<ProgramLogicalUnits>>,
+}
+
+/// Per-emitted-instruction logical units for a whole program, main first.
+///
+/// `units[pc]` is how many logical source instructions the emitted
+/// instruction at `pc` represents; an optimizing lowering folds every deleted
+/// instruction's unit into a surviving neighbor of the same basic block. The
+/// VM charges fuel, `executed_instructions`, and deterministic-collection
+/// scheduling by these units, which restores the unoptimized logical schedule
+/// over optimized code (the C2.3 receipt contract in `design/58-vm-core2.md`).
+/// Every folded instruction has fuel cost one, so an instruction's fuel is its
+/// own cost plus `unit - 1`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProgramLogicalUnits {
+    main: Box<[u32]>,
+    functions: Vec<Box<[u32]>>,
+}
+
+impl ProgramLogicalUnits {
+    /// Validates that the schedule covers every function body exactly and
+    /// that every unit is at least one.
+    pub fn new(
+        main: Vec<u32>,
+        functions: Vec<Vec<u32>>,
+    ) -> std::result::Result<Self, &'static str> {
+        if main.contains(&0) || functions.iter().any(|units| units.contains(&0)) {
+            return Err("logical units must be at least one per instruction");
+        }
+        Ok(Self {
+            main: main.into_boxed_slice(),
+            functions: functions.into_iter().map(Vec::into_boxed_slice).collect(),
+        })
+    }
+
+    /// True when every unit is one: the identity schedule carries no
+    /// information and should be represented as `None` on the program.
+    pub fn is_identity(&self) -> bool {
+        self.main.iter().all(|unit| *unit == 1)
+            && self
+                .functions
+                .iter()
+                .all(|units| units.iter().all(|unit| *unit == 1))
+    }
+
+    fn function_units(&self, prototype: Option<usize>) -> &[u32] {
+        match prototype {
+            None => &self.main,
+            Some(index) => self
+                .functions
+                .get(index)
+                .map(|units| &units[..])
+                .unwrap_or(&[]),
+        }
+    }
+
+    fn memory_bytes(&self) -> usize {
+        let mut bytes = size_of::<Self>()
+            .saturating_add(self.main.len().saturating_mul(size_of::<u32>()))
+            .saturating_add(self.functions.len().saturating_mul(size_of::<Box<[u32]>>()));
+        for units in &self.functions {
+            bytes = bytes.saturating_add(units.len().saturating_mul(size_of::<u32>()));
+        }
+        bytes
+    }
 }
 
 #[derive(Debug)]
@@ -423,6 +491,7 @@ impl Program {
             constants: Arc::new(ConstantStorage::new(constants)),
             functions: Vec::new(),
             source_name: None,
+            logical_units: None,
         }
     }
 
@@ -436,12 +505,35 @@ impl Program {
             constants: Arc::new(ConstantStorage::new(constants)),
             functions,
             source_name: None,
+            logical_units: None,
         }
     }
 
     pub fn with_source_name(mut self, source_name: Option<String>) -> Self {
         self.source_name = source_name.map(Arc::from);
         self
+    }
+
+    /// Attaches a validated logical-unit schedule. A `None` or identity
+    /// schedule clears the field so unoptimized programs pay nothing.
+    pub fn with_logical_units(mut self, units: Option<ProgramLogicalUnits>) -> Self {
+        self.logical_units = units.filter(|units| !units.is_identity()).map(Arc::new);
+        self
+    }
+
+    /// The attached logical-unit schedule, if any.
+    #[inline]
+    pub fn logical_units(&self) -> Option<&ProgramLogicalUnits> {
+        self.logical_units.as_deref()
+    }
+
+    /// Per-instruction units for one function (`None` prototype = main).
+    /// Empty when no schedule is attached.
+    #[inline]
+    pub(crate) fn logical_units_for(&self, prototype: Option<usize>) -> Option<&[u32]> {
+        self.logical_units
+            .as_deref()
+            .map(|units| units.function_units(prototype))
     }
 
     #[inline]
@@ -479,6 +571,11 @@ impl Program {
         if let Some(source_name) = &self.source_name {
             live = live.saturating_add(source_name.len());
             reserved = reserved.saturating_add(source_name.len());
+        }
+        if let Some(units) = &self.logical_units {
+            let bytes = units.memory_bytes();
+            live = live.saturating_add(bytes);
+            reserved = reserved.saturating_add(bytes);
         }
         if include_shared_constants {
             live = live
