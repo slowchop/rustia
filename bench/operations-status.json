@@ -26,9 +26,9 @@
     "state": "pending",
     "measured_commit": "f412e2dadd4568b4ba35158090978c79413fd0f7",
     "measured_at_unix": 1786658253,
-    "latest_relevant_commit": "311de5d940d91a7a49c75b05bf28486198f13f4e",
-    "latest_relevant_committed_at_unix": 1787548289,
-    "pending_relevant_commit_count": 5,
+    "latest_relevant_commit": "066ce1ffab721cd54ad960f2e7b65d11acf04d1a",
+    "latest_relevant_committed_at_unix": 1787557658,
+    "pending_relevant_commit_count": 6,
     "next_action": "Run the newest pending performance-relevant commit on the explicit qualified Linode lifecycle."
   },
   "landscape": {
