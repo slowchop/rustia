@@ -348,6 +348,13 @@ pub struct VmSettings {
     /// instruction boundary. Disabled by default so benchmark timings do not
     /// include telemetry scans.
     pub enable_memory_tracking: bool,
+    /// Counts executed instructions per opcode on the exact scalar
+    /// interpreter. Like conformance coverage, enabling this keeps execution
+    /// off the tape/HotIR/closure fast paths so every instruction takes
+    /// per-instruction dispatch; results and the logical fuel schedule are
+    /// unchanged. Disabled by default; intended for the C2.3 dynamic opcode
+    /// census, never for timing.
+    pub enable_opcode_census: bool,
     /// Maximum VM-owned logical live bytes admitted at guest instruction
     /// boundaries. A breach forces one collection before returning a
     /// catchable `OutOfMemory` error. Reserved allocator capacity is telemetry
@@ -375,6 +382,7 @@ impl Default for VmSettings {
             enable_conformance_pcall_helpers: false,
             enable_conformance_luau_call_limit: false,
             enable_memory_tracking: false,
+            enable_opcode_census: false,
             memory_limit_bytes: None,
             guest_surface: GuestSurface::Standard,
             services: VmServices::default(),
@@ -484,6 +492,7 @@ pub struct Vm {
     decision_epoch: u64,
     external_roots: Rc<RefCell<ExternalRootRegistry>>,
     coverage_hits: BTreeMap<CoverageKey, u64>,
+    opcode_census: Vec<u64>,
     control_live_bytes: usize,
     control_memory_dirty: bool,
     peak_live_bytes: usize,
@@ -2158,6 +2167,7 @@ impl Vm {
             settings.loadstring_compiler = None;
             settings.module_resolver = None;
             settings.enable_conformance_coverage = false;
+            settings.enable_opcode_census = false;
             settings.enable_conformance_top_level_yield = false;
             settings.enable_conformance_int64_userdata = false;
             settings.enable_conformance_native_userdata = false;
@@ -2234,6 +2244,7 @@ impl Vm {
                 values: BTreeMap::new(),
             })),
             coverage_hits: BTreeMap::new(),
+            opcode_census: Vec::new(),
             control_live_bytes: 0,
             control_memory_dirty: true,
             peak_live_bytes: 0,
@@ -2390,6 +2401,7 @@ impl Vm {
         self.protected_error_traceback = None;
         self.dynamic_programs.reset_epoch();
         self.coverage_hits.clear();
+        self.opcode_census.clear();
         self.external_roots = Rc::new(RefCell::new(ExternalRootRegistry {
             decision_epoch: next_epoch,
             next_id: 0,
@@ -3387,13 +3399,13 @@ impl Vm {
             }
 
             // Select the execution mode once per frame. Fuel metering and
-            // coverage instrumentation cannot appear mid-frame, so a plain
-            // (unmetered, uninstrumented) frame resolves its loader-built
-            // executable tape here and never retests those policies per
-            // instruction. Metered and instrumented frames stay entirely on
-            // the scalar dispatcher.
+            // coverage/census instrumentation cannot appear mid-frame, so a
+            // plain (unmetered, uninstrumented) frame resolves its
+            // loader-built executable tape here and never retests those
+            // policies per instruction. Metered and instrumented frames stay
+            // entirely on the scalar dispatcher.
             let plain_mode = fuel.state.fuel.is_none()
-                && !self.settings.enable_conformance_coverage
+                && !self.scalar_instrumentation_forced()
                 && self.tape_enabled();
             let execution_tape = if plain_mode {
                 program_id.and_then(|program_id| self.execution_tape(program_id, context.prototype))
@@ -3622,7 +3634,7 @@ impl Vm {
                         if instruction.op == Opcode::ForLoop
                             && self.hot_ir_enabled()
                             && fuel.state.fuel.is_none()
-                            && !self.settings.enable_conformance_coverage
+                            && !self.scalar_instrumentation_forced()
                             && !self.heap.has_allocation_debt()
                             && !self.weak_collection_due_within(1)
                         {
@@ -3754,6 +3766,7 @@ impl Vm {
                             self.executed_instructions = self.executed_instructions.wrapping_add(1);
                             self.maybe_collect()?;
                             self.record_coverage_hit(program_id, context.prototype, function, pc);
+                            self.record_opcode_execution(instruction.op);
                         }
 
                         pc += 1;
@@ -10727,7 +10740,7 @@ impl Vm {
         if !self.closure_call_fast_path_enabled()
             || self.settings.initial_fuel.is_some()
             || fuel.state.fuel.is_some()
-            || self.settings.enable_conformance_coverage
+            || self.scalar_instrumentation_forced()
             || self.heap.has_allocation_debt()
             || self.weak_collection_due_within(plan.maximum_instruction_count())
             || self.recursion_depth_exceeded(depth.saturating_add(1))
@@ -10762,7 +10775,7 @@ impl Vm {
             || !self.closure_call_fast_path_enabled()
             || self.settings.initial_fuel.is_some()
             || fuel.state.fuel.is_some()
-            || self.settings.enable_conformance_coverage
+            || self.scalar_instrumentation_forced()
             || self.heap.has_allocation_debt()
         {
             return Ok(None);
@@ -10866,7 +10879,7 @@ impl Vm {
         if !self.closure_call_fast_path_enabled()
             || self.settings.initial_fuel.is_some()
             || fuel.state.fuel.is_some()
-            || self.settings.enable_conformance_coverage
+            || self.scalar_instrumentation_forced()
             || self.heap.has_allocation_debt()
             || self.weak_collection_due_within(plan.maximum_instruction_count())
             || depth.saturating_add(1) > self.settings.recursion_limit
@@ -19305,6 +19318,56 @@ impl Vm {
             >= self
                 .next_weak_collection_instruction
                 .wrapping_sub(self.executed_instructions)
+    }
+
+    /// True when execution must stay on exact per-instruction scalar
+    /// dispatch for instrumentation (conformance coverage or the opcode
+    /// census). Every fast-tier admission checks this single predicate.
+    #[inline]
+    fn scalar_instrumentation_forced(&self) -> bool {
+        self.settings.enable_conformance_coverage || self.settings.enable_opcode_census
+    }
+
+    #[inline]
+    fn record_opcode_execution(&mut self, opcode: Opcode) {
+        if !self.settings.enable_opcode_census {
+            return;
+        }
+        if self.opcode_census.is_empty() {
+            self.opcode_census = vec![0; OPCODE_TAG_SPACE];
+        }
+        self.opcode_census[opcode as usize] += 1;
+    }
+
+    /// Executed-instruction counts per opcode recorded while
+    /// [`VmSettings::enable_opcode_census`] was set, in ascending opcode-tag
+    /// order with zero rows omitted. `None` when the census is disabled.
+    pub fn opcode_census(&self) -> Option<Vec<(Opcode, u64)>> {
+        if !self.settings.enable_opcode_census {
+            return None;
+        }
+        Some(
+            Opcode::ALL
+                .iter()
+                .copied()
+                .filter_map(|opcode| {
+                    let count = self
+                        .opcode_census
+                        .get(opcode as usize)
+                        .copied()
+                        .unwrap_or(0);
+                    (count != 0).then_some((opcode, count))
+                })
+                .collect(),
+        )
+    }
+
+    /// Clears recorded opcode-census counts, e.g. between warmup and the
+    /// measured call.
+    pub fn reset_opcode_census(&mut self) {
+        for count in &mut self.opcode_census {
+            *count = 0;
+        }
     }
 
     fn record_coverage_hit(

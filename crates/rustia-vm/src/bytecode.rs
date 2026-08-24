@@ -232,6 +232,152 @@ pub enum Opcode {
     NameCall = 130,
 }
 
+impl Opcode {
+    /// Every production opcode in ascending tag order.
+    ///
+    /// This is the canonical tag-to-opcode table for tooling (the opcode
+    /// census, disassembly, fuzz coverage). A unit test pins each entry to its
+    /// declared tag so the table cannot drift from the enum.
+    pub const ALL: [Opcode; 131] = [
+        Opcode::Halt,
+        Opcode::LoadConst,
+        Opcode::Move,
+        Opcode::Add,
+        Opcode::Sub,
+        Opcode::Mul,
+        Opcode::Div,
+        Opcode::Mod,
+        Opcode::Neg,
+        Opcode::Jump,
+        Opcode::JumpIfNot,
+        Opcode::JumpIf,
+        Opcode::Return,
+        Opcode::CallExtension,
+        Opcode::Assert,
+        Opcode::Equal,
+        Opcode::NotEqual,
+        Opcode::Not,
+        Opcode::Less,
+        Opcode::LessEqual,
+        Opcode::Greater,
+        Opcode::GreaterEqual,
+        Opcode::FloorDiv,
+        Opcode::Pow,
+        Opcode::Concat,
+        Opcode::ForPrep,
+        Opcode::ForLoop,
+        Opcode::ToNumber,
+        Opcode::NewArray,
+        Opcode::IpairsPrep,
+        Opcode::IpairsLoop,
+        Opcode::PairsPrep,
+        Opcode::PairsLoop,
+        Opcode::Len,
+        Opcode::GetIndex,
+        Opcode::SetIndex,
+        Opcode::TableConcat,
+        Opcode::ConcatArgs,
+        Opcode::ToString,
+        Opcode::NextKey,
+        Opcode::TypeOf,
+        Opcode::Abs,
+        Opcode::StringSub,
+        Opcode::StringLen,
+        Opcode::StringByte,
+        Opcode::StringUpper,
+        Opcode::StringLower,
+        Opcode::StringReverse,
+        Opcode::StringRep,
+        Opcode::StringFind,
+        Opcode::StringSplit,
+        Opcode::TableGetN,
+        Opcode::TableMaxN,
+        Opcode::MathFloor,
+        Opcode::MathCeil,
+        Opcode::MathRound,
+        Opcode::MathSign,
+        Opcode::MathClamp,
+        Opcode::MathMap,
+        Opcode::MathLerp,
+        Opcode::MathMin,
+        Opcode::MathMax,
+        Opcode::MathFmod,
+        Opcode::MathPow,
+        Opcode::MathSqrt,
+        Opcode::MathDeg,
+        Opcode::MathRad,
+        Opcode::MathIsNan,
+        Opcode::MathIsInf,
+        Opcode::MathIsFinite,
+        Opcode::MathSin,
+        Opcode::MathCos,
+        Opcode::MathTan,
+        Opcode::MathAsin,
+        Opcode::MathAcos,
+        Opcode::MathAtan,
+        Opcode::MathAtan2,
+        Opcode::MathSinh,
+        Opcode::MathCosh,
+        Opcode::MathTanh,
+        Opcode::MathExp,
+        Opcode::MathLog,
+        Opcode::MathLog10,
+        Opcode::MathLdexp,
+        Opcode::RawGet,
+        Opcode::RawSet,
+        Opcode::RawLen,
+        Opcode::TableFind,
+        Opcode::TableCreate,
+        Opcode::TableInsert,
+        Opcode::TableRemove,
+        Opcode::LoadFunction,
+        Opcode::Call,
+        Opcode::LoadCurrentFunction,
+        Opcode::GetGlobal,
+        Opcode::SetGlobal,
+        Opcode::GetLocalCell,
+        Opcode::SetLocalCell,
+        Opcode::GetUpvalue,
+        Opcode::SetUpvalue,
+        Opcode::ClearLocalCell,
+        Opcode::CallMulti,
+        Opcode::ReturnCall,
+        Opcode::CallExpand,
+        Opcode::LoadVarargs,
+        Opcode::ReturnVarargs,
+        Opcode::CallVarargs,
+        Opcode::ReturnCallVarargs,
+        Opcode::AppendVarargs,
+        Opcode::ReturnCallExpand,
+        Opcode::CallExpand2,
+        Opcode::CallExpandVarargs,
+        Opcode::ReturnCallExpand2,
+        Opcode::ReturnCallExpandVarargs,
+        Opcode::AppendCall,
+        Opcode::AppendCallVarargs,
+        Opcode::AppendCallExpand,
+        Opcode::ReturnCallExpand2Varargs,
+        Opcode::GenericCallPrep,
+        Opcode::GenericCallLoop,
+        Opcode::GeneralizedIterPrep,
+        Opcode::GeneralizedIterLoop,
+        Opcode::LoadConstWide,
+        Opcode::CallExpand3,
+        Opcode::CheckMethod,
+        Opcode::CoerceForNumber,
+        Opcode::GetImport,
+        Opcode::FastCall,
+        Opcode::GetTableKs,
+        Opcode::SetTableKs,
+        Opcode::NameCall,
+    ];
+
+    /// Decodes a raw tag byte, or `None` for an unassigned tag.
+    pub fn from_tag(tag: u8) -> Option<Opcode> {
+        Self::ALL.get(usize::from(tag)).copied()
+    }
+}
+
 /// Iterator-call instruction `b` lane emitted when the caller has no captured locals.
 ///
 /// Zero retains the legacy conservative behavior, so existing and hand-authored bytecode still
@@ -630,5 +776,16 @@ mod tests {
 
         assert!(program.shared_string(0).is_none());
         assert!(program.shared_string(1).is_none());
+    }
+
+    #[test]
+    fn opcode_table_matches_declared_tags_exactly() {
+        for (index, opcode) in Opcode::ALL.iter().enumerate() {
+            assert_eq!(*opcode as usize, index, "{opcode:?}");
+        }
+        assert_eq!(Opcode::from_tag(0), Some(Opcode::Halt));
+        assert_eq!(Opcode::from_tag(130), Some(Opcode::NameCall));
+        assert_eq!(Opcode::from_tag(131), None);
+        assert_eq!(Opcode::from_tag(u8::MAX), None);
     }
 }

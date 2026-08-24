@@ -233,13 +233,47 @@ workload the tape barely touches (about 1% dynamic share), and the accepted
 accepted on its diagnostic workload with the remaining per-workload gates
 deferred to a quieter host window or the next full cross-engine matrix.
 
-### C2.3 — complete compiler O2 and cleanup liveness
+### C2.3 — complete compiler O2 and cleanup liveness (analysis and machinery prepared)
 
 - Add commit-late local compound assignment, target-directed nested lowering, constant/RK arithmetic and index
   forms, branch folding, and local-slot tightening.
 - Replace uncaptured temporary clears with liveness receipts; preserve explicit close/detach operations for
   captured locals.
 - Make block logical receipts the optimization-independent fuel schedule before calling this phase complete.
+
+The preparation slice is implemented and merged ahead of the whole-function tape:
+
+- `rustia_vm::instruction_facts` is the exhaustive static operand/effect model for all 131 production
+  opcodes (reads over-approximate, definite writes under-approximate, conservative read-all fallback for the
+  exotic tail-call/expand shapes), and `rustia_vm::liveness` builds per-function basic blocks, backward
+  register liveness, forward local-cell may-attach state, per-register classification (captured cells,
+  uncaptured temporaries, values live across guest entries and block boundaries), and `ClearLocalCell`
+  classification (required captured-local detach versus pure cleanup). Nothing on the execution path consults
+  the analysis; default bytecode, fuel, and deterministic collection are unchanged.
+- The tape-facing contract is `liveness::BlockReceipt` (per-block source interval, logical instruction count,
+  live-in/out register and cell sets, terminator, guest-entry/allocation flags) plus
+  `liveness::LogicalReceipts`: per-emitted-instruction logical units whose per-block sums restore the
+  unoptimized fuel and deterministic-GC schedule over optimized code.
+  `rustia_compiler::compile_with_options_and_receipts` returns the program together with that schedule
+  (identity under the default compiler).
+- `VmSettings::enable_opcode_census` (default off) counts executed instructions per opcode on the exact
+  scalar interpreter, sharing the conformance-coverage admission gate so results and the fuel schedule stay
+  identical. The generated `design/58-vm-core2-c23-census.json` pins the five-workload static/dynamic census:
+  Move+ClearLocalCell are 47-63% of executed instructions, 195 of 210 static clears are
+  removable-with-receipts pure cleanup, and none are captured detaches. Its byte-exact sync test keeps the
+  report from drifting.
+- Classification is validated by execution, not just construction: replacing every provably dead pure-cleanup
+  clear with a value-preserving no-op leaves each workload checksum identical, while dropping required
+  captured-local detaches observably breaks per-iteration capture identity.
+- The optimization families themselves — constant-branch folding, commit-late/direct uncaptured compound
+  assignment, target-directed dead Move/Clear tail removal, and register-file tightening — exist as
+  default-disabled machinery with per-family differential tests, corpus-wide structural checks over the
+  conformance fixtures, and a generated workload preview (`design/58-vm-core2-c23-o2-preview.json`, deferred
+  with the machinery). They are deliberately not merged into main until the tape lands and logical receipts
+  make the fuel/GC schedule optimization-independent; enabling any family before that is a declared
+  compiler/fuel-schedule revision. Constant/RK operand emission is explicitly deferred: the census counts
+  only 1-5 static candidates per tracked workload, far below the 33-69 removable clears, so spending new
+  public opcode surface there is not yet measurement-justified; the analysis keeps counting candidates.
 
 ### C2.4 — register arena and iterative frames
 

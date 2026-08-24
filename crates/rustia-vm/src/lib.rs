@@ -9,6 +9,8 @@ pub mod error;
 pub mod extension;
 mod heap;
 mod hot_ir;
+pub mod instruction_facts;
+pub mod liveness;
 pub mod number;
 pub mod profile;
 mod register_blocks;
