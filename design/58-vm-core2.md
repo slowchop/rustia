@@ -233,7 +233,7 @@ workload the tape barely touches (about 1% dynamic share), and the accepted
 accepted on its diagnostic workload with the remaining per-workload gates
 deferred to a quieter host window or the next full cross-engine matrix.
 
-### C2.3 — complete compiler O2 and cleanup liveness (analysis and machinery prepared)
+### C2.3 — complete compiler O2 and cleanup liveness (receipts connected; reachability-exact track corpus-green)
 
 - Add commit-late local compound assignment, target-directed nested lowering, constant/RK arithmetic and index
   forms, branch folding, and local-slot tightening.
@@ -265,15 +265,43 @@ The preparation slice is implemented and merged ahead of the whole-function tape
 - Classification is validated by execution, not just construction: replacing every provably dead pure-cleanup
   clear with a value-preserving no-op leaves each workload checksum identical, while dropping required
   captured-local detaches observably breaks per-iteration capture identity.
-- The optimization families themselves — constant-branch folding, commit-late/direct uncaptured compound
-  assignment, target-directed dead Move/Clear tail removal, and register-file tightening — exist as
-  default-disabled machinery with per-family differential tests, corpus-wide structural checks over the
-  conformance fixtures, and a generated workload preview (`design/58-vm-core2-c23-o2-preview.json`, deferred
-  with the machinery). They are deliberately not merged into main until the tape lands and logical receipts
-  make the fuel/GC schedule optimization-independent; enabling any family before that is a declared
-  compiler/fuel-schedule revision. Constant/RK operand emission is explicitly deferred: the census counts
-  only 1-5 static candidates per tracked workload, far below the 33-69 removable clears, so spending new
-  public opcode surface there is not yet measurement-justified; the analysis keeps counting candidates.
+- The optimization families — constant-branch folding, commit-late/direct compound and plain self-update
+  assignment on uncaptured locals, reachability-exact dead Move/Clear tail folds, register-file tightening,
+  and the separate standalone-clear elision — are default-disabled machinery with per-family differential
+  tests, corpus-wide structural checks, and a generated workload preview
+  (`design/58-vm-core2-c23-o2-preview.json`). Constant/RK operand emission is explicitly deferred: the census
+  counts only 1-5 static candidates per tracked workload, far below the 33-69 removable clears, so spending
+  new public opcode surface there is not yet measurement-justified; the analysis keeps counting candidates.
+
+With the C2.2 tape merged, the logical receipts are now connected to the executor: optimized programs carry a
+validated `rustia_vm::ProgramLogicalUnits` schedule (attached by `compile_with_options` whenever an O2 family
+is enabled), and the VM charges fuel, `executed_instructions`, and deterministic-collection admission by those
+units on both the scalar dispatcher and the plain-mode tape. Every folded instruction has fuel cost one, so an
+instruction's restored cost is its own cost plus its extra units. HotIR and leaf-call plans assume one unit
+per PC and are skipped for unit-carrying programs; deterministic collection boundaries stay on the original
+count lattice but quantize to emitted-instruction edges inside a fused unit group. Schedule equivalence is
+pinned by tests: identical minimum fuel per family, identical outcomes at every fuel prefix, an identical
+logical `os.clock` on the plain-mode tape, and identical results across deterministic-GC interval sweeps.
+
+The full-corpus conformance gate (`rustia-conformance/tests/o2_conformance.rs`, threaded through
+`run_repository_with_experimental_o2`) then split the families by an empirical reachability boundary:
+
+- **Corpus-green (`ExperimentalO2Options::reachability_exact()`):** constant-branch folding, commit-late
+  compound/self-update assignment, provably-nil tail folds, and slot tightening pass all 712 fixtures
+  individually and together. These rewrites never extend or shrink object reachability at any deterministic
+  collection boundary: bypassed temporaries are provably nil beforehand and every produced value stays rooted
+  through its destination register. On the five tracked workloads this track removes 0.1-11.0% of executed
+  instructions (dominated by the plain self-update accumulator shape, the C2.2 six-operation receipt).
+- **Blocked on C2.4 (`elide_dead_cleanup_clears`):** deleting a standalone dead-value clear keeps the stale
+  value register-rooted through later collection boundaries; the upstream
+  `weak_table_key_value_root_liveness` fixture observes exactly one extra surviving weak entry. This family
+  carries most of the measured dynamic reduction (24.7-35.3% per workload, 30.1-38.8% with every family) and
+  stays hard-blocked until C2.4's frame root scanning masks registers the unoptimized program would already
+  have cleared; a self-documenting ignored conformance test pins the divergence and flips into a passing gate
+  when that lands.
+
+Default compilation remains byte-identical and schedule-identical; enabling any corpus-green family by
+default is now purely a measured performance decision behind the standard controlled A/B gates.
 
 ### C2.4 — register arena and iterative frames
 
@@ -282,6 +310,10 @@ The preparation slice is implemented and merged ahead of the whole-function tape
   path at a time to compact index-based frames.
 - Scan active windows directly for GC roots. Differentially exercise recursion, `pcall`/`xpcall`, coroutines,
   open captures, host re-entry, errors, quotas, and reset.
+- Mask liveness-dead registers during frame root scans using the C2.3 analysis, so eliding standalone
+  dead-value cleanup clears (`elide_dead_cleanup_clears`, which carries most of the C2.3 dynamic reduction)
+  stops changing weak-table observability; the pinned `weak_table_key_value_root_liveness` divergence is the
+  acceptance test.
 
 This is the largest broad architectural step and the phase most likely to close the closure/call gap. It lands
 only after C2.2 provides a stable executor boundary; mixing a frame rewrite with the old policy ladder would make

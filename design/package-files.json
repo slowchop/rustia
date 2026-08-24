@@ -1705,7 +1705,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-compiler/Cargo.toml",
       "publish": false,
-      "file_count": 17,
+      "file_count": 18,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1720,6 +1720,7 @@
         "tests/liveness_analysis.rs",
         "tests/o2_corpus_compile.rs",
         "tests/o2_families.rs",
+        "tests/o2_schedule.rs",
         "tests/o2_workload_preview.rs",
         "tests/opcode_census.rs",
         "tests/performance_fastpaths.rs",
@@ -1731,7 +1732,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-conformance/Cargo.toml",
       "publish": false,
-      "file_count": 734,
+      "file_count": 735,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -2466,6 +2467,7 @@
         "corpus/conformance/upstream/luau-0.709/tests/conformance/vector_library.luau",
         "src/lib.rs",
         "src/main.rs",
+        "tests/o2_conformance.rs",
         "tests/runner.rs"
       ]
     },

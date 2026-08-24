@@ -422,10 +422,19 @@ unreachable suspended-coroutine frames.
    generated five-workload census `design/58-vm-core2-c23-census.json` (Move+ClearLocalCell are 47-63% of
    executed instructions; 195 of 210 static clears are receipt-gated removable pure cleanup). Default
    bytecode, fuel, and deterministic collection are unchanged; classification is pinned by execution
-   differentials. The default-disabled O2 families (constant-branch folding, direct uncaptured compound
-   assignment, dead Move/Clear tail removal, register-file tightening) are prepared with per-family
-   differential tests and a generated workload preview on the `claude/c2-3-liveness-analysis-7cd991` branch
-   and stay unmerged until the tape's block receipts make the fuel/GC schedule optimization-independent
+   differentials. The C2.3 logical receipts are now connected to the tape executor: optimized programs carry a
+   validated `ProgramLogicalUnits` schedule and the VM charges fuel, `executed_instructions`, and
+   deterministic-collection admission by those units on both the scalar dispatcher and the plain-mode tape
+   (HotIR and leaf-call plans are skipped for unit-carrying programs), with equivalence pinned per family by
+   minimum-fuel equality, per-prefix fuel sweeps, logical-clock equality, and deterministic-GC interval
+   sweeps. The default-disabled O2 families are threaded through the full conformance corpus
+   (`run_repository_with_experimental_o2`); the reachability-exact track — constant-branch folding,
+   commit-late compound/self-update assignment, provably-nil tail folds, slot tightening — passes all 712
+   fixtures per family and together (0.1-11.0% executed-instruction reduction on the tracked workloads),
+   while standalone dead-clear elision (24.7-35.3% per workload; most of the measured win) diverges on the
+   upstream weak-root-liveness fixture and is hard-blocked until C2.4 frame root scans mask liveness-dead
+   registers; a self-documenting ignored conformance test pins the divergence. Default compilation remains
+   byte- and schedule-identical; enabling a corpus-green family is now purely a measured performance decision
    (see [`58-vm-core2.md`](58-vm-core2.md) §C2.3). The C2.5a slice is also merged: numeric writes to a
    proven existing, non-nil array slot mutate in place, skipping `mutate_table_data`'s before/after memory
    census and its no-op `side_usage` adjustment while keeping readonly, `__newindex`, insertion-order, and
