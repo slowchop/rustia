@@ -17,7 +17,7 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 1570,
+      "file_count": 1571,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
@@ -45,6 +45,7 @@
         "cloud/digitalocean-core2-tape-closures.json",
         "cloud/digitalocean-core2-tape-dense.json",
         "cloud/digitalocean-core2-tape-sparse.json",
+        "cloud/digitalocean-core2-tape-stdlib.json",
         "cloud/digitalocean-dense-ed65077.json",
         "cloud/digitalocean-region-b861ee9.json",
         "cloud/digitalocean-trial-basic-2c4g.json",
