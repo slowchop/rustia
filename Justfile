@@ -77,9 +77,9 @@ benchmarks:
 bench-do-auth:
     node tools/run-digitalocean-benchmark.js auth
 
-# Read-only validation of the frozen source identities and current DO catalog.
-bench-do-plan:
-    node tools/run-digitalocean-benchmark.js plan
+# Read-only validation of the selected frozen source identities and current DO catalog.
+bench-do-plan config="":
+    node tools/run-digitalocean-benchmark.js plan {{ if config == "" { "" } else { quote(config) } }}
 
 # Read-only validation of one diagnostic shared-CPU trial profile.
 bench-do-trial-plan profile:
@@ -93,9 +93,9 @@ bench-do-trial profile:
 bench-do-trials:
     node tools/run-digitalocean-benchmark.js trial-matrix
 
-# Run the frozen comparison on one ephemeral Premium Intel Droplet and confirm destruction.
-bench-do:
-    node tools/run-digitalocean-benchmark.js bench
+# Run the selected frozen comparison on one ephemeral Droplet and confirm destruction.
+bench-do config="":
+    node tools/run-digitalocean-benchmark.js bench {{ if config == "" { "" } else { quote(config) } }}
 
 # Inspect locally owned run state and its corresponding DigitalOcean resource.
 bench-do-status:

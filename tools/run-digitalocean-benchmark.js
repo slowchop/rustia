@@ -5,6 +5,7 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
 
@@ -352,6 +353,49 @@ function loadConfig(file = DEFAULT_CONFIG) {
     fail(`cannot load ${path.relative(REPO, file)}: ${error.message}`);
   }
   return validateConfig(value);
+}
+
+function pathIsInside(directory, candidate) {
+  const relative = path.relative(directory, candidate);
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function resolveConfigFile(argument, { repo = REPO, defaultConfig = DEFAULT_CONFIG } = {}) {
+  let file;
+  if (argument === undefined) {
+    file = path.resolve(defaultConfig);
+  } else {
+    const relative = requireString(argument, "DigitalOcean benchmark config path");
+    if (path.isAbsolute(relative) || relative.split(/[\\/]+/).includes("..")) {
+      fail("DigitalOcean benchmark config path must be repository-relative and contain no .. segments");
+    }
+    file = path.resolve(repo, relative);
+  }
+
+  const resolvedRepo = fs.realpathSync(repo);
+  if (!pathIsInside(path.resolve(repo), file)) {
+    fail("DigitalOcean benchmark config path must resolve inside the repository");
+  }
+
+  let metadata;
+  try {
+    metadata = fs.lstatSync(file);
+  } catch (error) {
+    fail(`cannot inspect DigitalOcean benchmark config ${path.relative(repo, file)}: ${error.message}`);
+  }
+  if (metadata.isSymbolicLink()) fail("DigitalOcean benchmark config must not be a symbolic link");
+  if (!metadata.isFile()) fail("DigitalOcean benchmark config must be a regular file");
+
+  let realFile;
+  try {
+    realFile = fs.realpathSync(file);
+  } catch (error) {
+    fail(`cannot resolve DigitalOcean benchmark config ${path.relative(repo, file)}: ${error.message}`);
+  }
+  if (!pathIsInside(resolvedRepo, realFile)) {
+    fail("DigitalOcean benchmark config path must resolve inside the repository");
+  }
+  return file;
 }
 
 function trialConfigPath(profile) {
@@ -2254,6 +2298,32 @@ async function selfTest(config) {
     loadConfig(path.join(REPO, "bench/cloud/digitalocean-dense-ed65077.json")).schema,
     "rustia.digitalocean-fixed-benchmark.v2",
   );
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-do-config-"));
+  try {
+    const fixtureRepo = path.join(temporary, "repo");
+    const fixtureCloud = path.join(fixtureRepo, "bench/cloud");
+    const outside = path.join(temporary, "outside.json");
+    const defaultFixture = path.join(fixtureCloud, "default.json");
+    const alternateFixture = path.join(fixtureCloud, "alternate.json");
+    fs.mkdirSync(fixtureCloud, { recursive: true });
+    fs.writeFileSync(defaultFixture, "{}\n");
+    fs.writeFileSync(alternateFixture, "{}\n");
+    fs.writeFileSync(outside, "{}\n");
+    const resolverOptions = { repo: fixtureRepo, defaultConfig: defaultFixture };
+    assert.equal(resolveConfigFile(undefined, resolverOptions), defaultFixture);
+    assert.equal(resolveConfigFile("bench/cloud/alternate.json", resolverOptions), alternateFixture);
+    assert.throws(() => resolveConfigFile("", resolverOptions));
+    assert.throws(() => resolveConfigFile("../outside.json", resolverOptions));
+    assert.throws(() => resolveConfigFile("bench/../bench/cloud/alternate.json", resolverOptions));
+    assert.throws(() => resolveConfigFile(outside, resolverOptions));
+    assert.throws(() => resolveConfigFile("bench", resolverOptions));
+    fs.symlinkSync(alternateFixture, path.join(fixtureRepo, "linked-config.json"));
+    assert.throws(() => resolveConfigFile("linked-config.json", resolverOptions));
+    fs.symlinkSync(temporary, path.join(fixtureRepo, "linked-directory"));
+    assert.throws(() => resolveConfigFile("linked-directory/outside.json", resolverOptions));
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
   const runner = await run("node", [REMOTE_RUNNER, "self-test"]);
   assert.match(outputText(runner), /self-test passed/);
   process.stdout.write("digitalocean benchmark coordinator self-test passed\n");
@@ -2262,8 +2332,8 @@ async function selfTest(config) {
 function usage() {
   process.stdout.write(`Usage:
   node tools/run-digitalocean-benchmark.js auth
-  node tools/run-digitalocean-benchmark.js plan
-  node tools/run-digitalocean-benchmark.js bench
+  node tools/run-digitalocean-benchmark.js plan [CONFIG.json]
+  node tools/run-digitalocean-benchmark.js bench [CONFIG.json]
   node tools/run-digitalocean-benchmark.js trial-plan PROFILE
   node tools/run-digitalocean-benchmark.js trial PROFILE
   node tools/run-digitalocean-benchmark.js trial-matrix
@@ -2271,56 +2341,82 @@ function usage() {
   node tools/run-digitalocean-benchmark.js destroy [RUN-ID]
   node tools/run-digitalocean-benchmark.js unlock
   node tools/run-digitalocean-benchmark.js self-test
+
+CONFIG.json must be a regular, non-symlink repository-relative file. The default is
+${path.relative(REPO, DEFAULT_CONFIG)}.
 `);
+}
+
+function requireCommandArguments(minimum, maximum = minimum) {
+  const count = process.argv.length - 2;
+  if (count < minimum || count > maximum) {
+    fail("unexpected command arguments; tokens are never accepted in argv");
+  }
 }
 
 async function main() {
   const command = process.argv[2];
   if (command === "unlock") {
+    requireCommandArguments(1);
     unlockStaleCoordinator();
     return;
   }
   if (command === "status") {
+    requireCommandArguments(1);
     await status();
     return;
   }
   if (command === "destroy") {
+    requireCommandArguments(1, 2);
     await destroy(process.argv[3] || "");
     return;
   }
   if (command === "trial-plan") {
+    requireCommandArguments(2);
     const configFile = trialConfigPath(process.argv[3] || "");
     const config = loadConfig(configFile);
     await buildPlan(config, { configFile });
     return;
   }
   if (command === "trial") {
+    requireCommandArguments(2);
     const summary = await trial(process.argv[3] || "");
     if (!summary.eligible_for_acceptance_profile) process.exitCode = 2;
     return;
   }
   if (command === "trial-matrix") {
+    requireCommandArguments(1);
     const result = await trialMatrix();
     if (!result.recommendation) process.exitCode = 2;
     return;
   }
-  const config = loadConfig();
   switch (command) {
     case "auth":
-      await authenticate(config);
+      requireCommandArguments(1);
+      await authenticate(loadConfig());
       break;
     case "plan":
-      await buildPlan(config);
+      requireCommandArguments(1, 2);
+      {
+        const configFile = resolveConfigFile(process.argv[3]);
+        await buildPlan(loadConfig(configFile), { configFile });
+      }
       break;
     case "bench":
-      await bench(config);
+      requireCommandArguments(1, 2);
+      {
+        const configFile = resolveConfigFile(process.argv[3]);
+        await bench(loadConfig(configFile), configFile);
+      }
       break;
     case "self-test":
-      await selfTest(config);
+      requireCommandArguments(1);
+      await selfTest(loadConfig());
       break;
     case "--help":
     case "-h":
     case "help":
+      requireCommandArguments(1);
       usage();
       break;
     default:
