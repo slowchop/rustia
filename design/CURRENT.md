@@ -398,7 +398,19 @@ unreachable suspended-coroutine frames.
    Continue from this accepted bridge into a
    mode-selected whole-function compact execution tape that replaces the Region/receipt production metadata,
    compiler liveness/receipts, a VM-owned register arena with compact iterative frames, and direct table/call
-   lanes before productionizing type-directed wasm/AOT.
+   lanes before productionizing type-directed wasm/AOT. The C2.3 preparation slice is now merged ahead of that
+   tape: `rustia_vm::instruction_facts` (exhaustive static operand/effect model for all 131 opcodes) and
+   `rustia_vm::liveness` (per-function basic blocks, register liveness, cell may-attach state, captured-detach
+   versus pure-cleanup clear classification, diagnostics, and the `BlockReceipt`/`LogicalReceipts` tape
+   contract), plus the default-off `VmSettings::enable_opcode_census` exact scalar opcode counter and the
+   generated five-workload census `design/58-vm-core2-c23-census.json` (Move+ClearLocalCell are 47-63% of
+   executed instructions; 195 of 210 static clears are receipt-gated removable pure cleanup). Default
+   bytecode, fuel, and deterministic collection are unchanged; classification is pinned by execution
+   differentials. The default-disabled O2 families (constant-branch folding, direct uncaptured compound
+   assignment, dead Move/Clear tail removal, register-file tightening) are prepared with per-family
+   differential tests and a generated workload preview on the `claude/c2-3-liveness-analysis-7cd991` branch
+   and stay unmerged until the tape's block receipts make the fuel/GC schedule optimization-independent
+   (see [`58-vm-core2.md`](58-vm-core2.md) §C2.3).
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 18 workload entries including
    source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
