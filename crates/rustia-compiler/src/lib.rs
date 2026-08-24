@@ -6607,7 +6607,7 @@ fn compare_ordered_constants(op: BinaryOp, lhs: &Constant, rhs: &Constant) -> Op
 mod tests {
     use super::{compile, compile_with_options, BuiltinEnvironment, CompileOptions};
     use rustia_parser::{parse_source, parse_source_bytes};
-    use rustia_vm::bytecode::{Constant, Opcode, Program, UpvalueDescriptor};
+    use rustia_vm::bytecode::{Constant, Instruction, Opcode, Program, UpvalueDescriptor};
     use rustia_vm::{ErrorKind, HostFunctionOp, OpCapability, Profile, Vm, VmSettings};
     use std::sync::Arc;
 
@@ -7099,6 +7099,52 @@ mod tests {
             let mut vm = Vm::new(Profile::ReproducibleStandard);
             let result = vm.run(&program).unwrap();
             assert_eq!(result.as_number(), Some(expected));
+        }
+    }
+
+    fn contains_register_block_shape(code: &[Instruction], operation: Opcode) -> bool {
+        code.windows(4).any(|instructions| {
+            let [lhs_move, rhs_move, binary, clear] = instructions else {
+                return false;
+            };
+            lhs_move.op == Opcode::Move
+                && lhs_move.c == 0
+                && lhs_move.aux == 0
+                && rhs_move.op == Opcode::Move
+                && rhs_move.c == 0
+                && rhs_move.aux == 0
+                && binary.op == operation
+                && binary.a == lhs_move.a
+                && binary.b == lhs_move.a
+                && binary.c == rhs_move.a
+                && binary.aux == 0
+                && clear.op == Opcode::ClearLocalCell
+                && clear.a == rhs_move.a
+                && clear.b == 0
+                && clear.c == 0
+                && clear.aux == 0
+        })
+    }
+
+    #[test]
+    fn compiler_register_binary_shapes_remain_available_to_vm_plans() {
+        for (source, operation, expected) in [
+            ("local a, b = 1, 2 return a + b", Opcode::Add, 3.0),
+            (
+                "local t = {7} local i = 1 return t[i]",
+                Opcode::GetIndex,
+                7.0,
+            ),
+        ] {
+            let chunk = parse_source(source).unwrap();
+            let program = compile(&chunk).unwrap();
+            assert!(
+                contains_register_block_shape(&program.main.code, operation),
+                "compiler stopped emitting the VM's verified register-block shape for {operation:?}"
+            );
+
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            assert_eq!(vm.run(&program).unwrap().as_number(), Some(expected));
         }
     }
 

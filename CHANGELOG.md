@@ -8,6 +8,16 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- VM Core 2 C2.1 adds two private, load-verified execution plans over unchanged
+  public bytecode. `ClearSpan` bulk-clears monotonic local-cleanup windows;
+  `RegisterBlock` directly executes the compiler's `Move`/`Move`/numeric-or-
+  dense-index/`ClearLocalCell` shape after all guards pass. Both retain exact
+  logical instruction accounting, fuel and deterministic-GC cadence, coverage,
+  structured error PCs, and scalar metamethod fallback. Region barriers and an
+  explicit HotIR priority test keep all three tiers composable. Loaded-program
+  quota admission now includes their exact retained metadata before insertion.
+  Controlled DigitalOcean timing is pending; no speed claim is made.
+
 - Region Engine v1 precomputes private side metadata for consecutive,
   effect-certified primitive-constant, register-bookkeeping, guarded-numeric,
   and guarded dense-array instructions. One region admission amortizes the

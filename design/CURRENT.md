@@ -385,9 +385,12 @@ unreachable suspended-coroutine frames.
    metadata with exact deoptimization and deterministic-policy fallback. Its accepted controlled DigitalOcean
    A/B measured +1.3181% candidate ns/unit with a conservative 95% interval of -4.5763% to +3.9306%, excluding
    a material 5% regression without establishing a speedup. Treat the slice as performance-neutral within the
-   measured interval; next extend verified private HotIR only where profiles identify stronger regions, pursue
-   iterator/table refinements, add profile-led superinstructions/O2, and only then productionize
-   type-directed wasm/AOT with guards, deopt, and interpreter-equivalence tests.
+   measured interval. The next programme is now [`58-vm-core2.md`](58-vm-core2.md): C2.1 implements preverified
+   bulk cleanup spans and four-instruction register blocks over unchanged public bytecode, with exact logical
+   accounting/policy fallback and controlled DigitalOcean timing still pending. Static coverage predicts about
+   276,001 register-block entries in the planned `generic_iteration` gate at `n=4000`; this is not a speed claim.
+   If accepted, continue into mode-selected executable blocks, compiler liveness/receipts, a VM-owned register
+   arena with compact iterative frames, and direct table/call lanes before productionizing type-directed wasm/AOT.
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 18 workload entries including
    source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,

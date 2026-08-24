@@ -643,6 +643,35 @@ should be profile-led and gated independently; superinstructions, broader
 HotIR/control-flow regions, and lower-overhead hot-loop execution remain the
 more promising routes to a material interpreter gain.
 
+### VM Core 2 C2.1 — implementation complete, controlled gate pending
+
+The next broad programme is specified in [`58-vm-core2.md`](58-vm-core2.md).
+Its first independently measurable slice attacks compiler-generated register
+work without changing the compiler's public bytecode or logical schedule.
+Loader metadata identifies monotonic contiguous `ClearLocalCell` runs and exact
+four-instruction register blocks (`Move`, `Move`, guarded numeric/dense-index
+operation, `ClearLocalCell`). ClearSpan clears a verified value/cell window in
+bulk. RegisterBlock snapshots both sources, proves the fast lane before any
+mutation, and commits only the final target/temporary state; a guard miss starts
+again at the first original `Move`, preserving generic and metamethod behavior.
+Both plans run only when fuel, coverage, allocation debt, and deterministic
+collection policy permit. Region construction treats their starts as executor
+barriers, and HotIR retains priority at loop backedges.
+
+Static compilation finds four eligible blocks in `generic_iteration` (three
+`Add`, one `Mul`) and one `GetIndex` block in `dense_tables`. With current tier
+priority the primary workload should enter RegisterBlock about `69*n + 1` times,
+or 276,001 times at the planned `n=4000`; HotIR consumes most dense-loop
+continuations. This is coverage analysis, not latency evidence. An attempted
+compiler bytecode-deletion variant was rejected because removing cleanup/setup
+instructions changed deterministic collection cadence; C2.1 therefore leaves
+the public instruction stream unchanged. Correctness tests cover exact
+bulk/scalar accounting, value/cell cleanup, fuel/coverage fallback,
+deterministic collection intervals, guard/error PCs, malformed metadata,
+memory-quota admission, compiler shape retention, and Region/ClearSpan/HotIR
+coexistence. No developer-host timing is admissible; the exact DigitalOcean A/B
+remains the promotion gate.
+
 ## Estimate vs C++ Luau
 
 | state | likely position vs C++ Luau interpreter |
