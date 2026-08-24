@@ -2095,6 +2095,7 @@ impl VmCell {
     /// guest-visible `mutation_version` bump. Storing nil is included: it
     /// clears a present slot in place without moving the array boundary.
     /// Readonly is the only remaining rejection.
+    #[allow(dead_code)]
     #[inline]
     fn write_present_array_slot(
         &mut self,
@@ -2158,10 +2159,7 @@ impl VmCell {
                 return Some(TableNumericArrayWrite::Deferred);
             }
             let existing = table_data.array[one_based_index - 1];
-            if !existing.is_nil() {
-                return self.write_present_array_slot(table, one_based_index, value);
-            }
-            if table_data.metatable.is_some() {
+            if existing.is_nil() && table_data.metatable.is_some() {
                 return Some(TableNumericArrayWrite::Deferred);
             }
             if table_data.readonly {
@@ -2185,10 +2183,7 @@ impl VmCell {
             .get(one_based_index - 1)
             .copied()
             .unwrap_or_else(Value::nil);
-        if !existing.is_nil() {
-            return self.write_present_array_slot(table, one_based_index, value);
-        }
-        if table_data.metatable.is_some() {
+        if existing.is_nil() && table_data.metatable.is_some() {
             return Some(TableNumericArrayWrite::Deferred);
         }
         if table_data.readonly {
