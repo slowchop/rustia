@@ -1,7 +1,9 @@
 # VM Core 2 — interpreter parity without a JIT
 
-> **Status (2026-08-24): C2.1 was remotely falsified; C2.2 Region-integrated private receipts are
-> implemented, correctness-validated, and remotely accepted with 8.1651% lower ns/unit.** This is the execution plan for the largest safe non-JIT performance programme. It refines the
+> **Status (2026-08-24): C2.1 was remotely falsified; C2.2 Region-integrated private receipts were
+> remotely accepted with 8.1651% lower ns/unit; the C2.2 mode-selected whole-function plain tape is
+> implemented and correctness-validated, replacing the Region/receipt production metadata, with its
+> controlled DigitalOcean gate pending.** This is the execution plan for the largest safe non-JIT performance programme. It refines the
 > performance queue in [`56-performance-research.md`](56-performance-research.md); it does not change Luau
 > semantics, the deterministic number contract, or the public no-unsafe policy.
 
@@ -162,13 +164,36 @@ Evidence is under
 
 This result validates the architectural lesson from C2.1: keep verified work
 inside one already-admitted executor instead of adding a competing per-PC tier.
-The next C2.2 slice is a mode-selected whole-function plain executable tape.
-It should replace Region/receipt production metadata, predecode operands
-and direct branch targets into effect-terminated blocks, and side-exit to the
-unchanged scalar instruction before any mutation on a guard miss. Metered and
-instrumented modes remain scalar initially. This attacks the repeated
-executor-selection ladder across arbitrary verified blocks before the larger
-frame-arena rewrite.
+
+The second C2.2 slice is the mode-selected whole-function plain executable
+tape, now implemented. The loader predecodes every source PC into exactly one
+private tape operation or an effect boundary: register moves and cell clears,
+primitive constant loads with the value decoded once at load time, guarded
+numeric arithmetic/negation/comparisons, truthiness inversion, guarded
+dense-array reads and writes, direct `Jump`/`JumpIf`/`JumpIfNot` targets,
+guarded numeric `ForLoop` backedges, and the accepted fused four/six-operation
+register receipts. A per-PC run suffix groups execution into effect-terminated
+blocks and doubles as the remaining logical cost, so one admission per block
+replaces the per-instruction fuel/coverage/debt/GC ladder; a deterministic
+collection boundary inside a block admits only the exact prefix and hands the
+boundary instruction to scalar semantics. Execution mode is selected once at
+function entry: plain (unmetered, uninstrumented) frames resolve the tape,
+while metered, coverage, debugging, and stepping frames stay entirely on the
+scalar dispatcher. A dynamic guard miss side-exits to the exact canonical
+instruction before any mutation with its accounting already settled; build
+verification declines malformed operands so structured errors keep their
+current kind and PC. HotIR keeps sole ownership of its recognized `ForLoop`
+backedges (they stay effect boundaries), and the closure-call PIC keeps `Call`
+sites, so the plain path never consults competing executors at one PC. The
+Region suffix map and the per-PC RegisterBlock map are retired; the receipt
+recognizer and its atomic executor survive as fused tape operations resolved
+at load time, which removes the per-`Move` map lookup entirely. Tape bytes are
+charged exactly during loaded-program quota admission. Scalar-versus-tape
+differential tests sweep every tape opcode family, branch edges, loops,
+deterministic collection intervals, guard exits, malformed jump targets and
+registers, and structured error PCs; the workspace release preflight,
+conformance package verification, fuzz smoke suite, and native/wasm
+memory-limit checks all passed with the tape as the production default.
 
 ### C2.3 — complete compiler O2 and cleanup liveness
 

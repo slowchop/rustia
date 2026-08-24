@@ -8,6 +8,28 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- VM Core 2 C2.2 replaces the plain-mode per-PC Region/receipt selection
+  ladder with one loader-built, whole-function executable tape. Every source
+  PC predecodes to exactly one private tape operation — register moves and
+  cell clears, primitive constant loads with the value decoded at load time,
+  guarded numeric arithmetic/negation/comparisons, truthiness inversion,
+  guarded dense-array reads and writes, direct `Jump`/`JumpIf`/`JumpIfNot`
+  branch targets, guarded numeric `ForLoop` backedges, and the accepted fused
+  four/six-operation register receipts — or to an effect boundary owned by the
+  scalar dispatcher. Execution mode (plain, metered, instrumented) is selected
+  once at function entry: unmetered, uninstrumented frames run the tape in
+  effect-terminated blocks whose run suffix doubles as the logical-cost prefix
+  for deterministic-GC admission, while metered and instrumented frames stay
+  entirely scalar. A dynamic guard miss side-exits to the exact canonical
+  instruction before any mutation, malformed operands decline at build time so
+  structured errors keep their kind and PC, HotIR-owned `ForLoop` backedges
+  stay effect boundaries, and tape metadata is charged exactly to
+  loaded-program quota admission. The Region suffix map and per-PC
+  RegisterBlock map are retired; the receipt recognizer and executor survive
+  inside the tape. Scalar-versus-tape differential tests sweep every tape
+  opcode family, deterministic collection intervals, guard exits, branch
+  edges, malformed jump targets, and error PCs.
+
 - VM Core 2 C2.2 adds frame-local immutable execution receipts over unchanged
   public bytecode. Region Engine can execute the compiler's exact
   `Move`/`Move`/numeric-or-dense-index/`ClearLocalCell` shape as one internal

@@ -2395,8 +2395,8 @@
         "src/lib.rs",
         "src/number.rs",
         "src/profile.rs",
-        "src/region.rs",
         "src/register_blocks.rs",
+        "src/tape.rs",
         "src/value.rs",
         "src/vm.rs",
         "tests/core.rs"

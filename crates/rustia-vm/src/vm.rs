@@ -21,13 +21,8 @@ use crate::hot_ir::{recognize_hot_ir_loops, HotIr, HotIrNumber, HotIrOpKind, Hot
 use crate::hot_ir::{HotIrArrayWrite, HotIrCellClear, HotIrNumberId, HotIrOp, HotIrRegisterWrite};
 use crate::number::{binary, canonicalize_number, NumericOp};
 use crate::profile::{GuestSurface, Profile};
-use crate::region::{
-    build_common_region_map, common_region_at, CommonRegion, COMMON_REGION_CANDIDATE,
-    REGION_OPCODE_CANDIDATE,
-};
-use crate::register_blocks::{
-    build_register_block_map, register_block_at, RegisterBlockMap, RegisterBlockPlan,
-};
+use crate::register_blocks::RegisterBlockPlan;
+use crate::tape::{FunctionTape, TapeComparison, TapeOp};
 use crate::value::{Value, ValueKind};
 use smallvec::SmallVec;
 use std::cell::RefCell;
@@ -498,9 +493,7 @@ pub struct Vm {
     #[cfg(test)]
     hot_ir_mode: HotIrTestMode,
     #[cfg(test)]
-    region_mode: RegionTestMode,
-    #[cfg(test)]
-    superinstruction_mode: SuperinstructionTestMode,
+    tape_mode: TapeTestMode,
     #[cfg(test)]
     closure_call_mode: ClosureCallTestMode,
 }
@@ -612,14 +605,7 @@ enum HotIrTestMode {
 
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RegionTestMode {
-    Off,
-    Auto,
-}
-
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SuperinstructionTestMode {
+enum TapeTestMode {
     Off,
     Auto,
 }
@@ -652,17 +638,13 @@ struct LoadedProgram {
     #[cfg(test)]
     hot_ir_guard_exits: u64,
     #[cfg(test)]
-    region_entries: u64,
+    tape_entries: u64,
     #[cfg(test)]
-    region_instructions: u64,
+    tape_instructions: u64,
     #[cfg(test)]
-    region_guard_exits: u64,
+    tape_receipts: u64,
     #[cfg(test)]
-    register_block_entries: u64,
-    #[cfg(test)]
-    register_block_instructions: u64,
-    #[cfg(test)]
-    register_block_guard_exits: u64,
+    tape_guard_exits: u64,
     #[cfg(test)]
     closure_call_cache_fills: u64,
     #[cfg(test)]
@@ -968,17 +950,13 @@ impl LoadedProgram {
             #[cfg(test)]
             hot_ir_guard_exits: 0,
             #[cfg(test)]
-            region_entries: 0,
+            tape_entries: 0,
             #[cfg(test)]
-            region_instructions: 0,
+            tape_instructions: 0,
             #[cfg(test)]
-            region_guard_exits: 0,
+            tape_receipts: 0,
             #[cfg(test)]
-            register_block_entries: 0,
-            #[cfg(test)]
-            register_block_instructions: 0,
-            #[cfg(test)]
-            register_block_guard_exits: 0,
+            tape_guard_exits: 0,
             #[cfg(test)]
             closure_call_cache_fills: 0,
             #[cfg(test)]
@@ -1116,14 +1094,14 @@ impl LoadedProgram {
         }
     }
 
-    fn execution_plans(&self, prototype: Option<u32>) -> Option<Arc<FunctionExecutionPlans>> {
+    fn execution_tape(&self, prototype: Option<u32>) -> Option<Arc<FunctionTape>> {
         match prototype {
             Some(prototype) => self
                 .function_inline_caches
                 .get(prototype as usize)?
-                .execution_plans
+                .execution_tape
                 .clone(),
-            None => self.main_inline_caches.execution_plans.clone(),
+            None => self.main_inline_caches.execution_tape.clone(),
         }
     }
 
@@ -1172,51 +1150,9 @@ struct FunctionInlineCaches {
     #[allow(clippy::box_collection)]
     closure_call_entries: Option<Box<Vec<ClosureCallInlineCache>>>,
     leaf_call_plan: Option<LeafCallPlan>,
-    execution_plans: Option<Arc<FunctionExecutionPlans>>,
+    execution_tape: Option<Arc<FunctionTape>>,
     hot_ir_by_pc: Option<Box<[u32]>>,
     hot_irs: Vec<Arc<HotIr>>,
-}
-
-/// Immutable load-time receipts used by the ordinary Region executor.
-///
-/// One shared handle is resolved when a function starts. Region and
-/// RegisterBlock lookup thereafter stays local to the frame instead of walking
-/// the loaded-program handle and prototype tables at every candidate PC.
-struct FunctionExecutionPlans {
-    common_region_by_pc: Option<Box<[u16]>>,
-    register_blocks: Option<RegisterBlockMap>,
-}
-
-impl FunctionExecutionPlans {
-    fn build(program: &Program, function: &Function) -> Option<Arc<Self>> {
-        let common_region_by_pc = build_common_region_map(program, function);
-        let register_blocks = build_register_block_map(function);
-        (common_region_by_pc.is_some() || register_blocks.is_some()).then(|| {
-            Arc::new(Self {
-                common_region_by_pc,
-                register_blocks,
-            })
-        })
-    }
-
-    #[inline]
-    fn common_region(&self, pc: usize) -> Option<CommonRegion> {
-        common_region_at(self.common_region_by_pc.as_deref(), pc)
-    }
-
-    fn memory_bytes(&self) -> usize {
-        size_of::<Self>()
-            .saturating_add(
-                self.common_region_by_pc
-                    .as_deref()
-                    .map_or(0, |by_pc| by_pc.len().saturating_mul(size_of::<u16>())),
-            )
-            .saturating_add(
-                self.register_blocks
-                    .as_ref()
-                    .map_or(0, RegisterBlockMap::memory_bytes),
-            )
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -1226,8 +1162,14 @@ struct HotIrInputs {
     next: f64,
 }
 
+/// Result of one plain-mode tape entry.
+///
+/// `Complete` accounts every executed logical instruction; `next_pc` itself is
+/// unaccounted and runs through full scalar policy. `GuardExit` additionally
+/// accounts the guarded instruction at `pc`, whose semantic implementation
+/// then runs below the caller without repeating policy work.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CommonRegionOutcome {
+enum TapeOutcome {
     Complete { next_pc: usize },
     GuardExit { pc: usize },
 }
@@ -1245,8 +1187,10 @@ impl FunctionInlineCaches {
                 _ => SITE_CACHE_INELIGIBLE,
             })
             .collect();
-        let execution_plans = FunctionExecutionPlans::build(program, function);
         let hot_irs = recognize_hot_ir_loops(program, function);
+        let hot_ir_backedges: Vec<usize> =
+            hot_irs.iter().map(|hot_ir| hot_ir.backedge_pc).collect();
+        let execution_tape = FunctionTape::build(program, function, &hot_ir_backedges);
         let hot_ir_by_pc = if hot_irs.is_empty() {
             None
         } else {
@@ -1266,7 +1210,7 @@ impl FunctionInlineCaches {
             native_call_entries: Vec::new(),
             closure_call_entries: None,
             leaf_call_plan,
-            execution_plans,
+            execution_tape,
             hot_ir_by_pc,
             hot_irs,
         }
@@ -1287,8 +1231,8 @@ impl FunctionInlineCaches {
         if let Some(by_pc) = &self.hot_ir_by_pc {
             usage.add_boxed_slice(by_pc);
         }
-        if let Some(execution_plans) = &self.execution_plans {
-            let bytes = execution_plans.memory_bytes();
+        if let Some(execution_tape) = &self.execution_tape {
+            let bytes = execution_tape.memory_bytes();
             usage.add(bytes, bytes);
         }
         usage.add_vec(&self.hot_irs);
@@ -2299,9 +2243,7 @@ impl Vm {
             #[cfg(test)]
             hot_ir_mode: HotIrTestMode::Auto,
             #[cfg(test)]
-            region_mode: RegionTestMode::Auto,
-            #[cfg(test)]
-            superinstruction_mode: SuperinstructionTestMode::Auto,
+            tape_mode: TapeTestMode::Auto,
             #[cfg(test)]
             closure_call_mode: ClosureCallTestMode::Auto,
         };
@@ -2323,22 +2265,10 @@ impl Vm {
     }
 
     #[inline]
-    fn region_enabled(&self) -> bool {
+    fn tape_enabled(&self) -> bool {
         #[cfg(test)]
         {
-            self.region_mode != RegionTestMode::Off
-        }
-        #[cfg(not(test))]
-        {
-            true
-        }
-    }
-
-    #[inline]
-    fn superinstructions_enabled(&self) -> bool {
-        #[cfg(test)]
-        {
-            self.superinstruction_mode != SuperinstructionTestMode::Off
+            self.tape_mode != TapeTestMode::Off
         }
         #[cfg(not(test))]
         {
@@ -3456,26 +3386,21 @@ impl Vm {
                 }));
             }
 
-            // Resolve immutable execution receipts once for this frame. The
-            // Region hot path can then consult both its suffix map and exact
-            // RegisterBlock plans without another loaded-program/prototype
-            // lookup at each candidate PC.
-            let execution_plans = if self.region_enabled() {
-                program_id
-                    .and_then(|program_id| self.execution_plans(program_id, context.prototype))
+            // Select the execution mode once per frame. Fuel metering and
+            // coverage instrumentation cannot appear mid-frame, so a plain
+            // (unmetered, uninstrumented) frame resolves its loader-built
+            // executable tape here and never retests those policies per
+            // instruction. Metered and instrumented frames stay entirely on
+            // the scalar dispatcher.
+            let plain_mode = fuel.state.fuel.is_none()
+                && !self.settings.enable_conformance_coverage
+                && self.tape_enabled();
+            let execution_tape = if plain_mode {
+                program_id.and_then(|program_id| self.execution_tape(program_id, context.prototype))
             } else {
                 None
             };
-            let common_regions_enabled = execution_plans
-                .as_deref()
-                .is_some_and(|plans| plans.common_region_by_pc.is_some());
-            let register_blocks = if self.superinstructions_enabled() {
-                execution_plans
-                    .as_deref()
-                    .and_then(|plans| plans.register_blocks.as_ref())
-            } else {
-                None
-            };
+            let execution_tape = execution_tape.as_deref();
 
             let allow_stackless_self_calls = resumed.is_none();
             let stackless_recursion_limit = self.stackless_recursion_limit();
@@ -3763,95 +3688,51 @@ impl Vm {
                             }
                         }
 
-                        let is_common_fast_path_candidate =
-                            COMMON_REGION_CANDIDATE[instruction.op as usize];
-                        let is_region_opcode_candidate = common_regions_enabled
-                            && REGION_OPCODE_CANDIDATE[instruction.op as usize];
-                        let next_is_region_opcode_candidate = is_region_opcode_candidate
-                            && function
-                                .code
-                                .get(pc.saturating_add(1))
-                                .is_some_and(|next| REGION_OPCODE_CANDIDATE[next.op as usize]);
-                        let mut region_guard_exit = false;
-                        if is_region_opcode_candidate
-                            && next_is_region_opcode_candidate
-                            && fuel.state.fuel.is_none()
-                            && !self.settings.enable_conformance_coverage
-                            && !self.heap.has_allocation_debt()
-                        {
-                            if let Some(program_id) = program_id {
-                                if let Some(region) = execution_plans
-                                    .as_deref()
-                                    .and_then(|plans| plans.common_region(pc))
-                                {
-                                    if !self.weak_collection_due_within(region.instruction_count())
-                                    {
-                                        match self.try_common_region(
-                                            program,
-                                            function,
-                                            program_id,
-                                            region,
-                                            register_blocks,
-                                            &mut registers,
-                                            &mut register_cells,
-                                        )? {
-                                            CommonRegionOutcome::Complete { next_pc } => {
-                                                pc = next_pc;
-                                                continue;
-                                            }
-                                            CommonRegionOutcome::GuardExit { pc: exit_pc } => {
-                                                pc = exit_pc;
-                                                instruction = *function.code.get(pc).ok_or_else(|| {
-                                                    Error::new(ErrorKind::InvalidProgram {
-                                                        reason: "region guard exited beyond function code",
-                                                    })
-                                                    .at_pc(pc)
-                                                })?;
-                                                self.update_current_gc_roots(
-                                                    &registers,
-                                                    &register_cells,
-                                                    &varargs,
-                                                    &pending_return_prefixes,
-                                                );
-                                                region_guard_exit = true;
-                                            }
+                        // The single plain-mode executor decision: one dense
+                        // per-PC tape entry instead of the retired per-PC
+                        // Region/receipt selection ladder.
+                        let mut tape_guard_exit = false;
+                        if let Some(tape) = execution_tape {
+                            if tape.run_from(pc) != 0 {
+                                match self.try_tape(
+                                    program,
+                                    function,
+                                    program_id,
+                                    tape,
+                                    pc,
+                                    &mut registers,
+                                    &mut register_cells,
+                                )? {
+                                    TapeOutcome::Complete { next_pc } => {
+                                        if next_pc != pc {
+                                            pc = next_pc;
+                                            continue;
                                         }
+                                    }
+                                    TapeOutcome::GuardExit { pc: exit_pc } => {
+                                        pc = exit_pc;
+                                        instruction = *function.code.get(pc).ok_or_else(|| {
+                                            Error::new(ErrorKind::InvalidProgram {
+                                                reason: "tape guard exited beyond function code",
+                                            })
+                                            .at_pc(pc)
+                                        })?;
+                                        self.update_current_gc_roots(
+                                            &registers,
+                                            &register_cells,
+                                            &varargs,
+                                            &pending_return_prefixes,
+                                        );
+                                        tape_guard_exit = true;
                                     }
                                 }
                             }
                         }
 
-                        let can_try_common_fast_path = !region_guard_exit
-                            && is_common_fast_path_candidate
-                            && fuel.state.fuel.is_none()
-                            && !self.settings.enable_conformance_coverage
-                            && !self.heap.has_allocation_debt()
-                            && !self.weak_collection_due_within(1);
-                        if region_guard_exit {
-                            // The region already performed this instruction's
+                        if tape_guard_exit {
+                            // The tape already performed this instruction's
                             // accounting and refreshed roots before deopt. Run
                             // only its semantic implementation below.
-                        } else if can_try_common_fast_path {
-                            self.executed_instructions = self.executed_instructions.wrapping_add(1);
-                            if self
-                                .try_common_instruction(
-                                    &mut registers,
-                                    &mut register_cells,
-                                    instruction,
-                                )
-                                .map_err(|error| {
-                                    attach_instruction_source(program, function, pc, error)
-                                })?
-                            {
-                                pc += 1;
-                                continue;
-                            }
-                            self.update_current_gc_roots(
-                                &registers,
-                                &register_cells,
-                                &varargs,
-                                &pending_return_prefixes,
-                            );
                         } else {
                             let fuel_cost = self
                                 .instruction_fuel_cost(instruction)
@@ -8406,234 +8287,388 @@ impl Vm {
         true
     }
 
-    #[inline(always)]
-    fn try_common_instruction(
+    /// Execute predecoded plain-mode tape operations from `entry_pc` under
+    /// per-block policy admission. Operations commit in source order and the
+    /// logical accounting matches the scalar dispatcher exactly. A dynamic
+    /// guard miss happens before the failing instruction mutates observable
+    /// state; the caller then runs that exact canonical instruction through
+    /// the semantic dispatcher without repeating its accounting.
+    fn try_tape(
         &mut self,
+        _program: &Program,
+        _function: &Function,
+        program_id: Option<u32>,
+        tape: &FunctionTape,
+        entry_pc: usize,
         registers: &mut [Value],
         register_cells: &mut [Option<u32>],
-        instruction: Instruction,
-    ) -> Result<bool> {
-        match instruction.op {
-            // Pure register bookkeeping: no allocation, no guest code, no GC
-            // trigger, so the slow path's root refresh and collection polling
-            // are provably unnecessary.
-            Opcode::Move => {
-                let value = get_register(registers, instruction.b)?;
-                set_register(registers, instruction.a, value)?;
-                Ok(true)
-            }
-            Opcode::ClearLocalCell => {
-                clear_register_cell(register_cells, instruction.a)?;
-                set_register(registers, instruction.a, Value::nil())?;
-                Ok(true)
-            }
-            Opcode::Add
-            | Opcode::Sub
-            | Opcode::Mul
-            | Opcode::Div
-            | Opcode::FloorDiv
-            | Opcode::Mod
-            | Opcode::Pow => {
-                let Some(lhs) = registers
-                    .get(instruction.b as usize)
-                    .and_then(|value| value.as_number())
-                else {
-                    return Ok(false);
-                };
-                let Some(rhs) = registers
-                    .get(instruction.c as usize)
-                    .and_then(|value| value.as_number())
-                else {
-                    return Ok(false);
-                };
-                let op = match instruction.op {
-                    Opcode::Add => NumericOp::Add,
-                    Opcode::Sub => NumericOp::Sub,
-                    Opcode::Mul => NumericOp::Mul,
-                    Opcode::Div => NumericOp::Div,
-                    Opcode::FloorDiv => NumericOp::FloorDiv,
-                    Opcode::Mod => NumericOp::Mod,
-                    Opcode::Pow => NumericOp::Pow,
-                    _ => unreachable!("numeric fast path accepts only binary numeric opcodes"),
-                };
-                set_register(
-                    registers,
-                    instruction.a,
-                    Value::number(binary(op, lhs, rhs)),
-                )?;
-                Ok(true)
-            }
-            Opcode::GetIndex => {
-                let Some(object) = registers.get(instruction.b as usize).copied() else {
-                    return Ok(false);
-                };
-                let Some(table) = object.as_table() else {
-                    return Ok(false);
-                };
-                let Some(index) = registers
-                    .get(instruction.c as usize)
-                    .and_then(|key| key.as_number())
-                    .and_then(array_iterator_index)
-                else {
-                    return Ok(false);
-                };
-                let Some(value) = self.heap.read_numeric_array_slot(table, index) else {
-                    return Ok(false);
-                };
-                if value.is_nil() {
-                    return Ok(false);
-                }
-                set_register(registers, instruction.a, value)?;
-                Ok(true)
-            }
-            Opcode::SetIndex => {
-                let Some(object) = registers.get(instruction.a as usize).copied() else {
-                    return Ok(false);
-                };
-                let Some(table) = object.as_table() else {
-                    return Ok(false);
-                };
-                let Some(index) = registers
-                    .get(instruction.b as usize)
-                    .and_then(|key| key.as_number())
-                    .and_then(array_iterator_index)
-                else {
-                    return Ok(false);
-                };
-                let Some(value) = registers.get(instruction.c as usize).copied() else {
-                    return Ok(false);
-                };
-                Ok(matches!(
-                    self.heap.try_write_numeric_array_slot(table, index, value),
-                    Some(TableNumericArrayWrite::Stored)
-                ))
-            }
-            _ => Ok(false),
-        }
-    }
-
-    #[inline(always)]
-    fn try_region_instruction(
-        &mut self,
-        program: &Program,
-        program_id: u32,
-        registers: &mut [Value],
-        register_cells: &mut [Option<u32>],
-        instruction: Instruction,
-    ) -> Result<bool> {
-        let constant_index = match instruction.op {
-            Opcode::LoadConst => Some(usize::from(instruction.c)),
-            Opcode::LoadConstWide if instruction.aux >= 0 => Some(instruction.aux as usize),
-            Opcode::LoadConstWide => {
-                return Err(Error::new(ErrorKind::InvalidProgram {
-                    reason: "negative wide constant index",
-                }));
-            }
-            _ => None,
-        };
-        if let Some(constant_index) = constant_index {
-            if !matches!(
-                program.constants().get(constant_index),
-                Some(Constant::Nil | Constant::Boolean(_) | Constant::Number(_))
-            ) {
-                return Ok(false);
-            }
-            let value = self.load_constant(program, Some(program_id), constant_index)?;
-            set_register(registers, instruction.a, value)?;
-            return Ok(true);
-        }
-        self.try_common_instruction(registers, register_cells, instruction)
-    }
-
-    /// Execute a preverified consecutive region under one policy admission.
-    /// Each operation commits in source order. A dynamic guard miss has not
-    /// mutated the current instruction, so only that instruction deoptimizes
-    /// through the semantic dispatch below the caller.
-    #[inline]
-    fn try_common_region(
-        &mut self,
-        program: &Program,
-        function: &Function,
-        program_id: u32,
-        region: CommonRegion,
-        register_blocks: Option<&RegisterBlockMap>,
-        registers: &mut [Value],
-        register_cells: &mut [Option<u32>],
-    ) -> Result<CommonRegionOutcome> {
+    ) -> Result<TapeOutcome> {
         #[cfg(not(test))]
         let _ = program_id;
-        let instructions = function
-            .code
-            .get(region.start_pc..region.end_pc())
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "common region extends beyond function code",
-                })
-                .at_pc(region.start_pc)
-            })?;
-
-        let mut offset = 0;
-        while offset < instructions.len() {
-            let instruction = instructions[offset];
-            let pc = region.start_pc + offset;
-
-            // An exact load-verified block remains part of this uninterrupted
-            // Region admission. A successful block advances the local cursor
-            // across its represented public instructions; a guard miss changes
-            // no state and falls through to the canonical first Move below.
-            if instruction.op == Opcode::Move {
-                if let Some(block) = register_block_at(register_blocks, pc) {
-                    let instruction_count = block.instruction_count();
-                    let next_offset = offset.saturating_add(instruction_count as usize);
-                    if next_offset <= instructions.len()
-                        && self.try_register_block(registers, register_cells, block)
-                    {
-                        #[cfg(test)]
-                        self.record_register_block_execution(program_id, instruction_count, false);
-                        offset = next_offset;
-                        continue;
+        // Tape operations cannot allocate, so allocation debt is invariant
+        // while the tape runs and is checked once per entry.
+        if self.heap.has_allocation_debt() {
+            return Ok(TapeOutcome::Complete { next_pc: entry_pc });
+        }
+        let mut pc = entry_pc;
+        #[cfg(test)]
+        let mut total: u64 = 0;
+        #[cfg(test)]
+        let mut total_receipts: u64 = 0;
+        macro_rules! finish_complete {
+            () => {{
+                #[cfg(test)]
+                self.record_tape_execution(program_id, total, total_receipts, false);
+                return Ok(TapeOutcome::Complete { next_pc: pc });
+            }};
+        }
+        loop {
+            let run = u64::from(tape.run_from(pc));
+            // Admit only the exact block prefix that cannot contain a
+            // deterministic collection boundary; the boundary instruction and
+            // any non-tape successor run through scalar semantics.
+            let boundary_distance = self
+                .next_weak_collection_instruction
+                .wrapping_sub(self.executed_instructions);
+            let admitted = run.min(boundary_distance.saturating_sub(1));
+            if admitted == 0 {
+                finish_complete!();
+            }
+            let mut done: u64 = 0;
+            let mut guard_missed = false;
+            'window: while done < admitted {
+                match tape.op(pc) {
+                    TapeOp::Exit => {
+                        // Defensive only: run suffixes never cover Exit ops.
+                        break 'window;
                     }
-                    #[cfg(test)]
-                    if next_offset <= instructions.len() {
-                        self.record_register_block_execution(program_id, 0, true);
+                    TapeOp::Move {
+                        destination,
+                        source,
+                    } => {
+                        let Some(value) = registers.get(usize::from(source)).copied() else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        let Some(slot) = registers.get_mut(usize::from(destination)) else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        *slot = value;
+                        done += 1;
+                        pc += 1;
+                    }
+                    TapeOp::ClearLocalCell { register } => {
+                        let register = usize::from(register);
+                        let (Some(slot), Some(cell)) = (
+                            registers.get_mut(register),
+                            register_cells.get_mut(register),
+                        ) else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        *cell = None;
+                        *slot = Value::nil();
+                        done += 1;
+                        pc += 1;
+                    }
+                    TapeOp::LoadPrimitive {
+                        destination,
+                        constant,
+                    } => {
+                        let value = tape.constant(constant);
+                        let Some(slot) = registers.get_mut(usize::from(destination)) else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        *slot = value;
+                        done += 1;
+                        pc += 1;
+                    }
+                    TapeOp::Numeric {
+                        operation,
+                        destination,
+                        lhs,
+                        rhs,
+                    } => {
+                        let lhs = registers
+                            .get(usize::from(lhs))
+                            .and_then(|value| value.as_number());
+                        let rhs = registers
+                            .get(usize::from(rhs))
+                            .and_then(|value| value.as_number());
+                        let (Some(lhs), Some(rhs)) = (lhs, rhs) else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        let Some(slot) = registers.get_mut(usize::from(destination)) else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        *slot = Value::number(binary(operation, lhs, rhs));
+                        done += 1;
+                        pc += 1;
+                    }
+                    TapeOp::NumericNegate {
+                        destination,
+                        source,
+                    } => {
+                        let Some(number) = registers
+                            .get(usize::from(source))
+                            .and_then(|value| value.as_number())
+                        else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        let Some(slot) = registers.get_mut(usize::from(destination)) else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        *slot = Value::number(binary(NumericOp::Neg, number, 0.0));
+                        done += 1;
+                        pc += 1;
+                    }
+                    TapeOp::Not {
+                        destination,
+                        source,
+                    } => {
+                        let Some(value) = registers.get(usize::from(source)).copied() else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        let Some(slot) = registers.get_mut(usize::from(destination)) else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        *slot = Value::boolean(!value.truthy());
+                        done += 1;
+                        pc += 1;
+                    }
+                    TapeOp::Compare {
+                        comparison,
+                        destination,
+                        lhs,
+                        rhs,
+                    } => {
+                        let lhs = registers
+                            .get(usize::from(lhs))
+                            .and_then(|value| value.as_number());
+                        let rhs = registers
+                            .get(usize::from(rhs))
+                            .and_then(|value| value.as_number());
+                        let (Some(lhs), Some(rhs)) = (lhs, rhs) else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        // Exactly `raw_order`/`raw_equal_values` on the
+                        // both-number path; other operand kinds stay scalar.
+                        let result = match comparison {
+                            TapeComparison::Less => {
+                                compare_ordering(OrderComparison::Less, lhs.partial_cmp(&rhs))
+                            }
+                            TapeComparison::LessEqual => {
+                                compare_ordering(OrderComparison::LessEqual, lhs.partial_cmp(&rhs))
+                            }
+                            TapeComparison::Greater => {
+                                compare_ordering(OrderComparison::Less, rhs.partial_cmp(&lhs))
+                            }
+                            TapeComparison::GreaterEqual => {
+                                compare_ordering(OrderComparison::LessEqual, rhs.partial_cmp(&lhs))
+                            }
+                            TapeComparison::Equal => lhs == rhs,
+                            TapeComparison::NotEqual => lhs != rhs,
+                        };
+                        let Some(slot) = registers.get_mut(usize::from(destination)) else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        *slot = Value::boolean(result);
+                        done += 1;
+                        pc += 1;
+                    }
+                    TapeOp::DenseArrayGet {
+                        destination,
+                        table,
+                        index,
+                    } => {
+                        let table = registers
+                            .get(usize::from(table))
+                            .and_then(|value| value.as_table());
+                        let index = registers
+                            .get(usize::from(index))
+                            .and_then(|key| key.as_number())
+                            .and_then(array_iterator_index);
+                        let (Some(table), Some(index)) = (table, index) else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        let Some(value) = self.heap.read_numeric_array_slot(table, index) else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        if value.is_nil() {
+                            guard_missed = true;
+                            break 'window;
+                        }
+                        let Some(slot) = registers.get_mut(usize::from(destination)) else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        *slot = value;
+                        done += 1;
+                        pc += 1;
+                    }
+                    TapeOp::DenseArraySet {
+                        table,
+                        index,
+                        value,
+                    } => {
+                        let table = registers
+                            .get(usize::from(table))
+                            .and_then(|object| object.as_table());
+                        let index = registers
+                            .get(usize::from(index))
+                            .and_then(|key| key.as_number())
+                            .and_then(array_iterator_index);
+                        let value = registers.get(usize::from(value)).copied();
+                        let (Some(table), Some(index), Some(value)) = (table, index, value) else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        if !matches!(
+                            self.heap.try_write_numeric_array_slot(table, index, value),
+                            Some(TableNumericArrayWrite::Stored)
+                        ) {
+                            guard_missed = true;
+                            break 'window;
+                        }
+                        done += 1;
+                        pc += 1;
+                    }
+                    TapeOp::Receipt { index } => {
+                        let Some(plan) = tape.receipt(index) else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        let count = plan.instruction_count();
+                        if done + count <= admitted
+                            && self.try_register_block(registers, register_cells, plan)
+                        {
+                            #[cfg(test)]
+                            {
+                                total_receipts += 1;
+                            }
+                            done += count;
+                            pc += count as usize;
+                        } else {
+                            // Guard miss or a window cut: execute the
+                            // receipt's canonical first `Move`; the interior
+                            // PCs carry the remaining individual operations.
+                            let Some(value) =
+                                registers.get(usize::from(plan.lhs_register())).copied()
+                            else {
+                                guard_missed = true;
+                                break 'window;
+                            };
+                            let Some(slot) = registers.get_mut(usize::from(plan.target_register()))
+                            else {
+                                guard_missed = true;
+                                break 'window;
+                            };
+                            *slot = value;
+                            done += 1;
+                            pc += 1;
+                        }
+                    }
+                    TapeOp::Jump { target } => {
+                        done += 1;
+                        pc = target as usize;
+                        break 'window;
+                    }
+                    TapeOp::JumpIf { condition, target } => {
+                        let Some(value) = registers.get(usize::from(condition)).copied() else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        done += 1;
+                        pc = if value.truthy() {
+                            target as usize
+                        } else {
+                            pc + 1
+                        };
+                        break 'window;
+                    }
+                    TapeOp::JumpIfNot { condition, target } => {
+                        let Some(value) = registers.get(usize::from(condition)).copied() else {
+                            guard_missed = true;
+                            break 'window;
+                        };
+                        done += 1;
+                        pc = if value.truthy() {
+                            pc + 1
+                        } else {
+                            target as usize
+                        };
+                        break 'window;
+                    }
+                    TapeOp::ForLoop { base, target } => {
+                        // Guard the numeric control window before mutation;
+                        // scalar dispatch owns coercion and type errors.
+                        let window = (|| {
+                            let base = usize::from(base);
+                            registers.get(base)?.as_number()?;
+                            registers.get(base + 1)?.as_number()?;
+                            registers.get(base + 2)?.as_number()
+                        })();
+                        if window.is_none() {
+                            guard_missed = true;
+                            break 'window;
+                        }
+                        match numeric_for_loop(
+                            registers,
+                            register_cells,
+                            Instruction::new(Opcode::ForLoop, base, 0, 0),
+                            pc,
+                        ) {
+                            Ok(true) => {
+                                done += 1;
+                                pc = target as usize;
+                            }
+                            Ok(false) => {
+                                done += 1;
+                                pc += 1;
+                            }
+                            Err(_) => {
+                                // Unreachable after the guard; scalar dispatch
+                                // owns the canonical diagnosis.
+                                guard_missed = true;
+                            }
+                        }
+                        break 'window;
                     }
                 }
             }
-
-            match self.try_region_instruction(
-                program,
-                program_id,
-                registers,
-                register_cells,
-                instruction,
-            ) {
-                Ok(true) => offset += 1,
-                Ok(false) => {
-                    let instruction_count = offset as u64 + 1;
-                    self.executed_instructions =
-                        self.executed_instructions.wrapping_add(instruction_count);
-                    #[cfg(test)]
-                    self.record_region_execution(program_id, instruction_count, true);
-                    return Ok(CommonRegionOutcome::GuardExit { pc });
-                }
-                Err(error) => {
-                    let instruction_count = offset as u64 + 1;
-                    self.executed_instructions =
-                        self.executed_instructions.wrapping_add(instruction_count);
-                    #[cfg(test)]
-                    self.record_region_execution(program_id, instruction_count, true);
-                    return Err(attach_instruction_source(program, function, pc, error));
-                }
+            if guard_missed {
+                let accounted = done.wrapping_add(1);
+                self.executed_instructions = self.executed_instructions.wrapping_add(accounted);
+                #[cfg(test)]
+                self.record_tape_execution(
+                    program_id,
+                    total.wrapping_add(accounted),
+                    total_receipts,
+                    true,
+                );
+                return Ok(TapeOutcome::GuardExit { pc });
+            }
+            #[cfg(test)]
+            {
+                total = total.wrapping_add(done);
+            }
+            self.executed_instructions = self.executed_instructions.wrapping_add(done);
+            if done == 0 {
+                finish_complete!();
             }
         }
-
-        let instruction_count = region.instruction_count();
-        self.executed_instructions = self.executed_instructions.wrapping_add(instruction_count);
-        #[cfg(test)]
-        self.record_region_execution(program_id, instruction_count, false);
-        Ok(CommonRegionOutcome::Complete {
-            next_pc: region.end_pc(),
-        })
     }
 
     /// Execute as many complete, policy-invisible HotIR iterations as possible. Every fallible
@@ -10352,14 +10387,10 @@ impl Vm {
         self.dynamic_programs.get(program_id)?.hot_ir(prototype, pc)
     }
 
-    fn execution_plans(
-        &self,
-        program_id: u32,
-        prototype: Option<u32>,
-    ) -> Option<Arc<FunctionExecutionPlans>> {
+    fn execution_tape(&self, program_id: u32, prototype: Option<u32>) -> Option<Arc<FunctionTape>> {
         self.dynamic_programs
             .get(program_id)?
-            .execution_plans(prototype)
+            .execution_tape(prototype)
     }
 
     fn table_inline_cache(
@@ -10550,39 +10581,24 @@ impl Vm {
     }
 
     #[cfg(test)]
-    fn record_region_execution(
+    fn record_tape_execution(
         &mut self,
-        program_id: u32,
+        program_id: Option<u32>,
         instruction_count: u64,
+        receipts: u64,
         guard_exit: bool,
     ) {
-        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
-            program.region_entries = program.region_entries.saturating_add(1);
-            program.region_instructions = program
-                .region_instructions
-                .saturating_add(instruction_count);
-            if guard_exit {
-                program.region_guard_exits = program.region_guard_exits.saturating_add(1);
-            }
+        if instruction_count == 0 && !guard_exit {
+            return;
         }
-    }
-
-    #[cfg(test)]
-    fn record_register_block_execution(
-        &mut self,
-        program_id: u32,
-        instruction_count: u64,
-        guard_exit: bool,
-    ) {
-        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
-            program.register_block_entries = program.register_block_entries.saturating_add(1);
-            program.register_block_instructions = program
-                .register_block_instructions
-                .saturating_add(instruction_count);
-            if guard_exit {
-                program.register_block_guard_exits =
-                    program.register_block_guard_exits.saturating_add(1);
-            }
+        let Some(mut program) = program_id.and_then(|id| self.dynamic_programs.get_mut(id)) else {
+            return;
+        };
+        program.tape_entries = program.tape_entries.saturating_add(1);
+        program.tape_instructions = program.tape_instructions.saturating_add(instruction_count);
+        program.tape_receipts = program.tape_receipts.saturating_add(receipts);
+        if guard_exit {
+            program.tape_guard_exits = program.tape_guard_exits.saturating_add(1);
         }
     }
 
@@ -27036,6 +27052,7 @@ fn table_expected_error() -> Error {
 #[cfg(test)]
 mod inline_cache_tests {
     use super::*;
+    use crate::register_blocks::recognize_register_block;
 
     macro_rules! test_execution {
         ($name:ident = $fuel:expr) => {
@@ -27053,28 +27070,7 @@ mod inline_cache_tests {
         };
     }
 
-    #[test]
-    fn common_region_candidate_table_matches_implemented_arms() {
-        let mut expected = [false; OPCODE_TAG_SPACE];
-        for op in [
-            Opcode::Add,
-            Opcode::Sub,
-            Opcode::Mul,
-            Opcode::Div,
-            Opcode::FloorDiv,
-            Opcode::Mod,
-            Opcode::Pow,
-            Opcode::GetIndex,
-            Opcode::SetIndex,
-            Opcode::Move,
-            Opcode::ClearLocalCell,
-        ] {
-            expected[op as usize] = true;
-        }
-        assert_eq!(COMMON_REGION_CANDIDATE, expected);
-    }
-
-    fn common_region_program() -> Program {
+    fn tape_program() -> Program {
         Program::new(
             Function::new(
                 vec![
@@ -27095,24 +27091,24 @@ mod inline_cache_tests {
     }
 
     #[test]
-    fn common_region_matches_instruction_dispatch_and_policy_fallbacks() {
-        let program = common_region_program();
-        let mut region = Vm::new(Profile::ReproducibleStandard);
-        let region_result = region.run(&program).unwrap();
-        assert_eq!(region_result.as_number(), Some(5.0));
-        assert_eq!(region.dynamic_programs[0].region_entries, 1);
-        assert_eq!(region.dynamic_programs[0].region_instructions, 6);
-        assert_eq!(region.dynamic_programs[0].region_guard_exits, 0);
+    fn tape_matches_instruction_dispatch_and_policy_fallbacks() {
+        let program = tape_program();
+        let mut taped = Vm::new(Profile::ReproducibleStandard);
+        let taped_result = taped.run(&program).unwrap();
+        assert_eq!(taped_result.as_number(), Some(5.0));
+        assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 6);
+        assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 0);
 
         let mut dispatched = Vm::new(Profile::ReproducibleStandard);
-        dispatched.region_mode = RegionTestMode::Off;
+        dispatched.tape_mode = TapeTestMode::Off;
         let dispatched_result = dispatched.run(&program).unwrap();
-        assert_eq!(region_result.as_number(), dispatched_result.as_number());
+        assert_eq!(taped_result.as_number(), dispatched_result.as_number());
         assert_eq!(
-            region.executed_instructions,
+            taped.executed_instructions,
             dispatched.executed_instructions
         );
-        assert_eq!(dispatched.dynamic_programs[0].region_entries, 0);
+        assert_eq!(dispatched.dynamic_programs[0].tape_entries, 0);
 
         let mut fuelled = Vm::with_settings(
             Profile::ReproducibleStandard,
@@ -27122,7 +27118,7 @@ mod inline_cache_tests {
             },
         );
         assert_eq!(fuelled.run(&program).unwrap().as_number(), Some(5.0));
-        assert_eq!(fuelled.dynamic_programs[0].region_entries, 0);
+        assert_eq!(fuelled.dynamic_programs[0].tape_entries, 0);
 
         let mut covered = Vm::with_settings(
             Profile::ReproducibleStandard,
@@ -27132,11 +27128,11 @@ mod inline_cache_tests {
             },
         );
         assert_eq!(covered.run(&program).unwrap().as_number(), Some(5.0));
-        assert_eq!(covered.dynamic_programs[0].region_entries, 0);
+        assert_eq!(covered.dynamic_programs[0].tape_entries, 0);
     }
 
     #[test]
-    fn common_region_guard_exit_resumes_exact_instruction_and_error_site() {
+    fn tape_guard_exit_resumes_exact_instruction_and_error_site() {
         let function = Function::new(
             vec![
                 Instruction::new(Opcode::LoadConst, 0, 0, 0),
@@ -27153,33 +27149,33 @@ mod inline_cache_tests {
             function,
             vec![Constant::Number(1.0), Constant::String(b"x".to_vec())],
         )
-        .with_source_name(Some("region-guard.luau".to_owned()));
+        .with_source_name(Some("tape-guard.luau".to_owned()));
 
-        let mut region = Vm::new(Profile::ReproducibleStandard);
-        let region_error = region.run(&program).unwrap_err();
-        assert_eq!(region.dynamic_programs[0].region_entries, 1);
-        assert_eq!(region.dynamic_programs[0].region_instructions, 2);
-        assert_eq!(region.dynamic_programs[0].region_guard_exits, 1);
+        let mut taped = Vm::new(Profile::ReproducibleStandard);
+        let taped_error = taped.run(&program).unwrap_err();
+        assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 2);
+        assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 1);
 
         let mut dispatched = Vm::new(Profile::ReproducibleStandard);
-        dispatched.region_mode = RegionTestMode::Off;
+        dispatched.tape_mode = TapeTestMode::Off;
         let dispatched_error = dispatched.run(&program).unwrap_err();
         assert_eq!(
-            std::mem::discriminant(&region_error.kind),
+            std::mem::discriminant(&taped_error.kind),
             std::mem::discriminant(&dispatched_error.kind)
         );
-        assert_eq!(region_error.pc, dispatched_error.pc);
-        assert_eq!(region_error.location, dispatched_error.location);
-        assert_eq!(region_error.pc, Some(3));
-        assert_eq!(region_error.location.unwrap().line, 42);
+        assert_eq!(taped_error.pc, dispatched_error.pc);
+        assert_eq!(taped_error.location, dispatched_error.location);
+        assert_eq!(taped_error.pc, Some(3));
+        assert_eq!(taped_error.location.unwrap().line, 42);
         assert_eq!(
-            region.executed_instructions,
+            taped.executed_instructions,
             dispatched.executed_instructions
         );
     }
 
     #[test]
-    fn common_region_preserves_deterministic_collection_cadence() {
+    fn tape_preserves_deterministic_collection_cadence() {
         let mut code = (0..16)
             .map(|index| Instruction::new(Opcode::LoadConst, index, 0, 0))
             .collect::<Vec<_>>();
@@ -27192,38 +27188,305 @@ mod inline_cache_tests {
             Instruction::new(Opcode::Return, 19, 1, 0),
         ]);
         let program = Program::new(Function::new(code, 20), vec![Constant::Number(2.0)]);
-        let mut saw_region = false;
+        let mut saw_tape = false;
         for interval in 1..=24 {
             let interval = NonZeroU64::new(interval).unwrap();
             let settings = VmSettings {
                 deterministic_gc_interval: interval,
                 ..VmSettings::default()
             };
-            let mut region = Vm::with_settings(Profile::DeterministicSim, settings.clone());
-            let region_result = region.run(&program).unwrap();
+            let mut taped = Vm::with_settings(Profile::DeterministicSim, settings.clone());
+            let taped_result = taped.run(&program).unwrap();
             let mut dispatched = Vm::with_settings(Profile::DeterministicSim, settings);
-            dispatched.region_mode = RegionTestMode::Off;
+            dispatched.tape_mode = TapeTestMode::Off;
             let dispatched_result = dispatched.run(&program).unwrap();
 
-            assert_eq!(region_result.as_number(), dispatched_result.as_number());
+            assert_eq!(taped_result.as_number(), dispatched_result.as_number());
             assert_eq!(
-                region.executed_instructions,
+                taped.executed_instructions,
                 dispatched.executed_instructions
             );
             assert_eq!(
-                region.deterministic_collection_count(),
+                taped.deterministic_collection_count(),
                 dispatched.deterministic_collection_count()
             );
             assert_eq!(
-                region.next_weak_collection_instruction,
+                taped.next_weak_collection_instruction,
                 dispatched.next_weak_collection_instruction
             );
-            saw_region |= region.dynamic_programs[0].region_entries > 0;
+            saw_tape |= taped.dynamic_programs[0].tape_entries > 0;
         }
-        assert!(saw_region);
+        assert!(saw_tape);
     }
 
-    fn numeric_register_block_program() -> Program {
+    /// One scalar-versus-tape differential execution of `program`, comparing
+    /// the result or error, the logical instruction count, and the
+    /// deterministic collection state, across a sweep of collection intervals.
+    fn assert_tape_differential(program: &Program) {
+        for interval in [1u64, 2, 3, 5, 7, 13, 64, 1024] {
+            let interval = NonZeroU64::new(interval).unwrap();
+            let settings = VmSettings {
+                deterministic_gc_interval: interval,
+                ..VmSettings::default()
+            };
+            let mut taped = Vm::with_settings(Profile::DeterministicSim, settings.clone());
+            let taped_result = taped.run(program);
+            let mut scalar = Vm::with_settings(Profile::DeterministicSim, settings);
+            scalar.tape_mode = TapeTestMode::Off;
+            let scalar_result = scalar.run(program);
+
+            match (&taped_result, &scalar_result) {
+                (Ok(taped_value), Ok(scalar_value)) => {
+                    assert_eq!(
+                        taped_value.as_number().map(f64::to_bits),
+                        scalar_value.as_number().map(f64::to_bits),
+                        "result mismatch at interval {interval}"
+                    );
+                    assert_eq!(
+                        taped_value.as_bool(),
+                        scalar_value.as_bool(),
+                        "result mismatch at interval {interval}"
+                    );
+                    assert_eq!(
+                        taped_value.is_nil(),
+                        scalar_value.is_nil(),
+                        "result mismatch at interval {interval}"
+                    );
+                }
+                (Err(taped_error), Err(scalar_error)) => {
+                    assert_eq!(
+                        std::mem::discriminant(&taped_error.kind),
+                        std::mem::discriminant(&scalar_error.kind),
+                        "error kind mismatch at interval {interval}"
+                    );
+                    assert_eq!(
+                        taped_error.pc, scalar_error.pc,
+                        "error pc mismatch at interval {interval}"
+                    );
+                    assert_eq!(
+                        format!("{taped_error}"),
+                        format!("{scalar_error}"),
+                        "error message mismatch at interval {interval}"
+                    );
+                }
+                _ => panic!(
+                    "tape/scalar outcome divergence at interval {interval}: \
+                     {taped_result:?} versus {scalar_result:?}"
+                ),
+            }
+            assert_eq!(
+                taped.executed_instructions, scalar.executed_instructions,
+                "logical instruction count mismatch at interval {interval}"
+            );
+            assert_eq!(
+                taped.deterministic_collection_count(),
+                scalar.deterministic_collection_count(),
+                "collection count mismatch at interval {interval}"
+            );
+            assert_eq!(
+                taped.next_weak_collection_instruction, scalar.next_weak_collection_instruction,
+                "collection cadence mismatch at interval {interval}"
+            );
+        }
+    }
+
+    #[test]
+    fn tape_executes_predecoded_branches_and_loops_exactly() {
+        // A numeric loop whose body reloads a constant each iteration: the
+        // shape stays off HotIR, so the ForLoop backedge itself runs on tape.
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                    Instruction::new(Opcode::LoadConst, 2, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 4, 0, 2),
+                    Instruction::with_aux(Opcode::ForPrep, 0, 0, 0, 8),
+                    Instruction::new(Opcode::LoadConst, 5, 0, 2),
+                    Instruction::new(Opcode::Add, 4, 4, 3),
+                    Instruction::with_aux(Opcode::ForLoop, 0, 0, 0, 5),
+                    Instruction::new(Opcode::Return, 4, 1, 0),
+                ],
+                7,
+            ),
+            vec![
+                Constant::Number(1.0),
+                Constant::Number(4.0),
+                Constant::Number(0.0),
+            ],
+        );
+        let mut taped = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(taped.run(&program).unwrap().as_number(), Some(10.0));
+        assert!(taped.dynamic_programs[0].tape_instructions > 0);
+        assert_tape_differential(&program);
+    }
+
+    #[test]
+    fn tape_conditional_branches_take_both_edges_exactly() {
+        for (condition, expected) in [(0.0, 20.0), (5.0, 10.0)] {
+            let program = Program::new(
+                Function::new(
+                    vec![
+                        Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                        Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                        Instruction::new(Opcode::Less, 2, 1, 0),
+                        Instruction::with_aux(Opcode::JumpIfNot, 2, 0, 0, 6),
+                        Instruction::new(Opcode::LoadConst, 3, 0, 2),
+                        Instruction::with_aux(Opcode::Jump, 0, 0, 0, 7),
+                        Instruction::new(Opcode::LoadConst, 3, 0, 3),
+                        Instruction::new(Opcode::Return, 3, 1, 0),
+                    ],
+                    4,
+                ),
+                vec![
+                    Constant::Number(condition),
+                    Constant::Number(1.0),
+                    Constant::Number(10.0),
+                    Constant::Number(20.0),
+                ],
+            );
+            let mut taped = Vm::new(Profile::ReproducibleStandard);
+            assert_eq!(taped.run(&program).unwrap().as_number(), Some(expected));
+            assert_tape_differential(&program);
+        }
+    }
+
+    #[test]
+    fn tape_comparisons_match_scalar_semantics_for_numbers_and_guard_rest() {
+        for operation in [
+            Opcode::Less,
+            Opcode::LessEqual,
+            Opcode::Greater,
+            Opcode::GreaterEqual,
+            Opcode::Equal,
+            Opcode::NotEqual,
+        ] {
+            for (lhs, rhs) in [
+                (Constant::Number(1.0), Constant::Number(2.0)),
+                (Constant::Number(2.0), Constant::Number(1.0)),
+                (Constant::Number(2.0), Constant::Number(2.0)),
+                (Constant::Number(-0.0), Constant::Number(0.0)),
+                (Constant::Number(f64::NAN), Constant::Number(1.0)),
+                (Constant::Number(f64::NAN), Constant::Number(f64::NAN)),
+                (
+                    Constant::String(b"a".to_vec()),
+                    Constant::String(b"b".to_vec()),
+                ),
+                (Constant::Number(1.0), Constant::String(b"1".to_vec())),
+            ] {
+                // String operands guard-exit to scalar dispatch, which owns
+                // string ordering and mixed-kind errors; the differential
+                // proves both executors agree in every case.
+                let program = Program::new(
+                    Function::new(
+                        vec![
+                            Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                            Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                            Instruction::new(operation, 2, 0, 1),
+                            Instruction::new(Opcode::Not, 3, 2, 0),
+                            Instruction::new(Opcode::Not, 2, 3, 0),
+                            Instruction::new(Opcode::Return, 2, 1, 0),
+                        ],
+                        4,
+                    ),
+                    vec![lhs.clone(), rhs.clone()],
+                );
+                assert_tape_differential(&program);
+            }
+        }
+    }
+
+    #[test]
+    fn tape_negate_matches_scalar_and_guards_non_numbers() {
+        for constant in [Constant::Number(-3.5), Constant::String(b"4".to_vec())] {
+            let program = Program::new(
+                Function::new(
+                    vec![
+                        Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                        Instruction::new(Opcode::Neg, 1, 0, 0),
+                        Instruction::new(Opcode::Return, 1, 1, 0),
+                    ],
+                    2,
+                ),
+                vec![constant],
+            );
+            assert_tape_differential(&program);
+        }
+    }
+
+    #[test]
+    fn tape_self_jump_stays_metered_on_the_scalar_dispatcher() {
+        // A branch-only infinite loop is legal guest code; under fuel the
+        // frame is metered, stays scalar, and stops with the canonical error.
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::with_aux(Opcode::Jump, 0, 0, 0, 1),
+                    Instruction::new(Opcode::Halt, 0, 0, 0),
+                ],
+                1,
+            ),
+            vec![Constant::Number(1.0)],
+        );
+        let settings = VmSettings {
+            initial_fuel: Some(1_000),
+            ..VmSettings::default()
+        };
+        let mut fuelled = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        let error = fuelled.run(&program).unwrap_err();
+        assert!(matches!(error.kind, ErrorKind::FuelExhausted { .. }));
+        assert_eq!(fuelled.dynamic_programs[0].tape_entries, 0);
+    }
+
+    #[test]
+    fn tape_malformed_jump_targets_keep_structured_errors_and_pc() {
+        // Negative target: the scalar checked_jump error at the branch PC.
+        let negative = Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::with_aux(Opcode::Jump, 0, 0, 0, -4),
+                    Instruction::new(Opcode::Return, 0, 1, 0),
+                ],
+                1,
+            ),
+            vec![Constant::Number(1.0)],
+        );
+        assert_tape_differential(&negative);
+
+        // Forward target beyond the function: the canonical fetch error at
+        // the out-of-bounds PC.
+        let beyond = Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::with_aux(Opcode::Jump, 0, 0, 0, 9),
+                    Instruction::new(Opcode::Return, 0, 1, 0),
+                ],
+                1,
+            ),
+            vec![Constant::Number(1.0)],
+        );
+        assert_tape_differential(&beyond);
+
+        // Out-of-bounds registers on otherwise-tape opcodes stay scalar and
+        // keep the canonical register error.
+        let out_of_bounds = Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::Move, 3, 0, 0),
+                    Instruction::new(Opcode::Return, 0, 1, 0),
+                ],
+                2,
+            ),
+            vec![Constant::Number(1.0)],
+        );
+        assert_tape_differential(&out_of_bounds);
+    }
+
+    fn numeric_receipt_program() -> Program {
         Program::new(
             Function::new(
                 vec![
@@ -27244,42 +27507,27 @@ mod inline_cache_tests {
     }
 
     #[test]
-    fn register_block_matches_scalar_dispatch_and_logical_instruction_count() {
-        let program = numeric_register_block_program();
-        let mut planned = Vm::new(Profile::ReproducibleStandard);
-        let planned_result = planned.run(&program).unwrap();
-        assert_eq!(planned_result.as_number(), Some(12.0));
-        assert_eq!(planned.dynamic_programs[0].register_block_entries, 1);
-        assert_eq!(planned.dynamic_programs[0].register_block_instructions, 6);
-        assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 0);
-        assert_eq!(planned.dynamic_programs[0].region_entries, 1);
-        assert_eq!(planned.dynamic_programs[0].region_instructions, 7);
-
-        let mut canonical_region = Vm::new(Profile::ReproducibleStandard);
-        canonical_region.superinstruction_mode = SuperinstructionTestMode::Off;
-        let canonical_region_result = canonical_region.run(&program).unwrap();
-        assert_eq!(
-            planned_result.as_number(),
-            canonical_region_result.as_number()
-        );
-        assert_eq!(
-            canonical_region.dynamic_programs[0].register_block_entries,
-            0
-        );
-        assert_eq!(canonical_region.dynamic_programs[0].region_entries, 1);
-        assert_eq!(canonical_region.dynamic_programs[0].region_instructions, 7);
+    fn receipt_matches_scalar_dispatch_and_logical_instruction_count() {
+        let program = numeric_receipt_program();
+        let mut taped = Vm::new(Profile::ReproducibleStandard);
+        let taped_result = taped.run(&program).unwrap();
+        assert_eq!(taped_result.as_number(), Some(12.0));
+        assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 7);
+        assert_eq!(taped.dynamic_programs[0].tape_receipts, 1);
+        assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 0);
 
         let mut scalar = Vm::new(Profile::ReproducibleStandard);
-        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-        scalar.region_mode = RegionTestMode::Off;
+        scalar.tape_mode = TapeTestMode::Off;
         let scalar_result = scalar.run(&program).unwrap();
-        assert_eq!(planned_result.as_number(), scalar_result.as_number());
-        assert_eq!(planned.executed_instructions, scalar.executed_instructions);
-        assert_eq!(scalar.dynamic_programs[0].register_block_entries, 0);
+        assert_eq!(taped_result.as_number(), scalar_result.as_number());
+        assert_eq!(taped.executed_instructions, scalar.executed_instructions);
+        assert_eq!(scalar.dynamic_programs[0].tape_entries, 0);
+        assert_tape_differential(&program);
     }
 
     #[test]
-    fn register_block_skip_keeps_later_region_guard_exit_accounting_exact() {
+    fn receipt_skip_keeps_later_tape_guard_exit_accounting_exact() {
         let program = Program::new(
             Function::new(
                 vec![
@@ -27305,51 +27553,29 @@ mod inline_cache_tests {
             ],
         );
 
-        let mut planned = Vm::new(Profile::ReproducibleStandard);
-        let planned_error = planned.run(&program).unwrap_err();
-        assert_eq!(planned_error.pc, Some(10));
-        assert_eq!(planned.dynamic_programs[0].register_block_entries, 1);
-        assert_eq!(planned.dynamic_programs[0].register_block_instructions, 6);
-        assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 0);
-        assert_eq!(planned.dynamic_programs[0].region_entries, 1);
-        assert_eq!(planned.dynamic_programs[0].region_instructions, 10);
-        assert_eq!(planned.dynamic_programs[0].region_guard_exits, 1);
-        assert_eq!(planned.executed_instructions, 11);
-
-        let mut canonical_region = Vm::new(Profile::ReproducibleStandard);
-        canonical_region.superinstruction_mode = SuperinstructionTestMode::Off;
-        let canonical_region_error = canonical_region.run(&program).unwrap_err();
-        assert_eq!(canonical_region_error.pc, planned_error.pc);
-        assert_eq!(
-            std::mem::discriminant(&canonical_region_error.kind),
-            std::mem::discriminant(&planned_error.kind)
-        );
-        assert_eq!(canonical_region.dynamic_programs[0].region_entries, 1);
-        assert_eq!(canonical_region.dynamic_programs[0].region_instructions, 10);
-        assert_eq!(canonical_region.dynamic_programs[0].region_guard_exits, 1);
-        assert_eq!(
-            canonical_region.dynamic_programs[0].register_block_entries,
-            0
-        );
+        let mut taped = Vm::new(Profile::ReproducibleStandard);
+        let taped_error = taped.run(&program).unwrap_err();
+        assert_eq!(taped_error.pc, Some(10));
+        assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 10);
+        assert_eq!(taped.dynamic_programs[0].tape_receipts, 1);
+        assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 1);
+        assert_eq!(taped.executed_instructions, 11);
 
         let mut scalar = Vm::new(Profile::ReproducibleStandard);
-        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-        scalar.region_mode = RegionTestMode::Off;
+        scalar.tape_mode = TapeTestMode::Off;
         let scalar_error = scalar.run(&program).unwrap_err();
-        assert_eq!(scalar_error.pc, planned_error.pc);
+        assert_eq!(scalar_error.pc, taped_error.pc);
         assert_eq!(
             std::mem::discriminant(&scalar_error.kind),
-            std::mem::discriminant(&planned_error.kind)
+            std::mem::discriminant(&taped_error.kind)
         );
-        assert_eq!(planned.executed_instructions, scalar.executed_instructions);
-        assert_eq!(
-            canonical_region.executed_instructions,
-            scalar.executed_instructions
-        );
+        assert_eq!(taped.executed_instructions, scalar.executed_instructions);
+        assert_tape_differential(&program);
     }
 
     #[test]
-    fn two_register_lifetime_blocks_complete_inside_one_region() {
+    fn two_lifetime_receipts_complete_inside_one_tape_entry() {
         let program = Program::new(
             Function::new(
                 vec![
@@ -27374,26 +27600,25 @@ mod inline_cache_tests {
             vec![Constant::Number(2.0), Constant::Number(3.0)],
         );
 
-        let mut planned = Vm::new(Profile::ReproducibleStandard);
-        let planned_result = planned.run(&program).unwrap();
-        assert_eq!(planned_result.as_number(), Some(15.0));
-        assert_eq!(planned.dynamic_programs[0].register_block_entries, 2);
-        assert_eq!(planned.dynamic_programs[0].register_block_instructions, 12);
-        assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 0);
-        assert_eq!(planned.dynamic_programs[0].region_entries, 1);
-        assert_eq!(planned.dynamic_programs[0].region_instructions, 13);
-        assert_eq!(planned.executed_instructions, 15);
+        let mut taped = Vm::new(Profile::ReproducibleStandard);
+        let taped_result = taped.run(&program).unwrap();
+        assert_eq!(taped_result.as_number(), Some(15.0));
+        assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 13);
+        assert_eq!(taped.dynamic_programs[0].tape_receipts, 2);
+        assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 0);
+        assert_eq!(taped.executed_instructions, 15);
 
         let mut scalar = Vm::new(Profile::ReproducibleStandard);
-        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-        scalar.region_mode = RegionTestMode::Off;
+        scalar.tape_mode = TapeTestMode::Off;
         let scalar_result = scalar.run(&program).unwrap();
-        assert_eq!(planned_result.as_number(), scalar_result.as_number());
-        assert_eq!(planned.executed_instructions, scalar.executed_instructions);
+        assert_eq!(taped_result.as_number(), scalar_result.as_number());
+        assert_eq!(taped.executed_instructions, scalar.executed_instructions);
+        assert_tape_differential(&program);
     }
 
     #[test]
-    fn register_lifetime_skip_keeps_later_region_direct_error_accounting_exact() {
+    fn out_of_bounds_clear_after_receipt_keeps_scalar_error_accounting_exact() {
         let program = Program::new(
             Function::new(
                 vec![
@@ -27413,31 +27638,30 @@ mod inline_cache_tests {
             vec![Constant::Number(7.0), Constant::Number(5.0)],
         );
 
-        let mut planned = Vm::new(Profile::ReproducibleStandard);
-        let planned_error = planned.run(&program).unwrap_err();
-        assert_eq!(planned_error.pc, Some(8));
-        assert_eq!(planned.dynamic_programs[0].register_block_entries, 1);
-        assert_eq!(planned.dynamic_programs[0].register_block_instructions, 6);
-        assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 0);
-        assert_eq!(planned.dynamic_programs[0].region_entries, 1);
-        assert_eq!(planned.dynamic_programs[0].region_instructions, 8);
-        assert_eq!(planned.dynamic_programs[0].region_guard_exits, 1);
-        assert_eq!(planned.executed_instructions, 9);
+        let mut taped = Vm::new(Profile::ReproducibleStandard);
+        let taped_error = taped.run(&program).unwrap_err();
+        assert_eq!(taped_error.pc, Some(8));
+        // The out-of-bounds clear is rejected at build time, so the tape run
+        // ends one instruction earlier and the canonical scalar error fires.
+        assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 7);
+        assert_eq!(taped.dynamic_programs[0].tape_receipts, 1);
+        assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 0);
+        assert_eq!(taped.executed_instructions, 9);
 
         let mut scalar = Vm::new(Profile::ReproducibleStandard);
-        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-        scalar.region_mode = RegionTestMode::Off;
+        scalar.tape_mode = TapeTestMode::Off;
         let scalar_error = scalar.run(&program).unwrap_err();
-        assert_eq!(planned_error.pc, scalar_error.pc);
+        assert_eq!(taped_error.pc, scalar_error.pc);
         assert_eq!(
-            std::mem::discriminant(&planned_error.kind),
+            std::mem::discriminant(&taped_error.kind),
             std::mem::discriminant(&scalar_error.kind)
         );
-        assert_eq!(planned.executed_instructions, scalar.executed_instructions);
+        assert_eq!(taped.executed_instructions, scalar.executed_instructions);
     }
 
     #[test]
-    fn branch_into_register_lifetime_block_interior_uses_canonical_region_execution() {
+    fn branch_into_receipt_interior_uses_canonical_tape_operations() {
         let program = Program::new(
             Function::new(
                 vec![
@@ -27457,29 +27681,26 @@ mod inline_cache_tests {
             ),
             vec![Constant::Number(7.0), Constant::Number(5.0)],
         );
-        let map = build_register_block_map(&program.main).expect("register-lifetime metadata");
-        assert_eq!(
-            register_block_at(Some(&map), 4)
-                .expect("six-instruction receipt")
-                .instruction_count(),
-            6
-        );
+        assert!(recognize_register_block(&program.main, 4).is_some());
 
-        let mut planned = Vm::new(Profile::ReproducibleStandard);
-        let planned_result = planned.run(&program).unwrap();
-        assert_eq!(planned_result.as_number(), Some(12.0));
-        assert_eq!(planned.dynamic_programs[0].register_block_entries, 0);
+        let mut taped = Vm::new(Profile::ReproducibleStandard);
+        let taped_result = taped.run(&program).unwrap();
+        assert_eq!(taped_result.as_number(), Some(12.0));
+        // The jump lands inside the receipt, so only individual predecoded
+        // operations run; the fused receipt never fires.
+        assert_eq!(taped.dynamic_programs[0].tape_receipts, 0);
+        assert!(taped.dynamic_programs[0].tape_instructions > 0);
 
         let mut scalar = Vm::new(Profile::ReproducibleStandard);
-        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-        scalar.region_mode = RegionTestMode::Off;
+        scalar.tape_mode = TapeTestMode::Off;
         let scalar_result = scalar.run(&program).unwrap();
-        assert_eq!(planned_result.as_number(), scalar_result.as_number());
-        assert_eq!(planned.executed_instructions, scalar.executed_instructions);
+        assert_eq!(taped_result.as_number(), scalar_result.as_number());
+        assert_eq!(taped.executed_instructions, scalar.executed_instructions);
+        assert_tape_differential(&program);
     }
 
     #[test]
-    fn register_block_matches_scalar_dispatch_for_every_numeric_operation() {
+    fn receipt_matches_scalar_dispatch_for_every_numeric_operation() {
         for operation in [
             Opcode::Add,
             Opcode::Sub,
@@ -27506,27 +27727,25 @@ mod inline_cache_tests {
                 ),
                 vec![Constant::Number(17.0), Constant::Number(3.0)],
             );
-            let mut planned = Vm::new(Profile::ReproducibleStandard);
-            let planned_result = planned.run(&program).unwrap();
-            assert_eq!(planned.dynamic_programs[0].register_block_entries, 1);
-            assert_eq!(planned.dynamic_programs[0].register_block_instructions, 6);
-            assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 0);
+            let mut taped = Vm::new(Profile::ReproducibleStandard);
+            let taped_result = taped.run(&program).unwrap();
+            assert_eq!(taped.dynamic_programs[0].tape_receipts, 1);
+            assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 0);
 
             let mut scalar = Vm::new(Profile::ReproducibleStandard);
-            scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-            scalar.region_mode = RegionTestMode::Off;
+            scalar.tape_mode = TapeTestMode::Off;
             let scalar_result = scalar.run(&program).unwrap();
             assert_eq!(
-                planned_result.as_number().map(f64::to_bits),
+                taped_result.as_number().map(f64::to_bits),
                 scalar_result.as_number().map(f64::to_bits),
-                "numeric RegisterBlock mismatch for {operation:?}"
+                "numeric receipt mismatch for {operation:?}"
             );
-            assert_eq!(planned.executed_instructions, scalar.executed_instructions);
+            assert_eq!(taped.executed_instructions, scalar.executed_instructions);
         }
     }
 
     #[test]
-    fn register_block_preserves_target_cell_and_clears_temporary_cell() {
+    fn receipt_preserves_target_cell_and_clears_temporary_cell() {
         let function = Function::new(
             vec![
                 Instruction::new(Opcode::Move, 2, 0, 0),
@@ -27536,8 +27755,7 @@ mod inline_cache_tests {
             ],
             4,
         );
-        let map = build_register_block_map(&function).expect("register-block metadata");
-        let block = register_block_at(Some(&map), 0).expect("register block");
+        let block = recognize_register_block(&function, 0).expect("register block");
         let mut registers = vec![
             Value::number(8.0),
             Value::number(2.0),
@@ -27554,7 +27772,7 @@ mod inline_cache_tests {
     }
 
     #[test]
-    fn register_lifetime_block_preserves_destination_cell_and_clears_both_temporaries() {
+    fn lifetime_receipt_preserves_destination_cell_and_clears_both_temporaries() {
         let function = Function::new(
             vec![
                 Instruction::new(Opcode::Move, 2, 0, 0),
@@ -27566,8 +27784,7 @@ mod inline_cache_tests {
             ],
             4,
         );
-        let map = build_register_block_map(&function).expect("register-lifetime metadata");
-        let block = register_block_at(Some(&map), 0).expect("register lifetime block");
+        let block = recognize_register_block(&function, 0).expect("register lifetime block");
         let mut registers = vec![
             Value::number(8.0),
             Value::number(2.0),
@@ -27587,7 +27804,7 @@ mod inline_cache_tests {
     }
 
     #[test]
-    fn register_lifetime_block_allows_destination_to_alias_both_sources() {
+    fn lifetime_receipt_allows_destination_to_alias_both_sources() {
         let program = Program::new(
             Function::new(
                 vec![
@@ -27604,22 +27821,22 @@ mod inline_cache_tests {
             ),
             vec![Constant::Number(4.0)],
         );
-        let mut planned = Vm::new(Profile::ReproducibleStandard);
-        let planned_result = planned.run(&program).unwrap();
-        assert_eq!(planned_result.as_number(), Some(8.0));
-        assert_eq!(planned.dynamic_programs[0].register_block_entries, 1);
-        assert_eq!(planned.dynamic_programs[0].register_block_instructions, 6);
-        assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 0);
+        let mut taped = Vm::new(Profile::ReproducibleStandard);
+        let taped_result = taped.run(&program).unwrap();
+        assert_eq!(taped_result.as_number(), Some(8.0));
+        assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 6);
+        assert_eq!(taped.dynamic_programs[0].tape_receipts, 1);
 
         let mut scalar = Vm::new(Profile::ReproducibleStandard);
-        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-        scalar.region_mode = RegionTestMode::Off;
+        scalar.tape_mode = TapeTestMode::Off;
         let scalar_result = scalar.run(&program).unwrap();
-        assert_eq!(planned_result.as_number(), scalar_result.as_number());
-        assert_eq!(planned.executed_instructions, scalar.executed_instructions);
+        assert_eq!(taped_result.as_number(), scalar_result.as_number());
+        assert_eq!(taped.executed_instructions, scalar.executed_instructions);
+        assert_tape_differential(&program);
     }
 
-    fn dense_get_index_register_block_program() -> Program {
+    fn dense_get_index_receipt_program() -> Program {
         Program::new(
             Function::new(
                 vec![
@@ -27642,25 +27859,23 @@ mod inline_cache_tests {
     }
 
     #[test]
-    fn register_block_executes_present_dense_array_reads() {
-        let program = dense_get_index_register_block_program();
-        let mut planned = Vm::new(Profile::ReproducibleStandard);
-        let planned_result = planned.run(&program).unwrap();
-        assert_eq!(planned_result.as_number(), Some(37.0));
-        assert_eq!(planned.dynamic_programs[0].register_block_entries, 1);
-        assert_eq!(planned.dynamic_programs[0].register_block_instructions, 6);
-        assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 0);
+    fn receipt_executes_present_dense_array_reads() {
+        let program = dense_get_index_receipt_program();
+        let mut taped = Vm::new(Profile::ReproducibleStandard);
+        let taped_result = taped.run(&program).unwrap();
+        assert_eq!(taped_result.as_number(), Some(37.0));
+        assert_eq!(taped.dynamic_programs[0].tape_receipts, 1);
 
         let mut scalar = Vm::new(Profile::ReproducibleStandard);
-        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-        scalar.region_mode = RegionTestMode::Off;
+        scalar.tape_mode = TapeTestMode::Off;
         let scalar_result = scalar.run(&program).unwrap();
-        assert_eq!(planned_result.as_number(), scalar_result.as_number());
-        assert_eq!(planned.executed_instructions, scalar.executed_instructions);
+        assert_eq!(taped_result.as_number(), scalar_result.as_number());
+        assert_eq!(taped.executed_instructions, scalar.executed_instructions);
+        assert_tape_differential(&program);
     }
 
     #[test]
-    fn register_block_guard_exit_restarts_at_the_first_move_and_keeps_error_pc() {
+    fn receipt_guard_exit_restarts_at_the_first_move_and_keeps_error_pc() {
         let program = Program::new(
             Function::new(
                 vec![
@@ -27678,27 +27893,30 @@ mod inline_cache_tests {
             ),
             vec![Constant::Number(7.0), Constant::Number(1.0)],
         );
-        let mut planned = Vm::new(Profile::ReproducibleStandard);
-        let planned_error = planned.run(&program).unwrap_err();
-        assert_eq!(planned_error.pc, Some(4));
-        assert_eq!(planned.dynamic_programs[0].register_block_entries, 1);
-        assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 1);
-        assert_eq!(planned.dynamic_programs[0].register_block_instructions, 0);
+        let mut taped = Vm::new(Profile::ReproducibleStandard);
+        let taped_error = taped.run(&program).unwrap_err();
+        assert_eq!(taped_error.pc, Some(4));
+        // The fused receipt declines before mutation, its canonical first
+        // Move and the interior Move run on tape, and the guarded GetIndex
+        // side-exits to the scalar error site.
+        assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 4);
+        assert_eq!(taped.dynamic_programs[0].tape_receipts, 0);
+        assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 1);
 
         let mut scalar = Vm::new(Profile::ReproducibleStandard);
-        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-        scalar.region_mode = RegionTestMode::Off;
+        scalar.tape_mode = TapeTestMode::Off;
         let scalar_error = scalar.run(&program).unwrap_err();
-        assert_eq!(planned_error.pc, scalar_error.pc);
+        assert_eq!(taped_error.pc, scalar_error.pc);
         assert_eq!(
-            std::mem::discriminant(&planned_error.kind),
+            std::mem::discriminant(&taped_error.kind),
             std::mem::discriminant(&scalar_error.kind)
         );
-        assert_eq!(planned.executed_instructions, scalar.executed_instructions);
+        assert_eq!(taped.executed_instructions, scalar.executed_instructions);
     }
 
     #[test]
-    fn register_block_numeric_guard_exit_preserves_string_coercion() {
+    fn receipt_numeric_guard_exit_preserves_string_coercion() {
         let program = Program::new(
             Function::new(
                 vec![
@@ -27716,23 +27934,23 @@ mod inline_cache_tests {
             ),
             vec![Constant::String(b"7".to_vec()), Constant::Number(2.0)],
         );
-        let mut planned = Vm::new(Profile::ReproducibleStandard);
-        let planned_result = planned.run(&program).unwrap();
-        assert_eq!(planned_result.as_number(), Some(9.0));
-        assert_eq!(planned.dynamic_programs[0].register_block_entries, 1);
-        assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 1);
+        let mut taped = Vm::new(Profile::ReproducibleStandard);
+        let taped_result = taped.run(&program).unwrap();
+        assert_eq!(taped_result.as_number(), Some(9.0));
+        assert_eq!(taped.dynamic_programs[0].tape_receipts, 0);
+        assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 1);
 
         let mut scalar = Vm::new(Profile::ReproducibleStandard);
-        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-        scalar.region_mode = RegionTestMode::Off;
+        scalar.tape_mode = TapeTestMode::Off;
         let scalar_result = scalar.run(&program).unwrap();
-        assert_eq!(planned_result.as_number(), scalar_result.as_number());
-        assert_eq!(planned.executed_instructions, scalar.executed_instructions);
+        assert_eq!(taped_result.as_number(), scalar_result.as_number());
+        assert_eq!(taped.executed_instructions, scalar.executed_instructions);
+        assert_tape_differential(&program);
     }
 
     #[test]
-    fn register_block_uses_scalar_policy_paths_for_fuel_and_coverage() {
-        let program = numeric_register_block_program();
+    fn tape_uses_scalar_policy_paths_for_fuel_and_coverage() {
+        let program = numeric_receipt_program();
         let mut fuelled = Vm::with_settings(
             Profile::ReproducibleStandard,
             VmSettings {
@@ -27741,7 +27959,7 @@ mod inline_cache_tests {
             },
         );
         assert_eq!(fuelled.run(&program).unwrap().as_number(), Some(12.0));
-        assert_eq!(fuelled.dynamic_programs[0].register_block_entries, 0);
+        assert_eq!(fuelled.dynamic_programs[0].tape_entries, 0);
 
         let mut covered = Vm::with_settings(
             Profile::ReproducibleStandard,
@@ -27751,13 +27969,13 @@ mod inline_cache_tests {
             },
         );
         assert_eq!(covered.run(&program).unwrap().as_number(), Some(12.0));
-        assert_eq!(covered.dynamic_programs[0].register_block_entries, 0);
+        assert_eq!(covered.dynamic_programs[0].tape_entries, 0);
     }
 
     #[test]
-    fn register_block_preserves_deterministic_collection_cadence() {
+    fn receipt_preserves_deterministic_collection_cadence() {
         // A long primitive prefix lets the deterministic collector retire the
-        // VM's startup allocation debt before at least one block admission.
+        // VM's startup allocation debt before at least one receipt admission.
         let mut code = (0..16)
             .map(|index| Instruction::new(Opcode::LoadConst, index, 0, 0))
             .collect::<Vec<_>>();
@@ -27771,37 +27989,36 @@ mod inline_cache_tests {
             Instruction::new(Opcode::Return, 0, 1, 0),
         ]);
         let program = Program::new(Function::new(code, 18), vec![Constant::Number(2.0)]);
-        let mut saw_block = false;
+        let mut saw_receipt = false;
         for interval in 1..=24 {
             let interval = NonZeroU64::new(interval).unwrap();
             let settings = VmSettings {
                 deterministic_gc_interval: interval,
                 ..VmSettings::default()
             };
-            let mut planned = Vm::with_settings(Profile::DeterministicSim, settings.clone());
-            let planned_result = planned.run(&program).unwrap();
+            let mut taped = Vm::with_settings(Profile::DeterministicSim, settings.clone());
+            let taped_result = taped.run(&program).unwrap();
             let mut scalar = Vm::with_settings(Profile::DeterministicSim, settings);
-            scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-            scalar.region_mode = RegionTestMode::Off;
+            scalar.tape_mode = TapeTestMode::Off;
             let scalar_result = scalar.run(&program).unwrap();
 
-            assert_eq!(planned_result.as_number(), scalar_result.as_number());
-            assert_eq!(planned.executed_instructions, scalar.executed_instructions);
+            assert_eq!(taped_result.as_number(), scalar_result.as_number());
+            assert_eq!(taped.executed_instructions, scalar.executed_instructions);
             assert_eq!(
-                planned.deterministic_collection_count(),
+                taped.deterministic_collection_count(),
                 scalar.deterministic_collection_count()
             );
             assert_eq!(
-                planned.next_weak_collection_instruction,
+                taped.next_weak_collection_instruction,
                 scalar.next_weak_collection_instruction
             );
-            saw_block |= planned.dynamic_programs[0].register_block_entries > 0;
+            saw_receipt |= taped.dynamic_programs[0].tape_receipts > 0;
         }
-        assert!(saw_block);
+        assert!(saw_receipt);
     }
 
     #[test]
-    fn register_block_fuses_inside_one_uninterrupted_common_region() {
+    fn four_operation_receipt_fuses_inside_one_tape_entry() {
         let program = Program::new(
             Function::new(
                 vec![
@@ -27823,14 +28040,14 @@ mod inline_cache_tests {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
 
         assert_eq!(vm.run(&program).unwrap().as_number(), Some(42.0));
-        assert_eq!(vm.dynamic_programs[0].region_entries, 1);
-        assert_eq!(vm.dynamic_programs[0].region_instructions, 8);
-        assert_eq!(vm.dynamic_programs[0].register_block_entries, 1);
-        assert_eq!(vm.dynamic_programs[0].register_block_instructions, 4);
+        assert_eq!(vm.dynamic_programs[0].tape_entries, 1);
+        assert_eq!(vm.dynamic_programs[0].tape_instructions, 8);
+        assert_eq!(vm.dynamic_programs[0].tape_receipts, 1);
+        assert_tape_differential(&program);
     }
 
     #[test]
-    fn register_block_runs_first_loop_body_then_hot_ir_takes_continuations() {
+    fn receipt_runs_first_loop_body_then_hot_ir_takes_continuations() {
         let program = Program::new(
             Function::new(
                 vec![
@@ -27861,15 +28078,13 @@ mod inline_cache_tests {
         tiered.hot_ir_mode = HotIrTestMode::Force;
         let tiered_result = tiered.run(&program).unwrap();
         assert_eq!(tiered_result.as_number(), Some(10.0));
-        assert_eq!(tiered.dynamic_programs[0].register_block_entries, 1);
-        assert_eq!(tiered.dynamic_programs[0].register_block_instructions, 6);
+        assert_eq!(tiered.dynamic_programs[0].tape_receipts, 1);
         assert_eq!(tiered.dynamic_programs[0].hot_ir_entries, 1);
         assert_eq!(tiered.dynamic_programs[0].hot_ir_iterations, 3);
 
         let mut scalar = Vm::new(Profile::ReproducibleStandard);
         scalar.hot_ir_mode = HotIrTestMode::Off;
-        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-        scalar.region_mode = RegionTestMode::Off;
+        scalar.tape_mode = TapeTestMode::Off;
         let scalar_result = scalar.run(&program).unwrap();
         assert_eq!(tiered_result.as_number(), scalar_result.as_number());
         assert_eq!(tiered.executed_instructions, scalar.executed_instructions);
@@ -27977,7 +28192,7 @@ mod inline_cache_tests {
         assert_eq!(fast.run(&program).unwrap().as_number(), Some(64.0));
         assert!(fast.dynamic_programs[0].hot_ir_entries > 0);
         assert!(fast.dynamic_programs[0].hot_ir_iterations > 0);
-        assert!(fast.dynamic_programs[0].region_entries > 0);
+        assert!(fast.dynamic_programs[0].tape_entries > 0);
 
         let mut interpreted = Vm::new(Profile::ReproducibleStandard);
         interpreted.hot_ir_mode = HotIrTestMode::Off;
@@ -29246,7 +29461,7 @@ mod inline_cache_tests {
     }
 
     #[test]
-    fn loaded_program_quota_admission_counts_register_block_metadata_exactly() {
+    fn loaded_program_quota_admission_counts_tape_metadata_exactly() {
         let mut planned_code = Vec::new();
         let mut alias_near_miss_code = Vec::new();
         for _ in 0..512 {
@@ -29258,8 +29473,8 @@ mod inline_cache_tests {
                 Instruction::new(Opcode::Move, 0, 2, 0),
                 Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
             ]);
-            // Valid public bytecode with the same uninterrupted Region shape,
-            // but target aliases lhs so no private register receipt is valid.
+            // Valid public bytecode with the same tape-covered shape, but
+            // target aliases lhs so no fused register receipt is valid.
             alias_near_miss_code.extend([
                 Instruction::new(Opcode::Move, 2, 2, 0),
                 Instruction::new(Opcode::Move, 3, 1, 0),
@@ -29278,41 +29493,36 @@ mod inline_cache_tests {
         vm.collect_garbage();
 
         let loaded = LoadedProgram::new(program.clone());
-        let execution_plans = loaded
+        let execution_tape = loaded
             .main_inline_caches
-            .execution_plans
+            .execution_tape
             .as_deref()
-            .expect("execution-plan metadata");
-        assert!(execution_plans.common_region_by_pc.is_some());
-        let register_blocks = execution_plans
-            .register_blocks
-            .as_ref()
-            .expect("register-block metadata");
-        assert_eq!(register_blocks.plan_count(), 512);
+            .expect("tape metadata");
 
         let alias_near_miss_loaded = LoadedProgram::new(alias_near_miss_program);
-        let alias_near_miss_plans = alias_near_miss_loaded
+        let alias_near_miss_tape = alias_near_miss_loaded
             .main_inline_caches
-            .execution_plans
+            .execution_tape
             .as_deref()
-            .expect("near-miss Region metadata");
-        assert!(alias_near_miss_plans.common_region_by_pc.is_some());
-        assert!(alias_near_miss_plans.register_blocks.is_none());
+            .expect("near-miss tape metadata");
 
         let additional = vm.dynamic_programs.additional_live_bytes(&loaded);
         let alias_near_miss_additional = vm
             .dynamic_programs
             .additional_live_bytes(&alias_near_miss_loaded);
-        let expected_register_metadata = program
-            .main
-            .code
-            .len()
-            .saturating_mul(size_of::<u16>())
-            .saturating_add(512usize.saturating_mul(size_of::<RegisterBlockPlan>()));
+        // Both variants predecode identical per-PC ops and run suffixes; the
+        // only metadata difference is the 512 fused receipt payloads.
+        let expected_receipt_metadata = 512usize.saturating_mul(size_of::<RegisterBlockPlan>());
+        assert_eq!(
+            execution_tape
+                .memory_bytes()
+                .checked_sub(alias_near_miss_tape.memory_bytes()),
+            Some(expected_receipt_metadata),
+        );
         assert_eq!(
             additional.checked_sub(alias_near_miss_additional),
-            Some(expected_register_metadata),
-            "the independent live-byte delta must equal by-PC plus plan payload storage"
+            Some(expected_receipt_metadata),
+            "the independent live-byte delta must equal the fused receipt payload storage"
         );
 
         let before = vm.current_live_bytes();

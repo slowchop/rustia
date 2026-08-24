@@ -718,6 +718,33 @@ next slice should remove the repeated scalar/HotIR/call/Region selection ladder
 for plain verified blocks, rather than expanding the receipt catalogue one
 compiler shape at a time.
 
+### VM Core 2 C2.2 — whole-function plain executable tape (implemented)
+
+The tape slice is implemented as specified: the loader predecodes every source
+PC of every function into exactly one private tape operation or an effect
+boundary, with operands verified and direct branch targets resolved at load
+time. A per-PC run suffix groups execution into effect-terminated blocks whose
+remaining logical cost gates one deterministic-GC admission per block, and a
+boundary inside a block admits only the exact prefix. Plain (unmetered,
+uninstrumented) frames select the tape once at function entry; metered,
+coverage, debugging, and stepping frames remain entirely scalar. The verified
+operation set covers register moves and cell clears, predecoded primitive
+constant loads, guarded numeric arithmetic/negation/comparisons, truthiness
+inversion, guarded dense-array reads and writes, direct
+`Jump`/`JumpIf`/`JumpIfNot` branches, guarded numeric `ForLoop` backedges
+without HotIR, and the previously accepted fused four/six-operation register
+receipts, now resolved into the operation stream so the per-`Move`
+RegisterBlock map lookup disappears. Guard misses side-exit to the exact
+canonical instruction before any mutation with settled accounting; HotIR keeps
+sole ownership of its backedges and the closure-call PIC keeps `Call` sites.
+The Region suffix map and RegisterBlockMap production metadata are retired,
+and tape bytes are charged exactly at loaded-program admission. Differential
+scalar-versus-tape tests sweep every tape opcode family, branches, loops,
+deterministic collection intervals, guard exits, malformed operands, and
+structured error PCs; the release preflight, conformance verification, fuzz
+smoke suite, and native/wasm memory-limit gates passed. Controlled DigitalOcean
+timing is pending; no local latency claims are made.
+
 ## Estimate vs C++ Luau
 
 | state | likely position vs C++ Luau interpreter |

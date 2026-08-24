@@ -395,10 +395,17 @@ unreachable suspended-coroutine frames.
    `generic_iteration`, with pooled medians of 15,367.787 versus 14,112.992 ns/unit and a conservative nominal
    95% interval of -10.2126% to -5.9577%. All 808 formal samples matched; all 19 timed legs and all 11 final
    admitted idle windows passed their host gates. Run `20260824T022115Z-64b2afe9` confirmed key/Droplet cleanup.
-   Continue from this accepted bridge into a
-   mode-selected whole-function compact execution tape that replaces the Region/receipt production metadata,
-   compiler liveness/receipts, a VM-owned register arena with compact iterative frames, and direct table/call
-   lanes before productionizing type-directed wasm/AOT.
+   The follow-on C2.2 slice is now implemented: a mode-selected whole-function plain executable tape
+   replaces the Region/receipt production metadata. The loader predecodes each source PC into one verified
+   private operation (register/cell bookkeeping, primitive constant loads, guarded numeric
+   arithmetic/negation/comparisons, guarded dense-array access, direct branch targets, non-HotIR numeric
+   `ForLoop` backedges, and the accepted fused four/six-operation receipts) or an effect boundary; run
+   suffixes group effect-terminated blocks under one deterministic-GC admission, plain mode is selected once
+   at function entry, metered/instrumented frames stay scalar, and guard misses side-exit to the exact
+   canonical instruction before any mutation. Scalar-versus-tape differentials, the release preflight,
+   conformance verification, fuzz smoke, and native/wasm memory-limit gates passed; its controlled
+   DigitalOcean gate is pending. Next come compiler liveness/receipts, a VM-owned register arena with
+   compact iterative frames, and direct table/call lanes before productionizing type-directed wasm/AOT.
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 18 workload entries including
    source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
