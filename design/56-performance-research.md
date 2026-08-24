@@ -742,8 +742,22 @@ and tape bytes are charged exactly at loaded-program admission. Differential
 scalar-versus-tape tests sweep every tape opcode family, branches, loops,
 deterministic collection intervals, guard exits, malformed operands, and
 structured error PCs; the release preflight, conformance verification, fuzz
-smoke suite, and native/wasm memory-limit gates passed. Controlled DigitalOcean
-timing is pending; no local latency claims are made.
+smoke suite, and native/wasm memory-limit gates passed.
+
+The controlled DigitalOcean gate then accepted the tape. Baseline `84e732a`
+(the accepted receipt slice) versus exact candidate `77e0d92` on
+`generic_iteration` at fixed `n=4000` measured pooled medians of 13,092.320
+versus 12,567.856 ns/unit: 4.0059% lower candidate time with a conservative
+nominal 95% interval of -7.1417% to -2.8710%, excluding both zero and the
+predeclared +5% material-regression boundary. Four qualification pairs passed
+at 3.5815% maximum within-order ratio spread; all 808 formal samples matched
+the checksum; all 19 timed legs observed zero steal. Run
+`20260824T053606Z-bad0cf1d` (AMS3 Basic Intel 4-vCPU/8-GiB) confirmed
+temporary-key and Droplet deletion. Evidence:
+`bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/analysis.json`.
+Replacing the per-PC executor-selection ladder with one loader-built tape is
+therefore an accepted win on top of the receipt slice for this workload and
+protocol.
 
 ## Estimate vs C++ Luau
 

@@ -403,8 +403,12 @@ unreachable suspended-coroutine frames.
    suffixes group effect-terminated blocks under one deterministic-GC admission, plain mode is selected once
    at function entry, metered/instrumented frames stay scalar, and guard misses side-exit to the exact
    canonical instruction before any mutation. Scalar-versus-tape differentials, the release preflight,
-   conformance verification, fuzz smoke, and native/wasm memory-limit gates passed; its controlled
-   DigitalOcean gate is pending. Next come compiler liveness/receipts, a VM-owned register arena with
+   conformance verification, fuzz smoke, and native/wasm memory-limit gates passed, and its controlled
+   DigitalOcean gate accepted exact candidate `77e0d92` against the receipt baseline `84e732a`:
+   4.0059% lower `generic_iteration` ns/unit (pooled medians 13,092.320 versus 12,567.856) with a
+   conservative nominal 95% interval of -7.1417% to -2.8710%, excluding zero and the +5% boundary. All
+   808 formal samples matched the checksum and run `20260824T053606Z-bad0cf1d` confirmed key/Droplet
+   cleanup. Next come compiler liveness/receipts, a VM-owned register arena with
    compact iterative frames, and direct table/call lanes before productionizing type-directed wasm/AOT.
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 18 workload entries including

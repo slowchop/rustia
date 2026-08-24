@@ -2,8 +2,8 @@
 
 > **Status (2026-08-24): C2.1 was remotely falsified; C2.2 Region-integrated private receipts were
 > remotely accepted with 8.1651% lower ns/unit; the C2.2 mode-selected whole-function plain tape is
-> implemented and correctness-validated, replacing the Region/receipt production metadata, with its
-> controlled DigitalOcean gate pending.** This is the execution plan for the largest safe non-JIT performance programme. It refines the
+> implemented, correctness-validated, and remotely accepted with 4.0059% lower `generic_iteration`
+> ns/unit against the receipt baseline.** This is the execution plan for the largest safe non-JIT performance programme. It refines the
 > performance queue in [`56-performance-research.md`](56-performance-research.md); it does not change Luau
 > semantics, the deterministic number contract, or the public no-unsafe policy.
 
@@ -194,6 +194,25 @@ deterministic collection intervals, guard exits, malformed jump targets and
 registers, and structured error PCs; the workspace release preflight,
 conformance package verification, fuzz smoke suite, and native/wasm
 memory-limit checks all passed with the tape as the production default.
+
+The frozen same-host comparison tested the accepted receipt baseline `84e732a`
+against exact tape candidate `77e0d92` on `generic_iteration` at fixed
+`n=4000`. Four counterbalanced qualification pairs passed with 3.5815% maximum
+within-order ratio spread (4.8139% raw cross-order, recorded for audit). The
+independent eight-leg ABBA/BAAB comparison measured pooled medians of
+13,092.320 ns/unit for the baseline and 12,567.856 ns/unit for the candidate:
+a 4.0059% reduction with a conservative nominal 95% interval of -7.1417% to
+-2.8710%, wholly below zero as well as the predeclared +5% material-regression
+boundary. All 808 formal samples matched the checksum, all 19 timed legs
+observed zero steal and passed their host gates, and 11 final admitted idle
+windows passed. Three additional final-binary measurements were retained as
+evidence sidecars without changing the complete cross-engine matrix cohort.
+DigitalOcean run `20260824T053606Z-bad0cf1d` used an AMS3 Basic Intel
+4-vCPU/8-GiB host for roughly 24 minutes and confirmed both temporary-key and
+Droplet deletion. Evidence is under
+`bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/`. Combined
+with the accepted receipt slice, plain-mode register/branch work now runs
+about 12% below the pre-C2.2 baseline on this workload and protocol.
 
 ### C2.3 — complete compiler O2 and cleanup liveness
 

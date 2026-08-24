@@ -1,0 +1,103 @@
+[2026-08-24T05:37:52.014Z] preparing exact source trees and frozen release binaries
+[2026-08-24T05:37:52.017Z] disabling periodic package activity before the quiet measurement phase
+[2026-08-24T05:37:52.017Z] + systemctl stop apt-daily.service
+[2026-08-24T05:37:52.027Z] + systemctl mask apt-daily.service
+[2026-08-24T05:37:52.289Z] + systemctl stop apt-daily-upgrade.service
+[2026-08-24T05:37:52.298Z] + systemctl mask apt-daily-upgrade.service
+[2026-08-24T05:37:52.557Z] + systemctl stop apt-daily.timer
+[2026-08-24T05:37:52.566Z] + systemctl mask apt-daily.timer
+[2026-08-24T05:37:52.870Z] + systemctl stop apt-daily-upgrade.timer
+[2026-08-24T05:37:52.881Z] + systemctl mask apt-daily-upgrade.timer
+[2026-08-24T05:37:53.183Z] + systemctl stop unattended-upgrades.service
+[2026-08-24T05:37:53.209Z] + systemctl mask unattended-upgrades.service
+[2026-08-24T05:37:53.469Z] + systemctl stop packagekit.service
+[2026-08-24T05:37:53.483Z] + systemctl mask packagekit.service
+[2026-08-24T05:37:53.760Z] + curl --proto =https --tlsv1.2 -sSf https://sh.rustup.rs -o /opt/rustia/rustup-init.sh
+[2026-08-24T05:37:53.820Z] + sh /opt/rustia/rustup-init.sh -y --profile minimal --default-toolchain none
+[2026-08-24T05:37:54.077Z] + /root/.cargo/bin/rustup toolchain install 1.95.0 --profile minimal
+[2026-08-24T05:38:07.243Z] + git clone --bare /opt/rustia/incoming/rustia.bundle /opt/rustia/repo.git
+[2026-08-24T05:38:08.024Z] + git --git-dir /opt/rustia/repo.git bundle verify /opt/rustia/incoming/rustia.bundle
+[2026-08-24T05:38:08.028Z] + git --git-dir /opt/rustia/repo.git worktree add --detach /opt/rustia/src-a 84e732add4863150bd993f3354b274ab9c3ee41a
+[2026-08-24T05:38:08.393Z] + git --git-dir /opt/rustia/repo.git worktree add --detach /opt/rustia/src-b 77e0d92871133277340b03b2eda119974babecda
+[2026-08-24T05:38:08.815Z] + git -C /opt/rustia/src-a rev-parse HEAD
+[2026-08-24T05:38:08.820Z] + git -C /opt/rustia/src-b rev-parse HEAD
+[2026-08-24T05:38:08.833Z] + /root/.cargo/bin/cargo +1.95.0 fetch --locked --manifest-path /opt/rustia/src-b/Cargo.toml
+[2026-08-24T05:38:16.508Z] + /root/.cargo/bin/cargo +1.95.0 build --locked --offline --manifest-path /opt/rustia/src-a/Cargo.toml -p script-bench-harness --bin script-bench --release
+[2026-08-24T05:38:55.925Z] + /root/.cargo/bin/cargo +1.95.0 build --locked --offline --manifest-path /opt/rustia/src-b/Cargo.toml -p script-bench-harness --bin script-bench --release
+[2026-08-24T05:39:38.656Z] + uname -a
+[2026-08-24T05:39:38.662Z] + lscpu --json
+[2026-08-24T05:39:38.670Z] + systemd-detect-virt
+[2026-08-24T05:39:38.679Z] + /root/.cargo/bin/rustc +1.95.0 -vV
+[2026-08-24T05:39:38.705Z] + /root/.cargo/bin/cargo +1.95.0 --version
+[2026-08-24T05:39:38.724Z] + taskset --version
+[2026-08-24T05:39:38.729Z] + systemctl list-timers --all --no-pager
+[2026-08-24T05:39:38.747Z] + taskset -apc 0 8095
+[2026-08-24T05:39:38.759Z] verified stable set of 12 controller threads on CPU 0
+[2026-08-24T05:39:38.759Z] running predeclared paired relative-stability qualification
+[2026-08-24T05:39:38.771Z] qualification-pair-1-baseline: fixed 60s cooldown
+[2026-08-24T05:40:48.857Z] qualification-pair-1-baseline: idle gate not ready (load1=0.49, idle=100%, steal=0, contaminants=0); retrying
+[2026-08-24T05:41:03.898Z] qualification-pair-1-baseline: idle gate not ready (load1=0.38, idle=100%, steal=0, contaminants=0); retrying
+[2026-08-24T05:41:18.931Z] qualification-pair-1-baseline: idle gate not ready (load1=0.29, idle=100%, steal=0, contaminants=0); retrying
+[2026-08-24T05:41:33.974Z] qualification-pair-1-baseline: idle gate not ready (load1=0.23, idle=99.9002%, steal=0, contaminants=0); retrying
+[2026-08-24T05:41:49.008Z] qualification-pair-1-baseline: idle gate not ready (load1=0.18, idle=100%, steal=0, contaminants=0); retrying
+[2026-08-24T05:42:04.037Z] qualification-pair-1-baseline: idle gate not ready (load1=0.14, idle=99.9001%, steal=0, contaminants=0); retrying
+[2026-08-24T05:42:19.066Z] qualification-pair-1-baseline: idle gate not ready (load1=0.11, idle=100%, steal=0, contaminants=0); retrying
+[2026-08-24T05:42:34.101Z] qualification-pair-1-baseline: idle gate passed (load1=0.08, cpu1 idle=100%, steal=0)
+[2026-08-24T05:42:34.102Z] + taskset -c 1 /opt/rustia/target-a/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 84e732add4863150bd993f3354b274ab9c3ee41a --samples-json /opt/rustia/qualification/paired-pilot-1-baseline.json
+[2026-08-24T05:42:45.716Z] qualification-pair-1-candidate: continuing the admitted pair without a second cooldown
+[2026-08-24T05:42:45.716Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 77e0d92871133277340b03b2eda119974babecda --samples-json /opt/rustia/qualification/paired-pilot-1-candidate.json
+[2026-08-24T05:42:56.489Z] qualification-pair-2-candidate: fixed 60s cooldown
+[2026-08-24T05:44:06.571Z] qualification-pair-2-candidate: idle gate passed (load1=0.1, cpu1 idle=100%, steal=0)
+[2026-08-24T05:44:06.571Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 77e0d92871133277340b03b2eda119974babecda --samples-json /opt/rustia/qualification/paired-pilot-2-candidate.json
+[2026-08-24T05:44:18.143Z] qualification-pair-2-baseline: continuing the admitted pair without a second cooldown
+[2026-08-24T05:44:18.143Z] + taskset -c 1 /opt/rustia/target-a/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 84e732add4863150bd993f3354b274ab9c3ee41a --samples-json /opt/rustia/qualification/paired-pilot-2-baseline.json
+[2026-08-24T05:44:29.402Z] qualification-pair-3-candidate: fixed 60s cooldown
+[2026-08-24T05:45:39.490Z] qualification-pair-3-candidate: idle gate not ready (load1=0.13, idle=100%, steal=0, contaminants=0); retrying
+[2026-08-24T05:45:54.516Z] qualification-pair-3-candidate: idle gate passed (load1=0.1, cpu1 idle=99.900299%, steal=0)
+[2026-08-24T05:45:54.517Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 77e0d92871133277340b03b2eda119974babecda --samples-json /opt/rustia/qualification/paired-pilot-3-candidate.json
+[2026-08-24T05:46:04.866Z] qualification-pair-3-baseline: continuing the admitted pair without a second cooldown
+[2026-08-24T05:46:04.866Z] + taskset -c 1 /opt/rustia/target-a/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 84e732add4863150bd993f3354b274ab9c3ee41a --samples-json /opt/rustia/qualification/paired-pilot-3-baseline.json
+[2026-08-24T05:46:15.385Z] qualification-pair-4-baseline: fixed 60s cooldown
+[2026-08-24T05:47:25.466Z] qualification-pair-4-baseline: idle gate not ready (load1=0.11, idle=100%, steal=0, contaminants=0); retrying
+[2026-08-24T05:47:40.490Z] qualification-pair-4-baseline: idle gate passed (load1=0.08, cpu1 idle=100%, steal=0)
+[2026-08-24T05:47:40.490Z] + taskset -c 1 /opt/rustia/target-a/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 84e732add4863150bd993f3354b274ab9c3ee41a --samples-json /opt/rustia/qualification/paired-pilot-4-baseline.json
+[2026-08-24T05:47:51.188Z] qualification-pair-4-candidate: continuing the admitted pair without a second cooldown
+[2026-08-24T05:47:51.189Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 77e0d92871133277340b03b2eda119974babecda --samples-json /opt/rustia/qualification/paired-pilot-4-candidate.json
+[2026-08-24T05:48:01.463Z] running frozen eight-leg A/B comparison
+[2026-08-24T05:48:01.464Z] accepted-1-core2tape-abba-A1.json: fixed 60s cooldown
+[2026-08-24T05:49:11.544Z] accepted-1-core2tape-abba-A1.json: idle gate passed (load1=0.1, cpu1 idle=100%, steal=0)
+[2026-08-24T05:49:11.544Z] + taskset -c 1 /opt/rustia/target-a/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 84e732add4863150bd993f3354b274ab9c3ee41a --samples-json bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-abba-A1.json
+[2026-08-24T05:49:22.330Z] accepted-2-core2tape-abba-B1.json: continuing the admitted pair without a second cooldown
+[2026-08-24T05:49:22.332Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 77e0d92871133277340b03b2eda119974babecda --samples-json bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-abba-B1.json
+[2026-08-24T05:49:32.661Z] accepted-3-core2tape-abba-B2.json: fixed 60s cooldown
+[2026-08-24T05:50:42.742Z] accepted-3-core2tape-abba-B2.json: idle gate not ready (load1=0.11, idle=99.900299%, steal=0, contaminants=0); retrying
+[2026-08-24T05:50:57.766Z] accepted-3-core2tape-abba-B2.json: idle gate passed (load1=0.08, cpu1 idle=100%, steal=0)
+[2026-08-24T05:50:57.766Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 77e0d92871133277340b03b2eda119974babecda --samples-json bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-abba-B2.json
+[2026-08-24T05:51:08.361Z] accepted-4-core2tape-abba-A2.json: continuing the admitted pair without a second cooldown
+[2026-08-24T05:51:08.362Z] + taskset -c 1 /opt/rustia/target-a/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 84e732add4863150bd993f3354b274ab9c3ee41a --samples-json bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-abba-A2.json
+[2026-08-24T05:51:19.247Z] accepted-5-core2tape-baab-B3.json: fixed 60s cooldown
+[2026-08-24T05:52:29.323Z] accepted-5-core2tape-baab-B3.json: idle gate not ready (load1=0.12, idle=100%, steal=0, contaminants=0); retrying
+[2026-08-24T05:52:44.348Z] accepted-5-core2tape-baab-B3.json: idle gate passed (load1=0.09, cpu1 idle=99.9002%, steal=0)
+[2026-08-24T05:52:44.348Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 77e0d92871133277340b03b2eda119974babecda --samples-json bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-baab-B3.json
+[2026-08-24T05:52:55.243Z] accepted-6-core2tape-baab-A3.json: continuing the admitted pair without a second cooldown
+[2026-08-24T05:52:55.244Z] + taskset -c 1 /opt/rustia/target-a/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 84e732add4863150bd993f3354b274ab9c3ee41a --samples-json bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-baab-A3.json
+[2026-08-24T05:53:07.248Z] accepted-7-core2tape-baab-A4.json: fixed 60s cooldown
+[2026-08-24T05:54:17.330Z] accepted-7-core2tape-baab-A4.json: idle gate not ready (load1=0.11, idle=100%, steal=0, contaminants=0); retrying
+[2026-08-24T05:54:32.357Z] accepted-7-core2tape-baab-A4.json: idle gate passed (load1=0.08, cpu1 idle=100%, steal=0)
+[2026-08-24T05:54:32.358Z] + taskset -c 1 /opt/rustia/target-a/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 84e732add4863150bd993f3354b274ab9c3ee41a --samples-json bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-baab-A4.json
+[2026-08-24T05:54:43.504Z] accepted-8-core2tape-baab-B4.json: continuing the admitted pair without a second cooldown
+[2026-08-24T05:54:43.504Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --no-history --no-results --no-latest-json --commit 77e0d92871133277340b03b2eda119974babecda --samples-json bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-baab-B4.json
+[2026-08-24T05:54:54.175Z] + node bench/analyze-fixed-samples.js --baseline bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-abba-A1.json --baseline bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-abba-A2.json --baseline bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-baab-A3.json --baseline bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-baab-A4.json --candidate bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-abba-B1.json --candidate bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-abba-B2.json --candidate bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-baab-B3.json --candidate bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/core2tape-baab-B4.json --bootstrap-reps 20000 --seed 2026082405 --material-threshold 5 --expected-legs 4 --require-full-commits
+[2026-08-24T05:55:03.857Z] comparison accepted; appending three actual final-binary history measurements
+[2026-08-24T05:55:03.885Z] publication-1: fixed 60s cooldown
+[2026-08-24T05:56:13.971Z] publication-1: idle gate not ready (load1=0.15, idle=100%, steal=0, contaminants=0); retrying
+[2026-08-24T05:56:28.994Z] publication-1: idle gate not ready (load1=0.12, idle=99.9002%, steal=0, contaminants=0); retrying
+[2026-08-24T05:56:44.018Z] publication-1: idle gate passed (load1=0.09, cpu1 idle=100%, steal=0)
+[2026-08-24T05:56:44.020Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --history bench/history/runs.jsonl --no-results --no-latest-json --commit 77e0d92871133277340b03b2eda119974babecda --samples-json bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/final-generic_iteration-1.json
+[2026-08-24T05:56:54.382Z] publication-2: fixed 60s cooldown
+[2026-08-24T05:58:04.460Z] publication-2: idle gate passed (load1=0.07, cpu1 idle=100%, steal=0)
+[2026-08-24T05:58:04.460Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --history bench/history/runs.jsonl --no-results --no-latest-json --commit 77e0d92871133277340b03b2eda119974babecda --samples-json bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/final-generic_iteration-2.json
+[2026-08-24T05:58:14.871Z] publication-3: fixed 60s cooldown
+[2026-08-24T05:59:24.951Z] publication-3: idle gate passed (load1=0.06, cpu1 idle=100%, steal=0)
+[2026-08-24T05:59:24.951Z] + taskset -c 1 /opt/rustia/target-b/release/script-bench --engines rustia --workloads generic_iteration --fixed-n 4000 --reps 101 --history bench/history/runs.jsonl --no-results --no-latest-json --commit 77e0d92871133277340b03b2eda119974babecda --samples-json bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/final-generic_iteration-3.json
+[2026-08-24T05:59:35.286Z] + /opt/rustia/target-b/release/script-bench --check-history --history bench/history/runs.jsonl

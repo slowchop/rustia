@@ -28,7 +28,14 @@ Current unpublished workspace version: `0.0.1`.
   RegisterBlock map are retired; the receipt recognizer and executor survive
   inside the tape. Scalar-versus-tape differential tests sweep every tape
   opcode family, deterministic collection intervals, guard exits, branch
-  edges, malformed jump targets, and error PCs.
+  edges, malformed jump targets, and error PCs. The accepted controlled
+  DigitalOcean gate measured 4.0059% lower candidate `generic_iteration`
+  ns/unit against the receipt baseline (pooled medians 13,092.320 versus
+  12,567.856), with a conservative nominal 95% interval from -7.1417% to
+  -2.8710%. All 808 formal samples matched the checksum, all 19 timed legs
+  observed zero steal, and the Droplet/key cleanup gate passed. Evidence is
+  retained under
+  `bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/`.
 
 - VM Core 2 C2.2 adds frame-local immutable execution receipts over unchanged
   public bytecode. Region Engine can execute the compiler's exact
