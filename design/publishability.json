@@ -97,7 +97,7 @@
       "publish": false,
       "role": "public-rustia-crate",
       "package_file_audit": {
-        "file_count": 12,
+        "file_count": 13,
         "forbidden_path_violations": 0
       },
       "internal_dependencies": [
@@ -136,7 +136,7 @@
       "publish": false,
       "role": "public-rustia-crate",
       "package_file_audit": {
-        "file_count": 28,
+        "file_count": 29,
         "forbidden_path_violations": 0
       },
       "internal_dependencies": [

@@ -23,6 +23,8 @@ pub use error::{Error, ErrorKind, Result};
 pub use extension::{
     ExtensionHandler, ExtensionOp, HostFunctionHandler, HostFunctionOp, OpCapability,
 };
+#[cfg(any(test, feature = "table-write-diagnostics"))]
+pub use heap::NumericArraySlotWriteCounts;
 pub use profile::{GuestSurface, Profile};
 pub use value::{Value, ValueKind};
 pub use vm::{

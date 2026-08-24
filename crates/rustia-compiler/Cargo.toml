@@ -12,6 +12,12 @@ categories.workspace = true
 description = "Luau-to-rustia bytecode compiler"
 publish.workspace = true
 
+[features]
+default = []
+# Enables the default-off `rustia-vm` numeric array-slot write census used by
+# `tests/array_slot_write_coverage.rs`. Never enabled for benchmark builds.
+table-write-diagnostics = ["rustia-vm/table-write-diagnostics"]
+
 [dependencies]
 rustia-lexer.workspace = true
 rustia-parser.workspace = true

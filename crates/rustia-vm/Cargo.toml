@@ -12,6 +12,13 @@ categories.workspace = true
 description = "Deterministic Luau virtual machine for rustia"
 publish.workspace = true
 
+[features]
+default = []
+# Diagnostic-only path census for numeric array-slot writes. Never enabled in
+# production or benchmark builds; the counters exist so a separate test can
+# prove which workloads reach the C2.5a direct existing-slot lane.
+table-write-diagnostics = []
+
 [dependencies]
 gc-arena.workspace = true
 libm.workspace = true

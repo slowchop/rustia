@@ -2309,6 +2309,17 @@ impl Vm {
         &self.settings
     }
 
+    /// Diagnostic-only census of which lane served each numeric array-slot
+    /// write.
+    ///
+    /// Available only under `cfg(test)` or the default-off
+    /// `table-write-diagnostics` feature, so ordinary and benchmark builds
+    /// carry no hot-path instrumentation.
+    #[cfg(any(test, feature = "table-write-diagnostics"))]
+    pub fn numeric_array_slot_write_counts(&self) -> crate::NumericArraySlotWriteCounts {
+        self.heap.numeric_array_slot_write_counts()
+    }
+
     /// Returns an exact census of VM-managed heap/program/control allocations.
     ///
     /// Peak fields are present only when `VmSettings::enable_memory_tracking`
