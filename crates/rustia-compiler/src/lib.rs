@@ -58,18 +58,40 @@ impl std::error::Error for CompileError {}
 
 pub type Result<T> = std::result::Result<T, CompileError>;
 
+mod o2;
+
+pub use o2::{ExperimentalO2Options, ProgramReceipts};
+
 pub fn compile(chunk: &Chunk) -> Result<Program> {
     compile_with_options(chunk, CompileOptions::default())
 }
 
 pub fn compile_with_options(chunk: &Chunk, options: CompileOptions) -> Result<Program> {
+    compile_with_options_and_receipts(chunk, options).map(|(program, _)| program)
+}
+
+/// Compiles like [`compile_with_options`] and additionally returns the
+/// logical-receipt schedule ([`ProgramReceipts`]) the executable tape prices
+/// blocks with. With every [`ExperimentalO2Options`] flag off (the default)
+/// the receipts are the identity schedule.
+pub fn compile_with_options_and_receipts(
+    chunk: &Chunk,
+    options: CompileOptions,
+) -> Result<(Program, ProgramReceipts)> {
     // Capture discovery is intentionally a complete compiler pass. Nested functions can make a
     // source-earlier assignment target captured (including when that assignment executes again at
     // a loop backedge), so a single source-order pass cannot safely decide whether that write must
     // update a shared cell. The second deterministic pass starts with the complete captured-register
     // sets and therefore emits cell write-throughs at every assignment site.
+    let experimental_o2 = options.experimental_o2;
     let capture_hints = Compiler::new(options.clone()).discover_capture_hints(chunk)?;
-    Compiler::with_capture_hints(options, capture_hints).compile_chunk(chunk)
+    let program = Compiler::with_capture_hints(options, capture_hints).compile_chunk(chunk)?;
+    if experimental_o2.any_enabled() {
+        o2::optimize_program(&program, experimental_o2)
+    } else {
+        let receipts = ProgramReceipts::identity(&program);
+        Ok((program, receipts))
+    }
 }
 
 fn collect_capture_hints(main: &BTreeSet<u8>, functions: &[Function]) -> Vec<Vec<u8>> {
@@ -97,6 +119,14 @@ pub struct CompileOptions {
     /// its SETLIST chunk before any keyed field, preserving insertion order).
     /// Set this only for `Profile::Puc51Compat` guests.
     pub puc51_constructor_order: bool,
+    /// Default-disabled C2.3 optimization families ([`ExperimentalO2Options`]).
+    ///
+    /// While every flag is false (the default and the only supported public
+    /// configuration), emitted bytecode is byte-identical to a compiler
+    /// without this field. Enabling a family changes emitted instructions and
+    /// therefore the fuel/deterministic-GC schedule; that is gated on C2.2's
+    /// block receipts per `design/58-vm-core2.md`.
+    pub experimental_o2: ExperimentalO2Options,
 }
 
 impl CompileOptions {
