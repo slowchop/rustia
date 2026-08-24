@@ -27,7 +27,9 @@
 //!   the logical instructions the unoptimized path charged
 //!   ([`LogicalReceipts`]). This is the schedule the tape consumes.
 
-use rustia_vm::bytecode::{Function, Instruction, InstructionSource, Opcode, Program};
+use rustia_vm::bytecode::{
+    Function, Instruction, InstructionSource, Opcode, Program, ProgramLogicalUnits,
+};
 use rustia_vm::instruction_facts::{instruction_facts, InstructionFlow};
 use rustia_vm::liveness::{ClearKind, FunctionLiveness, LogicalReceipts};
 use rustia_vm::Constant;
@@ -50,21 +52,52 @@ pub struct ExperimentalO2Options {
     /// evaluation.
     pub commit_late_compound_locals: bool,
     /// Retarget single-destination producers over their `Move d, t;
-    /// ClearLocalCell t` result-lifetime tails and delete uncaptured cleanup
-    /// clears whose value the analysis proves dead.
+    /// ClearLocalCell t` result-lifetime tails. Reachability-exact: the value
+    /// lives in the destination register either way and the bypassed
+    /// temporary provably stays nil, so weak-table observability at every
+    /// deterministic collection boundary is unchanged.
     pub remove_dead_register_tails: bool,
+    /// Delete standalone uncaptured cleanup clears whose value the analysis
+    /// proves dead.
+    ///
+    /// **Blocked on C2.4 liveness-receipt root scanning.** A dead-value clear
+    /// is still a GC-root barrier: deleting it keeps the stale value
+    /// register-rooted through later collection boundaries, which the
+    /// upstream `weak_table_key_value_root_liveness` fixture observes (one
+    /// extra weak entry survives `collectgarbage()`). Until frame root scans
+    /// mask registers the unoptimized program would have cleared, this family
+    /// changes weak-table reachability and must not be enabled; its corpus
+    /// gate is the `#[ignore]`d test in
+    /// `rustia-conformance/tests/o2_conformance.rs`.
+    pub elide_dead_cleanup_clears: bool,
     /// Shrink `max_registers` to the analyzed operand high-water mark.
     pub tighten_local_slots: bool,
 }
 
 impl ExperimentalO2Options {
-    /// Every family enabled; test/validation convenience.
+    /// Every family enabled; test/validation convenience. Includes the
+    /// C2.4-blocked clear elision, so this configuration preserves values and
+    /// the logical schedule but not weak-table root reachability; use
+    /// [`Self::reachability_exact`] for the enablement track.
     pub const ALL: Self = Self {
         fold_constant_branches: true,
         commit_late_compound_locals: true,
         remove_dead_register_tails: true,
+        elide_dead_cleanup_clears: true,
         tighten_local_slots: true,
     };
+
+    /// The families whose rewrites are reachability-exact at every
+    /// deterministic collection boundary — the corpus-green enablement track.
+    pub const fn reachability_exact() -> Self {
+        Self {
+            fold_constant_branches: true,
+            commit_late_compound_locals: true,
+            remove_dead_register_tails: true,
+            elide_dead_cleanup_clears: false,
+            tighten_local_slots: true,
+        }
+    }
 
     pub fn any_enabled(self) -> bool {
         self != Self::default()
@@ -122,6 +155,19 @@ pub(crate) fn optimize_program(
     let constants = program.constants().to_vec();
     let mut optimized = Program::with_functions(main, constants, functions);
     optimized.source_name = program.source_name.clone();
+    // Attach the logical-unit schedule so the VM restores the unoptimized
+    // fuel/deterministic-GC accounting over the optimized code. Every folded
+    // instruction (Move, ClearLocalCell, LoadConst/Wide, JumpIf/JumpIfNot)
+    // has fuel cost one, which the VM's charging rule relies on.
+    let logical_units = ProgramLogicalUnits::new(
+        main_receipts.units().to_vec(),
+        function_receipts
+            .iter()
+            .map(|receipts| receipts.units().to_vec())
+            .collect(),
+    )
+    .map_err(CompileError::new)?;
+    let optimized = optimized.with_logical_units(Some(logical_units));
     Ok((
         optimized,
         ProgramReceipts {
@@ -149,6 +195,10 @@ fn optimize_function(
     }
     if options.remove_dead_register_tails {
         let plan = plan_dead_register_tails(program, &current)?;
+        apply_rewrite(program, &mut current, &mut units, plan)?;
+    }
+    if options.elide_dead_cleanup_clears {
+        let plan = plan_dead_cleanup_clears(program, &current)?;
         apply_rewrite(program, &mut current, &mut units, plan)?;
     }
     if options.tighten_local_slots {
@@ -419,9 +469,6 @@ fn plan_commit_late_compound_locals(program: &Program, function: &Function) -> R
             break;
         }
         let operation = function.code[op_pc];
-        let commit = function.code[op_pc + 1];
-        let clear_rhs = function.code[op_pc + 2];
-        let clear_result = function.code[op_pc + 3];
         if !is_compound_operation(operation.op) || operation.aux != 0 {
             continue;
         }
@@ -430,9 +477,30 @@ fn plan_commit_late_compound_locals(program: &Program, function: &Function) -> R
         if operation.b != result || rhs == result {
             continue;
         }
-        if commit.op != Opcode::Move || commit.b != result {
-            continue;
-        }
+        // Two tail orderings share one rewrite:
+        //
+        // - compound `x op= e`: OP; Move x, r; Clear rhs; Clear r
+        // - plain self-update `x = x op e` (the C2.2 six-operation receipt
+        //   shape): OP; Clear rhs; Move x, r; Clear r
+        //
+        // `commit_pc` names the Move, `kept_clear_pc` the retained rhs clear.
+        let (commit, commit_pc, kept_clear_pc) = {
+            let first = function.code[op_pc + 1];
+            let second = function.code[op_pc + 2];
+            if first.op == Opcode::Move && first.b == result {
+                (first, op_pc + 1, op_pc + 2)
+            } else if first.op == Opcode::ClearLocalCell
+                && first.a == rhs
+                && second.op == Opcode::Move
+                && second.b == result
+            {
+                (second, op_pc + 2, op_pc + 1)
+            } else {
+                continue;
+            }
+        };
+        let clear_rhs = function.code[kept_clear_pc];
+        let clear_result = function.code[op_pc + 3];
         let target = commit.a;
         if target == result || target == rhs {
             continue;
@@ -511,7 +579,7 @@ fn plan_commit_late_compound_locals(program: &Program, function: &Function) -> R
 
         plan.deleted[pc0] = true;
         plan.replacements[op_pc] = Some(Instruction::new(operation.op, target, target, rhs));
-        plan.deleted[op_pc + 1] = true;
+        plan.deleted[commit_pc] = true;
         plan.deleted[op_pc + 3] = true;
     }
     Ok(plan)
@@ -619,18 +687,20 @@ fn a_is_pure_destination(opcode: Opcode) -> bool {
     )
 }
 
-/// Two rewrites over the result-lifetime tails the census counts:
+/// Target-directed fold over the result-lifetime tails the census counts:
+/// `producer …, a = t; Move d, t; ClearLocalCell t` where the producer's `a`
+/// is a pure destination and `t` is an uncaptured, cell-free, afterwards-dead
+/// temporary becomes `producer …, a = d`.
 ///
-/// - Target-directed fold: `producer …, a = t; Move d, t; ClearLocalCell t`
-///   where the producer's `a` is a pure destination and `t` is an uncaptured,
-///   cell-free, afterwards-dead temporary becomes `producer …, a = d`.
-/// - Cleanup removal: any remaining `ClearLocalCell` the analysis classifies
-///   as pure cleanup of a dead value is deleted.
+/// Reachability-exact (with clear elision off): the produced value is rooted
+/// through `d` on both sides, and the bypassed temporary was nil before the
+/// producer — every write to a compiler temporary is either followed by its
+/// retained clear or retargeted away — so it stays nil instead of holding the
+/// value transiently.
 fn plan_dead_register_tails(program: &Program, function: &Function) -> Result<RewritePlan> {
     let liveness = analyze(program, function)?;
     let mut plan = RewritePlan::new(function.code.len());
 
-    // Target-directed folds first: they consume their own clears.
     for pc in 1..function.code.len().saturating_sub(1) {
         let move_tail = function.code[pc];
         let clear_tail = function.code[pc + 1];
@@ -678,6 +748,49 @@ fn plan_dead_register_tails(program: &Program, function: &Function) -> Result<Re
         if cells.contains(temporary) {
             continue;
         }
+        // Reachability exactness needs the bypassed temporary to be provably
+        // nil before the producer: walk back through the block; the first
+        // instruction touching it must be a retained ClearLocalCell (or the
+        // block must be the function entry with no touch at all), so skipping
+        // the producer's write leaves nil exactly where the original left
+        // nil. Anything else could leave a stale collectable value rooted
+        // through later collection boundaries.
+        let block_start = {
+            let block = liveness
+                .cfg()
+                .block_index_of_pc(producer_pc)
+                .unwrap_or_default();
+            liveness.cfg().blocks()[block].start_pc
+        };
+        let mut verdict = None;
+        let mut scan = producer_pc;
+        while scan > block_start {
+            scan -= 1;
+            let candidate = function.code[scan];
+            let facts = instruction_facts(program, function, candidate);
+            let touches = facts.reads.contains(temporary)
+                || facts.writes.contains(temporary)
+                || facts.conditional_writes.contains(temporary)
+                || facts.reads_all_registers;
+            if touches {
+                verdict = Some(
+                    candidate.op == Opcode::ClearLocalCell
+                        && candidate.a == temporary
+                        && !plan.touched(scan),
+                );
+                break;
+            }
+        }
+        let provably_nil = match verdict {
+            Some(nil_from_kept_clear) => nil_from_kept_clear,
+            // Untouched across the whole block: only the function entry
+            // itself proves a nil start; any other block can be entered with
+            // an arbitrary value in the slot.
+            None => block_start == 0,
+        };
+        if !provably_nil {
+            continue;
+        }
 
         let mut retargeted = producer;
         retargeted.a = destination;
@@ -686,7 +799,16 @@ fn plan_dead_register_tails(program: &Program, function: &Function) -> Result<Re
         plan.deleted[pc + 1] = true;
     }
 
-    // Remaining dead pure-cleanup clears.
+    Ok(plan)
+}
+
+/// Deletes standalone `ClearLocalCell`s that only nil a dead, cell-free
+/// register. Values stay identical; weak-table root reachability does not —
+/// see [`ExperimentalO2Options::elide_dead_cleanup_clears`] for the C2.4
+/// dependency.
+fn plan_dead_cleanup_clears(program: &Program, function: &Function) -> Result<RewritePlan> {
+    let liveness = analyze(program, function)?;
+    let mut plan = RewritePlan::new(function.code.len());
     for site in liveness.clear_sites() {
         if site.kind != ClearKind::PureCleanup || !site.value_dead_after {
             continue;

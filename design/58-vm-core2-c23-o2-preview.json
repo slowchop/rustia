@@ -5,42 +5,47 @@
     "01_dense_tables": {
       "baseline": { "static_instructions": 102, "register_slots": 18, "dynamic_instructions": 55727, "dynamic_move_clear": 35031 },
       "fold_constant_branches": { "static_instructions": 102, "register_slots": 18, "dynamic_instructions": 55727, "dynamic_move_clear": 35031 },
-      "commit_late_compound_locals": { "static_instructions": 102, "register_slots": 18, "dynamic_instructions": 55727, "dynamic_move_clear": 35031 },
-      "remove_dead_register_tails": { "static_instructions": 69, "register_slots": 18, "dynamic_instructions": 39194, "dynamic_move_clear": 18498 },
+      "commit_late_compound_locals": { "static_instructions": 99, "register_slots": 18, "dynamic_instructions": 49583, "dynamic_move_clear": 28887 },
+      "remove_dead_register_tails": { "static_instructions": 102, "register_slots": 18, "dynamic_instructions": 55727, "dynamic_move_clear": 35031 },
+      "elide_dead_cleanup_clears": { "static_instructions": 69, "register_slots": 18, "dynamic_instructions": 39194, "dynamic_move_clear": 18498 },
       "tighten_local_slots": { "static_instructions": 102, "register_slots": 18, "dynamic_instructions": 55727, "dynamic_move_clear": 35031 },
-      "all": { "static_instructions": 69, "register_slots": 18, "dynamic_instructions": 39194, "dynamic_move_clear": 18498 }
+      "all": { "static_instructions": 67, "register_slots": 18, "dynamic_instructions": 35098, "dynamic_move_clear": 14402 }
     },
     "02_sparse_tables": {
       "baseline": { "static_instructions": 112, "register_slots": 18, "dynamic_instructions": 27943, "dynamic_move_clear": 16015 },
       "fold_constant_branches": { "static_instructions": 112, "register_slots": 18, "dynamic_instructions": 27943, "dynamic_move_clear": 16015 },
-      "commit_late_compound_locals": { "static_instructions": 112, "register_slots": 18, "dynamic_instructions": 27943, "dynamic_move_clear": 16015 },
-      "remove_dead_register_tails": { "static_instructions": 77, "register_slots": 18, "dynamic_instructions": 19138, "dynamic_move_clear": 7210 },
+      "commit_late_compound_locals": { "static_instructions": 109, "register_slots": 18, "dynamic_instructions": 27919, "dynamic_move_clear": 15991 },
+      "remove_dead_register_tails": { "static_instructions": 112, "register_slots": 18, "dynamic_instructions": 27943, "dynamic_move_clear": 16015 },
+      "elide_dead_cleanup_clears": { "static_instructions": 77, "register_slots": 18, "dynamic_instructions": 19138, "dynamic_move_clear": 7210 },
       "tighten_local_slots": { "static_instructions": 112, "register_slots": 18, "dynamic_instructions": 27943, "dynamic_move_clear": 16015 },
-      "all": { "static_instructions": 77, "register_slots": 18, "dynamic_instructions": 19138, "dynamic_move_clear": 7210 }
+      "all": { "static_instructions": 75, "register_slots": 18, "dynamic_instructions": 19122, "dynamic_move_clear": 7194 }
     },
     "04_closures_upvalues": {
       "baseline": { "static_instructions": 83, "register_slots": 21, "dynamic_instructions": 388, "dynamic_move_clear": 212 },
       "fold_constant_branches": { "static_instructions": 83, "register_slots": 21, "dynamic_instructions": 388, "dynamic_move_clear": 212 },
-      "commit_late_compound_locals": { "static_instructions": 83, "register_slots": 21, "dynamic_instructions": 388, "dynamic_move_clear": 212 },
-      "remove_dead_register_tails": { "static_instructions": 57, "register_slots": 21, "dynamic_instructions": 259, "dynamic_move_clear": 83 },
+      "commit_late_compound_locals": { "static_instructions": 80, "register_slots": 21, "dynamic_instructions": 364, "dynamic_move_clear": 188 },
+      "remove_dead_register_tails": { "static_instructions": 83, "register_slots": 21, "dynamic_instructions": 388, "dynamic_move_clear": 212 },
+      "elide_dead_cleanup_clears": { "static_instructions": 57, "register_slots": 21, "dynamic_instructions": 259, "dynamic_move_clear": 83 },
       "tighten_local_slots": { "static_instructions": 83, "register_slots": 21, "dynamic_instructions": 388, "dynamic_move_clear": 212 },
-      "all": { "static_instructions": 57, "register_slots": 21, "dynamic_instructions": 259, "dynamic_move_clear": 83 }
+      "all": { "static_instructions": 55, "register_slots": 21, "dynamic_instructions": 243, "dynamic_move_clear": 67 }
     },
     "09_generic_iteration": {
       "baseline": { "static_instructions": 184, "register_slots": 37, "dynamic_instructions": 9506, "dynamic_move_clear": 4506 },
       "fold_constant_branches": { "static_instructions": 184, "register_slots": 37, "dynamic_instructions": 9506, "dynamic_move_clear": 4506 },
-      "commit_late_compound_locals": { "static_instructions": 184, "register_slots": 37, "dynamic_instructions": 9506, "dynamic_move_clear": 4506 },
-      "remove_dead_register_tails": { "static_instructions": 124, "register_slots": 37, "dynamic_instructions": 7156, "dynamic_move_clear": 2156 },
+      "commit_late_compound_locals": { "static_instructions": 181, "register_slots": 37, "dynamic_instructions": 8738, "dynamic_move_clear": 3738 },
+      "remove_dead_register_tails": { "static_instructions": 184, "register_slots": 37, "dynamic_instructions": 9506, "dynamic_move_clear": 4506 },
+      "elide_dead_cleanup_clears": { "static_instructions": 124, "register_slots": 37, "dynamic_instructions": 7156, "dynamic_move_clear": 2156 },
       "tighten_local_slots": { "static_instructions": 184, "register_slots": 37, "dynamic_instructions": 9506, "dynamic_move_clear": 4506 },
-      "all": { "static_instructions": 124, "register_slots": 37, "dynamic_instructions": 7156, "dynamic_move_clear": 2156 }
+      "all": { "static_instructions": 122, "register_slots": 37, "dynamic_instructions": 6644, "dynamic_move_clear": 1644 }
     },
     "10_stdlib_math_table": {
       "baseline": { "static_instructions": 110, "register_slots": 20, "dynamic_instructions": 451, "dynamic_move_clear": 257 },
       "fold_constant_branches": { "static_instructions": 110, "register_slots": 20, "dynamic_instructions": 451, "dynamic_move_clear": 257 },
-      "commit_late_compound_locals": { "static_instructions": 110, "register_slots": 20, "dynamic_instructions": 451, "dynamic_move_clear": 257 },
-      "remove_dead_register_tails": { "static_instructions": 69, "register_slots": 20, "dynamic_instructions": 292, "dynamic_move_clear": 98 },
+      "commit_late_compound_locals": { "static_instructions": 104, "register_slots": 20, "dynamic_instructions": 427, "dynamic_move_clear": 233 },
+      "remove_dead_register_tails": { "static_instructions": 108, "register_slots": 20, "dynamic_instructions": 451, "dynamic_move_clear": 257 },
+      "elide_dead_cleanup_clears": { "static_instructions": 70, "register_slots": 20, "dynamic_instructions": 292, "dynamic_move_clear": 98 },
       "tighten_local_slots": { "static_instructions": 110, "register_slots": 20, "dynamic_instructions": 451, "dynamic_move_clear": 257 },
-      "all": { "static_instructions": 69, "register_slots": 20, "dynamic_instructions": 292, "dynamic_move_clear": 98 }
+      "all": { "static_instructions": 65, "register_slots": 20, "dynamic_instructions": 276, "dynamic_move_clear": 82 }
     }
   }
 }

@@ -84,13 +84,14 @@ fn executed_instructions(program: &Program) -> u64 {
         .sum()
 }
 
-const FAMILIES: [(&str, ExperimentalO2Options); 5] = [
+const FAMILIES: [(&str, ExperimentalO2Options); 6] = [
     (
         "fold_constant_branches",
         ExperimentalO2Options {
             fold_constant_branches: true,
             commit_late_compound_locals: false,
             remove_dead_register_tails: false,
+            elide_dead_cleanup_clears: false,
             tighten_local_slots: false,
         },
     ),
@@ -100,6 +101,7 @@ const FAMILIES: [(&str, ExperimentalO2Options); 5] = [
             fold_constant_branches: false,
             commit_late_compound_locals: true,
             remove_dead_register_tails: false,
+            elide_dead_cleanup_clears: false,
             tighten_local_slots: false,
         },
     ),
@@ -109,6 +111,17 @@ const FAMILIES: [(&str, ExperimentalO2Options); 5] = [
             fold_constant_branches: false,
             commit_late_compound_locals: false,
             remove_dead_register_tails: true,
+            elide_dead_cleanup_clears: false,
+            tighten_local_slots: false,
+        },
+    ),
+    (
+        "elide_dead_cleanup_clears",
+        ExperimentalO2Options {
+            fold_constant_branches: false,
+            commit_late_compound_locals: false,
+            remove_dead_register_tails: false,
+            elide_dead_cleanup_clears: true,
             tighten_local_slots: false,
         },
     ),
@@ -118,6 +131,7 @@ const FAMILIES: [(&str, ExperimentalO2Options); 5] = [
             fold_constant_branches: false,
             commit_late_compound_locals: false,
             remove_dead_register_tails: false,
+            elide_dead_cleanup_clears: false,
             tighten_local_slots: true,
         },
     ),
@@ -380,14 +394,24 @@ fn constant_branches_fold_to_unconditional_flow() {
 
 #[test]
 fn dead_register_tails_disappear_and_execution_shrinks() {
+    // Simple-assignment shapes with fresh-temporary producers: the
+    // reachability-exact fold retargets `producer r; Move d, r; Clear r`
+    // only when r is provably nil before the producer, which covers copies,
+    // constant loads, global reads, and call results feeding plain
+    // assignments. Accumulator tails belong to commit_late_compound_locals.
     let source = r#"
-        local acc = 0
-        local t = { 1, 2, 3, 4 }
-        for i = 1, 4 do
-            local x = t[i] + i
-            acc = acc + x
+        local function source(i)
+            return i * 2
         end
-        return acc
+        local a = 0
+        local b = 0
+        for i = 1, 6 do
+            a = source(i)
+            b = a
+            b = 7
+            b = source(b + a)
+        end
+        return a + b
     "#;
     let baseline = compile_o2(source, ExperimentalO2Options::default());
     let optimized = compile_o2(

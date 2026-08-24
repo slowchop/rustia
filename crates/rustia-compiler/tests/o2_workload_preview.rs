@@ -27,13 +27,14 @@ const WORKLOADS: [&str; 5] = [
 /// Matches the merged census report so the two files are comparable.
 const DYNAMIC_N: f64 = 8.0;
 
-const FAMILIES: [(&str, ExperimentalO2Options); 5] = [
+const FAMILIES: [(&str, ExperimentalO2Options); 6] = [
     (
         "fold_constant_branches",
         ExperimentalO2Options {
             fold_constant_branches: true,
             commit_late_compound_locals: false,
             remove_dead_register_tails: false,
+            elide_dead_cleanup_clears: false,
             tighten_local_slots: false,
         },
     ),
@@ -43,6 +44,7 @@ const FAMILIES: [(&str, ExperimentalO2Options); 5] = [
             fold_constant_branches: false,
             commit_late_compound_locals: true,
             remove_dead_register_tails: false,
+            elide_dead_cleanup_clears: false,
             tighten_local_slots: false,
         },
     ),
@@ -52,6 +54,17 @@ const FAMILIES: [(&str, ExperimentalO2Options); 5] = [
             fold_constant_branches: false,
             commit_late_compound_locals: false,
             remove_dead_register_tails: true,
+            elide_dead_cleanup_clears: false,
+            tighten_local_slots: false,
+        },
+    ),
+    (
+        "elide_dead_cleanup_clears",
+        ExperimentalO2Options {
+            fold_constant_branches: false,
+            commit_late_compound_locals: false,
+            remove_dead_register_tails: false,
+            elide_dead_cleanup_clears: true,
             tighten_local_slots: false,
         },
     ),
@@ -61,6 +74,7 @@ const FAMILIES: [(&str, ExperimentalO2Options); 5] = [
             fold_constant_branches: false,
             commit_late_compound_locals: false,
             remove_dead_register_tails: false,
+            elide_dead_cleanup_clears: false,
             tighten_local_slots: true,
         },
     ),
