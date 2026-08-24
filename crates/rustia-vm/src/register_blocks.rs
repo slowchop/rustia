@@ -1,16 +1,18 @@
 //! Private metadata for preverified register-operand instruction blocks.
 //!
 //! Public bytecode remains unchanged and remains the semantic authority. This
-//! module only recognizes exact compiler-emitted four-instruction shapes. The
-//! executor uses a plan only after admitting all four logical instructions;
-//! guard misses resume at the first unchanged public instruction.
+//! module recognizes exact compiler-emitted four-instruction shapes and an
+//! optional two-instruction result-lifetime suffix. The executor uses a plan
+//! only after admitting every represented logical instruction; guard misses
+//! resume at the first unchanged public instruction.
 
 use crate::bytecode::{Function, Opcode};
 
 const NO_REGISTER_BLOCK: u16 = 0;
 const REGISTER_BLOCK_INSTRUCTION_COUNT: usize = 4;
+const REGISTER_LIFETIME_BLOCK_INSTRUCTION_COUNT: usize = 6;
 
-/// A preverified four-instruction register block.
+/// A preverified four- or six-instruction register block.
 ///
 /// The represented bytecode is exactly:
 ///
@@ -19,47 +21,34 @@ const REGISTER_BLOCK_INSTRUCTION_COUNT: usize = 4;
 /// Move           temporary, rhs
 /// operation      target, target, temporary
 /// ClearLocalCell temporary
+/// [Move           destination, target]
+/// [ClearLocalCell target]
 /// ```
 ///
 /// `operation` is one of the arithmetic binary operations or `GetIndex`.
 /// The two destination registers do not alias either source register. The two
 /// source registers may be equal, which preserves common expressions such as
-/// `value + value`.
+/// `value + value`. When present, the optional lifetime destination is distinct
+/// from both temporary destinations but may alias either or both sources.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct RegisterBlockPlan {
-    start_pc: usize,
     operation: Opcode,
     target_register: u8,
     lhs_register: u8,
     temporary_register: u8,
     rhs_register: u8,
+    lifetime_destination_register: Option<u8>,
 }
 
 impl RegisterBlockPlan {
-    /// PC of the first represented `Move` instruction.
-    #[inline]
-    #[cfg(test)]
-    pub(crate) const fn start_pc(self) -> usize {
-        self.start_pc
-    }
-
     /// Number of logical bytecode instructions represented by this plan.
     #[inline]
     pub(crate) const fn instruction_count(self) -> u64 {
-        REGISTER_BLOCK_INSTRUCTION_COUNT as u64
-    }
-
-    /// First PC after the represented bytecode instructions.
-    #[inline]
-    pub(crate) const fn end_pc(self) -> usize {
-        self.start_pc + REGISTER_BLOCK_INSTRUCTION_COUNT
-    }
-
-    /// PC of the arithmetic or indexing operation.
-    #[inline]
-    #[cfg(test)]
-    pub(crate) const fn operation_pc(self) -> usize {
-        self.start_pc + 2
+        if self.lifetime_destination_register.is_some() {
+            REGISTER_LIFETIME_BLOCK_INSTRUCTION_COUNT as u64
+        } else {
+            REGISTER_BLOCK_INSTRUCTION_COUNT as u64
+        }
     }
 
     #[inline]
@@ -85,6 +74,12 @@ impl RegisterBlockPlan {
     #[inline]
     pub(crate) const fn rhs_register(self) -> u8 {
         self.rhs_register
+    }
+
+    /// Destination of the optional `Move destination, target` lifetime suffix.
+    #[inline]
+    pub(crate) const fn lifetime_destination_register(self) -> Option<u8> {
+        self.lifetime_destination_register
     }
 }
 
@@ -231,14 +226,50 @@ fn recognize_register_block(function: &Function, pc: usize) -> Option<RegisterBl
         return None;
     }
 
+    let lifetime_destination_register = recognize_lifetime_suffix(
+        function,
+        pc + REGISTER_BLOCK_INSTRUCTION_COUNT,
+        target_register,
+        temporary_register,
+    );
+
     Some(RegisterBlockPlan {
-        start_pc: pc,
         operation: operation.op,
         target_register,
         lhs_register,
         temporary_register,
         rhs_register,
+        lifetime_destination_register,
     })
+}
+
+#[inline]
+fn recognize_lifetime_suffix(
+    function: &Function,
+    pc: usize,
+    target_register: u8,
+    temporary_register: u8,
+) -> Option<u8> {
+    let destination_move = function.code.get(pc)?;
+    let target_clear = function.code.get(pc + 1)?;
+    if destination_move.op != Opcode::Move
+        || destination_move.b != target_register
+        || destination_move.c != 0
+        || destination_move.aux != 0
+        || target_clear.op != Opcode::ClearLocalCell
+        || target_clear.a != target_register
+        || target_clear.b != 0
+        || target_clear.c != 0
+        || target_clear.aux != 0
+    {
+        return None;
+    }
+
+    let destination_register = destination_move.a;
+    (usize::from(destination_register) < function.max_registers
+        && destination_register != target_register
+        && destination_register != temporary_register)
+        .then_some(destination_register)
 }
 
 #[inline]
@@ -274,6 +305,27 @@ mod tests {
         ]
     }
 
+    fn lifetime_block(
+        operation: Opcode,
+        target: u8,
+        lhs: u8,
+        temporary: u8,
+        rhs: u8,
+        destination: u8,
+    ) -> Vec<Instruction> {
+        let mut code = block(operation, target, lhs, temporary, rhs);
+        code.extend([
+            Instruction::new(Opcode::Move, destination, target, 0),
+            Instruction::new(Opcode::ClearLocalCell, target, 0, 0),
+        ]);
+        code
+    }
+
+    #[test]
+    fn plan_payload_stays_compact() {
+        assert!(std::mem::size_of::<RegisterBlockPlan>() <= 8);
+    }
+
     #[test]
     fn recognizes_every_supported_operation_and_reports_all_fields() {
         for operation in [
@@ -286,25 +338,33 @@ mod tests {
             Opcode::Pow,
             Opcode::GetIndex,
         ] {
-            let function = function(block(operation, 4, 1, 5, 2), 6);
-            let map = build_register_block_map(&function).expect("register-block metadata");
+            let base_function = function(block(operation, 4, 1, 5, 2), 6);
+            let map = build_register_block_map(&base_function).expect("register-block metadata");
             let plan = register_block_at(Some(&map), 0).expect("complete block");
 
             assert_eq!(map.plan_count(), 1);
-            assert_eq!(plan.start_pc(), 0);
             assert_eq!(plan.instruction_count(), 4);
-            assert_eq!(plan.end_pc(), 4);
-            assert_eq!(plan.operation_pc(), 2);
             assert_eq!(plan.operation(), operation);
             assert_eq!(plan.target_register(), 4);
             assert_eq!(plan.lhs_register(), 1);
             assert_eq!(plan.temporary_register(), 5);
             assert_eq!(plan.rhs_register(), 2);
+            assert_eq!(plan.lifetime_destination_register(), None);
 
             for interior_pc in 1..4 {
                 assert_eq!(register_block_at(Some(&map), interior_pc), None);
             }
             assert_eq!(register_block_at(Some(&map), 4), None);
+
+            let function = function(lifetime_block(operation, 4, 1, 5, 2, 1), 6);
+            let map = build_register_block_map(&function).expect("lifetime-block metadata");
+            let plan = register_block_at(Some(&map), 0).expect("lifetime block");
+            assert_eq!(map.plan_count(), 1);
+            assert_eq!(plan.instruction_count(), 6);
+            assert_eq!(plan.lifetime_destination_register(), Some(1));
+            for interior_pc in 1..6 {
+                assert_eq!(register_block_at(Some(&map), interior_pc), None);
+            }
         }
     }
 
@@ -354,10 +414,69 @@ mod tests {
             );
         }
 
-        let function = function(block(Opcode::Add, 0, 1, 2, 1), 3);
-        let map = build_register_block_map(&function).expect("shared source is safe");
+        let base_function = function(block(Opcode::Add, 0, 1, 2, 1), 3);
+        let map = build_register_block_map(&base_function).expect("shared source is safe");
         let plan = register_block_at(Some(&map), 0).expect("shared-source plan");
         assert_eq!(plan.lhs_register(), plan.rhs_register());
+
+        let function = function(lifetime_block(Opcode::Add, 1, 0, 2, 0, 0), 3);
+        let map = build_register_block_map(&function).expect("shared source/destination is safe");
+        let plan = register_block_at(Some(&map), 0).expect("shared lifetime destination");
+        assert_eq!(plan.lhs_register(), plan.rhs_register());
+        assert_eq!(plan.lifetime_destination_register(), Some(0));
+        assert_eq!(plan.instruction_count(), 6);
+    }
+
+    #[test]
+    fn malformed_lifetime_suffixes_retain_the_four_instruction_plan() {
+        let exact = lifetime_block(Opcode::Add, 4, 1, 5, 2, 1);
+        let mut near_misses = Vec::new();
+
+        let mut code = exact.clone();
+        code[4].op = Opcode::LoadConst;
+        near_misses.push(code);
+        let mut code = exact.clone();
+        code[4].b = 3;
+        near_misses.push(code);
+        let mut code = exact.clone();
+        code[4].c = 1;
+        near_misses.push(code);
+        let mut code = exact.clone();
+        code[4].aux = 1;
+        near_misses.push(code);
+        let mut code = exact.clone();
+        code[4].a = 4;
+        near_misses.push(code);
+        let mut code = exact.clone();
+        code[4].a = 5;
+        near_misses.push(code);
+        let mut code = exact.clone();
+        code[4].a = 6;
+        near_misses.push(code);
+
+        let mut code = exact.clone();
+        code[5].op = Opcode::SetLocalCell;
+        near_misses.push(code);
+        let mut code = exact.clone();
+        code[5].a = 3;
+        near_misses.push(code);
+        let mut code = exact.clone();
+        code[5].b = 1;
+        near_misses.push(code);
+        let mut code = exact.clone();
+        code[5].c = 1;
+        near_misses.push(code);
+        let mut code = exact;
+        code[5].aux = 1;
+        near_misses.push(code);
+
+        for (index, code) in near_misses.into_iter().enumerate() {
+            let map = build_register_block_map(&function(code, 6))
+                .unwrap_or_else(|| panic!("base plan missing for suffix near miss {index}"));
+            let plan = register_block_at(Some(&map), 0).expect("four-instruction fallback");
+            assert_eq!(plan.instruction_count(), 4, "suffix near miss {index}");
+            assert_eq!(plan.lifetime_destination_register(), None);
+        }
     }
 
     #[test]
@@ -437,7 +556,7 @@ mod tests {
 
         let first = register_block_at(Some(&map), 0).expect("first plan");
         assert_eq!(first.operation(), Opcode::Sub);
-        assert_eq!(first.end_pc(), 4);
+        assert_eq!(first.instruction_count(), 4);
 
         for pc in 4..9 {
             assert_eq!(register_block_at(Some(&map), pc), None);
@@ -445,8 +564,7 @@ mod tests {
 
         let second = register_block_at(Some(&map), 9).expect("second plan");
         assert_eq!(second.operation(), Opcode::GetIndex);
-        assert_eq!(second.operation_pc(), 11);
-        assert_eq!(second.end_pc(), 13);
+        assert_eq!(second.instruction_count(), 4);
     }
 
     #[test]

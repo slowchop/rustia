@@ -643,7 +643,7 @@ should be profile-led and gated independently; superinstructions, broader
 HotIR/control-flow regions, and lower-overhead hot-loop execution remain the
 more promising routes to a material interpreter gain.
 
-### VM Core 2 C2.1 — implementation complete, controlled gate pending
+### VM Core 2 C2.1 — controlled gate falsified the separate mini-tier
 
 The next broad programme is specified in [`58-vm-core2.md`](58-vm-core2.md).
 Its first independently measurable slice attacks compiler-generated register
@@ -669,8 +669,29 @@ the public instruction stream unchanged. Correctness tests cover exact
 bulk/scalar accounting, value/cell cleanup, fuel/coverage fallback,
 deterministic collection intervals, guard/error PCs, malformed metadata,
 memory-quota admission, compiler shape retention, and Region/ClearSpan/HotIR
-coexistence. No developer-host timing is admissible; the exact DigitalOcean A/B
-remains the promotion gate.
+coexistence.
+
+The exact DigitalOcean A/B then falsified the architecture despite that
+correctness coverage. Baseline `9695a62` and candidate `2bb7bef` ran fixed
+`generic_iteration` work at `n=4000` in four qualified counterbalanced pairs;
+qualification ratio spread was at most 0.659% and every checksum matched. The
+candidate was 5.293% slower, with a conservative nominal 95% interval from
++3.720% to +6.135%. That interval crosses the declared +5% material-regression
+boundary, so the coordinator rejected publication and left public history
+unchanged. Run `20260824T003125Z-a92640e7` confirmed Droplet and temporary-key
+cleanup after exporting local diagnostics.
+
+The failure is consistent with tier duplication: Region already grouped the
+six-operation register lifetime, while C2.1 split it at RegisterBlock and
+ClearSpan barriers and performed another loaded-program/prototype/map lookup
+at each block. The separate executor and unexonerated ClearSpan path are
+removed. C2.2 implements private four- and six-operation receipts inside one
+uninterrupted Region, resolved once per function. The six-operation form also
+absorbs the compiler's destination commit and result cleanup for the hot
+uncaptured-local accumulator shape. Focused semantic review and the complete
+correctness suite passed; controlled DigitalOcean timing remains the promotion
+gate. This independently gated bridge precedes the mode-selected compact execution tape described in
+[`58-vm-core2.md`](58-vm-core2.md).
 
 ## Estimate vs C++ Luau
 

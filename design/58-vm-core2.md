@@ -1,7 +1,7 @@
 # VM Core 2 — interpreter parity without a JIT
 
-> **Status (2026-08-24): C2.1 implemented; correctness validation and controlled DigitalOcean measurement
-> pending.** This is the execution plan for the largest safe non-JIT performance programme. It refines the
+> **Status (2026-08-24): C2.1 was remotely falsified; C2.2 Region-integrated private receipts are
+> implemented and correctness-validated, with the controlled gate pending.** This is the execution plan for the largest safe non-JIT performance programme. It refines the
 > performance queue in [`56-performance-research.md`](56-performance-research.md); it does not change Luau
 > semantics, the deterministic number contract, or the public no-unsafe policy.
 
@@ -81,7 +81,7 @@ This is an interpreter design. It emits no native code, allocates no executable 
 - Keep developer/self-hosted machines correctness-only. Controlled timings run only on operator-started
   DigitalOcean droplets, which must be deleted before evidence promotion.
 
-### C2.1 — stop dispatching avoidable register work (implemented)
+### C2.1 — stop dispatching avoidable register work (implemented, falsified, removed)
 
 - Loader-recognized `ClearSpan` plans cover monotonic contiguous `ClearLocalCell` runs in either compiler emission
   order. A two-byte-per-PC map is allocated only for qualifying functions and includes interior suffixes.
@@ -105,18 +105,45 @@ plan in `dense_tables`. With current HotIR priority, generic iteration should en
 `69*n + 1` times (276,001 at the gate's `n=4000`), while HotIR consumes most dense-loop continuations. These are
 coverage observations, not latency claims.
 
-Promotion gate: full formatting/clippy/workspace tests, all conformance fixtures, fuzz workspace, native/wasm
-goldens, then an exact same-host DigitalOcean A/B. `generic_iteration` is the primary timing workload because it
-keeps its dominant generic-iterator loops in the scalar/block tiers and has the strongest expected RegisterBlock
-coverage; `dense_tables` is a secondary combined-tier breadth check if the budget permits.
+The exact same-host DigitalOcean gate compared baseline `9695a62` with candidate `2bb7bef` on
+`generic_iteration` at fixed `n=4000`. All four qualification pairs passed with only 0.659% maximum within-order
+ratio spread, and all checksums matched. Across the independent eight-leg comparison the candidate was 5.293%
+slower; its conservative nominal 95% interval was +3.720% to +6.135%. Because that interval contains the
+predeclared +5% material-regression boundary, the comparison was rejected and public benchmark history was not
+changed. DigitalOcean run `20260824T003125Z-a92640e7` retained local diagnostics and confirmed both Droplet and
+temporary-key cleanup.
 
-### C2.2 — make blocks the baseline executor
+This falsifies C2.1's separate-executor design. Baseline Region Engine already admitted the common six-operation
+register lifetime as one run. C2.1 split it into a four-operation RegisterBlock plus another Region admission,
+added loaded-program/prototype/map lookup at each block, and placed another policy ladder before the existing
+Region path. ClearSpan was measured only as part of the same regressing candidate and is therefore not retained
+without an independent winning gate. The public bytecode-shape tests remain useful for the replacement receipt;
+the competing runtime tier, its barriers, and ClearSpan production metadata do not.
+
+### C2.2 — make blocks the baseline executor (first slice implemented; gate pending)
 
 - Introduce effect-terminated basic blocks with predecoded operands, logical cost, prefix costs, and liveness.
 - Split entry into plain, metered, and instrumented modes while sharing semantic helpers.
 - Move the common numeric/array lanes into direct block operations instead of nested Region dispatch.
 - Require on/off differential tests for every opcode family, collection interval, fuel boundary, guard exit, and
   structured error PC.
+
+The first independently measurable C2.2 slice reuses the existing Region admission boundary while changing its
+inside representation. Private receipts are resolved once at function entry and may commit only while Region
+already owns the complete source interval. The four-operation form represents the original expression result.
+An exact six-operation form additionally absorbs the compiler's `Move destination,result`; `ClearLocalCell
+result` lifetime tail, which covers the hot uncaptured-local accumulator updates while preserving the
+destination cell link. Success advances the Region cursor by four or six logical instructions; a guard miss
+executes the untouched canonical operations in order. This keeps surrounding register work in one uninterrupted
+Region and removes the per-`Move` loaded-program lookup that falsified C2.1. It is a bridge to the full compact
+tape, not another peer tier in the scalar dispatch ladder.
+
+The compiler contract now pins both the four-operation expression prefix and
+the normal-assignment six-operation lifetime tail. Focused differential tests,
+independent semantic review, the workspace release preflight, conformance
+package verification, fuzz tests, and native/wasm memory-limit checks form the
+correctness gate before the exact DigitalOcean A/B. No developer-host timing is
+admissible and no C2.2 speed claim is made before that controlled comparison.
 
 ### C2.3 — complete compiler O2 and cleanup liveness
 

@@ -8,15 +8,23 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
-- VM Core 2 C2.1 adds two private, load-verified execution plans over unchanged
-  public bytecode. `ClearSpan` bulk-clears monotonic local-cleanup windows;
-  `RegisterBlock` directly executes the compiler's `Move`/`Move`/numeric-or-
-  dense-index/`ClearLocalCell` shape after all guards pass. Both retain exact
-  logical instruction accounting, fuel and deterministic-GC cadence, coverage,
-  structured error PCs, and scalar metamethod fallback. Region barriers and an
-  explicit HotIR priority test keep all three tiers composable. Loaded-program
-  quota admission now includes their exact retained metadata before insertion.
-  Controlled DigitalOcean timing is pending; no speed claim is made.
+- VM Core 2 C2.2 adds frame-local immutable execution receipts over unchanged
+  public bytecode. Region Engine can execute the compiler's exact
+  `Move`/`Move`/numeric-or-dense-index/`ClearLocalCell` shape as one internal
+  operation while retaining the surrounding uninterrupted Region. An exact
+  six-operation form also absorbs the compiler's destination commit and result
+  cleanup for hot uncaptured-local updates. Receipt metadata is resolved once
+  at function entry; success advances four or six logical instructions, while
+  a guard miss runs the canonical operations in order.
+  Fuel, coverage, deterministic-GC cadence, structured error PCs, scalar
+  metamethod fallback, and exact loaded-program quota admission remain pinned.
+  This replaces the C2.1 peer RegisterBlock/ClearSpan tier: its controlled
+  DigitalOcean gate measured a 5.293% slowdown with a conservative nominal 95%
+  interval of +3.720% to +6.135%, so publication was rejected, ClearSpan was
+  removed as unexonerated, and public benchmark history was not changed. The
+  compiler now pins both the four-operation prefix and six-operation lifetime
+  shape. Correctness validation is complete; the controlled C2.2 DigitalOcean
+  gate is pending, so no C2.2 speed claim is made yet.
 
 - Region Engine v1 precomputes private side metadata for consecutive,
   effect-certified primitive-constant, register-bookkeeping, guarded-numeric,

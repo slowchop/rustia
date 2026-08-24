@@ -22,13 +22,12 @@ use crate::hot_ir::{HotIrArrayWrite, HotIrCellClear, HotIrNumberId, HotIrOp, Hot
 use crate::number::{binary, canonicalize_number, NumericOp};
 use crate::profile::{GuestSurface, Profile};
 use crate::region::{
-    build_common_region_map_with_barriers, common_region_at, CommonRegion, COMMON_REGION_CANDIDATE,
+    build_common_region_map, common_region_at, CommonRegion, COMMON_REGION_CANDIDATE,
     REGION_OPCODE_CANDIDATE,
 };
 use crate::register_blocks::{
     build_register_block_map, register_block_at, RegisterBlockMap, RegisterBlockPlan,
 };
-use crate::superinstructions::{build_clear_span_map, clear_span_at, ClearSpan};
 use crate::value::{Value, ValueKind};
 use smallvec::SmallVec;
 use std::cell::RefCell;
@@ -659,10 +658,6 @@ struct LoadedProgram {
     #[cfg(test)]
     region_guard_exits: u64,
     #[cfg(test)]
-    clear_span_entries: u64,
-    #[cfg(test)]
-    clear_span_instructions: u64,
-    #[cfg(test)]
     register_block_entries: u64,
     #[cfg(test)]
     register_block_instructions: u64,
@@ -979,10 +974,6 @@ impl LoadedProgram {
             #[cfg(test)]
             region_guard_exits: 0,
             #[cfg(test)]
-            clear_span_entries: 0,
-            #[cfg(test)]
-            clear_span_instructions: 0,
-            #[cfg(test)]
             register_block_entries: 0,
             #[cfg(test)]
             register_block_instructions: 0,
@@ -1125,63 +1116,14 @@ impl LoadedProgram {
         }
     }
 
-    fn common_region(&self, prototype: Option<u32>, pc: usize) -> Option<CommonRegion> {
+    fn execution_plans(&self, prototype: Option<u32>) -> Option<Arc<FunctionExecutionPlans>> {
         match prototype {
             Some(prototype) => self
                 .function_inline_caches
                 .get(prototype as usize)?
-                .common_region(pc),
-            None => self.main_inline_caches.common_region(pc),
-        }
-    }
-
-    fn clear_span(&self, prototype: Option<u32>, pc: usize) -> Option<ClearSpan> {
-        match prototype {
-            Some(prototype) => self
-                .function_inline_caches
-                .get(prototype as usize)?
-                .clear_span(pc),
-            None => self.main_inline_caches.clear_span(pc),
-        }
-    }
-
-    fn register_block(&self, prototype: Option<u32>, pc: usize) -> Option<RegisterBlockPlan> {
-        match prototype {
-            Some(prototype) => self
-                .function_inline_caches
-                .get(prototype as usize)?
-                .register_block(pc),
-            None => self.main_inline_caches.register_block(pc),
-        }
-    }
-
-    fn has_common_regions(&self, prototype: Option<u32>) -> bool {
-        match prototype {
-            Some(prototype) => self
-                .function_inline_caches
-                .get(prototype as usize)
-                .is_some_and(FunctionInlineCaches::has_common_regions),
-            None => self.main_inline_caches.has_common_regions(),
-        }
-    }
-
-    fn has_clear_spans(&self, prototype: Option<u32>) -> bool {
-        match prototype {
-            Some(prototype) => self
-                .function_inline_caches
-                .get(prototype as usize)
-                .is_some_and(FunctionInlineCaches::has_clear_spans),
-            None => self.main_inline_caches.has_clear_spans(),
-        }
-    }
-
-    fn has_register_blocks(&self, prototype: Option<u32>) -> bool {
-        match prototype {
-            Some(prototype) => self
-                .function_inline_caches
-                .get(prototype as usize)
-                .is_some_and(FunctionInlineCaches::has_register_blocks),
-            None => self.main_inline_caches.has_register_blocks(),
+                .execution_plans
+                .clone(),
+            None => self.main_inline_caches.execution_plans.clone(),
         }
     }
 
@@ -1230,11 +1172,51 @@ struct FunctionInlineCaches {
     #[allow(clippy::box_collection)]
     closure_call_entries: Option<Box<Vec<ClosureCallInlineCache>>>,
     leaf_call_plan: Option<LeafCallPlan>,
-    common_region_by_pc: Option<Box<[u16]>>,
-    clear_span_by_pc: Option<Box<[u16]>>,
-    register_blocks: Option<RegisterBlockMap>,
+    execution_plans: Option<Arc<FunctionExecutionPlans>>,
     hot_ir_by_pc: Option<Box<[u32]>>,
     hot_irs: Vec<Arc<HotIr>>,
+}
+
+/// Immutable load-time receipts used by the ordinary Region executor.
+///
+/// One shared handle is resolved when a function starts. Region and
+/// RegisterBlock lookup thereafter stays local to the frame instead of walking
+/// the loaded-program handle and prototype tables at every candidate PC.
+struct FunctionExecutionPlans {
+    common_region_by_pc: Option<Box<[u16]>>,
+    register_blocks: Option<RegisterBlockMap>,
+}
+
+impl FunctionExecutionPlans {
+    fn build(program: &Program, function: &Function) -> Option<Arc<Self>> {
+        let common_region_by_pc = build_common_region_map(program, function);
+        let register_blocks = build_register_block_map(function);
+        (common_region_by_pc.is_some() || register_blocks.is_some()).then(|| {
+            Arc::new(Self {
+                common_region_by_pc,
+                register_blocks,
+            })
+        })
+    }
+
+    #[inline]
+    fn common_region(&self, pc: usize) -> Option<CommonRegion> {
+        common_region_at(self.common_region_by_pc.as_deref(), pc)
+    }
+
+    fn memory_bytes(&self) -> usize {
+        size_of::<Self>()
+            .saturating_add(
+                self.common_region_by_pc
+                    .as_deref()
+                    .map_or(0, |by_pc| by_pc.len().saturating_mul(size_of::<u16>())),
+            )
+            .saturating_add(
+                self.register_blocks
+                    .as_ref()
+                    .map_or(0, RegisterBlockMap::memory_bytes),
+            )
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1263,13 +1245,8 @@ impl FunctionInlineCaches {
                 _ => SITE_CACHE_INELIGIBLE,
             })
             .collect();
-        let clear_span_by_pc = build_clear_span_map(function);
-        let register_blocks = build_register_block_map(function);
+        let execution_plans = FunctionExecutionPlans::build(program, function);
         let hot_irs = recognize_hot_ir_loops(program, function);
-        let common_region_by_pc = build_common_region_map_with_barriers(program, function, |pc| {
-            clear_span_at(clear_span_by_pc.as_deref(), pc).is_some()
-                || register_block_at(register_blocks.as_ref(), pc).is_some()
-        });
         let hot_ir_by_pc = if hot_irs.is_empty() {
             None
         } else {
@@ -1289,9 +1266,7 @@ impl FunctionInlineCaches {
             native_call_entries: Vec::new(),
             closure_call_entries: None,
             leaf_call_plan,
-            common_region_by_pc,
-            clear_span_by_pc,
-            register_blocks,
+            execution_plans,
             hot_ir_by_pc,
             hot_irs,
         }
@@ -1312,14 +1287,8 @@ impl FunctionInlineCaches {
         if let Some(by_pc) = &self.hot_ir_by_pc {
             usage.add_boxed_slice(by_pc);
         }
-        if let Some(by_pc) = &self.common_region_by_pc {
-            usage.add_boxed_slice(by_pc);
-        }
-        if let Some(by_pc) = &self.clear_span_by_pc {
-            usage.add_boxed_slice(by_pc);
-        }
-        if let Some(register_blocks) = &self.register_blocks {
-            let bytes = register_blocks.memory_bytes();
+        if let Some(execution_plans) = &self.execution_plans {
+            let bytes = execution_plans.memory_bytes();
             usage.add(bytes, bytes);
         }
         usage.add_vec(&self.hot_irs);
@@ -1332,36 +1301,6 @@ impl FunctionInlineCaches {
     fn hot_ir(&self, pc: usize) -> Option<Arc<HotIr>> {
         let index = *self.hot_ir_by_pc.as_ref()?.get(pc)?;
         (index != u32::MAX).then(|| self.hot_irs.get(index as usize).cloned())?
-    }
-
-    #[inline]
-    fn common_region(&self, pc: usize) -> Option<CommonRegion> {
-        common_region_at(self.common_region_by_pc.as_deref(), pc)
-    }
-
-    #[inline]
-    fn has_common_regions(&self) -> bool {
-        self.common_region_by_pc.is_some()
-    }
-
-    #[inline]
-    fn clear_span(&self, pc: usize) -> Option<ClearSpan> {
-        clear_span_at(self.clear_span_by_pc.as_deref(), pc)
-    }
-
-    #[inline]
-    fn has_clear_spans(&self) -> bool {
-        self.clear_span_by_pc.is_some()
-    }
-
-    #[inline]
-    fn register_block(&self, pc: usize) -> Option<RegisterBlockPlan> {
-        register_block_at(self.register_blocks.as_ref(), pc)
-    }
-
-    #[inline]
-    fn has_register_blocks(&self) -> bool {
-        self.register_blocks.is_some()
     }
 
     fn table_inline_cache(&self, pc: usize) -> Option<TableStringInlineCache> {
@@ -3517,20 +3456,26 @@ impl Vm {
                 }));
             }
 
-            let clear_spans_enabled = self.superinstructions_enabled()
-                && program_id
-                    .is_some_and(|program_id| self.has_clear_spans(program_id, context.prototype));
-            let register_blocks_enabled = self.superinstructions_enabled()
-                && program_id.is_some_and(|program_id| {
-                    self.has_register_blocks(program_id, context.prototype)
-                });
-            // Loader barriers keep Region Engine from consuming the first
-            // instruction of a more specialized ClearSpan or register block,
-            // so the executors can remain active in the same function.
-            let common_regions_enabled = self.region_enabled()
-                && program_id.is_some_and(|program_id| {
-                    self.has_common_regions(program_id, context.prototype)
-                });
+            // Resolve immutable execution receipts once for this frame. The
+            // Region hot path can then consult both its suffix map and exact
+            // RegisterBlock plans without another loaded-program/prototype
+            // lookup at each candidate PC.
+            let execution_plans = if self.region_enabled() {
+                program_id
+                    .and_then(|program_id| self.execution_plans(program_id, context.prototype))
+            } else {
+                None
+            };
+            let common_regions_enabled = execution_plans
+                .as_deref()
+                .is_some_and(|plans| plans.common_region_by_pc.is_some());
+            let register_blocks = if self.superinstructions_enabled() {
+                execution_plans
+                    .as_deref()
+                    .and_then(|plans| plans.register_blocks.as_ref())
+            } else {
+                None
+            };
 
             let allow_stackless_self_calls = resumed.is_none();
             let stackless_recursion_limit = self.stackless_recursion_limit();
@@ -3818,87 +3763,6 @@ impl Vm {
                             }
                         }
 
-                        // The compiler's register-form binary expressions use
-                        // two setup Moves, one arithmetic/dense-array operation,
-                        // and one temporary clear. A verified block evaluates
-                        // all guards against the original registers before it
-                        // mutates anything, so a miss resumes at the first Move
-                        // and retains the generic/metamethod semantics exactly.
-                        if register_blocks_enabled
-                            && instruction.op == Opcode::Move
-                            && fuel.state.fuel.is_none()
-                            && !self.settings.enable_conformance_coverage
-                            && !self.heap.has_allocation_debt()
-                        {
-                            if let Some(program_id) = program_id {
-                                if let Some(block) =
-                                    self.register_block(program_id, context.prototype, pc)
-                                {
-                                    let instruction_count = block.instruction_count();
-                                    if !self.weak_collection_due_within(instruction_count) {
-                                        let completed = self.try_register_block(
-                                            &mut registers,
-                                            &mut register_cells,
-                                            block,
-                                        );
-                                        if completed {
-                                            self.executed_instructions = self
-                                                .executed_instructions
-                                                .wrapping_add(instruction_count);
-                                            #[cfg(test)]
-                                            self.record_register_block_execution(
-                                                program_id,
-                                                instruction_count,
-                                                false,
-                                            );
-                                            pc = block.end_pc();
-                                            continue;
-                                        }
-                                        #[cfg(test)]
-                                        self.record_register_block_execution(program_id, 0, true);
-                                    }
-                                }
-                            }
-                        }
-
-                        // Compiler cleanup commonly emits adjacent clears for a
-                        // contiguous temporary/local register window. The load-
-                        // verified span preserves the original logical instruction
-                        // count while clearing both register slices in bulk. Any
-                        // policy boundary inside the span keeps scalar dispatch.
-                        if clear_spans_enabled
-                            && instruction.op == Opcode::ClearLocalCell
-                            && fuel.state.fuel.is_none()
-                            && !self.settings.enable_conformance_coverage
-                            && !self.heap.has_allocation_debt()
-                        {
-                            if let Some(program_id) = program_id {
-                                if let Some(span) =
-                                    self.clear_span(program_id, context.prototype, pc)
-                                {
-                                    let instruction_count = span.instruction_count();
-                                    if !self.weak_collection_due_within(instruction_count)
-                                        && execute_clear_span(
-                                            &mut registers,
-                                            &mut register_cells,
-                                            span,
-                                        )
-                                    {
-                                        self.executed_instructions = self
-                                            .executed_instructions
-                                            .wrapping_add(instruction_count);
-                                        #[cfg(test)]
-                                        self.record_clear_span_execution(
-                                            program_id,
-                                            instruction_count,
-                                        );
-                                        pc = span.end_pc();
-                                        continue;
-                                    }
-                                }
-                            }
-                        }
-
                         let is_common_fast_path_candidate =
                             COMMON_REGION_CANDIDATE[instruction.op as usize];
                         let is_region_opcode_candidate = common_regions_enabled
@@ -3916,8 +3780,9 @@ impl Vm {
                             && !self.heap.has_allocation_debt()
                         {
                             if let Some(program_id) = program_id {
-                                if let Some(region) =
-                                    self.common_region(program_id, context.prototype, pc)
+                                if let Some(region) = execution_plans
+                                    .as_deref()
+                                    .and_then(|plans| plans.common_region(pc))
                                 {
                                     if !self.weak_collection_due_within(region.instruction_count())
                                     {
@@ -3926,6 +3791,7 @@ impl Vm {
                                             function,
                                             program_id,
                                             region,
+                                            register_blocks,
                                             &mut registers,
                                             &mut register_cells,
                                         )? {
@@ -8453,7 +8319,7 @@ impl Vm {
     /// Execute one load-verified register block without exposing its temporary
     /// setup state. Every dynamic guard is checked against the original
     /// registers first. A false result therefore permits exact deoptimization
-    /// to `block.start_pc` with no repair or duplicated accounting.
+    /// to the first represented Move with no repair or duplicated accounting.
     #[inline(always)]
     fn try_register_block(
         &mut self,
@@ -8465,11 +8331,14 @@ impl Vm {
         let lhs = usize::from(block.lhs_register());
         let temporary = usize::from(block.temporary_register());
         let rhs = usize::from(block.rhs_register());
+        let lifetime_destination = block.lifetime_destination_register().map(usize::from);
         if target >= registers.len()
             || lhs >= registers.len()
             || temporary >= registers.len()
             || rhs >= registers.len()
             || temporary >= register_cells.len()
+            || lifetime_destination.is_some_and(|destination| destination >= registers.len())
+            || (lifetime_destination.is_some() && target >= register_cells.len())
         {
             return false;
         }
@@ -8520,10 +8389,18 @@ impl Vm {
             _ => return false,
         };
 
-        // The recognizer proves target and temporary distinct. Commit the
-        // same final state as Move/Move/op/ClearLocalCell; target's cell link
-        // remains unchanged, while the temporary link and value are cleared.
-        registers[target] = result;
+        // The recognizer proves target, temporary, and an optional lifetime
+        // destination distinct. Source values were snapped before this point,
+        // so the destination may safely alias either source. Its cell link is
+        // preserved exactly as by Move, while both dead temporaries are
+        // detached when the lifetime suffix is represented.
+        if let Some(destination) = lifetime_destination {
+            registers[destination] = result;
+            registers[target] = Value::nil();
+            register_cells[target] = None;
+        } else {
+            registers[target] = result;
+        }
         registers[temporary] = Value::nil();
         register_cells[temporary] = None;
         true
@@ -8679,6 +8556,7 @@ impl Vm {
         function: &Function,
         program_id: u32,
         region: CommonRegion,
+        register_blocks: Option<&RegisterBlockMap>,
         registers: &mut [Value],
         register_cells: &mut [Option<u32>],
     ) -> Result<CommonRegionOutcome> {
@@ -8694,8 +8572,34 @@ impl Vm {
                 .at_pc(region.start_pc)
             })?;
 
-        for (offset, instruction) in instructions.iter().copied().enumerate() {
+        let mut offset = 0;
+        while offset < instructions.len() {
+            let instruction = instructions[offset];
             let pc = region.start_pc + offset;
+
+            // An exact load-verified block remains part of this uninterrupted
+            // Region admission. A successful block advances the local cursor
+            // across its represented public instructions; a guard miss changes
+            // no state and falls through to the canonical first Move below.
+            if instruction.op == Opcode::Move {
+                if let Some(block) = register_block_at(register_blocks, pc) {
+                    let instruction_count = block.instruction_count();
+                    let next_offset = offset.saturating_add(instruction_count as usize);
+                    if next_offset <= instructions.len()
+                        && self.try_register_block(registers, register_cells, block)
+                    {
+                        #[cfg(test)]
+                        self.record_register_block_execution(program_id, instruction_count, false);
+                        offset = next_offset;
+                        continue;
+                    }
+                    #[cfg(test)]
+                    if next_offset <= instructions.len() {
+                        self.record_register_block_execution(program_id, 0, true);
+                    }
+                }
+            }
+
             match self.try_region_instruction(
                 program,
                 program_id,
@@ -8703,7 +8607,7 @@ impl Vm {
                 register_cells,
                 instruction,
             ) {
-                Ok(true) => {}
+                Ok(true) => offset += 1,
                 Ok(false) => {
                     let instruction_count = offset as u64 + 1;
                     self.executed_instructions =
@@ -10448,50 +10352,14 @@ impl Vm {
         self.dynamic_programs.get(program_id)?.hot_ir(prototype, pc)
     }
 
-    fn common_region(
+    fn execution_plans(
         &self,
         program_id: u32,
         prototype: Option<u32>,
-        pc: usize,
-    ) -> Option<CommonRegion> {
+    ) -> Option<Arc<FunctionExecutionPlans>> {
         self.dynamic_programs
             .get(program_id)?
-            .common_region(prototype, pc)
-    }
-
-    fn has_common_regions(&self, program_id: u32, prototype: Option<u32>) -> bool {
-        self.dynamic_programs
-            .get(program_id)
-            .is_some_and(|program| program.has_common_regions(prototype))
-    }
-
-    fn clear_span(&self, program_id: u32, prototype: Option<u32>, pc: usize) -> Option<ClearSpan> {
-        self.dynamic_programs
-            .get(program_id)?
-            .clear_span(prototype, pc)
-    }
-
-    fn has_clear_spans(&self, program_id: u32, prototype: Option<u32>) -> bool {
-        self.dynamic_programs
-            .get(program_id)
-            .is_some_and(|program| program.has_clear_spans(prototype))
-    }
-
-    fn register_block(
-        &self,
-        program_id: u32,
-        prototype: Option<u32>,
-        pc: usize,
-    ) -> Option<RegisterBlockPlan> {
-        self.dynamic_programs
-            .get(program_id)?
-            .register_block(prototype, pc)
-    }
-
-    fn has_register_blocks(&self, program_id: u32, prototype: Option<u32>) -> bool {
-        self.dynamic_programs
-            .get(program_id)
-            .is_some_and(|program| program.has_register_blocks(prototype))
+            .execution_plans(prototype)
     }
 
     fn table_inline_cache(
@@ -10696,16 +10564,6 @@ impl Vm {
             if guard_exit {
                 program.region_guard_exits = program.region_guard_exits.saturating_add(1);
             }
-        }
-    }
-
-    #[cfg(test)]
-    fn record_clear_span_execution(&mut self, program_id: u32, instruction_count: u64) {
-        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
-            program.clear_span_entries = program.clear_span_entries.saturating_add(1);
-            program.clear_span_instructions = program
-                .clear_span_instructions
-                .saturating_add(instruction_count);
         }
     }
 
@@ -21317,21 +21175,6 @@ fn clear_register_cell(register_cells: &mut [Option<u32>], register: u8) -> Resu
     Ok(())
 }
 
-#[inline]
-fn execute_clear_span(
-    registers: &mut [Value],
-    register_cells: &mut [Option<u32>],
-    span: ClearSpan,
-) -> bool {
-    let register_range = span.register_range();
-    if register_range.end > registers.len() || register_range.end > register_cells.len() {
-        return false;
-    }
-    registers[register_range.clone()].fill(Value::nil());
-    register_cells[register_range].fill(None);
-    true
-}
-
 fn sync_leaf_mutation_to_registers(
     registers: &mut [Value],
     register_cells: &[Option<u32>],
@@ -27380,153 +27223,6 @@ mod inline_cache_tests {
         assert!(saw_region);
     }
 
-    fn clear_span_program() -> Program {
-        Program::new(
-            Function::new(
-                vec![
-                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
-                    Instruction::new(Opcode::Move, 1, 0, 0),
-                    Instruction::new(Opcode::Move, 2, 0, 0),
-                    Instruction::new(Opcode::Move, 3, 0, 0),
-                    Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
-                    Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
-                    Instruction::new(Opcode::ClearLocalCell, 1, 0, 0),
-                    Instruction::new(Opcode::Return, 0, 1, 0),
-                    Instruction::new(Opcode::Halt, 0, 0, 0),
-                ],
-                4,
-            ),
-            vec![Constant::Number(7.0)],
-        )
-    }
-
-    #[test]
-    fn clear_span_matches_scalar_dispatch_and_logical_instruction_count() {
-        let program = clear_span_program();
-        let mut bulk = Vm::new(Profile::ReproducibleStandard);
-        let bulk_result = bulk.run(&program).unwrap();
-        assert_eq!(bulk_result.as_number(), Some(7.0));
-        assert_eq!(bulk.dynamic_programs[0].clear_span_entries, 1);
-        assert_eq!(bulk.dynamic_programs[0].clear_span_instructions, 3);
-
-        let mut scalar = Vm::new(Profile::ReproducibleStandard);
-        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-        scalar.region_mode = RegionTestMode::Off;
-        let scalar_result = scalar.run(&program).unwrap();
-        assert_eq!(bulk_result.as_number(), scalar_result.as_number());
-        assert_eq!(bulk.executed_instructions, scalar.executed_instructions);
-        assert_eq!(scalar.dynamic_programs[0].clear_span_entries, 0);
-    }
-
-    #[test]
-    fn clear_span_preserves_cell_and_value_cleanup() {
-        let function = Function::new(
-            vec![
-                Instruction::new(Opcode::ClearLocalCell, 1, 0, 0),
-                Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
-                Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
-            ],
-            5,
-        );
-        let map = build_clear_span_map(&function).expect("clear-span metadata");
-        let span = clear_span_at(Some(&map), 0).expect("clear span");
-        let mut registers = vec![Value::number(1.0); 5];
-        let mut cells = vec![Some(99); 5];
-
-        assert!(execute_clear_span(&mut registers, &mut cells, span));
-        assert_eq!(registers[0].as_number(), Some(1.0));
-        assert!(registers[1..4].iter().all(|value| value.is_nil()));
-        assert_eq!(registers[4].as_number(), Some(1.0));
-        assert_eq!(cells, vec![Some(99), None, None, None, Some(99)]);
-    }
-
-    #[test]
-    fn clear_span_uses_scalar_policy_paths_for_fuel_and_coverage() {
-        let program = clear_span_program();
-        let mut fuelled = Vm::with_settings(
-            Profile::ReproducibleStandard,
-            VmSettings {
-                initial_fuel: Some(100),
-                ..VmSettings::default()
-            },
-        );
-        assert_eq!(fuelled.run(&program).unwrap().as_number(), Some(7.0));
-        assert_eq!(fuelled.dynamic_programs[0].clear_span_entries, 0);
-
-        let mut covered = Vm::with_settings(
-            Profile::ReproducibleStandard,
-            VmSettings {
-                enable_conformance_coverage: true,
-                ..VmSettings::default()
-            },
-        );
-        assert_eq!(covered.run(&program).unwrap().as_number(), Some(7.0));
-        assert_eq!(covered.dynamic_programs[0].clear_span_entries, 0);
-    }
-
-    #[test]
-    fn clear_span_preserves_deterministic_collection_cadence() {
-        let program = clear_span_program();
-        let mut saw_span = false;
-        for interval in 1..=16 {
-            let interval = NonZeroU64::new(interval).unwrap();
-            let settings = VmSettings {
-                deterministic_gc_interval: interval,
-                ..VmSettings::default()
-            };
-            let mut bulk = Vm::with_settings(Profile::DeterministicSim, settings.clone());
-            let bulk_result = bulk.run(&program).unwrap();
-            let mut scalar = Vm::with_settings(Profile::DeterministicSim, settings);
-            scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-            scalar.region_mode = RegionTestMode::Off;
-            let scalar_result = scalar.run(&program).unwrap();
-
-            assert_eq!(bulk_result.as_number(), scalar_result.as_number());
-            assert_eq!(bulk.executed_instructions, scalar.executed_instructions);
-            assert_eq!(
-                bulk.deterministic_collection_count(),
-                scalar.deterministic_collection_count()
-            );
-            assert_eq!(
-                bulk.next_weak_collection_instruction,
-                scalar.next_weak_collection_instruction
-            );
-            saw_span |= bulk.dynamic_programs[0].clear_span_entries > 0;
-        }
-        assert!(saw_span);
-    }
-
-    #[test]
-    fn malformed_clear_before_a_valid_suffix_keeps_the_exact_error_pc() {
-        let program = Program::new(
-            Function::new(
-                vec![
-                    Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
-                    Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
-                    Instruction::new(Opcode::ClearLocalCell, 1, 0, 0),
-                    Instruction::new(Opcode::ClearLocalCell, 0, 0, 0),
-                    Instruction::new(Opcode::Halt, 0, 0, 0),
-                ],
-                3,
-            ),
-            Vec::new(),
-        );
-        let mut bulk = Vm::new(Profile::ReproducibleStandard);
-        let bulk_error = bulk.run(&program).unwrap_err();
-        assert_eq!(bulk_error.pc, Some(0));
-        assert_eq!(bulk.dynamic_programs[0].clear_span_entries, 0);
-
-        let mut scalar = Vm::new(Profile::ReproducibleStandard);
-        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
-        scalar.region_mode = RegionTestMode::Off;
-        let scalar_error = scalar.run(&program).unwrap_err();
-        assert_eq!(bulk_error.pc, scalar_error.pc);
-        assert_eq!(
-            std::mem::discriminant(&bulk_error.kind),
-            std::mem::discriminant(&scalar_error.kind)
-        );
-    }
-
     fn numeric_register_block_program() -> Program {
         Program::new(
             Function::new(
@@ -27537,7 +27233,9 @@ mod inline_cache_tests {
                     Instruction::new(Opcode::Move, 3, 1, 0),
                     Instruction::new(Opcode::Add, 2, 2, 3),
                     Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
-                    Instruction::new(Opcode::Return, 2, 1, 0),
+                    Instruction::new(Opcode::Move, 0, 2, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
+                    Instruction::new(Opcode::Return, 0, 1, 0),
                 ],
                 4,
             ),
@@ -27552,8 +27250,24 @@ mod inline_cache_tests {
         let planned_result = planned.run(&program).unwrap();
         assert_eq!(planned_result.as_number(), Some(12.0));
         assert_eq!(planned.dynamic_programs[0].register_block_entries, 1);
-        assert_eq!(planned.dynamic_programs[0].register_block_instructions, 4);
+        assert_eq!(planned.dynamic_programs[0].register_block_instructions, 6);
         assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 0);
+        assert_eq!(planned.dynamic_programs[0].region_entries, 1);
+        assert_eq!(planned.dynamic_programs[0].region_instructions, 7);
+
+        let mut canonical_region = Vm::new(Profile::ReproducibleStandard);
+        canonical_region.superinstruction_mode = SuperinstructionTestMode::Off;
+        let canonical_region_result = canonical_region.run(&program).unwrap();
+        assert_eq!(
+            planned_result.as_number(),
+            canonical_region_result.as_number()
+        );
+        assert_eq!(
+            canonical_region.dynamic_programs[0].register_block_entries,
+            0
+        );
+        assert_eq!(canonical_region.dynamic_programs[0].region_entries, 1);
+        assert_eq!(canonical_region.dynamic_programs[0].region_instructions, 7);
 
         let mut scalar = Vm::new(Profile::ReproducibleStandard);
         scalar.superinstruction_mode = SuperinstructionTestMode::Off;
@@ -27562,6 +27276,206 @@ mod inline_cache_tests {
         assert_eq!(planned_result.as_number(), scalar_result.as_number());
         assert_eq!(planned.executed_instructions, scalar.executed_instructions);
         assert_eq!(scalar.dynamic_programs[0].register_block_entries, 0);
+    }
+
+    #[test]
+    fn register_block_skip_keeps_later_region_guard_exit_accounting_exact() {
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                    Instruction::new(Opcode::Move, 2, 0, 0),
+                    Instruction::new(Opcode::Move, 3, 1, 0),
+                    Instruction::new(Opcode::Add, 2, 2, 3),
+                    Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
+                    Instruction::new(Opcode::Move, 0, 2, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 4, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 5, 0, 2),
+                    Instruction::new(Opcode::GetIndex, 6, 4, 5),
+                    Instruction::new(Opcode::Return, 6, 1, 0),
+                ],
+                7,
+            ),
+            vec![
+                Constant::Number(7.0),
+                Constant::Number(5.0),
+                Constant::Number(1.0),
+            ],
+        );
+
+        let mut planned = Vm::new(Profile::ReproducibleStandard);
+        let planned_error = planned.run(&program).unwrap_err();
+        assert_eq!(planned_error.pc, Some(10));
+        assert_eq!(planned.dynamic_programs[0].register_block_entries, 1);
+        assert_eq!(planned.dynamic_programs[0].register_block_instructions, 6);
+        assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 0);
+        assert_eq!(planned.dynamic_programs[0].region_entries, 1);
+        assert_eq!(planned.dynamic_programs[0].region_instructions, 10);
+        assert_eq!(planned.dynamic_programs[0].region_guard_exits, 1);
+        assert_eq!(planned.executed_instructions, 11);
+
+        let mut canonical_region = Vm::new(Profile::ReproducibleStandard);
+        canonical_region.superinstruction_mode = SuperinstructionTestMode::Off;
+        let canonical_region_error = canonical_region.run(&program).unwrap_err();
+        assert_eq!(canonical_region_error.pc, planned_error.pc);
+        assert_eq!(
+            std::mem::discriminant(&canonical_region_error.kind),
+            std::mem::discriminant(&planned_error.kind)
+        );
+        assert_eq!(canonical_region.dynamic_programs[0].region_entries, 1);
+        assert_eq!(canonical_region.dynamic_programs[0].region_instructions, 10);
+        assert_eq!(canonical_region.dynamic_programs[0].region_guard_exits, 1);
+        assert_eq!(
+            canonical_region.dynamic_programs[0].register_block_entries,
+            0
+        );
+
+        let mut scalar = Vm::new(Profile::ReproducibleStandard);
+        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
+        scalar.region_mode = RegionTestMode::Off;
+        let scalar_error = scalar.run(&program).unwrap_err();
+        assert_eq!(scalar_error.pc, planned_error.pc);
+        assert_eq!(
+            std::mem::discriminant(&scalar_error.kind),
+            std::mem::discriminant(&planned_error.kind)
+        );
+        assert_eq!(planned.executed_instructions, scalar.executed_instructions);
+        assert_eq!(
+            canonical_region.executed_instructions,
+            scalar.executed_instructions
+        );
+    }
+
+    #[test]
+    fn two_register_lifetime_blocks_complete_inside_one_region() {
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                    Instruction::new(Opcode::Move, 2, 0, 0),
+                    Instruction::new(Opcode::Move, 3, 1, 0),
+                    Instruction::new(Opcode::Add, 2, 2, 3),
+                    Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
+                    Instruction::new(Opcode::Move, 0, 2, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
+                    Instruction::new(Opcode::Move, 2, 0, 0),
+                    Instruction::new(Opcode::Move, 3, 1, 0),
+                    Instruction::new(Opcode::Mul, 2, 2, 3),
+                    Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
+                    Instruction::new(Opcode::Move, 0, 2, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
+                    Instruction::new(Opcode::Return, 0, 1, 0),
+                ],
+                4,
+            ),
+            vec![Constant::Number(2.0), Constant::Number(3.0)],
+        );
+
+        let mut planned = Vm::new(Profile::ReproducibleStandard);
+        let planned_result = planned.run(&program).unwrap();
+        assert_eq!(planned_result.as_number(), Some(15.0));
+        assert_eq!(planned.dynamic_programs[0].register_block_entries, 2);
+        assert_eq!(planned.dynamic_programs[0].register_block_instructions, 12);
+        assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 0);
+        assert_eq!(planned.dynamic_programs[0].region_entries, 1);
+        assert_eq!(planned.dynamic_programs[0].region_instructions, 13);
+        assert_eq!(planned.executed_instructions, 15);
+
+        let mut scalar = Vm::new(Profile::ReproducibleStandard);
+        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
+        scalar.region_mode = RegionTestMode::Off;
+        let scalar_result = scalar.run(&program).unwrap();
+        assert_eq!(planned_result.as_number(), scalar_result.as_number());
+        assert_eq!(planned.executed_instructions, scalar.executed_instructions);
+    }
+
+    #[test]
+    fn register_lifetime_skip_keeps_later_region_direct_error_accounting_exact() {
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                    Instruction::new(Opcode::Move, 2, 0, 0),
+                    Instruction::new(Opcode::Move, 3, 1, 0),
+                    Instruction::new(Opcode::Add, 2, 2, 3),
+                    Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
+                    Instruction::new(Opcode::Move, 0, 2, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 4, 0, 0),
+                    Instruction::new(Opcode::Return, 0, 1, 0),
+                ],
+                4,
+            ),
+            vec![Constant::Number(7.0), Constant::Number(5.0)],
+        );
+
+        let mut planned = Vm::new(Profile::ReproducibleStandard);
+        let planned_error = planned.run(&program).unwrap_err();
+        assert_eq!(planned_error.pc, Some(8));
+        assert_eq!(planned.dynamic_programs[0].register_block_entries, 1);
+        assert_eq!(planned.dynamic_programs[0].register_block_instructions, 6);
+        assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 0);
+        assert_eq!(planned.dynamic_programs[0].region_entries, 1);
+        assert_eq!(planned.dynamic_programs[0].region_instructions, 8);
+        assert_eq!(planned.dynamic_programs[0].region_guard_exits, 1);
+        assert_eq!(planned.executed_instructions, 9);
+
+        let mut scalar = Vm::new(Profile::ReproducibleStandard);
+        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
+        scalar.region_mode = RegionTestMode::Off;
+        let scalar_error = scalar.run(&program).unwrap_err();
+        assert_eq!(planned_error.pc, scalar_error.pc);
+        assert_eq!(
+            std::mem::discriminant(&planned_error.kind),
+            std::mem::discriminant(&scalar_error.kind)
+        );
+        assert_eq!(planned.executed_instructions, scalar.executed_instructions);
+    }
+
+    #[test]
+    fn branch_into_register_lifetime_block_interior_uses_canonical_region_execution() {
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                    Instruction::new(Opcode::LoadConst, 2, 0, 0),
+                    Instruction::with_aux(Opcode::Jump, 0, 0, 0, 5),
+                    Instruction::new(Opcode::Move, 2, 0, 0),
+                    Instruction::new(Opcode::Move, 3, 1, 0),
+                    Instruction::new(Opcode::Add, 2, 2, 3),
+                    Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
+                    Instruction::new(Opcode::Move, 0, 2, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
+                    Instruction::new(Opcode::Return, 0, 1, 0),
+                ],
+                4,
+            ),
+            vec![Constant::Number(7.0), Constant::Number(5.0)],
+        );
+        let map = build_register_block_map(&program.main).expect("register-lifetime metadata");
+        assert_eq!(
+            register_block_at(Some(&map), 4)
+                .expect("six-instruction receipt")
+                .instruction_count(),
+            6
+        );
+
+        let mut planned = Vm::new(Profile::ReproducibleStandard);
+        let planned_result = planned.run(&program).unwrap();
+        assert_eq!(planned_result.as_number(), Some(12.0));
+        assert_eq!(planned.dynamic_programs[0].register_block_entries, 0);
+
+        let mut scalar = Vm::new(Profile::ReproducibleStandard);
+        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
+        scalar.region_mode = RegionTestMode::Off;
+        let scalar_result = scalar.run(&program).unwrap();
+        assert_eq!(planned_result.as_number(), scalar_result.as_number());
+        assert_eq!(planned.executed_instructions, scalar.executed_instructions);
     }
 
     #[test]
@@ -27584,7 +27498,9 @@ mod inline_cache_tests {
                         Instruction::new(Opcode::Move, 3, 1, 0),
                         Instruction::new(operation, 2, 2, 3),
                         Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
-                        Instruction::new(Opcode::Return, 2, 1, 0),
+                        Instruction::new(Opcode::Move, 0, 2, 0),
+                        Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
+                        Instruction::new(Opcode::Return, 0, 1, 0),
                     ],
                     4,
                 ),
@@ -27593,6 +27509,7 @@ mod inline_cache_tests {
             let mut planned = Vm::new(Profile::ReproducibleStandard);
             let planned_result = planned.run(&program).unwrap();
             assert_eq!(planned.dynamic_programs[0].register_block_entries, 1);
+            assert_eq!(planned.dynamic_programs[0].register_block_instructions, 6);
             assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 0);
 
             let mut scalar = Vm::new(Profile::ReproducibleStandard);
@@ -27636,6 +27553,72 @@ mod inline_cache_tests {
         assert_eq!(cells, vec![None, None, Some(11), None]);
     }
 
+    #[test]
+    fn register_lifetime_block_preserves_destination_cell_and_clears_both_temporaries() {
+        let function = Function::new(
+            vec![
+                Instruction::new(Opcode::Move, 2, 0, 0),
+                Instruction::new(Opcode::Move, 3, 1, 0),
+                Instruction::new(Opcode::Add, 2, 2, 3),
+                Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
+                Instruction::new(Opcode::Move, 0, 2, 0),
+                Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
+            ],
+            4,
+        );
+        let map = build_register_block_map(&function).expect("register-lifetime metadata");
+        let block = register_block_at(Some(&map), 0).expect("register lifetime block");
+        let mut registers = vec![
+            Value::number(8.0),
+            Value::number(2.0),
+            Value::number(98.0),
+            Value::number(99.0),
+        ];
+        let mut cells = vec![Some(10), None, Some(11), Some(12)];
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+
+        assert_eq!(block.instruction_count(), 6);
+        assert_eq!(block.lifetime_destination_register(), Some(0));
+        assert!(vm.try_register_block(&mut registers, &mut cells, block));
+        assert_eq!(registers[0].as_number(), Some(10.0));
+        assert!(registers[2].is_nil());
+        assert!(registers[3].is_nil());
+        assert_eq!(cells, vec![Some(10), None, None, None]);
+    }
+
+    #[test]
+    fn register_lifetime_block_allows_destination_to_alias_both_sources() {
+        let program = Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::Move, 1, 0, 0),
+                    Instruction::new(Opcode::Move, 2, 0, 0),
+                    Instruction::new(Opcode::Add, 1, 1, 2),
+                    Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
+                    Instruction::new(Opcode::Move, 0, 1, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 1, 0, 0),
+                    Instruction::new(Opcode::Return, 0, 1, 0),
+                ],
+                3,
+            ),
+            vec![Constant::Number(4.0)],
+        );
+        let mut planned = Vm::new(Profile::ReproducibleStandard);
+        let planned_result = planned.run(&program).unwrap();
+        assert_eq!(planned_result.as_number(), Some(8.0));
+        assert_eq!(planned.dynamic_programs[0].register_block_entries, 1);
+        assert_eq!(planned.dynamic_programs[0].register_block_instructions, 6);
+        assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 0);
+
+        let mut scalar = Vm::new(Profile::ReproducibleStandard);
+        scalar.superinstruction_mode = SuperinstructionTestMode::Off;
+        scalar.region_mode = RegionTestMode::Off;
+        let scalar_result = scalar.run(&program).unwrap();
+        assert_eq!(planned_result.as_number(), scalar_result.as_number());
+        assert_eq!(planned.executed_instructions, scalar.executed_instructions);
+    }
+
     fn dense_get_index_register_block_program() -> Program {
         Program::new(
             Function::new(
@@ -27648,7 +27631,9 @@ mod inline_cache_tests {
                     Instruction::new(Opcode::Move, 4, 1, 0),
                     Instruction::new(Opcode::GetIndex, 3, 3, 4),
                     Instruction::new(Opcode::ClearLocalCell, 4, 0, 0),
-                    Instruction::new(Opcode::Return, 3, 1, 0),
+                    Instruction::new(Opcode::Move, 2, 3, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
+                    Instruction::new(Opcode::Return, 2, 1, 0),
                 ],
                 5,
             ),
@@ -27663,6 +27648,7 @@ mod inline_cache_tests {
         let planned_result = planned.run(&program).unwrap();
         assert_eq!(planned_result.as_number(), Some(37.0));
         assert_eq!(planned.dynamic_programs[0].register_block_entries, 1);
+        assert_eq!(planned.dynamic_programs[0].register_block_instructions, 6);
         assert_eq!(planned.dynamic_programs[0].register_block_guard_exits, 0);
 
         let mut scalar = Vm::new(Profile::ReproducibleStandard);
@@ -27684,7 +27670,9 @@ mod inline_cache_tests {
                     Instruction::new(Opcode::Move, 3, 1, 0),
                     Instruction::new(Opcode::GetIndex, 2, 2, 3),
                     Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
-                    Instruction::new(Opcode::Return, 2, 1, 0),
+                    Instruction::new(Opcode::Move, 0, 2, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
+                    Instruction::new(Opcode::Return, 0, 1, 0),
                 ],
                 4,
             ),
@@ -27720,7 +27708,9 @@ mod inline_cache_tests {
                     Instruction::new(Opcode::Move, 3, 1, 0),
                     Instruction::new(Opcode::Add, 2, 2, 3),
                     Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
-                    Instruction::new(Opcode::Return, 2, 1, 0),
+                    Instruction::new(Opcode::Move, 0, 2, 0),
+                    Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
+                    Instruction::new(Opcode::Return, 0, 1, 0),
                 ],
                 4,
             ),
@@ -27776,7 +27766,9 @@ mod inline_cache_tests {
             Instruction::new(Opcode::Move, 17, 1, 0),
             Instruction::new(Opcode::Add, 16, 16, 17),
             Instruction::new(Opcode::ClearLocalCell, 17, 0, 0),
-            Instruction::new(Opcode::Return, 16, 1, 0),
+            Instruction::new(Opcode::Move, 0, 16, 0),
+            Instruction::new(Opcode::ClearLocalCell, 16, 0, 0),
+            Instruction::new(Opcode::Return, 0, 1, 0),
         ]);
         let program = Program::new(Function::new(code, 18), vec![Constant::Number(2.0)]);
         let mut saw_block = false;
@@ -27809,7 +27801,7 @@ mod inline_cache_tests {
     }
 
     #[test]
-    fn register_block_clear_span_and_region_metadata_coexist() {
+    fn register_block_fuses_inside_one_uninterrupted_common_region() {
         let program = Program::new(
             Function::new(
                 vec![
@@ -27832,8 +27824,9 @@ mod inline_cache_tests {
 
         assert_eq!(vm.run(&program).unwrap().as_number(), Some(42.0));
         assert_eq!(vm.dynamic_programs[0].region_entries, 1);
+        assert_eq!(vm.dynamic_programs[0].region_instructions, 8);
         assert_eq!(vm.dynamic_programs[0].register_block_entries, 1);
-        assert_eq!(vm.dynamic_programs[0].clear_span_entries, 1);
+        assert_eq!(vm.dynamic_programs[0].register_block_instructions, 4);
     }
 
     #[test]
@@ -27869,6 +27862,7 @@ mod inline_cache_tests {
         let tiered_result = tiered.run(&program).unwrap();
         assert_eq!(tiered_result.as_number(), Some(10.0));
         assert_eq!(tiered.dynamic_programs[0].register_block_entries, 1);
+        assert_eq!(tiered.dynamic_programs[0].register_block_instructions, 6);
         assert_eq!(tiered.dynamic_programs[0].hot_ir_entries, 1);
         assert_eq!(tiered.dynamic_programs[0].hot_ir_iterations, 3);
 
@@ -29253,23 +29247,74 @@ mod inline_cache_tests {
 
     #[test]
     fn loaded_program_quota_admission_counts_register_block_metadata_exactly() {
-        let mut code = Vec::new();
+        let mut planned_code = Vec::new();
+        let mut alias_near_miss_code = Vec::new();
         for _ in 0..512 {
-            code.extend([
+            planned_code.extend([
                 Instruction::new(Opcode::Move, 2, 0, 0),
                 Instruction::new(Opcode::Move, 3, 1, 0),
                 Instruction::new(Opcode::Add, 2, 2, 3),
                 Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
+                Instruction::new(Opcode::Move, 0, 2, 0),
+                Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
+            ]);
+            // Valid public bytecode with the same uninterrupted Region shape,
+            // but target aliases lhs so no private register receipt is valid.
+            alias_near_miss_code.extend([
+                Instruction::new(Opcode::Move, 2, 2, 0),
+                Instruction::new(Opcode::Move, 3, 1, 0),
+                Instruction::new(Opcode::Add, 2, 2, 3),
+                Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
+                Instruction::new(Opcode::Move, 0, 2, 0),
+                Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
             ]);
         }
-        code.push(Instruction::new(Opcode::Halt, 0, 0, 0));
-        let program = Program::new(Function::new(code, 4), Vec::new());
+        planned_code.push(Instruction::new(Opcode::Halt, 0, 0, 0));
+        alias_near_miss_code.push(Instruction::new(Opcode::Halt, 0, 0, 0));
+        let program = Program::new(Function::new(planned_code, 4), Vec::new());
+        let alias_near_miss_program =
+            Program::new(Function::new(alias_near_miss_code, 4), Vec::new());
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         vm.collect_garbage();
 
         let loaded = LoadedProgram::new(program.clone());
-        assert!(loaded.main_inline_caches.register_blocks.is_some());
+        let execution_plans = loaded
+            .main_inline_caches
+            .execution_plans
+            .as_deref()
+            .expect("execution-plan metadata");
+        assert!(execution_plans.common_region_by_pc.is_some());
+        let register_blocks = execution_plans
+            .register_blocks
+            .as_ref()
+            .expect("register-block metadata");
+        assert_eq!(register_blocks.plan_count(), 512);
+
+        let alias_near_miss_loaded = LoadedProgram::new(alias_near_miss_program);
+        let alias_near_miss_plans = alias_near_miss_loaded
+            .main_inline_caches
+            .execution_plans
+            .as_deref()
+            .expect("near-miss Region metadata");
+        assert!(alias_near_miss_plans.common_region_by_pc.is_some());
+        assert!(alias_near_miss_plans.register_blocks.is_none());
+
         let additional = vm.dynamic_programs.additional_live_bytes(&loaded);
+        let alias_near_miss_additional = vm
+            .dynamic_programs
+            .additional_live_bytes(&alias_near_miss_loaded);
+        let expected_register_metadata = program
+            .main
+            .code
+            .len()
+            .saturating_mul(size_of::<u16>())
+            .saturating_add(512usize.saturating_mul(size_of::<RegisterBlockPlan>()));
+        assert_eq!(
+            additional.checked_sub(alias_near_miss_additional),
+            Some(expected_register_metadata),
+            "the independent live-byte delta must equal by-PC plus plan payload storage"
+        );
+
         let before = vm.current_live_bytes();
         vm.settings.memory_limit_bytes = Some(before.saturating_add(additional).saturating_sub(1));
 

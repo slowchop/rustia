@@ -385,12 +385,15 @@ unreachable suspended-coroutine frames.
    metadata with exact deoptimization and deterministic-policy fallback. Its accepted controlled DigitalOcean
    A/B measured +1.3181% candidate ns/unit with a conservative 95% interval of -4.5763% to +3.9306%, excluding
    a material 5% regression without establishing a speedup. Treat the slice as performance-neutral within the
-   measured interval. The next programme is now [`58-vm-core2.md`](58-vm-core2.md): C2.1 implements preverified
-   bulk cleanup spans and four-instruction register blocks over unchanged public bytecode, with exact logical
-   accounting/policy fallback and controlled DigitalOcean timing still pending. Static coverage predicts about
-   276,001 register-block entries in the planned `generic_iteration` gate at `n=4000`; this is not a speed claim.
-   If accepted, continue into mode-selected executable blocks, compiler liveness/receipts, a VM-owned register
-   arena with compact iterative frames, and direct table/call lanes before productionizing type-directed wasm/AOT.
+   measured interval. The next programme is now [`58-vm-core2.md`](58-vm-core2.md). Its C2.1 cleanup/register
+   mini-tier was exactly falsified on DigitalOcean: candidate `2bb7bef` was 5.293% slower on fixed
+   `generic_iteration`, with a conservative nominal 95% interval of +3.720% to +6.135%. The coordinator rejected
+   publication, public benchmark history stayed unchanged, and cloud cleanup was confirmed. C2.2 removes the
+   competing per-`Move` tier and implements direct register receipts inside one uninterrupted Region, resolved
+   once per function. The receipt slice has passed focused semantic review and correctness validation; its
+   controlled DigitalOcean promotion gate remains pending. Continue from that independently gated slice into a mode-selected compact execution tape,
+   compiler liveness/receipts, a VM-owned register arena with compact iterative frames, and direct table/call
+   lanes before productionizing type-directed wasm/AOT.
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 18 workload entries including
    source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,

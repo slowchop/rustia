@@ -7126,6 +7126,43 @@ mod tests {
         })
     }
 
+    fn contains_register_lifetime_block_shape(code: &[Instruction], operation: Opcode) -> bool {
+        code.windows(6).any(|instructions| {
+            let [lhs_move, rhs_move, binary, temporary_clear, destination_move, target_clear] =
+                instructions
+            else {
+                return false;
+            };
+            lhs_move.op == Opcode::Move
+                && lhs_move.c == 0
+                && lhs_move.aux == 0
+                && rhs_move.op == Opcode::Move
+                && rhs_move.c == 0
+                && rhs_move.aux == 0
+                && binary.op == operation
+                && binary.a == lhs_move.a
+                && binary.b == lhs_move.a
+                && binary.c == rhs_move.a
+                && binary.aux == 0
+                && temporary_clear.op == Opcode::ClearLocalCell
+                && temporary_clear.a == rhs_move.a
+                && temporary_clear.b == 0
+                && temporary_clear.c == 0
+                && temporary_clear.aux == 0
+                && destination_move.op == Opcode::Move
+                && destination_move.b == lhs_move.a
+                && destination_move.c == 0
+                && destination_move.aux == 0
+                && destination_move.a != lhs_move.a
+                && destination_move.a != rhs_move.a
+                && target_clear.op == Opcode::ClearLocalCell
+                && target_clear.a == lhs_move.a
+                && target_clear.b == 0
+                && target_clear.c == 0
+                && target_clear.aux == 0
+        })
+    }
+
     #[test]
     fn compiler_register_binary_shapes_remain_available_to_vm_plans() {
         for (source, operation, expected) in [
@@ -7141,6 +7178,32 @@ mod tests {
             assert!(
                 contains_register_block_shape(&program.main.code, operation),
                 "compiler stopped emitting the VM's verified register-block shape for {operation:?}"
+            );
+
+            let mut vm = Vm::new(Profile::ReproducibleStandard);
+            assert_eq!(vm.run(&program).unwrap().as_number(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn compiler_register_lifetime_shapes_remain_available_to_vm_plans() {
+        for (source, operation, expected) in [
+            (
+                "local a, b, result = 1, 2, 0 result = a + b return result",
+                Opcode::Add,
+                3.0,
+            ),
+            (
+                "local t = {7} local i, result = 1, 0 result = t[i] return result",
+                Opcode::GetIndex,
+                7.0,
+            ),
+        ] {
+            let chunk = parse_source(source).unwrap();
+            let program = compile(&chunk).unwrap();
+            assert!(
+                contains_register_lifetime_block_shape(&program.main.code, operation),
+                "compiler stopped emitting the VM's verified register-lifetime shape for {operation:?}"
             );
 
             let mut vm = Vm::new(Profile::ReproducibleStandard);

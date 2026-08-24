@@ -112,28 +112,15 @@ pub(crate) fn region_effect(program: &Program, instruction: Instruction) -> Opti
 /// GC, or allocation-debt boundary can resume region execution later in the
 /// same run. Long runs are split at the representable length; public bytecode
 /// and jump targets are unchanged.
-#[cfg(test)]
 pub(crate) fn build_common_region_map(
     program: &Program,
     function: &Function,
-) -> Option<Box<[u16]>> {
-    build_common_region_map_with_barriers(program, function, |_| false)
-}
-
-/// Build region metadata while treating selected PCs as executor boundaries.
-/// A more specialized private plan can use a boundary to keep Region Engine
-/// from consuming its first instruction; ordinary single-instruction dispatch
-/// remains available at that PC when the specialized plan cannot run.
-pub(crate) fn build_common_region_map_with_barriers(
-    program: &Program,
-    function: &Function,
-    mut is_barrier: impl FnMut(usize) -> bool,
 ) -> Option<Box<[u16]>> {
     let mut by_pc = vec![NO_REGION; function.code.len()];
     let mut found = false;
     let mut pc = 0;
     while pc < function.code.len() {
-        if is_barrier(pc) || region_effect(program, function.code[pc]).is_none() {
+        if region_effect(program, function.code[pc]).is_none() {
             pc += 1;
             continue;
         }
@@ -142,7 +129,7 @@ pub(crate) fn build_common_region_map_with_barriers(
         let limit = start
             .saturating_add(u16::MAX as usize)
             .min(function.code.len());
-        while pc < limit && !is_barrier(pc) && region_effect(program, function.code[pc]).is_some() {
+        while pc < limit && region_effect(program, function.code[pc]).is_some() {
             pc += 1;
         }
         let count = pc - start;
@@ -238,35 +225,6 @@ mod tests {
         assert_eq!(common_region_at(Some(&map), 1), None);
         assert_eq!(common_region_at(Some(&map), 2), None);
         assert_eq!(common_region_at(Some(&map), 7), None);
-    }
-
-    #[test]
-    fn specialized_executor_barriers_split_common_regions() {
-        let program = Program::new(
-            Function::new(
-                vec![
-                    Instruction::new(Opcode::Move, 0, 1, 0),
-                    Instruction::new(Opcode::Move, 1, 0, 0),
-                    Instruction::new(Opcode::ClearLocalCell, 3, 0, 0),
-                    Instruction::new(Opcode::ClearLocalCell, 2, 0, 0),
-                    Instruction::new(Opcode::Move, 2, 1, 0),
-                    Instruction::new(Opcode::Move, 3, 2, 0),
-                ],
-                4,
-            ),
-            Vec::new(),
-        );
-        let map = build_common_region_map_with_barriers(&program, &program.main, |pc| {
-            matches!(pc, 2 | 3)
-        })
-        .expect("regions on both sides of barriers");
-
-        assert_eq!(common_region_at(Some(&map), 0).unwrap().end_pc(), 2);
-        assert_eq!(common_region_at(Some(&map), 1), None);
-        assert_eq!(common_region_at(Some(&map), 2), None);
-        assert_eq!(common_region_at(Some(&map), 3), None);
-        assert_eq!(common_region_at(Some(&map), 4).unwrap().end_pc(), 6);
-        assert_eq!(common_region_at(Some(&map), 5), None);
     }
 
     #[test]
