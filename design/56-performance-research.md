@@ -768,6 +768,76 @@ budget closed. All eight Droplets and temporary keys were confirmed deleted.
 Cross-workload tape movement therefore remains to be established by the next
 full cross-engine matrix or a quieter dedicated-host window.
 
+### VM Core 2 C2.5a — direct existing dense-array slot write, unmeasurable on the tracked suite
+
+C2.5's first slice gives `VmCell::try_write_numeric_array_slot` a direct lane for a proven existing, non-nil
+array slot. The guard resolves the handle, proves `one_based_index - 1` is inside `array`, and proves the
+stored value is not nil. A present key bypasses `__newindex` in both layouts and shadows any hash/node-part
+entry for the same numeric key, so the write cannot allocate, grow, shrink, rehash, or move any array/hash
+length or capacity — precisely the `table_data_memory_usage` inputs. It therefore skips `mutate_table_data`'s
+before/after census and its no-op `side_usage` adjustment and performs only the one guest-visible
+`mutation_version` bump. Readonly still wins, nil clearing is included, and every unproven shape falls
+through to the untouched generic path; the guard reuses the lookup that path already needed, so a miss keeps
+its original single lookup. A `debug_assert!` probing both hash parts pins the shadowing invariant across the
+unit, conformance, and fuzz suites.
+
+The bet was screened for hit coverage before any billable run, using a default-off `table-write-diagnostics`
+census that leaves production and benchmark builds uninstrumented. **The direct lane is reached zero times by
+all 17 runnable benchmark workloads.** `dense_tables` issues 16,384 numeric array-slot writes per 64 units and
+every one grows the array; `stdlib_math_table` issues 4,000, all growth; `sparse_tables` defers all 8,191;
+`memory_burst` issues 266,240 with zero direct. The cause is structural rather than incidental: each tracked
+workload builds its tables from `{}` over an ascending index and never rewrites a slot it already filled, and
+`table.sort` writes its result back through the single batched `try_write_array_prefix` call rather than
+per-slot. So the suite ceiling for this lane is not small, it is exactly 0.0000%.
+
+That is a stronger version of the GETIMPORT+FASTCALL situation recorded above, where a ~0.02% suite ceiling
+was enough to close a bet locally. It also relocates the C2.5 target: the measurable dense-table cost is
+array append and growth — where 100% of the suite's numeric array writes actually land — not existing-slot
+mutation. Capacity prediction and append fast-pathing are a separate slice with their own gate and must not
+be folded into this one.
+
+Because the lane itself cannot be executed by a tracked workload, the exact DigitalOcean gate measured the
+only thing the slice can cost one: the guard evaluated on every miss. `dense_tables` is the most write-dense
+tracked workload at 256 guard evaluations per unit, so it is the correct regression gate for that cost.
+
+Two forms were gated against the same baseline `92d30b8` on fixed `dense_tables` work at `n=1500`, 101
+repetitions per leg, four counterbalanced ABBA/BAAB legs per side, 20,000 bootstrap iterations, and a
+predeclared 5% material-regression threshold. Every leg matched checksum
+`number:193302491.00000000000000000`.
+
+The first form, exact candidate `066ce1f`, tested the lane before the layout dispatch, so each miss re-read a
+slot the branch it fell through to was about to load. Pooled medians were 53,622.599 ns/unit for the baseline
+and 53,953.160 for the candidate: a +0.6165% candidate delta with a conservative nominal 95% interval of
+-0.1571% to +2.2646% (pooled +0.2334% to +1.1304%). That is `material_regression_excluded`, but its point
+estimate is consistent with exactly that redundant load, so the measurement was used to improve the
+candidate rather than to close it.
+
+The final form, exact candidate `2082436`, admits the lane from inside each layout branch on the `existing`
+value that branch already loads, so a miss costs one test the branch was going to make regardless. Pooled
+medians were 54,212.962 ns/unit for the baseline and 53,971.312 for the candidate: a -0.4457% candidate delta
+with a conservative nominal 95% interval of -2.5751% to +1.5953% (pooled -0.9741% to +0.1617%), also
+`material_regression_excluded`. The two gates ran on separate host draws, so the 1.06-point movement between
+them is a cross-host signal rather than a paired attribution; each individual result is a same-host paired
+comparison against the same baseline commit.
+
+Verdict: retained as neutral, in the same disposition as Region Engine v1. Both intervals straddle zero, so
+neither establishes a win or a loss, and the final form carries no nominal cost. The slice keeps its place as
+the C2.5 direct-table lane with exact guards and complete differential coverage; it is not a speed claim, and
+public benchmark history is unchanged (the single-workload rows stayed out of the cohort as usual, with the
+three final candidate measurements retained as sidecars).
+
+Nine ephemeral Droplets were consumed. Five failed host qualification before any measurement — AMS3 on steal
+ticks, AMS3 on a 36.342% within-order paired ratio spread against the 5% ceiling, NYC3 on steal ticks, SFO3 at
+5.098%, and SFO3 at 6.689% — and one had its accepted block invalidated by steal at leg 7. This account offers
+only shared Basic plans, so region choice and re-drawing were the available levers, and the pool needed six
+draws to yield two qualifying hosts. Every Droplet and temporary SSH key was confirmed deleted; 145.2 billable
+minutes cost about $0.20. Evidence:
+`bench/history/evidence/066ce1ffab721cd54ad960f2e7b65d11acf04d1a/analysis.json` and
+`bench/history/evidence/2082436260ceab46d97a060f2440457728976309/analysis.json`.
+
+The follow-up this measurement selects is array append and capacity, not more existing-slot work.
+
+
 ## Estimate vs C++ Luau
 
 | state | likely position vs C++ Luau interpreter |

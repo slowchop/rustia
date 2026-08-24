@@ -426,7 +426,21 @@ unreachable suspended-coroutine frames.
    assignment, dead Move/Clear tail removal, register-file tightening) are prepared with per-family
    differential tests and a generated workload preview on the `claude/c2-3-liveness-analysis-7cd991` branch
    and stay unmerged until the tape's block receipts make the fuel/GC schedule optimization-independent
-   (see [`58-vm-core2.md`](58-vm-core2.md) §C2.3).
+   (see [`58-vm-core2.md`](58-vm-core2.md) §C2.3). C2.5's first slice is also merged: numeric writes to a
+   proven existing, non-nil array slot mutate in place, skipping `mutate_table_data`'s before/after memory
+   census and its no-op `side_usage` adjustment while keeping readonly, `__newindex`, insertion-order, and
+   the single `mutation_version` bump exact; a `debug_assert!` pins the shadowing invariant across the unit,
+   conformance, and fuzz suites, and a Log/PUC differential matrix plus end-to-end Luau tests cover it. Its
+   default-off `table-write-diagnostics` census showed the lane is reached **zero times by all 17 runnable
+   benchmark workloads** — every numeric array-slot write in the suite is an append or a deferral, because
+   each workload rebuilds its tables from `{}` over an ascending index. Two exact DigitalOcean gates against
+   baseline `92d30b8` on fixed `dense_tables` work therefore measured only the guard's miss cost: `066ce1f`
+   at +0.6165% (conservative nominal 95% interval -0.1571% to +2.2646%) and the final `2082436` at -0.4457%
+   (-2.5751% to +1.5953%), both `material_regression_excluded`. The slice is retained as neutral, not as a
+   speed claim, and public benchmark history is unchanged. Nine Droplets were consumed (five failed host
+   qualification before measurement, one lost its accepted block to steal), all confirmed deleted with their
+   temporary keys, for about $0.20. The measurable dense-table target is now array append/growth and capacity
+   prediction — a separate slice with its own gate (see [`58-vm-core2.md`](58-vm-core2.md) §C2.5).
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 18 workload entries including
    source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,

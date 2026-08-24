@@ -287,12 +287,73 @@ This is the largest broad architectural step and the phase most likely to close 
 only after C2.2 provides a stable executor boundary; mixing a frame rewrite with the old policy ladder would make
 failures difficult to localize.
 
-### C2.5 — direct tables and fixed-result calls
+### C2.5 — direct tables and fixed-result calls (first slice implemented; the measurable target moved)
 
 - Fast-path existing dense-slot mutation with incremental memory accounting and mutation-version updates.
 - Add constant numeric slot forms and colocated PIC records.
 - Extend exact-identity FASTCALL lanes and direct fixed-result writes without weakening monkey-patch fallback.
 - Audit maintained memory counters against a debug full census after every mutation shape.
+
+#### C2.5a — direct existing dense-array slot write
+
+`VmCell::try_write_numeric_array_slot` mutates a proven existing, non-nil array slot in place. The guard is
+exact and fully evaluated before any mutation: the handle resolves, `one_based_index - 1` is inside `array`,
+and the value stored there is not nil. A present key bypasses `__newindex` in both layouts, so the lane needs
+no metatable test, and a present array slot shadows any hash/node-part entry carrying the same numeric key —
+`table_numeric_get` and `puc_getnum` both read the array first, and every array-growth site removes the
+numeric hash key as it fills the slot. Overwriting the slot therefore cannot allocate, grow, shrink, rehash,
+or change any array/hash length or capacity, which is exactly the `table_data_memory_usage` input set, so the
+write skips `mutate_table_data`'s before/after census and its no-op `side_usage` adjustment and performs only
+the single guest-visible `mutation_version` bump. Readonly still wins over the lane, storing nil is included
+(it clears a present slot without moving the array boundary), and every other shape — missing handle, index
+0, out-of-range index, existing nil slot — falls through to the unchanged generic path. The guard reuses the
+handle lookup the generic path already needed, so a miss keeps its original single lookup.
+
+The shadowing invariant is not an assertion in prose: a `debug_assert!` probes both hash parts on every
+direct write, so the unit, conformance, and fuzz suites enforce it mechanically. Correctness coverage is a
+Log/PUC differential matrix comparing shortcut-then-fallback against the general `table_set` path on values,
+border length, iteration order, storage shape, mutation-version movement, and the memory census, plus
+end-to-end Luau tests for both table layouts covering `__newindex` bypass on present keys, `__newindex`
+dispatch on absent and present-nil keys, in-place nil clearing, `table.freeze` rejection, and the
+`table.sort` mutation guard.
+
+**Measured hit coverage: zero.** A default-off `table-write-diagnostics` feature censuses which lane serves
+each numeric array-slot write, so no production or benchmark build carries hot-path instrumentation. The
+census (`just check-array-slot-coverage`) reports that the direct lane is reached **0 times by all 17
+runnable benchmark workloads**. Every numeric array-slot write in the suite is an append or a deferral:
+`dense_tables` performs 16,384 writes per 64 units and all 16,384 grow the array, `stdlib_math_table`
+performs 4,000 and all grow, `sparse_tables` defers all 8,191, and `memory_burst` performs 266,240 with 0
+direct. Each tracked workload rebuilds its tables from `{}` and walks an ascending index, so it never
+rewrites a slot it already filled. A tripwire test pins that fact and fails the day a tracked workload starts
+reaching the lane, which is when the performance bet reopens.
+
+Because the lane cannot be executed by a tracked workload, the exact DigitalOcean gate measured the only
+thing the slice can cost one: the guard evaluated on every miss. `dense_tables` evaluates it 384,000 times
+per timed repetition at `n=1500` and never takes it, so it is the correct regression gate. Two forms were
+gated against the same baseline `92d30b8` on that fixed workload. The first, `066ce1f`, tested the lane
+before the layout dispatch and re-read a slot the branch it fell through to was about to load anyway: pooled
+medians 53,622.599 versus 53,953.160 ns/unit, a +0.6165% candidate delta with a conservative nominal 95%
+interval of -0.1571% to +2.2646% (pooled +0.2334% to +1.1304%). The final form, `2082436`, admits the lane
+from inside each layout branch on the `existing` value that branch already loads: pooled medians 54,212.962
+versus 53,971.312 ns/unit, a -0.4457% candidate delta with a conservative nominal 95% interval of -2.5751%
+to +1.5953% (pooled -0.9741% to +0.1617%). Both are `material_regression_excluded`; the two runs used
+separate host draws, so the 1.06-point movement between them is a cross-host signal, not a paired
+attribution.
+
+Verdict: retained as neutral. Each interval straddles zero, so neither establishes a win or a loss, and the
+final form carries no nominal cost. The slice keeps its place as the C2.5 direct-table lane with exact
+guards and full differential coverage; it is not a speed claim.
+
+Nine ephemeral Droplets were used across the two accepted gates. Five failed host qualification before any
+measurement (AMS3 on steal, AMS3 on a 36.342% within-order paired ratio spread, NYC3 on steal, SFO3 at
+5.098%, SFO3 at 6.689%) and one had its accepted block invalidated by steal at leg 7; this account offers
+only shared Basic plans, so region and re-draw were the available levers. Every Droplet and temporary key was
+confirmed deleted, and 145.2 billable minutes cost about $0.20.
+
+The measurable dense-table opportunity is array append and growth, where 100% of the suite's numeric array
+writes actually land - not existing-slot mutation. Capacity prediction and append fast-pathing are a separate
+slice with their own gate and must not be folded into this one.
+
 
 ## Measurement and stop rules
 
