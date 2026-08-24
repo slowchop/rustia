@@ -1,0 +1,12 @@
+# Koto equivalent of array_mutation: repeated in-place list updates.
+# unit = one read-modify-write pass over a persistent 256-element list.
+export f = |n|
+  t = []
+  for i in 1..=256
+    t.push i
+  checksum = 0
+  for it in 1..=n
+    for i in 0..256
+      t[i] = (t[i] * 3 + it) % 1000
+    checksum += t.first() + t.last()
+  checksum

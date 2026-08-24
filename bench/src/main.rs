@@ -153,6 +153,12 @@ const WORKLOADS: &[Workload] = &[
         default: false,
     },
     Workload {
+        id: "array_mutation",
+        file_stem: "12_array_mutation",
+        unit: "in-place update pass over a 256-elem array",
+        default: false,
+    },
+    Workload {
         id: "string_building",
         file_stem: "15_string_building",
         unit: "build+concat 64 string fragments",
@@ -2916,7 +2922,7 @@ mod tests {
             .get("workloads")
             .and_then(serde_json::Value::as_array)
             .expect("workloads array");
-        assert_eq!(workloads.len(), 18);
+        assert_eq!(workloads.len(), 19);
 
         let defaults = workloads
             .iter()
@@ -2940,6 +2946,38 @@ mod tests {
         let repo = repo_root().expect("repo root");
         for workload in WORKLOADS.iter().filter(|workload| workload.default) {
             assert_sources_for_all_benchmark_dialects(&repo, workload);
+        }
+    }
+
+    /// `array_mutation` covers every dialect that can express an in-place
+    /// element store. Roto's `List` exposes `get`/`push`/`swap` but no element
+    /// assignment, and the hand-written WAT set exists only for the wasm
+    /// pre-lock gate, so neither carries this workload.
+    #[test]
+    fn array_mutation_covers_the_dialects_with_in_place_element_stores() {
+        let repo = repo_root().expect("repo root");
+        let workload = WORKLOADS
+            .iter()
+            .find(|entry| entry.id == "array_mutation")
+            .expect("array_mutation workload");
+
+        assert!(
+            !workload.default,
+            "array_mutation stays opt-in until a full cross-engine matrix admits it to public history"
+        );
+        for dialect in [
+            Dialect::Luau,
+            Dialect::Lua54,
+            Dialect::JavaScript,
+            Dialect::Koto,
+            Dialect::Rhai,
+        ] {
+            assert!(
+                workload_path(&repo, dialect, workload).is_some(),
+                "missing {} source for workload {}",
+                dialect.as_str(),
+                workload.id
+            );
         }
     }
 

@@ -81,7 +81,7 @@ headline. All 8 architecture axes are decided
 ([`30-architecture.md`](30-architecture.md) v3), 10 conformance-verified improvements are adopted
 ([`55-improvements.md`](55-improvements.md)), the no-unsafe SotA performance research stack is now captured in
 [`56-performance-research.md`](56-performance-research.md), and the standalone benchmark harness has the engine/workload/history
-shell, generated current-results HTML report, 18 workload entries including cross-adapter `string_building` source coverage and
+shell, generated current-results HTML report, 19 workload entries including cross-adapter `string_building` source coverage and
 six synthetic/realistic memory workloads, and
 the `rustia`/`boa`/`koto`/`luaur`/`mlua-lua54`/`mlua-luau`/`rhai`/`roto`/`ruau`/`rquickjs`/`wasmi`/`wasmtime` native adapters in
 place.
@@ -445,7 +445,7 @@ unreachable suspended-coroutine frames.
    array append/growth and capacity prediction — a separate slice with its own gate
    (see [`58-vm-core2.md`](58-vm-core2.md) §C2.5).
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
-   The runner already exposes the requested engine matrix, five default workloads, 18 workload entries including
+   The runner already exposes the requested engine matrix, five default workloads, 19 workload entries including
    source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
    a standalone HTML report, an explicit closed wasm pre-lock gate artifact, a wasm target bench for rustia+koto+rhai, a `call_ref`
    versus `br_table` dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle.

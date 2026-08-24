@@ -245,7 +245,7 @@ function checkBenchmark(progress, readme, current) {
   requireIncludes(
     "design/CURRENT.md",
     current,
-    "18 workload entries including cross-adapter `string_building` source coverage",
+    "19 workload entries including cross-adapter `string_building` source coverage",
     "current benchmark workload coverage",
   );
   requireIncludes(

@@ -366,6 +366,22 @@ The measurable dense-table opportunity is array append and growth, where 100% of
 writes actually land - not existing-slot mutation. Capacity prediction and append fast-pathing are a separate
 slice with their own gate and must not be folded into this one.
 
+#### Closing the workload gap
+
+The suite had no in-place mutation workload at all, which is why C2.5's direct-table lane was unmeasurable.
+`array_mutation` (`bench/workloads/luau/12_array_mutation.luau` plus Lua 5.4, JavaScript, Koto, and Rhai
+ports) closes that gap: it builds a 256-element array once and then only rewrites filled slots, the shape of
+particle, grid, and vector update loops. Roto carries no port because its `List` exposes `get`/`push`/`swap`
+but no element assignment, and the hand-written WAT set exists only for the wasm pre-lock gate. The workload
+is `default: false`, so the public five-workload cohort and its generated claim gate are unchanged until a
+full cross-engine matrix admits it. Every port was checked against an independent reference implementation
+and all five produce the same checksum, and the array stays non-degenerate (all 256 values remain distinct,
+because `x -> (3x + it) mod 1000` is a bijection).
+
+The C2.5a census now reports the mirror image of the tracked five: `array_mutation` serves 16,384 of its
+16,640 numeric array-slot writes through the direct lane (98.46%), the remaining 256 being the one-time
+build. A test pins that, alongside the tripwire pinning zero coverage on the tracked five.
+
 
 ## Measurement and stop rules
 

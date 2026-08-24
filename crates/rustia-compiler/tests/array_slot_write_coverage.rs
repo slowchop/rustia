@@ -52,6 +52,11 @@ const WORKLOADS: &[(&str, &str, u64)] = &[
         4_000,
     ),
     (
+        "array_mutation",
+        "bench/workloads/luau/12_array_mutation.luau",
+        64,
+    ),
+    (
         "oop_metamethods",
         "bench/workloads/luau/03_oop_metamethods.luau",
         4_000,
@@ -180,6 +185,30 @@ fn tracked_workloads_report_direct_array_slot_lane_coverage() {
     for (workload, path, n) in WORKLOADS {
         report(workload, workload_counts(path, *n));
     }
+}
+
+/// The `array_mutation` workload exists precisely to exercise this lane: it
+/// builds a 256-element array once and then only rewrites filled slots, so
+/// essentially every numeric array-slot write it issues must be served
+/// directly. This is the positive counterpart to the tripwire below.
+#[test]
+fn the_array_mutation_workload_exercises_the_direct_lane() {
+    let counts = workload_counts("bench/workloads/luau/12_array_mutation.luau", 64)
+        .expect("array_mutation must run");
+    report("array_mutation", Some(counts));
+    assert!(
+        counts.direct > 0,
+        "array_mutation must reach the C2.5a direct lane; got {counts:?}"
+    );
+    assert_eq!(
+        counts.generic_stored, 256,
+        "only the one-time 256-slot build should take the generic append path; got {counts:?}"
+    );
+    assert_eq!(
+        counts.calls - counts.generic_stored,
+        counts.direct,
+        "every write after the build must be a direct existing-slot store; got {counts:?}"
+    );
 }
 
 /// Tripwire pinning the measured C2.5a hit coverage.
