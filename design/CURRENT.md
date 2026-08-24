@@ -433,14 +433,17 @@ unreachable suspended-coroutine frames.
    conformance, and fuzz suites, and a Log/PUC differential matrix plus end-to-end Luau tests cover it. Its
    default-off `table-write-diagnostics` census showed the lane is reached **zero times by all 17 runnable
    benchmark workloads** — every numeric array-slot write in the suite is an append or a deferral, because
-   each workload rebuilds its tables from `{}` over an ascending index. Two exact DigitalOcean gates against
-   baseline `92d30b8` on fixed `dense_tables` work therefore measured only the guard's miss cost: `066ce1f`
-   at +0.6165% (conservative nominal 95% interval -0.1571% to +2.2646%) and the final `2082436` at -0.4457%
-   (-2.5751% to +1.5953%), both `material_regression_excluded`. The slice is retained as neutral, not as a
-   speed claim, and public benchmark history is unchanged. Nine Droplets were consumed (five failed host
-   qualification before measurement, one lost its accepted block to steal), all confirmed deleted with their
-   temporary keys, for about $0.20. The measurable dense-table target is now array append/growth and capacity
-   prediction — a separate slice with its own gate (see [`58-vm-core2.md`](58-vm-core2.md) §C2.5).
+   each workload rebuilds its tables from `{}` over an ascending index. Three exact DigitalOcean gates on fixed
+   `dense_tables` work therefore measured only the guard's miss cost: `92d30b8`→`066ce1f` at +0.6165%
+   (conservative nominal 95% interval -0.1571% to +2.2646%), `92d30b8`→`2082436` at -0.4457% (-2.5751% to
+   +1.5953%), and, after the C2.2 tape landed and rebased the first two candidates away, `b253e9f`→`0a31255`
+   at -1.8842% (-18.1155% to +0.3730%, wide because two of four baseline legs ran about 20% slow). All three
+   are `material_regression_excluded` with intervals containing zero, so the slice is retained as neutral,
+   not as a speed claim, and public benchmark history is unchanged. Fourteen Droplets produced those three
+   gates (eleven were rejected before or during measurement on this account's shared-only Basic pool), all
+   confirmed deleted with their temporary keys, for about $0.31. The measurable dense-table target is now
+   array append/growth and capacity prediction — a separate slice with its own gate
+   (see [`58-vm-core2.md`](58-vm-core2.md) §C2.5).
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 18 workload entries including
    source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,

@@ -327,28 +327,40 @@ direct. Each tracked workload rebuilds its tables from `{}` and walks an ascendi
 rewrites a slot it already filled. A tripwire test pins that fact and fails the day a tracked workload starts
 reaching the lane, which is when the performance bet reopens.
 
-Because the lane cannot be executed by a tracked workload, the exact DigitalOcean gate measured the only
+Because the lane cannot be executed by a tracked workload, the exact DigitalOcean gates measured the only
 thing the slice can cost one: the guard evaluated on every miss. `dense_tables` evaluates it 384,000 times
-per timed repetition at `n=1500` and never takes it, so it is the correct regression gate. Two forms were
-gated against the same baseline `92d30b8` on that fixed workload. The first, `066ce1f`, tested the lane
-before the layout dispatch and re-read a slot the branch it fell through to was about to load anyway: pooled
-medians 53,622.599 versus 53,953.160 ns/unit, a +0.6165% candidate delta with a conservative nominal 95%
-interval of -0.1571% to +2.2646% (pooled +0.2334% to +1.1304%). The final form, `2082436`, admits the lane
-from inside each layout branch on the `existing` value that branch already loads: pooled medians 54,212.962
-versus 53,971.312 ns/unit, a -0.4457% candidate delta with a conservative nominal 95% interval of -2.5751%
-to +1.5953% (pooled -0.9741% to +0.1617%). Both are `material_regression_excluded`; the two runs used
-separate host draws, so the 1.06-point movement between them is a cross-host signal, not a paired
-attribution.
+per timed repetition at `n=1500` and never takes it, so it is the correct regression gate. Three gates ran
+on that fixed workload, each with 101 repetitions per leg, four counterbalanced ABBA/BAAB legs per side,
+20,000 bootstrap iterations, and every leg matching checksum `number:193302491.00000000000000000`.
 
-Verdict: retained as neutral. Each interval straddles zero, so neither establishes a win or a loss, and the
-final form carries no nominal cost. The slice keeps its place as the C2.5 direct-table lane with exact
-guards and full differential coverage; it is not a speed claim.
+| gate | baseline | candidate | delta | conservative 95% interval | pooled interval |
+|---|---|---|---:|---|---|
+| lane checked before the layout dispatch | `92d30b8` | `066ce1f` | +0.6165% | -0.1571% to +2.2646% | +0.2334% to +1.1304% |
+| lane admitted inside each branch | `92d30b8` | `2082436` | -0.4457% | -2.5751% to +1.5953% | -0.9741% to +0.1617% |
+| same, on the C2.2 tape baseline | `b253e9f` | `0a31255` | -1.8842% | -18.1155% to +0.3730% | -3.5130% to -0.9452% |
 
-Nine ephemeral Droplets were used across the two accepted gates. Five failed host qualification before any
-measurement (AMS3 on steal, AMS3 on a 36.342% within-order paired ratio spread, NYC3 on steal, SFO3 at
-5.098%, SFO3 at 6.689%) and one had its accepted block invalidated by steal at leg 7; this account offers
-only shared Basic plans, so region and re-draw were the available levers. Every Droplet and temporary key was
-confirmed deleted, and 145.2 billable minutes cost about $0.20.
+The first gate's point estimate was consistent with a redundant load the first form introduced: it tested the
+lane before the layout dispatch and re-read a slot the branch it fell through to was about to load anyway.
+That measurement selected the final form, which admits the lane from inside each layout branch on the
+`existing` value that branch already loads. The third gate re-measured the final form after the C2.2
+executable tape landed on main, because the first two gates' commits were rebased away and their baseline
+predates the tape; the tape still funnels dense-array writes through `try_write_numeric_array_slot`. Its wide
+conservative interval reflects leg clustering rather than a large effect: two of its four baseline legs ran
+about 20% slow (64,668.6 and 65,085.7 versus 53,613.0 and 54,014.6 ns/unit) while all four candidate legs
+stayed within 53,071.2-54,269.0, so its -1.8842% point estimate should not be read as a win.
+
+Verdict: retained as neutral. All three are `material_regression_excluded` and all three conservative
+intervals contain zero, so none establishes a win or a loss, and the final form carries no nominal cost. The
+slice keeps its place as the C2.5 direct-table lane with exact guards and full differential coverage; it is
+not a speed claim, and public benchmark history is unchanged.
+
+Fourteen ephemeral Droplets produced those three accepted gates. Eleven were rejected before or during
+measurement - AMS3 on steal, AMS3 at a 36.342% within-order paired ratio spread against the 5% ceiling, NYC3
+on steal, SFO3 at 5.098%, 6.689%, 11.403%, 27.537%, 17.578%, 12.997% and 8.591%, plus one accepted block
+invalidated by steal at leg 7. This account offers only shared Basic plans, so region choice and re-drawing
+were the available levers. Every Droplet and temporary key was confirmed deleted, and 225.2 billable minutes
+cost about $0.31. Evidence for all three gates is under `bench/history/evidence/`; the first two directories
+name commits that the tape rebase removed from the branch, and are retained only for their raw samples.
 
 The measurable dense-table opportunity is array append and growth, where 100% of the suite's numeric array
 writes actually land - not existing-slot mutation. Capacity prediction and append fast-pathing are a separate

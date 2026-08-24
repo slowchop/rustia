@@ -800,40 +800,46 @@ Because the lane itself cannot be executed by a tracked workload, the exact Digi
 only thing the slice can cost one: the guard evaluated on every miss. `dense_tables` is the most write-dense
 tracked workload at 256 guard evaluations per unit, so it is the correct regression gate for that cost.
 
-Two forms were gated against the same baseline `92d30b8` on fixed `dense_tables` work at `n=1500`, 101
-repetitions per leg, four counterbalanced ABBA/BAAB legs per side, 20,000 bootstrap iterations, and a
-predeclared 5% material-regression threshold. Every leg matched checksum
-`number:193302491.00000000000000000`.
+Three gates ran on fixed `dense_tables` work at `n=1500`, each with 101 repetitions per leg, four
+counterbalanced ABBA/BAAB legs per side, 20,000 bootstrap iterations, a predeclared 5% material-regression
+threshold, and every leg matching checksum `number:193302491.00000000000000000`.
 
-The first form, exact candidate `066ce1f`, tested the lane before the layout dispatch, so each miss re-read a
-slot the branch it fell through to was about to load. Pooled medians were 53,622.599 ns/unit for the baseline
-and 53,953.160 for the candidate: a +0.6165% candidate delta with a conservative nominal 95% interval of
--0.1571% to +2.2646% (pooled +0.2334% to +1.1304%). That is `material_regression_excluded`, but its point
-estimate is consistent with exactly that redundant load, so the measurement was used to improve the
-candidate rather than to close it.
+| gate | baseline | candidate | pooled medians (ns/unit) | delta | conservative 95% interval | pooled interval |
+|---|---|---|---|---:|---|---|
+| lane checked before the layout dispatch | `92d30b8` | `066ce1f` | 53,622.599 → 53,953.160 | +0.6165% | -0.1571% to +2.2646% | +0.2334% to +1.1304% |
+| lane admitted inside each branch | `92d30b8` | `2082436` | 54,212.962 → 53,971.312 | -0.4457% | -2.5751% to +1.5953% | -0.9741% to +0.1617% |
+| same, on the C2.2 tape baseline | `b253e9f` | `0a31255` | 54,814.593 → 53,781.802 | -1.8842% | -18.1155% to +0.3730% | -3.5130% to -0.9452% |
 
-The final form, exact candidate `2082436`, admits the lane from inside each layout branch on the `existing`
-value that branch already loads, so a miss costs one test the branch was going to make regardless. Pooled
-medians were 54,212.962 ns/unit for the baseline and 53,971.312 for the candidate: a -0.4457% candidate delta
-with a conservative nominal 95% interval of -2.5751% to +1.5953% (pooled -0.9741% to +0.1617%), also
-`material_regression_excluded`. The two gates ran on separate host draws, so the 1.06-point movement between
-them is a cross-host signal rather than a paired attribution; each individual result is a same-host paired
-comparison against the same baseline commit.
+The first form tested the lane before the layout dispatch, so each miss re-read a slot the branch it fell
+through to was about to load. Its point estimate is consistent with exactly that redundant load, so the
+measurement was used to improve the candidate rather than to close it: the final form admits the lane from
+inside each layout branch on the `existing` value that branch already loads, so a miss costs one test the
+branch was going to make regardless. The third gate re-measured that final form after the C2.2 executable
+tape landed on main — the first two gates' commits were rebased away and their baseline predates the tape,
+while the tape still funnels dense-array writes through `try_write_numeric_array_slot`. Its conservative
+interval is wide because of leg clustering, not a large effect: two of its four baseline legs ran about 20%
+slow (64,668.6 and 65,085.7 versus 53,613.0 and 54,014.6 ns/unit) while all four candidate legs stayed within
+53,071.2-54,269.0, so its -1.8842% point estimate must not be read as a win. All three gates used separate
+host draws, so movements between them are cross-host signals rather than paired attributions; each is a
+same-host paired comparison against its own baseline commit.
 
-Verdict: retained as neutral, in the same disposition as Region Engine v1. Both intervals straddle zero, so
-neither establishes a win or a loss, and the final form carries no nominal cost. The slice keeps its place as
-the C2.5 direct-table lane with exact guards and complete differential coverage; it is not a speed claim, and
-public benchmark history is unchanged (the single-workload rows stayed out of the cohort as usual, with the
-three final candidate measurements retained as sidecars).
+Verdict: retained as neutral, in the same disposition as Region Engine v1. All three are
+`material_regression_excluded` and all three conservative intervals contain zero, so none establishes a win
+or a loss, and the final form carries no nominal cost. The slice keeps its place as the C2.5 direct-table
+lane with exact guards and complete differential coverage; it is not a speed claim, and public benchmark
+history is unchanged (the single-workload rows stayed out of the cohort as usual, with each run's three final
+candidate measurements retained as sidecars).
 
-Nine ephemeral Droplets were consumed. Five failed host qualification before any measurement — AMS3 on steal
-ticks, AMS3 on a 36.342% within-order paired ratio spread against the 5% ceiling, NYC3 on steal ticks, SFO3 at
-5.098%, and SFO3 at 6.689% — and one had its accepted block invalidated by steal at leg 7. This account offers
-only shared Basic plans, so region choice and re-drawing were the available levers, and the pool needed six
-draws to yield two qualifying hosts. Every Droplet and temporary SSH key was confirmed deleted; 145.2 billable
-minutes cost about $0.20. Evidence:
-`bench/history/evidence/066ce1ffab721cd54ad960f2e7b65d11acf04d1a/analysis.json` and
-`bench/history/evidence/2082436260ceab46d97a060f2440457728976309/analysis.json`.
+Fourteen ephemeral Droplets produced those three accepted gates. Eleven were rejected before or during
+measurement — AMS3 on steal ticks, AMS3 at a 36.342% within-order paired ratio spread against the 5% ceiling,
+NYC3 on steal ticks, SFO3 at 5.098%, 6.689%, 11.403%, 27.537%, 17.578%, 12.997% and 8.591%, plus one accepted
+block invalidated by steal at leg 7. This account offers only shared Basic plans, so region choice and
+re-drawing were the available levers. Every Droplet and temporary SSH key was confirmed deleted; 225.2
+billable minutes cost about $0.31. Evidence:
+`bench/history/evidence/066ce1ffab721cd54ad960f2e7b65d11acf04d1a/analysis.json`,
+`bench/history/evidence/2082436260ceab46d97a060f2440457728976309/analysis.json`, and
+`bench/history/evidence/0a3125566919ca62d42905bfb99732f4170e1e04/analysis.json`. The first two directories
+name commits the tape rebase removed from the branch and are retained only for their raw samples.
 
 The follow-up this measurement selects is array append and capacity, not more existing-slot work.
 
