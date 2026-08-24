@@ -1582,7 +1582,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-compiler/Cargo.toml",
       "publish": false,
-      "file_count": 12,
+      "file_count": 13,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1592,6 +1592,7 @@
         "LICENSE-MIT",
         "README.md",
         "src/lib.rs",
+        "tests/array_slot_write_coverage.rs",
         "tests/liveness_analysis.rs",
         "tests/opcode_census.rs",
         "tests/performance_fastpaths.rs",
@@ -2411,7 +2412,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia/Cargo.toml",
       "publish": false,
-      "file_count": 28,
+      "file_count": 29,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -2434,6 +2435,7 @@
         "src/macros.rs",
         "src/serde_value.rs",
         "src/value.rs",
+        "tests/array_slot_mutation.rs",
         "tests/bare_wasm_live.rs",
         "tests/hardened_leaf.rs",
         "tests/mixed_heap_pressure.rs",

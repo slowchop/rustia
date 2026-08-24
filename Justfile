@@ -64,6 +64,11 @@ test-wasm-memory-limit:
     cargo build --locked --manifest-path bench/wasm/adapter-runner/Cargo.toml --target wasm32-unknown-unknown --release
     node bench/wasm/test-rustia-memory-limit.mjs
 
+# Report which benchmark workloads reach the C2.5a direct array-slot lane.
+check-array-slot-coverage:
+    cargo clippy --locked -p rustia-compiler --all-targets --features table-write-diagnostics -- -D warnings
+    cargo test --locked -p rustia-compiler --features table-write-diagnostics --test array_slot_write_coverage -- --nocapture
+
 check-examples:
     cargo test --locked -p rustia --examples --no-run
 

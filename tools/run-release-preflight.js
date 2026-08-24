@@ -76,3 +76,27 @@ run("cargo", [
 run("cargo", ["test", "--locked", "--manifest-path", "fuzz/Cargo.toml"]);
 run("cargo", ["test", "--locked", "-p", "rustia", "--examples", "--no-run"]);
 run("cargo", ["test", "--locked", "--workspace"]);
+run("cargo", [
+  "clippy",
+  "--locked",
+  "-p",
+  "rustia-compiler",
+  "--all-targets",
+  "--features",
+  "table-write-diagnostics",
+  "--",
+  "-D",
+  "warnings",
+]);
+run("cargo", [
+  "test",
+  "--locked",
+  "-p",
+  "rustia-compiler",
+  "--features",
+  "table-write-diagnostics",
+  "--test",
+  "array_slot_write_coverage",
+  "--",
+  "--nocapture",
+]);
