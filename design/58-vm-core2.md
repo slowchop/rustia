@@ -214,6 +214,25 @@ Droplet deletion. Evidence is under
 with the accepted receipt slice, plain-mode register/branch work now runs
 about 12% below the pre-C2.2 baseline on this workload and protocol.
 
+The same-day attempts to extend the tape gate to the other four tracked
+workloads were host-limited and remain unpublished. One `dense_tables`
+comparison qualified and completed but was inconclusive by the predeclared
+rule: +0.881% candidate point estimate with a pooled interval of -0.631% to
++2.405%, while the conservative hierarchical envelope of -3.046% to +6.830%
+touched the +5% material-regression boundary, so publication was refused and
+diagnostics were retained. Every other attempt failed the predeclared host
+qualification or block gates outright (within-order ratio spreads of 8.882%
+to 23.389%, plus two contamination/steal discards) across both the AMS3 and
+NYC3 Basic Intel pools as shared-host noise worsened through the morning. In
+total eight ephemeral Droplets ran for about 131 minutes; every Droplet and
+temporary SSH key deletion was confirmed, and cloud spend stayed under the
+task's $1.00 ceiling. No workload showed a statistically clear slowdown, the
+dense point estimate is consistent with neutrality on a HotIR-dominated
+workload the tape barely touches (about 1% dynamic share), and the accepted
+`generic_iteration` interval is wholly below zero, so the tape slice is
+accepted on its diagnostic workload with the remaining per-workload gates
+deferred to a quieter host window or the next full cross-engine matrix.
+
 ### C2.3 — complete compiler O2 and cleanup liveness
 
 - Add commit-late local compound assignment, target-directed nested lowering, constant/RK arithmetic and index

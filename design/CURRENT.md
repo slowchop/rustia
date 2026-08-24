@@ -408,7 +408,11 @@ unreachable suspended-coroutine frames.
    4.0059% lower `generic_iteration` ns/unit (pooled medians 13,092.320 versus 12,567.856) with a
    conservative nominal 95% interval of -7.1417% to -2.8710%, excluding zero and the +5% boundary. All
    808 formal samples matched the checksum and run `20260824T053606Z-bad0cf1d` confirmed key/Droplet
-   cleanup. Next come compiler liveness/receipts, a VM-owned register arena with
+   cleanup. Same-day gates for the other four tracked workloads were host-limited: one qualified
+   `dense_tables` comparison was inconclusive by the predeclared conservative-envelope rule (+0.881%
+   point, -3.046% to +6.830%) and every other attempt failed host qualification on both AMS3 and NYC3
+   pools; diagnostics were retained, nothing else was published, and all eight Droplets/keys were
+   confirmed deleted. Next come compiler liveness/receipts, a VM-owned register arena with
    compact iterative frames, and direct table/call lanes before productionizing type-directed wasm/AOT.
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 18 workload entries including

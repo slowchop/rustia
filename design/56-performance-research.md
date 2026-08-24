@@ -757,7 +757,16 @@ temporary-key and Droplet deletion. Evidence:
 `bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/analysis.json`.
 Replacing the per-PC executor-selection ladder with one loader-built tape is
 therefore an accepted win on top of the receipt slice for this workload and
-protocol.
+protocol. Same-day extension gates for the other four tracked workloads were
+host-limited: one qualified `dense_tables` comparison was inconclusive
+(+0.881% point, conservative envelope -3.046% to +6.830% touching the +5%
+rule; diagnostics retained, not published), and all `sparse_tables`,
+`closures_upvalues`, and `stdlib_math_table` attempts failed the predeclared
+host qualification gates (8.882%-23.389% within-order spreads or
+contamination discards) on both AMS3 and NYC3 pools before the task's cloud
+budget closed. All eight Droplets and temporary keys were confirmed deleted.
+Cross-workload tape movement therefore remains to be established by the next
+full cross-engine matrix or a quieter dedicated-host window.
 
 ## Estimate vs C++ Luau
 
