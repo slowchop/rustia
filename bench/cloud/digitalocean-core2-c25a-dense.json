@@ -15,8 +15,8 @@
   },
   "source": {
     "baseline_commit": "92d30b8279c0817f96349fdce8ba146b8373639c",
-    "candidate_commit": "066ce1ffab721cd54ad960f2e7b65d11acf04d1a",
-    "harness_commit": "066ce1ffab721cd54ad960f2e7b65d11acf04d1a",
+    "candidate_commit": "2082436260ceab46d97a060f2440457728976309",
+    "harness_commit": "2082436260ceab46d97a060f2440457728976309",
     "expected_sha256": {
       "baseline_original_harness": "084a6a5b3626a85728ea9be1177b50c218b31d535a0ea2125c088113fb72a6e5",
       "overlay_harness": "084a6a5b3626a85728ea9be1177b50c218b31d535a0ea2125c088113fb72a6e5",
@@ -44,7 +44,7 @@
       { "variant": "candidate", "file": "c25a-baab-B4.json" }
     ],
     "bootstrap_repetitions": 20000,
-    "bootstrap_seed": 2026082406,
+    "bootstrap_seed": 2026082407,
     "material_regression_threshold_percent": 5,
     "expected_legs_per_group": 4
   },
