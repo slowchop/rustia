@@ -2080,6 +2080,53 @@ impl VmCell {
         })
     }
 
+    /// VM Core 2 C2.5a: commits a write to an array slot the caller has
+    /// already proven present and non-nil.
+    ///
+    /// A present key bypasses `__newindex` in both layouts, so this lane needs
+    /// no metatable test, and a present array slot shadows any hash/node-part
+    /// entry carrying the same numeric key (`table_numeric_get` and
+    /// `puc_getnum` both read the array first, and every array-growth site
+    /// removes the numeric hash key as it fills the slot). Overwriting the
+    /// slot therefore cannot allocate, grow, shrink, rehash, or change any
+    /// array/hash length or capacity - exactly the `table_data_memory_usage`
+    /// input set - so the write skips `mutate_table_data`'s before/after
+    /// census and its no-op `side_usage` adjustment and performs only the one
+    /// guest-visible `mutation_version` bump. Storing nil is included: it
+    /// clears a present slot in place without moving the array boundary.
+    /// Readonly is the only remaining rejection.
+    #[inline]
+    fn write_present_array_slot(
+        &mut self,
+        table: u32,
+        one_based_index: usize,
+        value: Value,
+    ) -> Option<TableNumericArrayWrite> {
+        let table_data = self.tables.get_mut(table)?;
+        debug_assert!(
+            table_data
+                .array
+                .get(one_based_index - 1)
+                .is_some_and(|existing| !existing.is_nil()),
+            "the caller must prove the array slot is present and non-nil"
+        );
+        debug_assert!(
+            numeric_array_slot_shadows_hash_part(table_data, one_based_index),
+            "a non-nil array slot must shadow every hash entry for the same numeric key"
+        );
+        if table_data.readonly {
+            return Some(TableNumericArrayWrite::Readonly);
+        }
+        table_data.array[one_based_index - 1] = value;
+        table_data.mutation_version = table_data.mutation_version.wrapping_add(1);
+        #[cfg(any(test, feature = "table-write-diagnostics"))]
+        {
+            self.numeric_array_slot_writes.direct =
+                self.numeric_array_slot_writes.direct.wrapping_add(1);
+        }
+        Some(TableNumericArrayWrite::Stored)
+    }
+
     /// Stores a numeric array slot when doing so cannot observe `__newindex`.
     ///
     /// Existing non-nil slots always bypass `__newindex`. Missing slots may be stored directly
@@ -2098,54 +2145,11 @@ impl VmCell {
         if one_based_index == 0 || one_based_index > MAX_LUAU_ARRAY_INDEX {
             return Some(TableNumericArrayWrite::Deferred);
         }
-        // VM Core 2 C2.5a direct existing-slot mutation.
-        //
-        // The guard proves an already-materialized, non-nil array slot: the
-        // handle resolves, `one_based_index - 1` is inside `array`, and the
-        // value stored there is not nil. A present key bypasses `__newindex`
-        // in both layouts, so no metatable check is needed, and a present
-        // array slot shadows any hash/node part entry for the same numeric
-        // key (`table_numeric_get`/`puc_getnum` both read the array first).
-        // Overwriting it therefore cannot allocate, grow, shrink, rehash, or
-        // change the array/hash length or capacity, which is exactly the
-        // `table_data_memory_usage` input set. The write consequently skips
-        // `mutate_table_data`'s before/after census and its no-op
-        // `side_usage` adjustment and performs only the one guest-visible
-        // `mutation_version` bump. Storing nil is included: it clears a
-        // present slot in place without moving the array boundary.
-        // Anything else - a missing handle, index 0, an out-of-range index,
-        // or an existing nil slot - falls through to the unchanged generic
-        // path below before any mutation.
-        //
-        // The guard reuses the handle lookup the generic path already needed,
-        // so a miss costs one extra slot read and nil test and keeps its
-        // original single lookup.
+        // VM Core 2 C2.5a admits the direct existing-slot lane from inside
+        // each layout branch, on the `existing` value that branch already
+        // loads, so a lane miss costs nothing beyond one test the branch was
+        // going to make anyway.
         let table_data = self.tables.get(table)?;
-        if table_data
-            .array
-            .get(one_based_index - 1)
-            .is_some_and(|existing| !existing.is_nil())
-        {
-            debug_assert!(
-                numeric_array_slot_shadows_hash_part(table_data, one_based_index),
-                "a non-nil array slot must shadow every hash entry for the same numeric key"
-            );
-            if table_data.readonly {
-                return Some(TableNumericArrayWrite::Readonly);
-            }
-            let table_data = self
-                .tables
-                .get_mut(table)
-                .expect("the table handle resolved immediately above");
-            table_data.array[one_based_index - 1] = value;
-            table_data.mutation_version = table_data.mutation_version.wrapping_add(1);
-            #[cfg(any(test, feature = "table-write-diagnostics"))]
-            {
-                self.numeric_array_slot_writes.direct =
-                    self.numeric_array_slot_writes.direct.wrapping_add(1);
-            }
-            return Some(TableNumericArrayWrite::Stored);
-        }
         if table_data.puc_hash().is_some() {
             // PUC: the array never grows outside rehash, so out-of-range
             // indices defer to the general path (node part); in-range writes
@@ -2154,7 +2158,10 @@ impl VmCell {
                 return Some(TableNumericArrayWrite::Deferred);
             }
             let existing = table_data.array[one_based_index - 1];
-            if existing.is_nil() && table_data.metatable.is_some() {
+            if !existing.is_nil() {
+                return self.write_present_array_slot(table, one_based_index, value);
+            }
+            if table_data.metatable.is_some() {
                 return Some(TableNumericArrayWrite::Deferred);
             }
             if table_data.readonly {
@@ -2178,7 +2185,10 @@ impl VmCell {
             .get(one_based_index - 1)
             .copied()
             .unwrap_or_else(Value::nil);
-        if existing.is_nil() && table_data.metatable.is_some() {
+        if !existing.is_nil() {
+            return self.write_present_array_slot(table, one_based_index, value);
+        }
+        if table_data.metatable.is_some() {
             return Some(TableNumericArrayWrite::Deferred);
         }
         if table_data.readonly {
