@@ -1,0 +1,101 @@
+name: Nightly Cross-Engine Matrix
+
+# Runs at 18:00 UTC (04:00 AEST) and measures the full cross-engine matrix on
+# one ephemeral dedicated Linode, but only when main has gained
+# performance-relevant commits since the last recorded cohort. Timing happens
+# exclusively on the Linode; this hosted runner only coordinates. The workflow
+# is the one sanctioned holder of contents-write so accepted cohorts land on
+# main and flow to the dashboard through the existing publication workflow.
+"on":
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rustia-nightly-matrix
+  cancel-in-progress: false
+
+jobs:
+  matrix:
+    name: Conditional dedicated-Linode matrix
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+
+    steps:
+      - name: Checkout trusted main history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Decide whether new performance-relevant commits exist
+        id: gate
+        run: |
+          node tools/render-benchmark-operations-status.js
+          pending="$(node -p 'JSON.parse(require("fs").readFileSync("bench/operations-status.json","utf8")).progress.pending_relevant_commit_count')"
+          git checkout -- bench/operations-status.json
+          echo "pending=$pending" >> "$GITHUB_OUTPUT"
+          if [ "$pending" = "0" ]; then
+            echo "No performance-relevant commits since the last recorded cohort; skipping." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Pending performance-relevant commits: $pending; running the matrix." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Install Linode credential
+        if: steps.gate.outputs.pending != '0'
+        env:
+          LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}
+        run: |
+          test -n "$LINODE_TOKEN"
+          install -d -m 700 .rustia-benchmark-state/linode
+          install -m 600 /dev/null .rustia-benchmark-state/linode/token
+          printf '%s\n' "$LINODE_TOKEN" > .rustia-benchmark-state/linode/token
+
+      - name: Freeze per-commit matrix protocol
+        if: steps.gate.outputs.pending != '0'
+        run: |
+          benchmark_commit="$(git rev-parse HEAD)"
+          short_commit="${benchmark_commit:0:12}"
+          config="bench/cloud/linode-cross-engine-matrix-${short_commit}.json"
+          node tools/create-linode-matrix-config.js --output "$config"
+          node tools/check-package-files.js
+          node tools/check-publishability.js
+          git config user.name "rustia-benchmark"
+          git config user.email "benchmark@rustia.invalid"
+          git add "$config" design/package-files.json design/publishability.json
+          git commit -m "Freeze cross-engine matrix ${short_commit}"
+          printf 'RUSTIA_MATRIX_CONFIG=%s\n' "$config" >> "$GITHUB_ENV"
+          printf 'RUSTIA_MATRIX_COMMIT=%s\n' "$short_commit" >> "$GITHUB_ENV"
+
+      - name: Run cross-engine matrix on one ephemeral dedicated Linode
+        if: steps.gate.outputs.pending != '0'
+        run: node tools/run-linode-benchmark.js bench "$RUSTIA_MATRIX_CONFIG"
+
+      - name: Publish accepted cohort to main
+        if: steps.gate.outputs.pending != '0'
+        run: |
+          node tools/render-benchmark-operations-status.js
+          node bench/render-current-results.js
+          node tools/check-benchmark-results.js
+          git add bench design
+          git commit -m "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT}"
+          if ! git push origin HEAD:main; then
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+      - name: Verify Linode cleanup
+        if: always() && steps.gate.outputs.pending != '0'
+        run: |
+          node tools/run-linode-benchmark.js status || true
+          node tools/run-linode-benchmark.js destroy || true
+          rm -f .rustia-benchmark-state/linode/token

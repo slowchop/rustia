@@ -9,6 +9,7 @@ const workflowDir = path.join(root, ".github", "workflows");
 const ciPath = path.join(workflowDir, "ci.yml");
 const rustiaMemoryPath = path.join(workflowDir, "linode-rustia-memory.yml");
 const benchmarkPublicationPath = path.join(workflowDir, "publish-benchmark-data.yml");
+const nightlyMatrixPath = path.join(workflowDir, "nightly-matrix-bench.yml");
 const rustToolchainPath = path.join(root, "rust-toolchain.toml");
 const releasePreflightPath = path.join(root, "tools", "run-release-preflight.js");
 
@@ -274,6 +275,33 @@ function checkRustiaMemory(text) {
   checkActionPins(text, label);
 }
 
+function checkNightlyMatrix(text) {
+  const label = ".github/workflows/nightly-matrix-bench.yml";
+  requireIncludes(text, "name: Nightly Cross-Engine Matrix\n", label);
+  requireIncludes(text, "\"on\":\n  schedule:\n    - cron: \"0 18 * * *\"\n  workflow_dispatch:\n", label);
+  // The single sanctioned contents-write grant: this workflow may push
+  // accepted matrix cohorts to main and nothing else may.
+  requireIncludes(text, "permissions:\n  contents: write\n", label);
+  requireIncludes(text, "cancel-in-progress: false\n", label);
+  requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
+  requireIncludes(text, "ref: main", label);
+  requireIncludes(text, "runs-on: ubuntu-latest", label);
+  requireIncludes(text, "pending_relevant_commit_count", label);
+  requireIncludes(text, "steps.gate.outputs.pending != '0'", label);
+  requireIncludes(text, "LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}", label);
+  requireIncludes(text, "node tools/create-linode-matrix-config.js", label);
+  requireIncludes(text, "node tools/run-linode-benchmark.js bench", label);
+  requireIncludes(text, "node tools/check-benchmark-results.js", label);
+  requireIncludes(text, "node tools/run-linode-benchmark.js destroy", label);
+  requireIncludes(text, "rm -f .rustia-benchmark-state/linode/token", label);
+  forbidIncludes(text, "actions/upload-artifact", label);
+  forbidIncludes(text, "retention-days:", label);
+  forbidIncludes(text, "pull_request_target", label);
+  forbidIncludes(text, "workflow_run", label);
+  forbidIncludes(text, "BENCH_DATA_DEPLOY_KEY", label);
+  checkActionPins(text, label);
+}
+
 function checkBenchmarkPublication(text) {
   const label = ".github/workflows/publish-benchmark-data.yml";
   requireIncludes(text, "name: Publish Benchmark Data\n", label);
@@ -323,7 +351,12 @@ function checkBenchmarkPublication(text) {
 }
 
 const files = workflowFiles();
-for (const required of ["ci.yml", "linode-rustia-memory.yml", "publish-benchmark-data.yml"]) {
+for (const required of [
+  "ci.yml",
+  "linode-rustia-memory.yml",
+  "nightly-matrix-bench.yml",
+  "publish-benchmark-data.yml",
+]) {
   if (!files.includes(required)) {
     fail(`missing .github/workflows/${required}`);
   }
@@ -334,6 +367,7 @@ if (files.includes("benchmarks.yml")) {
 checkRunnerLabels(files);
 checkCi(readWorkflow(ciPath));
 checkRustiaMemory(readWorkflow(rustiaMemoryPath));
+checkNightlyMatrix(readWorkflow(nightlyMatrixPath));
 checkBenchmarkPublication(readWorkflow(benchmarkPublicationPath));
 checkReleasePreflight(readWorkflow(releasePreflightPath));
 

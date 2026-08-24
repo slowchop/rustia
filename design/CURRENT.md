@@ -465,9 +465,16 @@ unreachable suspended-coroutine frames.
 6. **Keep the executable conformance corpus green**. The current repo has 712 executable fixtures covering 511
    behavior refs with no pending rows: 694/493 are Luau 0.709 oracle-backed and 18/18 are offline PUC 5.1.5
    oracle-backed. New engine work should add focused fixtures rather than re-opening pending inventory.
-7. **Maintain benchmark operations** — hosted CI remains validation-only. Operator-started cloud lifecycles are
+7. **Maintain benchmark operations** — hosted runners never time anything; ephemeral dedicated cloud hosts are
    the timing authority: dedicated Linode for complete Linux/wasm matrices and qualified DigitalOcean A/B for
    fixed-work optimization decisions. Both must keep their provenance, completeness, and cleanup gates green.
+   Matrix cohorts now run on an operator-sanctioned nightly schedule:
+   `.github/workflows/nightly-matrix-bench.yml` (18:00 UTC / 04:00 AEST) coordinates one ephemeral dedicated
+   Linode only when `bench/operations-status.json` reports pending performance-relevant commits, freezes the
+   exact-commit protocol with `tools/create-linode-matrix-config.js`, and pushes accepted cohorts to `main`
+   (the repository's single sanctioned CI contents-write grant, shape-pinned by `tools/check-workflows.js`).
+   Failed or unqualified nights publish nothing and retry the next night, capping spend at one Linode
+   (~$0.11) per night.
 
 **Pre-release gates:** see the "What's next" section below. Object reclamation/limits and deterministic
 decision reset, maintained live-memory accounting, and the shared native/Node-V8 mixed-heap pressure gate are
