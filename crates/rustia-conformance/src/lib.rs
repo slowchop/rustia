@@ -59,6 +59,20 @@ pub struct PendingCase {
 }
 
 pub fn run_repository(repo: impl AsRef<Path>) -> Result<Report> {
+    run_repository_with_experimental_o2(repo, rustia_compiler::ExperimentalO2Options::default())
+}
+
+/// Runs the complete corpus with the given default-disabled O2 families
+/// enabled for fixture compilation (preludes and `loadstring` chunks stay on
+/// the default compiler). This is the per-family enablement gate from
+/// `design/58-vm-core2.md` §C2.3: every fixture must hold its expected
+/// behavior — including fuel-limit and deterministic-collection expectations,
+/// which the attached logical-unit schedule restores — under optimized
+/// lowering.
+pub fn run_repository_with_experimental_o2(
+    repo: impl AsRef<Path>,
+    experimental_o2: rustia_compiler::ExperimentalO2Options,
+) -> Result<Report> {
     let repo = repo.as_ref();
     let known_refs = load_ref_catalog(repo)?;
     let manifest_text = load_manifest_text(repo)?;
@@ -83,7 +97,7 @@ pub fn run_repository(repo: impl AsRef<Path>) -> Result<Report> {
             OracleStatus::RustiaOnly => report.rustia_only += 1,
             OracleStatus::PucLua515 => report.puc51_oracle += 1,
         }
-        case.run(repo, &known_refs)?;
+        case.run(repo, &known_refs, experimental_o2)?;
     }
 
     if report.fixtures == 0 {
@@ -313,7 +327,12 @@ impl<'a> Case<'a> {
         Ok(())
     }
 
-    fn run(&self, repo: &Path, known_refs: &BTreeMap<String, CatalogStatus>) -> Result<()> {
+    fn run(
+        &self,
+        repo: &Path,
+        known_refs: &BTreeMap<String, CatalogStatus>,
+        experimental_o2: rustia_compiler::ExperimentalO2Options,
+    ) -> Result<()> {
         self.validate_metadata(known_refs)?;
 
         if self.oracle == OracleStatus::PendingImpl {
@@ -322,12 +341,12 @@ impl<'a> Case<'a> {
             return Ok(());
         }
 
-        self.run_luau(repo)
+        self.run_luau(repo, experimental_o2)
     }
 
     fn run_forced(&self, repo: &Path, known_refs: &BTreeMap<String, CatalogStatus>) -> Result<()> {
         self.validate_metadata(known_refs)?;
-        self.run_luau(repo)
+        self.run_luau(repo, rustia_compiler::ExperimentalO2Options::default())
     }
 
     fn validate_metadata(&self, known_refs: &BTreeMap<String, CatalogStatus>) -> Result<()> {
@@ -406,15 +425,24 @@ impl<'a> Case<'a> {
         Ok(())
     }
 
-    fn run_luau(&self, repo: &Path) -> Result<()> {
+    fn run_luau(
+        &self,
+        repo: &Path,
+        experimental_o2: rustia_compiler::ExperimentalO2Options,
+    ) -> Result<()> {
         let source_path = resolve_manifest_source_path(repo, self.path)?;
         let source = fs::read(&source_path).map_err(|error| Error::io(&source_path, error))?;
         let source_name = source_path
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or(self.path);
-        let result =
-            compile_and_run_luau_conformance(&source, source_name, self.path, self.profile);
+        let result = compile_and_run_luau_conformance_with_o2(
+            &source,
+            source_name,
+            self.path,
+            self.profile,
+            experimental_o2,
+        );
         match self.expect {
             Expect::Pass => {
                 result.map_err(|error| {
@@ -566,16 +594,34 @@ struct RunOutput {
     string: Option<Vec<u8>>,
 }
 
+#[cfg(test)]
 fn compile_and_run_luau_conformance(
     source: &[u8],
     source_name: &str,
     harness_path: &str,
     profile: Profile,
 ) -> std::result::Result<RunOutput, String> {
+    compile_and_run_luau_conformance_with_o2(
+        source,
+        source_name,
+        harness_path,
+        profile,
+        rustia_compiler::ExperimentalO2Options::default(),
+    )
+}
+
+fn compile_and_run_luau_conformance_with_o2(
+    source: &[u8],
+    source_name: &str,
+    harness_path: &str,
+    profile: Profile,
+    experimental_o2: rustia_compiler::ExperimentalO2Options,
+) -> std::result::Result<RunOutput, String> {
     let chunk = parse_source_bytes(source).map_err(|error| error.to_string())?;
     let options = CompileOptions {
         builtins: BuiltinEnvironment::LuauConformance,
         puc51_constructor_order: profile == Profile::Puc51Compat,
+        experimental_o2,
         ..CompileOptions::default()
     }
     .with_source_bytes(source_name, source);
