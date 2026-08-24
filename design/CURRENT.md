@@ -426,7 +426,7 @@ unreachable suspended-coroutine frames.
    assignment, dead Move/Clear tail removal, register-file tightening) are prepared with per-family
    differential tests and a generated workload preview on the `claude/c2-3-liveness-analysis-7cd991` branch
    and stay unmerged until the tape's block receipts make the fuel/GC schedule optimization-independent
-   (see [`58-vm-core2.md`](58-vm-core2.md) §C2.3). C2.5's first slice is also merged: numeric writes to a
+   (see [`58-vm-core2.md`](58-vm-core2.md) §C2.3). The C2.5a slice is also merged: numeric writes to a
    proven existing, non-nil array slot mutate in place, skipping `mutate_table_data`'s before/after memory
    census and its no-op `side_usage` adjustment while keeping readonly, `__newindex`, insertion-order, and
    the single `mutation_version` bump exact; a `debug_assert!` pins the shadowing invariant across the unit,
