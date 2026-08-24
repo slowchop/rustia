@@ -1705,7 +1705,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-compiler/Cargo.toml",
       "publish": false,
-      "file_count": 13,
+      "file_count": 17,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1715,8 +1715,12 @@
         "LICENSE-MIT",
         "README.md",
         "src/lib.rs",
+        "src/o2.rs",
         "tests/array_slot_write_coverage.rs",
         "tests/liveness_analysis.rs",
+        "tests/o2_corpus_compile.rs",
+        "tests/o2_families.rs",
+        "tests/o2_workload_preview.rs",
         "tests/opcode_census.rs",
         "tests/performance_fastpaths.rs",
         "tests/performance_gc_audit.rs"

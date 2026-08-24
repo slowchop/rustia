@@ -1,0 +1,221 @@
+//! Generated preview of the default-disabled O2 families on the five tracked
+//! workloads: static and dynamic instruction-count reductions and register
+//! file sizes, per family and with every family enabled.
+//!
+//! Writes `design/58-vm-core2-c23-o2-preview.json` and keeps it in sync
+//! byte-for-byte (regenerate with `RUSTIA_UPDATE_C23_O2_PREVIEW=1 cargo test
+//! -p rustia-compiler --test o2_workload_preview`). Every dynamic figure is
+//! an exact scalar instruction count from the opcode census; this file
+//! carries no timing claims, and none of these families are enabled by
+//! default.
+
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
+
+use rustia_compiler::{compile_with_options, CompileOptions, ExperimentalO2Options};
+use rustia_parser::parse_source;
+use rustia_vm::{Opcode, Profile, Program, Value, Vm, VmSettings};
+
+const WORKLOADS: [&str; 5] = [
+    "01_dense_tables",
+    "02_sparse_tables",
+    "04_closures_upvalues",
+    "09_generic_iteration",
+    "10_stdlib_math_table",
+];
+
+/// Matches the merged census report so the two files are comparable.
+const DYNAMIC_N: f64 = 8.0;
+
+const FAMILIES: [(&str, ExperimentalO2Options); 5] = [
+    (
+        "fold_constant_branches",
+        ExperimentalO2Options {
+            fold_constant_branches: true,
+            commit_late_compound_locals: false,
+            remove_dead_register_tails: false,
+            tighten_local_slots: false,
+        },
+    ),
+    (
+        "commit_late_compound_locals",
+        ExperimentalO2Options {
+            fold_constant_branches: false,
+            commit_late_compound_locals: true,
+            remove_dead_register_tails: false,
+            tighten_local_slots: false,
+        },
+    ),
+    (
+        "remove_dead_register_tails",
+        ExperimentalO2Options {
+            fold_constant_branches: false,
+            commit_late_compound_locals: false,
+            remove_dead_register_tails: true,
+            tighten_local_slots: false,
+        },
+    ),
+    (
+        "tighten_local_slots",
+        ExperimentalO2Options {
+            fold_constant_branches: false,
+            commit_late_compound_locals: false,
+            remove_dead_register_tails: false,
+            tighten_local_slots: true,
+        },
+    ),
+    ("all", ExperimentalO2Options::ALL),
+];
+
+fn repo_path(relative: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(relative)
+}
+
+fn compile_workload(id: &str, o2: ExperimentalO2Options) -> Program {
+    let source = std::fs::read_to_string(repo_path(&format!("bench/workloads/luau/{id}.luau")))
+        .unwrap_or_else(|error| panic!("read workload {id}: {error}"));
+    let chunk =
+        parse_source(&source).unwrap_or_else(|error| panic!("parse workload {id}: {error}"));
+    let options = CompileOptions {
+        experimental_o2: o2,
+        ..CompileOptions::default()
+    }
+    .with_source(id, &source);
+    compile_with_options(&chunk, options)
+        .unwrap_or_else(|error| panic!("compile workload {id}: {error}"))
+}
+
+struct Measurement {
+    static_instructions: u64,
+    register_slots: u64,
+    dynamic_instructions: u64,
+    dynamic_move_clear: u64,
+    checksum: u64,
+}
+
+fn measure(program: &Program) -> Measurement {
+    let static_instructions = std::iter::once(&program.main)
+        .chain(program.functions.iter())
+        .map(|function| function.code.len() as u64)
+        .sum();
+    let register_slots = std::iter::once(&program.main)
+        .chain(program.functions.iter())
+        .map(|function| function.max_registers as u64)
+        .sum();
+
+    let settings = VmSettings {
+        enable_opcode_census: true,
+        ..VmSettings::default()
+    };
+    let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+    let function = vm
+        .run(program)
+        .unwrap_or_else(|error| panic!("workload setup failed: {error}"));
+    vm.reset_opcode_census();
+    let result = vm
+        .call_function(program, function, &[Value::number(DYNAMIC_N)])
+        .unwrap_or_else(|error| panic!("workload call failed: {error}"));
+    let checksum = result
+        .as_number()
+        .unwrap_or_else(|| panic!("workload checksum must be a number"))
+        .to_bits();
+    let census = vm.opcode_census().expect("census enabled");
+    let dynamic_instructions = census.iter().map(|(_, count)| *count).sum();
+    let dynamic_move_clear = census
+        .iter()
+        .filter(|(opcode, _)| matches!(opcode, Opcode::Move | Opcode::ClearLocalCell))
+        .map(|(_, count)| *count)
+        .sum();
+    Measurement {
+        static_instructions,
+        register_slots,
+        dynamic_instructions,
+        dynamic_move_clear,
+        checksum,
+    }
+}
+
+fn render_preview() -> String {
+    let mut json = String::new();
+    json.push_str("{\n");
+    json.push_str(
+        "  \"comment\": \"Preview of the default-disabled C2.3 O2 families on the five \
+         tracked workloads. Generated by crates/rustia-compiler/tests/o2_workload_preview.rs; \
+         regenerate with RUSTIA_UPDATE_C23_O2_PREVIEW=1. Counts are exact static instruction \
+         totals and exact scalar executed-instruction totals for one f(n) call; register \
+         slots sum max_registers across prototypes. No family is enabled by default and no \
+         timing is claimed. Enablement stays gated on C2.2 block receipts.\",\n",
+    );
+    let _ = writeln!(json, "  \"dynamic_n\": {},", DYNAMIC_N as u64);
+    json.push_str("  \"workloads\": {\n");
+    for (workload_index, id) in WORKLOADS.iter().enumerate() {
+        let baseline_program = compile_workload(id, ExperimentalO2Options::default());
+        let baseline = measure(&baseline_program);
+        let _ = writeln!(json, "    \"{id}\": {{");
+        json.push_str("      \"baseline\": ");
+        let _ = write!(
+            json,
+            "{{ \"static_instructions\": {}, \"register_slots\": {}, \
+             \"dynamic_instructions\": {}, \"dynamic_move_clear\": {} }}",
+            baseline.static_instructions,
+            baseline.register_slots,
+            baseline.dynamic_instructions,
+            baseline.dynamic_move_clear
+        );
+        json.push_str(",\n");
+        for (family_index, (name, family)) in FAMILIES.iter().enumerate() {
+            let program = compile_workload(id, *family);
+            let measured = measure(&program);
+            assert_eq!(
+                measured.checksum, baseline.checksum,
+                "family {name} changed the {id} checksum"
+            );
+            let _ = write!(
+                json,
+                "      \"{name}\": {{ \"static_instructions\": {}, \"register_slots\": {}, \
+                 \"dynamic_instructions\": {}, \"dynamic_move_clear\": {} }}",
+                measured.static_instructions,
+                measured.register_slots,
+                measured.dynamic_instructions,
+                measured.dynamic_move_clear
+            );
+            json.push_str(if family_index + 1 < FAMILIES.len() {
+                ",\n"
+            } else {
+                "\n"
+            });
+        }
+        json.push_str("    }");
+        json.push_str(if workload_index + 1 < WORKLOADS.len() {
+            ",\n"
+        } else {
+            "\n"
+        });
+    }
+    json.push_str("  }\n}\n");
+    json
+}
+
+#[test]
+fn committed_o2_preview_matches_the_compiler() {
+    let path = repo_path("design/58-vm-core2-c23-o2-preview.json");
+    let rendered = render_preview();
+    if std::env::var_os("RUSTIA_UPDATE_C23_O2_PREVIEW").is_some() {
+        std::fs::write(&path, &rendered)
+            .unwrap_or_else(|error| panic!("write O2 preview: {error}"));
+        return;
+    }
+    let committed = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+        panic!(
+            "read committed O2 preview ({error}); generate it with \
+             RUSTIA_UPDATE_C23_O2_PREVIEW=1 cargo test -p rustia-compiler \
+             --test o2_workload_preview"
+        )
+    });
+    assert_eq!(
+        committed, rendered,
+        "the committed O2 preview drifted; regenerate with RUSTIA_UPDATE_C23_O2_PREVIEW=1"
+    );
+}
