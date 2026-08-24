@@ -689,9 +689,34 @@ removed. C2.2 implements private four- and six-operation receipts inside one
 uninterrupted Region, resolved once per function. The six-operation form also
 absorbs the compiler's destination commit and result cleanup for the hot
 uncaptured-local accumulator shape. Focused semantic review and the complete
-correctness suite passed; controlled DigitalOcean timing remains the promotion
-gate. This independently gated bridge precedes the mode-selected compact execution tape described in
-[`58-vm-core2.md`](58-vm-core2.md).
+correctness suite passed before controlled timing.
+
+### VM Core 2 C2.2 — Region-integrated receipts accepted
+
+The exact DigitalOcean comparison used baseline `9695a62` and candidate
+`84e732a` on fixed `generic_iteration` work at `n=4000`. On an AMS3 Basic Intel
+4-vCPU/8-GiB host, four counterbalanced qualification pairs passed with a
+maximum 1.9286% within-order ratio spread. The independent eight-leg ABBA/BAAB
+comparison produced pooled medians of 15,367.787 ns/unit for the baseline and
+14,112.992 ns/unit for the candidate. Candidate ns/unit was 8.1651% lower, with
+a conservative nominal 95% interval from -10.2126% to -5.9577%. The interval
+excludes both zero and the predeclared +5% material-regression boundary, so this
+is accepted evidence of a speedup for the measured workload and Linux protocol.
+
+All 808 formal samples matched the checksum; all 19 timed legs and all 11 final
+admitted idle windows passed their host gates. The same final binary produced
+three additional retained history sidecars. The complete cross-engine matrix
+cohort remains unchanged; the accepted A/B appears
+as an optimization check instead of mixing a one-workload candidate into that
+cohort. Run `20260824T022115Z-64b2afe9` confirmed temporary-key and Droplet
+cleanup. Evidence:
+`bench/history/evidence/84e732add4863150bd993f3354b274ab9c3ee41a/analysis.json`.
+
+This independently gated bridge precedes the mode-selected whole-function
+compact executable tape described in [`58-vm-core2.md`](58-vm-core2.md). That
+next slice should remove the repeated scalar/HotIR/call/Region selection ladder
+for plain verified blocks, rather than expanding the receipt catalogue one
+compiler shape at a time.
 
 ## Estimate vs C++ Luau
 

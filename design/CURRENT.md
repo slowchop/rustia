@@ -390,8 +390,13 @@ unreachable suspended-coroutine frames.
    `generic_iteration`, with a conservative nominal 95% interval of +3.720% to +6.135%. The coordinator rejected
    publication, public benchmark history stayed unchanged, and cloud cleanup was confirmed. C2.2 removes the
    competing per-`Move` tier and implements direct register receipts inside one uninterrupted Region, resolved
-   once per function. The receipt slice has passed focused semantic review and correctness validation; its
-   controlled DigitalOcean promotion gate remains pending. Continue from that independently gated slice into a mode-selected compact execution tape,
+   once per function. The receipt slice passed focused semantic review, complete correctness validation, and its
+   controlled DigitalOcean promotion gate: exact candidate `84e732a` used 8.1651% less time on fixed
+   `generic_iteration`, with pooled medians of 15,367.787 versus 14,112.992 ns/unit and a conservative nominal
+   95% interval of -10.2126% to -5.9577%. All 808 formal samples matched; all 19 timed legs and all 11 final
+   admitted idle windows passed their host gates. Run `20260824T022115Z-64b2afe9` confirmed key/Droplet cleanup.
+   Continue from this accepted bridge into a
+   mode-selected whole-function compact execution tape that replaces the Region/receipt production metadata,
    compiler liveness/receipts, a VM-owned register arena with compact iterative frames, and direct table/call
    lanes before productionizing type-directed wasm/AOT.
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).

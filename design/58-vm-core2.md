@@ -1,7 +1,7 @@
 # VM Core 2 — interpreter parity without a JIT
 
 > **Status (2026-08-24): C2.1 was remotely falsified; C2.2 Region-integrated private receipts are
-> implemented and correctness-validated, with the controlled gate pending.** This is the execution plan for the largest safe non-JIT performance programme. It refines the
+> implemented, correctness-validated, and remotely accepted with 8.1651% lower ns/unit.** This is the execution plan for the largest safe non-JIT performance programme. It refines the
 > performance queue in [`56-performance-research.md`](56-performance-research.md); it does not change Luau
 > semantics, the deterministic number contract, or the public no-unsafe policy.
 
@@ -120,7 +120,7 @@ Region path. ClearSpan was measured only as part of the same regressing candidat
 without an independent winning gate. The public bytecode-shape tests remain useful for the replacement receipt;
 the competing runtime tier, its barriers, and ClearSpan production metadata do not.
 
-### C2.2 — make blocks the baseline executor (first slice implemented; gate pending)
+### C2.2 — make blocks the baseline executor (first receipt slice accepted)
 
 - Introduce effect-terminated basic blocks with predecoded operands, logical cost, prefix costs, and liveness.
 - Split entry into plain, metered, and instrumented modes while sharing semantic helpers.
@@ -141,9 +141,34 @@ tape, not another peer tier in the scalar dispatch ladder.
 The compiler contract now pins both the four-operation expression prefix and
 the normal-assignment six-operation lifetime tail. Focused differential tests,
 independent semantic review, the workspace release preflight, conformance
-package verification, fuzz tests, and native/wasm memory-limit checks form the
-correctness gate before the exact DigitalOcean A/B. No developer-host timing is
-admissible and no C2.2 speed claim is made before that controlled comparison.
+package verification, fuzz tests, and native/wasm memory-limit checks passed
+before the exact DigitalOcean A/B. No developer-host timing was used.
+
+The frozen same-host comparison then tested baseline `9695a62` against exact
+candidate `84e732a` on `generic_iteration` at fixed `n=4000`. Four
+counterbalanced qualification pairs passed with 1.9286% maximum within-order
+ratio spread. The independent eight-leg ABBA/BAAB comparison measured pooled
+medians of 15,367.787 ns/unit for the baseline and 14,112.992 ns/unit for the
+candidate: an 8.1651% reduction. Its conservative nominal 95% interval was
+-10.2126% to -5.9577%, wholly below zero as well as the predeclared +5%
+material-regression boundary. All 808 formal samples matched the checksum, all
+19 timed legs and all 11 final admitted idle windows passed their host gates,
+and three additional final-binary measurements were retained as evidence
+sidecars without replacing the complete cross-engine matrix cohort.
+DigitalOcean run `20260824T022115Z-64b2afe9` used an AMS3 Basic Intel
+4-vCPU/8-GiB host and confirmed both temporary-key and Droplet deletion.
+Evidence is under
+`bench/history/evidence/84e732add4863150bd993f3354b274ab9c3ee41a/`.
+
+This result validates the architectural lesson from C2.1: keep verified work
+inside one already-admitted executor instead of adding a competing per-PC tier.
+The next C2.2 slice is a mode-selected whole-function plain executable tape.
+It should replace Region/receipt production metadata, predecode operands
+and direct branch targets into effect-terminated blocks, and side-exit to the
+unchanged scalar instruction before any mutation on a guard miss. Metered and
+instrumented modes remain scalar initially. This attacks the repeated
+executor-selection ladder across arbitrary verified blocks before the larger
+frame-arena rewrite.
 
 ### C2.3 — complete compiler O2 and cleanup liveness
 

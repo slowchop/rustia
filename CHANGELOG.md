@@ -23,8 +23,12 @@ Current unpublished workspace version: `0.0.1`.
   interval of +3.720% to +6.135%, so publication was rejected, ClearSpan was
   removed as unexonerated, and public benchmark history was not changed. The
   compiler now pins both the four-operation prefix and six-operation lifetime
-  shape. Correctness validation is complete; the controlled C2.2 DigitalOcean
-  gate is pending, so no C2.2 speed claim is made yet.
+  shape. The accepted controlled C2.2 DigitalOcean gate then measured 8.1651%
+  lower candidate `generic_iteration` ns/unit, with a conservative nominal 95%
+  interval from -10.2126% to -5.9577%. All 808 formal samples matched the
+  checksum, three final-binary measurements were retained as sidecars, and the
+  Droplet/key cleanup gate passed. Evidence is retained under
+  `bench/history/evidence/84e732add4863150bd993f3354b274ab9c3ee41a/`.
 
 - Region Engine v1 precomputes private side metadata for consecutive,
   effect-certified primitive-constant, register-bookkeeping, guarded-numeric,
@@ -48,6 +52,10 @@ Current unpublished workspace version: `0.0.1`.
   CPU-busy self-hosted Actions runners remain available for builds,
   correctness, validation, relevance detection, and publication, but are
   explicitly non-authoritative for timing and cannot schedule billed hosts.
+  The validation-only benchmark-data publisher now uses that reviewed
+  `general-linux` pool instead of budget-blocked GitHub-hosted capacity,
+  disables checkout credentials, and removes its temporary deploy key and
+  worktrees on every exit before the persistent runner can be reused.
 
 - A new `Profile::Puc51Compat` PUC Lua 5.1.5 compatibility profile: a faithful
   `ltable.c` table backend (array part + node part with main-position chaining,

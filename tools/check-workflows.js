@@ -76,6 +76,7 @@ function checkActionPins(text, label) {
 
 function checkRunnerLabels(files) {
   const hostedRunners = new Set(["ubuntu-latest", "macos-latest", "windows-latest"]);
+  const generalLinuxWorkflows = new Set(["ci.yml", "publish-benchmark-data.yml"]);
   for (const file of files) {
     const text = readWorkflow(path.join(workflowDir, file));
     const label = `.github/workflows/${file}`;
@@ -97,7 +98,7 @@ function checkRunnerLabels(files) {
           "      group: general-linux",
           "      labels: [self-hosted, Linux, X64, general-linux]",
         ].join("\n");
-        if (file !== "ci.yml" || runnerBlock !== expected) {
+        if (!generalLinuxWorkflows.has(file) || runnerBlock !== expected) {
           fail(`${label} expanded runs-on block must select the reviewed general-linux group and labels`);
         }
         continue;
@@ -106,7 +107,7 @@ function checkRunnerLabels(files) {
         fail(`${label} hosted runs-on value must be one of ${[...hostedRunners].join(", ")}, got ${value}`);
       }
     }
-    if (file !== "ci.yml") forbidIncludes(text, "self-hosted", label);
+    if (!generalLinuxWorkflows.has(file)) forbidIncludes(text, "self-hosted", label);
     forbidIncludes(text, "cargo run -p script-bench-harness", label);
     forbidIncludes(text, "node tools/run-wasm-gate.js", label);
     forbidIncludes(text, "node tools/run-wasm-dispatch-gate.js", label);
@@ -281,7 +282,20 @@ function checkBenchmarkPublication(text) {
   requireIncludes(text, "permissions:\n  contents: read\n", label);
   requireIncludes(text, "cancel-in-progress: false\n", label);
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
+  requireIncludes(
+    text,
+    "runs-on:\n      group: general-linux\n      labels: [self-hosted, Linux, X64, general-linux]",
+    label,
+  );
   requireIncludes(text, "ref: main", label);
+  requireIncludes(text, "persist-credentials: false", label);
+  requireIncludes(
+    text,
+    "uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659",
+    label,
+  );
+  requireIncludes(text, "toolchain: 1.95.0", label);
+  requireIncludes(text, "cache: false", label);
   requireIncludes(text, "node tools/check-benchmark-results.js", label);
   requireIncludes(text, "node tools/check-wasm-gate-results.js", label);
   requireIncludes(text, "node tools/render-benchmark-operations-status.js --check", label);
@@ -289,6 +303,10 @@ function checkBenchmarkPublication(text) {
   requireIncludes(text, "git@github.com:slowchop/rustia-bench-data.git", label);
   requireIncludes(text, "bench/operations-status.json", label);
   requireIncludes(text, "node tools/render-benchmark-data-readme.js", label);
+  requireIncludes(text, "publish_dir=\"$(mktemp -d \"$RUNNER_TEMP/rustia-bench-publish.XXXXXX\")\"", label);
+  requireIncludes(text, "rm -rf -- \"$publish_dir\"", label);
+  requireIncludes(text, "trap cleanup EXIT", label);
+  requireIncludes(text, "UserKnownHostsFile=$ssh_dir/known_hosts", label);
   requireIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
   requireIncludes(text, "git -C \"$pages_dir\" push origin HEAD:gh-pages", label);
   for (const forbidden of [

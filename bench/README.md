@@ -222,15 +222,20 @@ Record the following provenance beside any published interpretation:
 
 ### Reproducible ephemeral Linux host
 
-The current DigitalOcean Region Engine v1 follow-up is frozen in
+The current accepted DigitalOcean VM Core 2 C2.2 comparison is frozen in
+[`cloud/digitalocean-core2-84e732a-ams3.json`](cloud/digitalocean-core2-84e732a-ams3.json).
+It compares exact baseline `9695a62` with candidate `84e732a` on
+`generic_iteration` using 101-repetition sample blocks in the fixed-work paired
+protocol and bounded idle/steal gates described below. Its exact AMS3 Basic
+Intel 4-vCPU/8-GiB shape is frozen in the config; the plan fails instead of
+substituting a different size or region. The accepted eight-leg comparison
+measured 8.1651% lower candidate ns/unit with a conservative nominal 95%
+interval of -10.2126% to -5.9577%. Evidence is retained under
+[`history/evidence/84e732add4863150bd993f3354b274ab9c3ee41a/`](history/evidence/84e732add4863150bd993f3354b274ab9c3ee41a/).
+
+The earlier Region Engine v1 comparison remains frozen in
 [`cloud/digitalocean-region-b861ee9.json`](cloud/digitalocean-region-b861ee9.json).
-It compares exact pre-region baseline `7a69d1c` with candidate `b861ee9` on
-`generic_iteration` using 101-repetition sample blocks in the same fixed-work
-paired protocol and bounded
-idle/steal gates described below. Its exact Basic Intel 4-vCPU/8-GiB shape and
-current region are frozen in the config after a sweep of rejected, fully
-cleaned-up shared-CPU placements;
-the plan fails instead of substituting a different size or region. The earlier dense-table follow-up for baseline
+The earlier dense-table follow-up for baseline
 `dac4ec2295f77587c79f04e4ff0a09cb99912f96` and candidate
 `ed65077c2e779ec6a641b8ca2f8c8258b2508a2d` is encoded in
 [`cloud/digitalocean-dense-ed65077.json`](cloud/digitalocean-dense-ed65077.json)
