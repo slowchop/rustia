@@ -77,7 +77,11 @@ function checkActionPins(text, label) {
 
 function checkRunnerLabels(files) {
   const hostedRunners = new Set(["ubuntu-latest", "macos-latest", "windows-latest"]);
-  const generalLinuxWorkflows = new Set(["ci.yml", "publish-benchmark-data.yml"]);
+  const generalLinuxWorkflows = new Set([
+    "ci.yml",
+    "nightly-matrix-bench.yml",
+    "publish-benchmark-data.yml",
+  ]);
   for (const file of files) {
     const text = readWorkflow(path.join(workflowDir, file));
     const label = `.github/workflows/${file}`;
@@ -285,7 +289,11 @@ function checkNightlyMatrix(text) {
   requireIncludes(text, "cancel-in-progress: false\n", label);
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
   requireIncludes(text, "ref: main", label);
-  requireIncludes(text, "runs-on: ubuntu-latest", label);
+  requireIncludes(
+    text,
+    "runs-on:\n      group: general-linux\n      labels: [self-hosted, Linux, X64, general-linux]",
+    label,
+  );
   requireIncludes(text, "pending_relevant_commit_count", label);
   requireIncludes(text, "steps.gate.outputs.pending != '0'", label);
   requireIncludes(text, "LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}", label);

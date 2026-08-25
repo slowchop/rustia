@@ -22,7 +22,9 @@ jobs:
   matrix:
     name: Conditional dedicated-Linode matrix
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on:
+      group: general-linux
+      labels: [self-hosted, Linux, X64, general-linux]
     timeout-minutes: 80
 
     steps:
