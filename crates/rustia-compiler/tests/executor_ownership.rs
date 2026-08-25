@@ -29,8 +29,14 @@ const WORKLOADS: [&str; 6] = [
 ];
 
 /// Large enough for steady-state executor selection, small enough for a debug
-/// test run.
-const N: f64 = 32.0;
+/// test run. Override with `RUSTIA_EXECUTOR_CENSUS_N` to check that a reported
+/// count scales the way its claimed mechanism says it should.
+fn units() -> f64 {
+    std::env::var("RUSTIA_EXECUTOR_CENSUS_N")
+        .ok()
+        .and_then(|raw| raw.parse::<f64>().ok())
+        .unwrap_or(32.0)
+}
 
 fn repo_path(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -59,7 +65,7 @@ fn census_of(program: &Program) -> (ExecutorCensus, f64) {
         .run(program)
         .unwrap_or_else(|error| panic!("workload setup failed: {error}"));
     let result = vm
-        .call_function(program, function, &[Value::number(N)])
+        .call_function(program, function, &[Value::number(units())])
         .unwrap_or_else(|error| panic!("workload call failed: {error}"));
     let checksum = result.as_number().expect("workload returns a number");
     (vm.executor_census(), checksum)
@@ -93,6 +99,31 @@ fn report_executor_ownership() {
             opt_checksum.to_bits(),
             "{id}: reachability-exact O2 changed the workload checksum"
         );
+
+        // Pin the claim the report is used to make: sparse_tables is the only
+        // tracked workload whose index operations miss the tape's dense guard.
+        // Its inner loop issues four index operations per iteration (two
+        // writes, two reads) over 64 iterations per unit; the shortfall is one
+        // exit per deterministic-collection boundary that lands on such an
+        // operation, because a boundary instruction runs scalar and never
+        // enters the tape at all.
+        let expected_exits = 4.0 * 64.0 * units();
+        for census in [base_census, opt_census] {
+            if id == "02_sparse_tables" {
+                assert!(
+                    census.tape_guard_exits as f64 <= expected_exits
+                        && census.tape_guard_exits as f64 >= expected_exits - units(),
+                    "{id}: {} tape guard exits, expected at most {expected_exits} and no more \
+                     than one shortfall per unit",
+                    census.tape_guard_exits,
+                );
+            } else {
+                assert_eq!(
+                    census.tape_guard_exits, 0,
+                    "{id}: tape guard exits are no longer exclusive to sparse_tables",
+                );
+            }
+        }
 
         for (label, census) in [("default", base_census), ("o2-exact", opt_census)] {
             println!(

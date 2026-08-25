@@ -311,7 +311,7 @@ executor owns each workload; at `n = 32`, with the reachability-exact track:
 | workload | default | with `reachability_exact()` |
 | --- | --- | --- |
 | `dense_tables` | 1.03% tape, 16,298 HotIR iterations, 38 receipts | 99.76% tape, 0 HotIR, 8,191 receipts |
-| `sparse_tables` | 92.39% tape, 8,190 tape guard exits | unchanged coverage, 8,190 guard exits |
+| `sparse_tables` | 92.39% tape, 8,190 tape guard exits (**the only workload with any**) | unchanged coverage, 8,190 guard exits |
 | `closures_upvalues` | 68.67% tape, 32 closure fast entries | 77.67% tape, 0 closure fast entries |
 | `generic_iteration` | 38.02% tape, 2,208 receipts | 67.24% tape, 1,215 receipts |
 | `stdlib_math_table` | 82.38% tape | unchanged (no rewrite fired) |
@@ -324,6 +324,15 @@ the executor is effectively constant across both sides while the rewrite effect 
 38.02% to 67.24%, receipts 2,208 to 1,215). Dense may still be measured, but only as an explicitly
 labelled combined executor-swap-plus-rewrite result, never as the primary evidence for enabling a family
 by default.
+
+`sparse_tables` is the only tracked workload whose operations miss the tape's dense-array guard, and the
+test asserts that rather than only printing it. Its inner loop issues four index operations per iteration
+(two writes, two reads) over 64 iterations per unit, all against hash-part keys, so exits track
+`4 x 64 x n`: 2,048 at `n = 8`, 4,096 at `n = 16`, 8,190 at `n = 32`, 16,381 at `n = 64`. The small
+shortfall at larger `n` is one exit per deterministic-collection boundary that lands on such an operation,
+because a boundary instruction runs scalar and never enters the tape. Set `RUSTIA_EXECUTOR_CENSUS_N` to
+re-check the scaling. This is a count of side exits with no cost attached to it; whether they cost
+measurable time is what the re-frozen 201-repetition `sparse_tables` gate exists to answer.
 
 Charged `executed_instructions` are identical in every row, which is the logical-receipt contract
 working: the reduction the preview reports is in dispatched work, not in the charged schedule. The sign
