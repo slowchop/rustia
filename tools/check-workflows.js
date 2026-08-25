@@ -301,6 +301,12 @@ function checkNightlyMatrix(text) {
   );
   requireIncludes(text, "toolchain: 1.95.0", label);
   requireIncludes(text, "cache: false", label);
+  requireIncludes(
+    text,
+    "678efc1cfbd5fa5a88375daa7e2f3864a049d6d63a0296df925a2ae5f516cb56",
+    label,
+  );
+  requireIncludes(text, "sha256sum -c -", label);
   requireIncludes(text, "pending_relevant_commit_count", label);
   requireIncludes(text, "steps.gate.outputs.pending != '0'", label);
   requireIncludes(text, "LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}", label);

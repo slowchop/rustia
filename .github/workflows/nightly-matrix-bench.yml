@@ -45,6 +45,16 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install pinned just
+        run: |
+          just_dir="$RUNNER_TEMP/just-1.42.4"
+          install -d "$just_dir"
+          curl -sSfL --retry 3 -o "$just_dir/just.tar.gz" \
+            https://github.com/casey/just/releases/download/1.42.4/just-1.42.4-x86_64-unknown-linux-musl.tar.gz
+          printf '%s  %s\n' 678efc1cfbd5fa5a88375daa7e2f3864a049d6d63a0296df925a2ae5f516cb56 "$just_dir/just.tar.gz" | sha256sum -c -
+          tar -xzf "$just_dir/just.tar.gz" -C "$just_dir" just
+          printf '%s\n' "$just_dir" >> "$GITHUB_PATH"
+
       - name: Decide whether new performance-relevant commits exist
         id: gate
         run: |
