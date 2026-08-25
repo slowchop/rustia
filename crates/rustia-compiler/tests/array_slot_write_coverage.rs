@@ -1,4 +1,5 @@
-//! Hit coverage for the VM Core 2 C2.5a direct existing dense-array slot lane.
+//! Hit coverage for the VM Core 2 C2.5a direct existing-slot lane and the
+//! C2.5b direct exact-append lane.
 //!
 //! This runs the benchmark workloads through the same
 //! parse/compile/`Vm::call_function` sequence as the `rustia-engine` adapter in
@@ -153,6 +154,7 @@ fn workload_counts(source_path: &str, n: u64) -> Option<NumericArraySlotWriteCou
     Some(NumericArraySlotWriteCounts {
         calls: after.calls - before.calls,
         direct: after.direct - before.direct,
+        direct_append: after.direct_append - before.direct_append,
         generic_stored: after.generic_stored - before.generic_stored,
     })
 }
@@ -167,15 +169,22 @@ fn report(workload: &str, counts: Option<NumericArraySlotWriteCounts>) {
     } else {
         (counts.direct as f64) * 100.0 / (counts.calls as f64)
     };
+    let append_share = if counts.calls == 0 {
+        0.0
+    } else {
+        (counts.direct_append as f64) * 100.0 / (counts.calls as f64)
+    };
     println!(
-        "c2.5a-coverage {workload}: calls={} direct={} generic_stored={} \
-         other={} direct_share={share:.4}%",
+        "c2.5a-coverage {workload}: calls={} direct={} direct_append={} generic_stored={} \
+         other={} direct_share={share:.4}% direct_append_share={append_share:.4}%",
         counts.calls,
         counts.direct,
+        counts.direct_append,
         counts.generic_stored,
         counts
             .calls
             .saturating_sub(counts.direct)
+            .saturating_sub(counts.direct_append)
             .saturating_sub(counts.generic_stored),
     );
 }
@@ -187,10 +196,12 @@ fn tracked_workloads_report_direct_array_slot_lane_coverage() {
     }
 }
 
-/// The `array_mutation` workload exists precisely to exercise this lane: it
-/// builds a 256-element array once and then only rewrites filled slots, so
-/// essentially every numeric array-slot write it issues must be served
-/// directly. This is the positive counterpart to the tripwire below.
+/// The `array_mutation` workload exists precisely to exercise these lanes:
+/// it builds a 256-element array once (the C2.5b direct append lane) and
+/// then only rewrites filled slots (the C2.5a direct existing-slot lane),
+/// so every numeric array-slot write it issues is served directly and none
+/// fall to the generic `mutate_table_data` path. This is the positive
+/// counterpart to the tripwire below.
 #[test]
 fn the_array_mutation_workload_exercises_the_direct_lane() {
     let counts = workload_counts("bench/workloads/luau/12_array_mutation.luau", 64)
@@ -201,28 +212,61 @@ fn the_array_mutation_workload_exercises_the_direct_lane() {
         "array_mutation must reach the C2.5a direct lane; got {counts:?}"
     );
     assert_eq!(
-        counts.generic_stored, 256,
-        "only the one-time 256-slot build should take the generic append path; got {counts:?}"
+        counts.direct_append, 256,
+        "only the one-time 256-slot build should take the C2.5b direct append lane; got {counts:?}"
     );
     assert_eq!(
-        counts.calls - counts.generic_stored,
+        counts.generic_stored, 0,
+        "the generic mutate_table_data path should not be reached at all; got {counts:?}"
+    );
+    assert_eq!(
+        counts.calls - counts.direct_append,
         counts.direct,
         "every write after the build must be a direct existing-slot store; got {counts:?}"
     );
 }
 
-/// Tripwire pinning the measured C2.5a hit coverage.
+/// The C2.5b append lane is the mirror image: `dense_tables` reaches it on
+/// every one of its numeric array-slot writes, because each unit builds a
+/// fresh 256-element array from `{}` over an ascending index. That coverage
+/// is what makes C2.5b measurable on a tracked workload, unlike C2.5a.
 ///
-/// Every numeric array-slot write in the benchmark suite is currently either
-/// an append/growth or a deferral: each tracked workload rebuilds its tables
-/// from `{}` and never rewrites a slot it already filled, so the direct lane
-/// is reached zero times. That makes the slice unmeasurable by the controlled
-/// A/B protocol, which is why it is retained on correctness grounds rather
-/// than promoted with a timing claim.
+/// When this test fails the append lane has stopped serving a tracked
+/// workload, which invalidates the gate that justified it.
+#[test]
+fn tracked_workloads_reach_the_direct_append_lane() {
+    let counts = workload_counts("bench/workloads/luau/01_dense_tables.luau", 64)
+        .expect("dense_tables must run");
+    report("dense_tables", Some(counts));
+    assert_eq!(
+        counts.direct_append, counts.calls,
+        "every dense_tables numeric array-slot write should take the C2.5b append lane; \
+         got {counts:?}"
+    );
+    assert_eq!(
+        counts.generic_stored, 0,
+        "dense_tables should no longer reach the generic mutate_table_data path; got {counts:?}"
+    );
+    assert!(
+        counts.calls > 0,
+        "dense_tables must actually issue numeric array-slot writes; got {counts:?}"
+    );
+}
+
+/// Tripwire pinning the measured C2.5a existing-slot hit coverage.
 ///
-/// When this test fails, a tracked workload has started reaching the lane and
-/// the performance bet reopens: re-run the coverage report, then gate the
-/// slice on a controlled host.
+/// Every numeric array-slot write in the benchmark suite is an append or a
+/// deferral: each tracked workload rebuilds its tables from `{}` and never
+/// rewrites a slot it already filled, so the C2.5a *existing-slot* lane is
+/// reached zero times here. That is why C2.5a needed `array_mutation` before
+/// it could be measured at all.
+///
+/// This says nothing about the C2.5b *append* lane, which those same appends
+/// do reach - see
+/// [`tracked_workloads_reach_the_direct_append_lane`] for that side.
+///
+/// When this test fails, a tracked workload has started rewriting filled
+/// slots: re-run the coverage report, then gate on a controlled host.
 #[test]
 fn tracked_workloads_do_not_yet_reach_the_direct_lane() {
     for (workload, path, n) in WORKLOADS.iter().take(5) {

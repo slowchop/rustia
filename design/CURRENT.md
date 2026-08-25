@@ -440,9 +440,10 @@ unreachable suspended-coroutine frames.
    census and its no-op `side_usage` adjustment while keeping readonly, `__newindex`, insertion-order, and
    the single `mutation_version` bump exact; a `debug_assert!` pins the shadowing invariant across the unit,
    conformance, and fuzz suites, and a Log/PUC differential matrix plus end-to-end Luau tests cover it. Its
-   default-off `table-write-diagnostics` census showed the lane is reached **zero times by all 17 runnable
-   benchmark workloads** — every numeric array-slot write in the suite is an append or a deferral, because
-   each workload rebuilds its tables from `{}` over an ascending index. Three exact DigitalOcean gates on fixed
+   default-off `table-write-diagnostics` census showed the lane was then reached **zero times by all 17
+   then-runnable benchmark workloads** — every numeric array-slot write in the suite was an append or a
+   deferral, because each workload rebuilds its tables from `{}` over an ascending index. That result is what
+   motivated adding `array_mutation`, which reaches the lane on 98.46% of its writes. Three exact DigitalOcean gates on fixed
    `dense_tables` work therefore measured only the guard's miss cost: `92d30b8`→`066ce1f` at +0.6165%
    (conservative nominal 95% interval -0.1571% to +2.2646%), `92d30b8`→`2082436` at -0.4457% (-2.5751% to
    +1.5953%), and, after the C2.2 tape landed and rebased the first two candidates away, `b253e9f`→`0a31255`

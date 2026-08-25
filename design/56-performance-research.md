@@ -782,8 +782,9 @@ its original single lookup. A `debug_assert!` probing both hash parts pins the s
 unit, conformance, and fuzz suites.
 
 The bet was screened for hit coverage before any billable run, using a default-off `table-write-diagnostics`
-census that leaves production and benchmark builds uninstrumented. **The direct lane is reached zero times by
-all 17 runnable benchmark workloads.** `dense_tables` issues 16,384 numeric array-slot writes per 64 units and
+census that leaves production and benchmark builds uninstrumented. **At that point the direct lane was reached
+zero times by all 17 then-runnable benchmark workloads** — `array_mutation`, which reaches it on 98.46% of its
+writes, was added afterwards precisely because of this result. `dense_tables` issues 16,384 numeric array-slot writes per 64 units and
 every one grows the array; `stdlib_math_table` issues 4,000, all growth; `sparse_tables` defers all 8,191;
 `memory_burst` issues 266,240 with zero direct. The cause is structural rather than incidental: each tracked
 workload builds its tables from `{}` over an ascending index and never rewrites a slot it already filled, and
@@ -792,7 +793,7 @@ per-slot. So the suite ceiling for this lane is not small, it is exactly 0.0000%
 
 That is a stronger version of the GETIMPORT+FASTCALL situation recorded above, where a ~0.02% suite ceiling
 was enough to close a bet locally. It also relocates the C2.5 target: the measurable dense-table cost is
-array append and growth — where 100% of the suite's numeric array writes actually land — not existing-slot
+array append and growth — where every one of `dense_tables`' numeric array writes lands — not existing-slot
 mutation. Capacity prediction and append fast-pathing are a separate slice with their own gate and must not
 be folded into this one.
 

@@ -57,6 +57,9 @@ pub struct NumericArraySlotWriteCounts {
     pub calls: u64,
     /// Calls served by the direct existing non-nil slot mutation.
     pub direct: u64,
+    /// Calls served by the direct exact-append lane (C2.5b): an out-of-range
+    /// write to `array.len() + 1` with no Log hash-part entries to absorb.
+    pub direct_append: u64,
     /// Calls stored by the generic `mutate_table_data` path (append, growth,
     /// or an existing nil slot on a metatable-free table).
     pub generic_stored: u64,
@@ -2127,6 +2130,68 @@ impl VmCell {
         Some(TableNumericArrayWrite::Stored)
     }
 
+    /// VM Core 2 C2.5b: commits an exact append (`one_based_index ==
+    /// array.len() + 1`) to a Log-layout table whose hash part has nothing
+    /// to absorb.
+    ///
+    /// The generic path's append case is `array.resize(len + 1, nil)`
+    /// (which grows the array by exactly one slot) followed by overwriting
+    /// that slot and a `remove_hash_key` call that absorbs a numeric hash
+    /// entry sharing the new index. `remove_hash_key` over an empty
+    /// `entries` vector is provably a no-op, so with the hash part already
+    /// proven empty by the caller, the whole sequence collapses to a single
+    /// `Vec::push`. That means the only inputs to `table_data_memory_usage`
+    /// (`table_data_live_bytes`/`table_data_reserved_bytes`) this write can
+    /// change are the array's length (always +1 element) and its capacity
+    /// (whatever `Vec::push` reserves) - the hash part is untouched - so
+    /// `side_usage` can be updated incrementally instead of running
+    /// `mutate_table_data`'s before/after census, the same way C2.5a skips
+    /// it for existing-slot writes.
+    #[inline]
+    fn write_append_array_slot(
+        &mut self,
+        table: u32,
+        value: Value,
+    ) -> Option<TableNumericArrayWrite> {
+        let table_data = self.tables.get_mut(table)?;
+        debug_assert!(
+            !value.is_nil(),
+            "the caller must prove the appended value is non-nil"
+        );
+        debug_assert!(
+            !table_data.readonly,
+            "the caller must prove the table is not readonly"
+        );
+        debug_assert!(
+            table_data.metatable.is_none(),
+            "the caller must prove the table has no metatable"
+        );
+        debug_assert!(
+            matches!(&table_data.hash, HashPart::Log { entries, .. } if entries.is_empty()),
+            "the caller must prove the Log hash part has nothing to absorb"
+        );
+        let capacity_before = table_data.array.capacity();
+        table_data.array.push(value);
+        let capacity_after = table_data.array.capacity();
+        table_data.mutation_version = table_data.mutation_version.wrapping_add(1);
+        // A `Vec::push` can only grow or hold capacity steady, never shrink
+        // it, so the reserved-byte delta is never negative here: a plain
+        // `add` is correct, and `adjust`'s subtract-then-add (needed when a
+        // write could also shrink usage) would be redundant work.
+        self.side_usage.add(
+            size_of::<Value>(),
+            capacity_after
+                .saturating_sub(capacity_before)
+                .saturating_mul(size_of::<Value>()),
+        );
+        #[cfg(any(test, feature = "table-write-diagnostics"))]
+        {
+            self.numeric_array_slot_writes.direct_append =
+                self.numeric_array_slot_writes.direct_append.wrapping_add(1);
+        }
+        Some(TableNumericArrayWrite::Stored)
+    }
+
     /// Stores a numeric array slot when doing so cannot observe `__newindex`.
     ///
     /// Existing non-nil slots always bypass `__newindex`. Missing slots may be stored directly
@@ -2200,6 +2265,29 @@ impl VmCell {
         }
         if !value.is_nil() && one_based_index > table_data.array.len() + 1 {
             return Some(TableNumericArrayWrite::Deferred);
+        }
+        // VM Core 2 C2.5b: `dense_tables` issues 16,384 numeric array-slot
+        // writes per 64 units and every one is an exact append, so this is
+        // the fast path that matters for `dense_tables`-shaped code. Across
+        // the whole measured suite appends are about 94%: `array_mutation`
+        // is deliberately the other way round (98.46% existing-slot, which
+        // is what C2.5a serves), and `sparse_tables` defers all of its.
+        // Metatable and readonly were already ruled out above; the two
+        // Deferred checks above additionally guarantee that reaching this
+        // point with `one_based_index == array.len() + 1` implies
+        // `!value.is_nil()` (the nil check above defers every nil write past
+        // the current array end). An empty Log hash part means
+        // `remove_hash_key` has nothing to absorb, so the append can skip
+        // straight to `write_append_array_slot` instead of the generic
+        // resize+overwrite+remove_hash_key sequence. A non-empty hash part
+        // falls through unchanged to the generic path below.
+        if !value.is_nil() && one_based_index == table_data.array.len() + 1 {
+            let HashPart::Log { entries, .. } = &table_data.hash else {
+                unreachable!("Log layout checked above")
+            };
+            if entries.is_empty() {
+                return self.write_append_array_slot(table, value);
+            }
         }
         let stored = self.mutate_table_data(table, |table| {
             if value.is_nil() {
@@ -5632,6 +5720,875 @@ mod tests {
         assert!(
             direct_lane_hits > 0,
             "the differential matrix must actually exercise the direct lane"
+        );
+    }
+
+    // =========================================================================
+    // VM Core 2 C2.5b: direct exact-append array-slot mutation
+    // =========================================================================
+
+    #[test]
+    fn direct_array_append_stores_every_value_and_counts_direct_append_lane() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+        let counts_before = heap.numeric_array_slot_write_counts();
+
+        const N: usize = 40;
+        let mut prior_version = table_version(&heap, table);
+        for i in 1..=N {
+            assert_eq!(
+                heap.try_write_numeric_array_slot(table, i, Value::number(i as f64)),
+                Some(TableNumericArrayWrite::Stored),
+                "append #{i} stores"
+            );
+            let version = table_version(&heap, table);
+            assert_eq!(
+                version - prior_version,
+                1,
+                "append #{i} bumps mutation_version exactly once"
+            );
+            prior_version = version;
+        }
+
+        let counts_after = heap.numeric_array_slot_write_counts();
+        assert_eq!(
+            counts_after.direct_append - counts_before.direct_append,
+            N as u64,
+            "every append used the direct append lane"
+        );
+        assert_eq!(
+            counts_after.generic_stored, counts_before.generic_stored,
+            "the generic mutate_table_data path was not used"
+        );
+        assert_eq!(heap.array_len(table), Some(N));
+        for i in 1..=N {
+            assert_eq!(
+                heap.table_get(table, Value::number(i as f64))
+                    .and_then(Value::as_number),
+                Some(i as f64),
+                "slot {i} reads back"
+            );
+        }
+        // `memory_usage()` asserts (under cfg(test)) that the incrementally
+        // maintained total matches an exact full census, so this call is
+        // itself a check that N appends through the direct lane left no
+        // accounting drift.
+        heap.memory_usage();
+    }
+
+    #[test]
+    fn direct_array_append_accounts_live_and_reserved_bytes_across_capacity_growth() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+
+        let usage_before = heap.memory_usage();
+        let capacity_before = table_storage_shape(&heap, table).array_capacity;
+        assert_eq!(
+            capacity_before, 0,
+            "a freshly allocated empty array starts with no reserved capacity"
+        );
+
+        // Large enough to cross at least one Vec capacity doubling.
+        const N: usize = 40;
+        let mut capacities = Vec::with_capacity(N);
+        for i in 1..=N {
+            assert_eq!(
+                heap.try_write_numeric_array_slot(table, i, Value::number(i as f64)),
+                Some(TableNumericArrayWrite::Stored)
+            );
+            capacities.push(table_storage_shape(&heap, table).array_capacity);
+        }
+        let first_nonzero_capacity = capacities[0];
+        assert!(
+            first_nonzero_capacity > 0,
+            "the first append must reserve capacity"
+        );
+        let capacity_after = *capacities.last().expect("at least one append ran");
+        assert!(
+            capacity_after >= first_nonzero_capacity * 2,
+            "expected the array capacity to double at least once across {N} appends: \
+             first non-zero capacity {first_nonzero_capacity}, final capacity {capacity_after}"
+        );
+
+        // Calling `memory_usage()` itself asserts (under cfg(test)) that the
+        // incrementally maintained total equals an exact full census - that
+        // is part of what this test is checking. The explicit deltas below
+        // additionally pin down *this lane's* contribution by hand, using
+        // the same expressions as `table_data_live_bytes`/
+        // `table_data_reserved_bytes` for the array part.
+        let usage_after = heap.memory_usage();
+        assert_eq!(
+            usage_after.live_bytes - usage_before.live_bytes,
+            N * size_of::<Value>(),
+            "live bytes grow by exactly one Value per append"
+        );
+        assert_eq!(
+            usage_after.reserved_bytes - usage_before.reserved_bytes,
+            (capacity_after - capacity_before) * size_of::<Value>(),
+            "reserved bytes grow by exactly the observed Vec capacity delta"
+        );
+    }
+
+    #[test]
+    fn direct_array_append_with_nonempty_hash_part_falls_back_to_generic_path() {
+        let mut heap = VmCell::new();
+
+        // Case 1: an unrelated numeric hash key (far beyond the append
+        // point) survives an append that does not target it, and the append
+        // itself still stores correctly through the generic path.
+        let table = heap.alloc_array_table(&[Value::number(10.0), Value::number(20.0)]);
+        heap.table_set(table, Value::number(50.0), Value::number(500.0))
+            .expect("a far numeric key stores in the hash part");
+        assert_eq!(table_storage_shape(&heap, table).hash_len, 1);
+
+        let counts_before = heap.numeric_array_slot_write_counts();
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 3, Value::number(30.0)),
+            Some(TableNumericArrayWrite::Stored),
+            "an append with a non-empty (but unrelated) hash part still stores"
+        );
+        let counts_after = heap.numeric_array_slot_write_counts();
+        assert_eq!(
+            counts_after.direct_append, counts_before.direct_append,
+            "a non-empty hash part must not take the direct append lane"
+        );
+        assert_eq!(
+            counts_after.generic_stored - counts_before.generic_stored,
+            1
+        );
+        assert_eq!(
+            heap.table_get(table, Value::number(3.0))
+                .and_then(Value::as_number),
+            Some(30.0)
+        );
+        assert_eq!(
+            table_storage_shape(&heap, table).hash_len,
+            1,
+            "the unrelated hash entry is untouched"
+        );
+        assert_eq!(
+            heap.table_get(table, Value::number(50.0))
+                .and_then(Value::as_number),
+            Some(500.0)
+        );
+
+        // Case 2: a numeric hash entry that exactly matches the append
+        // index must be absorbed by the generic fallback, the same way the
+        // generic path absorbs it for any other write.
+        let table = heap.alloc_array_table(&[Value::number(1.0), Value::number(2.0)]);
+        // Park a hash entry at key 4 while the array is still too short for
+        // it to land in the array part (4 > array.len() + 1 == 3).
+        heap.table_set(table, Value::number(4.0), Value::number(444.0))
+            .expect("a far numeric key stores in the hash part");
+        // Grow the array to length 3 via an in-bounds key that does not
+        // touch key 4, so the array boundary ends up sitting right below
+        // the parked key.
+        heap.table_set(table, Value::number(3.0), Value::number(300.0))
+            .expect("an in-bounds key grows the array");
+        assert_eq!(
+            table_storage_shape(&heap, table).array_len,
+            3,
+            "the raw array Vec (what the C2.5b guard compares the index against) grew to 3"
+        );
+        assert_eq!(
+            heap.array_len(table),
+            Some(4),
+            "the Luau border extends through the contiguous parked hash key at 4"
+        );
+        assert_eq!(
+            table_storage_shape(&heap, table).hash_len,
+            1,
+            "key 4 is still parked in the hash part"
+        );
+
+        let counts_before = heap.numeric_array_slot_write_counts();
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 4, Value::number(999.0)),
+            Some(TableNumericArrayWrite::Stored),
+            "appending exactly onto a parked hash key still stores"
+        );
+        let counts_after = heap.numeric_array_slot_write_counts();
+        assert_eq!(
+            counts_after.direct_append, counts_before.direct_append,
+            "a hash entry to absorb must not take the direct append lane"
+        );
+        assert_eq!(
+            counts_after.generic_stored - counts_before.generic_stored,
+            1
+        );
+        assert_eq!(
+            heap.table_get(table, Value::number(4.0))
+                .and_then(Value::as_number),
+            Some(999.0),
+            "the array write wins over the stale hash entry"
+        );
+        assert_eq!(
+            table_storage_shape(&heap, table).hash_len,
+            0,
+            "the generic path absorbed the parked hash entry"
+        );
+        assert_eq!(heap.array_len(table), Some(4));
+    }
+
+    #[test]
+    fn direct_array_append_keeps_readonly_metatable_and_boundary_gates() {
+        // Log-layout only: PUC's array never grows outside rehash, so any
+        // out-of-range index (including the append point) defers before
+        // readonly/metatable are even consulted - that is covered
+        // separately by `direct_array_append_never_fires_on_puc_layout`.
+        let mut heap = VmCell::new();
+
+        // 1. Readonly: appending past the end of a frozen table reports
+        // Readonly and mutates nothing.
+        let frozen = heap.alloc_array_table(&[Value::number(1.0), Value::number(2.0)]);
+        heap.table_freeze(frozen).expect("table freezes");
+        let version_before = table_version(&heap, frozen);
+        let shape_before = table_storage_shape(&heap, frozen);
+        let counts_before = heap.numeric_array_slot_write_counts();
+        assert_eq!(
+            heap.try_write_numeric_array_slot(frozen, 3, Value::number(3.0)),
+            Some(TableNumericArrayWrite::Readonly),
+            "an append onto a readonly table reports readonly"
+        );
+        assert_eq!(
+            heap.numeric_array_slot_write_counts().direct_append,
+            counts_before.direct_append,
+            "a readonly rejection never reaches the append lane"
+        );
+        assert_eq!(
+            table_version(&heap, frozen),
+            version_before,
+            "a rejected append does not bump mutation_version"
+        );
+        assert_eq!(table_storage_shape(&heap, frozen), shape_before);
+
+        // 2. Metatable: appending past the end of a table with a metatable
+        // defers so __newindex can still run.
+        let meta = heap.alloc_array_table(&[]);
+        let with_metatable = heap.alloc_array_table(&[Value::number(1.0), Value::number(2.0)]);
+        heap.table_set_metatable(with_metatable, Some(meta))
+            .expect("metatable installs");
+        let version_before = table_version(&heap, with_metatable);
+        let shape_before = table_storage_shape(&heap, with_metatable);
+        let counts_before = heap.numeric_array_slot_write_counts();
+        assert_eq!(
+            heap.try_write_numeric_array_slot(with_metatable, 3, Value::number(3.0)),
+            Some(TableNumericArrayWrite::Deferred),
+            "an append onto a table with a metatable defers"
+        );
+        assert_eq!(
+            heap.numeric_array_slot_write_counts().direct_append,
+            counts_before.direct_append,
+            "a metatable defer never reaches the append lane"
+        );
+        assert_eq!(table_version(&heap, with_metatable), version_before);
+        assert_eq!(table_storage_shape(&heap, with_metatable), shape_before);
+
+        // 3. Nil value at the append index: unchanged existing behaviour
+        // (Deferred - a numeric hash entry could still exist beyond the
+        // array), never the append lane.
+        let table = heap.alloc_array_table(&[Value::number(1.0), Value::number(2.0)]);
+        let version_before = table_version(&heap, table);
+        let shape_before = table_storage_shape(&heap, table);
+        let counts_before = heap.numeric_array_slot_write_counts();
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 3, Value::nil()),
+            Some(TableNumericArrayWrite::Deferred),
+            "storing nil at the append index defers"
+        );
+        assert_eq!(
+            heap.numeric_array_slot_write_counts().direct_append,
+            counts_before.direct_append,
+            "a nil append never reaches the append lane"
+        );
+        assert_eq!(table_version(&heap, table), version_before);
+        assert_eq!(table_storage_shape(&heap, table), shape_before);
+
+        // 4. Index beyond len + 1: still Deferred, never the append lane.
+        let counts_before = heap.numeric_array_slot_write_counts();
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 4, Value::number(4.0)),
+            Some(TableNumericArrayWrite::Deferred),
+            "an index past len + 1 defers"
+        );
+        assert_eq!(
+            heap.numeric_array_slot_write_counts().direct_append,
+            counts_before.direct_append,
+            "an out-of-range index never reaches the append lane"
+        );
+        assert_eq!(table_version(&heap, table), version_before);
+        assert_eq!(table_storage_shape(&heap, table), shape_before);
+    }
+
+    #[test]
+    fn direct_array_append_never_fires_on_puc_layout() {
+        let mut heap = puc_heap();
+
+        // A plain PUC table: an append-shaped index (array.len() + 1) is
+        // out of range for PUC (arrays never grow outside rehash), so it
+        // always defers - the direct append lane is Log-only.
+        let table = heap.alloc_array_table(&[Value::number(1.0), Value::number(2.0)]);
+        let version_before = table_version(&heap, table);
+        let shape_before = table_storage_shape(&heap, table);
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 3, Value::number(3.0)),
+            Some(TableNumericArrayWrite::Deferred),
+            "PUC never grows the array via try_write_numeric_array_slot"
+        );
+        assert_eq!(heap.numeric_array_slot_write_counts().direct_append, 0);
+        assert_eq!(table_version(&heap, table), version_before);
+        assert_eq!(table_storage_shape(&heap, table), shape_before);
+
+        // Readonly and metatable PUC tables behave the same way at the
+        // append boundary: still Deferred, still never the append lane.
+        heap.table_freeze(table).expect("table freezes");
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 3, Value::number(3.0)),
+            Some(TableNumericArrayWrite::Deferred),
+            "a readonly PUC table still defers an out-of-range append"
+        );
+        assert_eq!(heap.numeric_array_slot_write_counts().direct_append, 0);
+
+        let with_metatable = heap.alloc_array_table(&[Value::number(1.0)]);
+        let meta = heap.alloc_array_table(&[]);
+        heap.table_set_metatable(with_metatable, Some(meta))
+            .expect("metatable installs");
+        assert_eq!(
+            heap.try_write_numeric_array_slot(with_metatable, 2, Value::number(2.0)),
+            Some(TableNumericArrayWrite::Deferred),
+            "a PUC table with a metatable still defers an out-of-range append"
+        );
+        assert_eq!(heap.numeric_array_slot_write_counts().direct_append, 0);
+    }
+
+    #[test]
+    fn direct_array_append_matches_the_general_write_path() {
+        // (array prefix, extra numeric hash keys, metatable, readonly)
+        let shapes: [(&[f64], &[f64], bool, bool); 7] = [
+            (&[], &[], false, false),
+            (&[10.0], &[], false, false),
+            (&[10.0, 20.0, 30.0], &[], false, false),
+            (&[10.0, 20.0, 30.0], &[], true, false),
+            (&[10.0, 20.0, 30.0], &[], false, true),
+            // An unrelated numeric hash key must survive an append that
+            // does not target it, identically on both paths, and the
+            // append itself must not take the direct lane.
+            (&[10.0, 20.0], &[50.0], false, false),
+            (&[10.0, 20.0, 30.0, 40.0, 50.0], &[], false, false),
+        ];
+        let values = [
+            Value::number(-0.5),
+            Value::nil(),
+            Value::boolean(true),
+            Value::number(0.0),
+        ];
+
+        let mut direct_append_hits = 0_u64;
+        for layout in ["log", "puc"] {
+            for (shape_index, (prefix, extra, metatable, readonly)) in
+                shapes.into_iter().enumerate()
+            {
+                // Indices spanning just below, at, and just past the append
+                // boundary (`prefix.len() + 1`) for this shape.
+                let len = prefix.len();
+                for index in len.saturating_sub(1)..=len + 2 {
+                    for (value_index, value) in values.into_iter().enumerate() {
+                        let build = |heap: &mut VmCell| {
+                            let table = heap.alloc_array_table(
+                                &prefix
+                                    .iter()
+                                    .copied()
+                                    .map(Value::number)
+                                    .collect::<Vec<_>>(),
+                            );
+                            for key in extra {
+                                heap.table_set(table, Value::number(*key), Value::number(*key))
+                                    .expect("hash key stores");
+                            }
+                            if metatable {
+                                let meta = heap.alloc_array_table(&[]);
+                                heap.table_set_metatable(table, Some(meta))
+                                    .expect("metatable installs");
+                            }
+                            if readonly {
+                                heap.table_freeze(table).expect("table freezes");
+                            }
+                            table
+                        };
+
+                        let mut fast = if layout == "log" {
+                            VmCell::new()
+                        } else {
+                            puc_heap()
+                        };
+                        let mut general = if layout == "log" {
+                            VmCell::new()
+                        } else {
+                            puc_heap()
+                        };
+                        let fast_table = build(&mut fast);
+                        let general_table = build(&mut general);
+
+                        let case =
+                            format!("{layout}/shape{shape_index}/index{index}/value{value_index}");
+                        assert_eq!(
+                            table_storage_shape(&fast, fast_table),
+                            table_storage_shape(&general, general_table),
+                            "{case}: identical construction"
+                        );
+
+                        let fast_version = table_version(&fast, fast_table);
+                        let general_version = table_version(&general, general_table);
+                        let append_counts_before = fast.numeric_array_slot_write_counts();
+                        let result =
+                            shortcut_then_general_write(&mut fast, fast_table, index, value);
+                        let _ =
+                            general.table_set(general_table, Value::number(index as f64), value);
+                        direct_append_hits += fast.numeric_array_slot_write_counts().direct_append
+                            - append_counts_before.direct_append;
+
+                        if readonly {
+                            assert!(
+                                !matches!(result, Some(TableNumericArrayWrite::Stored)),
+                                "{case}: readonly tables never store, got {result:?}"
+                            );
+                            // Log reports Readonly for both in-array-range
+                            // indices and the append boundary (readonly is
+                            // checked before the append lane); PUC only
+                            // ever reaches the readonly check for
+                            // in-array-range indices; a PUC index past the
+                            // array is Deferred before readonly is checked.
+                            let in_array_range = index >= 1 && index <= prefix.len();
+                            let log_append_boundary = layout == "log" && index == prefix.len() + 1;
+                            if in_array_range || log_append_boundary {
+                                assert!(
+                                    matches!(result, Some(TableNumericArrayWrite::Readonly)),
+                                    "{case}: a readonly rejection at index {index} \
+                                     (array len {}) reports readonly, got {result:?}",
+                                    prefix.len()
+                                );
+                            }
+                        }
+                        assert!(
+                            same_test_values(
+                                &numeric_readback(&mut fast, fast_table, 10),
+                                &numeric_readback(&mut general, general_table, 10)
+                            ),
+                            "{case}: identical guest-visible values"
+                        );
+                        let order = if layout == "log" {
+                            TableIterationOrder::Insertion
+                        } else {
+                            TableIterationOrder::Puc51
+                        };
+                        let fast_entries = collect_iteration(&mut fast, fast_table, order);
+                        let general_entries = collect_iteration(&mut general, general_table, order);
+                        assert_eq!(
+                            fast_entries.len(),
+                            general_entries.len(),
+                            "{case}: identical iteration length"
+                        );
+                        assert!(
+                            fast_entries.iter().zip(&general_entries).all(
+                                |((fast_key, fast_value), (general_key, general_value))| {
+                                    same_test_value(*fast_key, *general_key)
+                                        && same_test_value(*fast_value, *general_value)
+                                }
+                            ),
+                            "{case}: identical iteration order and values"
+                        );
+                        assert_eq!(
+                            fast.array_len(fast_table),
+                            general.array_len(general_table),
+                            "{case}: identical border length"
+                        );
+                        assert_eq!(
+                            table_storage_shape(&fast, fast_table),
+                            table_storage_shape(&general, general_table),
+                            "{case}: identical storage shape"
+                        );
+                        assert_eq!(
+                            table_version(&fast, fast_table) - fast_version,
+                            table_version(&general, general_table) - general_version,
+                            "{case}: identical mutation_version movement"
+                        );
+                        assert_eq!(
+                            fast.memory_usage(),
+                            general.memory_usage(),
+                            "{case}: identical live/reserved accounting"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(
+            direct_append_hits > 0,
+            "the differential matrix must actually exercise the direct append lane"
+        );
+    }
+
+    // =========================================================================
+    // VM Core 2 C2.5b: extended adversarial regression coverage
+    // =========================================================================
+
+    #[test]
+    fn direct_array_append_ignores_a_hollow_hash_index_side_vector() {
+        // White-box construction of a state the normal Log hash-part
+        // bookkeeping (`record_hash_remove`/`rebuild_hash_index`) never
+        // actually produces: `entries` empty but `index` non-empty, with
+        // every `index` slot claiming to reference entry 0. This answers the
+        // guard's precondition directly instead of by induction over every
+        // call site that touches `entries`/`index`: `table_hash_lookup`
+        // checks `entries.is_empty()` before ever reading `index`, so the
+        // C2.5b guard's `entries.is_empty()` check must be sufficient on its
+        // own, independent of what garbage `index` contains.
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[Value::number(1.0), Value::number(2.0)]);
+        {
+            let table_data = heap.tables.get_mut(table).expect("table exists");
+            let HashPart::Log { index, .. } = &mut table_data.hash else {
+                unreachable!("VmCell::new() is Log-layout");
+            };
+            *index = vec![1_u32; 8];
+        }
+        // The injection above changed `index`'s capacity without going
+        // through `mutate_table_data`, so resynchronize the incremental
+        // accounting before treating `memory_usage()`'s census assertion as
+        // a signal about the *append*, not about this probe's own setup.
+        heap.recompute_side_usage();
+        heap.memory_usage();
+
+        let counts_before = heap.numeric_array_slot_write_counts();
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 3, Value::number(30.0)),
+            Some(TableNumericArrayWrite::Stored),
+            "the append must still succeed with a hollow index vector present"
+        );
+        assert_eq!(
+            heap.numeric_array_slot_write_counts().direct_append - counts_before.direct_append,
+            1,
+            "entries.is_empty() alone must be enough to admit the append lane"
+        );
+        assert_eq!(
+            heap.table_get(table, Value::number(3.0))
+                .and_then(Value::as_number),
+            Some(30.0),
+            "the appended value reads back correctly, not any stale hash artifact"
+        );
+        assert_eq!(heap.array_len(table), Some(3));
+        heap.memory_usage();
+    }
+
+    #[test]
+    fn direct_array_append_after_release_spare_capacity_keeps_exact_accounting() {
+        let mut heap = VmCell::new();
+        let table = heap.alloc_array_table(&[]);
+        for i in 1..=20 {
+            assert_eq!(
+                heap.try_write_numeric_array_slot(table, i, Value::number(i as f64)),
+                Some(TableNumericArrayWrite::Stored)
+            );
+        }
+        let capacity_before_release = table_storage_shape(&heap, table).array_capacity;
+        heap.release_spare_capacity();
+        let shape_after_release = table_storage_shape(&heap, table);
+        assert_eq!(
+            shape_after_release.array_len, 20,
+            "release_spare_capacity does not pop non-nil trailing values"
+        );
+        assert!(
+            shape_after_release.array_capacity >= 20
+                && shape_after_release.array_capacity <= capacity_before_release,
+            "release_spare_capacity must not grow capacity, and cannot shrink below length: \
+             before={capacity_before_release} after={}",
+            shape_after_release.array_capacity
+        );
+        heap.memory_usage();
+
+        // Resume appending on a freshly-shrunk Vec: capacity_before/after
+        // inside write_append_array_slot must reflect the *just-shrunk*
+        // capacity, not any value cached from before release_spare_capacity.
+        for i in 21..=60 {
+            assert_eq!(
+                heap.try_write_numeric_array_slot(table, i, Value::number(i as f64)),
+                Some(TableNumericArrayWrite::Stored),
+                "append #{i} after release_spare_capacity"
+            );
+            heap.memory_usage();
+        }
+        assert_eq!(heap.array_len(table), Some(60));
+        for i in 1..=60 {
+            assert_eq!(
+                heap.table_get(table, Value::number(i as f64))
+                    .and_then(Value::as_number),
+                Some(i as f64)
+            );
+        }
+    }
+
+    #[test]
+    fn direct_array_append_after_table_clear_reuses_the_unshrunk_array() {
+        let mut heap = VmCell::new();
+        let table =
+            heap.alloc_array_table(&[Value::number(1.0), Value::number(2.0), Value::number(3.0)]);
+        // Give the hash part something to clear too, so entries.capacity()
+        // stays non-zero after clear (Vec::clear does not deallocate) while
+        // entries.len() drops to 0 - the "residual capacity" shape attack #1
+        // asks about.
+        heap.table_set(table, Value::number(50.0), Value::number(500.0))
+            .expect("hash key stores");
+        assert_eq!(table_storage_shape(&heap, table).hash_len, 1);
+
+        heap.table_clear(table).expect("table clears");
+        let shape_after_clear = table_storage_shape(&heap, table);
+        assert_eq!(
+            shape_after_clear.array_len, 3,
+            "table.clear() nils elements in place; it does not truncate the array"
+        );
+        assert_eq!(shape_after_clear.hash_len, 0);
+        heap.memory_usage();
+
+        // Index 1 lands on an already-nil array slot: existing-but-nil, not
+        // the append lane, unaffected by C2.5b.
+        let counts_before = heap.numeric_array_slot_write_counts();
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 1, Value::number(11.0)),
+            Some(TableNumericArrayWrite::Stored)
+        );
+        assert_eq!(
+            heap.numeric_array_slot_write_counts().direct_append,
+            counts_before.direct_append,
+            "filling an already-nil in-bounds slot after clear is not an append"
+        );
+
+        // Index 4 (array.len() + 1, using the post-clear length) is the real
+        // append boundary and must take the C2.5b lane, with the hash part
+        // correctly read as empty even though entries.capacity() is still
+        // whatever it was before the clear.
+        let counts_before = heap.numeric_array_slot_write_counts();
+        assert_eq!(
+            heap.try_write_numeric_array_slot(table, 4, Value::number(44.0)),
+            Some(TableNumericArrayWrite::Stored)
+        );
+        assert_eq!(
+            heap.numeric_array_slot_write_counts().direct_append - counts_before.direct_append,
+            1,
+            "index 4 == post-clear array.len() + 1 must take the append lane"
+        );
+        assert_eq!(heap.array_len(table), Some(4));
+        assert_eq!(
+            heap.table_get(table, Value::number(4.0))
+                .and_then(Value::as_number),
+            Some(44.0)
+        );
+        heap.memory_usage();
+    }
+
+    #[test]
+    fn direct_array_append_differential_fuzz_survives_interleaved_mutations() {
+        // Drives two heaps through long, randomized, interleaved sequences
+        // of numeric array-slot writes, far-hash writes/removals,
+        // `release_spare_capacity`, `table.clear`, a metatable install, and
+        // a freeze - one heap through `try_write_numeric_array_slot`
+        // (falling back to `table_set` exactly like the VM does), the other
+        // through `table_set` alone - and asserts they stay indistinguishable
+        // after *every* operation, not just at the end of a sequence.
+        // Complementary to `direct_array_append_matches_the_general_write_path`,
+        // which only ever applies one write to a freshly built table.
+        #[derive(Clone, Copy)]
+        enum Op {
+            ArrayWrite(usize, u8),
+            HashWrite(u32, u8),
+            ReleaseSpareCapacity,
+            Clear,
+            InstallMetatable,
+            Freeze,
+        }
+
+        fn pick_value(kind: u8, tag: u32) -> Value {
+            match kind % 4 {
+                0 => Value::nil(),
+                1 => Value::number(f64::from(tag) + 0.5),
+                2 => Value::boolean(tag.is_multiple_of(2)),
+                _ => Value::number(-(f64::from(tag))),
+            }
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        fn assert_states_match(
+            fast: &mut VmCell,
+            fast_table: u32,
+            general: &mut VmCell,
+            general_table: u32,
+            order: TableIterationOrder,
+            seed: u64,
+            op_index: u32,
+        ) {
+            let context = format!("seed {seed} op {op_index}");
+            assert!(
+                same_test_values(
+                    &numeric_readback(fast, fast_table, 16),
+                    &numeric_readback(general, general_table, 16)
+                ),
+                "{context}: identical guest-visible values"
+            );
+            assert_eq!(
+                fast.array_len(fast_table),
+                general.array_len(general_table),
+                "{context}: identical border length"
+            );
+            assert_eq!(
+                table_storage_shape(fast, fast_table),
+                table_storage_shape(general, general_table),
+                "{context}: identical storage shape"
+            );
+            assert_eq!(
+                table_version(fast, fast_table),
+                table_version(general, general_table),
+                "{context}: identical mutation_version"
+            );
+            let fast_entries = collect_iteration(fast, fast_table, order);
+            let general_entries = collect_iteration(general, general_table, order);
+            assert_eq!(
+                fast_entries.len(),
+                general_entries.len(),
+                "{context}: identical iteration length"
+            );
+            assert!(
+                fast_entries.iter().zip(&general_entries).all(
+                    |((fast_key, fast_value), (general_key, general_value))| {
+                        same_test_value(*fast_key, *general_key)
+                            && same_test_value(*fast_value, *general_value)
+                    }
+                ),
+                "{context}: identical iteration order and values"
+            );
+            assert_eq!(
+                fast.memory_usage(),
+                general.memory_usage(),
+                "{context}: identical live/reserved accounting (each independently \
+                 checked against an exact census by memory_usage() under cfg(test))"
+            );
+        }
+
+        let mut total_direct_append_hits = 0_u64;
+        for layout in ["log", "puc"] {
+            let order = if layout == "log" {
+                TableIterationOrder::Insertion
+            } else {
+                TableIterationOrder::Puc51
+            };
+            for seed in 0..40_u64 {
+                let mut state = seed
+                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    .wrapping_add(0x2545_F491_4F6C_DD1D);
+                let mut rng = move || {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    state
+                };
+
+                let mut fast = if layout == "log" {
+                    VmCell::new()
+                } else {
+                    puc_heap()
+                };
+                let mut general = if layout == "log" {
+                    VmCell::new()
+                } else {
+                    puc_heap()
+                };
+                let initial_len = (rng() % 6) as usize;
+                let initial: Vec<Value> = (0..initial_len)
+                    .map(|i| Value::number(i as f64 + 1.0))
+                    .collect();
+                let fast_table = fast.alloc_array_table(&initial);
+                let general_table = general.alloc_array_table(&initial);
+                assert_states_match(
+                    &mut fast,
+                    fast_table,
+                    &mut general,
+                    general_table,
+                    order,
+                    seed,
+                    0,
+                );
+
+                for op_index in 0..150_u32 {
+                    let choice = rng() % 100;
+                    let op = if choice < 60 {
+                        Op::ArrayWrite((rng() % 10) as usize, (rng() % 4) as u8)
+                    } else if choice < 82 {
+                        Op::HashWrite((rng() % 8) as u32, (rng() % 4) as u8)
+                    } else if choice < 88 {
+                        Op::ReleaseSpareCapacity
+                    } else if choice < 92 {
+                        Op::Clear
+                    } else if choice < 96 {
+                        Op::InstallMetatable
+                    } else {
+                        Op::Freeze
+                    };
+
+                    match op {
+                        Op::ArrayWrite(index, value_kind) => {
+                            let value = pick_value(value_kind, op_index);
+                            let before = fast.numeric_array_slot_write_counts();
+                            let _ =
+                                shortcut_then_general_write(&mut fast, fast_table, index, value);
+                            if layout == "log" {
+                                total_direct_append_hits +=
+                                    fast.numeric_array_slot_write_counts().direct_append
+                                        - before.direct_append;
+                            }
+                            let _ = general.table_set(
+                                general_table,
+                                Value::number(index as f64),
+                                value,
+                            );
+                        }
+                        Op::HashWrite(key_offset, value_kind) => {
+                            let key = 1_000.0 + f64::from(key_offset);
+                            let value = pick_value(value_kind, op_index);
+                            let _ = fast.table_set(fast_table, Value::number(key), value);
+                            let _ = general.table_set(general_table, Value::number(key), value);
+                        }
+                        Op::ReleaseSpareCapacity => {
+                            fast.release_spare_capacity();
+                            general.release_spare_capacity();
+                        }
+                        Op::Clear => {
+                            let _ = fast.table_clear(fast_table);
+                            let _ = general.table_clear(general_table);
+                        }
+                        Op::InstallMetatable => {
+                            let fast_meta = fast.alloc_array_table(&[]);
+                            let general_meta = general.alloc_array_table(&[]);
+                            let _ = fast.table_set_metatable(fast_table, Some(fast_meta));
+                            let _ = general.table_set_metatable(general_table, Some(general_meta));
+                        }
+                        Op::Freeze => {
+                            let _ = fast.table_freeze(fast_table);
+                            let _ = general.table_freeze(general_table);
+                        }
+                    }
+
+                    assert_states_match(
+                        &mut fast,
+                        fast_table,
+                        &mut general,
+                        general_table,
+                        order,
+                        seed,
+                        op_index + 1,
+                    );
+                }
+            }
+        }
+        assert!(
+            total_direct_append_hits > 0,
+            "the fuzzer must actually exercise the direct append lane at least once"
         );
     }
 

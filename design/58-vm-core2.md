@@ -394,8 +394,8 @@ were the available levers. Every Droplet and temporary key was confirmed deleted
 cost about $0.31. Evidence for all three gates is under `bench/history/evidence/`; the first two directories
 name commits that the tape rebase removed from the branch, and are retained only for their raw samples.
 
-The measurable dense-table opportunity is array append and growth, where 100% of the suite's numeric array
-writes actually land - not existing-slot mutation. Capacity prediction and append fast-pathing are a separate
+The measurable dense-table opportunity is array append and growth, where every one of `dense_tables`' numeric
+array writes lands - not existing-slot mutation. Capacity prediction and append fast-pathing are a separate
 slice with their own gate and must not be folded into this one.
 
 #### Closing the workload gap
