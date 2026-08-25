@@ -385,7 +385,22 @@ just bench-do-status
 just bench-do-unlock                # only after an ungraceful coordinator crash
 just bench-do-destroy               # when exactly one owned run remains
 just bench-do-destroy RUN_ID        # choose an exact owned run
+just bench-do-sweep                 # wallet backstop; also runs before every bench
 ```
+
+`bench-do-destroy` needs a live coordinator to act on, and its confirmation loop
+gives up after four minutes so an interrupted run cannot hold the lock forever.
+A provider outage that outlasts that window therefore leaves a Droplet billing
+with nothing running to stop it: this happened on 2026-08-24, when the
+DigitalOcean API returned 503/504 for roughly twenty minutes and one Droplet
+billed for about 1.4 hours. `bench-do-sweep` closes that gap and runs
+automatically at the start of every `bench`, before anything new is created. It
+destroys a `rustia-bench-` Droplet that any local run state claims — including
+one whose state wrongly recorded destruction, since the coordinator lock proves
+no local run still owns it — and otherwise only one that has outlived any
+legitimate lifetime by a wide margin, so it can never race another machine's
+live run. A creation time it cannot parse is never treated as old, and a failed
+API read is never treated as proof of absence.
 
 Repeated Premium Intel shared-CPU placements passed the idle gate but accrued
 nonzero hypervisor steal or unstable paired ratios during timed legs. Those

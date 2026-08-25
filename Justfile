@@ -114,6 +114,12 @@ bench-do-unlock:
 bench-do-destroy run_id="":
     node tools/run-digitalocean-benchmark.js destroy "{{ run_id }}"
 
+# Wallet backstop: destroy rustia-bench Droplets a run left billing. Runs
+# automatically before every `just bench-do`; use it directly after an
+# interrupted run or a provider outage.
+bench-do-sweep:
+    node tools/run-digitalocean-benchmark.js sweep
+
 # One-time private-prompt Linode authentication in an isolated ignored state file.
 bench-linode-auth:
     node tools/run-linode-benchmark.js auth

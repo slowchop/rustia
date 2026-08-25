@@ -31,6 +31,13 @@ const API_TIMEOUT_MS = 30 * 1000;
 const FORCE_KILL_DELAY_MS = 10 * 1000;
 const CLEANUP_RESERVE_MS = 8 * 60 * 1000;
 const DELETE_CONFIRM_TIMEOUT_MS = 4 * 60 * 1000;
+// Reaping a `rustia-bench-` Droplet that no local state claims can only be safe
+// once it has outlived any legitimate run: the frozen billable lifetime limit
+// plus the cleanup reserve, with headroom. Locally owned Droplets are reaped
+// immediately instead, because the coordinator lock proves no local run owns
+// them any more.
+const SWEEP_UNOWNED_MIN_AGE_MS = 3 * 60 * 60 * 1000;
+const BENCH_DROPLET_PREFIX = "rustia-bench-";
 const CREATE_RECONCILE_TIMEOUT_MS = 2 * 60 * 1000;
 const KEY_RECONCILE_TIMEOUT_MS = 30 * 1000;
 const COORDINATOR_LOCK = path.join(STATE_ROOT, "coordinator.lock");
@@ -1249,6 +1256,136 @@ async function deleteDroplet(state, config) {
   );
 }
 
+/// Decides which `rustia-bench-` Droplets a sweep may destroy.
+///
+/// This is the wallet backstop for the case the coordinator cannot cover: a run
+/// whose cleanup could not be confirmed (a provider outage outlasting
+/// `DELETE_CONFIRM_TIMEOUT_MS`, a killed process, a machine that went away)
+/// leaves a Droplet billing with nothing left running to stop it.
+///
+/// Two rules, both deliberately conservative:
+///   - A Droplet that any local state claims is ours and must not outlive its
+///     run, so it is reaped immediately. Callers hold the coordinator lock, so
+///     no local run can still own it. A state that claims the Droplet was
+///     destroyed while it is still listed is exactly the false-confirmation
+///     case worth catching, so it is reaped too.
+///   - A Droplet no local state claims may belong to another machine's live
+///     run, so it is reaped only once it has outlived any legitimate lifetime.
+///     An unknown or unparseable creation time is never treated as old.
+function sweepPlan(droplets, states, nowMs, unownedMinAgeMs = SWEEP_UNOWNED_MIN_AGE_MS) {
+  const ownedIds = new Set();
+  const ownedNames = new Set();
+  for (const state of states) {
+    if (state && state.droplet_id) ownedIds.add(state.droplet_id);
+    if (state && state.droplet_name) ownedNames.add(state.droplet_name);
+  }
+  const reap = [];
+  const keep = [];
+  for (const droplet of droplets) {
+    if (!droplet || typeof droplet.name !== "string") continue;
+    if (!droplet.name.startsWith(BENCH_DROPLET_PREFIX)) continue;
+    if (ownedIds.has(droplet.id) || ownedNames.has(droplet.name)) {
+      reap.push({ id: droplet.id, name: droplet.name, reason: "locally owned run left it listed" });
+      continue;
+    }
+    const created = Date.parse(droplet.created_at);
+    if (!Number.isFinite(created)) {
+      keep.push({ id: droplet.id, name: droplet.name, reason: "unowned with no parseable creation time" });
+      continue;
+    }
+    const ageMs = nowMs - created;
+    if (ageMs >= unownedMinAgeMs) {
+      reap.push({
+        id: droplet.id,
+        name: droplet.name,
+        reason: `unowned and ${Math.floor(ageMs / 60000)} minutes old, past any legitimate lifetime`,
+      });
+    } else {
+      keep.push({
+        id: droplet.id,
+        name: droplet.name,
+        reason: `unowned but only ${Math.floor(ageMs / 60000)} minutes old; may be another machine's live run`,
+      });
+    }
+  }
+  return { reap, keep };
+}
+
+/// Destroys what [`sweepPlan`] selects. Callers must already hold the
+/// coordinator lock. A read that fails is never treated as proof of absence:
+/// `listDroplets` throws rather than returning an empty list.
+async function sweepLocked(config, { announce = true } = {}) {
+  const plan = sweepPlan(await listDroplets(config), listStates(), Date.now());
+  for (const entry of plan.keep) {
+    if (announce) {
+      process.stdout.write(`sweep: keeping ${entry.name} (${entry.reason})\n`);
+    }
+  }
+  const destroyed = [];
+  for (const entry of plan.reap) {
+    process.stdout.write(`sweep: destroying ${entry.name} (${entry.reason})\n`);
+    await run(
+      "doctl",
+      ["compute", "droplet", "delete", String(entry.id), "--force", "--context", config.provider.context],
+      { allowFailure: true, announce: true, timeoutMs: API_TIMEOUT_MS },
+    );
+    destroyed.push(entry);
+  }
+  if (destroyed.length === 0) {
+    if (announce) process.stdout.write("sweep: no reapable rustia-bench Droplet found\n");
+    return { destroyed: [], confirmed: [] };
+  }
+
+  const deadline = Date.now() + DELETE_CONFIRM_TIMEOUT_MS;
+  let outstanding = destroyed.map((entry) => entry.id);
+  while (outstanding.length > 0 && Date.now() < deadline) {
+    try {
+      const listed = new Set((await listDroplets(config)).map((entry) => entry.id));
+      outstanding = outstanding.filter((id) => listed.has(id));
+      if (outstanding.length === 0) break;
+      for (const id of outstanding) {
+        await run(
+          "doctl",
+          ["compute", "droplet", "delete", String(id), "--force", "--context", config.provider.context],
+          { allowFailure: true, timeoutMs: API_TIMEOUT_MS },
+        );
+      }
+    } catch {
+      // A failed read is not proof of deletion; keep retrying until a
+      // successful list confirms absence.
+    }
+    const delay = Math.min(4000, Math.max(0, deadline - Date.now()));
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  if (outstanding.length > 0) {
+    fail(
+      `sweep could not confirm destruction of ${outstanding.join(", ")}; ` +
+        "do not assume billing stopped",
+    );
+  }
+  const confirmedAt = new Date().toISOString();
+  for (const state of listStates()) {
+    if (!destroyed.some((entry) => entry.id === state.droplet_id || entry.name === state.droplet_name)) {
+      continue;
+    }
+    state.droplet_destroyed_at = confirmedAt;
+    state.cleanup_note = "destruction confirmed by sweep after the owning run could not confirm it";
+    saveState(state);
+  }
+  process.stdout.write(`sweep: confirmed ${destroyed.length} Droplet(s) destroyed\n`);
+  return { destroyed, confirmed: destroyed.map((entry) => entry.id) };
+}
+
+async function sweep(config) {
+  requireExecutables(["doctl"]);
+  const lockToken = acquireCoordinatorLock();
+  try {
+    return await sweepLocked(config);
+  } finally {
+    releaseCoordinatorLock(lockToken);
+  }
+}
+
 async function cleanupOwned(state, config) {
   const errors = [];
   try {
@@ -1963,6 +2100,9 @@ async function bench(config, configFile = DEFAULT_CONFIG) {
   }
   const lockToken = acquireCoordinatorLock();
   try {
+    // Reclaim anything a previous run left billing before adding another
+    // Droplet. Holding the lock proves no local run still owns them.
+    await sweepLocked(config, { announce: false });
     const incomplete = incompleteStates();
     if (incomplete.length > 0) {
       fail(
@@ -2173,7 +2313,47 @@ async function destroy(runId) {
   }
 }
 
+function selfTestSweepPlan() {
+  const now = Date.parse("2026-08-25T00:00:00Z");
+  const minAge = SWEEP_UNOWNED_MIN_AGE_MS;
+  const droplets = [
+    // Locally owned and still listed although its state claims destruction:
+    // exactly the false-confirmation case the sweep exists to catch.
+    { id: 1, name: "rustia-bench-aaaaaaaa-11111111", created_at: "2026-08-24T23:55:00Z" },
+    // Locally owned by a run whose cleanup never completed.
+    { id: 2, name: "rustia-bench-bbbbbbbb-22222222", created_at: "2026-08-24T23:50:00Z" },
+    // Unowned and young: may be another machine's live run.
+    { id: 3, name: "rustia-bench-cccccccc-33333333", created_at: "2026-08-24T23:30:00Z" },
+    // Unowned and older than any legitimate lifetime.
+    { id: 4, name: "rustia-bench-dddddddd-44444444", created_at: "2026-08-24T12:00:00Z" },
+    // Unowned with an unusable creation time: never reaped on unknown age.
+    { id: 5, name: "rustia-bench-eeeeeeee-55555555", created_at: "not-a-timestamp" },
+    // Not ours at all.
+    { id: 6, name: "someone-elses-box", created_at: "2020-01-01T00:00:00Z" },
+  ];
+  const states = [
+    { run_id: "a", droplet_id: 1, droplet_name: "rustia-bench-aaaaaaaa-11111111", droplet_destroyed_at: "2026-08-24T23:58:00Z" },
+    { run_id: "b", droplet_id: 2, droplet_name: "rustia-bench-bbbbbbbb-22222222" },
+  ];
+
+  const plan = sweepPlan(droplets, states, now, minAge);
+  assert.deepEqual(plan.reap.map((entry) => entry.id).sort(), [1, 2, 4]);
+  assert.deepEqual(plan.keep.map((entry) => entry.id).sort(), [3, 5]);
+
+  // A droplet outside the prefix is never considered, in either bucket.
+  assert.ok(!plan.reap.some((entry) => entry.id === 6));
+  assert.ok(!plan.keep.some((entry) => entry.id === 6));
+
+  // With no local state at all, only the aged unowned droplet is reapable.
+  const unowned = sweepPlan(droplets, [], now, minAge);
+  assert.deepEqual(unowned.reap.map((entry) => entry.id).sort(), [4]);
+
+  // An empty droplet list is a successful "nothing to do", not an error.
+  assert.deepEqual(sweepPlan([], states, now, minAge), { reap: [], keep: [] });
+}
+
 async function selfTest(config) {
+  selfTestSweepPlan();
   assert.equal(config.publication.mode, "acceptance");
   assert.equal(config.measurement.run_order.length, 8);
   assert.deepEqual(
@@ -2339,6 +2519,7 @@ function usage() {
   node tools/run-digitalocean-benchmark.js trial-matrix
   node tools/run-digitalocean-benchmark.js status
   node tools/run-digitalocean-benchmark.js destroy [RUN-ID]
+  node tools/run-digitalocean-benchmark.js sweep
   node tools/run-digitalocean-benchmark.js unlock
   node tools/run-digitalocean-benchmark.js self-test
 
@@ -2369,6 +2550,11 @@ async function main() {
   if (command === "destroy") {
     requireCommandArguments(1, 2);
     await destroy(process.argv[3] || "");
+    return;
+  }
+  if (command === "sweep") {
+    requireCommandArguments(1);
+    await sweep(loadConfig());
     return;
   }
   if (command === "trial-plan") {
