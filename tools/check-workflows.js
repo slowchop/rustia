@@ -311,6 +311,7 @@ function checkNightlyMatrix(text) {
   requireIncludes(text, "steps.gate.outputs.pending != '0'", label);
   requireIncludes(text, "LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}", label);
   requireIncludes(text, "node tools/create-linode-matrix-config.js", label);
+  requireIncludes(text, "node tools/register-matrix-cohort.js", label);
   requireIncludes(text, "node tools/run-linode-benchmark.js bench", label);
   requireIncludes(text, "node tools/check-benchmark-results.js", label);
   requireIncludes(text, "node tools/run-linode-benchmark.js destroy", label);

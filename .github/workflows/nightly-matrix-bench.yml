@@ -85,11 +85,13 @@ jobs:
           short_commit="${benchmark_commit:0:12}"
           config="bench/cloud/linode-cross-engine-matrix-${short_commit}.json"
           node tools/create-linode-matrix-config.js --output "$config"
+          node tools/register-matrix-cohort.js
           node tools/check-package-files.js
           node tools/check-publishability.js
           git config user.name "rustia-benchmark"
           git config user.email "benchmark@rustia.invalid"
-          git add "$config" design/package-files.json design/publishability.json
+          git add "$config" tools/check-benchmark-results.js \
+            design/package-files.json design/publishability.json
           git commit -m "Freeze cross-engine matrix ${short_commit}"
           printf 'RUSTIA_MATRIX_CONFIG=%s\n' "$config" >> "$GITHUB_ENV"
           printf 'RUSTIA_MATRIX_COMMIT=%s\n' "$short_commit" >> "$GITHUB_ENV"
