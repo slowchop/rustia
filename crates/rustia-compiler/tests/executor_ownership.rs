@@ -77,7 +77,7 @@ fn share(part: u64, whole: u64) -> f64 {
 fn report_executor_ownership() {
     println!(
         "\nworkload                 variant      executed   tape_instr    tape%  \
-         hotIR_iters  tape_exits  receipts  closure_fast"
+         hotIR_iters  tape_exits  receipts  root_refresh  root_copies"
     );
     for id in WORKLOADS {
         let Some(baseline) = compile_workload(id, ExperimentalO2Options::default()) else {
@@ -97,14 +97,15 @@ fn report_executor_ownership() {
         for (label, census) in [("default", base_census), ("o2-exact", opt_census)] {
             println!(
                 "{id:24} {label:10} {executed:>10}   {tape_instr:>10} {tape:>7.2}%  \
-                 {hot:>11}  {tape_exits:>10}  {receipts:>8}  {closure:>12}",
+                 {hot:>11}  {tape_exits:>10}  {receipts:>8}  {refreshes:>12}  {copies:>11}",
                 executed = census.executed_instructions,
                 tape_instr = census.tape_instructions,
                 tape = share(census.tape_instructions, census.executed_instructions),
                 hot = census.hot_ir_iterations,
                 tape_exits = census.tape_guard_exits,
                 receipts = census.tape_receipts,
-                closure = census.closure_call_fast_entries,
+                refreshes = census.gc_root_refreshes,
+                copies = census.gc_root_values_copied,
             );
         }
     }

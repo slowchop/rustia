@@ -487,6 +487,10 @@ pub struct Vm {
     gc_step_counter: u64,
     gc_stopped: bool,
     executed_instructions: u64,
+    #[cfg(any(test, feature = "executor-diagnostics"))]
+    gc_root_refreshes: u64,
+    #[cfg(any(test, feature = "executor-diagnostics"))]
+    gc_root_values_copied: u64,
     next_weak_collection_instruction: u64,
     deterministic_collection_count: u64,
     decision_epoch: u64,
@@ -2247,6 +2251,10 @@ impl Vm {
             gc_step_counter: 0,
             gc_stopped: false,
             executed_instructions: 0,
+            #[cfg(any(test, feature = "executor-diagnostics"))]
+            gc_root_refreshes: 0,
+            #[cfg(any(test, feature = "executor-diagnostics"))]
+            gc_root_values_copied: 0,
             next_weak_collection_instruction,
             deterministic_collection_count: 0,
             decision_epoch: 0,
@@ -2341,6 +2349,8 @@ impl Vm {
     pub fn executor_census(&self) -> crate::ExecutorCensus {
         let mut census = crate::ExecutorCensus {
             executed_instructions: self.executed_instructions,
+            gc_root_refreshes: self.gc_root_refreshes,
+            gc_root_values_copied: self.gc_root_values_copied,
             ..crate::ExecutorCensus::default()
         };
         for slot in &self.dynamic_programs.slots {
@@ -14543,13 +14553,24 @@ impl Vm {
         varargs: &[Value],
         pending_return_prefixes: &[Value],
     ) {
-        let _ = self.mutate_last_call_stack_frame(|frame| {
+        #[cfg(any(test, feature = "executor-diagnostics"))]
+        {
+            self.gc_root_refreshes = self.gc_root_refreshes.saturating_add(1);
+        }
+        let _copied = self.mutate_last_call_stack_frame(|frame| {
             frame.roots.clear();
             frame.roots.extend_from_slice(registers);
             extend_capture_cell_roots(&mut frame.roots, register_cells);
             frame.roots.extend_from_slice(varargs);
             frame.roots.extend_from_slice(pending_return_prefixes);
+            frame.roots.len() as u64
         });
+        #[cfg(any(test, feature = "executor-diagnostics"))]
+        {
+            self.gc_root_values_copied = self
+                .gc_root_values_copied
+                .saturating_add(_copied.unwrap_or(0));
+        }
     }
 
     fn push_stackless_self_call_roots(

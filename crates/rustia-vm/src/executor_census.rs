@@ -16,6 +16,11 @@ pub struct ExecutorCensus {
     /// Total logical instructions the VM has charged, the denominator every
     /// executor share is measured against.
     pub executed_instructions: u64,
+    /// Times the VM rebuilt the current frame's GC root vector.
+    pub gc_root_refreshes: u64,
+    /// Values copied into frame root vectors by those refreshes. This is the
+    /// work a C2.4 window scan would replace with a borrow.
+    pub gc_root_values_copied: u64,
     /// Times the plain-mode tape was entered at a function or block boundary.
     pub tape_entries: u64,
     /// Source instructions the tape executed without returning to the scalar

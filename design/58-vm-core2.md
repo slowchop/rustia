@@ -317,6 +317,14 @@ executor owns each workload; at `n = 32`, with the reachability-exact track:
 | `stdlib_math_table` | 82.38% tape | unchanged (no rewrite fired) |
 | `array_mutation` | 0.96% tape, 8,399 HotIR iterations | unchanged (no rewrite fired) |
 
+**The enablement gate runs on `generic_iteration`, not `dense_tables`.** A dense gate would measure the
+tape replacing HotIR at least as much as it measures the O2 rewrites, because the executor changes under
+the candidate. `generic_iteration` loses only 31 HotIR iterations out of 36,955 executed instructions, so
+the executor is effectively constant across both sides while the rewrite effect is real (tape share
+38.02% to 67.24%, receipts 2,208 to 1,215). Dense may still be measured, but only as an explicitly
+labelled combined executor-swap-plus-rewrite result, never as the primary evidence for enabling a family
+by default.
+
 Charged `executed_instructions` are identical in every row, which is the logical-receipt contract
 working: the reduction the preview reports is in dispatched work, not in the charged schedule. The sign
 of the trade therefore differs per workload — `dense_tables` swaps HotIR for near-total tape coverage,
@@ -337,6 +345,26 @@ default is now purely a measured performance decision behind the standard contro
   dead-value cleanup clears (`elide_dead_cleanup_clears`, which carries most of the C2.3 dynamic reduction)
   stops changing weak-table observability; the pinned `weak_table_key_value_root_liveness` divergence is the
   acceptance test.
+
+**Measured size of the root-scan prize (2026-08-26).** `Vm::update_current_gc_roots` clears the current
+frame's root vector and copies the whole register file, capture cells, varargs, and pending return
+prefixes into it, and it runs at every instruction `instruction_may_invoke_guest` reports — which
+includes `GetIndex`/`SetIndex` unconditionally, plus every call, global access, `Concat`, and `Len`. The
+`executor-diagnostics` census counts that traffic per workload at `n = 32`:
+
+| workload | executed | root refreshes | values copied | copies per executed instruction |
+| --- | --- | --- | --- | --- |
+| `sparse_tables` | 111,731 | 12,297 | 196,752 | 1.76 |
+| `generic_iteration` | 36,955 | 2,509 | 37,193 | 1.01 |
+| `stdlib_math_table` | 1,771 | 133 | 1,699 | 0.96 |
+| `dense_tables` | 222,933 | 86 | 1,290 | 0.006 |
+| `array_mutation` | 166,786 | 16 | 240 | 0.001 |
+
+The two HotIR-owned workloads pay almost nothing because HotIR does not refresh per iteration; the
+tape/scalar-owned workloads copy roughly one to two `Value`s for every logical instruction they execute.
+Scanning the active frame window directly replaces that copy with a borrow, which is why C2.4 is sized
+against `sparse_tables` and `generic_iteration` rather than the dense workloads. This is a count of
+copied values, not a timing claim.
 
 This is the largest broad architectural step and the phase most likely to close the closure/call gap. It lands
 only after C2.2 provides a stable executor boundary; mixing a frame rewrite with the old policy ladder would make
