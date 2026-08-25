@@ -17,6 +17,9 @@ default = []
 # Enables the default-off `rustia-vm` numeric array-slot write census used by
 # `tests/array_slot_write_coverage.rs`. Never enabled for benchmark builds.
 table-write-diagnostics = ["rustia-vm/table-write-diagnostics"]
+# Enables the default-off `rustia-vm` executor census used by
+# `tests/executor_ownership.rs`. Never enabled for benchmark builds.
+executor-diagnostics = ["rustia-vm/executor-diagnostics"]
 
 [dependencies]
 rustia-lexer.workspace = true

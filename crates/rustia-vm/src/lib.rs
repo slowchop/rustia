@@ -6,6 +6,8 @@
 
 pub mod bytecode;
 pub mod error;
+#[cfg(any(test, feature = "executor-diagnostics"))]
+mod executor_census;
 pub mod extension;
 mod heap;
 mod hot_ir;
@@ -20,6 +22,8 @@ pub mod vm;
 
 pub use bytecode::{Constant, Function, Instruction, Opcode, Program, ProgramLogicalUnits};
 pub use error::{Error, ErrorKind, Result};
+#[cfg(any(test, feature = "executor-diagnostics"))]
+pub use executor_census::ExecutorCensus;
 pub use extension::{
     ExtensionHandler, ExtensionOp, HostFunctionHandler, HostFunctionOp, OpCapability,
 };

@@ -435,7 +435,13 @@ unreachable suspended-coroutine frames.
    upstream weak-root-liveness fixture and is hard-blocked until C2.4 frame root scans mask liveness-dead
    registers; a self-documenting ignored conformance test pins the divergence. Default compilation remains
    byte- and schedule-identical; enabling a corpus-green family is now purely a measured performance decision
-   (see [`58-vm-core2.md`](58-vm-core2.md) §C2.3). The C2.5a slice is also merged: numeric writes to a
+   (see [`58-vm-core2.md`](58-vm-core2.md) §C2.3), and that decision is a **per-workload executor trade**:
+   attaching a non-identity logical-unit schedule deselects HotIR and the leaf-call plans for that
+   program, so `dense_tables` swaps 16,298 HotIR iterations for 99.76% tape coverage while
+   `closures_upvalues` loses its closure-call fast entries outright. The default-off
+   `executor-diagnostics` feature and `crates/rustia-compiler/tests/executor_ownership.rs` report that
+   ownership per workload; the same report shows `sparse_tables` taking 8,190 tape guard exits per 32
+   units — one per scattered-integer index operation — independent of O2. The C2.5a slice is also merged: numeric writes to a
    proven existing, non-nil array slot mutate in place, skipping `mutate_table_data`'s before/after memory
    census and its no-op `side_usage` adjustment while keeping readonly, `__newindex`, insertion-order, and
    the single `mutation_version` bump exact; a `debug_assert!` pins the shadowing invariant across the unit,

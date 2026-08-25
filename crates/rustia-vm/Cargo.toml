@@ -18,6 +18,11 @@ default = []
 # production or benchmark builds; the counters exist so a separate test can
 # prove which workloads reach the C2.5a direct existing-slot lane.
 table-write-diagnostics = []
+# Diagnostic-only executor census: which executor (tape, HotIR, closure-call
+# fast entry, inline caches) actually ran each workload, and how often guards
+# side-exited. Never enabled in production or benchmark builds; the counters
+# add unconditional adds to hot paths and carry no semantic change.
+executor-diagnostics = []
 
 [dependencies]
 gc-arena.workspace = true

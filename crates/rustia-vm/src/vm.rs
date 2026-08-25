@@ -632,35 +632,35 @@ struct LoadedProgram {
     constant_atoms: Vec<u32>,
     main_inline_caches: FunctionInlineCaches,
     function_inline_caches: Vec<FunctionInlineCaches>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     table_inline_cache_hits: u64,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     table_inline_cache_fills: u64,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     native_call_inline_cache_hits: u64,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     native_call_inline_cache_fills: u64,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     hot_ir_entries: u64,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     hot_ir_iterations: u64,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     hot_ir_guard_exits: u64,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     tape_entries: u64,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     tape_instructions: u64,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     tape_receipts: u64,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     tape_guard_exits: u64,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     closure_call_cache_fills: u64,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     closure_call_prototype_hits: u64,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     closure_call_fast_entries: u64,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     closure_call_guard_exits: u64,
 }
 
@@ -944,35 +944,35 @@ impl LoadedProgram {
             constant_atoms,
             main_inline_caches,
             function_inline_caches,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             table_inline_cache_hits: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             table_inline_cache_fills: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             native_call_inline_cache_hits: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             native_call_inline_cache_fills: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             hot_ir_entries: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             hot_ir_iterations: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             hot_ir_guard_exits: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             tape_entries: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             tape_instructions: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             tape_receipts: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             tape_guard_exits: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             closure_call_cache_fills: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             closure_call_prototype_hits: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             closure_call_fast_entries: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             closure_call_guard_exits: 0,
         }
     }
@@ -2330,6 +2330,40 @@ impl Vm {
     #[cfg(any(test, feature = "table-write-diagnostics"))]
     pub fn numeric_array_slot_write_counts(&self) -> crate::NumericArraySlotWriteCounts {
         self.heap.numeric_array_slot_write_counts()
+    }
+
+    /// Diagnostic-only census of which executor served the run so far.
+    ///
+    /// Available only under `cfg(test)` or the default-off
+    /// `executor-diagnostics` feature, so ordinary and benchmark builds carry
+    /// no hot-path instrumentation. Counts aggregate every loaded program.
+    #[cfg(any(test, feature = "executor-diagnostics"))]
+    pub fn executor_census(&self) -> crate::ExecutorCensus {
+        let mut census = crate::ExecutorCensus {
+            executed_instructions: self.executed_instructions,
+            ..crate::ExecutorCensus::default()
+        };
+        for slot in &self.dynamic_programs.slots {
+            let Some(program) = slot.value.as_ref() else {
+                continue;
+            };
+            census.tape_entries += program.tape_entries;
+            census.tape_instructions += program.tape_instructions;
+            census.tape_receipts += program.tape_receipts;
+            census.tape_guard_exits += program.tape_guard_exits;
+            census.hot_ir_entries += program.hot_ir_entries;
+            census.hot_ir_iterations += program.hot_ir_iterations;
+            census.hot_ir_guard_exits += program.hot_ir_guard_exits;
+            census.closure_call_fast_entries += program.closure_call_fast_entries;
+            census.closure_call_prototype_hits += program.closure_call_prototype_hits;
+            census.closure_call_cache_fills += program.closure_call_cache_fills;
+            census.closure_call_guard_exits += program.closure_call_guard_exits;
+            census.table_inline_cache_hits += program.table_inline_cache_hits;
+            census.table_inline_cache_fills += program.table_inline_cache_fills;
+            census.native_call_inline_cache_hits += program.native_call_inline_cache_hits;
+            census.native_call_inline_cache_fills += program.native_call_inline_cache_fills;
+        }
+        census
     }
 
     /// Returns an exact census of VM-managed heap/program/control allocations.
@@ -8356,7 +8390,7 @@ impl Vm {
         registers: &mut [Value],
         register_cells: &mut [Option<u32>],
     ) -> Result<TapeOutcome> {
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "executor-diagnostics")))]
         let _ = program_id;
         // Tape operations cannot allocate, so allocation debt is invariant
         // while the tape runs and is checked once per entry.
@@ -8378,13 +8412,13 @@ impl Vm {
                     .sum(),
             }
         };
-        #[cfg(test)]
+        #[cfg(any(test, feature = "executor-diagnostics"))]
         let mut total: u64 = 0;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "executor-diagnostics"))]
         let mut total_receipts: u64 = 0;
         macro_rules! finish_complete {
             () => {{
-                #[cfg(test)]
+                #[cfg(any(test, feature = "executor-diagnostics"))]
                 self.record_tape_execution(program_id, total, total_receipts, false);
                 return Ok(TapeOutcome::Complete { next_pc: pc });
             }};
@@ -8638,7 +8672,7 @@ impl Vm {
                             && done + receipt_units <= admitted
                             && self.try_register_block(registers, register_cells, plan)
                         {
-                            #[cfg(test)]
+                            #[cfg(any(test, feature = "executor-diagnostics"))]
                             {
                                 total_receipts += 1;
                             }
@@ -8742,7 +8776,7 @@ impl Vm {
             if guard_missed {
                 let accounted = done.wrapping_add(unit_at(pc));
                 self.executed_instructions = self.executed_instructions.wrapping_add(accounted);
-                #[cfg(test)]
+                #[cfg(any(test, feature = "executor-diagnostics"))]
                 self.record_tape_execution(
                     program_id,
                     total.wrapping_add(accounted),
@@ -8751,7 +8785,7 @@ impl Vm {
                 );
                 return Ok(TapeOutcome::GuardExit { pc });
             }
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             {
                 total = total.wrapping_add(done);
             }
@@ -8772,9 +8806,9 @@ impl Vm {
         registers: &mut [Value],
         register_cells: &mut [Option<u32>],
     ) -> Option<usize> {
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "executor-diagnostics")))]
         let _ = program_id;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "executor-diagnostics"))]
         self.record_hot_ir_entry(program_id);
 
         let register_count = usize::from(hot_ir.register_count);
@@ -8810,7 +8844,7 @@ impl Vm {
                 1
             };
             if self.weak_collection_due_within(logical_steps) {
-                #[cfg(test)]
+                #[cfg(any(test, feature = "executor-diagnostics"))]
                 self.record_hot_ir_iterations(program_id, completed_iterations);
                 return None;
             }
@@ -8818,7 +8852,7 @@ impl Vm {
             if !continues {
                 registers[usize::from(hot_ir.index_register)] = Value::number(next);
                 self.executed_instructions = self.executed_instructions.wrapping_add(1);
-                #[cfg(test)]
+                #[cfg(any(test, feature = "executor-diagnostics"))]
                 self.record_hot_ir_iterations(program_id, completed_iterations);
                 return Some(hot_ir.backedge_pc + 1);
             }
@@ -8900,12 +8934,12 @@ impl Vm {
         program_id: u32,
         completed_iterations: u64,
     ) -> Option<usize> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "executor-diagnostics"))]
         {
             self.record_hot_ir_iterations(program_id, completed_iterations);
             self.record_hot_ir_guard_exit(program_id);
         }
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "executor-diagnostics")))]
         let _ = (program_id, completed_iterations);
         None
     }
@@ -8957,7 +8991,7 @@ impl Vm {
                     self.heap.read_string_hash_slot(table, atom, entry.slot())
                 {
                     if value.kind() != ValueKind::Nil {
-                        #[cfg(test)]
+                        #[cfg(any(test, feature = "executor-diagnostics"))]
                         self.record_table_inline_cache_hit(program_id);
                         return Ok(value);
                     }
@@ -8996,7 +9030,7 @@ impl Vm {
                         .read_string_hash_slot(index_table, atom, entry.slot())
                 {
                     if value.kind() != ValueKind::Nil {
-                        #[cfg(test)]
+                        #[cfg(any(test, feature = "executor-diagnostics"))]
                         self.record_table_inline_cache_hit(program_id);
                         return Ok(value);
                     }
@@ -9133,7 +9167,7 @@ impl Vm {
                     self.heap.read_string_hash_slot(table, atom, entry.slot())
                 {
                     if value.kind() != ValueKind::Nil {
-                        #[cfg(test)]
+                        #[cfg(any(test, feature = "executor-diagnostics"))]
                         self.record_table_inline_cache_hit(program_id);
                         return Ok(value);
                     }
@@ -9182,7 +9216,7 @@ impl Vm {
                     self.heap.read_string_hash_slot(table, atom, entry.slot())
                 {
                     if value.kind() != ValueKind::Nil {
-                        #[cfg(test)]
+                        #[cfg(any(test, feature = "executor-diagnostics"))]
                         self.record_table_inline_cache_hit(program_id);
                         return Ok(value);
                     }
@@ -9358,7 +9392,7 @@ impl Vm {
                     .write_string_hash_slot(table, atom, entry.slot(), value)
                 {
                     Some(TableStringHashWrite::Stored) => {
-                        #[cfg(test)]
+                        #[cfg(any(test, feature = "executor-diagnostics"))]
                         self.record_table_inline_cache_hit(program_id);
                         return Ok(());
                     }
@@ -10077,7 +10111,7 @@ impl Vm {
             .native_call_inline_cache(cache_site.program_id, cache_site.prototype, cache_site.pc)
             .filter(|entry| entry.function_handle == handle);
         let native = if let Some(entry) = cached {
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             self.record_native_call_inline_cache_hit(cache_site.program_id);
             entry.native
         } else {
@@ -10271,7 +10305,7 @@ impl Vm {
             cache_site.pc,
         ) {
             if entry.function_handle == handle {
-                #[cfg(test)]
+                #[cfg(any(test, feature = "executor-diagnostics"))]
                 self.record_native_call_inline_cache_hit(cache_site.program_id);
                 return self
                     .call_native_function_resumable(
@@ -10612,7 +10646,7 @@ impl Vm {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     fn record_closure_call_prototype_hit(&mut self, program_id: u32) {
         if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.closure_call_prototype_hits =
@@ -10620,21 +10654,21 @@ impl Vm {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     fn record_closure_call_fast_entry(&mut self, program_id: u32) {
         if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.closure_call_fast_entries = program.closure_call_fast_entries.saturating_add(1);
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     fn record_closure_call_guard_exit(&mut self, program_id: u32) {
         if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.closure_call_guard_exits = program.closure_call_guard_exits.saturating_add(1);
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     fn record_native_call_inline_cache_hit(&mut self, program_id: u32) {
         if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.native_call_inline_cache_hits =
@@ -10642,21 +10676,21 @@ impl Vm {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     fn record_table_inline_cache_hit(&mut self, program_id: u32) {
         if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.table_inline_cache_hits = program.table_inline_cache_hits.saturating_add(1);
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     fn record_hot_ir_entry(&mut self, program_id: u32) {
         if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.hot_ir_entries = program.hot_ir_entries.saturating_add(1);
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     fn record_hot_ir_iterations(&mut self, program_id: u32, iterations: u64) {
         let Some(mut program) = self.dynamic_programs.get_mut(program_id) else {
             return;
@@ -10664,14 +10698,14 @@ impl Vm {
         program.hot_ir_iterations = program.hot_ir_iterations.saturating_add(iterations);
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     fn record_hot_ir_guard_exit(&mut self, program_id: u32) {
         if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.hot_ir_guard_exits = program.hot_ir_guard_exits.saturating_add(1);
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     fn record_tape_execution(
         &mut self,
         program_id: Option<u32>,
@@ -10910,7 +10944,7 @@ impl Vm {
             return Ok(None);
         }
         if cache_hit {
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             self.record_closure_call_prototype_hit(caller_program);
         } else {
             self.set_closure_call_inline_cache(
@@ -10928,16 +10962,16 @@ impl Vm {
         let Some((first_capture, second_capture)) =
             selected_leaf_captures(plan, |index| self.heap.function_capture(handle, index))
         else {
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             self.record_closure_call_guard_exit(caller_program);
             return Ok(None);
         };
         let Some(outcome) = self.try_leaf_call_outcome(plan, first_capture, second_capture)? else {
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             self.record_closure_call_guard_exit(caller_program);
             return Ok(None);
         };
-        #[cfg(test)]
+        #[cfg(any(test, feature = "executor-diagnostics"))]
         self.record_closure_call_fast_entry(caller_program);
         Ok(Some(outcome))
     }

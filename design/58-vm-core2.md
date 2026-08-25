@@ -300,6 +300,29 @@ The full-corpus conformance gate (`rustia-conformance/tests/o2_conformance.rs`, 
   have cleared; a self-documenting ignored conformance test pins the divergence and flips into a passing gate
   when that lands.
 
+**Enablement is an executor trade, not a free instruction win (measured 2026-08-26).** Attaching a
+non-identity logical-unit schedule deselects HotIR *and* the leaf-call plans for that program
+(`Vm::load_program` and `recognize_leaf_call_plan` both skip unit-carrying programs, because their
+accounting assumes one logical unit per matched PC). `Program::with_logical_units` drops an identity
+schedule, so a program the pass did not actually rewrite keeps both. The default-off
+`executor-diagnostics` feature and `crates/rustia-compiler/tests/executor_ownership.rs` report which
+executor owns each workload; at `n = 32`, with the reachability-exact track:
+
+| workload | default | with `reachability_exact()` |
+| --- | --- | --- |
+| `dense_tables` | 1.03% tape, 16,298 HotIR iterations, 38 receipts | 99.76% tape, 0 HotIR, 8,191 receipts |
+| `sparse_tables` | 92.39% tape, 8,190 tape guard exits | unchanged coverage, 8,190 guard exits |
+| `closures_upvalues` | 68.67% tape, 32 closure fast entries | 77.67% tape, 0 closure fast entries |
+| `generic_iteration` | 38.02% tape, 2,208 receipts | 67.24% tape, 1,215 receipts |
+| `stdlib_math_table` | 82.38% tape | unchanged (no rewrite fired) |
+| `array_mutation` | 0.96% tape, 8,399 HotIR iterations | unchanged (no rewrite fired) |
+
+Charged `executed_instructions` are identical in every row, which is the logical-receipt contract
+working: the reduction the preview reports is in dispatched work, not in the charged schedule. The sign
+of the trade therefore differs per workload — `dense_tables` swaps HotIR for near-total tape coverage,
+`closures_upvalues` loses its closure-call fast entries outright — so enablement needs a per-workload
+controlled gate, not one gate generalized across the cohort.
+
 Default compilation remains byte-identical and schedule-identical; enabling any corpus-green family by
 default is now purely a measured performance decision behind the standard controlled A/B gates.
 
