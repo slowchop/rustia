@@ -2147,6 +2147,7 @@ impl VmCell {
     /// `side_usage` can be updated incrementally instead of running
     /// `mutate_table_data`'s before/after census, the same way C2.5a skips
     /// it for existing-slot writes.
+    #[allow(dead_code)]
     #[inline]
     fn write_append_array_slot(
         &mut self,
@@ -2281,14 +2282,6 @@ impl VmCell {
         // straight to `write_append_array_slot` instead of the generic
         // resize+overwrite+remove_hash_key sequence. A non-empty hash part
         // falls through unchanged to the generic path below.
-        if !value.is_nil() && one_based_index == table_data.array.len() + 1 {
-            let HashPart::Log { entries, .. } = &table_data.hash else {
-                unreachable!("Log layout checked above")
-            };
-            if entries.is_empty() {
-                return self.write_append_array_slot(table, value);
-            }
-        }
         let stored = self.mutate_table_data(table, |table| {
             if value.is_nil() {
                 let slot = table
