@@ -285,7 +285,8 @@ function checkNightlyMatrix(text) {
   requireIncludes(text, "\"on\":\n  schedule:\n    - cron: \"0 18 * * *\"\n  workflow_dispatch:\n", label);
   // The single sanctioned contents-write grant: this workflow may push
   // accepted matrix cohorts to main and nothing else may.
-  requireIncludes(text, "permissions:\n  contents: write\n", label);
+  requireIncludes(text, "permissions:\n  contents: write\n  actions: write\n", label);
+  requireIncludes(text, "publish-benchmark-data.yml/dispatches", label);
   requireIncludes(text, "cancel-in-progress: false\n", label);
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
   requireIncludes(text, "ref: main", label);

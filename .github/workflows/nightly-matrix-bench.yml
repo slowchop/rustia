@@ -13,6 +13,7 @@ name: Nightly Cross-Engine Matrix
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: rustia-nightly-matrix
@@ -140,6 +141,15 @@ jobs:
             echo "push raced with new commits on main; rebuilding publication (attempt $attempt)"
           done
           test -n "$published"
+          # A GITHUB_TOKEN push does not trigger downstream workflows, so the
+          # dashboard publication is dispatched explicitly.
+          curl -sSf -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/publish-benchmark-data.yml/dispatches" \
+            -d '{"ref":"main"}'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify Linode cleanup
         if: always() && steps.gate.outputs.pending != '0'
