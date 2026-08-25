@@ -95,6 +95,7 @@ jobs:
           git commit -m "Freeze cross-engine matrix ${short_commit}"
           printf 'RUSTIA_MATRIX_CONFIG=%s\n' "$config" >> "$GITHUB_ENV"
           printf 'RUSTIA_MATRIX_COMMIT=%s\n' "$short_commit" >> "$GITHUB_ENV"
+          printf 'RUSTIA_BENCHMARK_COMMIT=%s\n' "$benchmark_commit" >> "$GITHUB_ENV"
 
       - name: Run cross-engine matrix on one ephemeral dedicated Linode
         if: steps.gate.outputs.pending != '0'
@@ -103,15 +104,42 @@ jobs:
       - name: Publish accepted cohort to main
         if: steps.gate.outputs.pending != '0'
         run: |
-          node tools/render-benchmark-operations-status.js
-          node bench/render-current-results.js
-          node tools/check-benchmark-results.js
-          git add bench design
-          git commit -m "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT}"
-          if ! git push origin HEAD:main; then
-            git pull --rebase origin main
-            git push origin HEAD:main
-          fi
+          # Snapshot the locally promoted artifacts, then rebuild the
+          # publication as one fresh commit on top of the freshly fetched
+          # main so a long measurement never has to rebase over commits
+          # that landed while the Linode ran.
+          git add bench design tools/check-benchmark-results.js
+          git commit -m "Local promotion snapshot ${RUSTIA_MATRIX_COMMIT}"
+          snapshot="$(git rev-parse HEAD)"
+          published=""
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git checkout -B nightly-publish origin/main
+            git checkout "$snapshot" -- \
+              "$RUSTIA_MATRIX_CONFIG" \
+              bench/history \
+              bench/RESULTS.md \
+              bench/CLAIMS.md \
+              bench/current-results.json \
+              bench/wasm/current-results.json \
+              bench/wasm/dispatch-current-results.json
+            git checkout origin/main -- tools/check-benchmark-results.js
+            node tools/register-matrix-cohort.js --commit "$RUSTIA_BENCHMARK_COMMIT"
+            node tools/check-package-files.js
+            node tools/check-publishability.js
+            node tools/render-benchmark-operations-status.js
+            node bench/render-current-results.js
+            node bench/render-claims.js
+            node tools/check-benchmark-results.js
+            git add bench design tools/check-benchmark-results.js
+            git commit -m "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT}"
+            if git push origin HEAD:main; then
+              published=yes
+              break
+            fi
+            echo "push raced with new commits on main; rebuilding publication (attempt $attempt)"
+          done
+          test -n "$published"
 
       - name: Verify Linode cleanup
         if: always() && steps.gate.outputs.pending != '0'

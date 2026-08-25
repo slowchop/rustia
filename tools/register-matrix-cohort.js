@@ -32,8 +32,15 @@ function headCommit() {
 // create-linode-matrix-config.js, whose embedded engine list mirrors the same
 // newest operator template, so the two stay consistent by construction.
 function main() {
-  if (process.argv.length !== 2) fail("usage: register-matrix-cohort.js (registers HEAD)");
-  const commit = headCommit();
+  const argv = process.argv.slice(2);
+  let commit;
+  if (argv.length === 0) {
+    commit = headCommit();
+  } else if (argv.length === 2 && argv[0] === "--commit" && FULL_COMMIT.test(argv[1])) {
+    commit = argv[1];
+  } else {
+    fail("usage: register-matrix-cohort.js [--commit FULL_SHA] (default: HEAD)");
+  }
   const text = fs.readFileSync(CHECKER, "utf8");
   if (text.includes(`"${commit}"`)) {
     process.stdout.write(`${commit} is already a registered matrix cohort\n`);
