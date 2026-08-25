@@ -294,6 +294,13 @@ function checkNightlyMatrix(text) {
     "runs-on:\n      group: general-linux\n      labels: [self-hosted, Linux, X64, general-linux]",
     label,
   );
+  requireIncludes(
+    text,
+    "uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659",
+    label,
+  );
+  requireIncludes(text, "toolchain: 1.95.0", label);
+  requireIncludes(text, "cache: false", label);
   requireIncludes(text, "pending_relevant_commit_count", label);
   requireIncludes(text, "steps.gate.outputs.pending != '0'", label);
   requireIncludes(text, "LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}", label);
