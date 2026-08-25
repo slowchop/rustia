@@ -381,10 +381,10 @@ conservative interval reflects leg clustering rather than a large effect: two of
 about 20% slow (64,668.6 and 65,085.7 versus 53,613.0 and 54,014.6 ns/unit) while all four candidate legs
 stayed within 53,071.2-54,269.0, so its -1.8842% point estimate should not be read as a win.
 
-Verdict: retained as neutral. All three are `material_regression_excluded` and all three conservative
-intervals contain zero, so none establishes a win or a loss, and the final form carries no nominal cost. The
-slice keeps its place as the C2.5 direct-table lane with exact guards and full differential coverage; it is
-not a speed claim, and public benchmark history is unchanged.
+Those three gates all ran on workloads that never execute the lane, so all three are
+`material_regression_excluded` with conservative intervals containing zero: they establish only that the
+guard costs nothing where it never fires. The lane's actual value is measured separately below, on
+`array_mutation`.
 
 Fourteen ephemeral Droplets produced those three accepted gates. Eleven were rejected before or during
 measurement - AMS3 on steal, AMS3 at a 36.342% within-order paired ratio spread against the 5% ceiling, NYC3
@@ -413,6 +413,25 @@ because `x -> (3x + it) mod 1000` is a bijection).
 The C2.5a census now reports the mirror image of the tracked five: `array_mutation` serves 16,384 of its
 16,640 numeric array-slot writes through the direct lane (98.46%), the remaining 256 being the one-time
 build. A test pins that, alongside the tripwire pinning zero coverage on the tracked five.
+
+#### The lane measured where it fires
+
+With a workload that reaches the lane, the exact DigitalOcean gate compared control `7e6e71d` - candidate
+`accca92` with only the lane's two admissions removed, so the two trees differ by nothing else - against
+candidate `accca92` on fixed `array_mutation` work at `n=4000`. Pooled medians were 32,833.387 ns/unit for
+the control and 30,125.987 for the candidate: **8.2459% lower candidate time, with a conservative nominal 95%
+interval of -12.8420% to -3.1921%** (pooled -9.4445% to -7.2895%). That interval excludes both zero and the
+predeclared +5% material-regression boundary, so this is accepted evidence of a speedup rather than a
+neutral result. All 804 samples per side matched checksum `number:3996000.00000000000000000`.
+
+The run also validated the repetition change. The 5% within-order paired ratio ceiling was tuned on
+`generic_iteration`, and table workloads kept landing just over it at 101 repetitions per leg (5.098%,
+5.490%, 6.689%). At 201 repetitions the same pool qualified on its first draw with 0.2412% and 0.7950%
+within-order spreads. More repetitions shrink the leg-median standard error; the ceiling itself is unchanged.
+
+Taken together the four gates say the lane is free where it never fires and worth about 8% where it does.
+This is a per-workload result on one Linux protocol, and `array_mutation` is deliberately outside the public
+five-workload cohort, so it is not a blanket speed claim and public benchmark history is unchanged.
 
 
 ## Measurement and stop rules

@@ -1,0 +1,108 @@
+{
+  "provider": "digitalocean",
+  "droplet_id": null,
+  "droplet_name": "rustia-bench-accca92d-c0293658",
+  "created_at": "2026-08-25T07:17:14Z",
+  "status": "active",
+  "region": "sfo3",
+  "size_slug": "s-4vcpu-8gb-intel",
+  "image": {
+    "id": 235153036,
+    "slug": "ubuntu-24-04-x64",
+    "distribution": "Ubuntu",
+    "name": "24.04 (LTS) x64",
+    "created_at": "2026-07-01T16:38:32Z"
+  },
+  "vcpus": 4,
+  "memory_mib": 8192,
+  "disk_gib": 160,
+  "public_ipv4": "REDACTED",
+  "catalog_plan": {
+    "schema": "rustia.digitalocean-fixed-benchmark.v6",
+    "provider": "digitalocean",
+    "protocol_mode": "acceptance",
+    "context": "rustia-bench",
+    "region": "sfo3",
+    "image": {
+      "id": 235153036,
+      "slug": "ubuntu-24-04-x64",
+      "distribution": "Ubuntu",
+      "name": "24.04 (LTS) x64",
+      "created_at": "2026-07-01T16:38:32Z"
+    },
+    "size": {
+      "slug": "s-4vcpu-8gb-intel",
+      "description": "Basic Intel",
+      "vcpus": 4,
+      "memory_mib": 8192,
+      "disk_gib": 160,
+      "price_hourly_usd": 0.08333,
+      "price_monthly_usd": 56
+    },
+    "billable_lifetime_limit_minutes": 90,
+    "planned_compute_cost_ceiling_usd": 0.124995,
+    "cleanup_reserve_minutes": 8,
+    "billing_caveat": "the coordinator enforces this lifecycle deadline and reserves cleanup time, but a provider/API outage can delay confirmed deletion",
+    "source": {
+      "orchestration_commit": "37bdbc1092fa80a570e2c62d433a91eb2c703291",
+      "config_path": "bench/cloud/digitalocean-core2-c25a-mutation.json",
+      "config_sha256": "48a9aad2b89fdffbc28dd43b2fb86c8118a1d5af905ff3b0aedd2ee065411859",
+      "coordinator_sha256": "e17d8dfe6dcc5803d008d295f2f2a82da8a691268a0576c7f120d7db1a16b977",
+      "remote_runner_sha256": "d32b6bade18a9d012b71f85890e974431e4357c4055ff857b8cb75be2969a960",
+      "verified_source_hashes": {
+        "baseline original harness": "d0c64976bbd6d3412c1d61c51bad311281b33ae6810fc467490cbdd3c7ec70b0",
+        "candidate overlay harness": "d0c64976bbd6d3412c1d61c51bad311281b33ae6810fc467490cbdd3c7ec70b0",
+        "baseline workload": "7de0c1ad466df1c239e2d8b9ba6e5478029109274a84485cae697edf2858b4ff",
+        "candidate workload": "7de0c1ad466df1c239e2d8b9ba6e5478029109274a84485cae697edf2858b4ff",
+        "baseline Cargo.lock": "781ca5604e488e2c2f1b0e0b67142fcdd009f2a3c5af2a25b482fd7770206255",
+        "candidate Cargo.lock": "781ca5604e488e2c2f1b0e0b67142fcdd009f2a3c5af2a25b482fd7770206255",
+        "baseline toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
+        "candidate toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
+        "analyzer": "a66c145df59913813d8df6cb82c563dbec38d3b63671e2db8c27555fe443ea60",
+        "current history": "3f61432be580008ac5cab8d886448615022376e7b65395e540bd9ed5c34d0a56"
+      }
+    },
+    "comparison": {
+      "baseline_commit": "7e6e71dac237d084ab130536c4f3b18b16d3c3d8",
+      "candidate_commit": "accca92d0dd3efebbe58fd87cbf2f89d231c6bdc",
+      "harness_overlay_commit": "accca92d0dd3efebbe58fd87cbf2f89d231c6bdc",
+      "workload": "array_mutation",
+      "fixed_n": 4000,
+      "repetitions": 201,
+      "order": [
+        {
+          "variant": "baseline",
+          "file": "c25am-abba-A1.json"
+        },
+        {
+          "variant": "candidate",
+          "file": "c25am-abba-B1.json"
+        },
+        {
+          "variant": "candidate",
+          "file": "c25am-abba-B2.json"
+        },
+        {
+          "variant": "baseline",
+          "file": "c25am-abba-A2.json"
+        },
+        {
+          "variant": "candidate",
+          "file": "c25am-baab-B3.json"
+        },
+        {
+          "variant": "baseline",
+          "file": "c25am-baab-A3.json"
+        },
+        {
+          "variant": "baseline",
+          "file": "c25am-baab-A4.json"
+        },
+        {
+          "variant": "candidate",
+          "file": "c25am-baab-B4.json"
+        }
+      ]
+    }
+  }
+}

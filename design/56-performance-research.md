@@ -823,12 +823,31 @@ slow (64,668.6 and 65,085.7 versus 53,613.0 and 54,014.6 ns/unit) while all four
 host draws, so movements between them are cross-host signals rather than paired attributions; each is a
 same-host paired comparison against its own baseline commit.
 
-Verdict: retained as neutral, in the same disposition as Region Engine v1. All three are
-`material_regression_excluded` and all three conservative intervals contain zero, so none establishes a win
-or a loss, and the final form carries no nominal cost. The slice keeps its place as the C2.5 direct-table
-lane with exact guards and complete differential coverage; it is not a speed claim, and public benchmark
-history is unchanged (the single-workload rows stayed out of the cohort as usual, with each run's three final
-candidate measurements retained as sidecars).
+Those three gates all ran on workloads that never execute the lane, so all three are
+`material_regression_excluded` with conservative intervals containing zero. They establish only that the
+guard costs nothing where it never fires — not what the lane is worth.
+
+A fourth gate measured that. `array_mutation` (added separately as workload coverage, not as a rustia
+recognizer) reaches the lane on 98.46% of its numeric array-slot writes. Control `7e6e71d` is candidate
+`accca92` with only the lane's two admissions removed, so the trees differ by nothing else. On fixed
+`array_mutation` work at `n=4000`, 201 repetitions per leg, pooled medians were 32,833.387 ns/unit for the
+control and 30,125.987 for the candidate: **8.2459% lower candidate time with a conservative nominal 95%
+interval of -12.8420% to -3.1921%** (pooled -9.4445% to -7.2895%). The interval excludes both zero and the
+predeclared +5% boundary, so this is accepted evidence of a speedup. All 804 samples per side matched
+checksum `number:3996000.00000000000000000`, and the host qualified on its first draw at 0.2412%/0.7950%
+within-order spread — against 5.098%-6.689% at 101 repetitions, which is what motivated raising the
+repetition count rather than the ceiling.
+
+The developer-host screen that selected this measurement predicted -9.53% (min) / -9.33% (median). The
+controlled host measured -8.2459%. That is the first time in this file a local screen has been confirmed
+rather than inverted; the two bets it inverted on — the generalized-iterator leaf cache and
+GETIMPORT+FASTCALL fusion — both lacked a workload that executed the changed path, which is precisely the
+gap `array_mutation` closes.
+
+Verdict: the lane is free where it never fires and worth about 8% where it does. This is a per-workload
+result on one Linux protocol; `array_mutation` is deliberately outside the public five-workload cohort, so it
+is not a blanket speed claim and public benchmark history is unchanged (single-workload rows stay out of the
+cohort as usual, with each run's three final candidate measurements retained as sidecars).
 
 Fourteen ephemeral Droplets produced those three accepted gates. Eleven were rejected before or during
 measurement — AMS3 on steal ticks, AMS3 at a 36.342% within-order paired ratio spread against the 5% ceiling,
@@ -838,8 +857,16 @@ re-drawing were the available levers. Every Droplet and temporary SSH key was co
 billable minutes cost about $0.31. Evidence:
 `bench/history/evidence/066ce1ffab721cd54ad960f2e7b65d11acf04d1a/analysis.json`,
 `bench/history/evidence/2082436260ceab46d97a060f2440457728976309/analysis.json`, and
-`bench/history/evidence/0a3125566919ca62d42905bfb99732f4170e1e04/analysis.json`. The first two directories
-name commits the tape rebase removed from the branch and are retained only for their raw samples.
+`bench/history/evidence/0a3125566919ca62d42905bfb99732f4170e1e04/analysis.json`, and — for the accepted
+speedup — `bench/history/evidence/accca92d0dd3efebbe58fd87cbf2f89d231c6bdc/analysis.json`. The first two
+directories name commits the tape rebase removed from the branch and are retained only for their raw
+samples.
+
+One operational note from this cohort: a DigitalOcean API outage on 2026-08-24 outlasted the coordinator's
+four-minute delete-confirmation window, leaving one Droplet billing for about 1.4 hours with nothing running
+to reclaim it. The coordinator itself behaved correctly throughout — a failed read is never treated as proof
+of absence. `just bench-do-sweep`, which now also runs at the start of every `bench`, is the backstop for
+that case.
 
 The follow-up this measurement selects is array append and capacity, not more existing-slot work.
 

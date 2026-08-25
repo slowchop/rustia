@@ -447,12 +447,19 @@ unreachable suspended-coroutine frames.
    (conservative nominal 95% interval -0.1571% to +2.2646%), `92d30b8`→`2082436` at -0.4457% (-2.5751% to
    +1.5953%), and, after the C2.2 tape landed and rebased the first two candidates away, `b253e9f`→`0a31255`
    at -1.8842% (-18.1155% to +0.3730%, wide because two of four baseline legs ran about 20% slow). All three
-   are `material_regression_excluded` with intervals containing zero, so the slice is retained as neutral,
-   not as a speed claim, and public benchmark history is unchanged. Fourteen Droplets produced those three
-   gates (eleven were rejected before or during measurement on this account's shared-only Basic pool), all
-   confirmed deleted with their temporary keys, for about $0.31. The measurable dense-table target is now
-   array append/growth and capacity prediction — a separate slice with its own gate
-   (see [`58-vm-core2.md`](58-vm-core2.md) §C2.5).
+   have intervals containing zero, so they establish only that the guard costs nothing where it never fires.
+   The new `array_mutation` workload then measured the lane where it does fire (98.46% of its numeric
+   array-slot writes): control `7e6e71d` is candidate `accca92` with only the lane's two admissions removed,
+   and on fixed `n=4000` work at 201 repetitions per leg the candidate used **8.2459% less time, conservative
+   nominal 95% interval -12.8420% to -3.1921%**, excluding both zero and the +5% boundary. So the lane is
+   free where it never fires and worth about 8% where it does; this is a per-workload result on one Linux
+   protocol, `array_mutation` sits outside the public five-workload cohort, and public benchmark history is
+   unchanged. Seventeen Droplets produced the four accepted gates, all confirmed deleted with their temporary
+   keys, for about $0.51. Raising repetitions 101 → 201 moved the within-order qualification spread from
+   5.098%-6.689% to 0.2412%/0.7950% and qualified on the first draw. `just bench-do-sweep` now reclaims any
+   Droplet a run leaves billing and runs before every `bench`, after an API outage left one billing for about
+   1.4 hours. The measurable dense-table target is now array append/growth and capacity prediction — a
+   separate slice with its own gate (see [`58-vm-core2.md`](58-vm-core2.md) §C2.5).
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 19 workload entries including
    source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
