@@ -375,16 +375,28 @@ table read whose receiver carries no metatable can neither re-enter guest code n
 against `GetIndex`/`GetTableKs`, it changed **no workload's refresh count at all**. Two reasons, and both
 say the same thing:
 
-- The reads that dominate `sparse_tables` reach the scalar dispatcher through a *tape guard exit*, and
-  that path refreshes roots unconditionally rather than through the predicate. The instructions that miss
-  a tape guard are dense-array and numeric guards, which the static predicate already reports as
-  guest-invoking, so the unconditional refresh and the conditional one agree in practice today — the
-  refinement only introduces a divergence between them.
-- What remains in `generic_iteration` is calls, global access, and concatenation, none of which the
-  refinement touches.
+A null result alone could not tell "no table read reaches the predicate" apart from "the predicate is not
+consulted where it was assumed to be", so the census also records which opcode triggered each refresh and
+whether it came from the tape's exit path. At `n = 32`, defaults:
 
-So the traffic is not an over-approximation that can be tightened away; it is the cost of the frame owning
-a copied root vector at all. Removing it requires C2.4's active-window scan, which is why this was reverted
+| workload | refresh triggers (`tape_exit` counted separately) |
+| --- | --- |
+| `sparse_tables` | tape_exit 8,190; `GetIndex` 4,096, `SetIndex` 4,096 (those same exits), `Concat` 4,096, misc 9 |
+| `generic_iteration` | `GenericCallLoop` 1,184, `GeneralizedIterLoop` 1,024, `GetGlobal` 65, `CallMulti` 65, `GenericCallPrep` 64, `GetTableKs` 64, `GeneralizedIterPrep` 32, `SetTableKs` 8, misc 3 |
+| `stdlib_math_table` | `FastCall` 96, `CallExpand` 32, `GetImport` 5 |
+| `dense_tables` | `GetImport` 32, `FastCall` 32, misc 22 |
+| `closures_upvalues` | `CallMulti` 8 |
+| `array_mutation` | misc 16 |
+
+That resolves it. The predicate *is* live on the scalar path — `generic_iteration` consults it for 64
+`GetTableKs` — and the refinement correctly declined those, because that workload's receivers are `Coll`
+instances carrying a metatable by construction (`Coll.__index = Coll`), so `__index` genuinely may be
+consulted. Everything else is either a call, an allocation, a global access, or a concatenation that
+genuinely can re-enter guest code, or it arrives through the tape's unconditional exit path where the
+predicate is never asked.
+
+So no refresh in the tracked set is an over-approximation the refinement could have removed. The traffic is
+not something that can be tightened away; it is the cost of the frame owning a copied root vector at all. Removing it requires C2.4's active-window scan, which is why this was reverted
 rather than kept as an unmeasured special case with its own GC-liveness reasoning.
 
 The two HotIR-owned workloads pay almost nothing because HotIR does not refresh per iteration; the

@@ -21,6 +21,9 @@ pub struct ExecutorCensus {
     /// Values copied into frame root vectors by those refreshes. This is the
     /// work a C2.4 window scan would replace with a borrow.
     pub gc_root_values_copied: u64,
+    /// Root refreshes taken on the tape's guard-exit path, which refreshes
+    /// unconditionally rather than through the predicate.
+    pub gc_root_refreshes_tape_exit: u64,
     /// Times the plain-mode tape was entered at a function or block boundary.
     pub tape_entries: u64,
     /// Source instructions the tape executed without returning to the scalar

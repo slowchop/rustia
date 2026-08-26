@@ -59,7 +59,7 @@ fn compile_workload(id: &str, o2: ExperimentalO2Options) -> Option<Program> {
     )
 }
 
-fn census_of(program: &Program) -> (ExecutorCensus, f64) {
+fn census_of(program: &Program) -> (ExecutorCensus, f64, Vec<(rustia_vm::Opcode, u64)>) {
     let mut vm = Vm::new(Profile::ReproducibleStandard);
     let function = vm
         .run(program)
@@ -68,7 +68,11 @@ fn census_of(program: &Program) -> (ExecutorCensus, f64) {
         .call_function(program, function, &[Value::number(units())])
         .unwrap_or_else(|error| panic!("workload call failed: {error}"));
     let checksum = result.as_number().expect("workload returns a number");
-    (vm.executor_census(), checksum)
+    (
+        vm.executor_census(),
+        checksum,
+        vm.gc_root_refresh_histogram(),
+    )
 }
 
 fn share(part: u64, whole: u64) -> f64 {
@@ -90,10 +94,10 @@ fn report_executor_ownership() {
             println!("{id:24} (workload source missing, skipped)");
             continue;
         };
-        let (base_census, base_checksum) = census_of(&baseline);
+        let (base_census, base_checksum, base_triggers) = census_of(&baseline);
         let optimized =
             compile_workload(id, ExperimentalO2Options::reachability_exact()).expect("source read");
-        let (opt_census, opt_checksum) = census_of(&optimized);
+        let (opt_census, opt_checksum, _) = census_of(&optimized);
         assert_eq!(
             base_checksum.to_bits(),
             opt_checksum.to_bits(),
@@ -139,6 +143,15 @@ fn report_executor_ownership() {
                 copies = census.gc_root_values_copied,
             );
         }
+        let rendered = base_triggers
+            .iter()
+            .map(|(opcode, count)| format!("{opcode:?}={count}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        println!(
+            "{:24} triggers   tape_exit={:<8} {rendered}",
+            "", base_census.gc_root_refreshes_tape_exit
+        );
     }
     println!();
 }

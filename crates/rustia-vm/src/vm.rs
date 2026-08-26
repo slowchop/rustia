@@ -490,6 +490,10 @@ pub struct Vm {
     #[cfg(any(test, feature = "executor-diagnostics"))]
     gc_root_refreshes: u64,
     #[cfg(any(test, feature = "executor-diagnostics"))]
+    gc_root_refresh_by_opcode: Vec<u64>,
+    #[cfg(any(test, feature = "executor-diagnostics"))]
+    gc_root_refreshes_tape_exit: u64,
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     gc_root_values_copied: u64,
     next_weak_collection_instruction: u64,
     deterministic_collection_count: u64,
@@ -2254,6 +2258,10 @@ impl Vm {
             #[cfg(any(test, feature = "executor-diagnostics"))]
             gc_root_refreshes: 0,
             #[cfg(any(test, feature = "executor-diagnostics"))]
+            gc_root_refresh_by_opcode: Vec::new(),
+            #[cfg(any(test, feature = "executor-diagnostics"))]
+            gc_root_refreshes_tape_exit: 0,
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             gc_root_values_copied: 0,
             next_weak_collection_instruction,
             deterministic_collection_count: 0,
@@ -2351,6 +2359,7 @@ impl Vm {
             executed_instructions: self.executed_instructions,
             gc_root_refreshes: self.gc_root_refreshes,
             gc_root_values_copied: self.gc_root_values_copied,
+            gc_root_refreshes_tape_exit: self.gc_root_refreshes_tape_exit,
             ..crate::ExecutorCensus::default()
         };
         for slot in &self.dynamic_programs.slots {
@@ -3802,6 +3811,8 @@ impl Vm {
                                             })
                                             .at_pc(pc)
                                         })?;
+                                        #[cfg(any(test, feature = "executor-diagnostics"))]
+                                        self.note_root_refresh_trigger(instruction.op, true);
                                         self.update_current_gc_roots(
                                             &registers,
                                             &register_cells,
@@ -3836,6 +3847,8 @@ impl Vm {
                                 || self.settings.memory_limit_bytes.is_some()
                                 || instruction_may_invoke_guest(&registers, instruction)
                             {
+                                #[cfg(any(test, feature = "executor-diagnostics"))]
+                                self.note_root_refresh_trigger(instruction.op, false);
                                 self.update_current_gc_roots(
                                     &registers,
                                     &register_cells,
@@ -14544,6 +14557,39 @@ impl Vm {
                 roots.push(frame.handler);
             }
         }
+    }
+
+    /// Records which instruction caused a root refresh, so a null result
+    /// from narrowing the refresh predicate can be told apart from the
+    /// predicate never being consulted for that opcode.
+    #[cfg(any(test, feature = "executor-diagnostics"))]
+    fn note_root_refresh_trigger(&mut self, opcode: Opcode, tape_exit: bool) {
+        let index = opcode as usize;
+        if self.gc_root_refresh_by_opcode.len() <= index {
+            self.gc_root_refresh_by_opcode.resize(index + 1, 0);
+        }
+        self.gc_root_refresh_by_opcode[index] =
+            self.gc_root_refresh_by_opcode[index].saturating_add(1);
+        if tape_exit {
+            self.gc_root_refreshes_tape_exit = self.gc_root_refreshes_tape_exit.saturating_add(1);
+        }
+    }
+
+    /// Non-zero root-refresh triggers by opcode, in `Opcode::ALL` order.
+    #[cfg(any(test, feature = "executor-diagnostics"))]
+    pub fn gc_root_refresh_histogram(&self) -> Vec<(Opcode, u64)> {
+        Opcode::ALL
+            .iter()
+            .copied()
+            .filter_map(|opcode| {
+                let count = self
+                    .gc_root_refresh_by_opcode
+                    .get(opcode as usize)
+                    .copied()
+                    .unwrap_or(0);
+                (count != 0).then_some((opcode, count))
+            })
+            .collect()
     }
 
     fn update_current_gc_roots(
