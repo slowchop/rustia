@@ -369,6 +369,31 @@ includes `GetIndex`/`SetIndex` unconditionally, plus every call, global access, 
 | `dense_tables` | 222,933 | 86 | 1,290 | 0.006 |
 | `array_mutation` | 166,786 | 16 | 240 | 0.001 |
 
+**Ceiling on the phase, computed before building it (local screen, 2026-08-26).** Counts are not time, so
+the prize was bounded before committing to the rewrite. Both arms disable deterministic collection
+(`deterministic_gc_interval = u64::MAX`), which lets a build whose `update_current_gc_roots` body is a bare
+`return` stay checksum-identical to one that refreshes; the delta is then the whole cost of maintaining
+copied frame roots. Release build, `n = 32`, 40 repetitions, medians:
+
+| workload | refresh intact | refresh removed | delta | copies per instruction |
+| --- | --- | --- | --- | --- |
+| `generic_iteration` | 139,917 ns | 117,875 ns | -15.8% | 1.01 |
+| `sparse_tables` | 1,050,875 ns | 915,000 ns | -12.9% | 1.76 |
+| `stdlib_math_table` | 15,875 ns | 13,709 ns | -13.6% | 0.96 |
+| `dense_tables` | 490,667 ns | 482,458 ns | -1.7% | 0.006 |
+
+The ordering tracks the copy counts, and the HotIR-owned workload is ~nothing, which is what makes the
+screen credible as a measurement of the intended quantity rather than of noise.
+
+Five caveats, all load-bearing. This is a **developer-machine screen and must never enter benchmark
+history**; the Linux protocols remain the timing authority. Repeated runs of the same build varied by
+about 7.5%, so read these as "order of 10-18% on the tape/scalar-owned workloads", not as point estimates,
+and treat the dense figure as indistinguishable from zero. Disabling collection changes tape admission and
+removes collection work, so production behaviour differs. The stripped build is unsound in general and
+stays correct only because collection never runs. Most importantly this is an **upper bound**: C2.4
+replaces per-instruction copying with a window scan at collection time, and that scan is not free, so the
+realised win is strictly less than the table shows.
+
 **Narrowing the predicate does not reach this traffic — only a window scan does (tried and reverted,
 2026-08-26).** The obvious cheap alternative is to make `instruction_may_invoke_guest` heap-aware, since a
 table read whose receiver carries no metatable can neither re-enter guest code nor allocate. Implemented
