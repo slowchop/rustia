@@ -398,8 +398,21 @@ repetitions, medians):
 
 With multi-millisecond baselines the three tape/scalar-owned effects are far larger than the variance, and
 `stdlib_math_table` in particular resolves rather than staying inside the noise as it did at `n = 32`.
-`dense_tables` disagrees between median and min, which is what a null looks like at this scale, so it
-remains ~zero.
+
+`dense_tables` is ~zero, and the median/min split says so rather than merely failing to decide. Min is the
+least-contaminated sample — the run where least interference landed — and it moves far less with machine
+load than the median does. A real 4% effect on 222,933 executed instructions would appear in both; a median
+that reports 4.1% while the min reports 0.2% is the shape of interference the min escaped. That agrees with
+the mechanism, since `dense_tables` is HotIR-owned at 0.006 copies per executed instruction and has almost
+nothing for refresh removal to bite on. Two independent lines pointing at ~zero is a stronger statement
+than an undecided one. **Corollary for any dev-machine screen here: when min and median disagree by
+multiples, prefer min.** The cloud protocols deliberately use pooled medians for distributional reasons;
+that choice does not transfer to an unqualified developer machine.
+
+The benchmark binary carries none of this instrumentation, verified on the artifact rather than argued from
+the `cfg` attributes: `cargo tree -p script-bench-harness -e features` contains no `executor-diagnostics`
+entry, and `nm target/release/script-bench` matches zero symbols for `note_root_refresh_trigger`,
+`executor_census`, `gc_root_refresh_histogram`, `record_tape_execution`, or `record_hot_ir_entry`.
 
 **What the ceiling is a ceiling on.** Disabling collection removes collection work from both arms equally,
 so it does not bias the comparison, but production pays refresh cost *and* collection cost and C2.4 changes
