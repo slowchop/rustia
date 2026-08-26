@@ -385,6 +385,26 @@ copied frame roots. Release build, `n = 32`, 40 repetitions, medians:
 The ordering tracks the copy counts, and the HotIR-owned workload is ~nothing, which is what makes the
 screen credible as a measurement of the intended quantity rather than of noise.
 
+At `n = 32` the smaller workloads' effects are close to the run-to-run variance, so the screen was repeated
+with each workload's `n` raised until baseline runtime is milliseconds rather than microseconds (60
+repetitions, medians):
+
+| workload | n | refresh intact | refresh removed | delta (median) | delta (min) |
+| --- | --- | --- | --- | --- | --- |
+| `generic_iteration` | 1,024 | 4,453,667 ns | 3,481,458 ns | -21.8% | -20.8% |
+| `stdlib_math_table` | 8,192 | 4,221,750 ns | 3,489,083 ns | -17.4% | -16.2% |
+| `sparse_tables` | 256 | 8,348,375 ns | 7,290,833 ns | -12.7% | -15.2% |
+| `dense_tables` | 256 | 3,994,125 ns | 3,829,375 ns | -4.1% | -0.2% |
+
+With multi-millisecond baselines the three tape/scalar-owned effects are far larger than the variance, and
+`stdlib_math_table` in particular resolves rather than staying inside the noise as it did at `n = 32`.
+`dense_tables` disagrees between median and min, which is what a null looks like at this scale, so it
+remains ~zero.
+
+**What the ceiling is a ceiling on.** Disabling collection removes collection work from both arms equally,
+so it does not bias the comparison, but production pays refresh cost *and* collection cost and C2.4 changes
+the split between them rather than only deleting the first. These figures bound the refresh half.
+
 Five caveats, all load-bearing. This is a **developer-machine screen and must never enter benchmark
 history**; the Linux protocols remain the timing authority. Repeated runs of the same build varied by
 about 7.5%, so read these as "order of 10-18% on the tape/scalar-owned workloads", not as point estimates,
