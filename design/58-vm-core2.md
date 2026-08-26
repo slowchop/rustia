@@ -369,6 +369,24 @@ includes `GetIndex`/`SetIndex` unconditionally, plus every call, global access, 
 | `dense_tables` | 222,933 | 86 | 1,290 | 0.006 |
 | `array_mutation` | 166,786 | 16 | 240 | 0.001 |
 
+**Narrowing the predicate does not reach this traffic — only a window scan does (tried and reverted,
+2026-08-26).** The obvious cheap alternative is to make `instruction_may_invoke_guest` heap-aware, since a
+table read whose receiver carries no metatable can neither re-enter guest code nor allocate. Implemented
+against `GetIndex`/`GetTableKs`, it changed **no workload's refresh count at all**. Two reasons, and both
+say the same thing:
+
+- The reads that dominate `sparse_tables` reach the scalar dispatcher through a *tape guard exit*, and
+  that path refreshes roots unconditionally rather than through the predicate. The instructions that miss
+  a tape guard are dense-array and numeric guards, which the static predicate already reports as
+  guest-invoking, so the unconditional refresh and the conditional one agree in practice today — the
+  refinement only introduces a divergence between them.
+- What remains in `generic_iteration` is calls, global access, and concatenation, none of which the
+  refinement touches.
+
+So the traffic is not an over-approximation that can be tightened away; it is the cost of the frame owning
+a copied root vector at all. Removing it requires C2.4's active-window scan, which is why this was reverted
+rather than kept as an unmeasured special case with its own GC-liveness reasoning.
+
 The two HotIR-owned workloads pay almost nothing because HotIR does not refresh per iteration; the
 tape/scalar-owned workloads copy roughly one to two `Value`s for every logical instruction they execute.
 Scanning the active frame window directly replaces that copy with a borrow, which is why C2.4 is sized
