@@ -1,0 +1,7 @@
+CPU(s):                                  6
+Model name:                              AMD Ryzen 5 3600X 6-Core Processor
+Thread(s) per core:                      1
+isolcpus: isolcpus=4,5
+governor: schedutil
+kernel: 6.8.0-138-generic
+os: Ubuntu 24.04.4 LTS

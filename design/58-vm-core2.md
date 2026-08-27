@@ -398,6 +398,39 @@ The measurable dense-table opportunity is array append and growth, where every o
 array writes lands - not existing-slot mutation. Capacity prediction and append fast-pathing are a separate
 slice with their own gate and must not be folded into this one.
 
+#### C2.5b — direct array-append lane
+
+`dense_tables` takes the C2.5b append lane on all 16,384 of its numeric
+array-slot writes and reaches the generic `mutate_table_data` path zero times, so
+unlike C2.5a this slice is measurable on a tracked workload without adding one.
+The guard requires a Log-layout table, an existing nil/out-of-range slot, no
+metatable, not readonly, a non-nil value, `one_based_index == array.len() + 1`
+exactly, and an empty Log hash part. That last condition is what makes the
+collapse sound: the generic path's resize + overwrite + `remove_hash_key`
+sequence exists to absorb a numeric hash entry sharing the new index, and
+`table_hash_lookup` returns `Vacant` before it ever reads the side index, so
+empty `entries` is definitional proof that no such entry exists anywhere. The
+whole sequence becomes one `Vec::push`. An append does grow the array, so unlike
+C2.5a this cannot skip accounting, only make it incremental: live rises by
+`size_of::<Value>()` and reserved by the capacity delta, with the hash part
+untouched.
+
+An adversarial pass attacked accounting drift (residual hash capacity, a hollow
+side index, `table.clear`, `release_spare_capacity`, reallocation), semantic
+divergence, guard holes and version bumping across a 480,000-operation
+interleaved differential stress run, and found no defect.
+
+The measurement is the first taken on the dedicated `ci-bench` host after
+DigitalOcean was retired. Control `4e5eb70` is candidate `eaf3917` with only the
+append-lane admission removed. On fixed `dense_tables` work at n=1500, 201
+repetitions per leg and counterbalanced order, pooled medians were 39,898.435
+versus 39,184.492 ns/unit: **-1.7894% with a conservative nominal 95% interval of
+-2.1250% to -1.0770%**. The interval excludes zero, so this establishes a
+speedup. All 8 legs matched checksum `number:193302491.00000000000000000`, and
+every candidate leg median fell below every control leg median. Evidence and the
+protocol deviations are under
+`bench/history/evidence/eaf3917f7618c08852c5f03d81ebb2db0b6f6f6f/`.
+
 #### Closing the workload gap
 
 The suite had no in-place mutation workload at all, which is why C2.5's direct-table lane was unmeasurable.

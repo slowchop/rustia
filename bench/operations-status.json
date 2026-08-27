@@ -23,13 +23,13 @@
     "next_action": "Keep the artifact-only publisher healthy and investigate any failed publication before accepting newer public results."
   },
   "progress": {
-    "state": "current",
+    "state": "pending",
     "measured_commit": "7f416028e77e7a05b97c1702c1c0b6f11529e970",
     "measured_at_unix": 1787649067,
-    "latest_relevant_commit": "7f416028e77e7a05b97c1702c1c0b6f11529e970",
-    "latest_relevant_committed_at_unix": 1787647649,
-    "pending_relevant_commit_count": 0,
-    "next_action": "No progress measurement is currently required."
+    "latest_relevant_commit": "eaf3917f7618c08852c5f03d81ebb2db0b6f6f6f",
+    "latest_relevant_committed_at_unix": 1787702002,
+    "pending_relevant_commit_count": 1,
+    "next_action": "Run the newest pending performance-relevant commit on the explicit qualified Linode lifecycle."
   },
   "landscape": {
     "state": "paused",

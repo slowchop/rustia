@@ -460,7 +460,20 @@ unreachable suspended-coroutine frames.
    5.098%-6.689% to 0.2412%/0.7950% and qualified on the first draw. `just bench-do-sweep` now reclaims any
    Droplet a run leaves billing and runs before every `bench`, after an API outage left one billing for about
    1.4 hours. The measurable dense-table target is now array append/growth and capacity prediction — a
-   separate slice with its own gate (see [`58-vm-core2.md`](58-vm-core2.md) §C2.5).
+   separate slice with its own gate (see [`58-vm-core2.md`](58-vm-core2.md) §C2.5). That slice, C2.5b, is
+   now merged and measured: the append lane collapses the generic resize/overwrite/`remove_hash_key`
+   sequence to one `Vec::push` with incremental rather than skipped accounting, `dense_tables` takes it on
+   all 16,384 of its numeric array-slot writes, and an adversarial pass found no defect across a
+   480,000-operation interleaved differential stress run. **DigitalOcean is retired**: six consecutive
+   `dense_tables` gates failed host qualification there, and a controlled local test disproved the
+   workload-instability explanation (quiet-machine spread was 8.65% for `dense_tables` against 10.56% for
+   `array_mutation`), leaving host contention as the cause. Measurement now runs on the dedicated
+   `ci-bench` host (Ryzen 5 3600X, SMT off, `isolcpus=4,5`), which measures **0.52% between-leg spread**
+   against 15.12% on the retired sfo3 pool. Control `4e5eb70` versus candidate `eaf3917` on fixed
+   `dense_tables` work at n=1500 measured **-1.7894%, conservative nominal 95% interval -2.1250% to
+   -1.0770%** — the interval excludes zero, so this is an accepted speedup rather than a neutral result.
+   The run used a simplified protocol without the paired qualification, idle gate or cooldowns; those
+   should be wired into a runner workflow before it becomes the standing protocol.
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
    The runner already exposes the requested engine matrix, five default workloads, 19 workload entries including
    source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,

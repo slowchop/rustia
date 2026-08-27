@@ -872,6 +872,50 @@ that case.
 The follow-up this measurement selects is array append and capacity, not more existing-slot work.
 
 
+### VM Core 2 C2.5b — direct array-append lane, accepted on a dedicated host
+
+Where C2.5a needed a purpose-built workload before it could be measured at all,
+C2.5b is reached by `dense_tables` on all 16,384 of its numeric array-slot writes,
+and by `stdlib_math_table`, `serialization`, `string_building`, `memory_burst`,
+`memory_churn` and `memory_retained_control` at 100% as well. `array_mutation` is
+the deliberate inverse at 98.46% existing-slot; `sparse_tables` defers all of its.
+Suite-wide, appends are about 94% of numeric array-slot writes.
+
+The guard collapses the generic resize + overwrite + `remove_hash_key` sequence to
+one `Vec::push`, on the proof that empty Log `entries` means no hash entry exists
+for any key — `table_hash_lookup` returns `Vacant` before reading the side index.
+Accounting becomes incremental rather than skipped, because an append does grow
+the array.
+
+**This is also the first rustia measurement taken after DigitalOcean was retired.**
+Six consecutive `dense_tables` gates failed host qualification there (spreads
+11.663%, 5.910%, 17.088%, 5.057%, 6.039%, plus one contamination discard), against
+3 passes in 10 attempts at 101 repetitions. Raising repetitions 101 -> 201 did not
+help that workload, and a controlled local test disproved the workload-instability
+explanation: on a quiet machine `dense_tables` between-leg spread was 8.65% against
+`array_mutation`'s 10.56%, i.e. the workload blamed for the failures was the
+steadier of the two. The cause was host contention.
+
+The dedicated `ci-bench` host (AMD Ryzen 5 3600X, SMT off, `isolcpus=4,5`) measures
+**0.52% between-leg spread**, against 15.12% on DigitalOcean sfo3 and 8.65% on the
+developer Mac. A controlled governor test found `schedutil` at 0.52% and
+`performance` at 0.59%, so pinning frequency was not justified and the host was
+left as found.
+
+Control `4e5eb70` versus candidate `eaf3917` on fixed `dense_tables` work at
+n=1500, 201 repetitions per leg, counterbalanced, 804 samples per side, all
+matching checksum `number:193302491.00000000000000000`: pooled medians 39,898.435
+-> 39,184.492 ns/unit, **-1.7894% with a conservative nominal 95% interval of
+-2.1250% to -1.0770%**. The interval excludes zero. Every candidate leg median
+(39,109-39,243) is below every control leg median (39,579-40,028).
+
+Note the interval width: 1.05 points, against 4 to 15 points on the accepted
+DigitalOcean gates. That is what resolved a 1.8% effect the cloud pool could not
+see at all. The run used a simplified protocol without the paired qualification,
+idle gate or cooldowns — appropriate for an uncontended host, but they should be
+wired into a runner workflow before this becomes the standing protocol. Evidence:
+`bench/history/evidence/eaf3917f7618c08852c5f03d81ebb2db0b6f6f6f/`.
+
 ## Estimate vs C++ Luau
 
 | state | likely position vs C++ Luau interpreter |
