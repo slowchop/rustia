@@ -38,7 +38,13 @@ check-crate-metadata:
 check-workflows:
     node tools/check-workflows.js
 
+# Every commit hash a committed benchmark artifact cites must stay reachable.
+check-benchmark-commit-reachability:
+    node tools/check-benchmark-commit-reachability.js
+
 check-benchmark-results:
+    node tools/check-benchmark-commit-reachability.js
+    node tools/check-benchmark-commit-reachability.js --self-test
     node bench/analyze-fixed-samples.js --self-test
     node tools/run-digitalocean-benchmark.js self-test
     node tools/run-linode-benchmark.js self-test
