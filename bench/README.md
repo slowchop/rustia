@@ -677,6 +677,20 @@ labels that series by machine. Reconstructions are comparable within themselves
 and never across hosts, so each is charted as its own era; the artifact and the
 evidence both name the pinned core, because core choice is unmeasured.
 
+The published history is a single dedicated-machine series, and the chart shows
+only it. Recorded matrix runs stay in `bench/history/runs.jsonl` and still
+supply the 1x reference and the current-results tables, but they are measured on
+a different host, so plotting them beside a reconstruction would invite a host
+difference to be read as a performance change.
+
+**There is no repeatable runner for a dedicated-machine reconstruction yet.**
+The Linode recipes below drive the cloud path; the published `ci-bench` series
+was produced by an operator-run script against a machine reached over SSH, not
+by a committed tool. Reproducing or extending it currently means repeating that
+by hand. Promoting it needs a committed runner plus a decision about how it is
+triggered, since `tools/check-workflows.js` deliberately forbids measurement
+commands inside GitHub Actions.
+
 Only one reconstruction may run at a time. Concurrent runs sharing a worktree
 and a target directory reset each other's checkouts mid-build and yield no
 usable rows, so the runner takes an exclusive lock and refuses to start when one

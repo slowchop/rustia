@@ -494,7 +494,12 @@ unreachable suspended-coroutine frames.
    variation well below the effect. The earliest engine-bearing commit (`8c0211d`) needed a declared workspace
    member and the `pub fn call_function` wrapper its successor added; both are recorded in the artifact's
    `source_modifications`, and its checksums match the other 74 exactly. Commits before it contain no
-   `crates/` tree at all, so the series starts at the first commit that has an engine.
+   `crates/` tree at all, so the series starts at the first commit that has an engine. The chart shows this
+   series alone: the superseded Linode reconstruction and the recorded matrix line were removed from it
+   because they were measured on other hosts, and mixing hosts lets a machine difference read as a
+   performance change. Recorded matrix runs remain in `bench/history/runs.jsonl` and still supply the 1x
+   reference. **No committed runner reproduces this reconstruction** — it was operator-run over SSH, so
+   re-running or extending it is currently manual; that runner, and how it is triggered, is open work.
    Next work is the actual standalone-project split, the interop/serde/fuel-limit workload tranche, and
    regression alerts.
 5. **Stabilize and publish the public crates.** Settle the consumer API and semver surface, close the generated

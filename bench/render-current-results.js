@@ -1035,16 +1035,19 @@ function historySection(history, backfills, currentRows) {
   const reference = mluaJitHistoryReference(currentRows);
   const reconstructed = rustiaBackfillEras(backfills, reference);
   const recorded = rustiaHistoryEras(history.rows, reference);
-  const visibleRecorded = reconstructed.length > 0
-    ? recorded.filter((era) => era.title === "Current dedicated Linux history")
-    : recorded;
+  // One host, one protocol. When a reconstruction exists it is the whole
+  // chart: the recorded matrix runs are measured on a different machine, so
+  // drawing them alongside invites a host difference to be read as a
+  // performance change. Those runs stay in bench/history/runs.jsonl and still
+  // supply the 1x reference and the current-results tables.
+  const visibleRecorded = reconstructed.length > 0 ? [] : recorded;
   const eras = [...reconstructed, ...visibleRecorded];
   const snapshotCount = eras.reduce((total, era) => total + era.snapshotCount, 0);
   const summary = reconstructed.length > 0
-    ? `${formatInteger(reconstructed.reduce((total, era) => total + era.snapshotCount, 0))} historical Rustia revisions reconstructed across ${formatInteger(reconstructed.length)} fixed-harness series, each measured end to end on one machine, followed by the directly recorded dedicated series.`
+    ? `${formatInteger(reconstructed.reduce((total, era) => total + era.snapshotCount, 0))} historical Rustia revisions replayed against one fixed harness and one pinned dependency set, measured end to end on a single machine.`
     : `${formatInteger(snapshotCount)} recorded Linux matrix runs across two eras. Each chart is normalized to its own first run, so different hosts and protocols are never blended.`;
   const explanation = reconstructed.length > 0
-    ? `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>); each reconstructed series was measured end to end on the one machine named in its legend entry.`
+    ? `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>). Every point on this chart comes from the one machine named in the legend, so differences between points are engine changes rather than host changes.`
     : `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>).`;
   return `
     <section class="panel history-axis-panel" id="history">
@@ -1059,7 +1062,7 @@ function historySection(history, backfills, currentRows) {
         </div>
       </div>
       <p class="history-answer"><strong>Higher is faster; mlua/JIT is 1×.</strong> ${explanation}</p>
-      <p class="cohort-note">The Rustia lines share the same workloads and score, but remain separate: reconstruction and directly recorded matrix runs use different measurement protocols, and each reconstruction ran on its own host.</p>
+      ${eras.length > 1 ? `<p class="cohort-note">The Rustia lines share the same workloads and score, but remain separate: reconstruction and directly recorded matrix runs use different measurement protocols, and each reconstruction ran on its own host.</p>` : ""}
       <div data-history-axis-view="date">${rustiaHistoryChart(eras, reference, "date")}</div>
       <div data-history-axis-view="commit" hidden>${rustiaHistoryChart(eras, reference, "commit")}</div>
       ${rustiaOverallHistoryTable(eras)}
