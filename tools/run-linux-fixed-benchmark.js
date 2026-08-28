@@ -77,7 +77,12 @@ function usesPairedDigitalOceanProtocol(config) {
     "rustia.digitalocean-fixed-benchmark.v4",
     "rustia.digitalocean-fixed-benchmark.v5",
     "rustia.digitalocean-fixed-benchmark.v6",
+    "rustia.dedicated-fixed-benchmark.v1",
   ].includes(config.schema);
+}
+
+function isDedicatedHost(config) {
+  return config.schema === "rustia.dedicated-fixed-benchmark.v1";
 }
 
 function log(message) {
@@ -162,6 +167,34 @@ function validateLinodeHostGate(config) {
   }
 }
 
+// An owned host has no provider catalog to validate against, so its provider
+// section names what the operator guarantees instead: the machine, the cores
+// held off the scheduler, and the core a timed leg must run on.
+function validateDedicatedProvider(config) {
+  requireExactKeys(config.provider, ["host"], "config.provider");
+  const host = requireObject(config.provider.host, "config.provider.host");
+  requireExactKeys(
+    host,
+    ["name", "cpu_model", "logical_cpus", "physical_cores", "pinned_cpus", "max_runtime_minutes"],
+    "config.provider.host",
+  );
+  requireString(host.name, "config.provider.host.name");
+  requireString(host.cpu_model, "config.provider.host.cpu_model");
+  requireString(host.pinned_cpus, "config.provider.host.pinned_cpus");
+  requireInteger(host.logical_cpus, "config.provider.host.logical_cpus", 1);
+  requireInteger(host.physical_cores, "config.provider.host.physical_cores", 1);
+  requireInteger(host.max_runtime_minutes, "config.provider.host.max_runtime_minutes", 1);
+  // SMT is required off, so logical CPUs and physical cores must agree. A
+  // config that disagrees with itself would otherwise pass here and fail only
+  // on the host, after a build.
+  if (host.logical_cpus !== host.physical_cores) {
+    fail(
+      `config.provider.host declares ${host.logical_cpus} logical CPUs across ${host.physical_cores} ` +
+        `physical cores; the dedicated protocol requires SMT off, so these must be equal`,
+    );
+  }
+}
+
 function validateConfig(config) {
   requireObject(config, "config");
   const kind = protocolKind(config);
@@ -174,10 +207,12 @@ function validateConfig(config) {
     config.schema !== "rustia.linode-fixed-benchmark.v1" &&
     config.schema !== "rustia.linode-fixed-benchmark.v2" &&
     config.schema !== "rustia.vultr-fixed-benchmark.v1" &&
-    config.schema !== "rustia.scaleway-fixed-benchmark.v1"
+    config.schema !== "rustia.scaleway-fixed-benchmark.v1" &&
+    config.schema !== "rustia.dedicated-fixed-benchmark.v1"
   ) {
     fail("unsupported cloud benchmark config schema");
   }
+  if (isDedicatedHost(config)) validateDedicatedProvider(config);
   const requiredSections = kind === VM_STRING_MEMORY_PROTOCOL
     ? ["provider", "source", "measurement", "host_gate", "publication"]
     : ["provider", "source", "measurement", "qualification", "host_gate", "publication"];
@@ -456,6 +491,66 @@ function expandCpuList(text, description) {
     for (let cpu = start; cpu <= end; cpu += 1) cpus.add(cpu);
   }
   return [...cpus].sort((left, right) => left - right);
+}
+
+// An owned, permanently-provisioned host is attested differently from a rented
+// one: there is no provider metadata to compare against, and the properties
+// that matter are the ones that make it quiet. Cores held off the scheduler
+// with `isolcpus`, SMT disabled so a sibling thread cannot contend, and -- the
+// one that bites -- the measuring process actually being allowed to run on the
+// isolated core it names.
+//
+// That last check exists because the failure is silent rather than loud. An SSH
+// session on this host inherits an affinity mask that excludes the isolated
+// CPUs, so `nproc` reports the schedulable count and anything sizing itself
+// from it runs on the busy cores while reporting entirely believable numbers.
+// A benchmark that measures the wrong CPUs and says so is a nuisance; one that
+// measures the wrong CPUs quietly is a corrupted result.
+function verifyDedicatedIsolation(config) {
+  const host = config.provider.host;
+  const pinned = expandCpuList(String(host.pinned_cpus), "config.provider.host.pinned_cpus");
+  if (pinned.length === 0) fail("config.provider.host.pinned_cpus must name at least one CPU");
+
+  const isolatedRaw = fs.readFileSync("/sys/devices/system/cpu/isolated", "utf8").trim();
+  const isolated = isolatedRaw === "" ? [] : expandCpuList(isolatedRaw, "kernel isolated CPU list");
+  const notIsolated = pinned.filter((cpu) => !isolated.includes(cpu));
+  if (notIsolated.length > 0) {
+    fail(
+      `pinned CPU(s) ${notIsolated.join(",")} are not held off the scheduler; ` +
+        `/sys/devices/system/cpu/isolated reports ${JSON.stringify(isolatedRaw)}. ` +
+        `Boot with isolcpus covering the pinned set before measuring.`,
+    );
+  }
+
+  const smtPath = "/sys/devices/system/cpu/smt/control";
+  if (fs.existsSync(smtPath)) {
+    const smt = fs.readFileSync(smtPath, "utf8").trim();
+    if (smt !== "off" && smt !== "notsupported" && smt !== "notimplemented") {
+      fail(`simultaneous multithreading is ${JSON.stringify(smt)}; a sibling thread can contend with a timed leg`);
+    }
+  }
+
+  // The silent one. Ask the kernel which CPUs this process may actually use
+  // rather than inferring it from a core count.
+  const affinity = run("taskset", ["-pc", String(process.pid)], { allowFailure: true });
+  if (affinity.status !== 0) {
+    fail("could not read this process's CPU affinity mask; taskset is required to attest the pinned core");
+  }
+  const mask = affinity.stdout.trim().split(":").pop().trim();
+  const allowed = expandCpuList(mask, "process affinity mask");
+  const unusable = pinned.filter((cpu) => !allowed.includes(cpu));
+  if (unusable.length > 0) {
+    fail(
+      `this process may not run on pinned CPU(s) ${unusable.join(",")}: its affinity mask is ${mask}. ` +
+        `Sessions on an isolcpus host inherit a mask excluding the isolated CPUs, so a run started this way ` +
+        `would measure the schedulable cores and report plausible numbers for the wrong hardware. ` +
+        `Re-invoke under taskset -c ${pinned.join(",")}.`,
+    );
+  }
+
+  log(
+    `dedicated host attested: pinned CPU(s) ${pinned.join(",")} isolated, SMT off, affinity mask ${mask}`,
+  );
 }
 
 function verifyBareMetalHost(config, provider) {
@@ -2268,6 +2363,9 @@ async function execute(configFile, providerFile, bundle) {
   const phaseTimings = {};
 
   try {
+    if (isDedicatedHost(config)) {
+      verifyDedicatedIsolation(config);
+    }
     const bareMetalAttestation = verifyBareMetalHost(config, provider);
     if (bareMetalAttestation) log(`${provider.provider} physical-host topology attestation passed`);
     log("preparing exact source trees and frozen release binaries");
@@ -2490,6 +2588,45 @@ function selfTest() {
   assert.equal(delta.idle_ticks, 98);
   assert.equal(delta.idle_percent, 98);
   assert.equal(delta.steal_ticks, 0);
+  // The dedicated provider section is validated before a build runs, so its
+  // rules have to hold without a host. Each case here is a config that would
+  // otherwise fail only after the box had been provisioned and compiled.
+  const dedicatedHost = {
+    name: "ci-bench",
+    cpu_model: "AMD Ryzen 5 3600X",
+    logical_cpus: 6,
+    physical_cores: 6,
+    pinned_cpus: "4",
+    max_runtime_minutes: 180,
+  };
+  assert.doesNotThrow(() =>
+    validateDedicatedProvider({ provider: { host: { ...dedicatedHost } } }),
+  );
+  // SMT on: logical CPUs exceed physical cores, so a sibling thread could
+  // contend with a timed leg.
+  assert.throws(
+    () =>
+      validateDedicatedProvider({
+        provider: { host: { ...dedicatedHost, logical_cpus: 12 } },
+      }),
+    /SMT off/,
+  );
+  assert.throws(() =>
+    validateDedicatedProvider({ provider: { host: { ...dedicatedHost, pinned_cpus: "" } } }),
+  );
+  assert.throws(() =>
+    validateDedicatedProvider({ provider: { host: { ...dedicatedHost, extra: 1 } } }),
+  );
+  assert.throws(() => validateDedicatedProvider({ provider: { host: {} } }));
+  assert.equal(isDedicatedHost({ schema: "rustia.dedicated-fixed-benchmark.v1" }), true);
+  assert.equal(isDedicatedHost({ schema: "rustia.linode-fixed-benchmark.v2" }), false);
+  // The dedicated host runs the same paired protocol as the accepted DO gates:
+  // qualification, counterbalanced legs, conservative interval.
+  assert.equal(
+    usesPairedDigitalOceanProtocol({ schema: "rustia.dedicated-fixed-benchmark.v1" }),
+    true,
+  );
+
   const boundedStealConfig = {
     schema: "rustia.linode-fixed-benchmark.v2",
     host_gate: {
