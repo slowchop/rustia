@@ -318,6 +318,7 @@ struct Config {
     latest_json: Option<PathBuf>,
     samples_json: Option<PathBuf>,
     commit: Option<String>,
+    host: Option<String>,
     list: bool,
     list_json: bool,
     wasm_gate_json: bool,
@@ -349,6 +350,7 @@ impl Default for Config {
             latest_json: Some(PathBuf::from(CURRENT_RESULTS_JSON_PATH)),
             samples_json: None,
             commit: None,
+            host: None,
             list: false,
             list_json: false,
             wasm_gate_json: false,
@@ -386,6 +388,7 @@ struct Measurement {
     commit: String,
     timestamp_unix: u64,
     target: String,
+    host: Option<String>,
     mode_family: &'static str,
     execution_mode: &'static str,
     native_verified: bool,
@@ -824,6 +827,19 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
                     ));
                 }
                 config.commit = Some(value);
+            }
+            "--host" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| Error::new("--host requires a value"))?;
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    return Err(Error::new("--host must not be empty"));
+                }
+                if trimmed != value {
+                    return Err(Error::new("--host must not be padded with whitespace"));
+                }
+                config.host = Some(value);
             }
             "--help" | "-h" => {
                 print_usage();
@@ -1384,6 +1400,7 @@ fn measure_with_factory(
         commit: config.commit.clone().unwrap_or_else(git_commit),
         timestamp_unix: unix_time(),
         target: format!("{}-{}", env::consts::OS, env::consts::ARCH),
+        host: config.host.clone(),
         mode_family: mode_family(engine.id),
         execution_mode: execution_mode(engine.id),
         native_verified: verification.verified,
@@ -2753,7 +2770,7 @@ fn workload_order(workload: &str) -> usize {
 }
 
 fn record_json(record: &Measurement) -> String {
-    serde_json::to_string(&serde_json::json!({
+    let mut value = serde_json::json!({
         "timestamp_unix": record.timestamp_unix,
         "commit": record.commit,
         "target": record.target,
@@ -2778,8 +2795,19 @@ fn record_json(record: &Measurement) -> String {
         "native_verified": record.native_verified,
         "native_verification": record.native_verification,
         "native_verification_ratio": record.native_verification_ratio,
-    }))
-    .expect("measurement JSON contains only serializable values")
+    });
+    // Emitted only when the operator names the machine, so rows produced
+    // without it stay byte-identical to every row written before the field
+    // existed. Absence therefore means "measured before hosts were recorded"
+    // rather than "measured on an unknown host", and a labelled row can never
+    // be confused with the cloud-era rows above it.
+    if let Some(host) = &record.host {
+        value
+            .as_object_mut()
+            .expect("measurement JSON is an object")
+            .insert("host".to_owned(), serde_json::Value::String(host.clone()));
+    }
+    serde_json::to_string(&value).expect("measurement JSON contains only serializable values")
 }
 
 fn git_commit() -> String {
@@ -3391,6 +3419,31 @@ mod tests {
     }
 
     #[test]
+    fn history_rows_carry_the_host_only_when_it_is_named() {
+        let mut measurement = sample_measurement(100, "rustia", "luau", "dense_tables", "test");
+
+        // A run that does not name the machine must produce exactly what it
+        // produced before the field existed. Absence is the signal for the
+        // cloud-era rows already in history, so it has to stay unambiguous.
+        let anonymous: serde_json::Value =
+            serde_json::from_str(&record_json(&measurement)).expect("row is JSON");
+        assert!(anonymous.as_object().expect("object").get("host").is_none());
+        assert_eq!(anonymous.as_object().expect("object").len(), 24);
+
+        measurement.host = Some("ci-bench".to_owned());
+        let labelled: serde_json::Value =
+            serde_json::from_str(&record_json(&measurement)).expect("row is JSON");
+        assert_eq!(labelled["host"], "ci-bench");
+        assert_eq!(labelled.as_object().expect("object").len(), 25);
+
+        // Every other field must be untouched by the addition, so a labelled
+        // row stays comparable to the rows above it.
+        let mut without_host = labelled.as_object().expect("object").clone();
+        without_host.remove("host");
+        assert_eq!(serde_json::Value::Object(without_host), anonymous);
+    }
+
+    #[test]
     fn write_samples_json_preserves_execution_order_without_changing_history_records() {
         let samples = temp_path("raw-samples", "json");
         let mut measurement = sample_measurement(100, "rustia", "luau", "dense_tables", "test");
@@ -3489,6 +3542,7 @@ mod tests {
             checksum: "i64:42".to_owned(),
             commit: commit.to_owned(),
             timestamp_unix,
+            host: None,
             target: "test-target".to_owned(),
             mode_family: engine,
             execution_mode: "interpreter",
