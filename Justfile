@@ -38,11 +38,16 @@ check-crate-metadata:
 check-workflows:
     node tools/check-workflows.js
 
+# Read-only schema validation of a frozen benchmark config; no host, no build.
+bench-validate config:
+    node tools/run-linux-fixed-benchmark.js validate "{{ config }}"
+
 # Every commit hash a committed benchmark artifact cites must stay reachable.
 check-benchmark-commit-reachability:
     node tools/check-benchmark-commit-reachability.js
 
 check-benchmark-results:
+    node tools/run-linux-fixed-benchmark.js validate bench/cloud/dedicated-core2-tape-sparse.json
     node tools/check-benchmark-commit-reachability.js
     node tools/check-benchmark-commit-reachability.js --self-test
     node bench/analyze-fixed-samples.js --self-test

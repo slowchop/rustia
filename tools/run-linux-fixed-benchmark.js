@@ -2891,6 +2891,23 @@ async function main() {
     selfTest();
     return;
   }
+  // Read-only schema validation without a host, a bundle, or a build. A config
+  // whose only failure mode is "rejected after provisioning and compiling" wastes
+  // a measurement window to learn something a parse could have told us.
+  if (process.argv[2] === "validate") {
+    if (process.argv.length !== 4) {
+      process.stderr.write("Usage: node tools/run-linux-fixed-benchmark.js validate CONFIG.json\n");
+      process.exitCode = 2;
+      return;
+    }
+    const config = validateConfig(loadJson(process.argv[3], "config"));
+    process.stdout.write(
+      `${process.argv[3]}: ${config.schema} validates ` +
+        `(${config.measurement.workload} n=${config.measurement.fixed_n} ` +
+        `reps=${config.measurement.repetitions} legs=${config.measurement.run_order.length})\n`,
+    );
+    return;
+  }
   if (process.argv.length !== 5) {
     process.stderr.write(
       "Usage: node tools/run-linux-fixed-benchmark.js CONFIG.json PROVIDER.json REPO.bundle\n",
