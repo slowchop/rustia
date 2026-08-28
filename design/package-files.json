@@ -17,7 +17,7 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 1703,
+      "file_count": 1704,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
@@ -58,6 +58,7 @@
         "cloud/linode-cross-engine-matrix-7f416028e77e.json",
         "cloud/linode-cross-engine-matrix-83bc2f3.json",
         "cloud/linode-cross-engine-matrix-87db175.json",
+        "cloud/linode-cross-engine-matrix-8f0e7f474f2b.json",
         "cloud/linode-cross-engine-matrix-a562919.json",
         "cloud/linode-cross-engine-matrix-b1cd284.json",
         "cloud/linode-cross-engine-matrix-bbe0c5c.json",

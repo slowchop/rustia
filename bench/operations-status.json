@@ -23,18 +23,18 @@
     "next_action": "Keep the artifact-only publisher healthy and investigate any failed publication before accepting newer public results."
   },
   "progress": {
-    "state": "pending",
-    "measured_commit": "7f416028e77e7a05b97c1702c1c0b6f11529e970",
-    "measured_at_unix": 1787649067,
-    "latest_relevant_commit": "ac922622cbe5486b18bc538c3d6b7169d0512a5c",
-    "latest_relevant_committed_at_unix": 1787795810,
-    "pending_relevant_commit_count": 4,
-    "next_action": "Run the newest pending performance-relevant commit on the explicit qualified Linode lifecycle."
+    "state": "current",
+    "measured_commit": "8f0e7f474f2b895be73aecec2a70a215e8467322",
+    "measured_at_unix": 1787883276,
+    "latest_relevant_commit": "8f0e7f474f2b895be73aecec2a70a215e8467322",
+    "latest_relevant_committed_at_unix": 1787867543,
+    "pending_relevant_commit_count": 0,
+    "next_action": "No progress measurement is currently required."
   },
   "landscape": {
     "state": "paused",
-    "measured_commit": "7f416028e77e7a05b97c1702c1c0b6f11529e970",
-    "measured_at_unix": 1787649067,
+    "measured_commit": "8f0e7f474f2b895be73aecec2a70a215e8467322",
+    "measured_at_unix": 1787883276,
     "refresh_interval_days": 35,
     "reason": "Immutable latest-stable landscape campaigns and engine-version bridges are not implemented yet.",
     "next_action": "Add version provenance, immutable landscape snapshots, and old/new reference bridge validation before enabling monthly refreshes."
