@@ -506,6 +506,33 @@ function expandCpuList(text, description) {
 // from it runs on the busy cores while reporting entirely believable numbers.
 // A benchmark that measures the wrong CPUs and says so is a nuisance; one that
 // measures the wrong CPUs quietly is a corrupted result.
+// Provider metadata for an owned host is derived, never supplied. A rented box
+// has a provider API to describe it; an owned one has no such record, and a
+// hand-written file would be either fabricated provenance or a place for
+// infrastructure detail to leak. This document is built from the operator's
+// declared host and the kernel's own answers, and deliberately carries no
+// address, hostname, or account identifier -- evidence directories are
+// committed to a public-bound repository.
+function dedicatedProviderMetadata(config) {
+  const host = config.provider.host;
+  const online = expandCpuList(
+    fs.readFileSync("/sys/devices/system/cpu/online", "utf8"),
+    "online CPU list",
+  );
+  return {
+    schema: "rustia.bench.dedicated-provider.v1",
+    provider: "dedicated",
+    resource_type: "owned_bare_metal",
+    host: host.name,
+    cpu_model: host.cpu_model,
+    vcpus: online.length,
+    declared_logical_cpus: host.logical_cpus,
+    declared_physical_cores: host.physical_cores,
+    pinned_cpus: host.pinned_cpus,
+    isolated_cpus: fs.readFileSync("/sys/devices/system/cpu/isolated", "utf8").trim(),
+  };
+}
+
 function verifyDedicatedIsolation(config) {
   const host = config.provider.host;
   const pinned = expandCpuList(String(host.pinned_cpus), "config.provider.host.pinned_cpus");
@@ -2351,7 +2378,9 @@ async function execute(configFile, providerFile, bundle) {
   fs.writeFileSync(RUN_LOG, "", { mode: 0o600 });
   logReady = true;
   const config = validateConfig(loadJson(configFile, "protocol config"));
-  const provider = loadJson(providerFile, "provider metadata");
+  const provider = isDedicatedHost(config)
+    ? dedicatedProviderMetadata(config)
+    : loadJson(providerFile, "provider metadata");
   let evidenceDirectory = null;
   let status = {
     schema: "rustia.bench.cloud-run-status.v1",
@@ -2618,6 +2647,25 @@ function selfTest() {
     validateDedicatedProvider({ provider: { host: { ...dedicatedHost, extra: 1 } } }),
   );
   assert.throws(() => validateDedicatedProvider({ provider: { host: {} } }));
+  // Derived provider metadata must never carry an address, a hostname beyond
+  // the operator's own label, or an account identifier: evidence directories
+  // are committed to a public-bound repository, and 16 provider IPs reached it
+  // that way already.
+  const derivedKeys = [
+    "schema",
+    "provider",
+    "resource_type",
+    "host",
+    "cpu_model",
+    "vcpus",
+    "declared_logical_cpus",
+    "declared_physical_cores",
+    "pinned_cpus",
+    "isolated_cpus",
+  ];
+  const forbidden = /ip|addr|account|token|key|user|label|region|instance|id$/i;
+  const leaked = derivedKeys.filter((field) => forbidden.test(field));
+  assert.deepEqual(leaked, [], `derived provider metadata field(s) may carry infrastructure detail: ${leaked}`);
   assert.equal(isDedicatedHost({ schema: "rustia.dedicated-fixed-benchmark.v1" }), true);
   assert.equal(isDedicatedHost({ schema: "rustia.linode-fixed-benchmark.v2" }), false);
   // The dedicated host runs the same paired protocol as the accepted DO gates:
@@ -2908,14 +2956,18 @@ async function main() {
     );
     return;
   }
-  if (process.argv.length !== 5) {
+  if (process.argv.length !== 5 && process.argv.length !== 4) {
     process.stderr.write(
-      "Usage: node tools/run-linux-fixed-benchmark.js CONFIG.json PROVIDER.json REPO.bundle\n",
+      "Usage: node tools/run-linux-fixed-benchmark.js CONFIG.json PROVIDER.json REPO.bundle\n" +
+        "       node tools/run-linux-fixed-benchmark.js CONFIG.json REPO.bundle   (dedicated host)\n",
     );
     process.exitCode = 2;
     return;
   }
-  process.exitCode = await execute(process.argv[2], process.argv[3], process.argv[4]);
+  process.exitCode =
+    process.argv.length === 4
+      ? await execute(process.argv[2], null, process.argv[3])
+      : await execute(process.argv[2], process.argv[3], process.argv[4]);
 }
 
 main().catch((error) => {
