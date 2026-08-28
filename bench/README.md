@@ -671,6 +671,30 @@ instead of silently changing the workload. Accepted output is immutable at
 host, build, protocol, and gate evidence under
 `bench/evidence/history-backfill/<harness-commit>/`.
 
+A reconstruction may run on the dedicated benchmark machine instead of an
+ephemeral cloud instance. The artifact then records `host`, and the renderer
+labels that series by machine. Reconstructions are comparable within themselves
+and never across hosts, so each is charted as its own era; the artifact and the
+evidence both name the pinned core, because core choice is unmeasured.
+
+Only one reconstruction may run at a time. Concurrent runs sharing a worktree
+and a target directory reset each other's checkouts mid-build and yield no
+usable rows, so the runner takes an exclusive lock and refuses to start when one
+is held.
+
+Revisions that predate the harness entry point need source changes to be
+drivable at all: the workspace must declare the overlaid `bench` crate, and a
+revision older than `Vm::call_function` needs that wrapper. Applying it is
+allowed only when the wrapper is taken verbatim from the commit that introduced
+it and exposes machinery the revision already contains, so the measured work
+stays the revision's own. Every such change is listed in the artifact's
+`source_modifications`, and the revision's workload checksums must match the
+rest of the series exactly.
+
+Where two revisions compile to byte-identical binaries, their independently
+measured timings bound this host's run-to-run variation. That check is free and
+belongs in the evidence.
+
 Freeze only from a clean committed checkout, commit the generated config, plan
 without billing, then run the complete reconstruction on one ephemeral Linode:
 

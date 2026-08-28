@@ -1041,10 +1041,10 @@ function historySection(history, backfills, currentRows) {
   const eras = [...reconstructed, ...visibleRecorded];
   const snapshotCount = eras.reduce((total, era) => total + era.snapshotCount, 0);
   const summary = reconstructed.length > 0
-    ? `${formatInteger(reconstructed.reduce((total, era) => total + era.snapshotCount, 0))} historical Rustia revisions reconstructed with a single fixed harness, followed by the directly recorded dedicated-VM series.`
+    ? `${formatInteger(reconstructed.reduce((total, era) => total + era.snapshotCount, 0))} historical Rustia revisions reconstructed across ${formatInteger(reconstructed.length)} fixed-harness series, each measured end to end on one machine, followed by the directly recorded dedicated series.`
     : `${formatInteger(snapshotCount)} recorded Linux matrix runs across two eras. Each chart is normalized to its own first run, so different hosts and protocols are never blended.`;
   const explanation = reconstructed.length > 0
-    ? `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>); the reconstructed Rustia measurements used a separate VM of the same class.`
+    ? `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>); each reconstructed series was measured end to end on the one machine named in its legend entry.`
     : `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>).`;
   return `
     <section class="panel history-axis-panel" id="history">
@@ -1059,7 +1059,7 @@ function historySection(history, backfills, currentRows) {
         </div>
       </div>
       <p class="history-answer"><strong>Higher is faster; mlua/JIT is 1×.</strong> ${explanation}</p>
-      <p class="cohort-note">The two Rustia lines share the same workloads and score, but remain separate because reconstruction and directly recorded matrix runs use different measurement protocols.</p>
+      <p class="cohort-note">The Rustia lines share the same workloads and score, but remain separate: reconstruction and directly recorded matrix runs use different measurement protocols, and each reconstruction ran on its own host.</p>
       <div data-history-axis-view="date">${rustiaHistoryChart(eras, reference, "date")}</div>
       <div data-history-axis-view="commit" hidden>${rustiaHistoryChart(eras, reference, "commit")}</div>
       ${rustiaOverallHistoryTable(eras)}
@@ -1110,9 +1110,18 @@ function rustiaBackfillEras(backfills, reference) {
       }));
     return rustiaHistoryEra(
       "Fixed-harness reconstructed history",
-      `Harness ${backfill.harness_commit.slice(0, 7)} · measured together on one dedicated Linux VM`,
+      `Harness ${backfill.harness_commit.slice(0, 7)} · measured together on ${
+        backfill.host
+          ? `one dedicated machine (${backfill.host})`
+          : "one dedicated Linux VM"
+      }`,
       rows,
       reference,
+      "reconstructed",
+      // Name the machine when the artifact records one. Reconstructions from
+      // different hosts are not comparable to each other, so they must never
+      // share a label.
+      `Reconstructed · ${backfill.host ?? `harness ${backfill.harness_commit.slice(0, 7)}`}`,
     );
   });
 }
@@ -1138,19 +1147,26 @@ function rustiaHistoryEras(rows, reference) {
       continue;
     }
     return [
-      rustiaHistoryEra("Earlier Linux history", "Earlier host/protocol era; kept on its own scale", rustiaRows.filter((row) => row.timestamp_unix < splitAt), reference),
-      rustiaHistoryEra("Current dedicated Linux history", "Controlled matrix era; this is the chart to use for current progress", current, reference),
+      rustiaHistoryEra("Earlier Linux history", "Earlier host/protocol era; kept on its own scale", rustiaRows.filter((row) => row.timestamp_unix < splitAt), reference, "recorded", "Recorded · earlier hosts"),
+      rustiaHistoryEra("Current dedicated Linux history", "Controlled matrix era; this is the chart to use for current progress", current, reference, "recorded", "Recorded dedicated"),
     ];
   }
-  return [rustiaHistoryEra("Comparable Linux history", "All recorded Linux runs", rustiaRows, reference)];
+  return [rustiaHistoryEra("Comparable Linux history", "All recorded Linux runs", rustiaRows, reference, "recorded", "Recorded Linux history")];
 }
 
-function rustiaHistoryEra(title, description, rows, reference) {
+// `kind` distinguishes a reconstructed era (one fixed harness replayed over old
+// revisions) from a recorded one (the matrix as it ran), and `label` names the
+// individual series. Both are explicit because there can now be more than one
+// reconstruction, so neither the chart nor the table can identify a series by
+// its position in the era list.
+function rustiaHistoryEra(title, description, rows, reference, kind, label) {
   const workloads = rustiaHistoryWorkloads(rows);
   const timestamps = workloads.flatMap((workload) => workload.rows.map((row) => row.timestamp_unix));
   return {
     title,
     description,
+    kind,
+    label: label ?? title,
     workloads,
     overall: rustiaOverallHistory(workloads, reference),
     reference,
@@ -1269,10 +1285,21 @@ function rustiaHistoryChart(eras, reference, axisMode) {
     .filter((tick) => tick <= maxY)
     .sort((left, right) => left - right);
   const referenceColor = "#ea580c";
-  const styles = [
-    { color: "#2563eb", label: "Reconstructed", dash: "" },
-    { color: "#0f766e", label: "Recorded dedicated", dash: "5 4" },
-  ];
+  // Styles follow each era's identity rather than its position in the list:
+  // the number of reconstructed series grows with the number of backfill
+  // artifacts, so a positional lookup silently mislabels every era after the
+  // first once a second reconstruction exists.
+  const reconstructedPalette = ["#2563eb", "#7c3aed", "#0891b2"];
+  let reconstructedSeen = 0;
+  const styles = eras.map((era) =>
+    era.kind === "reconstructed"
+      ? {
+          color: reconstructedPalette[reconstructedSeen++ % reconstructedPalette.length],
+          label: era.label,
+          dash: "",
+        }
+      : { color: "#0f766e", label: era.label, dash: "5 4" },
+  );
   const firstLabel = axisMode === "commit" ? commitOrder[0].slice(0, 7) : formatIsoDate(minX);
   const lastLabel = axisMode === "commit" ? commitOrder.at(-1).slice(0, 7) : formatIsoDate(maxX);
   return `
@@ -1286,14 +1313,14 @@ function rustiaHistoryChart(eras, reference, axisMode) {
         <text x="${width - pad.right}" y="${height - 10}" text-anchor="end" class="history-axis-label">${escapeHtml(lastLabel)}</text>
         <line x1="${pad.left}" y1="${yScale(1).toFixed(2)}" x2="${width - pad.right}" y2="${yScale(1).toFixed(2)}" stroke="${referenceColor}" stroke-width="1.4" stroke-dasharray="7 6"><title>${escapeHtml(`mlua / Luau / JIT · current matrix ${reference.commit.slice(0, 7)} · 1×`)}</title></line>
         ${eras.map((era, index) => {
-          const style = styles[index] ?? { color: engineColor("rustia", index), label: era.title, dash: "" };
+          const style = styles[index];
           const points = era.overall.map((point) => `${xScale(point).toFixed(2)},${yScale(point.score).toFixed(2)}`).join(" ");
           const dash = style.dash === "" ? "" : ` stroke-dasharray="${style.dash}"`;
           return `<g><polyline points="${points}" fill="none" stroke="${style.color}" stroke-width="1.6"${dash} stroke-linecap="round" stroke-linejoin="round" />${era.overall.map((point) => `<circle cx="${xScale(point).toFixed(2)}" cy="${yScale(point.score).toFixed(2)}" r="2.2" fill="${style.color}"><title>${escapeHtml(`${style.label} · ${point.commit.slice(0, 7)} · ${formatSpeed(point.score)} mlua/JIT · ${formatSpeed(point.gain)} vs first in era`)}</title></circle>`).join("")}</g>`;
         }).join("")}
       </svg>
       <div class="history-legend">${eras.map((era, index) => {
-        const style = styles[index] ?? { color: engineColor("rustia", index), label: era.title };
+        const style = styles[index];
         return `<span>${colorDotMarkup(style.color)}rustia · ${escapeHtml(style.label)}</span>`;
       }).join("")}<span>${colorDotMarkup(referenceColor)}<strong>mlua</strong> / Luau / JIT · 1×</span></div>
     </div>
@@ -1306,7 +1333,7 @@ function rustiaOverallHistoryTable(eras) {
     const latest = era.overall.at(-1);
     const percent = (latest.gain - 1) * 100;
     const gap = 1 / latest.score;
-    return `<tr><td><strong>${escapeHtml(era.title === "Fixed-harness reconstructed history" ? "Reconstructed" : "Recorded dedicated")}</strong><br><small>${formatInteger(era.snapshotCount)} complete scores · geometric mean of 5 workloads</small></td><td>${formatSpeed(first.score)} of mlua/JIT · <code>${escapeHtml(first.commit.slice(0, 7))}</code></td><td>${formatSpeed(latest.score)} of mlua/JIT · <code>${escapeHtml(latest.commit.slice(0, 7))}</code></td><td><strong>${formatSpeed(latest.gain)}</strong> · ${percent >= 0 ? "+" : ""}${formatNumber(percent)}%</td><td>mlua/JIT is <strong>${formatSpeed(gap)}</strong> faster</td></tr>`;
+    return `<tr><td><strong>${escapeHtml(era.label)}</strong><br><small>${formatInteger(era.snapshotCount)} complete scores · geometric mean of 5 workloads</small></td><td>${formatSpeed(first.score)} of mlua/JIT · <code>${escapeHtml(first.commit.slice(0, 7))}</code></td><td>${formatSpeed(latest.score)} of mlua/JIT · <code>${escapeHtml(latest.commit.slice(0, 7))}</code></td><td><strong>${formatSpeed(latest.gain)}</strong> · ${percent >= 0 ? "+" : ""}${formatNumber(percent)}%</td><td>mlua/JIT is <strong>${formatSpeed(gap)}</strong> faster</td></tr>`;
   }).join("");
   return `<div class="table-wrap history-table"><table><thead><tr><th>Series</th><th>First run</th><th>Latest run</th><th>Improvement</th><th>Latest gap</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }

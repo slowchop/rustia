@@ -485,8 +485,18 @@ unreachable suspended-coroutine frames.
    source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
    a standalone HTML report, an explicit closed wasm pre-lock gate artifact, a wasm target bench for rustia+koto+rhai, a `call_ref`
    versus `br_table` dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle.
-   Next work is the actual standalone-project split, the interop/serde/fuel-limit workload tranche, regression
-   alerts, and longer-run public history.
+   Public history is now reconstructed end to end on the dedicated host: 75 revisions spanning 2026-07-03 to
+   2026-08-26, five workloads each, one fixed harness (`daaf422`) and one pinned dependency set overlaid onto
+   every revision, all 375 rows labelled `host: ci-bench`. Every revision produces byte-identical workload
+   checksums, so the series measures speed alone; the geometric mean across the five workloads improves
+   **4.291x (+329%)**, from 0.066x to 0.285x of mlua/Luau/JIT. Three revision pairs compiled to byte-identical
+   binaries and their independent timings agree to 0.50% median and 1.04% worst, which bounds run-to-run
+   variation well below the effect. The earliest engine-bearing commit (`8c0211d`) needed a declared workspace
+   member and the `pub fn call_function` wrapper its successor added; both are recorded in the artifact's
+   `source_modifications`, and its checksums match the other 74 exactly. Commits before it contain no
+   `crates/` tree at all, so the series starts at the first commit that has an engine.
+   Next work is the actual standalone-project split, the interop/serde/fuel-limit workload tranche, and
+   regression alerts.
 5. **Stabilize and publish the public crates.** Settle the consumer API and semver surface, close the generated
    release gates, flip `publish = false` in dependency order, and publish honest per-workload documentation.
 6. **Keep the executable conformance corpus green**. The current repo has 712 executable fixtures covering 511

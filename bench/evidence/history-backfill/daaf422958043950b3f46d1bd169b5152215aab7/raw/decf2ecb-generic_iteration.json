@@ -1,0 +1,72 @@
+{
+  "measurements": [
+    {
+      "checksum": "number:237283780.00000000000000000",
+      "cold_start_ns_median": 178711.0,
+      "cold_start_ns_min": 172011.0,
+      "commit": "decf2ecbc8f2cf11b9fb025e1ba54e4e87ebe2d7",
+      "dialect": "luau",
+      "engine": "rustia",
+      "execution_mode": "interpreter",
+      "first_call_ns_median": 26590.0,
+      "first_call_ns_min": 26100.0,
+      "mode_family": "rustia",
+      "n": 10364,
+      "n_selection": "fixed",
+      "native_verification": "not-applicable",
+      "native_verification_ratio": null,
+      "native_verified": false,
+      "ns_per_unit_median": 16237.023157082207,
+      "ns_per_unit_min": 16209.348417599382,
+      "prepare_ns_median": 152121.0,
+      "prepare_ns_min": 145911.0,
+      "reps": 5,
+      "samples_cold_start_ns": [
+        277562.0,
+        181351.0,
+        178711.0,
+        178031.0,
+        172011.0
+      ],
+      "samples_first_call_ns": [
+        37851.0,
+        26880.0,
+        26590.0,
+        26300.0,
+        26100.0
+      ],
+      "samples_ns_per_unit": [
+        16236.118101119258,
+        16209.348417599382,
+        16237.023157082207,
+        16265.468834426862,
+        16292.73552682362
+      ],
+      "samples_prepare_ns": [
+        239711.0,
+        154471.0,
+        152121.0,
+        151731.0,
+        145911.0
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1787893942,
+      "unit": "__iter(32)+pairs(5)+ipairs(32) pass",
+      "units_per_sec": 61692.79444411504,
+      "workload": "generic_iteration"
+    }
+  ],
+  "metadata": {
+    "cold_measurement": "fresh prepare followed immediately by one workload unit; prepare, first-call, and combined latency are retained separately",
+    "cold_sample_count": 5,
+    "description": "Raw per-repetition timings in execution order. This sidecar is separate from the append-only public history schema.",
+    "measurement_count": 1,
+    "measurement_isolation": "fresh prepared workload per repetition",
+    "sample_count": 5,
+    "sample_order": "execution order (unsorted)",
+    "warmup": "one untimed invocation immediately before each recorded sample"
+  },
+  "schema": "rustia.bench.raw-samples.v1",
+  "schema_version": 1,
+  "source": "script-bench-harness"
+}
