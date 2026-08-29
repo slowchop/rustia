@@ -693,8 +693,9 @@ commands inside GitHub Actions.
 
 Only one reconstruction may run at a time. Concurrent runs sharing a worktree
 and a target directory reset each other's checkouts mid-build and yield no
-usable rows, so the runner takes an exclusive lock and refuses to start when one
-is held.
+usable rows; the operator-run script that produced the published series took an
+exclusive lock for that reason. `tools/run-linux-history-backfill.js` does not
+yet, so until it does, serialising runs is the operator's responsibility.
 
 Revisions that predate the harness entry point need source changes to be
 drivable at all: the workspace must declare the overlaid `bench` crate, and a
