@@ -683,19 +683,39 @@ supply the 1x reference and the current-results tables, but they are measured on
 a different host, so plotting them beside a reconstruction would invite a host
 difference to be read as a performance change.
 
-**There is no repeatable runner for a dedicated-machine reconstruction yet.**
-The Linode recipes below drive the cloud path; the published `ci-bench` series
-was produced by an operator-run script against a machine reached over SSH, not
-by a committed tool. Reproducing or extending it currently means repeating that
-by hand. Promoting it needs a committed runner plus a decision about how it is
-triggered, since `tools/check-workflows.js` deliberately forbids measurement
-commands inside GitHub Actions.
+One command rebuilds the whole series on the owned host:
+
+```sh
+just bench-history-plan          # freeze and attest, measure nothing
+just bench-history               # measure every revision and promote
+just bench-history replace=1     # supersede an existing artifact
+```
+
+`replace=1` is the change-of-machine path. Numbers measured on a different box
+are not comparable with the new one's, so upgrading or replacing the hardware
+means re-deriving the series rather than appending to it, and the coordinator
+refuses to overwrite an existing artifact without being told to.
+
+The coordinator reaches the machine through `RUSTIA_BENCH_SSH`, an ssh
+destination or `ssh_config` alias the operator keeps outside this repository.
+No hostname, address or key path belongs here; `provider.host.name` is a
+provenance label published in row data, never an ssh target. Before shipping
+anything it attests the machine against the frozen config — CPU model, logical
+CPU count, SMT off, and that every pinned CPU really is in the kernel's isolated
+set. A pinned core the scheduler still uses is the failure this protocol exists
+to prevent, and it does not show up in the timings.
+
+Measurement stays out of GitHub Actions: `tools/check-workflows.js` forbids the
+harness there, and starting a run remains an explicit operator action.
 
 Only one reconstruction may run at a time. Concurrent runs sharing a worktree
 and a target directory reset each other's checkouts mid-build and yield no
-usable rows; the operator-run script that produced the published series took an
-exclusive lock for that reason. `tools/run-linux-history-backfill.js` does not
-yet, so until it does, serialising runs is the operator's responsibility.
+usable rows, so the runner takes an exclusive lock naming its pid and refuses to
+start while a live one is held. A lock left by a killed run is taken over
+automatically once its pid is gone; `just bench-history-unlock` clears one by
+hand. A run wipes its working state at startup but keeps the cargo target
+directory warm, which is what makes each revision cost about 26 seconds rather
+than minutes.
 
 Revisions that predate the harness entry point need source changes to be
 drivable at all: the workspace must declare the overlaid `bench` crate, and a
@@ -710,19 +730,16 @@ Where two revisions compile to byte-identical binaries, their independently
 measured timings bound this host's run-to-run variation. That check is free and
 belongs in the evidence.
 
-Freeze only from a clean committed checkout, commit the generated config, plan
-without billing, then run the complete reconstruction on one ephemeral Linode:
+Freeze only from a clean committed checkout and commit the generated config;
+`just bench-history` does the freeze itself and reuses an already-frozen config
+for the same harness commit rather than silently re-deriving one.
 
-```sh
-just bench-linode-backfill-freeze aee7749 bench/cloud/linode-history-backfill.json
-just bench-linode-backfill-plan bench/cloud/linode-history-backfill.json
-just bench-linode-backfill bench/cloud/linode-history-backfill.json
-```
-
-The dedicated shape is capped at 55 minutes and one rounded Linode billing
-hour. Historical source commit time is retained separately from honest
-measurement time; renderers order the reconstructed trend by the frozen target
-list rather than pretending the measurements happened in the past.
+`provider.host.max_runtime_minutes` bounds a run. On a rented instance that
+bound was a bill; on an owned machine it is a hang detector, checked at each
+revision boundary so a wedged build fails in seconds rather than after another
+twenty minutes. Historical source commit time is retained separately from
+honest measurement time; renderers order the reconstructed trend by the frozen
+target list rather than pretending the measurements happened in the past.
 
 Hosted CI only validates the committed artifacts. `tools/check-workflows.js`
 forbids fresh native or wasm measurement commands in GitHub Actions; starting a

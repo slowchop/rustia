@@ -498,8 +498,11 @@ unreachable suspended-coroutine frames.
    series alone: the superseded Linode reconstruction and the recorded matrix line were removed from it
    because they were measured on other hosts, and mixing hosts lets a machine difference read as a
    performance change. Recorded matrix runs remain in `bench/history/runs.jsonl` and still supply the 1x
-   reference. **No committed runner reproduces this reconstruction** — it was operator-run over SSH, so
-   re-running or extending it is currently manual; that runner, and how it is triggered, is open work.
+   reference. `just bench-history` now reproduces the whole series on the owned host from a clean
+   checkout, which is what a change of benchmark machine requires: numbers measured on the old box are
+   not comparable with the new one's, so the response to new hardware is to re-derive rather than append.
+   The runner attests the machine before building, takes an exclusive lock, applies declared source
+   repairs by re-deriving them from Git, and records the identical-binary repeatability check in evidence.
    Next work is the actual standalone-project split, the interop/serde/fuel-limit workload tranche, and
    regression alerts.
 5. **Stabilize and publish the public crates.** Settle the consumer API and semver surface, close the generated

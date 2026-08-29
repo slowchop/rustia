@@ -9,16 +9,33 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
-const ROOT = "/opt/rustia-history-backfill";
+// The retired Linode rental was destroyed after every run, so its ROOT was a
+// throwaway path under /opt with no ownership concerns. ci-bench is a machine
+// this project owns outright and reaches over SSH as an unprivileged user
+// (see run-dedicated-benchmark.js's REMOTE_ROOT, which already ships
+// ".rustia-history-backfill" to the same default), so ROOT lives under that
+// user's home directory instead, with an env var escape hatch for a
+// non-default disk.
+const ROOT = process.env.RUSTIA_BACKFILL_ROOT ?? path.join(os.homedir(), ".rustia-history-backfill");
 const REPOSITORY = path.join(ROOT, "repo.git");
 const HARNESS = path.join(ROOT, "harness");
 const SOURCES = path.join(ROOT, "sources");
-const TARGET = path.join(ROOT, "target");
+// The cargo target dir is deliberately outside WIPE_ON_START below: a warm
+// target dir is what makes each historical revision build in ~26s instead of
+// minutes, and unlike repo.git/sources/binaries it holds nothing keyed to a
+// specific run, so a previous run's target dir is never stale.
+const CACHE = path.join(ROOT, "cache");
+const TARGET = path.join(CACHE, "target");
 const BINARIES = path.join(ROOT, "binaries");
 const ATTEMPTS = path.join(ROOT, "attempts");
 const EXPORT = path.join(ROOT, "export");
-const EXPORT_ARCHIVE = "/opt/rustia/export.tar.gz";
+const EXPORT_ARCHIVE = path.join(ROOT, "export.tar.gz");
 const RUN_LOG = path.join(ROOT, "remote-run.log");
+const EVIDENCE = path.join(ROOT, "evidence");
+const LOCK_FILE = path.join(ROOT, "lock");
+// rustup installs here; the old runner assumed it ran as root and hardcoded
+// /root/.cargo/bin, so cargo/rustc/rustup are resolved through PATH instead.
+const CARGO_BIN = path.join(os.homedir(), ".cargo", "bin");
 const PROTOCOL = "rustia_history_backfill_v1";
 const WORKLOADS = Object.freeze([
   "dense_tables",
@@ -49,17 +66,14 @@ const CORE_TREES = Object.freeze([
   "crates/rustia-parser",
   "crates/rustia-vm",
 ]);
-const PACKAGE_ACTIVITY_UNITS = Object.freeze([
-  "apt-daily.service",
-  "apt-daily-upgrade.service",
-  "apt-daily.timer",
-  "apt-daily-upgrade.timer",
-  "unattended-upgrades.service",
-]);
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const MAX_TARGET_COMMITS = 64;
 const MAX_TIMED_ATTEMPTS = 3;
+// A second run must not inherit a previous run's clone, worktrees, binaries,
+// timed-attempt scratch, or last export/evidence -- see resetWorkingState.
+// CACHE (the warm cargo target dir) and LOCK_FILE (this run's own lock,
+// already held by the time resetWorkingState runs) are deliberately absent.
+const WIPE_ON_START = Object.freeze([REPOSITORY, HARNESS, SOURCES, BINARIES, ATTEMPTS, EXPORT, EVIDENCE]);
 
 let logReady = false;
 
@@ -131,6 +145,26 @@ function sha256File(file) {
   return sha256(fs.readFileSync(file));
 }
 
+// Mirrors expandCpuList in run-linux-fixed-benchmark.js: provider.host.pinned_cpus
+// is a taskset-style CPU-list string ("4", "4,5", "4-5"). This file's
+// host_gate.benchmark_cpu cross-check (below) is what the fixed runner has no
+// equivalent of, since it names its pinned core directly rather than through
+// a separate host_gate section.
+function expandCpuList(text, location) {
+  const cpus = new Set();
+  for (const token of String(text).trim().split(",")) {
+    const match = token.match(/^(\d+)(?:-(\d+))?$/);
+    if (!match) fail(`${location} has invalid CPU-list syntax`);
+    const start = Number(match[1]);
+    const end = match[2] === undefined ? start : Number(match[2]);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start || end - start > 4096) {
+      fail(`${location} has an invalid CPU range`);
+    }
+    for (let cpu = start; cpu <= end; cpu += 1) cpus.add(cpu);
+  }
+  return [...cpus].sort((left, right) => left - right);
+}
+
 function validateConfig(value) {
   const root = requireObject(value, "config");
   requireExactKeys(
@@ -138,55 +172,66 @@ function validateConfig(value) {
     ["schema", "provider", "source", "measurement", "host_gate", "publication"],
     "config",
   );
-  if (root.schema !== "rustia.linode-fixed-benchmark.v2") {
+  if (root.schema !== "rustia.dedicated-history-backfill.v1") {
     fail("unsupported history backfill config schema");
   }
 
-  const provider = requireObject(root.provider, "config.provider");
+  // An owned host has no provider catalog to validate against -- no region,
+  // image, size, or per-hour price. Mirrors validateDedicatedProvider in
+  // run-linux-fixed-benchmark.js: the provider section instead names what
+  // the operator guarantees -- the machine, the cores held off the
+  // scheduler, and the one core a timed leg must run on.
+  requireExactKeys(root.provider, ["host"], "config.provider");
+  const host = requireObject(root.provider.host, "config.provider.host");
   requireExactKeys(
-    provider,
-    ["region", "image", "size", "max_runtime_minutes"],
-    "config.provider",
+    host,
+    ["name", "cpu_model", "logical_cpus", "physical_cores", "pinned_cpus", "max_runtime_minutes"],
+    "config.provider.host",
   );
-  requireString(provider.region, "config.provider.region");
-  requireString(provider.image, "config.provider.image");
-  const maxRuntime = requireInteger(
-    provider.max_runtime_minutes,
-    "config.provider.max_runtime_minutes",
-    1,
-  );
-  if (maxRuntime >= 60) fail("history backfill must remain inside one Linode billing hour");
-  const size = requireObject(provider.size, "config.provider.size");
-  requireExactKeys(
-    size,
-    ["id", "description", "class", "vcpus", "memory_mib", "disk_gib", "max_hourly_price_usd"],
-    "config.provider.size",
-  );
-  requireString(size.id, "config.provider.size.id");
-  requireString(size.description, "config.provider.size.description");
-  if (requireString(size.class, "config.provider.size.class") !== "dedicated") {
-    fail("history backfill requires a dedicated Linode");
+  requireString(host.name, "config.provider.host.name");
+  requireString(host.cpu_model, "config.provider.host.cpu_model");
+  requireString(host.pinned_cpus, "config.provider.host.pinned_cpus");
+  requireInteger(host.logical_cpus, "config.provider.host.logical_cpus", 1);
+  requireInteger(host.physical_cores, "config.provider.host.physical_cores", 1);
+  requireInteger(host.max_runtime_minutes, "config.provider.host.max_runtime_minutes", 1);
+  // SMT is required off, so logical CPUs and physical cores must agree. A
+  // config that disagrees with itself would otherwise pass here and fail
+  // only on the host, after a build.
+  if (host.logical_cpus !== host.physical_cores) {
+    fail(
+      `config.provider.host declares ${host.logical_cpus} logical CPUs across ${host.physical_cores} ` +
+        `physical cores; the dedicated protocol requires SMT off, so these must be equal`,
+    );
   }
-  requireInteger(size.vcpus, "config.provider.size.vcpus", 2);
-  requireInteger(size.memory_mib, "config.provider.size.memory_mib", 1);
-  requireInteger(size.disk_gib, "config.provider.size.disk_gib", 1);
-  requireNumber(size.max_hourly_price_usd, "config.provider.size.max_hourly_price_usd", 0.001);
 
   const source = requireObject(root.source, "config.source");
   requireExactKeys(
     source,
-    ["harness_commit", "target_commits", "expected_sha256"],
+    ["harness_commit", "revision_selection", "target_commits", "source_modifications", "expected_sha256"],
     "config.source",
   );
   if (!FULL_COMMIT.test(requireString(source.harness_commit, "config.source.harness_commit"))) {
     fail("config.source.harness_commit must be a full lowercase commit");
   }
-  if (
-    !Array.isArray(source.target_commits) ||
-    source.target_commits.length === 0 ||
-    source.target_commits.length > MAX_TARGET_COMMITS
-  ) {
-    fail(`config.source.target_commits must contain 1..${MAX_TARGET_COMMITS} commits`);
+  const revisionSelection = requireObject(source.revision_selection, "config.source.revision_selection");
+  requireExactKeys(
+    revisionSelection,
+    ["walk", "includes_non_first_parent_commits", "ordering_is_presentational", "note"],
+    "config.source.revision_selection",
+  );
+  requireString(revisionSelection.walk, "config.source.revision_selection.walk");
+  requireString(revisionSelection.note, "config.source.revision_selection.note");
+  if (typeof revisionSelection.includes_non_first_parent_commits !== "boolean") {
+    fail("config.source.revision_selection.includes_non_first_parent_commits must be a boolean");
+  }
+  if (typeof revisionSelection.ordering_is_presentational !== "boolean") {
+    fail("config.source.revision_selection.ordering_is_presentational must be a boolean");
+  }
+  // Unlike the retired Linode cap (target_commits.length <= 64), which bounded
+  // a rental bill rather than correctness, an owned host has no per-run cost
+  // to cap: only non-empty, unique, full commits are required.
+  if (!Array.isArray(source.target_commits) || source.target_commits.length === 0) {
+    fail("config.source.target_commits must contain at least one commit");
   }
   const seen = new Set();
   for (const [index, commit] of source.target_commits.entries()) {
@@ -195,6 +240,64 @@ function validateConfig(value) {
     }
     if (seen.has(commit)) fail(`config.source.target_commits duplicates ${commit}`);
     seen.add(commit);
+  }
+  if (!Array.isArray(source.source_modifications)) {
+    fail("config.source.source_modifications must be an array");
+  }
+  for (const [index, repair] of source.source_modifications.entries()) {
+    const location = `config.source.source_modifications[${index}]`;
+    requireObject(repair, location);
+    requireExactKeys(
+      repair,
+      [
+        "commit",
+        "subject",
+        "cherry_pick",
+        "why_it_could_not_be_measured",
+        "changes_applied",
+        "why_the_timing_is_still_this_revision",
+        "why_it_is_derived_rather_than_stored",
+        "verification",
+      ],
+      location,
+    );
+    if (!seen.has(repair.commit)) {
+      fail(`${location}.commit ${repair.commit} is not one of config.source.target_commits`);
+    }
+    requireString(repair.subject, `${location}.subject`);
+    const cherryPick = requireObject(repair.cherry_pick, `${location}.cherry_pick`);
+    requireExactKeys(cherryPick, ["from_commit", "from_subject", "paths"], `${location}.cherry_pick`);
+    if (!FULL_COMMIT.test(requireString(cherryPick.from_commit, `${location}.cherry_pick.from_commit`))) {
+      fail(`${location}.cherry_pick.from_commit must be a full lowercase commit`);
+    }
+    requireString(cherryPick.from_subject, `${location}.cherry_pick.from_subject`);
+    if (!Array.isArray(cherryPick.paths) || cherryPick.paths.length === 0) {
+      fail(`${location}.cherry_pick.paths must be a non-empty array`);
+    }
+    for (const [pathIndex, relativePath] of cherryPick.paths.entries()) {
+      requireString(relativePath, `${location}.cherry_pick.paths[${pathIndex}]`);
+      // A repair patches source that ships inside the historical binary;
+      // bench/ is the harness overlay applied separately by overlayHarness,
+      // and a repair reaching into it would silently change what the harness
+      // measures instead of just repairing why an old revision cannot build.
+      if (relativePath.startsWith("bench/")) {
+        fail(`${location}.cherry_pick.paths[${pathIndex}] ${relativePath} must not be under bench/`);
+      }
+    }
+    for (const field of [
+      "why_it_could_not_be_measured",
+      "why_the_timing_is_still_this_revision",
+      "why_it_is_derived_rather_than_stored",
+      "verification",
+    ]) {
+      requireString(repair[field], `${location}.${field}`);
+    }
+    if (!Array.isArray(repair.changes_applied) || repair.changes_applied.length === 0) {
+      fail(`${location}.changes_applied must be a non-empty array`);
+    }
+    for (const [changeIndex, change] of repair.changes_applied.entries()) {
+      requireString(change, `${location}.changes_applied[${changeIndex}]`);
+    }
   }
   const expectedHashes = requireObject(source.expected_sha256, "config.source.expected_sha256");
   requireExactKeys(expectedHashes, Object.keys(OVERLAY_FILES), "config.source.expected_sha256");
@@ -239,9 +342,8 @@ function validateConfig(value) {
       "maximum_load_1m",
       "maximum_steal_ticks",
       "maximum_timed_steal_percent",
-      "maximum_timed_steal_ticks",
-      "maximum_timed_attempts_per_group",
       "wait_timeout_seconds",
+      "maximum_timed_attempts_per_group",
     ],
     "config.host_gate",
   );
@@ -254,23 +356,16 @@ function validateConfig(value) {
   if (requireInteger(gate.maximum_steal_ticks, "config.host_gate.maximum_steal_ticks", 0) !== 0) {
     fail("history backfill idle steal budget must remain zero");
   }
+  // An owned, isolcpus-pinned core has no hypervisor neighbor to steal cycles
+  // from in the first place, so the timed leg gets zero tolerance too --
+  // unlike the old Linode leg's 0.1% (and the maximum_timed_steal_ticks
+  // fallback that came with it), which budgeted for a shared host this
+  // project did not control. There is nothing left for a tick-based fallback
+  // to forgive, so that key is gone rather than frozen at some other value.
   if (
-    requireNumber(
-      gate.maximum_timed_steal_percent,
-      "config.host_gate.maximum_timed_steal_percent",
-      0,
-    ) !== 0.1
+    requireNumber(gate.maximum_timed_steal_percent, "config.host_gate.maximum_timed_steal_percent", 0) !== 0
   ) {
-    fail("history backfill timed steal budget must remain 0.1%");
-  }
-  if (
-    requireInteger(
-      gate.maximum_timed_steal_ticks,
-      "config.host_gate.maximum_timed_steal_ticks",
-      0,
-    ) !== 1
-  ) {
-    fail("history backfill timed steal tick budget must remain one");
+    fail("history backfill timed steal budget must remain zero on a dedicated host");
   }
   const maximumAttempts = requireInteger(
     gate.maximum_timed_attempts_per_group,
@@ -280,8 +375,22 @@ function validateConfig(value) {
   if (maximumAttempts > MAX_TIMED_ATTEMPTS) {
     fail(`history backfill allows at most ${MAX_TIMED_ATTEMPTS} timed attempts`);
   }
-  if (requireInteger(gate.wait_timeout_seconds, "config.host_gate.wait_timeout_seconds", 1) !== 300) {
-    fail("history backfill quiet-host timeout must remain 300 seconds");
+  // 900s (was 300s): an unmetered box can afford to wait longer for quiet
+  // than a per-minute rental could.
+  if (requireInteger(gate.wait_timeout_seconds, "config.host_gate.wait_timeout_seconds", 1) !== 900) {
+    fail("history backfill quiet-host timeout must remain 900 seconds");
+  }
+  // The fixed paired-leg runner has no equivalent check: it names the pinned
+  // core directly in provider metadata rather than cross-referencing a
+  // separate host_gate section against it. Here the two sections are
+  // independent parts of the same config, so a benchmark_cpu the operator
+  // never isolated is a config bug this can catch before anything is built.
+  const pinnedCpus = expandCpuList(host.pinned_cpus, "config.provider.host.pinned_cpus");
+  if (!pinnedCpus.includes(gate.benchmark_cpu)) {
+    fail(
+      `config.host_gate.benchmark_cpu ${gate.benchmark_cpu} is not among config.provider.host.pinned_cpus ` +
+        `(${JSON.stringify(host.pinned_cpus)} = ${pinnedCpus.join(",")})`,
+    );
   }
 
   const publication = requireObject(root.publication, "config.publication");
@@ -301,7 +410,9 @@ function run(command, args, options = {}) {
     cwd: options.cwd,
     env: options.env || process.env,
     encoding: "utf8",
-    stdio: options.capture === false ? "inherit" : ["ignore", "pipe", "pipe"],
+    input: options.input,
+    stdio:
+      options.capture === false ? "inherit" : [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     maxBuffer: 64 * 1024 * 1024,
   });
   if (result.error) throw result.error;
@@ -355,8 +466,21 @@ function verifySource(config, bundle) {
   }
 }
 
+// The old runner ran as root and hardcoded /root/.cargo/bin/<tool>; this one
+// runs as whatever unprivileged user owns ci-bench, so every cargo/rustc/
+// rustup invocation below resolves the bare command name through PATH, with
+// CARGO_BIN prepended so it works whether or not the invoking shell already
+// sourced rustup's own profile snippet.
+function cargoEnvironment(extra = {}) {
+  return {
+    ...process.env,
+    ...extra,
+    PATH: `${CARGO_BIN}${path.delimiter}${process.env.PATH || ""}`,
+  };
+}
+
 function installRust() {
-  if (!fs.existsSync("/root/.cargo/bin/rustup")) {
+  if (!fs.existsSync(path.join(CARGO_BIN, "rustup"))) {
     const installer = path.join(ROOT, "rustup-init.sh");
     run("curl", [
       "--proto",
@@ -373,11 +497,10 @@ function installRust() {
       capture: false,
     });
   }
-  run(
-    "/root/.cargo/bin/rustup",
-    ["toolchain", "install", "1.95.0", "--profile", "minimal"],
-    { capture: false },
-  );
+  run("rustup", ["toolchain", "install", "1.95.0", "--profile", "minimal"], {
+    env: cargoEnvironment(),
+    capture: false,
+  });
 }
 
 function overlayHarness(target) {
@@ -395,13 +518,54 @@ function overlayHarness(target) {
   );
 }
 
+// Some historical revisions cannot be measured as committed -- each entry in
+// config.source.source_modifications explains why, and carries a real diff
+// taken from a later commit (already in target_commits) rather than a
+// hand-authored patch. Applying it here, right after the harness overlay, is
+// what makes buildTargets' checkout match what expected_checksums assumes.
+function applySourceModifications(config, commit, worktree) {
+  const repairs = config.source.source_modifications.filter((entry) => entry.commit === commit);
+  if (repairs.length > 1) {
+    fail(`${commit} has ${repairs.length} source_modifications entries; only one repair per commit is supported`);
+  }
+  if (repairs.length === 0) return null;
+  const [repair] = repairs;
+  const { from_commit: fromCommit, paths } = repair.cherry_pick;
+  // validateConfig already checked shape; re-derive the diff from git itself
+  // (rather than trust changes_applied's prose) so "verbatim from the commit
+  // that introduced it" is true by construction, not merely asserted.
+  const parent = runText("git", ["--git-dir", REPOSITORY, "rev-parse", `${fromCommit}^`]);
+  if (parent !== commit) {
+    fail(
+      `source_modifications repair for ${commit} names from_commit ${fromCommit}, whose parent is ` +
+        `${parent}, not ${commit}; a repair must be the immediate next commit's diff`,
+    );
+  }
+  for (const relativePath of paths) {
+    if (relativePath.startsWith("bench/")) {
+      fail(`source_modifications repair for ${commit} touches ${relativePath}, which is under bench/`);
+    }
+  }
+  const diff = run("git", ["--git-dir", REPOSITORY, "diff", `${fromCommit}^`, fromCommit, "--", ...paths]).stdout;
+  const applied = run("git", ["-C", worktree, "apply", "--whitespace=nowarn"], {
+    input: diff,
+    allowFailure: true,
+  });
+  if (applied.status !== 0) {
+    fail(
+      `source_modifications repair for ${commit} failed to apply: ` +
+        `${applied.stderr.trim() || `git apply exited ${applied.status}`}`,
+    );
+  }
+  return sha256(Buffer.from(diff, "utf8"));
+}
+
 function buildEnvironment() {
-  return {
-    ...process.env,
+  return cargoEnvironment({
     CARGO_INCREMENTAL: "0",
     CARGO_TARGET_DIR: TARGET,
     RUSTC_WRAPPER: "",
-  };
+  });
 }
 
 function targetMetadata(commit) {
@@ -421,18 +585,39 @@ function targetMetadata(commit) {
   return { commit, committed_at_unix: committedAt, subject, core_trees: trees };
 }
 
-function buildTargets(config) {
-  const cargo = "/root/.cargo/bin/cargo";
+// provider.host.max_runtime_minutes has no billing meaning on an unmetered,
+// owned host. It exists as a hang detector: if a historical build or
+// measurement gets stuck, the run fails fast and names the limit instead of
+// running until someone notices.
+function checkRuntimeBudget(config, startedAtMs, where) {
+  const limitMinutes = config.provider.host.max_runtime_minutes;
+  const elapsedMinutes = (Date.now() - startedAtMs) / 60000;
+  if (elapsedMinutes > limitMinutes) {
+    fail(
+      `history backfill exceeded provider.host.max_runtime_minutes (${limitMinutes} minutes) ` +
+        `${where}: ${elapsedMinutes.toFixed(1)} minutes elapsed`,
+    );
+  }
+}
+
+function buildTargets(config, startedAtMs) {
+  const cargo = "cargo";
   fs.mkdirSync(SOURCES, { recursive: true });
   fs.mkdirSync(BINARIES, { recursive: true });
   const builds = [];
   for (const [index, commit] of config.source.target_commits.entries()) {
+    checkRuntimeBudget(
+      config,
+      startedAtMs,
+      `before building revision ${index + 1}/${config.source.target_commits.length}`,
+    );
     const source = path.join(SOURCES, commit);
     log(`building ${index + 1}/${config.source.target_commits.length} ${commit.slice(0, 8)}`);
     run("git", ["--git-dir", REPOSITORY, "worktree", "add", "--detach", source, commit], {
       capture: false,
     });
     overlayHarness(source);
+    const sourceModificationSha256 = applySourceModifications(config, commit, source);
     const cargoArgs = [
         "+1.95.0",
         "build",
@@ -456,6 +641,7 @@ function buildTargets(config) {
       binary,
       binary_sha256: sha256File(binary),
       resolved_lock_sha256: sha256File(path.join(source, "Cargo.lock")),
+      source_modification_sha256: sourceModificationSha256,
     });
   }
   return builds;
@@ -526,10 +712,7 @@ async function waitForQuiet(config, gateFile, timedAttempt, deadline) {
 }
 
 function timedGatePasses(gate, delta) {
-  return (
-    delta.steal_percent <= gate.maximum_timed_steal_percent ||
-    delta.steal_ticks <= gate.maximum_timed_steal_ticks
-  );
+  return delta.steal_percent <= gate.maximum_timed_steal_percent;
 }
 
 function measurementArgs(config, build, historyFile, samplesFile) {
@@ -549,6 +732,8 @@ function measurementArgs(config, build, historyFile, samplesFile) {
     samplesFile,
     "--commit",
     build.commit,
+    "--host",
+    config.provider.host.name,
     "--no-results",
     "--no-latest-json",
   ];
@@ -607,6 +792,12 @@ function validateRows(config, builds, rows) {
     if (row.engine !== "rustia" || row.dialect !== "luau" || row.target !== "linux-x86_64") {
       fail(`history row ${index + 1} has the wrong engine identity`);
     }
+    if (row.host !== config.provider.host.name) {
+      fail(
+        `history row ${index + 1} has host ${JSON.stringify(row.host)}, expected ` +
+          `${JSON.stringify(config.provider.host.name)}`,
+      );
+    }
     if (!WORKLOADS.includes(row.workload)) fail(`history row ${index + 1} has an unknown workload`);
     if (row.n !== config.measurement.fixed_n[row.workload]) {
       fail(`history row ${index + 1} has the wrong fixed N`);
@@ -636,7 +827,72 @@ function validateRows(config, builds, rows) {
   }
 }
 
-async function measure(config, builds, evidenceDirectory) {
+function median(sortedValues) {
+  const count = sortedValues.length;
+  if (count === 0) return null;
+  const middle = Math.floor(count / 2);
+  return count % 2 === 0 ? (sortedValues[middle - 1] + sortedValues[middle]) / 2 : sortedValues[middle];
+}
+
+// Free repeatability evidence (see bench/README.md): some historical commits
+// compile to byte-identical binaries -- a change outside the crates that end
+// up in script-bench leaves binary_sha256 unchanged. Every such duplicate was
+// still built and measured independently, at a different point in the run,
+// so the spread between their ns_per_unit_min readings is a real, no-extra-
+// measurement check on how quiet the host actually was. It is evidence, not
+// a gate: there is no threshold yet to justify failing a run over.
+function repeatabilityCheck(builds, rows) {
+  const byHash = new Map();
+  for (const build of builds) {
+    if (!byHash.has(build.binary_sha256)) byHash.set(build.binary_sha256, []);
+    byHash.get(build.binary_sha256).push(build.commit);
+  }
+  const groups = [...byHash.entries()]
+    .filter(([, commits]) => commits.length > 1)
+    .map(([binarySha256, commits]) => ({ binary_sha256: binarySha256, commits }));
+  if (groups.length === 0) {
+    return {
+      schema: "rustia.bench.history-backfill-repeatability.v1",
+      available: false,
+      reason: "no two target commits produced byte-identical binaries in this run",
+      groups: [],
+      comparisons: [],
+      median_spread_percent: null,
+      worst_spread_percent: null,
+    };
+  }
+  const rowByCommitWorkload = new Map(rows.map((row) => [`${row.commit}\0${row.workload}`, row]));
+  const comparisons = [];
+  for (const group of groups) {
+    for (const workload of WORKLOADS) {
+      const values = group.commits.map((commit) => {
+        const row = rowByCommitWorkload.get(`${commit}\0${workload}`);
+        if (!row) fail(`repeatabilityCheck: missing ${commit}/${workload} row for a duplicate binary`);
+        return row.ns_per_unit_min;
+      });
+      const lowest = Math.min(...values);
+      const highest = Math.max(...values);
+      comparisons.push({
+        binary_sha256: group.binary_sha256,
+        commits: group.commits,
+        workload,
+        ns_per_unit_min_values: values,
+        spread_percent: lowest > 0 ? ((highest - lowest) / lowest) * 100 : 0,
+      });
+    }
+  }
+  const spreads = comparisons.map((entry) => entry.spread_percent).sort((left, right) => left - right);
+  return {
+    schema: "rustia.bench.history-backfill-repeatability.v1",
+    available: true,
+    groups,
+    comparisons,
+    median_spread_percent: median(spreads),
+    worst_spread_percent: spreads[spreads.length - 1],
+  };
+}
+
+async function measure(config, builds, evidenceDirectory, startedAtMs) {
   const gateFile = path.join(evidenceDirectory, "gate.jsonl");
   fs.writeFileSync(gateFile, "");
   const quietDeadline = Date.now() + config.host_gate.wait_timeout_seconds * 1000;
@@ -650,6 +906,7 @@ async function measure(config, builds, evidenceDirectory) {
     const startedAt = new Date().toISOString();
     const outputs = [];
     for (const [index, build] of builds.entries()) {
+      checkRuntimeBudget(config, startedAtMs, `before measuring ${index + 1}/${builds.length}`);
       log(`measuring ${index + 1}/${builds.length} ${build.commit.slice(0, 8)}`);
       outputs.push(measureOne(config, build, attemptDirectory));
     }
@@ -691,8 +948,8 @@ function collectHost(config, builds) {
     cpu_model: model ? model[1].trim() : "unknown",
     logical_cpus: os.cpus().length,
     benchmark_cpu: config.host_gate.benchmark_cpu,
-    rustc_version: runText("/root/.cargo/bin/rustc", ["+1.95.0", "--version", "--verbose"]),
-    cargo_version: runText("/root/.cargo/bin/cargo", ["+1.95.0", "--version", "--verbose"]),
+    rustc_version: runText("rustc", ["+1.95.0", "--version", "--verbose"], { env: cargoEnvironment() }),
+    cargo_version: runText("cargo", ["+1.95.0", "--version", "--verbose"], { env: cargoEnvironment() }),
     target_count: builds.length,
   };
 }
@@ -711,16 +968,21 @@ function evidenceInventory(directory) {
   return files.sort();
 }
 
-function publish(config, configFile, providerFile, builds, measurement, evidenceDirectory) {
+function publish(config, configFile, providerFile, builds, measurement, evidenceDirectory, repeatability) {
   const measuredAt = Math.floor(Date.parse(measurement.finishedAt) / 1000);
   const publication = {
     schema: "rustia.bench.history-backfill.v1",
     harness_commit: config.source.harness_commit,
+    host: config.provider.host.name,
+    pinned_core: config.host_gate.benchmark_cpu,
     measured_at_unix: measuredAt,
     native_target: config.measurement.native_target,
     workloads: WORKLOADS,
     fixed_n: config.measurement.fixed_n,
     repetitions: config.measurement.repetitions,
+    revision_selection: config.source.revision_selection,
+    source_modifications: config.source.source_modifications,
+    repeatability,
     targets: builds.map(({ binary, ...build }) => build),
     rows: measurement.rows,
   };
@@ -737,6 +999,7 @@ function publish(config, configFile, providerFile, builds, measurement, evidence
     path.join(evidenceDirectory, "builds.json"),
     builds.map(({ binary, ...build }) => build),
   );
+  writeJson(path.join(evidenceDirectory, "repeatability.json"), repeatability);
   const rawDirectory = path.join(evidenceDirectory, "raw");
   fs.mkdirSync(rawDirectory, { recursive: true });
   for (const build of builds) {
@@ -777,87 +1040,196 @@ function exportRun(status, evidenceDirectory) {
   });
 }
 
-async function execute(configFile, providerFile, bundle) {
-  if (process.platform !== "linux" || process.getuid() !== 0) {
-    fail("history backfill runner must execute as root on Linux");
-  }
+// Two runs sharing ROOT -- the same repo clone, the same worktrees, the same
+// cargo target dir -- is not a hypothetical: a second run's resetWorkingState
+// or `git worktree add` can blow away the first run's in-progress checkout
+// mid-build, and both runs end up with zero usable rows. O_EXCL makes the
+// lock file's creation itself atomic, so there is no window where two
+// processes both believe they hold it.
+function acquireLock() {
   fs.mkdirSync(ROOT, { recursive: true });
-  fs.writeFileSync(RUN_LOG, "", { mode: 0o600 });
-  logReady = true;
-  const config = validateConfig(loadJson(configFile, "protocol config"));
-  const provider = requireObject(loadJson(providerFile, "provider metadata"), "provider metadata");
-  const evidenceDirectory = path.join(ROOT, "evidence");
-  fs.rmSync(evidenceDirectory, { recursive: true, force: true });
-  fs.mkdirSync(evidenceDirectory, { recursive: true });
-  let status = {
-    schema: "rustia.bench.cloud-run-status.v1",
-    status: "failed",
-    detail: "history backfill runner did not reach its terminal state",
-    started_at: new Date().toISOString(),
-  };
-  try {
-    if (config.host_gate.benchmark_cpu >= provider.vcpus) {
-      fail("configured benchmark CPU is absent from the Linode");
+  for (;;) {
+    try {
+      const descriptor = fs.openSync(LOCK_FILE, "wx");
+      try {
+        fs.writeSync(descriptor, JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
+      } finally {
+        fs.closeSync(descriptor);
+      }
+      return;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
     }
-    log("verifying fixed harness, historical targets, and source hashes");
-    verifySource(config, bundle);
-    installRust();
-    log(`building ${config.source.target_commits.length} historical Rustia revisions`);
-    const builds = buildTargets(config);
-    for (const unit of PACKAGE_ACTIVITY_UNITS) {
-      run("systemctl", ["stop", unit], { allowFailure: true });
-      run("systemctl", ["mask", unit], { allowFailure: true });
+    const holder = loadJson(LOCK_FILE, "lock file");
+    if (!Number.isSafeInteger(holder.pid)) fail(`${LOCK_FILE} does not name a pid`);
+    let holderAlive = true;
+    try {
+      process.kill(holder.pid, 0);
+    } catch (error) {
+      if (error.code === "ESRCH") holderAlive = false;
+      else if (error.code !== "EPERM") throw error;
     }
-    log("measuring fixed current workloads across the historical binaries");
-    const measurement = await measure(config, builds, evidenceDirectory);
-    publish(config, configFile, providerFile, builds, measurement, evidenceDirectory);
-    fs.copyFileSync(
-      path.join(EXPORT, "publication/bench/history/backfill.json"),
-      path.join(ROOT, "backfill-publication.json"),
-    );
-    status = {
-      ...status,
-      status: "backfill_complete",
-      detail: "fixed-harness Rustia history backfill completed",
-      finished_at: new Date().toISOString(),
-    };
-  } catch (error) {
-    status = {
-      ...status,
-      status: "failed",
-      detail: error.message,
-      finished_at: new Date().toISOString(),
-    };
-    log(`failed: ${error.message}`);
-  } finally {
-    exportRun(status, evidenceDirectory);
+    if (holderAlive) {
+      fail(
+        `history backfill is already running as pid ${holder.pid} (started ${holder.started_at}); ` +
+          `refusing to share ${ROOT} with a second, concurrent run`,
+      );
+    }
+    // The recorded pid is dead: a previous run crashed or was killed without
+    // reaching the finally block below. Its lock is stale, not a live
+    // conflict, so take it over rather than fail forever on an abandoned run.
+    log(`lock held by dead pid ${holder.pid} (started ${holder.started_at}); taking it over`);
+    fs.rmSync(LOCK_FILE, { force: true });
   }
-  return status.status === "backfill_complete" ? 0 : 2;
+}
+
+function releaseLock() {
+  fs.rmSync(LOCK_FILE, { force: true });
+}
+
+// verifySource does `git clone --bare` into REPOSITORY and buildTargets does
+// `git worktree add` into SOURCES/<commit>; only EVIDENCE was ever cleared
+// between runs, so a second run used to fail on the clone. Every directory
+// keyed to one run's state is removed here; CACHE (the warm cargo target
+// dir) is not -- see the comment on TARGET above.
+function resetWorkingState() {
+  // WIPE_ON_START is a fixed list of names joined onto ROOT, so a ROOT of "/"
+  // or the bare home directory would recursively delete real directories that
+  // happen to share those names. ROOT is operator-supplied through an
+  // environment variable, which is exactly the kind of input that is right
+  // until one day it is not.
+  const resolved = path.resolve(ROOT);
+  if (resolved === path.parse(resolved).root || resolved === path.resolve(os.homedir())) {
+    fail(
+      `RUSTIA_BACKFILL_ROOT resolves to ${resolved}; it must be a directory dedicated to this ` +
+        `runner, because starting a run erases the working state beneath it`,
+    );
+  }
+  for (const directory of WIPE_ON_START) {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+  fs.rmSync(EXPORT_ARCHIVE, { force: true });
+}
+
+async function execute(configFile, providerFile, bundle) {
+  if (process.platform !== "linux") {
+    fail("history backfill runner must execute on Linux");
+  }
+  const startedAtMs = Date.now();
+  acquireLock();
+  try {
+    resetWorkingState();
+    fs.mkdirSync(EVIDENCE, { recursive: true });
+    fs.writeFileSync(RUN_LOG, "", { mode: 0o600 });
+    logReady = true;
+    const config = validateConfig(loadJson(configFile, "protocol config"));
+    // The file is still shipped and archived as evidence (see publish()
+    // below); only its old role gating benchmark_cpu against an attested
+    // provider.vcpus is gone -- see the comment in the try block below.
+    requireObject(loadJson(providerFile, "provider metadata"), "provider metadata");
+    let status = {
+      schema: "rustia.bench.cloud-run-status.v1",
+      status: "failed",
+      detail: "history backfill runner did not reach its terminal state",
+      started_at: new Date().toISOString(),
+    };
+    try {
+      // The Linode-era check here compared host_gate.benchmark_cpu against an
+      // attested provider.vcpus from a freshly-provisioned instance. An owned
+      // host is not freshly provisioned each run, so validateConfig's
+      // pinned_cpus cross-check now catches an unisolated benchmark_cpu at
+      // config-load time, before anything is cloned or built.
+      log("verifying fixed harness, historical targets, and source hashes");
+      verifySource(config, bundle);
+      installRust();
+      log(`building ${config.source.target_commits.length} historical Rustia revisions`);
+      const builds = buildTargets(config, startedAtMs);
+      // The old runner also stopped and masked apt's periodic timers here.
+      // That is an unrequested, root-only side effect on a machine this
+      // project does not own exclusively for benchmarking; the host_gate
+      // idle/steal checks already reject a run a timer contaminates.
+      log("measuring fixed current workloads across the historical binaries");
+      const measurement = await measure(config, builds, EVIDENCE, startedAtMs);
+      const repeatability = repeatabilityCheck(builds, measurement.rows);
+      publish(config, configFile, providerFile, builds, measurement, EVIDENCE, repeatability);
+      fs.copyFileSync(
+        path.join(EXPORT, "publication/bench/history/backfill.json"),
+        path.join(ROOT, "backfill-publication.json"),
+      );
+      status = {
+        ...status,
+        status: "backfill_complete",
+        detail: "fixed-harness Rustia history backfill completed",
+        finished_at: new Date().toISOString(),
+      };
+    } catch (error) {
+      status = {
+        ...status,
+        status: "failed",
+        detail: error.message,
+        finished_at: new Date().toISOString(),
+      };
+      log(`failed: ${error.message}`);
+    } finally {
+      exportRun(status, EVIDENCE);
+    }
+    return status.status === "backfill_complete" ? 0 : 2;
+  } finally {
+    releaseLock();
+  }
+}
+
+function fakeCommits(count, seed) {
+  return Array.from({ length: count }, (_, index) =>
+    crypto.createHash("sha1").update(`${seed}-${index}`).digest("hex"),
+  );
+}
+
+function repairFixture(overrides) {
+  return {
+    commit: overrides.commit,
+    subject: "test repair",
+    cherry_pick: {
+      from_commit: overrides.fromCommit,
+      from_subject: "test source commit",
+      paths: overrides.paths,
+    },
+    why_it_could_not_be_measured: "x",
+    changes_applied: ["x"],
+    why_the_timing_is_still_this_revision: "x",
+    why_it_is_derived_rather_than_stored: "x",
+    verification: "x",
+  };
 }
 
 async function selfTest() {
   const hashes = Object.fromEntries(
     Object.keys(OVERLAY_FILES).map((field) => [field, "a".repeat(64)]),
   );
+  const commitA = "2".repeat(40);
+  const commitB = "3".repeat(40);
   const config = {
-    schema: "rustia.linode-fixed-benchmark.v2",
+    schema: "rustia.dedicated-history-backfill.v1",
     provider: {
-      region: "au-mel",
-      image: "linode/ubuntu24.04",
-      size: {
-        id: "g6-dedicated-4",
-        description: "Dedicated 8GB",
-        class: "dedicated",
-        vcpus: 4,
-        memory_mib: 8192,
-        disk_gib: 160,
-        max_hourly_price_usd: 0.108,
+      host: {
+        name: "ci-bench",
+        cpu_model: "AMD Ryzen 5 3600X",
+        logical_cpus: 6,
+        physical_cores: 6,
+        pinned_cpus: "4",
+        max_runtime_minutes: 180,
       },
-      max_runtime_minutes: 55,
     },
     source: {
       harness_commit: "1".repeat(40),
-      target_commits: ["2".repeat(40), "3".repeat(40)],
+      revision_selection: {
+        walk: "git log --topo-order --reverse over every engine path",
+        includes_non_first_parent_commits: true,
+        ordering_is_presentational: true,
+        note: "test fixture",
+      },
+      target_commits: [commitA, commitB],
+      source_modifications: [],
       expected_sha256: hashes,
     },
     measurement: {
@@ -871,29 +1243,77 @@ async function selfTest() {
       ),
     },
     host_gate: {
-      benchmark_cpu: 3,
+      benchmark_cpu: 4,
       cooldown_seconds: 30,
       idle_window_seconds: 10,
       minimum_idle_percent: 99,
       maximum_load_1m: 0.1,
       maximum_steal_ticks: 0,
-      maximum_timed_steal_percent: 0.1,
-      maximum_timed_steal_ticks: 1,
+      maximum_timed_steal_percent: 0,
+      wait_timeout_seconds: 900,
       maximum_timed_attempts_per_group: 3,
-      wait_timeout_seconds: 300,
     },
     publication: { mode: "history_backfill", rows: 10 },
   };
   assert.equal(validateConfig(config), config);
+
+  // The old Linode schema string must now be rejected outright.
+  assert.throws(() => validateConfig({ ...config, schema: "rustia.linode-fixed-benchmark.v2" }));
+
+  // Unlike the retired Linode cap (target_commits.length <= 64, which bounded
+  // a rental bill rather than correctness), an owned host must accept far
+  // more than that -- 75 is the actual size of the frozen ci-bench contract.
+  const manyCommits = fakeCommits(75, "history-backfill-selftest");
+  assert.equal(
+    validateConfig({
+      ...config,
+      source: { ...config.source, target_commits: manyCommits, source_modifications: [] },
+      publication: { mode: "history_backfill", rows: manyCommits.length * WORKLOADS.length },
+    }).source.target_commits.length,
+    75,
+  );
+
   assert.throws(() =>
     validateConfig({
       ...config,
-      source: { ...config.source, target_commits: [config.source.target_commits[0], config.source.target_commits[0]] },
+      source: { ...config.source, target_commits: [commitA, commitA] },
     }),
   );
   assert.throws(() =>
     validateConfig({ ...config, publication: { mode: "history_backfill", rows: 9 } }),
   );
+
+  // config.source.revision_selection is required.
+  assert.throws(() => {
+    const { revision_selection, ...sourceWithoutSelection } = config.source;
+    validateConfig({ ...config, source: sourceWithoutSelection });
+  });
+
+  // A repair's commit must be one of target_commits.
+  assert.throws(() =>
+    validateConfig({
+      ...config,
+      source: {
+        ...config.source,
+        source_modifications: [repairFixture({ commit: "9".repeat(40), fromCommit: commitB, paths: ["Cargo.toml"] })],
+      },
+    }),
+  );
+
+  // A repair must not touch bench/ -- that is the harness overlay's territory.
+  assert.throws(() =>
+    validateConfig({
+      ...config,
+      source: {
+        ...config.source,
+        source_modifications: [repairFixture({ commit: commitA, fromCommit: commitB, paths: ["bench/Cargo.toml"] })],
+      },
+    }),
+  );
+
+  // benchmark_cpu must be one of the pinned CPUs, not merely a valid integer.
+  assert.throws(() => validateConfig({ ...config, host_gate: { ...config.host_gate, benchmark_cpu: 5 } }));
+
   assert.deepEqual(
     cpuDelta(
       { fields: [10, 0, 5, 100, 2, 1, 1, 0] },
@@ -901,9 +1321,70 @@ async function selfTest() {
     ),
     { total_ticks: 100, idle_ticks: 98, steal_ticks: 0, idle_percent: 98, steal_percent: 0 },
   );
-  const gate = { maximum_timed_steal_percent: 0.1, maximum_timed_steal_ticks: 1 };
-  assert.equal(timedGatePasses(gate, { total_ticks: 946, steal_ticks: 1, steal_percent: 0.1057 }), true);
-  assert.equal(timedGatePasses(gate, { total_ticks: 946, steal_ticks: 2, steal_percent: 0.2114 }), false);
+
+  // Zero tolerance for timed-leg steal on a dedicated, isolcpus-pinned host --
+  // there is no maximum_timed_steal_ticks fallback left to forgive a tick.
+  const gate = { maximum_timed_steal_percent: 0 };
+  assert.equal(timedGatePasses(gate, { steal_percent: 0 }), true);
+  assert.equal(timedGatePasses(gate, { steal_percent: 0.0001 }), false);
+
+  assert.deepEqual(expandCpuList("4", "test"), [4]);
+  assert.deepEqual(expandCpuList("4,6", "test"), [4, 6]);
+  assert.deepEqual(expandCpuList("4-6", "test"), [4, 5, 6]);
+
+  // repeatabilityCheck: two builds share a binary; the spread between their
+  // independently measured ns_per_unit_min is computed, not thresholded.
+  {
+    const builds = [
+      { commit: commitA, binary_sha256: "same" },
+      { commit: commitB, binary_sha256: "same" },
+    ];
+    const rows = WORKLOADS.map((workload, index) => ({ commit: commitA, workload, ns_per_unit_min: 100 + index })).concat(
+      WORKLOADS.map((workload, index) => ({ commit: commitB, workload, ns_per_unit_min: 110 + index })),
+    );
+    const repeatability = repeatabilityCheck(builds, rows);
+    assert.equal(repeatability.available, true);
+    assert.equal(repeatability.groups.length, 1);
+    assert.equal(repeatability.comparisons.length, WORKLOADS.length);
+    const expectedSpread = ((110 - 100) / 100) * 100;
+    assert.ok(Math.abs(repeatability.worst_spread_percent - expectedSpread) < 1e-9);
+    const none = repeatabilityCheck(
+      [{ commit: commitA, binary_sha256: "one" }, { commit: commitB, binary_sha256: "two" }],
+      rows,
+    );
+    assert.equal(none.available, false);
+  }
+
+  // validateRows must reject a row measured on the wrong host -- it would
+  // silently mix in numbers from a different machine's cache, clock, kernel.
+  {
+    const builds = [commitA, commitB].map((commit) => ({ commit, binary_sha256: "x" }));
+    const goodRows = builds.flatMap((build) =>
+      WORKLOADS.map((workload) => ({
+        commit: build.commit,
+        engine: "rustia",
+        dialect: "luau",
+        target: "linux-x86_64",
+        host: config.provider.host.name,
+        workload,
+        n: config.measurement.fixed_n[workload],
+        reps: config.measurement.repetitions,
+        checksum: config.measurement.expected_checksums[workload],
+        ns_per_unit_min: 1,
+        ns_per_unit_median: 1,
+        units_per_sec: 1,
+      })),
+    );
+    const rowsConfig = { ...config, publication: { mode: "history_backfill", rows: goodRows.length } };
+    validateRows(rowsConfig, builds, goodRows);
+    const badRows = goodRows.map((row, index) => (index === 0 ? { ...row, host: "some-other-box" } : row));
+    assert.throws(() => validateRows(rowsConfig, builds, badRows));
+  }
+
+  // A runtime budget started in the distant past must trip; one started now must not.
+  assert.throws(() => checkRuntimeBudget(config, Date.now() - 999 * 24 * 60 * 60 * 1000, "self-test"));
+  checkRuntimeBudget(config, Date.now(), "self-test");
+
   process.stdout.write("history backfill runner self-test passed\n");
 }
 
