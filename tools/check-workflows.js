@@ -75,6 +75,26 @@ function checkActionPins(text, label) {
   }
 }
 
+// A job-level `runs-on:`. The value group must be allowed to match empty,
+// because the expanded form carries its group and labels on the following
+// lines. This pattern previously required at least one character after the
+// colon, so a bare `    runs-on:` never matched and the expanded-form check in
+// checkRunnerLabels was unreachable for every workflow in the repository. The
+// tripwire below fails loudly if that regression is ever reintroduced.
+const RUNS_ON_PATTERN = /^ {4}runs-on:\s*(.*)$/;
+for (const [sample, shouldMatch] of [
+  ["    runs-on:", true],
+  ["    runs-on: ubuntu-latest", true],
+  ["  runs-on: ubuntu-latest", false],
+]) {
+  if (RUNS_ON_PATTERN.test(sample) !== shouldMatch) {
+    fail(
+      `runs-on pattern no longer ${shouldMatch ? "matches" : "rejects"} ${JSON.stringify(sample)}; ` +
+        "the expanded-form runner check depends on it",
+    );
+  }
+}
+
 function checkRunnerLabels(files) {
   const hostedRunners = new Set(["ubuntu-latest", "macos-latest", "windows-latest"]);
   const generalLinuxWorkflows = new Set([
@@ -88,7 +108,7 @@ function checkRunnerLabels(files) {
     const lines = text.split(/\r?\n/);
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
-      const inline = line.match(/^ {4}runs-on:\s*(.+)$/);
+      const inline = line.match(RUNS_ON_PATTERN);
       if (!inline) {
         continue;
       }
