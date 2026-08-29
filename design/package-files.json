@@ -17,7 +17,7 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 2028,
+      "file_count": 2029,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
@@ -847,6 +847,7 @@
         "history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/regs-baab-B3.json",
         "history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/regs-baab-B4.json",
         "history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/remote-run.log",
+        "history/repairs.json",
         "history/runs.jsonl",
         "memory/current-results.json",
         "memory/history/runs.jsonl",

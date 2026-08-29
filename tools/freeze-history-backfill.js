@@ -152,19 +152,93 @@ function targetCommits(start, harness) {
   return commits;
 }
 
+/// The first commit that contains an engine at all. Everything before it is
+/// design notes, licences and demos with no `crates/` tree, so there is nothing
+/// to measure. Used when the operator names no start commit, which is what lets
+/// `just bench-history` take no arguments.
+function firstEngineCommit() {
+  const output = git(["log", "--reverse", "--format=%H", "--", ...ENGINE_PATHS]).trim();
+  const first = output ? output.split("\n", 1)[0] : "";
+  if (!FULL_COMMIT.test(first)) fail("could not locate the first Rustia engine revision");
+  return first;
+}
+
+/// Selects and validates the repairs that apply to one run's commits. Pure, so
+/// the admissibility rules can be tested without a repository: `resolveParent`
+/// maps a commit to its first parent. Throws on the first inadmissible repair.
+function selectRepairs(registry, selected, resolveParent) {
+  if (registry.schema !== "rustia.bench.history-repairs.v1") {
+    throw new Error("bench/history/repairs.json must declare schema rustia.bench.history-repairs.v1");
+  }
+  const chosen = new Set(selected);
+  const repairs = (registry.repairs ?? []).filter((repair) => chosen.has(repair.commit));
+  for (const repair of repairs) {
+    const { commit, cherry_pick: pick } = repair;
+    if (!pick || !FULL_COMMIT.test(pick.from_commit ?? "")) {
+      throw new Error(`repair for ${commit} must name a full cherry_pick.from_commit`);
+    }
+    // The parent relation is the whole admissibility argument: a repair may
+    // only take code from the commit immediately following the revision it
+    // repairs. Checked here so an inadmissible registry fails at freeze time
+    // rather than twenty minutes into a run.
+    const parent = resolveParent(pick.from_commit);
+    if (parent !== commit) {
+      throw new Error(
+        `repair for ${commit} is inadmissible: ${pick.from_commit.slice(0, 8)}^ is ` +
+          `${String(parent).slice(0, 8)}, not the repaired commit`,
+      );
+    }
+    if (!Array.isArray(pick.paths) || pick.paths.length === 0) {
+      throw new Error(`repair for ${commit} must name at least one cherry_pick path`);
+    }
+    for (const file of pick.paths) {
+      if (file.startsWith("bench/")) {
+        throw new Error(
+          `repair for ${commit} may not touch ${file}: bench/ belongs to the harness overlay`,
+        );
+      }
+    }
+  }
+  return repairs;
+}
+
+/// Source repairs for revisions a fixed harness cannot otherwise drive, filtered
+/// to the run's selected commits. Each is re-derived from Git by the runner; the
+/// config carries the derivation, never the patch bytes.
+function sourceModifications(selected) {
+  let registry;
+  try {
+    registry = JSON.parse(fs.readFileSync(path.join(REPO, "bench/history/repairs.json"), "utf8"));
+  } catch (error) {
+    fail(`could not read bench/history/repairs.json: ${error.message}`);
+  }
+  try {
+    return selectRepairs(registry, selected, (commit) => git(["rev-parse", `${commit}^`]).trim());
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
 function freeze(start, outputFile) {
   const tracked = git(["status", "--porcelain=v1", "--untracked-files=no"]).trim();
   if (tracked) fail("tracked worktree changes must be committed before freezing a backfill");
   const harness = git(["rev-parse", "HEAD"]).trim();
-  const resolvedStart = git(["rev-parse", `${start}^{commit}`]).trim();
+  const resolvedStart = start
+    ? git(["rev-parse", `${start}^{commit}`]).trim()
+    : firstEngineCommit();
   if (!FULL_COMMIT.test(harness) || !FULL_COMMIT.test(resolvedStart)) fail("invalid Git revision");
+  // The owned benchmark host, taken verbatim from the committed dedicated
+  // config so host identity has exactly one source in the repository.
   const baseConfig = JSON.parse(
-    fs.readFileSync(path.join(REPO, "bench/cloud/linode-cross-engine-matrix-83bc2f3.json"), "utf8"),
+    fs.readFileSync(path.join(REPO, "bench/cloud/dedicated-core2-tape-sparse.json"), "utf8"),
   );
+  if (baseConfig.schema !== "rustia.dedicated-fixed-benchmark.v1") {
+    fail("dedicated base config must declare schema rustia.dedicated-fixed-benchmark.v1");
+  }
   const measurements = loadCurrentRustiaRows();
   const commits = targetCommits(resolvedStart, harness);
   const config = {
-    schema: "rustia.linode-fixed-benchmark.v2",
+    schema: "rustia.dedicated-history-backfill.v1",
     provider: baseConfig.provider,
     source: {
       harness_commit: harness,
@@ -186,6 +260,10 @@ function freeze(start, outputFile) {
           "not to a moment.",
       },
       target_commits: commits,
+      // Derivations, not patch bytes. The runner re-reads each diff from Git at
+      // apply time, so "taken verbatim from the commit that introduced it"
+      // cannot drift from what is actually applied.
+      source_modifications: sourceModifications(commits),
       expected_sha256: Object.fromEntries(
         Object.entries(HASH_FILES).map(([field, file]) => [field, sha256(gitBlob(harness, file))]),
       ),
@@ -198,7 +276,16 @@ function freeze(start, outputFile) {
       repetitions: 5,
       expected_checksums: measurements.expected_checksums,
     },
-    host_gate: baseConfig.host_gate,
+    // The dedicated host's gate, plus the retry bound the backfill protocol
+    // needs and the fixed-benchmark config has no use for. Written out rather
+    // than copied so a reader sees the whole gate in one place: `pinned_cpus`
+    // and `benchmark_cpu` have to agree, and the steal ceilings are zero
+    // because steal is structurally absent on bare metal, which makes any
+    // non-zero reading a fault rather than a tolerance.
+    host_gate: {
+      ...baseConfig.host_gate,
+      maximum_timed_attempts_per_group: 3,
+    },
     publication: {
       mode: "history_backfill",
       rows: commits.length * WORKLOADS.length,
@@ -223,16 +310,109 @@ function freeze(start, outputFile) {
 
 function usage() {
   process.stdout.write(
-    "Usage: node tools/freeze-history-backfill.js START_COMMIT [OUTPUT.json]\n",
+    "Usage: node tools/freeze-history-backfill.js [--start COMMIT] [--output FILE.json]\n" +
+      "       node tools/freeze-history-backfill.js --self-test\n" +
+      "\n" +
+      "Without --start the series begins at the first commit that contains an engine.\n" +
+      "Without --output the config is written to stdout.\n",
   );
 }
 
+function selfTest() {
+  const A = "a".repeat(40);
+  const B = "b".repeat(40);
+  const parents = { [B]: A };
+  const resolve = (commit) => parents[commit] ?? "";
+  const registry = {
+    schema: "rustia.bench.history-repairs.v1",
+    repairs: [{ commit: A, cherry_pick: { from_commit: B, paths: ["Cargo.toml"] } }],
+  };
+  const check = (name, run, expected) => {
+    let message = null;
+    try {
+      run();
+    } catch (error) {
+      message = error.message;
+    }
+    if (expected === null) {
+      if (message !== null) fail(`self-test ${name}: unexpected failure ${message}`);
+      return;
+    }
+    if (message === null || !message.includes(expected)) {
+      fail(`self-test ${name}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(message)}`);
+    }
+  };
+
+  check("admissible repair", () => {
+    const picked = selectRepairs(registry, [A], resolve);
+    if (picked.length !== 1) throw new Error(`expected 1 repair, got ${picked.length}`);
+  }, null);
+
+  check("repairs outside the selected commits are dropped", () => {
+    const picked = selectRepairs(registry, ["c".repeat(40)], resolve);
+    if (picked.length !== 0) throw new Error(`expected 0 repairs, got ${picked.length}`);
+  }, null);
+
+  check(
+    "repair whose source is not the next commit",
+    () => selectRepairs(registry, [A], () => "d".repeat(40)),
+    "inadmissible",
+  );
+  check(
+    "repair touching the harness overlay",
+    () =>
+      selectRepairs(
+        { ...registry, repairs: [{ commit: A, cherry_pick: { from_commit: B, paths: ["bench/src/main.rs"] } }] },
+        [A],
+        resolve,
+      ),
+    "belongs to the harness overlay",
+  );
+  check(
+    "repair with no paths",
+    () =>
+      selectRepairs(
+        { ...registry, repairs: [{ commit: A, cherry_pick: { from_commit: B, paths: [] } }] },
+        [A],
+        resolve,
+      ),
+    "at least one cherry_pick path",
+  );
+  check("wrong registry schema", () => selectRepairs({ schema: "nope" }, [A], resolve), "must declare schema");
+
+  // The committed registry must itself be admissible against the real history.
+  sourceModifications([...new Set((JSON.parse(
+    fs.readFileSync(path.join(REPO, "bench/history/repairs.json"), "utf8"),
+  ).repairs ?? []).map((repair) => repair.commit))]);
+
+  process.stdout.write("freeze-history-backfill self-test ok\n");
+}
+
+function parseArgs(argv) {
+  const parsed = { start: undefined, output: undefined, selfTest: false };
+  for (let index = 0; index < argv.length; index += 1) {
+    const option = argv[index];
+    if (option === "--self-test") parsed.selfTest = true;
+    else if (option === "--start") parsed.start = argv[++index];
+    else if (option === "--output") parsed.output = argv[++index];
+    else return null;
+  }
+  if (parsed.selfTest && (parsed.start || parsed.output)) return null;
+  if ((parsed.start !== undefined && !parsed.start) || (parsed.output !== undefined && !parsed.output)) {
+    return null;
+  }
+  return parsed;
+}
+
 try {
-  if (process.argv.length < 3 || process.argv.length > 4) {
+  const parsed = parseArgs(process.argv.slice(2));
+  if (parsed === null) {
     usage();
     process.exitCode = 2;
+  } else if (parsed.selfTest) {
+    selfTest();
   } else {
-    freeze(process.argv[2], process.argv[3]);
+    freeze(parsed.start, parsed.output);
   }
 } catch (error) {
   process.stderr.write(`freeze-history-backfill: ${error.message}\n`);

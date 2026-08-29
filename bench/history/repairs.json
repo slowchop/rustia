@@ -1,0 +1,28 @@
+{
+  "schema": "rustia.bench.history-repairs.v1",
+  "description": "Source repairs a historical revision needs before any fixed harness can drive it. A repair is admissible only when it is a verbatim cherry-pick of paths from a later commit that exposes machinery the target revision already contains, so the measured work stays the target revision's own. The freezer copies the entries matching a run's selected commits into the frozen config; the runner re-derives each diff from Git at apply time rather than trusting stored bytes.",
+  "rules": [
+    "cherry_pick.from_commit's first parent must resolve to the repaired commit, so a repair can only ever come from the immediately following commit.",
+    "No cherry_pick path may start with 'bench/'. That directory is the harness overlay's territory, and allowing it here would let a repair smuggle harness changes into an engine revision.",
+    "The repaired revision's workload checksums must match the rest of the series exactly, which is what demonstrates the repair changed reachability rather than behaviour."
+  ],
+  "repairs": [
+    {
+      "commit": "8c0211d812647ad80498567486967bffb0f8c8c6",
+      "subject": "Add rustia conformance base",
+      "cherry_pick": {
+        "from_commit": "aee7749d2d95ba7c480a03a35d7827a31db265f6",
+        "from_subject": "Add standalone script benchmark harness",
+        "paths": ["Cargo.toml", "crates/rustia-vm/src/vm.rs"]
+      },
+      "why_it_could_not_be_measured": "The root Cargo.toml predates bench/, so the overlaid harness crate was undeclared; and this revision has no public Vm::call_function, the entry point a fixed harness needs to call a workload's returned function. That entry point was added by the very next commit (aee7749), the commit that introduced the harness.",
+      "changes_applied": [
+        "Added \"bench\" to the root Cargo.toml workspace members.",
+        "Applied aee7749's `pub fn call_function` verbatim."
+      ],
+      "why_the_timing_is_still_this_revision": "The wrapper reads settings.initial_fuel, calls call_value, and returns first_result_or_nil. All three already exist at this revision with matching signatures, so the wrapper exposes existing machinery and adds no behaviour.",
+      "why_it_is_derived_rather_than_stored": "Both changes are exactly the non-bench hunks of aee7749: `git diff aee7749^ aee7749 -- Cargo.toml crates/rustia-vm/src/vm.rs` is precisely the workspace member line plus the eleven-line wrapper, and nothing else. Deriving the patch from Git makes \"taken verbatim from the commit that introduced it\" true by construction instead of an assertion a reviewer has to check against stored bytes.",
+      "verification": "All five workload checksums match the other 74 revisions exactly."
+    }
+  ]
+}
