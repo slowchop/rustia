@@ -1,0 +1,9 @@
+{
+  "schema": "rustia.bench.history-backfill-repeatability.v1",
+  "available": false,
+  "reason": "no two target commits produced byte-identical binaries in this run",
+  "groups": [],
+  "comparisons": [],
+  "median_spread_percent": null,
+  "worst_spread_percent": null
+}

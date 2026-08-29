@@ -1,0 +1,281 @@
+{
+  "schema": "rustia.bench.history-backfill-samples.v1",
+  "commit": "b7f02f319c7230db61fabbfa7e309f2e382437e2",
+  "measurements": [
+    {
+      "checksum": "number:290154861.00000000000000000",
+      "cold_start_ns_median": 488434.00000000006,
+      "cold_start_ns_min": 482013,
+      "commit": "b7f02f319c7230db61fabbfa7e309f2e382437e2",
+      "dialect": "luau",
+      "engine": "rustia",
+      "execution_mode": "interpreter",
+      "first_call_ns_median": 284212,
+      "first_call_ns_min": 283402,
+      "mode_family": "rustia",
+      "n": 2251,
+      "n_selection": "fixed",
+      "native_verification": "not-applicable",
+      "native_verification_ratio": null,
+      "native_verified": false,
+      "ns_per_unit_median": 292909.0164371391,
+      "ns_per_unit_min": 292243.24922256777,
+      "prepare_ns_median": 204222,
+      "prepare_ns_min": 197711,
+      "reps": 5,
+      "samples_cold_start_ns": [
+        568974,
+        488713,
+        488434.00000000006,
+        482013,
+        483673
+      ],
+      "samples_first_call_ns": [
+        305982,
+        283402,
+        284212,
+        284302,
+        284112
+      ],
+      "samples_ns_per_unit": [
+        292243.24922256777,
+        292761.41137272323,
+        292909.0164371391,
+        293059.91337183473,
+        293004.997778765
+      ],
+      "samples_prepare_ns": [
+        262992,
+        205311,
+        204222,
+        197711,
+        199561
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1787970597,
+      "unit": "build+sum+sort of 256-elem array",
+      "units_per_sec": 3421.8070140549803,
+      "workload": "dense_tables"
+    },
+    {
+      "checksum": "number:2413892000.00000000000000000",
+      "cold_start_ns_median": 457333,
+      "cold_start_ns_min": 448983,
+      "commit": "b7f02f319c7230db61fabbfa7e309f2e382437e2",
+      "dialect": "luau",
+      "engine": "rustia",
+      "execution_mode": "interpreter",
+      "first_call_ns_median": 250832,
+      "first_call_ns_min": 244561.99999999997,
+      "mode_family": "rustia",
+      "n": 1522,
+      "n_selection": "fixed",
+      "native_verification": "not-applicable",
+      "native_verification_ratio": null,
+      "native_verified": false,
+      "ns_per_unit_median": 247721.98160315375,
+      "ns_per_unit_min": 246170.5223390276,
+      "prepare_ns_median": 204421,
+      "prepare_ns_min": 199361,
+      "reps": 5,
+      "samples_cold_start_ns": [
+        511123.00000000006,
+        448983,
+        457333,
+        458883,
+        450193
+      ],
+      "samples_first_call_ns": [
+        261011.99999999997,
+        244561.99999999997,
+        249532,
+        255422,
+        250832
+      ],
+      "samples_ns_per_unit": [
+        246170.5223390276,
+        286238.29697766097,
+        247151.97897503286,
+        247721.98160315375,
+        284062.938239159
+      ],
+      "samples_prepare_ns": [
+        250111.00000000003,
+        204421,
+        207801,
+        203461,
+        199361
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1787970601,
+      "unit": "fill+read 128 hash entries",
+      "units_per_sec": 4062.224796447373,
+      "workload": "sparse_tables"
+    },
+    {
+      "checksum": "number:155078458044.00000000000000000",
+      "cold_start_ns_median": 194931,
+      "cold_start_ns_min": 191341,
+      "commit": "b7f02f319c7230db61fabbfa7e309f2e382437e2",
+      "dialect": "luau",
+      "engine": "rustia",
+      "execution_mode": "interpreter",
+      "first_call_ns_median": 12340,
+      "first_call_ns_min": 12070,
+      "mode_family": "rustia",
+      "n": 742545,
+      "n_selection": "fixed",
+      "native_verification": "not-applicable",
+      "native_verification_ratio": null,
+      "native_verified": false,
+      "ns_per_unit_median": 1023.0624298864042,
+      "ns_per_unit_min": 1016.9056797904504,
+      "prepare_ns_median": 182751,
+      "prepare_ns_min": 179001,
+      "reps": 5,
+      "samples_cold_start_ns": [
+        267352,
+        198982,
+        191341,
+        194931,
+        194422
+      ],
+      "samples_first_call_ns": [
+        22040,
+        12390,
+        12340,
+        12180,
+        12070
+      ],
+      "samples_ns_per_unit": [
+        1023.0624298864042,
+        1016.9056797904504,
+        1024.4661131648586,
+        1017.053093078534,
+        1025.390104303443
+      ],
+      "samples_prepare_ns": [
+        245312.00000000003,
+        186592,
+        179001,
+        182751,
+        182352
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1787970609,
+      "unit": "one upvalue-mutating closure call",
+      "units_per_sec": 983375.3708663186,
+      "workload": "closures_upvalues"
+    },
+    {
+      "checksum": "number:237283780.00000000000000000",
+      "cold_start_ns_median": 252931.00000000003,
+      "cold_start_ns_min": 246441.99999999997,
+      "commit": "b7f02f319c7230db61fabbfa7e309f2e382437e2",
+      "dialect": "luau",
+      "engine": "rustia",
+      "execution_mode": "interpreter",
+      "first_call_ns_median": 60920,
+      "first_call_ns_min": 60040,
+      "mode_family": "rustia",
+      "n": 10364,
+      "n_selection": "fixed",
+      "native_verification": "not-applicable",
+      "native_verification_ratio": null,
+      "native_verified": false,
+      "ns_per_unit_median": 44506.523736009265,
+      "ns_per_unit_min": 44285.098803550754,
+      "prepare_ns_median": 192011,
+      "prepare_ns_min": 185661,
+      "reps": 5,
+      "samples_cold_start_ns": [
+        338662,
+        463334,
+        252931.00000000003,
+        247911.00000000003,
+        246441.99999999997
+      ],
+      "samples_first_call_ns": [
+        74570,
+        61821,
+        60920,
+        60040,
+        60781
+      ],
+      "samples_ns_per_unit": [
+        45046.37881126978,
+        44506.523736009265,
+        44389.01215746816,
+        44285.098803550754,
+        44509.110092628325
+      ],
+      "samples_prepare_ns": [
+        264092,
+        401513,
+        192011,
+        187871,
+        185661
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1787970613,
+      "unit": "__iter(32)+pairs(5)+ipairs(32) pass",
+      "units_per_sec": 22580.958991104715,
+      "workload": "generic_iteration"
+    },
+    {
+      "checksum": "number:1164044.68408851628191769",
+      "cold_start_ns_median": 204572,
+      "cold_start_ns_min": 202381,
+      "commit": "b7f02f319c7230db61fabbfa7e309f2e382437e2",
+      "dialect": "luau",
+      "engine": "rustia",
+      "execution_mode": "interpreter",
+      "first_call_ns_median": 5280,
+      "first_call_ns_min": 5180,
+      "mode_family": "rustia",
+      "n": 113454,
+      "n_selection": "fixed",
+      "native_verification": "not-applicable",
+      "native_verification_ratio": null,
+      "native_verified": false,
+      "ns_per_unit_median": 2434.5051650889345,
+      "ns_per_unit_min": 2425.153551218996,
+      "prepare_ns_median": 199392,
+      "prepare_ns_min": 197101,
+      "reps": 5,
+      "samples_cold_start_ns": [
+        259451,
+        204571,
+        202381,
+        205032,
+        204572
+      ],
+      "samples_first_call_ns": [
+        11810,
+        5540,
+        5280,
+        5190,
+        5180
+      ],
+      "samples_ns_per_unit": [
+        2437.990657006364,
+        2434.5051650889345,
+        2430.9767482856487,
+        2442.5923634248243,
+        2425.153551218996
+      ],
+      "samples_prepare_ns": [
+        247641,
+        199031,
+        197101,
+        199842,
+        199392
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1787970616,
+      "unit": "math fastcalls + buffered push",
+      "units_per_sec": 412345.02429644216,
+      "workload": "stdlib_math_table"
+    }
+  ]
+}

@@ -20,6 +20,9 @@ const ROOT = process.env.RUSTIA_BACKFILL_ROOT ?? path.join(os.homedir(), ".rusti
 const REPOSITORY = path.join(ROOT, "repo.git");
 const HARNESS = path.join(ROOT, "harness");
 const SOURCES = path.join(ROOT, "sources");
+// The single build tree every revision is checked out into. See buildTargets
+// for why this is not one directory per commit.
+const SOURCE_TREE = path.join(SOURCES, "tree");
 // The cargo target dir is deliberately outside WIPE_ON_START below: a warm
 // target dir is what makes each historical revision build in ~26s instead of
 // minutes, and unlike repo.git/sources/binaries it holds nothing keyed to a
@@ -611,11 +614,31 @@ function buildTargets(config, startedAtMs) {
       startedAtMs,
       `before building revision ${index + 1}/${config.source.target_commits.length}`,
     );
-    const source = path.join(SOURCES, commit);
+    // Every revision is built in ONE directory rather than a per-commit
+    // worktree. rustc embeds the manifest path in the binary, so a per-commit
+    // path makes every binary unique whatever its source, which destroys two
+    // properties worth more than the isolation it buys: two revisions whose
+    // engine source compiles to the same code no longer produce the same bytes,
+    // so the identical-binary repeatability check can never fire; and a rebuild
+    // of the same series can no longer be compared byte-for-byte against the
+    // last one. Observed directly — the first run under per-commit worktrees
+    // found zero identical pairs where the operator script that used a single
+    // directory found three.
+    //
+    // A shared directory needs the previous revision cleaned out of it, which is
+    // what reset --hard plus clean -fd do; the overlay and any repair are then
+    // reapplied from scratch below.
+    const source = SOURCE_TREE;
     log(`building ${index + 1}/${config.source.target_commits.length} ${commit.slice(0, 8)}`);
-    run("git", ["--git-dir", REPOSITORY, "worktree", "add", "--detach", source, commit], {
-      capture: false,
-    });
+    if (!fs.existsSync(path.join(source, ".git"))) {
+      run("git", ["--git-dir", REPOSITORY, "worktree", "add", "--detach", source, commit], {
+        capture: false,
+      });
+    } else {
+      run("git", ["-C", source, "reset", "--hard", "--quiet"], { capture: false });
+      run("git", ["-C", source, "clean", "-qfd"], { capture: false });
+      run("git", ["-C", source, "checkout", "--detach", "--quiet", commit], { capture: false });
+    }
     overlayHarness(source);
     const sourceModificationSha256 = applySourceModifications(config, commit, source);
     const cargoArgs = [

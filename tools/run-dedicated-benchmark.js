@@ -445,8 +445,11 @@ function commandHistory(options) {
       `${path.basename(configFile)} provider.json repo.bundle\n`,
   );
 
-  fetchExport(runDirectory);
-  promote(runDirectory, config, options.replace);
+  // fetchExport extracts into a subdirectory and returns it; promoting the run
+  // directory itself finds no status.json and throws away a completed
+  // measurement. commandFetch had this right and this did not.
+  const extracted = fetchExport(runDirectory);
+  promote(extracted, config, options.replace);
   fs.writeFileSync(path.join(STATE_ROOT, "last-run"), `${runId}\n`);
 }
 
