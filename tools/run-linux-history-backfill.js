@@ -775,8 +775,21 @@ function measureOne(config, build, attemptDirectory) {
       "--fixed-n",
       String(config.measurement.fixed_n[workload]),
     );
+    // Measure from the harness worktree, not from a revision's build tree. The
+    // harness commit is what pins the workload files, and every revision was
+    // overlaid with exactly those bytes, so the harness tree is the honest
+    // place to read them from — and unlike a build tree it does not change as
+    // revisions are checked out through it.
+    //
+    // This previously pointed at a per-commit source directory that no longer
+    // exists. Node reports a missing cwd as ENOENT against the *command*, so
+    // the failure read as "taskset is not installed" when taskset was present
+    // the whole time; the assertion below says what is actually wrong.
+    if (!fs.existsSync(HARNESS)) {
+      fail(`harness worktree ${HARNESS} is missing; cannot measure`);
+    }
     run("taskset", args, {
-      cwd: path.join(SOURCES, build.commit),
+      cwd: HARNESS,
       capture: false,
     });
     fs.appendFileSync(historyFile, fs.readFileSync(workloadHistory));
