@@ -148,6 +148,12 @@ function compareAttestation(declared, observed) {
       `logical_cpus: config says ${declared.logical_cpus}, host reports ${observed.logical_cpus}`,
     );
   }
+  // "notsupported" means the kernel cannot control SMT, which covers both a CPU
+  // that has none and one whose firmware disabled it — the case on this host,
+  // where a 6-core/12-thread part reports 6 CPUs. Neither reading proves SMT is
+  // off on its own, so the logical/physical equality check in the config and the
+  // logical_cpus comparison above are what actually establish it; this only
+  // rejects a machine that reports SMT explicitly switched on.
   if (observed.smt !== "off" && observed.smt !== "notsupported") {
     problems.push(`SMT must be off, host reports ${JSON.stringify(observed.smt)}`);
   }
@@ -525,8 +531,9 @@ function selfTest() {
     compareAttestation(declared, { ...good, cpu_model: "Other" }).join("|"),
     /cpu_model/,
   );
-  // An unsupported SMT control is not a failure: a CPU without SMT reports
-  // "notsupported" and is exactly as good as one with SMT switched off.
+  // "notsupported" is the real reading from this host, whose firmware disabled
+  // SMT so the kernel cannot control it. Accepted, because logical_cpus ===
+  // physical_cores is what establishes SMT is off.
   assert.deepEqual(compareAttestation(declared, { ...good, smt: "notsupported" }), []);
 
   const harness = "a".repeat(40);
