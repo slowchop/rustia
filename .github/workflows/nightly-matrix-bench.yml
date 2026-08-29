@@ -1,14 +1,23 @@
-name: Nightly Cross-Engine Matrix
+name: Cross-Engine Matrix (manual)
 
-# Runs at 18:00 UTC (04:00 AEST) and measures the full cross-engine matrix on
-# one ephemeral dedicated Linode, but only when main has gained
-# performance-relevant commits since the last recorded cohort. Timing happens
-# exclusively on the Linode; this hosted runner only coordinates. The workflow
-# is the one sanctioned holder of contents-write so accepted cohorts land on
-# main and flow to the dashboard through the existing publication workflow.
+# MANUAL ONLY. This measured the full cross-engine matrix on one ephemeral
+# dedicated Linode, and ran nightly at 18:00 UTC whenever main had gained
+# performance-relevant commits since the last recorded cohort. The schedule is
+# gone: measurement has moved to the owned benchmark host, and nothing in this
+# repository may start a billed instance on a timer. tools/check-workflows.js
+# now forbids a cron here, so restoring one is a two-file change rather than a
+# one-line one.
+#
+# The Linode path is retained until the matrix is ported to the owned host,
+# because this is still the only producer of the cross-engine comparison and of
+# the mlua/Luau/JIT reference the dashboard normalises against. Running it costs
+# real money and is now an explicit, deliberate act.
+#
+# Timing happens exclusively on the Linode; this hosted runner only coordinates.
+# The workflow is the one sanctioned holder of contents-write so accepted cohorts
+# land on main and flow to the dashboard through the existing publication
+# workflow.
 "on":
-  schedule:
-    - cron: "0 18 * * *"
   workflow_dispatch:
 
 permissions:

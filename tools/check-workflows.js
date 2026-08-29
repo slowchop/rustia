@@ -307,7 +307,12 @@ function checkRustiaMemory(text) {
 function checkNightlyMatrix(text) {
   const label = ".github/workflows/nightly-matrix-bench.yml";
   requireIncludes(text, "name: Nightly Cross-Engine Matrix\n", label);
-  requireIncludes(text, "\"on\":\n  schedule:\n    - cron: \"0 18 * * *\"\n  workflow_dispatch:\n", label);
+  // Manual dispatch only. The nightly schedule created a billed Linode
+  // whenever main gained an engine commit; measurement has moved to the owned
+  // host, so nothing in this repository may start a paid instance on a timer.
+  // Restoring a cron here has to change this line too, which is the point.
+  requireIncludes(text, "\"on\":\n  workflow_dispatch:\n", label);
+  forbidIncludes(text, "cron:", label);
   // The single sanctioned contents-write grant: this workflow may push
   // accepted matrix cohorts to main and nothing else may.
   requireIncludes(text, "permissions:\n  contents: write\n  actions: write\n", label);
