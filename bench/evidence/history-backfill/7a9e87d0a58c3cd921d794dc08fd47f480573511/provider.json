@@ -1,0 +1,15 @@
+{
+ "schema": "rustia.bench.dedicated-provider.v1",
+ "host": "ci-bench",
+ "class": "dedicated physical machine",
+ "attested_at": "2026-08-29T03:09:01.722Z",
+ "cpu_model": "AMD Ryzen 5 3600X 6-Core Processor",
+ "logical_cpus": 6,
+ "smt": "notsupported",
+ "isolated_cpus": "4-5",
+ "kernel": "6.8.0-138-generic",
+ "cpu_isolation": "isolcpus=4,5 nohz_full=4,5 rcu_nocbs=4,5",
+ "pinned_cpus": "4",
+ "node_version": "v22.23.1",
+ "cargo_version": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)"
+}
