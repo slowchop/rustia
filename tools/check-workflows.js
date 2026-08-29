@@ -240,6 +240,11 @@ function checkReleasePreflight(text) {
     '"tools/run-digitalocean-benchmark.js"',
     '"tools/run-linode-benchmark.js"',
     '"tools/run-linux-matrix-benchmark.js"',
+    // The owned-host lane. Its self-tests carry the rules that keep a source
+    // repair honest and a host attested, so preflight must keep running them.
+    '"tools/run-dedicated-benchmark.js"',
+    '"tools/run-linux-history-backfill.js"',
+    '"tools/freeze-history-backfill.js"',
     '"bench/run-memory-supervisor.js"',
     '"bench/analyze-memory-samples.js"',
     '"bench/run-memory-cohort.js"',

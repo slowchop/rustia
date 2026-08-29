@@ -167,17 +167,25 @@ bench-memory-self-test:
 bench-linode config="":
     node tools/run-linode-benchmark.js bench {{ if config == "" { "" } else { quote(config) } }}
 
-# Freeze one fixed-harness history reconstruction over source-changing Rustia commits.
-bench-linode-backfill-freeze start output:
-    node tools/freeze-history-backfill.js "{{ start }}" "{{ output }}"
+# Takes no arguments: the series starts at the first commit that contains an
+# engine and ends at HEAD. Pass replace=1 to supersede an existing artifact,
+# which is what a change of machine requires, since numbers measured on the old
+# box are not comparable with the new one's.
+# Rebuild the whole published performance history on the owned benchmark host.
+bench-history replace="":
+    node tools/run-dedicated-benchmark.js history {{ if replace == "" { "" } else { "--replace" } }}
 
-# Validate a frozen fixed-harness history backfill without creating a Linode.
-bench-linode-backfill-plan config:
-    node tools/run-linode-benchmark.js plan "{{ config }}"
+# Freeze and attest without measuring anything.
+bench-history-plan:
+    node tools/run-dedicated-benchmark.js plan
 
-# Build and measure the frozen historical Rustia revisions on one ephemeral Linode.
-bench-linode-backfill config:
-    node tools/run-linode-benchmark.js bench "{{ config }}"
+# Re-collect and promote the last remote run without measuring again.
+bench-history-fetch replace="":
+    node tools/run-dedicated-benchmark.js fetch {{ if replace == "" { "" } else { "--replace" } }}
+
+# Clear a lock a killed run left on the benchmark host.
+bench-history-unlock:
+    node tools/run-dedicated-benchmark.js unlock
 
 # Inspect locally owned run state and its corresponding Linode instance.
 bench-linode-status:
