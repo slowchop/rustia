@@ -171,6 +171,23 @@ function promotionPaths(harnessCommit) {
   };
 }
 
+/// Backfill artifacts already in the tree that this run would sit beside.
+/// bench/render-current-results.js charts every file in that directory, so a
+/// second artifact is a second line — and two reconstructions measured under
+/// different harnesses or on different machines are not comparable to each
+/// other. Superseding is therefore the normal outcome of re-running, not an
+/// exceptional one, and it must be deliberate rather than silent. Keyed on more
+/// than the destination path: a new harness commit lands at a new filename, so
+/// a path-only check would quietly leave the old series charted alongside.
+function existingBackfills(exceptHarnessCommit) {
+  if (!fs.existsSync(BACKFILL_DIR)) return [];
+  return fs
+    .readdirSync(BACKFILL_DIR)
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => name.slice(0, -".json".length))
+    .filter((commit) => commit !== exceptHarnessCommit);
+}
+
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   const known = new Set(["plan", "history", "fetch", "unlock", "self-test"]);
@@ -297,17 +314,25 @@ function promote(runDirectory, config, replace) {
   }
   const destination = promotionPaths(publication.harness_commit);
 
-  // A second artifact for the same harness would be charted as a second era by
-  // bench/render-current-results.js, which reads every file in that directory.
-  // Superseding one is the box-change path and must be deliberate.
-  if (fs.existsSync(destination.publication) && !replace) {
-    const existing = JSON.parse(fs.readFileSync(destination.publication, "utf8"));
+  const superseded = existingBackfills(publication.harness_commit);
+  const sameHarness = fs.existsSync(destination.publication);
+  if ((superseded.length > 0 || sameHarness) && !replace) {
+    const names = [...(sameHarness ? [publication.harness_commit] : []), ...superseded]
+      .map((commit) => commit.slice(0, 7))
+      .join(", ");
     fail(
-      `${path.relative(REPO, destination.publication)} already exists ` +
-        `(host ${existing.host ?? "unrecorded"}); pass --replace to supersede it`,
+      `bench/history/backfills already holds ${names}; pass --replace to supersede. ` +
+        `Reconstructions from different harnesses or machines are not comparable, ` +
+        `so keeping both would chart them as two lines`,
     );
   }
   fs.mkdirSync(BACKFILL_DIR, { recursive: true });
+  for (const commit of superseded) {
+    const stale = promotionPaths(commit);
+    fs.rmSync(stale.publication, { force: true });
+    fs.rmSync(stale.evidence, { recursive: true, force: true });
+    process.stdout.write(`superseded ${commit.slice(0, 7)}\n`);
+  }
   fs.rmSync(destination.evidence, { recursive: true, force: true });
   fs.copyFileSync(publicationSource, destination.publication);
   fs.cpSync(evidenceSource, destination.evidence, { recursive: true });
@@ -353,11 +378,16 @@ function commandHistory(options) {
   const configFile = freezeConfig(options.config);
   const config = loadConfig(configFile);
 
+  // Checked before measuring rather than only at promotion: 35 minutes of
+  // measurement that cannot be promoted is a waste the operator should be
+  // spared.
   const destination = promotionPaths(config.source.harness_commit);
-  if (fs.existsSync(destination.publication) && !options.replace) {
+  const blocking = existingBackfills(config.source.harness_commit);
+  if ((blocking.length > 0 || fs.existsSync(destination.publication)) && !options.replace) {
     fail(
-      `${path.relative(REPO, destination.publication)} already exists; ` +
-        `pass --replace to supersede it (the box-change path)`,
+      `bench/history/backfills already holds a reconstruction; pass replace=1 to supersede it. ` +
+        `This is the change-of-machine and change-of-harness path: the old numbers are not ` +
+        `comparable with the new ones, so the series is re-derived rather than extended`,
     );
   }
 
@@ -479,6 +509,12 @@ function selfTest() {
   assert.ok(paths.publication.endsWith(`${harness}.json`));
   assert.ok(paths.evidence.endsWith(harness));
   assert.throws(() => promotionPaths("short"), /full 40-hex/);
+
+  // The committed tree holds exactly one reconstruction, and re-running must
+  // supersede it rather than chart a second line beside it.
+  const present = existingBackfills("z".repeat(40));
+  assert.equal(present.length, 1, `expected one committed backfill, found ${present.length}`);
+  assert.deepEqual(existingBackfills(present[0]), [], "a run excludes its own artifact");
 
   assert.deepEqual(parseArgs(["plan"]), { command: "plan", replace: false, config: undefined });
   assert.deepEqual(parseArgs(["history", "--replace"]), {
