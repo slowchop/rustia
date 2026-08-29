@@ -306,7 +306,7 @@ function checkRustiaMemory(text) {
 
 function checkNightlyMatrix(text) {
   const label = ".github/workflows/nightly-matrix-bench.yml";
-  requireIncludes(text, "name: Nightly Cross-Engine Matrix\n", label);
+  requireIncludes(text, "name: Cross-Engine Matrix (manual)\n", label);
   // Manual dispatch only. The nightly schedule created a billed Linode
   // whenever main gained an engine commit; measurement has moved to the owned
   // host, so nothing in this repository may start a paid instance on a timer.
