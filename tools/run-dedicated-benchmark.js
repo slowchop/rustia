@@ -29,6 +29,14 @@ const REMOTE_ROOT = ".rustia-history-backfill";
 const SSH_ENV = "RUSTIA_BENCH_SSH";
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 
+// A non-interactive ssh session does not read the login profile, so neither
+// rustup's nor a home-directory node install is on PATH by default. Both are
+// user-local by design (nothing on this host needs root), so the coordinator
+// names them explicitly rather than depending on the remote shell's setup. An
+// earlier backfill lost 25 minutes to exactly this: cargo was absent from a
+// non-interactive PATH, every build failed, and the loop discarded the error.
+const REMOTE_PATH = 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"\n';
+
 function fail(message) {
   console.error(`run-dedicated-benchmark: ${message}`);
   process.exit(1);
@@ -229,14 +237,14 @@ function parseArgs(argv) {
 /// other host detail that must not enter this repository.
 const ATTEST_SCRIPT = `
 set -u
-printf 'cpu_model=%s\\n' "$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | sed 's/^ *//')"
+${REMOTE_PATH}printf 'cpu_model=%s\\n' "$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | sed 's/^ *//')"
 printf 'logical_cpus=%s\\n' "$(nproc --all)"
 printf 'smt=%s\\n' "$(cat /sys/devices/system/cpu/smt/control 2>/dev/null || echo unknown)"
 printf 'isolated_cpus=%s\\n' "$(cat /sys/devices/system/cpu/isolated 2>/dev/null || echo '')"
 printf 'kernel=%s\\n' "$(uname -r)"
 printf 'isolation=%s\\n' "$(tr ' ' '\\n' < /proc/cmdline | grep -E '^(isolcpus|nohz_full|rcu_nocbs)=' | tr '\\n' ' ')"
 printf 'node=%s\\n' "$(command -v node >/dev/null && node --version || echo missing)"
-printf 'cargo=%s\\n' "$(PATH="$HOME/.cargo/bin:$PATH" command -v cargo >/dev/null && PATH="$HOME/.cargo/bin:$PATH" cargo --version || echo missing)"
+printf 'cargo=%s\\n' "$(command -v cargo >/dev/null && cargo --version || echo missing)"
 `;
 
 function attestHost(config) {
@@ -424,9 +432,9 @@ function commandHistory(options) {
   process.stdout.write("running; this takes about 35 minutes for 75 revisions\n");
   sshStream(
     `set -eu\n` +
+      REMOTE_PATH +
       `export RUSTIA_BACKFILL_ROOT="$HOME/${REMOTE_ROOT}"\n` +
       `cd "$HOME/${REMOTE_ROOT}/inbox"\n` +
-      `export PATH="$HOME/.cargo/bin:$PATH"\n` +
       `node ${path.basename(REMOTE_RUNNER)} ` +
       `${path.basename(configFile)} provider.json repo.bundle\n`,
   );
