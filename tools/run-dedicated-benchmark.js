@@ -125,8 +125,15 @@ function parseCpuList(spec) {
 /// Returns a list of human-readable mismatches; empty means attested.
 function compareAttestation(declared, observed) {
   const problems = [];
-  if (observed.cpu_model !== declared.cpu_model) {
-    problems.push(`cpu_model: config says ${declared.cpu_model}, host reports ${observed.cpu_model}`);
+  // /proc/cpuinfo appends marketing text the config's model name omits ("AMD
+  // Ryzen 5 3600X" against "AMD Ryzen 5 3600X 6-Core Processor"), so requiring
+  // equality would reject the very host the config describes. A prefix is the
+  // right relation: it still rejects a different chip, which is the thing that
+  // would silently change every measurement.
+  const declaredModel = String(declared.cpu_model).trim().replace(/\s+/g, " ");
+  const observedModel = String(observed.cpu_model ?? "").trim().replace(/\s+/g, " ");
+  if (!observedModel.startsWith(declaredModel)) {
+    problems.push(`cpu_model: config says ${declaredModel}, host reports ${observedModel}`);
   }
   if (observed.logical_cpus !== declared.logical_cpus) {
     problems.push(
@@ -242,7 +249,12 @@ function attestHost(config) {
   observed.logical_cpus = Number(observed.logical_cpus);
   const declared = config.provider.host;
   const problems = compareAttestation(declared, observed);
-  if (observed.node === "missing") problems.push("node is not installed on the benchmark host");
+  if (observed.node === "missing") {
+    problems.push(
+      "node is not installed on the benchmark host, and the measurement runner is a Node script " +
+        "that executes there (install it once as a host prerequisite; see rustia-ops)",
+    );
+  }
   if (observed.cargo === "missing") problems.push("cargo is not on the benchmark host's PATH");
   if (problems.length > 0) {
     fail(`host attestation failed:\n  - ${problems.join("\n  - ")}`);
@@ -485,6 +497,11 @@ function selfTest() {
     isolated_cpus: "4-5",
   };
   assert.deepEqual(compareAttestation(declared, good), []);
+  // /proc/cpuinfo's trailing marketing text must not read as a different chip.
+  assert.deepEqual(
+    compareAttestation(declared, { ...good, cpu_model: "AMD Ryzen 5 3600X 6-Core Processor" }),
+    [],
+  );
   // A pinned core the kernel still schedules on is the exact failure this
   // protocol exists to prevent, and it never shows up in the timings.
   assert.match(
