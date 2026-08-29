@@ -489,9 +489,15 @@ unreachable suspended-coroutine frames.
    2026-08-26, five workloads each, one fixed harness (`daaf422`) and one pinned dependency set overlaid onto
    every revision, all 375 rows labelled `host: ci-bench`. Every revision produces byte-identical workload
    checksums, so the series measures speed alone; the geometric mean across the five workloads improves
-   **4.291x (+329%)**, from 0.066x to 0.285x of mlua/Luau/JIT. Three revision pairs compiled to byte-identical
-   binaries and their independent timings agree to 0.50% median and 1.04% worst, which bounds run-to-run
-   variation well below the effect. The earliest engine-bearing commit (`8c0211d`) needed a declared workspace
+   **4.291x (+329%)**, from 0.066x to 0.285x of mlua/Luau/JIT. Four revision pairs compiled to byte-identical
+   binaries; across the 20 resulting comparisons their independent timings agree to **0.41% median and 5.74%
+   worst**, which still bounds run-to-run variation far below the effect. That tail must be quoted per workload
+   rather than as one number: spread scales inversely with per-unit cost, from 0.32% worst on `dense_tables` at
+   39us/unit to 5.74% on `closures_upvalues` at 372ns/unit, where a 21ns difference is 5.7%. An earlier,
+   smaller sample of 15 comparisons gave 0.50%/1.04%, and that worst case was published as a host property; it
+   was not, it was which pairs happened to appear. The figure belongs to the backfill protocol's five
+   repetitions, not to the machine — the A/B lane runs 101-201 and measured an interval about one percentage
+   point wide on this host. The earliest engine-bearing commit (`8c0211d`) needed a declared workspace
    member and the `pub fn call_function` wrapper its successor added; both are recorded in the artifact's
    `source_modifications`, and its checksums match the other 74 exactly. Commits before it contain no
    `crates/` tree at all, so the series starts at the first commit that has an engine. The chart shows this
