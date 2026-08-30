@@ -874,6 +874,20 @@ function commandCalibrate(options) {
       material_threshold_percent: threshold,
       observed_aa_interval_percent: interval,
       observed_aa_delta_percent: analysis.comparison.candidate_delta_percent,
+      // Both components of the conservative envelope, because which one is
+      // wider says what would actually tighten this lane. The pooled interval
+      // narrows with more repetitions per leg; the hierarchical one is driven by
+      // leg-to-leg variation and does not, so if it dominates then buying more
+      // repetitions buys nothing and the answer is more passes.
+      observed_aa_pooled_percent: analysis.comparison.pooled_bootstrap_ci_percent,
+      observed_aa_hierarchical_percent: analysis.comparison.hierarchical_bootstrap_ci_percent,
+      widened_by:
+        analysis.comparison.hierarchical_bootstrap_ci_percent.upper -
+          analysis.comparison.hierarchical_bootstrap_ci_percent.lower >
+        analysis.comparison.pooled_bootstrap_ci_percent.upper -
+          analysis.comparison.pooled_bootstrap_ci_percent.lower
+          ? "leg_variation"
+          : "repetition_variation",
     };
     evidence.push({ workload, interval, delta: analysis.comparison.candidate_delta_percent, threshold });
   }
@@ -911,6 +925,11 @@ function commandCalibrate(options) {
   };
   const destination = options.out ?? path.join(REPO, "bench/pr-screening.json");
   writeJson(destination, output);
+  // Also to stdout. A calibration that exists only as a file inside a CI
+  // runner's temporary directory is a measurement nobody can retrieve; the run
+  // log is the durable copy, and it carries full precision rather than the
+  // two-decimal table above.
+  process.stdout.write(`${fs.readFileSync(destination, "utf8")}\n`);
   process.stdout.write(`wrote ${path.relative(REPO, destination)}\n`);
 }
 
