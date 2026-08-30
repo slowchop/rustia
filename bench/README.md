@@ -264,10 +264,11 @@ just bench-linode bench/cloud/linode-vm-string-memory-1370d6c.json
 ```
 
 The DigitalOcean, Vultr and Scaleway coordinators that ran these comparisons
-have been deleted. Timing now happens on one owned, attested host, so nothing
-in this repository authenticates to, creates, or pays for a cloud instance --
-and the operating instructions for those providers, which named a developer
-machine by host alias, are gone with them.
+have been deleted, the memory cohort has moved to the owned host, and the eleven
+Linode lifecycle recipes are gone. Nothing in this repository authenticates to,
+creates, or pays for a cloud instance -- not on a timer, not on a push, not by
+dispatch, not by recipe. The operating instructions for those providers, which
+named a developer machine by host alias, are gone with them.
 
 The frozen configs behind published measurements stay. They are the protocol a
 reader needs to check a number that is still on the dashboard; the tool that

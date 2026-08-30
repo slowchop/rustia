@@ -76,12 +76,18 @@ removed and are checked for their absence.
 
 ### Cost
 
-No timer may start a billed instance. The retired cloud matrix stays reachable
-by explicit dispatch only, because it remains the sole producer of the
-cross-engine reference every published Rustia number is normalised against;
-running it is a deliberate act that costs money. When it moves to the owned
-host, the cloud lifecycle and its cost ceilings, ownership journal, and deletion
-gate retire with it.
+**Nothing in this repository creates or pays for a cloud instance.** Not on a
+timer, not on a push, not by dispatch, and not by a justfile recipe. Every lane
+— the reconstruction, the per-commit series, pull-request screening, the
+cross-engine matrix and the memory cohort — runs on the owned host, so the cloud
+lifecycle's cost ceilings, ownership journal and deletion gate have nothing left
+to govern and are retired with it.
+
+One file remains from that model. `tools/run-linode-benchmark.js` is the only
+home of the matrix and memory acceptance rules, and the owned-host coordinator
+borrows them rather than carrying a second copy that agrees until one is edited.
+It is documented as retired at the top of the file, nothing invokes it, and it
+goes when those rules move to a shared module.
 
 ## Evidence lanes
 

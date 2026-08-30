@@ -158,6 +158,20 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Changed
 
+- **Nothing in this repository can create or pay for a cloud instance.** The
+  memory cohort — the last lane that could, and only ever by explicit dispatch —
+  now runs on the owned host through `.github/workflows/rustia-memory.yml`. Its
+  protocol pins two isolated cores rather than one, because the supervisor
+  samples while the benchmark runs and sharing a core would make the supervisor
+  part of what it measures. The eleven Linode lifecycle recipes are removed.
+  `tools/run-linode-benchmark.js` remains only as the home of the matrix and
+  memory acceptance rules that the owned-host coordinator uses; it is documented
+  as retired and nothing invokes it.
+- Owned-host memory evidence no longer carries filenames naming a provider it
+  never ran on: `linode-build.json` and `linode-run-gate.json` become
+  `build.json` and `run-gate.json` for that lifecycle. The validator accepts both,
+  so committed evidence from the retired lane keeps validating.
+
 - **Removed 1,230 cross-engine rows measured on retired cloud hosts** from
   `bench/history/runs.jsonl`, leaving the single cohort measured on the owned
   host. This is a destructive change to a published dataset and is recorded as
