@@ -16,6 +16,7 @@
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { execFileSync, spawnSync } = require("node:child_process");
 
@@ -80,28 +81,37 @@ function local(command, args, options = {}) {
   return result.stdout ?? "";
 }
 
-// spawnSync needs the remote script on stdin, which `local` does not thread, so
-// the ssh helpers drive spawnSync directly rather than growing an option no
-// other caller needs.
+// The attested host is either reached over ssh, or is this machine when the
+// coordinator runs on it -- which is what a workflow on the bench runner does.
+// Both paths run the same script and, critically, both attest before measuring:
+// running on the host does not exempt a run from proving the host is what the
+// config says.
+let localMode = false;
+function useLocalHost(enabled) { localMode = enabled; }
+
+function shellArgv() {
+  return localMode
+    ? ["bash", ["-s"]]
+    : ["ssh", ["-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", sshDestination(), "bash", "-s"]];
+}
+
+// spawnSync needs the script on stdin, which `local` does not thread, so these
+// drive spawnSync directly rather than growing an option no other caller needs.
 function sshCapture(script) {
-  const result = spawnSync(
-    "ssh",
-    ["-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", sshDestination(), "bash", "-s"],
-    { input: script, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
-  );
+  const [command, args] = shellArgv();
+  const result = spawnSync(command, args, {
+    input: script, encoding: "utf8", maxBuffer: 256 * 1024 * 1024,
+  });
   if (result.status !== 0) {
-    fail(`ssh failed: ${(result.stderr ?? "").trim() || `exit ${result.status}`}`);
+    fail(`${command} failed: ${(result.stderr ?? "").trim() || `exit ${result.status}`}`);
   }
   return result.stdout ?? "";
 }
 
 function sshStream(script) {
-  const result = spawnSync(
-    "ssh",
-    ["-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", sshDestination(), "bash", "-s"],
-    { input: script, stdio: ["pipe", "inherit", "inherit"] },
-  );
-  if (result.status !== 0) fail(`remote run failed with exit ${result.status}`);
+  const [command, args] = shellArgv();
+  const result = spawnSync(command, args, { input: script, stdio: ["pipe", "inherit", "inherit"] });
+  if (result.status !== 0) fail(`run failed with exit ${result.status}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -211,9 +221,9 @@ function existingBackfills(exceptHarnessCommit) {
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
-  const known = new Set(["plan", "history", "fetch", "unlock", "self-test"]);
+  const known = new Set(["plan", "history", "main", "fetch", "unlock", "self-test"]);
   if (!known.has(command)) return null;
-  const parsed = { command, replace: false, config: undefined };
+  const parsed = { command, replace: false, config: undefined, out: undefined, previousBinary: undefined, local: false };
   for (let index = 0; index < rest.length; index += 1) {
     const option = rest[index];
     if (option === "--replace") {
@@ -224,10 +234,22 @@ function parseArgs(argv) {
       const value = rest[++index];
       if (!value) return null;
       parsed.config = value;
+    } else if (option === "--local") {
+      parsed.local = true;
+    } else if (option === "--out") {
+      const value = rest[++index];
+      if (!value) return null;
+      parsed.out = value;
+    } else if (option === "--previous-binary") {
+      const value = rest[++index];
+      if (!value) return null;
+      parsed.previousBinary = value;
     } else {
       return null;
     }
   }
+  // --out and --previous-binary belong to the per-commit lane alone.
+  if ((parsed.out !== undefined || parsed.previousBinary !== undefined) && command !== "main") return null;
   // `--replace` supersedes an existing artifact, which both the measuring
   // command and the re-promoting one can do; nothing else promotes.
   if (parsed.replace && command !== "history" && command !== "fetch") return null;
@@ -466,6 +488,88 @@ function fetchExport(runDirectory) {
   return extracted;
 }
 
+// Measure HEAD alone and emit rows for the live per-commit series.
+//
+// Skips the measurement entirely when this commit builds the same binary as the
+// last measured one. That gate is exact rather than a path heuristic: a
+// documentation or tooling commit produces identical bytes, so recording it
+// would add a duplicate point claiming to be a new measurement. The binary hash
+// is already computed for provenance, so the check is free.
+// Puts the runner, the frozen config, the attestation and a bundle of this
+// checkout where the host can see them, then runs it. In local mode the host is
+// this machine, so the inbox is a directory rather than a destination.
+function shipAndRun(configFile, providerFile, bundleFile, isLocal) {
+  const inbox = `$HOME/${REMOTE_ROOT}/inbox`;
+  sshCapture(`set -eu\nmkdir -p "${inbox}"\n`);
+  if (isLocal) {
+    const resolved = path.join(os.homedir(), REMOTE_ROOT, "inbox");
+    for (const file of [path.join(REPO, REMOTE_RUNNER), configFile, providerFile, bundleFile]) {
+      fs.copyFileSync(file, path.join(resolved, path.basename(file)));
+    }
+  } else {
+    local(
+      "scp",
+      ["-q", REMOTE_RUNNER, configFile, providerFile, bundleFile, `${sshDestination()}:${REMOTE_ROOT}/inbox/`],
+      { capture: false },
+    );
+  }
+  sshStream(
+    `set -eu\n` +
+      REMOTE_PATH +
+      `export RUSTIA_BACKFILL_ROOT="$HOME/${REMOTE_ROOT}"\n` +
+      `cd "${inbox}"\n` +
+      `node ${path.basename(REMOTE_RUNNER)} ${path.basename(configFile)} ` +
+      `${path.basename(providerFile)} ${path.basename(bundleFile)}\n`,
+  );
+}
+
+function commandMain(options) {
+  if (!options.out) fail("main requires --out FILE to write the series rows to");
+  const configFile = path.join(STATE_ROOT, `main-${git(["rev-parse", "--short", "HEAD"]).trim()}.json`);
+  fs.rmSync(configFile, { force: true });
+  local("node", ["tools/freeze-history-backfill.js", "--only", "HEAD", "--output", path.relative(REPO, configFile)], {
+    capture: false,
+  });
+  const config = loadConfig(configFile);
+  const commit = config.source.target_commits[0];
+  const provider = attestHost(config);
+
+  const runId = `main-${commit.slice(0, 12)}`;
+  const runDirectory = path.join(STATE_ROOT, "runs", runId);
+  fs.rmSync(runDirectory, { recursive: true, force: true });
+  fs.mkdirSync(runDirectory, { recursive: true });
+  const providerFile = path.join(runDirectory, "provider.json");
+  writeJson(providerFile, provider);
+  const bundleFile = path.join(runDirectory, "repo.bundle");
+  local("git", ["bundle", "create", bundleFile, "HEAD"], { capture: false });
+
+  shipAndRun(configFile, providerFile, bundleFile, options.local);
+
+  const extracted = fetchExport(runDirectory);
+  const status = JSON.parse(fs.readFileSync(path.join(extracted, "status.json"), "utf8"));
+  if (status.status !== "backfill_complete") {
+    fail(`remote run did not complete: ${status.status}${status.reason ? ` (${status.reason})` : ""}`);
+  }
+  const publication = JSON.parse(
+    fs.readFileSync(path.join(extracted, "publication/bench/history/backfill.json"), "utf8"),
+  );
+  const target = publication.targets[0];
+  if (!target || target.commit !== commit) fail("the export does not describe the measured commit");
+
+  if (options.previousBinary && options.previousBinary === target.binary_sha256) {
+    // Same bytes as the last measured commit, so there is nothing new to record.
+    process.stdout.write(`unchanged: ${commit.slice(0, 8)} builds the same binary as the last measured commit\n`);
+    fs.writeFileSync(options.out, "");
+    return;
+  }
+
+  const rows = publication.rows.map((row) => ({ ...row, binary_sha256: target.binary_sha256 }));
+  fs.writeFileSync(options.out, rows.map((row) => `${JSON.stringify(row)}\n`).join(""));
+  process.stdout.write(
+    `measured ${commit.slice(0, 8)}: ${rows.length} rows, binary ${target.binary_sha256.slice(0, 12)}\n`,
+  );
+}
+
 function commandFetch(options) {
   const lastRunFile = path.join(STATE_ROOT, "last-run");
   const runId = fs.existsSync(lastRunFile) ? fs.readFileSync(lastRunFile, "utf8").trim() : null;
@@ -551,12 +655,22 @@ function selfTest() {
   assert.equal(present.length, 1, `expected one committed backfill, found ${present.length}`);
   assert.deepEqual(existingBackfills(present[0]), [], "a run excludes its own artifact");
 
-  assert.deepEqual(parseArgs(["plan"]), { command: "plan", replace: false, config: undefined });
-  assert.deepEqual(parseArgs(["history", "--replace"]), {
-    command: "history",
-    replace: true,
-    config: undefined,
+  assert.deepEqual(parseArgs(["plan"]), {
+    command: "plan", replace: false, config: undefined, out: undefined, previousBinary: undefined,
+    local: false,
   });
+  assert.deepEqual(parseArgs(["history", "--replace"]), {
+    command: "history", replace: true, config: undefined, out: undefined, previousBinary: undefined,
+    local: false,
+  });
+  // Local mode still attests: running on the host does not exempt a run from
+  // proving the host is what the config says.
+  assert.equal(parseArgs(["main", "--local", "--out", "r.jsonl"]).local, true);
+  // The per-commit options belong to that lane alone.
+  assert.equal(parseArgs(["main", "--out", "rows.jsonl"]).out, "rows.jsonl");
+  assert.equal(parseArgs(["history", "--out", "rows.jsonl"]), null);
+  assert.equal(parseArgs(["main", "--out"]), null);
+  assert.equal(parseArgs(["main", "--previous-binary"]), null);
   assert.equal(parseArgs(["bogus"]), null);
   assert.equal(parseArgs(["plan", "--replace"]), null, "plan promotes nothing");
   assert.equal(parseArgs(["fetch", "--replace"]).replace, true, "fetch promotes, so it may supersede");
@@ -571,6 +685,7 @@ function usage() {
       "\n" +
       "  plan      [--config FILE]              freeze, attest the host, print the plan\n" +
       "  history   [--config FILE] [--replace]  measure every revision and promote\n" +
+      "  main      --out FILE [--previous-binary SHA]  measure HEAD alone for the live series\n" +
       "  fetch     [--config FILE] [--replace]  re-collect and promote the last remote run\n" +
       "  unlock                                 clear a stale lock on the benchmark host\n" +
       "  self-test                              run the pure-function checks\n" +
@@ -588,8 +703,10 @@ try {
     selfTest();
   } else {
     fs.mkdirSync(STATE_ROOT, { recursive: true });
+    useLocalHost(parsed.local === true);
     if (parsed.command === "plan") commandPlan(parsed);
     else if (parsed.command === "history") commandHistory(parsed);
+    else if (parsed.command === "main") commandMain(parsed);
     else if (parsed.command === "fetch") commandFetch(parsed);
     else if (parsed.command === "unlock") commandUnlock();
   }

@@ -1,0 +1,116 @@
+name: Per-Commit Rustia Series
+
+# Measures each commit that lands on main under exactly the protocol the
+# reconstruction used, so the published chart continues rather than restarting.
+# Timing runs on the qualified owned host, which is the only class permitted to
+# produce one, and only through run-dedicated-benchmark.js, which attests the
+# machine against the frozen config before it builds anything.
+#
+# The rows are appended to the published data repository, not to this one: they
+# grow with every commit and have no business in source history, which is the
+# same split the memory lane already uses. This workflow therefore holds no
+# contents-write on this repository.
+#
+# A commit that builds a byte-identical binary records nothing. That gate is
+# exact rather than a path heuristic, so a documentation or tooling commit does
+# not add a duplicate point claiming to be a new measurement.
+"on":
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# Shares one group with every other lane that uses the bench host, so a
+# measurement can never overlap another job on the machine it is measuring.
+concurrency:
+  group: rustia-bench-host-serial
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    name: Measure this commit
+    if: github.ref == 'refs/heads/main'
+    runs-on:
+      group: bench-linux
+      labels: [self-hosted, Linux, X64, ci-bench]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout the measured commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          cache: false
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Measure and publish the series row
+        env:
+          BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$BENCH_DATA_DEPLOY_KEY"
+          work_dir="$(mktemp -d "$RUNNER_TEMP/rustia-series.XXXXXX")"
+          ssh_dir="$work_dir/ssh"
+          data_dir="$work_dir/data"
+          cleanup() {
+            rm -rf -- "$work_dir"
+          }
+          trap cleanup EXIT
+          install -d -m 700 "$ssh_dir"
+          install -m 600 /dev/null "$ssh_dir/id_ed25519"
+          printf '%s\n' "$BENCH_DATA_DEPLOY_KEY" > "$ssh_dir/id_ed25519"
+          unset BENCH_DATA_DEPLOY_KEY
+          export GIT_SSH_COMMAND="ssh -i $ssh_dir/id_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$ssh_dir/known_hosts"
+
+          git clone --branch main git@github.com:slowchop/rustia-bench-data.git "$data_dir"
+          rows_file="$data_dir/bench/history/series/ci-bench-main.jsonl"
+
+          # The binary hash of the last measured commit, so an unchanged engine
+          # is skipped rather than recorded twice.
+          previous=""
+          if [ -s "$rows_file" ]; then
+            previous="$(node -e 'const fs=require("fs");const lines=fs.readFileSync(process.argv[1],"utf8").trim().split("\n");console.log(JSON.parse(lines[lines.length-1]).binary_sha256 ?? "")' "$rows_file")"
+          fi
+
+          node tools/run-dedicated-benchmark.js main --local --out "$work_dir/rows.jsonl" ${previous:+--previous-binary "$previous"}
+
+          if [ ! -s "$work_dir/rows.jsonl" ]; then
+            echo "no engine change; nothing recorded" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          install -d "$data_dir/bench/history/series"
+          cat "$work_dir/rows.jsonl" >> "$rows_file"
+
+          # Validated against the committed protocol before anything is pushed,
+          # so a row that does not belong to this series never reaches the
+          # published data.
+          node tools/check-benchmark-series.js --rows-root "$data_dir"
+
+          git -C "$data_dir" config user.name "rustia-benchmark"
+          git -C "$data_dir" config user.email "benchmark@rustia.invalid"
+          git -C "$data_dir" add bench/history/series/ci-bench-main.jsonl
+          git -C "$data_dir" commit -m "Record per-commit series row $(git rev-parse --short HEAD)"
+          git -C "$data_dir" push origin HEAD:main
+
+          {
+            echo "## Series row recorded"
+            echo
+            echo "Commit \`$(git rev-parse --short HEAD)\` measured on the owned benchmark host."
+            echo
+            echo '```'
+            cat "$work_dir/rows.jsonl"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

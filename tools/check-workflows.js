@@ -113,6 +113,17 @@ const RUNNER_CLASSES = new Map([
       timingAuthority: false,
     },
   ],
+  [
+    "bench-linux",
+    {
+      block: [
+        "    runs-on:",
+        "      group: bench-linux",
+        "      labels: [self-hosted, Linux, X64, ci-bench]",
+      ].join("\n"),
+      timingAuthority: true,
+    },
+  ],
 ]);
 
 // Every workflow must appear here, so adding one is a deliberate act rather than
@@ -122,6 +133,7 @@ const WORKFLOW_RUNNER_CLASS = new Map([
   ["ci.yml", "general-linux"],
   ["nightly-matrix-bench.yml", "general-linux"],
   ["publish-benchmark-data.yml", "general-linux"],
+  ["main-bench.yml", "bench-linux"],
   ["linode-rustia-memory.yml", null],
 ]);
 
@@ -305,6 +317,30 @@ function checkCi(text) {
     label,
   );
   checkActionPins(text, label);
+}
+
+function checkMainBench(text) {
+  const label = ".github/workflows/main-bench.yml";
+  requireIncludes(text, "\"on\":\n  push:\n    branches:\n      - main\n", label);
+  requireIncludes(text, "permissions:\n  contents: read\n", label);
+  requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
+  // One group across every lane that touches the bench host, so a measurement
+  // never overlaps another job on the machine being measured.
+  requireIncludes(text, "group: rustia-bench-host-serial", label);
+  requireIncludes(text, "cancel-in-progress: false", label);
+  requireIncludes(text, "persist-credentials: false", label);
+  requireIncludes(text, "timeout-minutes:", label);
+  requireIncludes(text, "node tools/run-dedicated-benchmark.js main --local", label);
+  // Rows are validated against the committed protocol before they are pushed,
+  // so a row that does not belong to this series never reaches published data.
+  requireIncludes(text, "node tools/check-benchmark-series.js --rows-root", label);
+  requireIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
+  requireIncludes(text, "trap cleanup EXIT", label);
+  // The rows live in the data repository; this lane must never write history
+  // into this one, and must not become a second contents-write holder.
+  forbidIncludes(text, "bench/history/runs.jsonl", label);
+  forbidIncludes(text, "actions/upload-artifact", label);
+  forbidIncludes(text, "LINODE_TOKEN", label);
 }
 
 function checkReleasePreflight(text) {
@@ -499,6 +535,7 @@ function checkBenchmarkPublication(text) {
 const files = workflowFiles();
 for (const required of [
   "ci.yml",
+  "main-bench.yml",
   "linode-rustia-memory.yml",
   "nightly-matrix-bench.yml",
   "publish-benchmark-data.yml",
@@ -515,6 +552,7 @@ checkCi(readWorkflow(ciPath));
 checkRustiaMemory(readWorkflow(rustiaMemoryPath));
 checkNightlyMatrix(readWorkflow(nightlyMatrixPath));
 checkBenchmarkPublication(readWorkflow(benchmarkPublicationPath));
+checkMainBench(readWorkflow(path.join(workflowDir, "main-bench.yml")));
 checkReleasePreflight(readWorkflow(releasePreflightPath));
 
 console.log(`workflow policy ok for ${files.length} workflow file(s)`);
