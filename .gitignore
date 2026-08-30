@@ -7,3 +7,7 @@ target/
 .claude/worktrees/
 private/
 tools/puc51-oracle/build/
+
+# Live per-commit series rows live in the published data repository, not here;
+# a local copy is only ever installed for rendering.
+bench/history/series/*.jsonl

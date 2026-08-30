@@ -175,6 +175,52 @@ function readHistory() {
   return records.sort(compareRunTime);
 }
 
+// The live per-commit series. Its protocol is committed here; its rows live in
+// the published data repository and are installed into this checkout by the
+// publication workflow, exactly as the memory results already are. A local
+// render therefore draws the reconstruction alone, and the published page adds
+// the commits measured since — which is the same asymmetry memory already has.
+function readLiveSeries() {
+  const seriesDirectory = path.join(__dirname, "history", "series");
+  if (!fs.existsSync(seriesDirectory)) return [];
+  return fs
+    .readdirSync(seriesDirectory)
+    .filter((file) => file.endsWith(".json"))
+    .sort()
+    .flatMap((file) => {
+      const manifest = JSON.parse(fs.readFileSync(path.join(seriesDirectory, file), "utf8"));
+      const rowsPath = path.join(__dirname, "..", manifest.rows_file);
+      if (!fs.existsSync(rowsPath)) return [];
+      const rows = fs
+        .readFileSync(rowsPath, "utf8")
+        .split("\n")
+        .filter((line) => line.trim() !== "")
+        .map((line) => JSON.parse(line));
+      return rows.length === 0 ? [] : [{ manifest, rows }];
+    });
+}
+
+// A live series may continue a reconstruction only when they are the same
+// measurement: same machine, same pinned core, same harness, same workloads,
+// same fixed N, and the same checksum for every workload. If the harness, the
+// lockfile, the toolchain or a workload changes, the fixed N and the checksums
+// change with it and this returns false — which is the point. Two protocols
+// drawn as one line is exactly the confound the move to one host removed.
+function seriesContinues(manifest, backfill) {
+  if (manifest.host !== backfill.host) return false;
+  if (manifest.pinned_core !== backfill.pinned_core) return false;
+  if (manifest.harness_commit !== backfill.harness_commit) return false;
+  if (JSON.stringify(manifest.workloads) !== JSON.stringify(backfill.workloads)) return false;
+  if (JSON.stringify(manifest.fixed_n) !== JSON.stringify(backfill.fixed_n)) return false;
+  const backfillChecksums = {};
+  for (const row of backfill.rows) {
+    if (backfillChecksums[row.workload] === undefined) backfillChecksums[row.workload] = row.checksum;
+  }
+  return manifest.workloads.every(
+    (workload) => manifest.expected_checksums[workload] === backfillChecksums[workload],
+  );
+}
+
 function readHistoryBackfills() {
   if (!fs.existsSync(historyBackfillDirectory)) {
     return [];
@@ -1049,7 +1095,7 @@ function claimWorkloadLabel(row) {
 
 function historySection(history, backfills, currentRows) {
   const reference = mluaJitHistoryReference(currentRows);
-  const reconstructed = rustiaBackfillEras(backfills, reference);
+  const reconstructed = rustiaBackfillEras(backfills, reference, readLiveSeries());
   const recorded = rustiaHistoryEras(history.rows, reference);
   // One host, one protocol. When a reconstruction exists it is the whole
   // chart: the recorded matrix runs are measured on a different machine, so
@@ -1060,7 +1106,7 @@ function historySection(history, backfills, currentRows) {
   const eras = [...reconstructed, ...visibleRecorded];
   const snapshotCount = eras.reduce((total, era) => total + era.snapshotCount, 0);
   const summary = reconstructed.length > 0
-    ? `${formatInteger(reconstructed.reduce((total, era) => total + era.snapshotCount, 0))} historical Rustia revisions replayed against one fixed harness and one pinned dependency set, measured end to end on a single machine.`
+    ? `${formatInteger(reconstructed.reduce((total, era) => total + era.snapshotCount, 0))} historical Rustia revisions replayed against ${reconstructed.length === 1 ? "one fixed harness and one pinned dependency set, measured end to end on a single machine" : `${formatInteger(reconstructed.length)} fixed harnesses, each measured end to end on one machine and never blended with another`}.`
     : `${formatInteger(snapshotCount)} recorded Linux matrix runs across two eras. Each chart is normalized to its own first run, so different hosts and protocols are never blended.`;
   const explanation = reconstructed.length > 0
     ? `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>). Every point on this chart comes from the one machine named in the legend, so differences between points are engine changes rather than host changes.`
@@ -1106,8 +1152,9 @@ function mluaJitHistoryReference(rows) {
   };
 }
 
-function rustiaBackfillEras(backfills, reference) {
-  return backfills.map((backfill) => {
+function rustiaBackfillEras(backfills, reference, liveSeries = []) {
+  const unattached = new Set(liveSeries);
+  const eras = backfills.map((backfill) => {
     const targets = new Map(
       backfill.targets.map((target, index) => [
         target.commit,
@@ -1127,6 +1174,23 @@ function rustiaBackfillEras(backfills, reference) {
         timestamp_unix: targets.get(row.commit).committedAt,
         backfill_order: targets.get(row.commit).index,
       }));
+
+    // Commits measured since the reconstruction, drawn as the same line when
+    // and only when they are the same measurement. Ordered after every
+    // reconstructed point, since they are by construction later commits.
+    let order = backfill.targets.length;
+    for (const series of liveSeries) {
+      if (!seriesContinues(series.manifest, backfill)) continue;
+      unattached.delete(series);
+      const commitOrder = new Map();
+      for (const row of series.rows) {
+        if (!commitOrder.has(row.commit)) commitOrder.set(row.commit, order++);
+      }
+      for (const row of series.rows) {
+        if (!REQUIRED_COMMON_WORKLOAD_SET.has(row.workload)) continue;
+        rows.push({ ...row, backfill_order: commitOrder.get(row.commit) });
+      }
+    }
     return rustiaHistoryEra(
       "Fixed-harness reconstructed history",
       `Harness ${backfill.harness_commit.slice(0, 7)} · measured together on ${
@@ -1143,6 +1207,32 @@ function rustiaBackfillEras(backfills, reference) {
       `Reconstructed · ${backfill.host ?? `harness ${backfill.harness_commit.slice(0, 7)}`}`,
     );
   });
+
+  // A series whose protocol matched no reconstruction is a different
+  // measurement and gets its own line rather than being silently folded into
+  // one it is not comparable with.
+  for (const series of unattached) {
+    const commitOrder = new Map();
+    let order = 0;
+    for (const row of series.rows) {
+      if (!commitOrder.has(row.commit)) commitOrder.set(row.commit, order++);
+    }
+    const rows = series.rows
+      .filter((row) => REQUIRED_COMMON_WORKLOAD_SET.has(row.workload))
+      .map((row) => ({ ...row, backfill_order: commitOrder.get(row.commit) }));
+    if (rows.length === 0) continue;
+    eras.push(
+      rustiaHistoryEra(
+        "Recorded per-commit history",
+        `Harness ${series.manifest.harness_commit.slice(0, 7)} · ${series.manifest.host}`,
+        rows,
+        reference,
+        "reconstructed",
+        `Recorded · ${series.manifest.host}`,
+      ),
+    );
+  }
+  return eras;
 }
 
 function rustiaHistoryEras(rows, reference) {
