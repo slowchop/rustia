@@ -219,7 +219,7 @@ function sourceModifications(selected) {
   }
 }
 
-function freeze(start, outputFile) {
+function freeze(start, outputFile, only) {
   const tracked = git(["status", "--porcelain=v1", "--untracked-files=no"]).trim();
   if (tracked) fail("tracked worktree changes must be committed before freezing a backfill");
   const harness = git(["rev-parse", "HEAD"]).trim();
@@ -236,7 +236,13 @@ function freeze(start, outputFile) {
     fail("dedicated base config must declare schema rustia.dedicated-fixed-benchmark.v1");
   }
   const measurements = loadCurrentRustiaRows();
-  const commits = targetCommits(resolvedStart, harness);
+  // `--only` freezes a single revision: the per-commit lane measures one commit
+  // under exactly the protocol the reconstruction used, so the two are one
+  // series rather than two. Everything else about the config is identical.
+  const commits = only
+    ? [git(["rev-parse", `${only}^{commit}`]).trim()]
+    : targetCommits(resolvedStart, harness);
+  if (only && !FULL_COMMIT.test(commits[0])) fail("--only must name a resolvable commit");
   const config = {
     schema: "rustia.dedicated-history-backfill.v1",
     provider: baseConfig.provider,
@@ -310,7 +316,7 @@ function freeze(start, outputFile) {
 
 function usage() {
   process.stdout.write(
-    "Usage: node tools/freeze-history-backfill.js [--start COMMIT] [--output FILE.json]\n" +
+    "Usage: node tools/freeze-history-backfill.js [--start COMMIT | --only COMMIT] [--output FILE.json]\n" +
       "       node tools/freeze-history-backfill.js --self-test\n" +
       "\n" +
       "Without --start the series begins at the first commit that contains an engine.\n" +
@@ -389,17 +395,20 @@ function selfTest() {
 }
 
 function parseArgs(argv) {
-  const parsed = { start: undefined, output: undefined, selfTest: false };
+  const parsed = { start: undefined, output: undefined, only: undefined, selfTest: false };
   for (let index = 0; index < argv.length; index += 1) {
     const option = argv[index];
     if (option === "--self-test") parsed.selfTest = true;
     else if (option === "--start") parsed.start = argv[++index];
     else if (option === "--output") parsed.output = argv[++index];
+    else if (option === "--only") parsed.only = argv[++index];
     else return null;
   }
-  if (parsed.selfTest && (parsed.start || parsed.output)) return null;
-  if ((parsed.start !== undefined && !parsed.start) || (parsed.output !== undefined && !parsed.output)) {
-    return null;
+  if (parsed.selfTest && (parsed.start || parsed.output || parsed.only)) return null;
+  // --only names the whole series; a start commit would be ignored.
+  if (parsed.only !== undefined && parsed.start !== undefined) return null;
+  for (const value of [parsed.start, parsed.output, parsed.only]) {
+    if (value !== undefined && !value) return null;
   }
   return parsed;
 }
@@ -412,7 +421,7 @@ try {
   } else if (parsed.selfTest) {
     selfTest();
   } else {
-    freeze(parsed.start, parsed.output);
+    freeze(parsed.start, parsed.output, parsed.only);
   }
 } catch (error) {
   process.stderr.write(`freeze-history-backfill: ${error.message}\n`);
