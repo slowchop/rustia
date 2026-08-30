@@ -63,6 +63,26 @@ The qualification record carries the machine's measured repeatability. Quote it
 per workload: spread scales inversely with per-unit cost, so the same host reads
 0.32% worst on `dense_tables` and 5.74% on `closures_upvalues`.
 
+### Blocked: the memory cohort needs a delegated cgroup
+
+The memory lane is ported and its workflow runs on the owned host, but it cannot
+complete there yet, and the reason is a property of the machine rather than of
+the code. Per-VM memory is measured inside a dedicated cgroup; the benchmark
+host runs its CI as an unprivileged user (`uid 1001`), and that user has no
+cgroup-v2 subtree it can create children in.
+
+Root is one way to have one. The other, which keeps the runner unprivileged, is
+a systemd delegated scope: `loginctl enable-linger` for that user plus a drop-in
+carrying `Delegate=memory`. The runner checks for exactly that before it clones
+anything and names what is missing.
+
+**The check must not be relaxed to make the lane pass.** Without the cgroup there
+is no per-VM figure — the accounting is the cgroup's — so a run that skipped it
+would produce numbers that look like measurements and are not. The lane is
+dispatch-only, so until the host is configured it fails immediately and costs
+nothing; the alternative, restoring the cloud lane, would reintroduce the ability
+to spend money to work around a one-line host setting.
+
 ### Known gap: the A/B acceptance runner
 
 `tools/run-linux-fixed-benchmark.js` still assumes the rented model — root,
