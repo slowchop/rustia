@@ -657,6 +657,21 @@ instead, which costs nothing in wall clock.
 A screening result is a reading for a reviewer, not a measurement the project
 stands behind. The acceptance protocol produces those, and it runs far longer.
 
+The lane was verified end to end by a documentation-only pull request: it built
+both revisions, found byte-identical binaries, skipped the second pass and
+invoked the analyzer zero times, which is the correct outcome for a change that
+cannot have moved anything. Two defects surfaced only by running it — a `git
+fetch` in a job that drops its credentials at checkout, and a protocol-change
+rule that named the `bench/` directory and so declined the pull request for
+touching the README.
+
+One inefficiency is left in deliberately: the short-circuit fires after the
+first pass, which has already measured both sides, because the runner builds and
+measures in one invocation. Discovering "no engine change" therefore costs about
+ninety seconds more than it needs to. Threading a build-only mode through the
+runner to save that would add a second path through the thing whose single path
+is the reason the two lanes cannot drift.
+
 Freeze only from a clean committed checkout and commit the generated config;
 `just bench-history` does the freeze itself and reuses an already-frozen config
 for the same harness commit rather than silently re-deriving one.
