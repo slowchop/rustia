@@ -568,13 +568,18 @@ function shipAndRun(configFile, providerFile, bundleFile, isLocal, lane = LANES.
       { capture: false },
     );
   }
+  // Absolute paths, not basenames. The two runners resolve a relative argument
+  // against different directories -- the history one against the process's cwd,
+  // the matrix one against its own root -- so `repo.bundle` found the bundle for
+  // one lane and "does not exist" for the other. Naming the files outright means
+  // neither runner's idea of where it is standing can matter.
   sshStream(
     `set -eu\n` +
       REMOTE_PATH +
       `export ${lane.rootEnv}="$HOME/${lane.root}"\n` +
       `cd "${inbox}"\n` +
-      `node ${path.basename(lane.runner)} ${path.basename(configFile)} ` +
-      `${path.basename(providerFile)} ${path.basename(bundleFile)}\n`,
+      `node "${inbox}/${path.basename(lane.runner)}" "${inbox}/${path.basename(configFile)}" ` +
+      `"${inbox}/${path.basename(providerFile)}" "${inbox}/${path.basename(bundleFile)}"\n`,
   );
 }
 
