@@ -470,6 +470,10 @@ function checkBenchmarkPublication(text) {
   requireIncludes(text, "BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
   requireIncludes(text, "git@github.com:slowchop/rustia-bench-data.git", label);
   requireIncludes(text, "bench/operations-status.json", label);
+  // Publishing the chart without the rows behind it leaves a reader unable to
+  // check a number they can see.
+  requireIncludes(text, "bench/history/backfills/**", label);
+  requireIncludes(text, "for backfill in bench/history/backfills/*.json; do", label);
   requireIncludes(text, "node tools/render-benchmark-data-readme.js", label);
   requireIncludes(text, "publish_dir=\"$(mktemp -d \"$RUNNER_TEMP/rustia-bench-publish.XXXXXX\")\"", label);
   requireIncludes(text, "rm -rf -- \"$publish_dir\"", label);

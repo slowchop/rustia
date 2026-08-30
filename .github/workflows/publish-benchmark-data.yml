@@ -11,6 +11,7 @@ name: Publish Benchmark Data
       - bench/current-results.html
       - bench/current-results.json
       - bench/history/runs.jsonl
+      - bench/history/backfills/**
       - bench/operations-policy.json
       - bench/operations-status.json
       - bench/render-claims.js
@@ -100,6 +101,19 @@ jobs:
             bench/wasm/current-results.json \
             bench/wasm/dispatch-current-results.json; do
             install -m 644 "$artifact" "$data_dir/$artifact"
+          done
+
+          # The reconstructed-history artifacts, mirrored so a reader can check
+          # the published chart against the rows behind it. The data repo
+          # previously carried the picture of the 75-revision series without its
+          # 375 rows, while the cross-engine matrix beside it was fully mirrored.
+          # Evidence stays in the source repo: it is large, and the artifact is
+          # what is needed to verify a number on the page.
+          rm -rf -- "$data_dir/bench/history/backfills"
+          install -d "$data_dir/bench/history/backfills"
+          for backfill in bench/history/backfills/*.json; do
+            [ -e "$backfill" ] || continue
+            install -m 644 "$backfill" "$data_dir/$backfill"
           done
 
           install -m 644 "$data_dir/bench/memory/current-results.json" bench/memory/current-results.json
