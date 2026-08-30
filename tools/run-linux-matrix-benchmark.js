@@ -398,10 +398,20 @@ function installRuntime(runtime, artifact) {
   const stat = fs.lstatSync(binary);
   if (!stat.isFile() || stat.isSymbolicLink()) fail(`${runtime} extracted binary is not a regular file`);
   fs.chmodSync(binary, stat.mode | 0o500);
+  // Into a directory this run owns, not /usr/local/bin, which needs root. The
+  // rented model had root and the whole machine; an owned host has neither
+  // going spare. PATH is prepended rather than appended so the pinned runtime
+  // wins over any the machine already has -- which is the entire point of
+  // pinning it by URL and hash.
   const command = runtime === "spidermonkey" ? "js" : runtime;
-  const link = path.join("/usr/local/bin", command);
+  const binDirectory = path.join(ROOT, "bin");
+  fs.mkdirSync(binDirectory, { recursive: true });
+  const link = path.join(binDirectory, command);
   fs.rmSync(link, { force: true });
   fs.symlinkSync(binary, link);
+  if (!`${process.env.PATH ?? ""}`.split(path.delimiter).includes(binDirectory)) {
+    process.env.PATH = `${binDirectory}${path.delimiter}${process.env.PATH ?? ""}`;
+  }
   return { configured_version: artifact.version, archive_sha256: actual, command: link };
 }
 
@@ -773,7 +783,17 @@ const LOCK_FILE = path.join(ROOT, "lock");
 // caches that make a repeat run minutes rather than an hour, and every build
 // records its own hashes, so a poisoned cache would be visible rather than
 // silent.
-const WIPE_ON_START = Object.freeze([REPOSITORY, SOURCE, EXPORT, EVIDENCE_ROOT]);
+const WIPE_ON_START = Object.freeze([
+  REPOSITORY,
+  SOURCE,
+  EXPORT,
+  EVIDENCE_ROOT,
+  // The extracted runtimes and the links into them. Re-downloading costs a
+  // couple of seconds against a hash that is checked anyway, and a half-extracted
+  // archive left by a failed run is not something to inherit.
+  path.join(ROOT, "runtimes"),
+  path.join(ROOT, "bin"),
+]);
 
 function acquireLock() {
   fs.mkdirSync(ROOT, { recursive: true });
