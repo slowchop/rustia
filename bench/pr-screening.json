@@ -1,0 +1,142 @@
+{
+ "schema": "rustia.bench.pr-screening.v1",
+ "calibrated_at": "2026-08-30T22:02:43.272Z",
+ "calibrated_from_commit": "ebddaf7499f070e0ead15b539970e694c41a9e47",
+ "host": "ci-bench",
+ "pinned_core": 4,
+ "passes": 4,
+ "legs_per_side": 2,
+ "repetitions": 5,
+ "confidence": 0.99,
+ "splits": [
+  "1,4 vs 2,3",
+  "1,2 vs 3,4",
+  "1,3 vs 2,4"
+ ],
+ "straddling_split": "1,4 vs 2,3",
+ "method": "One revision measured in four separate passes, then compared against itself under all three balanced splits of those passes through bench/analyze-fixed-samples.js with --allow-identical-commits. Both sides of every split are the same binary, so each interval is this host's own spread. A workload's threshold is the widest end of the widest split, rounded up. All three are recorded because one split is one draw: two runs of this calibration at the same commit disagreed by a factor of eight on one workload, which is what a two-leg hierarchical bootstrap does. Every workload here is widened by leg variation rather than repetition variation, so more repetitions per leg would not tighten this lane -- more passes would. Only the straddling split can fail a calibration, because it is the arrangement the screening lane measures in and therefore the only one whose indistinguishability is being claimed; the other two are the same binary arranged so that session drift does not cancel, and a workload whose drift_splits is non-empty is one where that ordering is doing real work.",
+ "workloads": {
+  "dense_tables": {
+   "material_threshold_percent": 1.68,
+   "chosen_split": "1,3 vs 2,4",
+   "drift_splits": [],
+   "split_thresholds_percent": {
+    "1,4 vs 2,3": 1.6,
+    "1,2 vs 3,4": 1.28,
+    "1,3 vs 2,4": 1.68
+   },
+   "observed_aa_interval_percent": {
+    "lower": -0.220259453209271,
+    "upper": 1.67139872177518
+   },
+   "observed_aa_delta_percent": 1.02913293618996,
+   "observed_aa_pooled_percent": {
+    "lower": -0.0334680363059836,
+    "upper": 1.60655168449766
+   },
+   "observed_aa_hierarchical_percent": {
+    "lower": -0.220259453209271,
+    "upper": 1.67139872177518
+   },
+   "widened_by": "leg_variation"
+  },
+  "sparse_tables": {
+   "material_threshold_percent": 1.83,
+   "chosen_split": "1,3 vs 2,4",
+   "drift_splits": [],
+   "split_thresholds_percent": {
+    "1,4 vs 2,3": 1.75,
+    "1,2 vs 3,4": 1.81,
+    "1,3 vs 2,4": 1.83
+   },
+   "observed_aa_interval_percent": {
+    "lower": -0.390313482717208,
+    "upper": 1.82571575770898
+   },
+   "observed_aa_delta_percent": 0.666901396771835,
+   "observed_aa_pooled_percent": {
+    "lower": -0.278972745240635,
+    "upper": 1.71013797161021
+   },
+   "observed_aa_hierarchical_percent": {
+    "lower": -0.390313482717208,
+    "upper": 1.82571575770898
+   },
+   "widened_by": "leg_variation"
+  },
+  "closures_upvalues": {
+   "material_threshold_percent": 3.88,
+   "chosen_split": "1,2 vs 3,4",
+   "drift_splits": [],
+   "split_thresholds_percent": {
+    "1,4 vs 2,3": 3.86,
+    "1,2 vs 3,4": 3.88,
+    "1,3 vs 2,4": 3.13
+   },
+   "observed_aa_interval_percent": {
+    "lower": -1.77777337316312,
+    "upper": 3.87177761176698
+   },
+   "observed_aa_delta_percent": 0.803321854418293,
+   "observed_aa_pooled_percent": {
+    "lower": -1.5556424154852,
+    "upper": 2.87287835680377
+   },
+   "observed_aa_hierarchical_percent": {
+    "lower": -1.77777337316312,
+    "upper": 3.87177761176698
+   },
+   "widened_by": "leg_variation"
+  },
+  "generic_iteration": {
+   "material_threshold_percent": 1.61,
+   "chosen_split": "1,4 vs 2,3",
+   "drift_splits": [],
+   "split_thresholds_percent": {
+    "1,4 vs 2,3": 1.61,
+    "1,2 vs 3,4": 1.58,
+    "1,3 vs 2,4": 1.57
+   },
+   "observed_aa_interval_percent": {
+    "lower": -0.801515343222503,
+    "upper": 1.60384398830822
+   },
+   "observed_aa_delta_percent": -0.126959251592862,
+   "observed_aa_pooled_percent": {
+    "lower": -0.656314969222445,
+    "upper": 0.358184159495134
+   },
+   "observed_aa_hierarchical_percent": {
+    "lower": -0.801515343222503,
+    "upper": 1.60384398830822
+   },
+   "widened_by": "leg_variation"
+  },
+  "stdlib_math_table": {
+   "material_threshold_percent": 2.35,
+   "chosen_split": "1,3 vs 2,4",
+   "drift_splits": [
+    "1,3 vs 2,4"
+   ],
+   "split_thresholds_percent": {
+    "1,4 vs 2,3": 1.8,
+    "1,2 vs 3,4": 2.3,
+    "1,3 vs 2,4": 2.35
+   },
+   "observed_aa_interval_percent": {
+    "lower": 0.354662519434745,
+    "upper": 2.3497429069266
+   },
+   "observed_aa_delta_percent": 0.968208991979447,
+   "observed_aa_pooled_percent": {
+    "lower": 0.378163175202828,
+    "upper": 2.05000566655875
+   },
+   "observed_aa_hierarchical_percent": {
+    "lower": 0.354662519434745,
+    "upper": 2.3497429069266
+   },
+   "widened_by": "leg_variation"
+  }
+ }
+}
