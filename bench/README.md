@@ -665,6 +665,45 @@ works with `--features wasmi-engine`, and Wasmtime works with
 `--features wasmtime-engine`. The crate also builds with `--no-default-features`
 so the standalone harness shell is not tied to rustia internals.
 
+### Cross-engine matrix
+
+`.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines across
+the five workloads on the owned host and pushes the accepted cohort to `main`.
+It is this repository's single sanctioned contents-write grant: the cohort
+belongs in source history, unlike the per-commit series, whose rows grow forever
+and live in the data repository.
+
+It replaced a nightly job that created a billed cloud instance whenever `main`
+had gained performance-relevant commits since the last cohort. Both properties
+are gone. The gate asked the Rustia-progress question, which the per-commit
+series now answers directly; this lane asks about competitors, and running it
+unconditionally also produces a host-drift signal — kernel, microcode, thermal —
+that a gated run would hide. Its cost is forty minutes of an otherwise idle
+owned machine rather than a bill.
+
+The runner is the same one the rented instance used, with the assumptions that
+belonged to a throwaway machine removed: it no longer requires root, no longer
+installs into `/root`, no longer permanently masks the host's package timers,
+wipes only its own working state between runs while keeping both cargo target
+directories warm, and takes an exclusive lock. `max_runtime_minutes` used to be
+a billing ceiling the coordinator enforced by destroying the machine; on an
+owned host nothing destroys anything, so it is now a hang detector checked at
+the phase boundaries.
+
+The owned lifecycle has its own config schema rather than borrowing the rented
+one's provider shape, and its steal ceilings are exactly zero. On bare metal
+steal is structurally absent, so a non-zero reading is a fault rather than
+something to tolerate. Host evidence records `uname -srvm` rather than
+`uname -a`: on a throwaway instance the node name was a random string that died
+with the machine, and on an owned host it is the real name of a real machine in
+a file committed to a public repository.
+
+**Before the rented rows are deleted**, `tools/record-host-bridge.js` writes the
+per-engine comparison between the last rented cohort and the first owned one.
+Published figures are ratios against the reference measured in the same run, so
+a change of host cancels there; absolute nanoseconds do not, and after the
+deletion that comparison is unrecoverable.
+
 ## History Schema
 
 Each line in `history/runs.jsonl` is a JSON object:
