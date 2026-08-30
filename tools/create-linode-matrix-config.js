@@ -89,7 +89,17 @@ function toDedicated(config) {
   return {
     ...config,
     schema: DEDICATED_SCHEMA,
-    provider: { host: { ...host } },
+    provider: {
+      host: {
+        ...host,
+        // Tighter than the shared host block's general ceiling, and tighter than
+        // the workflow's job timeout on purpose: whichever bound is smaller is
+        // the one that produces the error message, and the runner's names the
+        // phase it was in. A job killed at its timeout says only that it ran
+        // out of time.
+        max_runtime_minutes: 90,
+      },
+    },
     host_gate: {
       ...config.host_gate,
       benchmark_cpu: base.host_gate.benchmark_cpu,
