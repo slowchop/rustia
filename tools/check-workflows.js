@@ -429,6 +429,10 @@ function checkReleasePreflight(text) {
     // repair honest and a host attested, so preflight must keep running them.
     '"tools/run-dedicated-benchmark.js"',
     '"tools/check-benchmark-series.js"',
+    // Reads history only; it is not a measurement. Preflight runs its self-test
+    // because the rule it carries -- that a per-unit ratio needs both sides to
+    // mean the same unit -- is what keeps a host comparison honest.
+    '"tools/record-host-bridge.js"',
     '"tools/run-linux-history-backfill.js"',
     '"tools/freeze-history-backfill.js"',
     '"bench/run-memory-supervisor.js"',
