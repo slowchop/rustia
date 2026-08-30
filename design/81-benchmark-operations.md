@@ -122,9 +122,12 @@ decision threshold. A rejected candidate never enters the progress trend.
 
 A reading for the author of a change, produced on the same qualified host and
 retained nowhere. `.github/workflows/pr-bench.yml` measures the branch against
-`git merge-base origin/main HEAD` — not main's tip, which would attribute an
-unrelated commit landing mid-review to the pull request — across two passes with
-the order reversed in the second, so the sides interleave A B B A.
+the merge base of the branch and its target — not the target's tip, which would
+attribute an unrelated commit landing mid-review to the pull request — across two
+passes with the order reversed in the second, so the sides interleave A B B A.
+The base is taken from the pull request event as a commit id: the job drops its
+credentials at checkout and so cannot reach the remote, which is a property worth
+keeping rather than working around.
 
 Screening is a distinct lane from candidate experiments and must not be confused
 with one. It runs a short protocol, publishes nothing, and holds no write access
