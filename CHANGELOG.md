@@ -8,6 +8,46 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- Pull-request benchmark screening on the owned host.
+  `.github/workflows/pr-bench.yml` measures a branch against
+  `git merge-base origin/main HEAD` — not main's tip, which would attribute an
+  unrelated commit landing mid-review to the change — over two passes with the
+  order reversed in the second, so the two sides interleave A B B A. It reports
+  in the job summary and records nothing: no row, no published artifact, and no
+  write access to either repository, each pinned by `checkPrBench`. Fork pull
+  requests never reach the benchmark host; that guard is in place now rather
+  than deferred to whenever the repository goes public.
+- Measured rather than declared screening thresholds. `just bench-calibrate`
+  measures one revision four times and compares it against itself under all
+  three balanced splits of those passes, so every interval is the host's own
+  spread. A workload's threshold is the widest end of the widest split. There is
+  no default and no fallback: a declared figure that happens to sit inside the
+  host's spread would report movement on changes that did nothing. The A/A run
+  is also the protocol's canary — an interval that excludes zero when nothing
+  changed means the comparison is measuring something other than the code, and
+  the calibration refuses to write itself rather than let a wider threshold
+  paper over it.
+- `comparison.direction` in the fixed-sample analyzer, stating faster, slower or
+  indistinguishable against zero. The material-regression threshold is
+  one-sided, so a genuine speedup previously reported
+  `material_regression_excluded` — true, and it reads as if nothing happened.
+  Replaying the committed `84e732a` analysis shows an 8.2% improvement published
+  under exactly that wording.
+- `--confidence` in the analyzer. Screening five workloads at 95% gives roughly a
+  23% chance one of them moves on a change that did nothing, and more
+  repetitions cannot fix a per-test error rate, so the level had to become a
+  parameter. It is refused unless the run has at least ten bootstrap resamples
+  per tail. The `*_ci_95_percent` fields stay at 95% whatever is asked for, so
+  their names remain true and consumers written before the option read what they
+  always read.
+- `tools/record-host-bridge.js`, which records how two benchmark machines
+  compared before rows measured on one of them are deleted. Published figures are
+  ratios against the reference measured in the same run, so a change of host
+  cancels there; absolute nanoseconds do not.
+- `tools/retire-cloud-history.js`, which removes cohorts measured on retired
+  hosts only if every generated report comes out byte-identical, and restores the
+  file if any of them moves.
+
 - Automated cross-engine matrix benchmarking on the owned host:
   `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines
   across the five workloads on `ci-bench` and pushes the accepted cohort to
@@ -117,6 +157,26 @@ Current unpublished workspace version: `0.0.1`.
   `design/50-conformance.md`.
 
 ### Changed
+
+- Every benchmark now runs on one owned, attested machine. The DigitalOcean,
+  Vultr and Scaleway coordinators are deleted, and the cross-engine matrix moved
+  from a nightly billed cloud instance to `.github/workflows/weekly-matrix-bench.yml`
+  on that host. Nothing in this repository can create, authenticate to, or pay
+  for a cloud instance. The matrix also lost its pending-commits gate: that gate
+  asked the Rustia-progress question, which the per-commit series now answers
+  directly, and running unconditionally makes host drift visible rather than
+  hiding it.
+- Frozen configs behind published measurements are retained even though their
+  coordinators are gone; they are the protocol a reader needs to check a number
+  still on the dashboard. Configs no committed evidence referenced were deleted
+  with their coordinator. Roughly two hundred lines of cloud operating
+  instructions were removed, and with them a developer machine's host alias,
+  which should not have been in a public-bound repository.
+- The workflow checker's ban on the raw benchmark harness now names the timing
+  rather than the binary. `--refresh-results` returns before any measurement and
+  only re-derives the report tables from committed history; banning the command
+  outright is why the retired matrix lane could reach it through `just` for
+  months without any rule noticing.
 
 - DigitalOcean protocol v6 now evaluates paired-host stability within matching
   AB/BA orders. This retains the four-pair counterbalance while preventing a
