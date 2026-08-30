@@ -6642,6 +6642,14 @@ async function main() {
   }
 }
 
+// RETIRED LIFECYCLE. Nothing invokes this coordinator any more: no workflow
+// reaches it, and its justfile recipes are gone, so no path in this repository
+// creates or pays for a cloud instance. The file survives for one reason -- the
+// owned-host coordinator borrows the matrix and memory acceptance rules exported
+// at the bottom, and reimplementing them would mean two sets of rules that agree
+// only until one is edited. They move to a shared module and this file goes when
+// that extraction is worth doing on its own; running it in the meantime would
+// provision an instance and is not something anything here asks for.
 if (require.main === module) {
   main().catch((error) => {
     process.stderr.write(`run-linode-benchmark: ${error.message}\n`);

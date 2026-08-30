@@ -84,31 +84,7 @@ release-preflight:
     node tools/run-release-preflight.js
 
 benchmarks:
-    @node -e 'console.error("Local benchmark publication is disabled: use just bench-linode-matrix-plan CONFIG and just bench-linode-matrix CONFIG."); process.exit(2)'
-
-# One-time private-prompt Linode authentication in an isolated ignored state file.
-bench-linode-auth:
-    node tools/run-linode-benchmark.js auth
-
-# Read-only validation of the selected frozen config, account safety, and dedicated plan.
-bench-linode-plan config="":
-    node tools/run-linode-benchmark.js plan {{ if config == "" { "" } else { quote(config) } }}
-
-# Validate a frozen cross-language Linux + wasm matrix config without creating a Linode.
-bench-linode-matrix-plan config:
-    node tools/run-linode-benchmark.js plan "{{ config }}"
-
-# Run and atomically publish one fresh Linux + wasm matrix on an ephemeral dedicated Linode.
-bench-linode-matrix config:
-    node tools/run-linode-benchmark.js bench "{{ config }}"
-
-# Validate a frozen cross-engine Linux memory cohort without creating a Linode.
-bench-linode-memory-plan config:
-    node tools/run-linode-benchmark.js plan "{{ config }}"
-
-# Record and atomically publish one cross-engine Linux memory cohort.
-bench-linode-memory config:
-    node tools/run-linode-benchmark.js bench "{{ config }}"
+    @node -e 'console.error("Local benchmark publication is disabled. Measurement happens on the owned host: dispatch the Cross-Engine Matrix or Rustia Memory workflow, or run just bench-history / just bench-pr."); process.exit(2)'
 
 # Validate the isolated memory child/supervisor, cohort analyzer, and publisher locally.
 bench-memory-self-test:
@@ -117,10 +93,6 @@ bench-memory-self-test:
     node bench/run-memory-cohort.js self-test
     node bench/publish-memory-analysis.js self-test
     node tools/run-linux-memory-benchmark.js self-test
-
-# Run the selected frozen config on one ephemeral dedicated-CPU Linode and confirm deletion.
-bench-linode config="":
-    node tools/run-linode-benchmark.js bench {{ if config == "" { "" } else { quote(config) } }}
 
 # Takes no arguments: the series starts at the first commit that contains an
 # engine and ends at HEAD. Pass replace=1 to supersede an existing artifact,
@@ -153,22 +125,6 @@ bench-pr out="pr-screening.md":
 # Set the pull-request screening thresholds from an A/A run on the bench host.
 bench-calibrate out="bench/pr-screening.json":
     node tools/run-dedicated-benchmark.js calibrate --out {{ quote(out) }}
-
-# Inspect locally owned run state and its corresponding Linode instance.
-bench-linode-status:
-    node tools/run-linode-benchmark.js status
-
-# Remove only a coordinator lock whose recorded local process no longer exists.
-bench-linode-unlock:
-    node tools/run-linode-benchmark.js unlock
-
-# Idempotently clean up an interrupted run; pass an id when more than one remains.
-bench-linode-destroy run_id="":
-    node tools/run-linode-benchmark.js destroy "{{ run_id }}"
-
-# Re-promote one completed fixed-throughput or evidence-only export after local promotion rolled back; never contacts Linode.
-bench-linode-promote run_id:
-    node tools/run-linode-benchmark.js promote "{{ run_id }}"
 
 gen-current-results:
     cargo run -p script-bench-harness -- --refresh-results
