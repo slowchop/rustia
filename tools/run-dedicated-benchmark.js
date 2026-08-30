@@ -449,23 +449,8 @@ function commandHistory(options) {
   local("git", ["bundle", "create", bundleFile, "HEAD"], { capture: false });
 
   process.stdout.write(`shipping ${config.source.target_commits.length} revisions to ${provider.host}\n`);
-  const remote = `$HOME/${REMOTE_ROOT}`;
-  sshCapture(`set -eu\nmkdir -p "${remote}/inbox"\n`);
-  local(
-    "scp",
-    ["-q", REMOTE_RUNNER, configFile, providerFile, bundleFile, `${sshDestination()}:${REMOTE_ROOT}/inbox/`],
-    { capture: false },
-  );
-
   process.stdout.write("running; this takes about 35 minutes for 75 revisions\n");
-  sshStream(
-    `set -eu\n` +
-      REMOTE_PATH +
-      `export RUSTIA_BACKFILL_ROOT="$HOME/${REMOTE_ROOT}"\n` +
-      `cd "$HOME/${REMOTE_ROOT}/inbox"\n` +
-      `node ${path.basename(REMOTE_RUNNER)} ` +
-      `${path.basename(configFile)} provider.json repo.bundle\n`,
-  );
+  shipAndRun(configFile, providerFile, bundleFile, options.local);
 
   // fetchExport extracts into a subdirectory and returns it; promoting the run
   // directory itself finds no status.json and throws away a completed
@@ -477,9 +462,18 @@ function commandHistory(options) {
 
 function fetchExport(runDirectory) {
   const archive = path.join(runDirectory, "export.tar.gz");
-  local("scp", ["-q", `${sshDestination()}:${REMOTE_ROOT}/export.tar.gz`, archive], {
-    capture: false,
-  });
+  // The export comes back the same way the run went out. In local mode the host
+  // is this machine, so the archive is copied rather than fetched -- reaching
+  // for scp here would demand an ssh destination the local lane has no use for,
+  // which is exactly how the first per-commit run failed after measuring
+  // successfully.
+  if (localMode) {
+    fs.copyFileSync(path.join(os.homedir(), REMOTE_ROOT, "export.tar.gz"), archive);
+  } else {
+    local("scp", ["-q", `${sshDestination()}:${REMOTE_ROOT}/export.tar.gz`, archive], {
+      capture: false,
+    });
+  }
   const extracted = path.join(runDirectory, "export");
   fs.rmSync(extracted, { recursive: true, force: true });
   fs.mkdirSync(extracted, { recursive: true });
