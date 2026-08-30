@@ -584,8 +584,8 @@ belongs in the evidence.
 
 ### Pull-request screening
 
-`.github/workflows/pr-bench.yml` measures a pull request against
-`git merge-base origin/main HEAD` and reports the result in the job summary. It
+`.github/workflows/pr-bench.yml` measures a pull request against its merge base
+with the target branch and reports the result in the job summary. It
 records nothing: no row, no published artifact, and no write access to either
 repository. The merge base rather than main's tip, because an unrelated commit
 landing mid-review would otherwise be attributed to the pull request.
@@ -622,7 +622,8 @@ The calibration is also the protocol's own canary, and it caught something on
 its first real run. Four passes admit three balanced splits; all three are
 analysed. Under `1,3 vs 2,4` — every candidate pass immediately after its
 baseline — `sparse_tables` read as 1.2% *faster than itself*, with an interval
-of [-1.71, -0.66] that excludes zero.
+of [-1.71, -0.66] that excludes zero. A later run reproduced it on a different
+workload: `stdlib_math_table`, same split, this time slower.
 
 That is not a fault in the code. It is monotonic drift across a measurement
 session: later passes are faster, and that arrangement does not cancel it. The
