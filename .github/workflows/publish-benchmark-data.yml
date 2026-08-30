@@ -116,6 +116,11 @@ jobs:
             install -m 644 "$backfill" "$data_dir/$backfill"
           done
 
+          # The live per-commit series is validated where its rows live. The
+          # protocol is in this repository and reviewed; the rows are in the
+          # data repository because they grow with every commit.
+          node tools/check-benchmark-series.js --rows-root "$data_dir"
+
           install -m 644 "$data_dir/bench/memory/current-results.json" bench/memory/current-results.json
           install -m 644 "$data_dir/bench/memory/history/runs.jsonl" bench/memory/history/runs.jsonl
           node bench/render-current-results.js

@@ -330,6 +330,7 @@ function checkReleasePreflight(text) {
     // The owned-host lane. Its self-tests carry the rules that keep a source
     // repair honest and a host attested, so preflight must keep running them.
     '"tools/run-dedicated-benchmark.js"',
+    '"tools/check-benchmark-series.js"',
     '"tools/run-linux-history-backfill.js"',
     '"tools/freeze-history-backfill.js"',
     '"bench/run-memory-supervisor.js"',
@@ -474,6 +475,7 @@ function checkBenchmarkPublication(text) {
   // check a number they can see.
   requireIncludes(text, "bench/history/backfills/**", label);
   requireIncludes(text, "for backfill in bench/history/backfills/*.json; do", label);
+  requireIncludes(text, "node tools/check-benchmark-series.js --rows-root", label);
   requireIncludes(text, "node tools/render-benchmark-data-readme.js", label);
   requireIncludes(text, "publish_dir=\"$(mktemp -d \"$RUNNER_TEMP/rustia-bench-publish.XXXXXX\")\"", label);
   requireIncludes(text, "rm -rf -- \"$publish_dir\"", label);

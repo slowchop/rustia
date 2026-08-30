@@ -1,0 +1,36 @@
+{
+  "schema": "rustia.bench.history-series.v1",
+  "schema_version": 1,
+  "description": "Protocol for the live per-commit Rustia series. This file is the protocol; the rows it describes live in the published data repository, following the memory lane, because they grow with every commit and have no business in source history. Seeded verbatim from the reconstruction named below so the two are one continuous line rather than two eras.",
+  "host": "ci-bench",
+  "pinned_core": 4,
+  "harness_commit": "7a9e87d0a58c3cd921d794dc08fd47f480573511",
+  "protocol": "rustia_main_series_v1",
+  "native_target": "linux-x86_64",
+  "workloads": [
+    "dense_tables",
+    "sparse_tables",
+    "closures_upvalues",
+    "generic_iteration",
+    "stdlib_math_table"
+  ],
+  "fixed_n": {
+    "dense_tables": 2251,
+    "sparse_tables": 1522,
+    "closures_upvalues": 742545,
+    "generic_iteration": 10364,
+    "stdlib_math_table": 113454
+  },
+  "repetitions": 5,
+  "expected_checksums": {
+    "dense_tables": "number:290154861.00000000000000000",
+    "sparse_tables": "number:2413892000.00000000000000000",
+    "closures_upvalues": "number:155078458044.00000000000000000",
+    "generic_iteration": "number:237283780.00000000000000000",
+    "stdlib_math_table": "number:1164044.68408851628191769"
+  },
+  "rows_file": "bench/history/series/ci-bench-main.jsonl",
+  "rows_location": "slowchop/rustia-bench-data",
+  "join": "A renderer may draw this series continuously with a reconstruction only when host, pinned_core, harness_commit, workloads, fixed_n and every expected_checksums entry match exactly. If the harness, lockfile, toolchain or a workload changes, the fixed N and the checksums change with it, the match fails, and a new era file must be opened rather than two incomparable protocols being drawn as one line.",
+  "seeded_from_backfill": "7a9e87d0a58c3cd921d794dc08fd47f480573511"
+}

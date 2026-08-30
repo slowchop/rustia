@@ -17,7 +17,7 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 1807,
+      "file_count": 1808,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
@@ -627,6 +627,7 @@
         "history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/remote-run.log",
         "history/repairs.json",
         "history/runs.jsonl",
+        "history/series/ci-bench-main.json",
         "memory/current-results.json",
         "memory/history/runs.jsonl",
         "memory/raw/18b58d85431cdf38b7cf00665f1a348b305292aa/pre-reclamation-18b58d8/analysis.json",
