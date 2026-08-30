@@ -53,6 +53,9 @@ Options:
                              per-test error rate.
   --expected-legs N          Require exactly N baseline and N candidate legs.
   --require-full-commits     Require distinct lowercase 40-hex commit IDs.
+  --allow-identical-commits  Permit both sides to name the same commit. For an A/A
+                             calibration only: it measures what the host does when
+                             nothing changed. Recorded in the output.
   --self-test                Run dependency-free in-memory tests.
   --help                     Show this help.
 `;
@@ -400,6 +403,7 @@ function validateComparison(
   candidateValue,
   expectedLegs = null,
   requireFullCommits = false,
+  allowIdenticalCommits = false,
 ) {
   const baseline = requireArray(baselineValue, "baseline records");
   const candidate = requireArray(candidateValue, "candidate records");
@@ -426,7 +430,14 @@ function validateComparison(
 
   const baselineCommit = uniqueValue(baseline, "commit", "baseline commit");
   const candidateCommit = uniqueValue(candidate, "commit", "candidate commit");
-  if (baselineCommit === candidateCommit) {
+  // Refused by default: two sides of a comparison that name the same commit are
+  // almost always a wiring mistake, and the resulting "no regression" would be
+  // about nothing. An A/A calibration is the one case where it is the point --
+  // splitting one revision's legs into two groups measures what this host does
+  // when nothing changed, and it has to run through this same code path or it
+  // is not calibrating the thing that judges real changes. So it is permitted
+  // only when asked for by name, and the output records that it was.
+  if (baselineCommit === candidateCommit && !allowIdenticalCommits) {
     fail(`baseline and candidate commits must differ, both are ${JSON.stringify(baselineCommit)}`);
   }
   if (requireFullCommits) {
@@ -632,6 +643,10 @@ function validateAnalysisOptions(value) {
   if (typeof requireFullCommits !== "boolean") {
     fail("analysis options.requireFullCommits must be a boolean");
   }
+  const allowIdenticalCommits = options.allowIdenticalCommits ?? false;
+  if (typeof allowIdenticalCommits !== "boolean") {
+    fail("analysis options.allowIdenticalCommits must be a boolean");
+  }
   const confidenceLevel = requireConfidenceLevel(
     options.confidenceLevel ?? DEFAULT_CONFIDENCE_LEVEL,
     bootstrapIterations,
@@ -644,6 +659,7 @@ function validateAnalysisOptions(value) {
     expectedLegs,
     requireFullCommits,
     confidenceLevel,
+    allowIdenticalCommits,
   };
 }
 
@@ -670,6 +686,7 @@ function analyzeRecords(baseline, candidate, options) {
     candidate,
     validatedOptions.expectedLegs,
     validatedOptions.requireFullCommits,
+    validatedOptions.allowIdenticalCommits,
   );
   const baselineSamples = baseline.flatMap((record) => record.samples);
   const candidateSamples = candidate.flatMap((record) => record.samples);
@@ -748,6 +765,9 @@ function analyzeRecords(baseline, candidate, options) {
         "the stated level is nominal: the pooled interval assumes IID repetitions; the hierarchical sensitivity interval models observed leg clustering but cannot cover unobserved host states",
       expected_legs: validatedOptions.expectedLegs,
       require_full_commits: validatedOptions.requireFullCommits,
+      // True only for an A/A calibration, where both sides are the same
+      // revision. An artifact carrying this is measuring the host, not a change.
+      identical_commits_permitted: validatedOptions.allowIdenticalCommits,
     },
     baseline: groupOutput(baseline, baselineCommit),
     candidate: groupOutput(candidate, candidateCommit),
@@ -784,6 +804,7 @@ function parseArgs(args) {
     candidateFiles: [],
     bootstrapIterations: DEFAULT_BOOTSTRAP_ITERATIONS,
     expectedLegs: null,
+    allowIdenticalCommits: false,
     confidenceLevel: DEFAULT_CONFIDENCE_LEVEL,
     materialThresholdPercent: DEFAULT_MATERIAL_THRESHOLD_PERCENT,
     requireFullCommits: false,
@@ -805,6 +826,11 @@ function parseArgs(args) {
     }
     if (option === "--require-full-commits") {
       config.requireFullCommits = true;
+      analysisOptionSeen = true;
+      continue;
+    }
+    if (option === "--allow-identical-commits") {
+      config.allowIdenticalCommits = true;
       analysisOptionSeen = true;
       continue;
     }
@@ -1276,6 +1302,24 @@ function runSelfTest() {
     /needs at least 2000 bootstrap iterations to resolve 10 resamples per tail, but 1000 were requested/,
   );
   assert.equal(requireConfidenceLevel(0.99, 2_000, "probe"), 0.99);
+
+  // A/A: both sides the same revision. Refused unless asked for by name, and
+  // when permitted the output says so, so a calibration artifact can never be
+  // read as a comparison between two revisions.
+  const selfPaired = [candidate1, candidate2].map((record) => ({ ...record, commit: "baseline-commit" }));
+  assertThrowsMessage(
+    () => analyzeRecords([baseline1, baseline2], selfPaired, options),
+    /baseline and candidate commits must differ/,
+  );
+  const calibration = analyzeRecords([baseline1, baseline2], selfPaired, {
+    ...options,
+    allowIdenticalCommits: true,
+  });
+  assert.equal(calibration.method.identical_commits_permitted, true);
+  assert.equal(calibration.baseline.commit, calibration.candidate.commit);
+  assert.equal(first.method.identical_commits_permitted, false);
+  assert.equal(parseArgs(["--allow-identical-commits"]).allowIdenticalCommits, true);
+  assert.equal(parseArgs([]).allowIdenticalCommits, false);
 
   assert.equal(parseArgs(["--confidence", "0.99"]).confidenceLevel, 0.99);
   assert.equal(parseArgs([]).confidenceLevel, 0.95);

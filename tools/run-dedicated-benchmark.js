@@ -221,9 +221,20 @@ function existingBackfills(exceptHarnessCommit) {
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
-  const known = new Set(["plan", "history", "main", "fetch", "unlock", "self-test"]);
+  const known = new Set(["plan", "history", "main", "pr", "calibrate", "fetch", "unlock", "self-test"]);
   if (!known.has(command)) return null;
-  const parsed = { command, replace: false, config: undefined, out: undefined, previousBinary: undefined, local: false };
+  const parsed = {
+    command,
+    replace: false,
+    config: undefined,
+    out: undefined,
+    previousBinary: undefined,
+    local: false,
+    base: undefined,
+    json: undefined,
+    repetitions: undefined,
+    confidence: undefined,
+  };
   for (let index = 0; index < rest.length; index += 1) {
     const option = rest[index];
     if (option === "--replace") {
@@ -244,12 +255,38 @@ function parseArgs(argv) {
       const value = rest[++index];
       if (!value) return null;
       parsed.previousBinary = value;
+    } else if (option === "--base") {
+      const value = rest[++index];
+      if (!value) return null;
+      parsed.base = value;
+    } else if (option === "--json") {
+      const value = rest[++index];
+      if (!value) return null;
+      parsed.json = value;
+    } else if (option === "--repetitions") {
+      const value = rest[++index];
+      if (!value || !/^[1-9][0-9]*$/.test(value) || Number(value) > 10_000) return null;
+      parsed.repetitions = Number(value);
+    } else if (option === "--confidence") {
+      const value = rest[++index];
+      const parsedValue = Number(value);
+      if (!value || !Number.isFinite(parsedValue) || parsedValue <= 0.5 || parsedValue >= 1) return null;
+      parsed.confidence = parsedValue;
     } else {
       return null;
     }
   }
-  // --out and --previous-binary belong to the per-commit lane alone.
-  if ((parsed.out !== undefined || parsed.previousBinary !== undefined) && command !== "main") return null;
+  // --out is shared by the three lanes that write a file; --previous-binary is
+  // the per-commit lane's alone.
+  if (parsed.out !== undefined && !["main", "pr", "calibrate"].includes(command)) return null;
+  if (parsed.previousBinary !== undefined && command !== "main") return null;
+  // --base and --json describe a comparison; --repetitions and --confidence buy
+  // a tighter interval, which only the lanes that publish nothing may do.
+  if (parsed.base !== undefined && command !== "pr") return null;
+  if (parsed.json !== undefined && command !== "pr") return null;
+  for (const option of [parsed.repetitions, parsed.confidence]) {
+    if (option !== undefined && command !== "calibrate") return null;
+  }
   // `--replace` supersedes an existing artifact, which both the measuring
   // command and the re-promoting one can do; nothing else promotes.
   if (parsed.replace && command !== "history" && command !== "fetch") return null;
@@ -564,6 +601,414 @@ function commandMain(options) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// PR screening
+// ---------------------------------------------------------------------------
+
+// Files whose bytes define the comparison rather than take part in it. A PR that
+// edits any of them is not comparable against its merge base under one frozen
+// protocol: the workload text, the fixed sizes, the toolchain and the locked
+// dependency set are all pinned into the config by hash, so a change here makes
+// the run fail on a checksum mismatch deep inside the host. Refusing up front
+// says why, which the checksum failure would not.
+const PROTOCOL_PATH_PREFIXES = Object.freeze(["bench/", "Cargo.lock", "rust-toolchain.toml"]);
+
+function protocolChanges(paths) {
+  return paths.filter((file) =>
+    PROTOCOL_PATH_PREFIXES.some((prefix) =>
+      prefix.endsWith("/") ? file.startsWith(prefix) : file === prefix,
+    ),
+  );
+}
+
+// The screening thresholds, per workload, measured rather than chosen. The file
+// is written by `calibrate` from a run in which nothing changed, so a threshold
+// only exists once this host has been observed producing it. There is no
+// default: a guessed figure that happens to sit inside the noise reports
+// movement on PRs that changed nothing, which is worse than no lane at all.
+function loadScreeningThresholds() {
+  const file = path.join(REPO, "bench/pr-screening.json");
+  if (!fs.existsSync(file)) {
+    fail(
+      "bench/pr-screening.json is missing; run `run-dedicated-benchmark.js calibrate` on the " +
+        "benchmark host and commit its output before screening pull requests",
+    );
+  }
+  const data = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (data.schema !== "rustia.bench.pr-screening.v1") {
+    fail("bench/pr-screening.json must declare schema rustia.bench.pr-screening.v1");
+  }
+  if (data.host !== "ci-bench") fail("bench/pr-screening.json was not calibrated on ci-bench");
+  const thresholds = data.workloads;
+  if (!thresholds || typeof thresholds !== "object") {
+    fail("bench/pr-screening.json must map every workload to a threshold");
+  }
+  for (const workload of Object.keys(thresholds)) {
+    const entry = thresholds[workload];
+    if (!Number.isFinite(entry?.material_threshold_percent) || entry.material_threshold_percent <= 0) {
+      fail(`bench/pr-screening.json ${workload} must carry a positive material_threshold_percent`);
+    }
+  }
+  return data;
+}
+
+// One measurement pass over a frozen pair, start to finish, returning the
+// extracted export. `history`, `main` and this lane all reach the host through
+// shipAndRun and come back through fetchExport; the difference between them is
+// the config, not the transport.
+function runPass(configFile, label, isLocal) {
+  const config = loadConfig(configFile);
+  const provider = attestHost(config);
+  const runDirectory = path.join(STATE_ROOT, "runs", label);
+  fs.rmSync(runDirectory, { recursive: true, force: true });
+  fs.mkdirSync(runDirectory, { recursive: true });
+  const providerFile = path.join(runDirectory, "provider.json");
+  writeJson(providerFile, provider);
+  const bundleFile = path.join(runDirectory, "repo.bundle");
+  local("git", ["bundle", "create", bundleFile, "HEAD"], { capture: false });
+  shipAndRun(configFile, providerFile, bundleFile, isLocal);
+  const extracted = fetchExport(runDirectory);
+  const status = JSON.parse(fs.readFileSync(path.join(extracted, "status.json"), "utf8"));
+  if (status.status !== "backfill_complete") {
+    fail(`${label} did not complete: ${status.status}${status.reason ? ` (${status.reason})` : ""}`);
+  }
+  return extracted;
+}
+
+function passRawDirectory(extracted) {
+  return path.join(extracted, "evidence/history-backfill/raw");
+}
+
+function passBuilds(extracted) {
+  const file = path.join(extracted, "evidence/history-backfill/builds.json");
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function binaryOf(builds, commit) {
+  const build = builds.find((entry) => entry.commit === commit);
+  if (!build || !build.binary_sha256) fail(`the export does not describe a build of ${commit.slice(0, 8)}`);
+  return build.binary_sha256;
+}
+
+function freezePairConfig(baseline, candidate, repetitions, label) {
+  const configFile = path.join(STATE_ROOT, `${label}.json`);
+  fs.rmSync(configFile, { force: true });
+  local(
+    "node",
+    [
+      "tools/freeze-history-backfill.js",
+      "--pair",
+      baseline,
+      candidate,
+      "--repetitions",
+      String(repetitions),
+      "--output",
+      path.relative(REPO, configFile),
+    ],
+    { capture: false },
+  );
+  return configFile;
+}
+
+// Runs the analyzer over one workload's legs and returns its parsed output. The
+// legs are named by side, so a mix-up between them is a missing file rather than
+// a silently reversed comparison.
+function analyzeWorkload(workload, baselineLegs, candidateLegs, threshold, confidence) {
+  const args = [path.join(REPO, "bench/analyze-fixed-samples.js")];
+  for (const leg of baselineLegs) args.push("--baseline", leg);
+  for (const leg of candidateLegs) args.push("--candidate", leg);
+  args.push(
+    "--expected-legs",
+    String(baselineLegs.length),
+    "--require-full-commits",
+    "--material-threshold",
+    String(threshold),
+    "--confidence",
+    String(confidence),
+  );
+  const output = local("node", args);
+  const analysis = JSON.parse(output);
+  if (analysis.identity.workload !== workload) {
+    fail(`analyzer reported ${analysis.identity.workload} for ${workload}`);
+  }
+  return analysis;
+}
+
+function screeningSummary(result) {
+  const lines = [];
+  lines.push("## Benchmark screening");
+  lines.push("");
+  if (result.skipped) {
+    lines.push(result.reason);
+    return `${lines.join("\n")}\n`;
+  }
+  lines.push(
+    `Baseline \`${result.baseline.slice(0, 8)}\` (merge base) against \`${result.candidate.slice(0, 8)}\`, ` +
+      `measured on \`${result.host}\` pinned to core ${result.pinned_core}, ` +
+      `${result.legs_per_side} legs per side interleaved A B B A, ` +
+      `${result.repetitions} repetitions per leg, ` +
+      `${(result.confidence * 100).toFixed(0)}% intervals.`,
+  );
+  lines.push("");
+  lines.push("| workload | change | interval | reading |");
+  lines.push("| --- | ---: | ---: | --- |");
+  for (const entry of result.workloads) {
+    const sign = entry.delta_percent > 0 ? "+" : "";
+    lines.push(
+      `| \`${entry.workload}\` | ${sign}${entry.delta_percent.toFixed(2)}% | ` +
+        `[${entry.interval.lower.toFixed(2)}, ${entry.interval.upper.toFixed(2)}] | ${entry.reading} |`,
+    );
+  }
+  lines.push("");
+  lines.push(
+    "`slower` and `faster` mean the interval clears zero. `no change measured` means it does not -- " +
+      "which is not the same as proof that nothing moved, only that this run cannot separate it from " +
+      "the host's own spread.",
+  );
+  const regressions = result.workloads.filter((entry) => entry.verdict === "regression");
+  if (regressions.length > 0) {
+    lines.push("");
+    lines.push(
+      `**${regressions.length} workload(s) exceeded the calibrated screening threshold.** ` +
+        "The threshold is the spread this host shows when nothing changed, so a reading above it " +
+        "is a change rather than noise. This lane reports; it does not block.",
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+// A/A calibration. Measures one revision four times and compares two of those
+// passes against the other two, so both sides are the same bytes and every
+// difference is the host. Four passes rather than two because the PR lane uses
+// two legs a side, and an interval width only transfers to a comparison built
+// the same way.
+//
+// The split is 1,4 against 2,3: the two groups straddle the run symmetrically,
+// so a slow drift over the session cancels instead of loading onto whichever
+// group went last.
+//
+// This is deliberately more pessimistic than the lane it calibrates. Here each
+// leg gets its own quiet window; in the PR lane the two sides are measured
+// inside one window, which can only make them more comparable. A threshold set
+// from this is therefore not tighter than the noise it will meet.
+const CALIBRATION_PASSES = 4;
+const CALIBRATION_SPLIT = Object.freeze({ baseline: [0, 3], candidate: [1, 2] });
+
+function calibrationThreshold(interval) {
+  const widest = Math.max(Math.abs(interval.lower), Math.abs(interval.upper));
+  // Two decimals, rounded up, so the recorded threshold is never narrower than
+  // what was actually observed.
+  return Math.ceil(widest * 100) / 100;
+}
+
+function commandCalibrate(options) {
+  const commit = git(["rev-parse", "HEAD"]).trim();
+  const repetitions = options.repetitions ?? 5;
+  const confidence = options.confidence ?? 0.99;
+  const passes = [];
+  for (let index = 0; index < CALIBRATION_PASSES; index += 1) {
+    const label = `calibrate-${commit.slice(0, 12)}-${index + 1}`;
+    const configFile = path.join(STATE_ROOT, `${label}.json`);
+    fs.rmSync(configFile, { force: true });
+    local(
+      "node",
+      [
+        "tools/freeze-history-backfill.js",
+        "--only",
+        commit,
+        "--repetitions",
+        String(repetitions),
+        "--output",
+        path.relative(REPO, configFile),
+      ],
+      { capture: false },
+    );
+    process.stdout.write(`calibration pass ${index + 1}/${CALIBRATION_PASSES}\n`);
+    passes.push(runPass(configFile, label, options.local));
+  }
+
+  // Every pass must have built the same bytes, or this is not an A/A run at all.
+  const binaries = new Set(passes.map((pass) => binaryOf(passBuilds(pass), commit)));
+  if (binaries.size !== 1) {
+    fail(`calibration passes produced ${binaries.size} different binaries for one commit`);
+  }
+
+  // The workload list comes from the frozen config rather than a constant here,
+  // so calibration covers exactly what the lane measures and cannot drift from
+  // it.
+  const config = loadConfig(path.join(STATE_ROOT, `calibrate-${commit.slice(0, 12)}-1.json`));
+  const legFor = (passIndex, workload) =>
+    path.join(passRawDirectory(passes[passIndex]), `${commit}-${workload}-samples.json`);
+  const workloads = {};
+  const evidence = [];
+  const broken = [];
+  for (const workload of config.measurement.workloads) {
+    const baselineLegs = CALIBRATION_SPLIT.baseline.map((index) => legFor(index, workload));
+    const candidateLegs = CALIBRATION_SPLIT.candidate.map((index) => legFor(index, workload));
+    const args = [path.join(REPO, "bench/analyze-fixed-samples.js")];
+    for (const leg of baselineLegs) args.push("--baseline", leg);
+    for (const leg of candidateLegs) args.push("--candidate", leg);
+    args.push(
+      "--expected-legs",
+      "2",
+      "--allow-identical-commits",
+      "--material-threshold",
+      "0",
+      "--confidence",
+      String(confidence),
+    );
+    const analysis = JSON.parse(local("node", args));
+    const interval = analysis.comparison.bootstrap_ci_percent;
+    const threshold = calibrationThreshold(interval);
+    // The canary. Nothing changed between these two groups, so an interval that
+    // clears zero means the protocol is measuring something other than the code.
+    // Raising the threshold until it passes would hide exactly the fault worth
+    // finding, so this refuses to write a calibration instead.
+    if (analysis.comparison.direction.status !== "indistinguishable") {
+      broken.push(
+        `${workload}: A/A interval [${interval.lower.toFixed(2)}, ${interval.upper.toFixed(2)}] ` +
+          `excludes zero (${analysis.comparison.direction.status})`,
+      );
+    }
+    workloads[workload] = {
+      material_threshold_percent: threshold,
+      observed_aa_interval_percent: interval,
+      observed_aa_delta_percent: analysis.comparison.candidate_delta_percent,
+    };
+    evidence.push({ workload, interval, delta: analysis.comparison.candidate_delta_percent, threshold });
+  }
+
+  for (const line of evidence) {
+    process.stdout.write(
+      `${line.workload.padEnd(20)} delta ${line.delta.toFixed(3).padStart(8)}%  ` +
+        `interval [${line.interval.lower.toFixed(2)}, ${line.interval.upper.toFixed(2)}]  ` +
+        `threshold ${line.threshold.toFixed(2)}%\n`,
+    );
+  }
+  if (broken.length > 0) {
+    fail(
+      "the A/A calibration is not indistinguishable from zero, so the comparison protocol is " +
+        `measuring something other than the code:\n  ${broken.join("\n  ")}`,
+    );
+  }
+
+  const output = {
+    schema: "rustia.bench.pr-screening.v1",
+    calibrated_at: new Date().toISOString(),
+    calibrated_from_commit: commit,
+    host: config.provider.host.name,
+    pinned_core: config.host_gate.benchmark_cpu,
+    passes: CALIBRATION_PASSES,
+    legs_per_side: 2,
+    repetitions,
+    confidence,
+    method:
+      "One revision measured in four separate passes; passes 1 and 4 compared against 2 and 3 " +
+      "through bench/analyze-fixed-samples.js with --allow-identical-commits. Both sides are the " +
+      "same binary, so the interval is this host's own spread. Each threshold is the widest end " +
+      "of that interval, rounded up: a reading a PR has to beat to be a change rather than noise.",
+    workloads,
+  };
+  const destination = options.out ?? path.join(REPO, "bench/pr-screening.json");
+  writeJson(destination, output);
+  process.stdout.write(`wrote ${path.relative(REPO, destination)}\n`);
+}
+
+function commandPr(options) {
+  if (!options.out) fail("pr requires --out FILE to write the screening summary to");
+  const screening = loadScreeningThresholds();
+  const candidate = git(["rev-parse", "HEAD"]).trim();
+  const baseline = git(["merge-base", options.base ?? "origin/main", "HEAD"]).trim();
+  if (!FULL_COMMIT.test(baseline) || !FULL_COMMIT.test(candidate)) {
+    fail("could not resolve both the merge base and the candidate to full commits");
+  }
+  const write = (result) => {
+    fs.writeFileSync(options.out, screeningSummary(result));
+    if (options.json) writeJson(options.json, result);
+  };
+
+  if (baseline === candidate) {
+    write({ skipped: true, reason: "The merge base is this commit; there is nothing to compare against." });
+    return;
+  }
+
+  const changed = git(["diff", "--name-only", `${baseline}..${candidate}`]).trim().split("\n").filter(Boolean);
+  const protocol = protocolChanges(changed);
+  if (protocol.length > 0) {
+    write({
+      skipped: true,
+      reason:
+        "This change edits the measurement protocol itself " +
+        `(${protocol.slice(0, 6).map((file) => `\`${file}\``).join(", ")}` +
+        `${protocol.length > 6 ? ", …" : ""}), so the two sides cannot be measured under one frozen ` +
+        "config. Compare them with a full acceptance run instead.",
+    });
+    return;
+  }
+
+  const repetitions = screening.repetitions;
+  const confidence = screening.confidence;
+  const first = runPass(
+    freezePairConfig(baseline, candidate, repetitions, `pr-${candidate.slice(0, 12)}-ab`),
+    `pr-${candidate.slice(0, 12)}-ab`,
+    options.local,
+  );
+  const builds = passBuilds(first);
+  if (binaryOf(builds, baseline) === binaryOf(builds, candidate)) {
+    write({
+      skipped: true,
+      reason:
+        `This change builds a byte-identical binary to its merge base ` +
+        `(\`${binaryOf(builds, baseline).slice(0, 12)}\`), so there is nothing to measure.`,
+    });
+    return;
+  }
+  const second = runPass(
+    freezePairConfig(candidate, baseline, repetitions, `pr-${candidate.slice(0, 12)}-ba`),
+    `pr-${candidate.slice(0, 12)}-ba`,
+    options.local,
+  );
+
+  const legs = (commit) => [first, second].map((pass) => path.join(passRawDirectory(pass), `${commit}-WORKLOAD-samples.json`));
+  const workloads = [];
+  for (const workload of Object.keys(screening.workloads)) {
+    const baselineLegs = legs(baseline).map((file) => file.replace("WORKLOAD", workload));
+    const candidateLegs = legs(candidate).map((file) => file.replace("WORKLOAD", workload));
+    for (const file of [...baselineLegs, ...candidateLegs]) {
+      if (!fs.existsSync(file)) fail(`missing measured leg ${path.relative(STATE_ROOT, file)}`);
+    }
+    const threshold = screening.workloads[workload].material_threshold_percent;
+    const analysis = analyzeWorkload(workload, baselineLegs, candidateLegs, threshold, confidence);
+    const direction = analysis.comparison.direction.status;
+    workloads.push({
+      workload,
+      delta_percent: analysis.comparison.candidate_delta_percent,
+      interval: analysis.comparison.bootstrap_ci_percent,
+      threshold_percent: threshold,
+      direction,
+      verdict: analysis.comparison.verdict.status,
+      reading:
+        direction === "faster" ? "faster" : direction === "slower" ? "slower" : "no change measured",
+    });
+  }
+
+  const config = loadConfig(path.join(STATE_ROOT, `pr-${candidate.slice(0, 12)}-ab.json`));
+  const result = {
+    schema: "rustia.bench.pr-screening-result.v1",
+    skipped: false,
+    baseline,
+    candidate,
+    host: config.provider.host.name,
+    pinned_core: config.host_gate.benchmark_cpu,
+    legs_per_side: 2,
+    repetitions,
+    confidence,
+    workloads,
+  };
+  write(result);
+  process.stdout.write(screeningSummary(result));
+}
+
 function commandFetch(options) {
   const lastRunFile = path.join(STATE_ROOT, "last-run");
   const runId = fs.existsSync(lastRunFile) ? fs.readFileSync(lastRunFile, "utf8").trim() : null;
@@ -649,13 +1094,13 @@ function selfTest() {
   assert.equal(present.length, 1, `expected one committed backfill, found ${present.length}`);
   assert.deepEqual(existingBackfills(present[0]), [], "a run excludes its own artifact");
 
-  assert.deepEqual(parseArgs(["plan"]), {
-    command: "plan", replace: false, config: undefined, out: undefined, previousBinary: undefined,
-    local: false,
-  });
+  const defaults = {
+    replace: false, config: undefined, out: undefined, previousBinary: undefined, local: false,
+    base: undefined, json: undefined, repetitions: undefined, confidence: undefined,
+  };
+  assert.deepEqual(parseArgs(["plan"]), { command: "plan", ...defaults });
   assert.deepEqual(parseArgs(["history", "--replace"]), {
-    command: "history", replace: true, config: undefined, out: undefined, previousBinary: undefined,
-    local: false,
+    command: "history", ...defaults, replace: true,
   });
   // Local mode still attests: running on the host does not exempt a run from
   // proving the host is what the config says.
@@ -670,6 +1115,67 @@ function selfTest() {
   assert.equal(parseArgs(["fetch", "--replace"]).replace, true, "fetch promotes, so it may supersede");
   assert.equal(parseArgs(["history", "--config"]), null);
 
+  // The screening lanes. --base and --json describe a comparison, so only `pr`
+  // takes them; --repetitions and --confidence buy a tighter interval, which
+  // only the lane that publishes nothing is free to do.
+  assert.equal(parseArgs(["pr", "--out", "s.md"]).out, "s.md");
+  assert.equal(parseArgs(["pr", "--out", "s.md", "--base", "origin/main"]).base, "origin/main");
+  assert.equal(parseArgs(["pr", "--out", "s.md", "--json", "s.json"]).json, "s.json");
+  assert.equal(parseArgs(["main", "--out", "r.jsonl", "--base", "x"]), null, "the series has no merge base");
+  assert.equal(parseArgs(["pr", "--repetitions", "25"]), null, "screening must not retune itself");
+  assert.equal(parseArgs(["calibrate", "--repetitions", "25"]).repetitions, 25);
+  assert.equal(parseArgs(["calibrate", "--confidence", "0.99"]).confidence, 0.99);
+  assert.equal(parseArgs(["calibrate", "--confidence", "1"]), null);
+  assert.equal(parseArgs(["calibrate", "--confidence", "0.5"]), null);
+  assert.equal(parseArgs(["calibrate", "--repetitions", "0"]), null);
+  assert.equal(parseArgs(["history", "--out", "x"]), null);
+  assert.equal(parseArgs(["pr", "--base"]), null);
+
+  // Protocol files define the comparison; a change to one is not comparable
+  // under a single frozen config, and the lane has to say so rather than fail
+  // on a checksum deep inside the host.
+  assert.deepEqual(protocolChanges(["crates/rustia-vm/src/vm.rs"]), []);
+  assert.deepEqual(protocolChanges(["bench/workloads/luau/01.luau"]), ["bench/workloads/luau/01.luau"]);
+  assert.deepEqual(protocolChanges(["Cargo.lock"]), ["Cargo.lock"]);
+  assert.deepEqual(protocolChanges(["rust-toolchain.toml"]), ["rust-toolchain.toml"]);
+  // A path that merely starts with the same letters is not inside the directory.
+  assert.deepEqual(protocolChanges(["benchmarks/notes.md", "Cargo.lock.bak"]), []);
+
+  // The threshold is the widest end of the A/A interval, rounded up, so it is
+  // never narrower than what the host was actually seen doing.
+  assert.equal(calibrationThreshold({ lower: -1.234, upper: 0.5 }), 1.24);
+  assert.equal(calibrationThreshold({ lower: -0.1, upper: 2.001 }), 2.01);
+  assert.equal(calibrationThreshold({ lower: -0.5, upper: 0.5 }), 0.5);
+
+  // The two calibration groups must straddle the run, not sit one after the
+  // other, or a drift across the session lands entirely on the second group.
+  assert.deepEqual(CALIBRATION_SPLIT.baseline, [0, 3]);
+  assert.deepEqual(CALIBRATION_SPLIT.candidate, [1, 2]);
+  assert.equal(
+    new Set([...CALIBRATION_SPLIT.baseline, ...CALIBRATION_SPLIT.candidate]).size,
+    CALIBRATION_PASSES,
+    "every calibration pass must be used exactly once",
+  );
+
+  // A skipped screening still renders a summary a reader can act on.
+  const skipped = screeningSummary({ skipped: true, reason: "nothing to compare" });
+  assert.match(skipped, /## Benchmark screening/);
+  assert.match(skipped, /nothing to compare/);
+  const rendered = screeningSummary({
+    skipped: false, baseline: "a".repeat(40), candidate: "b".repeat(40), host: "ci-bench",
+    pinned_core: 4, legs_per_side: 2, repetitions: 5, confidence: 0.99,
+    workloads: [
+      { workload: "dense_tables", delta_percent: -3.5, interval: { lower: -4, upper: -3 },
+        direction: "faster", verdict: "material_regression_excluded", reading: "faster" },
+      { workload: "closures_upvalues", delta_percent: 9, interval: { lower: 8, upper: 10 },
+        direction: "slower", verdict: "regression", reading: "slower" },
+    ],
+  });
+  assert.match(rendered, /ci-bench/);
+  assert.match(rendered, /-3\.50%/);
+  assert.match(rendered, /\+9\.00%/);
+  assert.match(rendered, /1 workload\(s\) exceeded the calibrated screening threshold/);
+
   process.stdout.write("run-dedicated-benchmark self-test ok\n");
 }
 
@@ -680,6 +1186,10 @@ function usage() {
       "  plan      [--config FILE]              freeze, attest the host, print the plan\n" +
       "  history   [--config FILE] [--replace]  measure every revision and promote\n" +
       "  main      --out FILE [--previous-binary SHA]  measure HEAD alone for the live series\n" +
+      "  pr        --out FILE [--base REF] [--json FILE]  screen HEAD against its merge base\n" +
+      "  calibrate [--out FILE] [--repetitions N] [--confidence P]\n" +
+      "                                         measure one revision against itself and write\n" +
+      "                                         the per-workload screening thresholds\n" +
       "  fetch     [--config FILE] [--replace]  re-collect and promote the last remote run\n" +
       "  unlock                                 clear a stale lock on the benchmark host\n" +
       "  self-test                              run the pure-function checks\n" +
@@ -701,6 +1211,8 @@ try {
     if (parsed.command === "plan") commandPlan(parsed);
     else if (parsed.command === "history") commandHistory(parsed);
     else if (parsed.command === "main") commandMain(parsed);
+    else if (parsed.command === "pr") commandPr(parsed);
+    else if (parsed.command === "calibrate") commandCalibrate(parsed);
     else if (parsed.command === "fetch") commandFetch(parsed);
     else if (parsed.command === "unlock") commandUnlock();
   }

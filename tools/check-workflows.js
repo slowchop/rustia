@@ -133,6 +133,7 @@ const WORKFLOW_RUNNER_CLASS = new Map([
   ["nightly-matrix-bench.yml", "general-linux"],
   ["publish-benchmark-data.yml", "general-linux"],
   ["main-bench.yml", "bench-solo"],
+  ["pr-bench.yml", "bench-solo"],
   ["linode-rustia-memory.yml", null],
 ]);
 
@@ -350,6 +351,44 @@ function checkMainBench(text) {
   forbidIncludes(text, "LINODE_TOKEN", label);
 }
 
+function checkPrBench(text) {
+  const label = ".github/workflows/pr-bench.yml";
+  // pull_request, never pull_request_target: the latter would run this with a
+  // writable token in the base repository's context. The global ban below covers
+  // it too; this is the file where it would actually be tempting.
+  requireIncludes(text, '"on":\n  pull_request:\n', label);
+  requireIncludes(text, "permissions:\n  contents: read\n", label);
+  requireIncludes(text, "cancel-in-progress: true", label);
+  requireIncludes(text, "persist-credentials: false", label);
+  requireIncludes(text, "timeout-minutes:", label);
+  requireIncludes(text, "node tools/run-dedicated-benchmark.js pr", label);
+  requireIncludes(text, "node tools/run-dedicated-benchmark.js calibrate", label);
+
+  // The fork guard. The repository is private today, so this changes nothing
+  // now; it is pinned because the day it starts to matter is the day the
+  // repository goes public, and by then nobody will be reading this file.
+  // Without it, any stranger's pull request would execute their code on the
+  // machine that produces every published number.
+  requireIncludes(
+    text,
+    "github.event.pull_request.head.repo.full_name == github.repository",
+    label,
+  );
+
+  // Screening reports; it does not record. Three independent statements of that:
+  // no write to either repository, nothing that reaches published history, and
+  // no secret to write with.
+  forbidIncludes(text, "git push", label);
+  forbidIncludes(text, "bench/history", label);
+  forbidIncludes(text, "--history", label);
+  forbidIncludes(text, "secrets.", label);
+  forbidIncludes(text, "contents: write", label);
+  forbidIncludes(text, "actions/upload-artifact", label);
+  // A screening run must not be able to supersede the reconstruction or promote
+  // an artifact, both of which --replace does.
+  forbidIncludes(text, "--replace", label);
+}
+
 function checkReleasePreflight(text) {
   const label = "tools/run-release-preflight.js";
   for (const needle of [
@@ -546,6 +585,7 @@ const files = workflowFiles();
 for (const required of [
   "ci.yml",
   "main-bench.yml",
+  "pr-bench.yml",
   "linode-rustia-memory.yml",
   "nightly-matrix-bench.yml",
   "publish-benchmark-data.yml",
@@ -563,6 +603,7 @@ checkRustiaMemory(readWorkflow(rustiaMemoryPath));
 checkNightlyMatrix(readWorkflow(nightlyMatrixPath));
 checkBenchmarkPublication(readWorkflow(benchmarkPublicationPath));
 checkMainBench(readWorkflow(path.join(workflowDir, "main-bench.yml")));
+checkPrBench(readWorkflow(path.join(workflowDir, "pr-bench.yml")));
 checkReleasePreflight(readWorkflow(releasePreflightPath));
 
 console.log(`workflow policy ok for ${files.length} workflow file(s)`);

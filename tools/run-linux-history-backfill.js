@@ -1039,7 +1039,15 @@ function publish(config, configFile, providerFile, builds, measurement, evidence
   const rawDirectory = path.join(evidenceDirectory, "raw");
   fs.mkdirSync(rawDirectory, { recursive: true });
   for (const build of builds) {
-    for (const suffix of [".jsonl", "-samples.json"]) {
+    const suffixes = [".jsonl", "-samples.json"];
+    // The per-workload sidecars as the harness wrote them. The combined file
+    // above is this runner's own envelope; these are rustia.bench.raw-samples.v1
+    // and are what bench/analyze-fixed-samples.js reads directly. Exporting them
+    // is what lets the PR lane compare two revisions without anything having to
+    // rebuild an analyzer input out of parts, which would mean asserting
+    // protocol metadata rather than carrying the harness's own.
+    for (const workload of WORKLOADS) suffixes.push(`-${workload}-samples.json`);
+    for (const suffix of suffixes) {
       const source = path.join(measurement.attemptDirectory, `${build.commit}${suffix}`);
       fs.copyFileSync(source, path.join(rawDirectory, `${build.commit}${suffix}`));
     }

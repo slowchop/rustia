@@ -219,7 +219,7 @@ function sourceModifications(selected) {
   }
 }
 
-function freeze(start, outputFile, only) {
+function freeze(start, outputFile, only, pair, repetitions) {
   const tracked = git(["status", "--porcelain=v1", "--untracked-files=no"]).trim();
   if (tracked) fail("tracked worktree changes must be committed before freezing a backfill");
   const harness = git(["rev-parse", "HEAD"]).trim();
@@ -239,10 +239,25 @@ function freeze(start, outputFile, only) {
   // `--only` freezes a single revision: the per-commit lane measures one commit
   // under exactly the protocol the reconstruction used, so the two are one
   // series rather than two. Everything else about the config is identical.
-  const commits = only
-    ? [git(["rev-parse", `${only}^{commit}`]).trim()]
-    : targetCommits(resolvedStart, harness);
-  if (only && !FULL_COMMIT.test(commits[0])) fail("--only must name a resolvable commit");
+  // `--pair` freezes exactly two revisions in the order given. The PR lane runs
+  // this twice with the order reversed, so the two sides interleave as A B B A
+  // rather than being measured one after the other -- host drift over the run
+  // then lands on both sides instead of on whichever went second.
+  let commits;
+  if (pair) {
+    commits = pair.map((revision) => git(["rev-parse", `${revision}^{commit}`]).trim());
+    if (!commits.every((commit) => FULL_COMMIT.test(commit))) {
+      fail("--pair must name two resolvable commits");
+    }
+    if (commits[0] === commits[1]) {
+      fail("--pair needs two different commits; compare a commit with itself across legs instead");
+    }
+  } else if (only) {
+    commits = [git(["rev-parse", `${only}^{commit}`]).trim()];
+    if (!FULL_COMMIT.test(commits[0])) fail("--only must name a resolvable commit");
+  } else {
+    commits = targetCommits(resolvedStart, harness);
+  }
   const config = {
     schema: "rustia.dedicated-history-backfill.v1",
     provider: baseConfig.provider,
@@ -279,7 +294,11 @@ function freeze(start, outputFile, only) {
       native_target: "linux-x86_64",
       workloads: WORKLOADS,
       fixed_n: measurements.fixed_n,
-      repetitions: 5,
+      // The reconstruction and the per-commit series both use five, and a row
+      // that is to join that series has to be measured the same way. The PR lane
+      // publishes nothing, so it is free to buy a tighter interval with more
+      // repetitions -- which is the only reason this is a parameter.
+      repetitions,
       expected_checksums: measurements.expected_checksums,
     },
     // The dedicated host's gate, plus the retry bound the backfill protocol
@@ -316,7 +335,9 @@ function freeze(start, outputFile, only) {
 
 function usage() {
   process.stdout.write(
-    "Usage: node tools/freeze-history-backfill.js [--start COMMIT | --only COMMIT] [--output FILE.json]\n" +
+    "Usage: node tools/freeze-history-backfill.js [--start COMMIT | --only COMMIT |\n" +
+      "                                            --pair BASELINE CANDIDATE]\n" +
+      "                                           [--repetitions N] [--output FILE.json]\n" +
       "       node tools/freeze-history-backfill.js --self-test\n" +
       "\n" +
       "Without --start the series begins at the first commit that contains an engine.\n" +
@@ -391,24 +412,57 @@ function selfTest() {
     fs.readFileSync(path.join(REPO, "bench/history/repairs.json"), "utf8"),
   ).repairs ?? []).map((repair) => repair.commit))]);
 
+  // The argument surface. --pair is two commits in the order given, is mutually
+  // exclusive with the two series selectors, and refuses a commit paired with
+  // itself -- that comparison exists, but it is legs of one revision, not a pair.
+  const args = (list) => parseArgs(list);
+  if (args(["--pair", "aaa", "bbb"])?.pair?.length !== 2) fail("self-test: --pair must take two values");
+  if (args(["--pair", "aaa", "bbb", "--only", "ccc"]) !== null) fail("self-test: --pair with --only must be refused");
+  if (args(["--pair", "aaa", "bbb", "--start", "ccc"]) !== null) fail("self-test: --pair with --start must be refused");
+  if (args(["--pair", "aaa"]) !== null) fail("self-test: --pair with one value must be refused");
+  if (args(["--repetitions", "25"])?.repetitions !== 25) fail("self-test: --repetitions must parse");
+  if (args(["--repetitions", "0"]) !== null) fail("self-test: --repetitions 0 must be refused");
+  if (args(["--repetitions", "-3"]) !== null) fail("self-test: negative --repetitions must be refused");
+  if (args(["--repetitions", "1e6"]) !== null) fail("self-test: non-integer --repetitions must be refused");
+  if (args(["--repetitions", "10001"]) !== null) fail("self-test: unbounded --repetitions must be refused");
+  if (args([])?.repetitions !== undefined) fail("self-test: --repetitions must default to unset");
+
   process.stdout.write("freeze-history-backfill self-test ok\n");
 }
 
 function parseArgs(argv) {
-  const parsed = { start: undefined, output: undefined, only: undefined, selfTest: false };
+  const parsed = {
+    start: undefined,
+    output: undefined,
+    only: undefined,
+    pair: undefined,
+    repetitions: undefined,
+    selfTest: false,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const option = argv[index];
     if (option === "--self-test") parsed.selfTest = true;
     else if (option === "--start") parsed.start = argv[++index];
     else if (option === "--output") parsed.output = argv[++index];
     else if (option === "--only") parsed.only = argv[++index];
+    else if (option === "--pair") parsed.pair = [argv[++index], argv[++index]];
+    else if (option === "--repetitions") parsed.repetitions = argv[++index];
     else return null;
   }
-  if (parsed.selfTest && (parsed.start || parsed.output || parsed.only)) return null;
+  if (parsed.selfTest && (parsed.start || parsed.output || parsed.only || parsed.pair)) return null;
   // --only names the whole series; a start commit would be ignored.
   if (parsed.only !== undefined && parsed.start !== undefined) return null;
   for (const value of [parsed.start, parsed.output, parsed.only]) {
     if (value !== undefined && !value) return null;
+  }
+  if (parsed.pair !== undefined) {
+    if (parsed.start !== undefined || parsed.only !== undefined) return null;
+    if (parsed.pair.length !== 2 || parsed.pair.some((value) => !value)) return null;
+  }
+  if (parsed.repetitions !== undefined) {
+    if (!/^[1-9][0-9]*$/.test(parsed.repetitions)) return null;
+    parsed.repetitions = Number(parsed.repetitions);
+    if (parsed.repetitions > 10_000) return null;
   }
   return parsed;
 }
@@ -421,7 +475,7 @@ try {
   } else if (parsed.selfTest) {
     selfTest();
   } else {
-    freeze(parsed.start, parsed.output, parsed.only);
+    freeze(parsed.start, parsed.output, parsed.only, parsed.pair, parsed.repetitions ?? 5);
   }
 } catch (error) {
   process.stderr.write(`freeze-history-backfill: ${error.message}\n`);
