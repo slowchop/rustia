@@ -413,7 +413,9 @@ function installRuntimes(config) {
 }
 
 function build(config) {
-  const cargo = "/root/.cargo/bin/cargo";
+  // Through PATH, like rustup above: /root/.cargo/bin belongs to the rented
+  // model, where the runner was the only user on the machine.
+  const cargo = "cargo";
   const manifest = path.join(SOURCE, "Cargo.toml");
   const benchManifest = path.join(SOURCE, "bench/Cargo.toml");
   const wasmManifest = path.join(SOURCE, "bench/wasm/adapter-runner/Cargo.toml");
@@ -670,18 +672,26 @@ async function measure(config, buildInfo, evidenceDirectory) {
 function collectHost(config, buildInfo) {
   const cpuInfo = fs.readFileSync("/proc/cpuinfo", "utf8");
   const model = cpuInfo.match(/^model name\s*:\s*(.+)$/m);
+  const dedicated = config.schema === DEDICATED_SCHEMA;
   return {
     schema: "rustia.bench.matrix-host.v1",
     captured_at: new Date().toISOString(),
     platform: process.platform,
     arch: runText("uname", ["-m"]),
-    uname: runText("uname", ["-a"]),
+    // `uname -a` includes the node name. On a throwaway instance that is a
+    // random string that stops existing with the machine; on an owned host it
+    // is the real name of a real machine, and this file is committed to a
+    // public repository. The kernel, release and architecture are what the
+    // evidence is actually for, so the owned lane records those and leaves the
+    // node name out rather than publishing it and hoping nobody minds.
+    uname: dedicated ? runText("uname", ["-srvm"]) : runText("uname", ["-a"]),
     os_release: fs.readFileSync("/etc/os-release", "utf8"),
     virtualization: runText("systemd-detect-virt", [], { allowFailure: true }),
     cpu_model: model ? model[1].trim() : "unknown",
     cpuinfo_sha256: sha256(Buffer.from(cpuInfo)),
     benchmark_cpu: config.host_gate.benchmark_cpu,
-    rustc_vv: runText("/root/.cargo/bin/rustc", ["+1.95.0", "-vV"]),
+    // Resolved through PATH; /root/.cargo/bin only exists on the rented model.
+    rustc_vv: runText("rustc", ["+1.95.0", "-vV"]),
     cargo_version: runText(buildInfo.cargo, ["+1.95.0", "--version"]),
     taskset_version: runText("taskset", ["--version"]).split("\n")[0],
   };

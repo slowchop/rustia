@@ -25,8 +25,25 @@ const STATE_ROOT = path.join(REPO, ".rustia-benchmark-state/dedicated");
 const CONFIG_DIR = path.join(REPO, "bench/cloud");
 const BACKFILL_DIR = path.join(REPO, "bench/history/backfills");
 const EVIDENCE_DIR = path.join(REPO, "bench/evidence/history-backfill");
-const REMOTE_RUNNER = "tools/run-linux-history-backfill.js";
-const REMOTE_ROOT = ".rustia-history-backfill";
+// Two runners reach the same host the same way. They differ only in which
+// script is shipped, which directory it owns, and which variable names that
+// directory -- so the transport is one function and the lane is data, rather
+// than a second copy of ship/run/fetch that agrees with the first until one of
+// them is edited.
+const LANES = Object.freeze({
+  history: Object.freeze({
+    runner: "tools/run-linux-history-backfill.js",
+    root: ".rustia-history-backfill",
+    rootEnv: "RUSTIA_BACKFILL_ROOT",
+  }),
+  matrix: Object.freeze({
+    runner: "tools/run-linux-matrix-benchmark.js",
+    root: ".rustia-matrix",
+    rootEnv: "RUSTIA_MATRIX_ROOT",
+  }),
+});
+const REMOTE_RUNNER = LANES.history.runner;
+const REMOTE_ROOT = LANES.history.root;
 const SSH_ENV = "RUSTIA_BENCH_SSH";
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 
@@ -221,7 +238,7 @@ function existingBackfills(exceptHarnessCommit) {
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
-  const known = new Set(["plan", "history", "main", "pr", "calibrate", "fetch", "unlock", "self-test"]);
+  const known = new Set(["plan", "history", "main", "pr", "calibrate", "matrix", "fetch", "unlock", "self-test"]);
   if (!known.has(command)) return null;
   const parsed = {
     command,
@@ -230,6 +247,7 @@ function parseArgs(argv) {
     out: undefined,
     previousBinary: undefined,
     local: false,
+    plan: false,
     base: undefined,
     json: undefined,
     repetitions: undefined,
@@ -247,6 +265,8 @@ function parseArgs(argv) {
       parsed.config = value;
     } else if (option === "--local") {
       parsed.local = true;
+    } else if (option === "--plan") {
+      parsed.plan = true;
     } else if (option === "--out") {
       const value = rest[++index];
       if (!value) return null;
@@ -282,6 +302,9 @@ function parseArgs(argv) {
   if (parsed.previousBinary !== undefined && command !== "main") return null;
   // --base and --json describe a comparison; --repetitions and --confidence buy
   // a tighter interval, which only the lanes that publish nothing may do.
+  // --plan measures and validates but promotes nothing, which only the lane that
+  // promotes into this repository has any use for.
+  if (parsed.plan && command !== "matrix") return null;
   if (parsed.base !== undefined && command !== "pr") return null;
   if (parsed.json !== undefined && command !== "pr") return null;
   for (const option of [parsed.repetitions, parsed.confidence]) {
@@ -497,7 +520,7 @@ function commandHistory(options) {
   fs.writeFileSync(path.join(STATE_ROOT, "last-run"), `${runId}\n`);
 }
 
-function fetchExport(runDirectory) {
+function fetchExport(runDirectory, lane = LANES.history) {
   const archive = path.join(runDirectory, "export.tar.gz");
   // The export comes back the same way the run went out. In local mode the host
   // is this machine, so the archive is copied rather than fetched -- reaching
@@ -505,9 +528,9 @@ function fetchExport(runDirectory) {
   // which is exactly how the first per-commit run failed after measuring
   // successfully.
   if (localMode) {
-    fs.copyFileSync(path.join(os.homedir(), REMOTE_ROOT, "export.tar.gz"), archive);
+    fs.copyFileSync(path.join(os.homedir(), lane.root, "export.tar.gz"), archive);
   } else {
-    local("scp", ["-q", `${sshDestination()}:${REMOTE_ROOT}/export.tar.gz`, archive], {
+    local("scp", ["-q", `${sshDestination()}:${lane.root}/export.tar.gz`, archive], {
       capture: false,
     });
   }
@@ -529,27 +552,28 @@ function fetchExport(runDirectory) {
 // Puts the runner, the frozen config, the attestation and a bundle of this
 // checkout where the host can see them, then runs it. In local mode the host is
 // this machine, so the inbox is a directory rather than a destination.
-function shipAndRun(configFile, providerFile, bundleFile, isLocal) {
-  const inbox = `$HOME/${REMOTE_ROOT}/inbox`;
+function shipAndRun(configFile, providerFile, bundleFile, isLocal, lane = LANES.history) {
+  const inbox = `$HOME/${lane.root}/inbox`;
   sshCapture(`set -eu\nmkdir -p "${inbox}"\n`);
   if (isLocal) {
-    const resolved = path.join(os.homedir(), REMOTE_ROOT, "inbox");
-    for (const file of [path.join(REPO, REMOTE_RUNNER), configFile, providerFile, bundleFile]) {
+    const resolved = path.join(os.homedir(), lane.root, "inbox");
+    fs.mkdirSync(resolved, { recursive: true });
+    for (const file of [path.join(REPO, lane.runner), configFile, providerFile, bundleFile]) {
       fs.copyFileSync(file, path.join(resolved, path.basename(file)));
     }
   } else {
     local(
       "scp",
-      ["-q", REMOTE_RUNNER, configFile, providerFile, bundleFile, `${sshDestination()}:${REMOTE_ROOT}/inbox/`],
+      ["-q", lane.runner, configFile, providerFile, bundleFile, `${sshDestination()}:${lane.root}/inbox/`],
       { capture: false },
     );
   }
   sshStream(
     `set -eu\n` +
       REMOTE_PATH +
-      `export RUSTIA_BACKFILL_ROOT="$HOME/${REMOTE_ROOT}"\n` +
+      `export ${lane.rootEnv}="$HOME/${lane.root}"\n` +
       `cd "${inbox}"\n` +
-      `node ${path.basename(REMOTE_RUNNER)} ${path.basename(configFile)} ` +
+      `node ${path.basename(lane.runner)} ${path.basename(configFile)} ` +
       `${path.basename(providerFile)} ${path.basename(bundleFile)}\n`,
   );
 }
@@ -598,6 +622,154 @@ function commandMain(options) {
   fs.writeFileSync(options.out, rows.map((row) => `${JSON.stringify(row)}\n`).join(""));
   process.stdout.write(
     `measured ${commit.slice(0, 8)}: ${rows.length} rows, binary ${target.binary_sha256.slice(0, 12)}\n`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Cross-engine matrix
+// ---------------------------------------------------------------------------
+
+// The acceptance rules come from the rented lane rather than a second
+// implementation of them. Requiring that coordinator is side-effect free: it
+// only runs when invoked directly.
+const matrixRules = require("./run-linode-benchmark.js");
+
+const MATRIX_PUBLICATIONS = Object.freeze({
+  history: "publication/bench/history/runs.jsonl",
+  wasm: "publication/bench/wasm/current-results.json",
+  dispatch: "publication/bench/wasm/dispatch-current-results.json",
+});
+
+// The rented lane's evidence check asserts the host is a KVM guest, which is
+// exactly the thing that is no longer true. The rest of it -- manifest schema,
+// source hashes, protocol and provider hashes, per-file hashes, result shape --
+// transfers unchanged, so this is that check with the virtualisation assertion
+// replaced by the one that matters here: the machine must not be virtualised.
+function validateDedicatedMatrixEvidence(config, evidenceDirectory, providerFile, publications) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(evidenceDirectory, "manifest.json"), "utf8"));
+  if (
+    manifest.schema !== "rustia.bench.cross-engine-matrix-evidence.v1" ||
+    manifest.benchmark_commit !== config.source.benchmark_commit
+  ) {
+    fail("matrix evidence manifest has the wrong schema or commit");
+  }
+  const host = JSON.parse(fs.readFileSync(path.join(evidenceDirectory, "host.json"), "utf8"));
+  if (host.platform !== "linux" || host.arch !== "x86_64") {
+    fail("matrix host evidence is not Linux x86-64");
+  }
+  if (host.virtualization !== "none") {
+    fail(`matrix host evidence reports virtualization ${JSON.stringify(host.virtualization)}; the owned host is bare metal`);
+  }
+  if (host.benchmark_cpu !== config.host_gate.benchmark_cpu) {
+    fail("matrix host evidence pinned a different CPU than the config");
+  }
+  // The node name is deliberately absent from the owned lane's uname, because
+  // this file is committed to a public repository.
+  if (/(\s|^)[A-Za-z0-9-]*\bci-bench\b/.test(host.uname ?? "")) {
+    fail("matrix host evidence carries a node name; the owned lane must record uname -srvm");
+  }
+  if (manifest.protocol_sha256 !== matrixRules.sha256File(path.join(evidenceDirectory, "protocol.json"))) {
+    fail("matrix manifest protocol hash is wrong");
+  }
+  if (manifest.provider_sha256 !== matrixRules.sha256File(path.join(evidenceDirectory, "provider.json"))) {
+    fail("matrix manifest provider hash is wrong");
+  }
+  if (matrixRules.sha256File(path.join(evidenceDirectory, "provider.json")) !== sha256File(providerFile)) {
+    fail("matrix provider evidence does not match the attestation this run shipped");
+  }
+  if (manifest.host_sha256 !== matrixRules.sha256File(path.join(evidenceDirectory, "host.json"))) {
+    fail("matrix manifest host hash is wrong");
+  }
+  const publicationHashes = {
+    history: matrixRules.sha256File(publications.history),
+    wasm: matrixRules.sha256File(publications.wasm),
+    dispatch: matrixRules.sha256File(publications.dispatch),
+  };
+  for (const [name, wanted] of Object.entries(publicationHashes)) {
+    if (manifest.publication_sha256?.[name] !== wanted) {
+      fail(`matrix manifest ${name} publication hash is wrong`);
+    }
+  }
+  const shape = {
+    native_rows: config.publication.native_rows,
+    wasm_rows: config.publication.wasm_rows,
+    dispatch_runtimes: config.publication.dispatch_runtimes,
+  };
+  for (const [key, wanted] of Object.entries(shape)) {
+    if (manifest.result_shape?.[key] !== wanted) fail(`matrix manifest result shape ${key} is wrong`);
+  }
+  for (const [file, hash] of Object.entries(manifest.evidence_sha256 ?? {})) {
+    if (matrixRules.sha256File(path.join(evidenceDirectory, file)) !== hash) {
+      fail(`matrix evidence hash is wrong for ${file}`);
+    }
+  }
+}
+
+function commandMatrix(options) {
+  const commit = git(["rev-parse", "HEAD"]).trim();
+  const short = commit.slice(0, 12);
+  const configRelative = `bench/cloud/dedicated-cross-engine-matrix-${short}.json`;
+  const configFile = path.join(REPO, configRelative);
+  if (!fs.existsSync(configFile)) {
+    local("node", ["tools/create-linode-matrix-config.js", "--dedicated", "--output", configRelative], {
+      capture: false,
+    });
+  }
+  const config = JSON.parse(fs.readFileSync(configFile, "utf8"));
+  if (config.source.benchmark_commit !== commit) {
+    fail(`${configRelative} was frozen at a different commit; measure the commit it names or delete it`);
+  }
+  const provider = attestHost({
+    provider: config.provider,
+    host_gate: config.host_gate,
+  });
+
+  const runId = `matrix-${short}`;
+  const runDirectory = path.join(STATE_ROOT, "runs", runId);
+  fs.rmSync(runDirectory, { recursive: true, force: true });
+  fs.mkdirSync(runDirectory, { recursive: true });
+  const providerFile = path.join(runDirectory, "provider.json");
+  writeJson(providerFile, provider);
+  const bundleFile = path.join(runDirectory, "repo.bundle");
+  local("git", ["bundle", "create", bundleFile, "HEAD"], { capture: false });
+
+  process.stdout.write(`measuring 13 engines x 5 workloads on ${provider.host}\n`);
+  shipAndRun(configFile, providerFile, bundleFile, options.local, LANES.matrix);
+  const extracted = fetchExport(runDirectory, LANES.matrix);
+
+  const status = JSON.parse(fs.readFileSync(path.join(extracted, "status.json"), "utf8"));
+  matrixRules.validateMatrixStatus(status);
+  const publications = Object.fromEntries(
+    Object.entries(MATRIX_PUBLICATIONS).map(([name, relative]) => [name, path.join(extracted, relative)]),
+  );
+  const historyDestination = path.join(REPO, "bench/history/runs.jsonl");
+  // Applies the rented lane's own rules: the export must be this repository's
+  // history with exactly the frozen number of rows appended, each belonging to
+  // the measured commit, and the wasm and dispatch results must match their
+  // declared dimensions.
+  matrixRules.validateMatrixNativeRows(config, publications.history, historyDestination, status);
+  matrixRules.validateMatrixWasm(config, publications.wasm, status);
+  matrixRules.validateMatrixDispatch(config, publications.dispatch, status);
+  const evidenceSource = path.join(extracted, "evidence/matrix", commit);
+  validateDedicatedMatrixEvidence(config, evidenceSource, providerFile, publications);
+
+  if (options.plan) {
+    process.stdout.write("validated; --plan means nothing was promoted\n");
+    return;
+  }
+
+  const evidenceDestination = path.join(REPO, "bench/evidence/matrix", commit, runId);
+  if (fs.existsSync(evidenceDestination)) fail(`refusing to overwrite matrix evidence ${path.relative(REPO, evidenceDestination)}`);
+  fs.mkdirSync(path.dirname(evidenceDestination), { recursive: true });
+  fs.cpSync(evidenceSource, evidenceDestination, { recursive: true });
+  fs.copyFileSync(publications.history, historyDestination);
+  fs.copyFileSync(publications.wasm, path.join(REPO, "bench/wasm/current-results.json"));
+  fs.copyFileSync(publications.dispatch, path.join(REPO, "bench/wasm/dispatch-current-results.json"));
+  local("node", ["tools/register-matrix-cohort.js"], { capture: false });
+  process.stdout.write(
+    `promoted cohort ${short}: ${config.publication.native_rows} native rows, ` +
+      `${config.publication.wasm_rows} wasm rows\n` +
+      `next: regenerate the reports and commit ${configRelative}, the publications and the evidence\n`,
   );
 }
 
@@ -1115,7 +1287,7 @@ function selfTest() {
 
   const defaults = {
     replace: false, config: undefined, out: undefined, previousBinary: undefined, local: false,
-    base: undefined, json: undefined, repetitions: undefined, confidence: undefined,
+    plan: false, base: undefined, json: undefined, repetitions: undefined, confidence: undefined,
   };
   assert.deepEqual(parseArgs(["plan"]), { command: "plan", ...defaults });
   assert.deepEqual(parseArgs(["history", "--replace"]), {
@@ -1149,6 +1321,20 @@ function selfTest() {
   assert.equal(parseArgs(["calibrate", "--repetitions", "0"]), null);
   assert.equal(parseArgs(["history", "--out", "x"]), null);
   assert.equal(parseArgs(["pr", "--base"]), null);
+  assert.equal(parseArgs(["matrix", "--plan"]).plan, true);
+  assert.equal(parseArgs(["matrix"]).plan, false);
+  assert.equal(parseArgs(["history", "--plan"]), null, "only the matrix lane validates without promoting");
+  assert.equal(parseArgs(["pr", "--plan"]), null);
+
+  // Two runners, one transport. The lanes must not share a directory, or a
+  // matrix run would wipe the history lane's warm cargo cache and vice versa.
+  assert.notEqual(LANES.history.root, LANES.matrix.root);
+  assert.notEqual(LANES.history.rootEnv, LANES.matrix.rootEnv);
+  assert.notEqual(LANES.history.runner, LANES.matrix.runner);
+  for (const lane of Object.values(LANES)) {
+    assert.match(lane.root, /^\.[a-z-]+$/, "a lane root must be a dotted name under $HOME");
+    assert(fs.existsSync(path.join(REPO, lane.runner)), `${lane.runner} must exist`);
+  }
 
   // Protocol files define the comparison; a change to one is not comparable
   // under a single frozen config, and the lane has to say so rather than fail
@@ -1206,6 +1392,7 @@ function usage() {
       "  history   [--config FILE] [--replace]  measure every revision and promote\n" +
       "  main      --out FILE [--previous-binary SHA]  measure HEAD alone for the live series\n" +
       "  pr        --out FILE [--base REF] [--json FILE]  screen HEAD against its merge base\n" +
+      "  matrix    [--plan]                     measure 13 engines x 5 workloads and promote\n" +
       "  calibrate [--out FILE] [--repetitions N] [--confidence P]\n" +
       "                                         measure one revision against itself and write\n" +
       "                                         the per-workload screening thresholds\n" +
@@ -1232,6 +1419,7 @@ try {
     else if (parsed.command === "main") commandMain(parsed);
     else if (parsed.command === "pr") commandPr(parsed);
     else if (parsed.command === "calibrate") commandCalibrate(parsed);
+    else if (parsed.command === "matrix") commandMatrix(parsed);
     else if (parsed.command === "fetch") commandFetch(parsed);
     else if (parsed.command === "unlock") commandUnlock();
   }

@@ -6628,7 +6628,24 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(`run-linode-benchmark: ${error.message}\n`);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    process.stderr.write(`run-linode-benchmark: ${error.message}\n`);
+    process.exitCode = 1;
+  });
+}
+
+// The matrix acceptance rules, so the owned-host coordinator applies exactly the
+// ones the rented lane applied rather than a second implementation that agrees
+// today. They stay here rather than moving to a shared module because there is
+// still only one other caller: when this file retires with the cloud lifecycle,
+// the rules move with their remaining consumer, which is the point at which the
+// shared module is earned rather than guessed at.
+module.exports = {
+  validateMatrixStatus,
+  validateMatrixNativeRows,
+  validateMatrixWasm,
+  validateMatrixDispatch,
+  evidenceFiles,
+  sha256File,
+};
