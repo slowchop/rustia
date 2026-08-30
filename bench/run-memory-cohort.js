@@ -200,9 +200,36 @@ function collectHost() {
   };
 }
 
+// The delegated cgroup subtree systemd gives an unprivileged user, if there is
+// one. Root gets the mount itself; the benchmark host runs CI unprivileged and
+// needs its own writable subtree instead.
+function delegatedCgroupRoot() {
+  if (typeof process.getuid !== "function") return null;
+  const uid = process.getuid();
+  if (uid === 0) return null;
+  const candidate = `/sys/fs/cgroup/user.slice/user-${uid}.slice/user@${uid}.service`;
+  try {
+    fs.accessSync(path.join(candidate, "cgroup.subtree_control"), fs.constants.W_OK);
+    return candidate;
+  } catch {
+    return null;
+  }
+}
+
 function runCohort(config) {
-  if (process.platform !== "linux" || typeof process.getuid !== "function" || process.getuid() !== 0) {
-    fail("memory cohort requires root on Linux");
+  if (process.platform !== "linux") fail("memory cohort requires Linux");
+  // Root, or a delegated subtree. What the protocol needs is a cgroup it can
+  // create children in with the memory controller enabled -- being uid 0 is one
+  // way to have that, not the requirement itself.
+  const cgroupRoot = typeof process.getuid === "function" && process.getuid() === 0
+    ? null
+    : delegatedCgroupRoot();
+  if (typeof process.getuid === "function" && process.getuid() !== 0 && cgroupRoot === null) {
+    fail(
+      "memory cohort needs a writable cgroup-v2 subtree: run as root, or delegate one to this " +
+        `user (systemd: a user@${process.getuid()}.service scope with Delegate=memory). Per-VM ` +
+        "accounting is measured inside a dedicated cgroup, so there is no meaningful run without one.",
+    );
   }
   const protocol = validateProtocol(loadJson(config.config, "memory protocol"));
   for (const binary of [config.binaryAll, config.binaryLua54]) {
@@ -261,7 +288,7 @@ function runCohort(config) {
           String(protocol.host.sample_interval_ms),
           "--timeout-ms",
           String(protocol.host.timeout_ms),
-          "--allow-root-cgroup",
+          ...(cgroupRoot === null ? ["--allow-root-cgroup"] : ["--cgroup-root", cgroupRoot]),
         ],
         { capture: false },
       );

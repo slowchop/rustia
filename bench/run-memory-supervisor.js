@@ -247,14 +247,39 @@ function enableController(directory, controller) {
   if (!enabled.includes(controller)) writeControl(control, `+${controller}`, "cgroup.subtree_control");
 }
 
+// What this actually needs is a cgroup-v2 subtree it can write to, with the
+// memory controller available. Being root is one way to have that; a systemd
+// delegated user subtree is another, and the benchmark host deliberately runs
+// its CI as an unprivileged user. Asserting uid 0 named a sufficient condition
+// as if it were the requirement, and refused a host that could measure
+// perfectly well.
+function assertUsableCgroupRoot(root) {
+  if (!fs.existsSync(path.join(root, "cgroup.controllers"))) {
+    fail(`${root} is not a cgroup-v2 mount`);
+  }
+  const controllers = readText(path.join(root, "cgroup.controllers"), "cgroup.controllers")
+    .trim()
+    .split(/\s+/);
+  if (!controllers.includes("memory")) {
+    fail(
+      `${root} does not offer the memory controller (has: ${controllers.join(" ") || "none"}). ` +
+        "Per-VM accounting needs it; on a delegated user subtree that means Delegate=memory.",
+    );
+  }
+  try {
+    fs.accessSync(root, fs.constants.W_OK | fs.constants.X_OK);
+    fs.accessSync(path.join(root, "cgroup.subtree_control"), fs.constants.W_OK);
+  } catch (error) {
+    fail(
+      `${root} is not writable by this user (${error.code}). Run as root, or delegate a cgroup ` +
+        "subtree to the benchmark user and pass it with --cgroup-root.",
+    );
+  }
+}
+
 function createCgroup(config) {
   if (process.platform !== "linux") fail("memory publication supervisor requires Linux");
-  if (typeof process.getuid !== "function" || process.getuid() !== 0) {
-    fail("memory publication supervisor requires root for a dedicated cgroup");
-  }
-  if (!fs.existsSync(path.join(config.cgroupRoot, "cgroup.controllers"))) {
-    fail(`${config.cgroupRoot} is not a cgroup-v2 mount`);
-  }
+  assertUsableCgroupRoot(config.cgroupRoot);
   if (config.cgroupRoot === DEFAULT_CGROUP_ROOT && !config.allowRootCgroup) {
     fail("using the root cgroup mount requires --allow-root-cgroup");
   }
