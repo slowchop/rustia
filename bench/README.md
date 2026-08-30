@@ -598,9 +598,14 @@ same runner the reconstruction uses; the lane adds no second measurement path.
 Three cases end the run early, each with a reason rather than a number:
 
 - the merge base is this commit, so there is nothing to compare against;
-- the change edits the measurement protocol itself (`bench/`, `Cargo.lock`,
-  `rust-toolchain.toml`), which the frozen config pins by hash — the run would
-  otherwise fail on a checksum deep inside the host, which says nothing useful;
+- the change edits a file the frozen config pins by hash — the five workload
+  files, `bench/src/main.rs`, `bench/Cargo.toml`, `Cargo.lock`,
+  `rust-toolchain.toml`, or `bench/current-results.json`, which supplies the
+  fixed sizes and expected checksums. The run would otherwise fail on a checksum
+  deep inside the host, which says nothing useful. That list comes from the
+  freezer itself rather than being restated here: the first version named the
+  `bench/` directory, and refused the lane's first pull request — a
+  documentation change — as a protocol change;
 - the change builds a byte-identical binary to its merge base.
 
 **Thresholds are measured, not chosen.** `bench/pr-screening.json` comes from

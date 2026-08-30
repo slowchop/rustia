@@ -777,20 +777,24 @@ function commandMatrix(options) {
 // PR screening
 // ---------------------------------------------------------------------------
 
-// Files whose bytes define the comparison rather than take part in it. A PR that
-// edits any of them is not comparable against its merge base under one frozen
-// protocol: the workload text, the fixed sizes, the toolchain and the locked
-// dependency set are all pinned into the config by hash, so a change here makes
-// the run fail on a checksum mismatch deep inside the host. Refusing up front
-// says why, which the checksum failure would not.
-const PROTOCOL_PATH_PREFIXES = Object.freeze(["bench/", "Cargo.lock", "rust-toolchain.toml"]);
+// Files whose bytes define the comparison rather than take part in it: the
+// workload text, the harness, the toolchain, the locked dependency set, and the
+// results file the fixed sizes and expected checksums are read from. A change to
+// any of them makes the two sides incomparable under one frozen config, and the
+// run would fail on a checksum mismatch deep inside the host rather than saying
+// so.
+//
+// Taken from the freezer rather than restated. The first version listed the
+// directory `bench/`, which is where those files live but also where the README
+// lives -- so the lane's first real pull request, a documentation change, was
+// refused as a protocol change. A prefix that is right about the intent and
+// wrong about the set is worse than no rule, because it looks like it worked.
+const freezer = require("./freeze-history-backfill.js");
+const PROTOCOL_PATHS = Object.freeze([...Object.values(freezer.HASH_FILES), freezer.CURRENT_RESULTS]);
 
 function protocolChanges(paths) {
-  return paths.filter((file) =>
-    PROTOCOL_PATH_PREFIXES.some((prefix) =>
-      prefix.endsWith("/") ? file.startsWith(prefix) : file === prefix,
-    ),
-  );
+  const protocol = new Set(PROTOCOL_PATHS);
+  return paths.filter((file) => protocol.has(file));
 }
 
 // The screening thresholds, per workload, measured rather than chosen. The file
@@ -1420,11 +1424,25 @@ function selfTest() {
   // under a single frozen config, and the lane has to say so rather than fail
   // on a checksum deep inside the host.
   assert.deepEqual(protocolChanges(["crates/rustia-vm/src/vm.rs"]), []);
-  assert.deepEqual(protocolChanges(["bench/workloads/luau/01.luau"]), ["bench/workloads/luau/01.luau"]);
   assert.deepEqual(protocolChanges(["Cargo.lock"]), ["Cargo.lock"]);
   assert.deepEqual(protocolChanges(["rust-toolchain.toml"]), ["rust-toolchain.toml"]);
-  // A path that merely starts with the same letters is not inside the directory.
+  assert.deepEqual(protocolChanges(["bench/Cargo.toml"]), ["bench/Cargo.toml"]);
+  assert.deepEqual(
+    protocolChanges(["bench/workloads/luau/01_dense_tables.luau"]),
+    ["bench/workloads/luau/01_dense_tables.luau"],
+  );
+  assert.deepEqual(protocolChanges(["bench/current-results.json"]), ["bench/current-results.json"]);
+  // Files under bench/ that the frozen config does not pin are ordinary changes.
+  // Refusing these was the defect the lane's first pull request found.
+  assert.deepEqual(protocolChanges(["bench/README.md", "bench/CLAIMS.md", "bench/RESULTS.md"]), []);
+  assert.deepEqual(protocolChanges(["bench/history/runs.jsonl", "bench/cloud/x.json"]), []);
   assert.deepEqual(protocolChanges(["benchmarks/notes.md", "Cargo.lock.bak"]), []);
+  // The set has to be the freezer's own, or the two drift and the lane refuses
+  // the wrong changes again.
+  for (const file of Object.values(freezer.HASH_FILES)) {
+    assert.deepEqual(protocolChanges([file]), [file], `${file} is pinned by the config`);
+  }
+  assert.equal(PROTOCOL_PATHS.length, Object.keys(freezer.HASH_FILES).length + 1);
 
   // The threshold is the widest end of the A/A interval, rounded up, so it is
   // never narrower than what the host was actually seen doing.

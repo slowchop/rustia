@@ -467,7 +467,15 @@ function parseArgs(argv) {
   return parsed;
 }
 
-try {
+// The files whose bytes the frozen config pins by hash, plus the one it reads
+// its fixed sizes and expected checksums from. Exported so the screening lane
+// refuses exactly the changes that would break a comparison, rather than a
+// directory that happens to contain them.
+module.exports = { HASH_FILES, CURRENT_RESULTS: "bench/current-results.json" };
+
+if (require.main !== module) {
+  // Required for the constants above; nothing else runs.
+} else try {
   const parsed = parseArgs(process.argv.slice(2));
   if (parsed === null) {
     usage();
