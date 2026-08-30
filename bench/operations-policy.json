@@ -42,6 +42,7 @@
         "measurement-candidate",
         "measurement-landscape",
         "measurement-screening",
+        "measurement-memory",
         "artifact-validation"
       ]
     }
