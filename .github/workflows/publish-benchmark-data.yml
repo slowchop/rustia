@@ -121,6 +121,17 @@ jobs:
           # data repository because they grow with every commit.
           node tools/check-benchmark-series.js --rows-root "$data_dir"
 
+          # The live series rows, brought into the checkout so the chart can
+          # draw them. Validating them was not enough: the renderer reads the
+          # rows from this tree, so without this the published chart stops at
+          # the last reconstructed revision no matter how many commits have
+          # been measured since.
+          if [ -f "$data_dir/bench/history/series/ci-bench-main.jsonl" ]; then
+            install -d bench/history/series
+            install -m 644 "$data_dir/bench/history/series/ci-bench-main.jsonl" \
+              bench/history/series/ci-bench-main.jsonl
+          fi
+
           install -m 644 "$data_dir/bench/memory/current-results.json" bench/memory/current-results.json
           install -m 644 "$data_dir/bench/memory/history/runs.jsonl" bench/memory/history/runs.jsonl
           node bench/render-current-results.js

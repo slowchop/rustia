@@ -531,7 +531,10 @@ function checkBenchmarkPublication(text) {
     "pull_request_target",
     "contents: write",
   ]) forbidIncludes(text, forbidden, label);
-  checkActionPins(text, label);
+  checkActionPins(text, label);  // Validating the rows is not the same as drawing them: the renderer reads
+  // them from the checkout, so they must be installed before it runs.
+  requireIncludes(text, "install -m 644 \"$data_dir/bench/history/series/ci-bench-main.jsonl\"", label);
+
 }
 
 const files = workflowFiles();
