@@ -46,6 +46,7 @@ node("tools/run-linode-benchmark.js", "self-test");
 node("tools/run-dedicated-benchmark.js", "self-test");
 node("tools/check-benchmark-series.js", "--self-test");
 node("tools/record-host-bridge.js", "--self-test");
+node("tools/retire-cloud-history.js", "--self-test");
 node("tools/run-linux-history-backfill.js", "self-test");
 node("tools/freeze-history-backfill.js", "--self-test");
 node("tools/run-linux-matrix-benchmark.js", "self-test");

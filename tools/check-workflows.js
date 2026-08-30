@@ -433,6 +433,9 @@ function checkReleasePreflight(text) {
     // because the rule it carries -- that a per-unit ratio needs both sides to
     // mean the same unit -- is what keeps a host comparison honest.
     '"tools/record-host-bridge.js"',
+    // Its self-test is the only thing standing between a destructive edit to a
+    // published dataset and a silently changed dashboard.
+    '"tools/retire-cloud-history.js"',
     '"tools/run-linux-history-backfill.js"',
     '"tools/freeze-history-backfill.js"',
     '"bench/run-memory-supervisor.js"',
