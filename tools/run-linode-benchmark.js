@@ -4968,11 +4968,17 @@ function expectedMemoryProtocol(config) {
 }
 
 async function validateCrossEngineMemoryEvidence(config, evidenceSource) {
+  // Two of these are named after the lifecycle that produced them. The rented
+  // lane's committed evidence uses the provider-prefixed names and must keep
+  // validating; an owned-host run names them for what they are, because an
+  // artifact called linode-build.json from a machine that never touched Linode
+  // is a provenance record that lies.
+  const dedicated = config.schema === "rustia.dedicated-memory-benchmark.v1";
   const required = [
     "analysis.json",
     "host.json",
-    "linode-build.json",
-    "linode-run-gate.json",
+    dedicated ? "build.json" : "linode-build.json",
+    dedicated ? "run-gate.json" : "linode-run-gate.json",
     "manifest.json",
     "protocol.json",
     "run-order.json",
@@ -6650,6 +6656,7 @@ if (require.main === module) {
 // the rules move with their remaining consumer, which is the point at which the
 // shared module is earned rather than guessed at.
 module.exports = {
+  validateCrossEngineMemoryEvidence,
   validateMatrixStatus,
   validateMatrixNativeRows,
   validateMatrixWasm,

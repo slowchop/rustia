@@ -41,6 +41,11 @@ const LANES = Object.freeze({
     root: ".rustia-matrix",
     rootEnv: "RUSTIA_MATRIX_ROOT",
   }),
+  memory: Object.freeze({
+    runner: "tools/run-linux-memory-benchmark.js",
+    root: ".rustia-memory",
+    rootEnv: "RUSTIA_MEMORY_ROOT",
+  }),
 });
 const REMOTE_RUNNER = LANES.history.runner;
 const REMOTE_ROOT = LANES.history.root;
@@ -238,7 +243,9 @@ function existingBackfills(exceptHarnessCommit) {
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
-  const known = new Set(["plan", "history", "main", "pr", "calibrate", "matrix", "fetch", "unlock", "self-test"]);
+  const known = new Set([
+    "plan", "history", "main", "pr", "calibrate", "matrix", "memory", "fetch", "unlock", "self-test",
+  ]);
   if (!known.has(command)) return null;
   const parsed = {
     command,
@@ -304,7 +311,7 @@ function parseArgs(argv) {
   // a tighter interval, which only the lanes that publish nothing may do.
   // --plan measures and validates but promotes nothing, which only the lane that
   // promotes into this repository has any use for.
-  if (parsed.plan && command !== "matrix") return null;
+  if (parsed.plan && command !== "matrix" && command !== "memory") return null;
   if (parsed.base !== undefined && command !== "pr") return null;
   if (parsed.json !== undefined && command !== "pr") return null;
   for (const option of [parsed.repetitions, parsed.confidence]) {
@@ -784,6 +791,118 @@ function commandMatrix(options) {
     `promoted cohort ${short}: ${config.publication.native_rows} native rows, ` +
       `${config.publication.wasm_rows} wasm rows\n` +
       `next: regenerate the reports and commit ${configRelative}, the publications and the evidence\n`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Rustia memory cohort
+// ---------------------------------------------------------------------------
+
+// Measures per-VM memory on the owned host and promotes the cohort into this
+// checkout. Unlike the matrix, the runner exports evidence rather than a
+// finished publication: bench/publish-memory-analysis.js derives the results
+// file and the appended history from the analysis in that evidence, which is
+// the same tool the rented lane used and the reason this command is short.
+async function commandMemory(options) {
+  const commit = git(["rev-parse", "HEAD"]).trim();
+  const short = commit.slice(0, 12);
+  const configRelative = `bench/cloud/dedicated-rustia-ci-memory-${short}.json`;
+  const configFile = path.join(REPO, configRelative);
+  if (!fs.existsSync(configFile)) {
+    local(
+      "node",
+      ["tools/create-rustia-ci-memory-config.js", "--dedicated", "--output", configRelative],
+      { capture: false },
+    );
+  }
+  const config = JSON.parse(fs.readFileSync(configFile, "utf8"));
+  if (config.source.benchmark_commit !== commit) {
+    fail(`${configRelative} was frozen at a different commit; measure the commit it names or delete it`);
+  }
+
+  // The two files this promotion rewrites must be exactly what the config was
+  // frozen against, or the cohort is being appended to a history that moved
+  // underneath it.
+  const historyDestination = path.join(REPO, "bench/memory/history/runs.jsonl");
+  const currentDestination = path.join(REPO, "bench/memory/current-results.json");
+  if (
+    sha256File(historyDestination) !== config.source.expected_sha256.memory_history_before ||
+    sha256File(currentDestination) !== config.source.expected_sha256.memory_current_before
+  ) {
+    fail("the local memory publication changed after this config was frozen; re-freeze it");
+  }
+
+  const provider = attestHost({ provider: config.provider, host_gate: config.host_gate });
+  const runId = `memory-${short}`;
+  const runDirectory = path.join(STATE_ROOT, "runs", runId);
+  fs.rmSync(runDirectory, { recursive: true, force: true });
+  fs.mkdirSync(runDirectory, { recursive: true });
+  const providerFile = path.join(runDirectory, "provider.json");
+  writeJson(providerFile, provider);
+  const bundleFile = path.join(runDirectory, "repo.bundle");
+  local("git", ["bundle", "create", bundleFile, "HEAD"], { capture: false });
+
+  process.stdout.write(`measuring per-VM memory on ${provider.host}\n`);
+  shipAndRun(configFile, providerFile, bundleFile, options.local, LANES.memory);
+  const extracted = fetchExport(runDirectory, LANES.memory);
+
+  const status = JSON.parse(fs.readFileSync(path.join(extracted, "status.json"), "utf8"));
+  if (status.status !== "memory_complete") {
+    fail(`memory run did not complete: ${status.status}${status.detail ? ` (${status.detail})` : ""}`);
+  }
+  const cohort = config.measurement.cohort_id;
+  const evidenceSource = path.join(extracted, "evidence/memory", commit, cohort);
+  // The rented lane's own acceptance rules, which know both evidence naming
+  // schemes and check the raw sample count against the frozen protocol.
+  await matrixRules.validateCrossEngineMemoryEvidence(config, evidenceSource);
+
+  if (options.plan) {
+    process.stdout.write("validated; --plan means nothing was promoted\n");
+    return;
+  }
+
+  const evidenceDestination = path.join(REPO, "bench/memory/raw", commit, cohort);
+  if (fs.existsSync(evidenceDestination)) {
+    fail(`refusing to overwrite memory evidence ${path.relative(REPO, evidenceDestination)}`);
+  }
+  // Staged, then renamed into place, with the two publication files restored if
+  // anything between here and the render fails. A half-promoted memory cohort
+  // is a results file that disagrees with its own history.
+  const snapshots = [historyDestination, currentDestination].map((file) => ({
+    file,
+    bytes: fs.readFileSync(file),
+  }));
+  const historyStage = `${historyDestination}.incoming`;
+  const currentStage = `${currentDestination}.incoming`;
+  let promoted = false;
+  try {
+    fs.mkdirSync(path.dirname(evidenceDestination), { recursive: true });
+    fs.cpSync(evidenceSource, evidenceDestination, { recursive: true, errorOnExist: true, force: false });
+    fs.copyFileSync(historyDestination, historyStage);
+    local("node", [
+      path.join(REPO, "bench/publish-memory-analysis.js"),
+      "--analysis", path.join(evidenceDestination, "analysis.json"),
+      "--cohort-id", cohort,
+      "--evidence", path.relative(REPO, evidenceDestination),
+      "--history", historyStage,
+      "--current", currentStage,
+      "--commit", commit,
+    ], { capture: false });
+    fs.renameSync(historyStage, historyDestination);
+    fs.renameSync(currentStage, currentDestination);
+    promoted = true;
+    local("node", [path.join(REPO, "bench/render-current-results.js")], { capture: false });
+    local("node", [path.join(REPO, "bench/render-current-results.js"), "--check"], { capture: false });
+  } catch (error) {
+    fs.rmSync(historyStage, { force: true });
+    fs.rmSync(currentStage, { force: true });
+    fs.rmSync(evidenceDestination, { recursive: true, force: true });
+    if (promoted) for (const snapshot of snapshots) fs.writeFileSync(snapshot.file, snapshot.bytes);
+    throw error;
+  }
+  process.stdout.write(
+    `promoted memory cohort ${short}: ${config.publication.rows} rows, evidence at ` +
+      `${path.relative(REPO, evidenceDestination)}\n`,
   );
 }
 
@@ -1420,15 +1539,24 @@ function selfTest() {
   assert.equal(parseArgs(["history", "--out", "x"]), null);
   assert.equal(parseArgs(["pr", "--base"]), null);
   assert.equal(parseArgs(["matrix", "--plan"]).plan, true);
+  assert.equal(parseArgs(["memory", "--plan"]).plan, true);
+  assert.equal(parseArgs(["memory"]).command, "memory");
   assert.equal(parseArgs(["matrix"]).plan, false);
   assert.equal(parseArgs(["history", "--plan"]), null, "only the matrix lane validates without promoting");
   assert.equal(parseArgs(["pr", "--plan"]), null);
 
   // Two runners, one transport. The lanes must not share a directory, or a
   // matrix run would wipe the history lane's warm cargo cache and vice versa.
-  assert.notEqual(LANES.history.root, LANES.matrix.root);
-  assert.notEqual(LANES.history.rootEnv, LANES.matrix.rootEnv);
-  assert.notEqual(LANES.history.runner, LANES.matrix.runner);
+  // No two lanes may share a directory, an environment variable or a runner: a
+  // matrix run would otherwise wipe another lane's warm cargo cache.
+  const laneList = Object.values(LANES);
+  for (const key of ["root", "rootEnv", "runner"]) {
+    assert.equal(
+      new Set(laneList.map((lane) => lane[key])).size,
+      laneList.length,
+      `every lane must have its own ${key}`,
+    );
+  }
   for (const lane of Object.values(LANES)) {
     assert.match(lane.root, /^\.[a-z-]+$/, "a lane root must be a dotted name under $HOME");
     assert(fs.existsSync(path.join(REPO, lane.runner)), `${lane.runner} must exist`);
@@ -1539,6 +1667,7 @@ function usage() {
       "  main      --out FILE [--previous-binary SHA]  measure HEAD alone for the live series\n" +
       "  pr        --out FILE [--base REF] [--json FILE]  screen HEAD against its merge base\n" +
       "  matrix    [--plan]                     measure 13 engines x 5 workloads and promote\n" +
+      "  memory    [--plan]                     measure per-VM memory and promote\n" +
       "  calibrate [--out FILE] [--repetitions N] [--confidence P]\n" +
       "                                         measure one revision against itself and write\n" +
       "                                         the per-workload screening thresholds\n" +
@@ -1566,6 +1695,12 @@ try {
     else if (parsed.command === "pr") commandPr(parsed);
     else if (parsed.command === "calibrate") commandCalibrate(parsed);
     else if (parsed.command === "matrix") commandMatrix(parsed);
+    else if (parsed.command === "memory") {
+      commandMemory(parsed).catch((error) => {
+        process.stderr.write(`run-dedicated-benchmark: ${error.message}\n`);
+        process.exitCode = 1;
+      });
+    }
     else if (parsed.command === "fetch") commandFetch(parsed);
     else if (parsed.command === "unlock") commandUnlock();
   }

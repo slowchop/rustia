@@ -394,6 +394,19 @@ function exportRun(status, config, evidenceDirectory) {
   run("tar", ["--format=ustar", "-czf", EXPORT_ARCHIVE, "-C", EXPORT, "."], { capture: false });
 }
 
+// Evidence filenames. The rented lifecycle named two of them after the provider
+// it ran on; on an owned host that is a provenance artifact naming a machine it
+// never touched, which is exactly the drift this project's evidence exists to
+// prevent. The rented lane keeps its names so its committed evidence stays
+// readable by the validator that has always read it.
+function evidenceNames(config) {
+  const dedicated = config.schema === DEDICATED_SCHEMA;
+  return {
+    gate: dedicated ? "run-gate.json" : "linode-run-gate.json",
+    build: dedicated ? "build.json" : "linode-build.json",
+  };
+}
+
 const LOCK_FILE = path.join(ROOT, "lock");
 
 // Every directory keyed to one run's state. The rented model destroyed the
@@ -511,8 +524,10 @@ async function execute(configFile, providerFile, bundle) {
       benchmark_cpu: cpuDelta(benchmarkBefore, readCpu(config.host_gate.benchmark_cpu)),
       supervisor_cpu: cpuDelta(supervisorBefore, readCpu(config.host_gate.supervisor_cpu)),
     };
-    writeJson(path.join(evidenceDirectory, "linode-run-gate.json"), {
-      schema: "rustia.bench.memory-linode-gate.v1",
+    writeJson(path.join(evidenceDirectory, evidenceNames(config).gate), {
+      schema: config.schema === DEDICATED_SCHEMA
+        ? "rustia.bench.memory-host-gate.v1"
+        : "rustia.bench.memory-linode-gate.v1",
       pre_run: quiet,
       run: runGate,
     });
@@ -523,7 +538,7 @@ async function execute(configFile, providerFile, bundle) {
     if (!Array.isArray(analysis.rows) || analysis.rows.length !== config.publication.rows) {
       fail(`memory analysis row count is not ${config.publication.rows}`);
     }
-    writeJson(path.join(evidenceDirectory, "linode-build.json"), {
+    writeJson(path.join(evidenceDirectory, evidenceNames(config).build), {
       all_binary_sha256: binaries.all_sha256,
       lua54_binary_sha256: binaries.lua54_sha256,
       rustc_vv: runText("rustc", ["+1.95.0", "-vV"]),
@@ -607,6 +622,16 @@ function selfTest() {
     [],
     "the warm cargo target directories must survive a repeat run",
   );
+
+  // Evidence names follow the lifecycle, so an owned-host artifact does not
+  // claim a provider it never ran on, and the rented one keeps the names its
+  // committed evidence already uses.
+  assert.deepEqual(evidenceNames({ schema: DEDICATED_SCHEMA }), {
+    gate: "run-gate.json", build: "build.json",
+  });
+  assert.deepEqual(evidenceNames({ schema: "rustia.linode-fixed-benchmark.v2" }), {
+    gate: "linode-run-gate.json", build: "linode-build.json",
+  });
 
   assert.deepEqual(parseCpuList("4,5"), [4, 5]);
   assert.deepEqual(parseCpuList("0-1,4"), [0, 1, 4]);

@@ -7,7 +7,7 @@ const path = require("path");
 const root = path.resolve(__dirname, "..");
 const workflowDir = path.join(root, ".github", "workflows");
 const ciPath = path.join(workflowDir, "ci.yml");
-const rustiaMemoryPath = path.join(workflowDir, "linode-rustia-memory.yml");
+const rustiaMemoryPath = path.join(workflowDir, "rustia-memory.yml");
 const benchmarkPublicationPath = path.join(workflowDir, "publish-benchmark-data.yml");
 const weeklyMatrixPath = path.join(workflowDir, "weekly-matrix-bench.yml");
 const rustToolchainPath = path.join(root, "rust-toolchain.toml");
@@ -134,7 +134,7 @@ const WORKFLOW_RUNNER_CLASS = new Map([
   ["publish-benchmark-data.yml", "general-linux"],
   ["main-bench.yml", "bench-solo"],
   ["pr-bench.yml", "bench-solo"],
-  ["linode-rustia-memory.yml", null],
+  ["rustia-memory.yml", "bench-solo"],
 ]);
 
 // Commands that take a timing. Until now only the first three were forbidden,
@@ -466,13 +466,16 @@ function checkReleasePreflight(text) {
 }
 
 function checkRustiaMemory(text) {
-  const label = ".github/workflows/linode-rustia-memory.yml";
-  requireIncludes(text, "name: Rustia Linode Memory\n", label);
+  const label = ".github/workflows/rustia-memory.yml";
+  requireIncludes(text, "name: Rustia Memory Cohort\n", label);
   requireIncludes(text, "\"on\":\n  workflow_dispatch:\n", label);
   requireIncludes(text, "commit_sha:\n", label);
   requireIncludes(text, "required: true\n", label);
   requireIncludes(text, "type: string\n", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
+  // Shares the host's serialisation group: sampling must never overlap another
+  // job on the machine it is measuring.
+  requireIncludes(text, "group: rustia-bench-host-serial", label);
   requireIncludes(text, "cancel-in-progress: false\n", label);
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
   requireIncludes(text, "ref: main", label);
@@ -481,16 +484,19 @@ function checkRustiaMemory(text) {
   requireIncludes(text, 'git cat-file -e "${BENCHMARK_COMMIT}^{commit}"', label);
   requireIncludes(text, 'git merge-base --is-ancestor "$BENCHMARK_COMMIT" origin/main', label);
   requireIncludes(text, 'test "$(git rev-parse HEAD)" = "$BENCHMARK_COMMIT"', label);
-  requireIncludes(text, "LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}", label);
-  requireIncludes(text, "node tools/create-rustia-ci-memory-config.js", label);
-  requireIncludes(text, "node tools/run-linode-benchmark.js bench", label);
+  // Measurement only through the driver that attests the machine first.
+  requireIncludes(text, "node tools/run-dedicated-benchmark.js memory --local", label);
   requireIncludes(text, "node tools/summarize-rustia-ci-memory.js", label);
   requireIncludes(text, "BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
   requireIncludes(text, "git@github.com:slowchop/rustia-bench-data.git", label);
   requireIncludes(text, "node tools/merge-rustia-ci-memory-data.js", label);
   requireIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
   requireIncludes(text, "git -C \"$pages_dir\" push origin HEAD:gh-pages", label);
-  requireIncludes(text, "node tools/run-linode-benchmark.js destroy", label);
+  // This was the last lane that could create a billed instance. These are the
+  // strings that would bring that back.
+  forbidIncludes(text, "LINODE_TOKEN", label);
+  forbidIncludes(text, "run-linode-benchmark.js", label);
+  forbidIncludes(text, ".rustia-benchmark-state/linode", label);
   forbidIncludes(text, "actions/upload-artifact", label);
   forbidIncludes(text, "retention-days:", label);
   forbidIncludes(text, "pull_request_target", label);
@@ -602,7 +608,7 @@ for (const required of [
   "ci.yml",
   "main-bench.yml",
   "pr-bench.yml",
-  "linode-rustia-memory.yml",
+  "rustia-memory.yml",
   "weekly-matrix-bench.yml",
   "publish-benchmark-data.yml",
 ]) {

@@ -1,5 +1,19 @@
-name: Rustia Linode Memory
+name: Rustia Memory Cohort
 
+# Measures per-VM memory for one exact commit on the owned benchmark host.
+#
+# It used to provision a billed Linode. Nothing in this repository can create a
+# cloud instance any more; this was the last lane that could, and it could only
+# ever do so by explicit dispatch. Timing and sampling now run on `ci-bench`,
+# reached only through run-dedicated-benchmark.js, which attests the machine
+# against the frozen config before it builds anything.
+#
+# The protocol pins two isolated cores rather than one: the supervisor samples
+# while the benchmark runs, and sharing a core would make the supervisor part of
+# what it measures.
+#
+# Results go to the published data repository, not to this one, which is why
+# this workflow holds no contents-write on this repository.
 "on":
   workflow_dispatch:
     inputs:
@@ -12,15 +26,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: rustia-linode-memory-main
+  group: rustia-bench-host-serial
   cancel-in-progress: false
 
 jobs:
   benchmark:
-    name: Rustia-only dedicated-Linux memory
+    name: Rustia-only memory on the owned host
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 55
+    runs-on:
+      group: bench-solo
+    timeout-minutes: 75
 
     steps:
       - name: Checkout trusted main history
@@ -33,46 +48,29 @@ jobs:
         env:
           BENCHMARK_COMMIT: ${{ inputs.commit_sha }}
         run: |
+          set -euo pipefail
           if ! [[ "$BENCHMARK_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
             echo "commit_sha must be an exact lowercase 40-character commit SHA" >&2
             exit 1
           fi
-          git fetch --no-tags origin main
           git cat-file -e "${BENCHMARK_COMMIT}^{commit}"
           git merge-base --is-ancestor "$BENCHMARK_COMMIT" origin/main
           git checkout --detach "$BENCHMARK_COMMIT"
           test "$(git rev-parse HEAD)" = "$BENCHMARK_COMMIT"
+
+      - name: Install pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          cache: false
 
       - name: Install Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
 
-      - name: Install Linode credential
-        env:
-          LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}
-        run: |
-          test -n "$LINODE_TOKEN"
-          install -d -m 700 .rustia-benchmark-state/linode
-          install -m 600 /dev/null .rustia-benchmark-state/linode/token
-          printf '%s\n' "$LINODE_TOKEN" > .rustia-benchmark-state/linode/token
-
-      - name: Freeze per-commit protocol
-        env:
-          BENCHMARK_COMMIT: ${{ inputs.commit_sha }}
-        run: |
-          short_commit="${BENCHMARK_COMMIT:0:12}"
-          config="bench/cloud/linode-rustia-ci-memory-${short_commit}.json"
-          node tools/create-rustia-ci-memory-config.js --output "$config"
-          git config user.name "rustia-benchmark"
-          git config user.email "benchmark@rustia.invalid"
-          git add "$config"
-          git commit -m "Freeze Rustia CI memory protocol for ${short_commit} [skip linode]"
-          printf 'RUSTIA_MEMORY_CONFIG=%s\n' "$config" >> "$GITHUB_ENV"
-          printf 'RUSTIA_MEMORY_COHORT=rustia-ci-%s\n' "$short_commit" >> "$GITHUB_ENV"
-
-      - name: Run Rustia-only Linode memory cohort
-        run: node tools/run-linode-benchmark.js bench "$RUSTIA_MEMORY_CONFIG"
+      - name: Measure and promote the memory cohort
+        run: node tools/run-dedicated-benchmark.js memory --local
 
       - name: Summarize improvement
         run: |
@@ -87,6 +85,7 @@ jobs:
           BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}
           BENCHMARK_COMMIT: ${{ inputs.commit_sha }}
         run: |
+          set -euo pipefail
           test -n "$BENCH_DATA_DEPLOY_KEY"
           ssh_dir="$RUNNER_TEMP/rustia-bench-ssh"
           data_dir="$RUNNER_TEMP/rustia-bench-data"
@@ -122,13 +121,3 @@ jobs:
             git -C "$pages_dir" commit -m "Publish Rustia memory ${BENCHMARK_COMMIT:0:12}"
             git -C "$pages_dir" push origin HEAD:gh-pages
           fi
-
-      - name: Confirm cloud cleanup
-        if: always()
-        run: |
-          node tools/run-linode-benchmark.js status > /tmp/rustia-linode-status.json
-          jq -r '.[] | select(.cleanup_complete == false) | .run_id' \
-            /tmp/rustia-linode-status.json |
-            while read -r run_id; do
-              node tools/run-linode-benchmark.js destroy "$run_id"
-            done
