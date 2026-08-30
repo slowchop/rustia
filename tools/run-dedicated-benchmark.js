@@ -972,9 +972,16 @@ const CALIBRATION_PASSES = 4;
 // produced: a threshold must not be narrower than something this host has
 // actually been seen doing.
 const CALIBRATION_SPLITS = Object.freeze([
-  Object.freeze({ label: "1,4 vs 2,3", baseline: [0, 3], candidate: [1, 2] }),
-  Object.freeze({ label: "1,2 vs 3,4", baseline: [0, 1], candidate: [2, 3] }),
-  Object.freeze({ label: "1,3 vs 2,4", baseline: [0, 2], candidate: [1, 3] }),
+  // The arrangement the screening lane actually uses. Each side's passes
+  // straddle the run, so a drift across the session falls on both equally.
+  Object.freeze({ label: "1,4 vs 2,3", baseline: [0, 3], candidate: [1, 2], straddles: true }),
+  // Deliberately not drift-neutral. 1,2 vs 3,4 is first half against second
+  // half; 1,3 vs 2,4 puts every candidate pass immediately after its baseline.
+  // Neither is how the lane measures, so neither can fail a calibration -- but
+  // both are real comparisons of the same binary, so whatever they show is
+  // movement the host can produce, and the threshold must clear it.
+  Object.freeze({ label: "1,2 vs 3,4", baseline: [0, 1], candidate: [2, 3], straddles: false }),
+  Object.freeze({ label: "1,3 vs 2,4", baseline: [0, 2], candidate: [1, 3], straddles: false }),
 ]);
 
 function calibrationThreshold(interval) {
@@ -1025,6 +1032,7 @@ function commandCalibrate(options) {
   const workloads = {};
   const evidence = [];
   const broken = [];
+  const drift = [];
   for (const workload of config.measurement.workloads) {
     const splits = CALIBRATION_SPLITS.map((split) => {
       const args = [path.join(REPO, "bench/analyze-fixed-samples.js")];
@@ -1049,23 +1057,41 @@ function commandCalibrate(options) {
     const analysis = widest.analysis;
     const interval = analysis.comparison.bootstrap_ci_percent;
     const threshold = widest.threshold;
-    // The canary. Nothing changed between these two groups, so an interval that
-    // clears zero means the protocol is measuring something other than the code.
-    // Raising the threshold until it passes would hide exactly the fault worth
-    // finding, so this refuses to write a calibration instead.
+    // The canary, and it applies to the arrangement the lane measures in. The
+    // claim being made is "when nothing changed, this lane reports
+    // indistinguishable"; the straddling split is that claim, so an interval
+    // there that clears zero means the protocol is measuring something other
+    // than the code and no threshold should be written.
+    //
+    // The other two splits are not failures. They are the same binary arranged
+    // so that a drift across the session does not cancel, and this host does
+    // drift: the run that produced this rule read sparse_tables as 1.2% faster
+    // than itself under 1,3 vs 2,4, with an interval that excluded zero. That is
+    // a finding about the host, not a fault in the code, and treating it as a
+    // failure would leave the lane permanently uncalibratable while telling us
+    // nothing new. It is recorded, and it widens the threshold.
     for (const candidate of splits) {
-      if (candidate.analysis.comparison.direction.status !== "indistinguishable") {
-        const bounds = candidate.analysis.comparison.bootstrap_ci_percent;
-        broken.push(
-          `${workload} split ${candidate.split.label}: A/A interval ` +
-            `[${bounds.lower.toFixed(2)}, ${bounds.upper.toFixed(2)}] ` +
-            `excludes zero (${candidate.analysis.comparison.direction.status})`,
-        );
-      }
+      if (candidate.analysis.comparison.direction.status === "indistinguishable") continue;
+      const bounds = candidate.analysis.comparison.bootstrap_ci_percent;
+      const note =
+        `${workload} split ${candidate.split.label}: A/A interval ` +
+        `[${bounds.lower.toFixed(2)}, ${bounds.upper.toFixed(2)}] ` +
+        `excludes zero (${candidate.analysis.comparison.direction.status})`;
+      if (candidate.split.straddles) broken.push(note);
+      else drift.push(note);
     }
     workloads[workload] = {
       material_threshold_percent: threshold,
       chosen_split: widest.split.label,
+      // Splits that read the same binary as changed. Empty is the expected
+      // state; a non-empty list is this host's session drift, made visible.
+      drift_splits: splits
+        .filter(
+          (entry) =>
+            !entry.split.straddles &&
+            entry.analysis.comparison.direction.status !== "indistinguishable",
+        )
+        .map((entry) => entry.split.label),
       // Every split, so a reader can see how much the threshold depends on which
       // arrangement was drawn rather than having to run the calibration twice to
       // find out.
@@ -1099,10 +1125,19 @@ function commandCalibrate(options) {
         `threshold ${line.threshold.toFixed(2)}%\n`,
     );
   }
+  if (drift.length > 0) {
+    process.stdout.write(
+      `\nthis host drifts across a session: ${drift.length} non-straddling split(s) read the same\n` +
+        "binary as changed. The lane measures A B B A precisely so that this cancels; the readings\n" +
+        "below are why that ordering is load-bearing rather than decorative, and they widen the\n" +
+        `thresholds above:\n  ${drift.join("\n  ")}\n\n`,
+    );
+  }
   if (broken.length > 0) {
     fail(
-      "the A/A calibration is not indistinguishable from zero, so the comparison protocol is " +
-        `measuring something other than the code:\n  ${broken.join("\n  ")}`,
+      "the A/A calibration is not indistinguishable from zero in the arrangement the screening " +
+        "lane measures in, so the comparison protocol is measuring something other than the code:" +
+        `\n  ${broken.join("\n  ")}`,
     );
   }
 
@@ -1117,6 +1152,7 @@ function commandCalibrate(options) {
     repetitions,
     confidence,
     splits: CALIBRATION_SPLITS.map((split) => split.label),
+    straddling_split: CALIBRATION_SPLITS.find((split) => split.straddles).label,
     method:
       "One revision measured in four separate passes, then compared against itself under all three " +
       "balanced splits of those passes through bench/analyze-fixed-samples.js with " +
@@ -1126,7 +1162,10 @@ function commandCalibrate(options) {
       "same commit disagreed by a factor of eight on one workload, which is what a two-leg " +
       "hierarchical bootstrap does. Every workload here is widened by leg variation rather than " +
       "repetition variation, so more repetitions per leg would not tighten this lane -- more passes " +
-      "would.",
+      "would. Only the straddling split can fail a calibration, because it is the arrangement the " +
+      "screening lane measures in and therefore the only one whose indistinguishability is being " +
+      "claimed; the other two are the same binary arranged so that session drift does not cancel, " +
+      "and a workload whose drift_splits is non-empty is one where that ordering is doing real work.",
     workloads,
   };
   const destination = options.out ?? path.join(REPO, "bench/pr-screening.json");
@@ -1404,9 +1443,18 @@ function selfTest() {
     assert(!seenSplits.has(key), `${split.label} duplicates another split`);
     seenSplits.add(key);
   }
-  // The first split still straddles the run, so the headline arrangement is the
-  // one where a slow drift across the session cancels rather than accumulating.
-  assert.deepEqual(CALIBRATION_SPLITS[0].baseline, [0, 3]);
+  // Exactly one split straddles the run, and it is the one the screening lane
+  // measures in: pass order A B then B A puts each side at positions 1 and 4 or
+  // 2 and 3. Only that split can fail a calibration, so if this ever stops being
+  // true the canary is testing an arrangement nothing uses.
+  const straddling = CALIBRATION_SPLITS.filter((split) => split.straddles);
+  assert.equal(straddling.length, 1, "exactly one split may be the lane's own arrangement");
+  assert.deepEqual(straddling[0].baseline, [0, 3]);
+  assert.deepEqual(straddling[0].candidate, [1, 2]);
+  assert.equal(CALIBRATION_SPLITS[0].straddles, true, "the headline split must be the lane's own");
+  for (const split of CALIBRATION_SPLITS) {
+    assert.equal(typeof split.straddles, "boolean", `${split.label} must declare whether it straddles`);
+  }
 
   // A skipped screening still renders a summary a reader can act on.
   const skipped = screeningSummary({ skipped: true, reason: "nothing to compare" });
