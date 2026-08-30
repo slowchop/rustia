@@ -9,7 +9,11 @@ const { execFileSync } = require("node:child_process");
 
 const ROOT = path.resolve(__dirname, "..");
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
-const SAFE_OUTPUT = /^bench\/cloud\/linode-rustia-ci-memory-[0-9a-f]{7,40}\.json$/;
+const SAFE_OUTPUT = /^bench\/cloud\/(linode|dedicated)-rustia-ci-memory-[0-9a-f]{7,40}\.json$/;
+const DEDICATED_SCHEMA = "rustia.dedicated-memory-benchmark.v1";
+// One source for the owned host's identity, shared with the history and matrix
+// lanes; a second copy is a second thing to keep in step with the machine.
+const DEDICATED_HOST_CONFIG = "bench/cloud/dedicated-core2-tape-sparse.json";
 
 function fail(message) {
   throw new Error(message);
@@ -40,16 +44,80 @@ function sourceHash(commit, relative) {
   return sha256(gitBytes(commit, relative));
 }
 
-function parseOutput(argv) {
-  if (argv.length !== 2 || argv[0] !== "--output") {
-    fail("usage: create-rustia-ci-memory-config.js --output bench/cloud/linode-rustia-ci-memory-COMMIT.json");
+// The owned-host variant. Every measurement rule is untouched -- same groups,
+// same samples, same bootstrap, same publication shape -- so a cohort measured
+// here is comparable with one measured on the rented instance in everything but
+// the machine. Two pinned cores, because the supervisor samples while the
+// benchmark runs and sharing a core would make the supervisor part of what it
+// measures; ci-bench isolates 4 and 5, which is exactly enough.
+function toDedicated(config) {
+  const base = JSON.parse(fs.readFileSync(path.join(ROOT, DEDICATED_HOST_CONFIG), "utf8"));
+  const host = base.provider?.host;
+  if (!host || typeof host.name !== "string") {
+    fail(`${DEDICATED_HOST_CONFIG} does not carry a provider.host block`);
   }
-  const relative = argv[1].replaceAll("\\", "/");
+  // The throughput lanes pin one core, so the shared host block says "4". This
+  // protocol needs two and the machine has two: the isolated set is declared in
+  // the operations policy, which is where the qualification lives and therefore
+  // the honest place to widen from. Taking the second core from anywhere else
+  // would be this lane asserting an isolation nobody checked.
+  const policy = JSON.parse(
+    fs.readFileSync(path.join(ROOT, "bench/operations-policy.json"), "utf8"),
+  );
+  const authority = Object.values(policy.runner_classes ?? {}).find(
+    (entry) => entry.timing_authority === true,
+  );
+  if (!authority || authority.host !== host.name) {
+    fail(`bench/operations-policy.json does not declare ${host.name} as the timing authority`);
+  }
+  const isolated = authority.qualification?.isolated_cpus;
+  if (!Array.isArray(isolated) || isolated.length < 2) {
+    fail(
+      `bench/operations-policy.json isolates ${isolated?.length ?? 0} core(s) on ${host.name}; ` +
+        "the memory protocol needs two, one for the benchmark and one for the supervisor that " +
+        "samples it",
+    );
+  }
+  const pinned = [...isolated].sort((left, right) => left - right).slice(0, 2);
+  return {
+    ...config,
+    schema: DEDICATED_SCHEMA,
+    provider: { host: { ...host, pinned_cpus: pinned.join(",") } },
+    host_gate: {
+      ...config.host_gate,
+      benchmark_cpu: pinned[0],
+      supervisor_cpu: pinned[1],
+    },
+  };
+}
+
+function parseOutput(argv) {
+  const args = [...argv];
+  let dedicated = false;
+  const flag = args.indexOf("--dedicated");
+  if (flag !== -1) {
+    dedicated = true;
+    args.splice(flag, 1);
+  }
+  if (args.length !== 2 || args[0] !== "--output") {
+    fail(
+      "usage: create-rustia-ci-memory-config.js [--dedicated] --output " +
+        "bench/cloud/{linode,dedicated}-rustia-ci-memory-COMMIT.json",
+    );
+  }
+  const relative = args[1].replaceAll("\\", "/");
   if (!SAFE_OUTPUT.test(relative)) fail("--output must be a safe per-commit bench/cloud JSON path");
+  // The filename says which machine the config is for; it must agree with the
+  // flag, or a reader takes it for the thing it is not.
+  const named = relative.includes("/dedicated-rustia-ci-memory-");
+  if (named !== dedicated) {
+    fail(`--output name and ${dedicated ? "--dedicated" : "the rented lifecycle"} disagree`);
+  }
   const output = path.resolve(ROOT, relative);
   if (path.relative(ROOT, output).startsWith("..")) fail("--output escapes the repository");
-  return { relative, output };
+  return { relative, output, dedicated };
 }
+
 
 function createConfig(commit) {
   const workloads = [
@@ -140,11 +208,11 @@ function createConfig(commit) {
 }
 
 function main() {
-  const { relative, output } = parseOutput(process.argv.slice(2));
+  const { relative, output, dedicated } = parseOutput(process.argv.slice(2));
   const commit = gitText(["rev-parse", "HEAD"]);
   if (!FULL_COMMIT.test(commit)) fail("HEAD did not resolve to a full lowercase commit");
   if (fs.existsSync(output)) fail(`refusing to overwrite ${relative}`);
-  const config = createConfig(commit);
+  const config = dedicated ? toDedicated(createConfig(commit)) : createConfig(commit);
   fs.writeFileSync(output, `${JSON.stringify(config, null, 2)}\n`, {
     flag: "wx",
     mode: 0o600,
@@ -152,9 +220,14 @@ function main() {
   process.stdout.write(`${relative}\n`);
 }
 
-try {
-  main();
-} catch (error) {
-  process.stderr.write(`create-rustia-ci-memory-config: ${error.message}\n`);
-  process.exitCode = 1;
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    process.stderr.write(`create-rustia-ci-memory-config: ${error.message}\n`);
+    process.exitCode = 1;
+  }
 }
+
+// Exported so the runner's self-test can validate exactly what this writes.
+module.exports = { createConfig, toDedicated, parseOutput };

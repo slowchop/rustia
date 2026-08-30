@@ -507,6 +507,34 @@ function selfTest() {
     host_gate: { benchmark_cpu: 3, supervisor_cpu: 2 },
   };
   assert.equal(memoryProtocol(config).host.benchmark_cpu, 3);
+  // The load-bearing link: what the freezer writes is what this runner accepts,
+  // for both lifecycles, asserted against the freezer's own functions rather
+  // than a fixture that resembles their output.
+  const freezer = require("./create-rustia-ci-memory-config.js");
+  const head = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: path.join(__dirname, ".."),
+    encoding: "utf8",
+  }).stdout.trim();
+  const rented = freezer.createConfig(head);
+  assert.equal(validateConfig(rented).schema, "rustia.linode-fixed-benchmark.v2");
+  const dedicated = freezer.toDedicated(rented);
+  assert.equal(validateConfig(dedicated).schema, DEDICATED_SCHEMA);
+  assert.equal(dedicated.provider.host.name, "ci-bench");
+  // Two distinct pinned cores, both in the kernel's isolated set.
+  assert.notEqual(dedicated.host_gate.benchmark_cpu, dedicated.host_gate.supervisor_cpu);
+  const pinnedCpus = parseCpuList(dedicated.provider.host.pinned_cpus);
+  assert(pinnedCpus.includes(dedicated.host_gate.benchmark_cpu));
+  assert(pinnedCpus.includes(dedicated.host_gate.supervisor_cpu));
+  // A core outside the pinned set must be refused.
+  assert.throws(
+    () =>
+      validateConfig({
+        ...dedicated,
+        host_gate: { ...dedicated.host_gate, supervisor_cpu: 0 },
+      }),
+    /supervisor_cpu 0 is not one of provider\.host\.pinned_cpus/,
+  );
+
   assert.deepEqual(parseCpuList("4,5"), [4, 5]);
   assert.deepEqual(parseCpuList("0-1,4"), [0, 1, 4]);
   assert.throws(() => parseCpuList(""), /empty/);
