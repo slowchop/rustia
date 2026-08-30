@@ -726,6 +726,35 @@ stays the revision's own. Every such change is listed in the artifact's
 `source_modifications`, and the revision's workload checksums must match the
 rest of the series exactly.
 
+### Per-commit series
+
+Every commit that lands on `main` is measured on the owned host under exactly
+the reconstruction's protocol, so the chart continues rather than restarting.
+`.github/workflows/main-bench.yml` runs on the qualified runner class and reaches
+measurement only through `run-dedicated-benchmark.js`, which attests the machine
+before it builds — including when it runs on that machine, where local mode
+skips the transport but not the attestation.
+
+The rows live in the published data repository, not here: they grow with every
+commit, which is the same split the memory lane already uses. This repository
+holds the protocol at `bench/history/series/ci-bench-main.json`, and
+`tools/check-benchmark-series.js` validates the rows against it before anything
+is pushed. The load-bearing rule is checksum equality — a changed checksum means
+the workload changed, so the points either side are not measuring the same thing.
+
+A commit that builds a byte-identical binary records nothing. The gate is the
+compiled binary's hash rather than a path heuristic, so documentation and tooling
+commits do not add duplicate points.
+
+The renderer joins the live series to a reconstruction only when host, pinned
+core, harness, workloads, fixed `N` and every checksum agree; otherwise it draws
+a separate labelled line. Two protocols on one line is the confound that moving
+to a single host removed.
+
+Publication is not dispatched per commit. Rows accumulate and the chart refreshes
+on the next publication run, which keeps a twenty-minute job and a Pages commit
+off every merge.
+
 Where two revisions compile to byte-identical binaries, their independently
 measured timings bound this host's run-to-run variation. That check is free and
 belongs in the evidence.

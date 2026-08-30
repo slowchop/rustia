@@ -509,6 +509,12 @@ unreachable suspended-coroutine frames.
    not comparable with the new one's, so the response to new hardware is to re-derive rather than append.
    The runner attests the machine before building, takes an exclusive lock, applies declared source
    repairs by re-deriving them from Git, and records the identical-binary repeatability check in evidence.
+   Every commit landing on `main` is now measured automatically on the owned host under that same
+   protocol and appended to the published series, so the chart advances rather than freezing at the last
+   reconstructed revision; a commit whose binary is byte-identical records nothing. Runner policy is
+   split into classes: the shared pool may not produce a timing and holds no `measurement-` role, at most
+   one class may be authoritative, and measurement is reachable from a workflow only through the
+   entrypoint that attests the machine first.
    Next work is the actual standalone-project split, the interop/serde/fuel-limit workload tranche, and
    regression alerts.
 5. **Stabilize and publish the public crates.** Settle the consumer API and semver surface, close the generated
