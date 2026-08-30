@@ -1233,11 +1233,18 @@ function commandPr(options) {
     options.local,
   );
 
-  const legs = (commit) => [first, second].map((pass) => path.join(passRawDirectory(pass), `${commit}-WORKLOAD-samples.json`));
+  // One leg per pass per side. Both sides appear in both passes, in opposite
+  // order, so each side's legs sit at positions 1 and 4 or 2 and 3 of the
+  // session -- the arrangement the calibration shows is the one that cancels
+  // this host's drift.
+  const legs = (commit, workload) =>
+    [first, second].map((pass) =>
+      path.join(passRawDirectory(pass), `${commit}-${workload}-samples.json`),
+    );
   const workloads = [];
   for (const workload of Object.keys(screening.workloads)) {
-    const baselineLegs = legs(baseline).map((file) => file.replace("WORKLOAD", workload));
-    const candidateLegs = legs(candidate).map((file) => file.replace("WORKLOAD", workload));
+    const baselineLegs = legs(baseline, workload);
+    const candidateLegs = legs(candidate, workload);
     for (const file of [...baselineLegs, ...candidateLegs]) {
       if (!fs.existsSync(file)) fail(`missing measured leg ${path.relative(STATE_ROOT, file)}`);
     }
