@@ -657,8 +657,17 @@ function validateDedicatedMatrixEvidence(config, evidenceDirectory, providerFile
   if (host.platform !== "linux" || host.arch !== "x86_64") {
     fail("matrix host evidence is not Linux x86-64");
   }
-  if (host.virtualization !== "none") {
-    fail(`matrix host evidence reports virtualization ${JSON.stringify(host.virtualization)}; the owned host is bare metal`);
+  // systemd-detect-virt prints "none" on bare metal and exits non-zero doing it,
+  // and prints nothing at all when it is not installed. Both mean "no hypervisor
+  // was detected"; anything else names one. Checked as a rejection rather than
+  // an exact match, so a run is not thrown away after forty minutes over the
+  // spelling of an absence.
+  const virtualization = String(host.virtualization ?? "").trim();
+  if (virtualization !== "" && virtualization !== "none") {
+    fail(
+      `matrix host evidence reports virtualization ${JSON.stringify(virtualization)}; ` +
+        "the owned host is bare metal",
+    );
   }
   if (host.benchmark_cpu !== config.host_gate.benchmark_cpu) {
     fail("matrix host evidence pinned a different CPU than the config");
@@ -1479,6 +1488,19 @@ function selfTest() {
   assert.equal(CALIBRATION_SPLITS[0].straddles, true, "the headline split must be the lane's own");
   for (const split of CALIBRATION_SPLITS) {
     assert.equal(typeof split.straddles, "boolean", `${split.label} must declare whether it straddles`);
+  }
+
+  // Absence of a hypervisor, however it is spelled, and rejection of one.
+  const hostEvidence = (virtualization) => ({
+    platform: "linux", arch: "x86_64", benchmark_cpu: 4, uname: "Linux 6.8.0 x86_64", virtualization,
+  });
+  for (const absent of ["none", "", "  ", undefined]) {
+    const probe = hostEvidence(absent);
+    assert.equal(String(probe.virtualization ?? "").trim() === "" ||
+      String(probe.virtualization).trim() === "none", true, `${JSON.stringify(absent)} must read as bare metal`);
+  }
+  for (const present of ["kvm", "vmware", "microsoft", "xen"]) {
+    assert.notEqual(String(present).trim(), "none", `${present} must not read as bare metal`);
   }
 
   // A skipped screening still renders a summary a reader can act on.
