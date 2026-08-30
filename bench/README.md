@@ -604,19 +604,39 @@ Three cases end the run early, each with a reason rather than a number:
 - the change builds a byte-identical binary to its merge base.
 
 **Thresholds are measured, not chosen.** `bench/pr-screening.json` comes from
-`just bench-calibrate`, which measures one revision four times and compares
-passes 1 and 4 against 2 and 3 — both sides the same binary, so the interval is
-this host's own spread. Each workload's threshold is the widest end of that
-interval, rounded up. There is no default and no fallback: a guessed figure that
-happens to sit inside the host's spread reports movement on changes that did
-nothing, which is worse than having no lane. The screening lane refuses to run
-until a calibration exists.
+`just bench-calibrate`, which measures one revision four times and compares it
+against itself under every balanced split of those passes — both sides of every
+split are the same binary, so each interval is this host's own spread. A
+workload's threshold is the widest end of the widest split, rounded up. There is
+no default and no fallback: a guessed figure that happens to sit inside the
+host's spread reports movement on changes that did nothing, which is worse than
+having no lane. The screening lane refuses to run until a calibration exists.
 
-The calibration is also the protocol's own canary. Nothing changed between its
-two groups, so an interval that excludes zero means the comparison is measuring
-something other than the code. It refuses to write a calibration in that case,
-because raising the threshold until it passes would hide the one fault worth
-finding.
+One split is one draw. Two calibrations of the same commit produced thresholds
+that disagreed by a factor of eight on `generic_iteration`, which is what a
+two-leg hierarchical bootstrap does with two legs to resample from. Every
+workload also reports `widened_by: leg_variation`, so more repetitions per leg
+would tighten nothing here — more passes would.
+
+The calibration is also the protocol's own canary, and it caught something on
+its first real run. Four passes admit three balanced splits; all three are
+analysed. Under `1,3 vs 2,4` — every candidate pass immediately after its
+baseline — `sparse_tables` read as 1.2% *faster than itself*, with an interval
+of [-1.71, -0.66] that excludes zero.
+
+That is not a fault in the code. It is monotonic drift across a measurement
+session: later passes are faster, and that arrangement does not cancel it. The
+screening lane does not measure that way — two passes ordered A B then B A put
+each side at positions 1 and 4 or 2 and 3, which straddles the run — so the
+canary fails only on the straddling split, which is the arrangement whose
+indistinguishability is actually being claimed.
+
+The other two splits keep their job. They are the same binary arranged so drift
+does not cancel, so whatever they show is movement this host can produce: they
+widen the threshold, and each workload records which of them read a change in
+`drift_splits`. This is what turns A B B A from a stated precaution into a
+measured requirement — a non-straddling arrangement of the same passes reports
+a change that did not happen.
 
 Recalibrate after any change to the machine — kernel, firmware, isolation, or
 the box itself. Adopting a calibration is a deliberate commit, since it changes

@@ -523,8 +523,13 @@ unreachable suspended-coroutine frames.
    measures one revision four times and compares passes 1 and 4 against 2 and 3 through the ordinary
    analyzer, both sides the same binary, so the interval is the host's own spread and each threshold is
    its widest end rounded up. There is no default, because a declared figure sitting inside that spread
-   would report movement on changes that did nothing; the A/A run doubles as the protocol's canary and
-   refuses to write a calibration if any interval excludes zero. The analyzer gained the two readings the
+   would report movement on changes that did nothing. The A/A run doubles as the protocol's canary and
+   found real drift on its first run: `sparse_tables` read 1.2% faster than itself under the split that
+   places each candidate pass immediately after its baseline, interval [-1.71, -0.66], excluding zero.
+   That is monotonic session drift rather than a code fault, and it is precisely what the lane's A B B A
+   ordering cancels — which turns that ordering from a stated precaution into a measured requirement.
+   The canary therefore fails only on the straddling split, the arrangement whose indistinguishability
+   the lane actually claims; the drift-sensitive splits still widen the thresholds and are recorded. The analyzer gained the two readings the
    lane needs: `comparison.direction` against zero, because a one-sided threshold reports a genuine
    speedup as `material_regression_excluded` — replaying the committed `84e732a` analysis shows an 8.2%
    improvement published under exactly that wording — and `--confidence`, because five workloads screened

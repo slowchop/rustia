@@ -139,11 +139,20 @@ interval is the host's own spread, and each workload's threshold is its widest
 end rounded up. There is no default threshold, because a declared figure that
 sits inside the host's spread reports movement on changes that did nothing.
 
-The A/A run is also the protocol's canary: an interval that excludes zero when
-nothing changed means the comparison is measuring something other than the code,
-and the calibration refuses to write itself rather than let a wider threshold
-paper over it. Recalibrate whenever the machine changes; adopting a calibration
-is a deliberate commit.
+The A/A run is also the protocol's canary, and it has already earned its keep.
+Four passes admit three balanced splits, all of which are analysed. On the first
+real run `sparse_tables` read as 1.2% faster than itself under `1,3 vs 2,4`,
+with an interval excluding zero — monotonic session drift, not a code fault,
+under an arrangement where each candidate pass immediately follows its baseline
+so the drift does not cancel. The screening lane orders its passes A B then B A,
+which straddles the run, so the canary fails only on that straddling split: it
+is the arrangement whose indistinguishability the lane actually claims. The
+other splits still widen the threshold and are recorded per workload, because
+whatever they show is movement this host can produce.
+
+That result is what makes the A B B A ordering a measured requirement rather
+than a stated precaution. Recalibrate whenever the machine changes; adopting a
+calibration is a deliberate commit.
 
 Because the lane reads five workloads at once, it screens at a 99% interval
 rather than 95%: five independent 95% readings give roughly a 23% chance one
