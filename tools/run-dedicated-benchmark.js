@@ -964,7 +964,18 @@ function screeningSummary(result) {
 // inside one window, which can only make them more comparable. A threshold set
 // from this is therefore not tighter than the noise it will meet.
 const CALIBRATION_PASSES = 4;
-const CALIBRATION_SPLIT = Object.freeze({ baseline: [0, 3], candidate: [1, 2] });
+// Every way of splitting four passes into two balanced groups. One split is one
+// draw, and two calibration runs of the same commit disagreed by a factor of
+// eight on generic_iteration -- a two-leg hierarchical bootstrap has two legs to
+// resample from, which is barely an estimate. All three splits are measured from
+// the same passes at no extra cost, and the threshold is the widest any of them
+// produced: a threshold must not be narrower than something this host has
+// actually been seen doing.
+const CALIBRATION_SPLITS = Object.freeze([
+  Object.freeze({ label: "1,4 vs 2,3", baseline: [0, 3], candidate: [1, 2] }),
+  Object.freeze({ label: "1,2 vs 3,4", baseline: [0, 1], candidate: [2, 3] }),
+  Object.freeze({ label: "1,3 vs 2,4", baseline: [0, 2], candidate: [1, 3] }),
+]);
 
 function calibrationThreshold(interval) {
   const widest = Math.max(Math.abs(interval.lower), Math.abs(interval.upper));
@@ -1015,35 +1026,52 @@ function commandCalibrate(options) {
   const evidence = [];
   const broken = [];
   for (const workload of config.measurement.workloads) {
-    const baselineLegs = CALIBRATION_SPLIT.baseline.map((index) => legFor(index, workload));
-    const candidateLegs = CALIBRATION_SPLIT.candidate.map((index) => legFor(index, workload));
-    const args = [path.join(REPO, "bench/analyze-fixed-samples.js")];
-    for (const leg of baselineLegs) args.push("--baseline", leg);
-    for (const leg of candidateLegs) args.push("--candidate", leg);
-    args.push(
-      "--expected-legs",
-      "2",
-      "--allow-identical-commits",
-      "--material-threshold",
-      "0",
-      "--confidence",
-      String(confidence),
-    );
-    const analysis = JSON.parse(local("node", args));
+    const splits = CALIBRATION_SPLITS.map((split) => {
+      const args = [path.join(REPO, "bench/analyze-fixed-samples.js")];
+      for (const index of split.baseline) args.push("--baseline", legFor(index, workload));
+      for (const index of split.candidate) args.push("--candidate", legFor(index, workload));
+      args.push(
+        "--expected-legs",
+        "2",
+        "--allow-identical-commits",
+        "--material-threshold",
+        "0",
+        "--confidence",
+        String(confidence),
+      );
+      const analysis = JSON.parse(local("node", args));
+      return { split, analysis, threshold: calibrationThreshold(analysis.comparison.bootstrap_ci_percent) };
+    });
+    // The widest split decides the threshold; every split is checked against the
+    // canary, because a protocol fault that only one arrangement of the same
+    // passes reveals is still a protocol fault.
+    const widest = splits.reduce((left, right) => (right.threshold > left.threshold ? right : left));
+    const analysis = widest.analysis;
     const interval = analysis.comparison.bootstrap_ci_percent;
-    const threshold = calibrationThreshold(interval);
+    const threshold = widest.threshold;
     // The canary. Nothing changed between these two groups, so an interval that
     // clears zero means the protocol is measuring something other than the code.
     // Raising the threshold until it passes would hide exactly the fault worth
     // finding, so this refuses to write a calibration instead.
-    if (analysis.comparison.direction.status !== "indistinguishable") {
-      broken.push(
-        `${workload}: A/A interval [${interval.lower.toFixed(2)}, ${interval.upper.toFixed(2)}] ` +
-          `excludes zero (${analysis.comparison.direction.status})`,
-      );
+    for (const candidate of splits) {
+      if (candidate.analysis.comparison.direction.status !== "indistinguishable") {
+        const bounds = candidate.analysis.comparison.bootstrap_ci_percent;
+        broken.push(
+          `${workload} split ${candidate.split.label}: A/A interval ` +
+            `[${bounds.lower.toFixed(2)}, ${bounds.upper.toFixed(2)}] ` +
+            `excludes zero (${candidate.analysis.comparison.direction.status})`,
+        );
+      }
     }
     workloads[workload] = {
       material_threshold_percent: threshold,
+      chosen_split: widest.split.label,
+      // Every split, so a reader can see how much the threshold depends on which
+      // arrangement was drawn rather than having to run the calibration twice to
+      // find out.
+      split_thresholds_percent: Object.fromEntries(
+        splits.map((entry) => [entry.split.label, entry.threshold]),
+      ),
       observed_aa_interval_percent: interval,
       observed_aa_delta_percent: analysis.comparison.candidate_delta_percent,
       // Both components of the conservative envelope, because which one is
@@ -1088,11 +1116,17 @@ function commandCalibrate(options) {
     legs_per_side: 2,
     repetitions,
     confidence,
+    splits: CALIBRATION_SPLITS.map((split) => split.label),
     method:
-      "One revision measured in four separate passes; passes 1 and 4 compared against 2 and 3 " +
-      "through bench/analyze-fixed-samples.js with --allow-identical-commits. Both sides are the " +
-      "same binary, so the interval is this host's own spread. Each threshold is the widest end " +
-      "of that interval, rounded up: a reading a PR has to beat to be a change rather than noise.",
+      "One revision measured in four separate passes, then compared against itself under all three " +
+      "balanced splits of those passes through bench/analyze-fixed-samples.js with " +
+      "--allow-identical-commits. Both sides of every split are the same binary, so each interval is " +
+      "this host's own spread. A workload's threshold is the widest end of the widest split, rounded " +
+      "up. All three are recorded because one split is one draw: two runs of this calibration at the " +
+      "same commit disagreed by a factor of eight on one workload, which is what a two-leg " +
+      "hierarchical bootstrap does. Every workload here is widened by leg variation rather than " +
+      "repetition variation, so more repetitions per leg would not tighten this lane -- more passes " +
+      "would.",
     workloads,
   };
   const destination = options.out ?? path.join(REPO, "bench/pr-screening.json");
@@ -1354,13 +1388,25 @@ function selfTest() {
 
   // The two calibration groups must straddle the run, not sit one after the
   // other, or a drift across the session lands entirely on the second group.
-  assert.deepEqual(CALIBRATION_SPLIT.baseline, [0, 3]);
-  assert.deepEqual(CALIBRATION_SPLIT.candidate, [1, 2]);
-  assert.equal(
-    new Set([...CALIBRATION_SPLIT.baseline, ...CALIBRATION_SPLIT.candidate]).size,
-    CALIBRATION_PASSES,
-    "every calibration pass must be used exactly once",
-  );
+  // Every balanced split of the passes, each using every pass exactly once, and
+  // no split repeated -- three is all there are for four passes.
+  assert.equal(CALIBRATION_SPLITS.length, 3);
+  const seenSplits = new Set();
+  for (const split of CALIBRATION_SPLITS) {
+    assert.equal(split.baseline.length, split.candidate.length);
+    assert.equal(
+      new Set([...split.baseline, ...split.candidate]).size,
+      CALIBRATION_PASSES,
+      `${split.label} must use every calibration pass exactly once`,
+    );
+    // A split and its mirror image are the same comparison.
+    const key = [split.baseline, split.candidate].map((g) => [...g].sort().join("")).sort().join("|");
+    assert(!seenSplits.has(key), `${split.label} duplicates another split`);
+    seenSplits.add(key);
+  }
+  // The first split still straddles the run, so the headline arrangement is the
+  // one where a slow drift across the session cancels rather than accumulating.
+  assert.deepEqual(CALIBRATION_SPLITS[0].baseline, [0, 3]);
 
   // A skipped screening still renders a summary a reader can act on.
   const skipped = screeningSummary({ skipped: true, reason: "nothing to compare" });
