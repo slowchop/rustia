@@ -17,7 +17,7 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 1808,
+      "file_count": 1809,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
@@ -320,6 +320,7 @@
         "evidence/matrix/f412e2dadd4568b4ba35158090978c79413fd0f7/20260813T213406Z-924af4e7/protocol.json",
         "evidence/matrix/f412e2dadd4568b4ba35158090978c79413fd0f7/20260813T213406Z-924af4e7/provider.json",
         "evidence/matrix/f412e2dadd4568b4ba35158090978c79413fd0f7/20260813T213406Z-924af4e7/runtime-versions.json",
+        "evidence/matrix/f4807587780aec5829b297c037d5dd03ca40d251/host-bridge.json",
         "evidence/matrix/f4807587780aec5829b297c037d5dd03ca40d251/matrix-f4807587780a/gate.jsonl",
         "evidence/matrix/f4807587780aec5829b297c037d5dd03ca40d251/matrix-f4807587780a/host.json",
         "evidence/matrix/f4807587780aec5829b297c037d5dd03ca40d251/matrix-f4807587780a/manifest.json",

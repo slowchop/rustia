@@ -557,11 +557,17 @@ unreachable suspended-coroutine frames.
    (`main`), pull-request screening (`pr`), and the cross-engine matrix (`matrix`).
    `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines on the owned host and pushes
    accepted cohorts to `main` (the repository's single sanctioned CI contents-write grant, shape-pinned by
-   `tools/check-workflows.js`). It is dispatch-only until the first owned-host cohort has been inspected, and
-   it runs unconditionally rather than gated on pending commits: the gate asked the Rustia-progress question,
-   which the per-commit series now answers directly, while an ungated run also makes host drift — kernel,
-   microcode, thermal — visible instead of hiding it. Nothing in this repository can start a billed instance,
-   on a timer or otherwise.
+   `tools/check-workflows.js`). It runs unconditionally rather than gated on pending commits: the gate asked
+   the Rustia-progress question, which the per-commit series now answers directly, while an ungated run also
+   makes host drift — kernel, microcode, thermal — visible instead of hiding it. Its first cohort
+   (`f480758`) has landed, so `bench/history/runs.jsonl` now holds exactly one cohort, measured on
+   `ci-bench`: the 1,230 rows measured on retired cloud hosts were removed once every generated report
+   reproduced byte-identically without them. `bench/evidence/matrix/f480758.../host-bridge.json` records how
+   the two machines compared first, because that could not be recovered afterwards and is not a constant —
+   the ratio ranges 0.71x to 1.86x by engine, so absolute nanoseconds do not carry across the change while
+   the published same-run ratios do. Nothing in this repository can start a billed instance, on a timer or
+   otherwise; one lane can still create one by explicit dispatch (the memory benchmark), and its runner and
+   config freezer are ported to the owned host while its coordinator and workflow are not.
 
 **Pre-release gates:** see the "What's next" section below. Object reclamation/limits and deterministic
 decision reset, maintained live-memory accounting, and the shared native/Node-V8 mixed-heap pressure gate are

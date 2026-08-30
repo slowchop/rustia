@@ -158,6 +158,25 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Changed
 
+- **Removed 1,230 cross-engine rows measured on retired cloud hosts** from
+  `bench/history/runs.jsonl`, leaving the single cohort measured on the owned
+  host. This is a destructive change to a published dataset and is recorded as
+  its own entry for that reason. It is safe because the generated reports only
+  ever showed the newest row per engine/workload slot, and that row already
+  belonged to the kept cohort: `tools/retire-cloud-history.js` regenerates
+  `current-results.json`, `RESULTS.md`, `CLAIMS.md` and the dashboard afterwards
+  and refuses to proceed unless every byte is identical. The removed rows remain
+  in this repository's Git history and in the published data repository's.
+- Before that deletion, `bench/evidence/matrix/<cohort>/host-bridge.json` records
+  how the two machines compared, per engine and per workload. That comparison
+  could not have been recovered afterwards, and it is not a constant: the ratio
+  between the owned host and the retired instance ranges from 0.71 to 1.86
+  depending on the engine — `roto` reads 1.75x slower on the new machine and
+  `wasmtime` 0.82x — so a reader looking at absolute nanoseconds across the
+  change would otherwise see engine movements that never happened. Published
+  figures are ratios against the reference measured in the same run, so they are
+  unaffected.
+
 - Every benchmark now runs on one owned, attested machine. The DigitalOcean,
   Vultr and Scaleway coordinators are deleted, and the cross-engine matrix moved
   from a nightly billed cloud instance to `.github/workflows/weekly-matrix-bench.yml`
