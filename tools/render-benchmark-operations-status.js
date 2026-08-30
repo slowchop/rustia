@@ -45,10 +45,75 @@ function requireString(value, label) {
   if (typeof value !== "string" || value.trim() === "") fail(`${label} must be a non-empty string`);
 }
 
-function validatePolicy(policy) {
-  if (policy.schema !== "rustia.bench.operations-policy.v1" || policy.schema_version !== 1) {
-    fail(`${relative(policyPath)} must use rustia.bench.operations-policy.v1`);
+// The v1 schema had a single `runner`, which could only say "runners are not
+// timing authorities". That was true of the shared pool and became false the
+// moment an owned, qualified machine started producing every published number.
+// v2 splits runners into classes so the guarantee can be stated where it holds
+// rather than weakened everywhere, and the rules below make each half
+// mechanical instead of prose in design/81.
+function validateRunnerClasses(policy) {
+  const classes = policy.runner_classes;
+  if (classes === null || typeof classes !== "object" || Array.isArray(classes)) {
+    fail("runner_classes must be an object keyed by class name");
   }
+  const shared = classes["general-linux"];
+  if (!shared || shared.environment !== "self-hosted-shared" || shared.timing_authority !== false) {
+    // The original v1 assertion, narrowed to the class it was always about.
+    fail("the general-linux class must remain shared and non-authoritative for timing");
+  }
+  const authoritative = [];
+  for (const [name, runner] of Object.entries(classes)) {
+    if (!Array.isArray(runner.allowed_roles) || runner.allowed_roles.length === 0) {
+      fail(`runner_classes.${name}.allowed_roles must be a non-empty array`);
+    }
+    if (runner.timing_authority !== true) {
+      // A class that cannot be trusted with a timing may not be assigned one.
+      // design/81 said this in prose; here it is a rule.
+      const measuring = runner.allowed_roles.filter((role) => role.startsWith("measurement-"));
+      if (measuring.length > 0) {
+        fail(
+          `runner_classes.${name} is not a timing authority but claims ${measuring.join(", ")}`,
+        );
+      }
+      continue;
+    }
+    authoritative.push(name);
+    requireString(runner.host, `runner_classes.${name}.host`);
+    const q = runner.qualification;
+    if (q === null || typeof q !== "object") fail(`runner_classes.${name}.qualification must be an object`);
+    if (!Array.isArray(q.isolated_cpus) || q.isolated_cpus.length === 0) {
+      fail(`runner_classes.${name}.qualification.isolated_cpus must be a non-empty array`);
+    }
+    if (!Number.isSafeInteger(q.pinned_cpu) || !q.isolated_cpus.includes(q.pinned_cpu)) {
+      // A pinned core the kernel still schedules on is the failure the whole
+      // arrangement exists to prevent, and it is invisible in the timings.
+      fail(`runner_classes.${name}.qualification.pinned_cpu must be one of its isolated CPUs`);
+    }
+    if (q.smt !== "disabled") fail(`runner_classes.${name}.qualification.smt must be "disabled"`);
+    if (q.concurrent_jobs !== 1) fail(`runner_classes.${name}.qualification.concurrent_jobs must be 1`);
+    const r = q.repeatability;
+    if (r === null || typeof r !== "object"
+      || typeof r.median_spread_percent !== "number"
+      || typeof r.worst_spread_percent !== "number") {
+      fail(`runner_classes.${name}.qualification.repeatability must record median and worst spread`);
+    }
+  }
+  if (authoritative.length > 1) {
+    // One authority, so the shared pool cannot be promoted later by quietly
+    // adding a second.
+    fail(`at most one runner class may be a timing authority; got ${authoritative.join(", ")}`);
+  }
+  const declared = policy.measurement?.authoritative_runner_classes;
+  if (!Array.isArray(declared) || JSON.stringify(declared.slice().sort()) !== JSON.stringify(authoritative.slice().sort())) {
+    fail("measurement.authoritative_runner_classes must list exactly the classes marked timing_authority");
+  }
+}
+
+function validatePolicy(policy) {
+  if (policy.schema !== "rustia.bench.operations-policy.v2" || policy.schema_version !== 2) {
+    fail(`${relative(policyPath)} must use rustia.bench.operations-policy.v2`);
+  }
+  validateRunnerClasses(policy);
   if (!Array.isArray(policy.progress?.relevant_paths) || policy.progress.relevant_paths.length === 0) {
     fail("progress.relevant_paths must be a non-empty array");
   }
@@ -58,7 +123,6 @@ function validatePolicy(policy) {
       fail(`progress.relevant_paths[${index}] must remain repository-relative`);
     }
   }
-  if (policy.runner?.timing_authority !== false) fail("shared runner timing_authority must remain false");
   if (policy.measurement?.scheduled_billing_allowed !== false) {
     fail("scheduled benchmark billing must remain disabled");
   }
@@ -123,7 +187,7 @@ function renderStatus(policy, results) {
   return {
     schema: "rustia.bench.operations-status.v1",
     schema_version: 1,
-    runner: policy.runner,
+    runner_classes: policy.runner_classes,
     measurement: policy.measurement,
     publication: policy.publication,
     progress: {

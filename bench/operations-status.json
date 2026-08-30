@@ -1,21 +1,61 @@
 {
   "schema": "rustia.bench.operations-status.v1",
   "schema_version": 1,
-  "runner": {
-    "environment": "self-hosted-shared",
-    "timing_authority": false,
-    "allowed_roles": [
-      "build",
-      "correctness-test",
-      "artifact-validation",
-      "relevance-detection",
-      "dependency-update-detection",
-      "artifact-publication"
-    ]
+  "runner_classes": {
+    "general-linux": {
+      "environment": "self-hosted-shared",
+      "timing_authority": false,
+      "reason": "Shared and normally CPU-busy. Valid for work whose result does not depend on wall-clock speed; no result measured here may enter a performance claim, a regression trend, or an engine ranking.",
+      "allowed_roles": [
+        "build",
+        "correctness-test",
+        "artifact-validation",
+        "relevance-detection",
+        "dependency-update-detection",
+        "artifact-publication"
+      ]
+    },
+    "bench-linux": {
+      "environment": "self-hosted-owned-qualified",
+      "timing_authority": true,
+      "host": "ci-bench",
+      "reason": "One owned machine, quiet by construction: cores held off the scheduler, SMT disabled, one job at a time, and attested against the kernel before a run builds anything.",
+      "qualification": {
+        "isolated_cpus": [
+          4,
+          5
+        ],
+        "pinned_cpu": 4,
+        "smt": "disabled",
+        "concurrent_jobs": 1,
+        "attested_by": "tools/run-dedicated-benchmark.js compares the machine's own report against the frozen config before shipping, including that every pinned core is in /sys/devices/system/cpu/isolated",
+        "repeatability": {
+          "protocol": "rustia_history_backfill_v1",
+          "repetitions": 5,
+          "comparisons": 20,
+          "median_spread_percent": 0.41,
+          "worst_spread_percent": 5.74,
+          "method": "Revision pairs that compile to byte-identical binaries, so the figure assumes no model of what counts as equivalent work.",
+          "caveat": "Quote it per workload, not as one number: spread scales inversely with per-unit cost, from 0.32% worst on dense_tables at 39us/unit to 5.74% on closures_upvalues at 372ns/unit. This belongs to the backfill protocol's five repetitions; the A/B acceptance protocol runs 101-201 and is far tighter."
+        }
+      },
+      "allowed_roles": [
+        "build",
+        "measurement-progress",
+        "measurement-candidate",
+        "measurement-landscape",
+        "artifact-validation"
+      ]
+    }
   },
   "measurement": {
-    "mode": "operator-started-qualified-host",
-    "scheduled_billing_allowed": false
+    "mode": "attested-owned-host",
+    "authoritative_runner_classes": [
+      "bench-linux"
+    ],
+    "scheduled_billing_allowed": false,
+    "billed_host_creation": "operator-dispatch-only",
+    "reason": "No timer may start a billed instance. The retired cloud matrix remains reachable by explicit dispatch only, because it is still the sole producer of the cross-engine reference every published Rustia number is normalised against."
   },
   "publication": {
     "state": "active",

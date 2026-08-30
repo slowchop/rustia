@@ -19,9 +19,15 @@ It must also preserve candidate A/B experiments as research evidence, expose
 when results are stale or paused, and never start billed infrastructure merely
 because a scheduled CI job fired.
 
-## Runner boundary
+## Runner classes
 
-GitHub Actions runners are self-hosted, shared, and normally CPU-busy. They are
+The boundary is a property of the machine, not of a workflow filename. Two
+classes exist, declared in `bench/operations-policy.json` and enforced by
+`tools/check-workflows.js` and `tools/render-benchmark-operations-status.js`.
+
+### `general-linux` — shared, never a timing authority
+
+The general Actions pool is self-hosted, shared, and normally CPU-busy. It is
 valid for deterministic work whose result does not depend on wall-clock speed:
 
 - formatting, builds, Clippy, unit/integration and conformance tests;
@@ -30,14 +36,41 @@ valid for deterministic work whose result does not depend on wall-clock speed:
 - performance-relevance and dependency-update detection;
 - rendering and publishing already accepted benchmark artifacts.
 
-They are not benchmark hosts. No result measured on those runners may enter a
+**These are not benchmark hosts.** No result measured on them may enter a
 performance claim, regression trend, or current-engine ranking. Wall-clock and
-resource-sensitive tests must use deterministic clocks, generous timeouts, or
-an isolated qualified host.
+resource-sensitive tests must use deterministic clocks, generous timeouts, or a
+qualified host. The policy makes this mechanical: a class that is not a timing
+authority may hold no role matching `measurement-`, and a workflow bound to such
+a class may not name any measurement command.
 
-Fresh timing remains an explicit operator-started lifecycle on an ephemeral,
-qualified benchmark host. The coordinator must retain its existing hard cost
-and runtime ceilings, resource ownership journal, and confirmed deletion gate.
+### `bench-linux` — one owned, qualified machine
+
+Timing happens on a single owned host, quiet by construction: cores held off the
+scheduler, SMT disabled, timed work pinned to one isolated core, and one job on
+the box at a time. It is a timing authority precisely because those properties
+are checked rather than asserted — `tools/run-dedicated-benchmark.js` compares
+the machine's own report against the frozen config before it ships anything,
+including that every pinned core appears in the kernel's isolated set. A pinned
+core the scheduler still uses is the failure this arrangement exists to prevent,
+and it does not show up in the timings.
+
+At most one class may be authoritative, so the shared pool cannot be promoted
+later by adding a second. Measurement is reachable from a workflow only through
+that one attesting entrypoint; the four on-host runners may not be invoked from
+a workflow at all.
+
+The qualification record carries the machine's measured repeatability. Quote it
+per workload: spread scales inversely with per-unit cost, so the same host reads
+0.32% worst on `dense_tables` and 5.74% on `closures_upvalues`.
+
+### Cost
+
+No timer may start a billed instance. The retired cloud matrix stays reachable
+by explicit dispatch only, because it remains the sole producer of the
+cross-engine reference every published Rustia number is normalised against;
+running it is a deliberate act that costs money. When it moves to the owned
+host, the cloud lifecycle and its cost ceilings, ownership journal, and deletion
+gate retire with it.
 
 ## Evidence lanes
 

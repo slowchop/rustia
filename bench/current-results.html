@@ -1161,7 +1161,7 @@
             <span class="operations-state state-active">Active</span>
           </div>
           <p>Shared self-hosted runners may build, test correctness, validate evidence, detect updates, and publish accepted artifacts.</p>
-          <p><strong>They are not timing authorities.</strong> Fresh measurements require an explicit qualified-host lifecycle; scheduled billing is disabled.</p>
+          <p><strong>The shared pool is still not a timing authority.</strong> Every timing on this page was measured on one qualified machine, <code>ci-bench</code>, pinned to isolated core 4 with SMT disabled and one job on the box at a time. No result measured on the shared pool may enter a claim, and no scheduled job may start a billed instance.</p>
           <p class="operations-next">Next: Keep the artifact-only publisher healthy and investigate any failed publication before accepting newer public results.</p>
         </article>
       </div>

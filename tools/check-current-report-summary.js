@@ -49,8 +49,16 @@ function count(text, fragment) {
 
 function main() {
   const operationsHtml = operationsStatusSection({
-    runner: { environment: "self-hosted-shared", timing_authority: false },
-    measurement: { mode: "operator-started-qualified-host", scheduled_billing_allowed: false },
+    runner_classes: {
+      "general-linux": { environment: "self-hosted-shared", timing_authority: false },
+      "bench-linux": {
+        environment: "self-hosted-owned-qualified",
+        timing_authority: true,
+        host: "ci-bench",
+        qualification: { pinned_cpu: 4 },
+      },
+    },
+    measurement: { mode: "attested-owned-host", scheduled_billing_allowed: false },
     publication: {
       state: "active",
       reason: "Publication reason.",
@@ -74,8 +82,14 @@ function main() {
   });
   assert.match(operationsHtml, /Automatic publication is active/);
   assert.match(operationsHtml, /2 relevant commits waiting/);
-  assert.match(operationsHtml, /They are not timing authorities/);
-  assert.match(operationsHtml, /scheduled billing is disabled/);
+  // The page must keep saying the shared pool cannot produce a timing, and must
+  // keep naming the machine that did. Asserting the host means the page can
+  // never quietly stop attributing its own numbers.
+  assert.match(operationsHtml, /The shared pool is still not a timing authority/);
+  assert.match(operationsHtml, /no result measured on the shared pool may enter a claim/i);
+  assert.match(operationsHtml, /ci-bench/);
+  assert.match(operationsHtml, /isolated core 4/);
+  assert.match(operationsHtml, /no scheduled job may start a billed instance/i);
 
   const optimizationHtml = optimizationEvidenceSection([{
     workload: "generic_iteration",

@@ -100,12 +100,28 @@ function readOperationsStatus(data) {
   if (status.schema !== "rustia.bench.operations-status.v1" || status.schema_version !== 1) {
     fail(`${relative(operationsStatusPath)} must use rustia.bench.operations-status.v1`);
   }
-  if (status.runner?.environment !== "self-hosted-shared" || status.runner?.timing_authority !== false) {
+  // The page may not render at all unless the shared pool is still barred from
+  // producing a timing, and unless whatever class is allowed to produce one
+  // names the machine and its isolation. The renderer checks this itself rather
+  // than trusting the status file it was handed, because this page is where the
+  // claim becomes public.
+  const shared = status.runner_classes?.["general-linux"];
+  if (shared?.environment !== "self-hosted-shared" || shared?.timing_authority !== false) {
     fail("benchmark operations must keep shared self-hosted runners non-authoritative for timing");
   }
-  if (status.measurement?.mode !== "operator-started-qualified-host" ||
+  const authoritative = Object.entries(status.runner_classes ?? {})
+    .filter(([, runner]) => runner?.timing_authority === true);
+  if (authoritative.length !== 1) {
+    fail(`exactly one runner class may be a timing authority; got ${authoritative.length}`);
+  }
+  const [authoritativeName, authoritativeRunner] = authoritative[0];
+  if (typeof authoritativeRunner.host !== "string" || authoritativeRunner.host === ""
+    || !Number.isSafeInteger(authoritativeRunner.qualification?.pinned_cpu)) {
+    fail(`runner class ${authoritativeName} must name its host and pinned CPU`);
+  }
+  if (status.measurement?.mode !== "attested-owned-host" ||
       status.measurement?.scheduled_billing_allowed !== false) {
-    fail("benchmark operations must require explicit qualified-host measurement without scheduled billing");
+    fail("benchmark operations must require attested owned-host measurement without scheduled billing");
   }
   const states = new Set(["active", "current", "pending", "stale", "paused"]);
   for (const lane of ["publication", "progress", "landscape"]) {
@@ -2368,6 +2384,11 @@ function operationsStatusSection(status) {
   const progress = status.progress;
   const landscape = status.landscape;
   const publication = status.publication;
+  // Validated above: exactly one class is a timing authority and it names its
+  // host and pinned core. Naming the machine on the page means it can never
+  // silently stop saying which one produced these numbers.
+  const [, authority] = Object.entries(status.runner_classes)
+    .find(([, runner]) => runner?.timing_authority === true);
   const pendingLabel = progress.pending_relevant_commit_count === 1 ? "commit" : "commits";
   return `
     <section class="panel operations-panel" id="operations-status">
@@ -2404,7 +2425,7 @@ function operationsStatusSection(status) {
             <span class="operations-state state-${escapeHtml(publication.state)}">${escapeHtml(operationsStateLabel(publication.state))}</span>
           </div>
           <p>Shared self-hosted runners may build, test correctness, validate evidence, detect updates, and publish accepted artifacts.</p>
-          <p><strong>They are not timing authorities.</strong> Fresh measurements require an explicit qualified-host lifecycle; scheduled billing is disabled.</p>
+          <p><strong>The shared pool is still not a timing authority.</strong> Every timing on this page was measured on one qualified machine, <code>${escapeHtml(authority.host)}</code>, pinned to isolated core ${authority.qualification.pinned_cpu} with SMT disabled and one job on the box at a time. No result measured on the shared pool may enter a claim, and no scheduled job may start a billed instance.</p>
           <p class="operations-next">Next: ${escapeHtml(publication.next_action)}</p>
         </article>
       </div>
