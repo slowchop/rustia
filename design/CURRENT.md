@@ -515,6 +515,24 @@ unreachable suspended-coroutine frames.
    split into classes: the shared pool may not produce a timing and holds no `measurement-` role, at most
    one class may be authoritative, and measurement is reachable from a workflow only through the
    entrypoint that attests the machine first.
+   Pull requests are screened on the same host against `git merge-base origin/main HEAD` — not main's
+   tip, which would attribute an unrelated commit landing mid-review to the change — over two passes
+   with the order reversed in the second, so the sides interleave A B B A. The lane reports in the job
+   summary and records nothing: no row, no published artifact, no write access to either repository,
+   each pinned by `checkPrBench`. Its thresholds are measured rather than declared: `just bench-calibrate`
+   measures one revision four times and compares passes 1 and 4 against 2 and 3 through the ordinary
+   analyzer, both sides the same binary, so the interval is the host's own spread and each threshold is
+   its widest end rounded up. There is no default, because a declared figure sitting inside that spread
+   would report movement on changes that did nothing; the A/A run doubles as the protocol's canary and
+   refuses to write a calibration if any interval excludes zero. The analyzer gained the two readings the
+   lane needs: `comparison.direction` against zero, because a one-sided threshold reports a genuine
+   speedup as `material_regression_excluded` — replaying the committed `84e732a` analysis shows an 8.2%
+   improvement published under exactly that wording — and `--confidence`, because five workloads screened
+   at 95% give roughly a 23% chance one moves on a null change and more repetitions cannot fix a per-test
+   error rate. The `*_ci_95_percent` fields stay at 95% whatever level is asked for, verified by
+   reproducing a months-old committed analysis byte-identically. The fork guard is already in place rather
+   than deferred: `pr-bench.yml` refuses pull requests from forks, which changes nothing while the
+   repository is private and is the guarantee that matters the day it is not.
    Next work is the actual standalone-project split, the interop/serde/fuel-limit workload tranche, and
    regression alerts.
 5. **Stabilize and publish the public crates.** Settle the consumer API and semver surface, close the generated

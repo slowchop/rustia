@@ -43,7 +43,7 @@ qualified host. The policy makes this mechanical: a class that is not a timing
 authority may hold no role matching `measurement-`, and a workflow bound to such
 a class may not name any measurement command.
 
-### `bench-linux` — one owned, qualified machine
+### `bench-solo` — one owned, qualified machine
 
 Timing happens on a single owned host, quiet by construction: cores held off the
 scheduler, SMT disabled, timed work pinned to one isolated core, and one job on
@@ -117,6 +117,50 @@ Keep controlled ABBA/BAAB evidence separate from progress and landscape data.
 Retain accepted, rejected, and inconclusive experiments with raw samples,
 baseline/candidate identities, host gates, uncertainty, and the declared
 decision threshold. A rejected candidate never enters the progress trend.
+
+### 5. Pull-request screening
+
+A reading for the author of a change, produced on the same qualified host and
+retained nowhere. `.github/workflows/pr-bench.yml` measures the branch against
+`git merge-base origin/main HEAD` — not main's tip, which would attribute an
+unrelated commit landing mid-review to the pull request — across two passes with
+the order reversed in the second, so the sides interleave A B B A.
+
+Screening is a distinct lane from candidate experiments and must not be confused
+with one. It runs a short protocol, publishes nothing, and holds no write access
+to either repository. A candidate experiment is what settles whether an
+optimisation is adopted.
+
+**Thresholds are measured on the host rather than declared.**
+`bench/pr-screening.json` is produced by an A/A run: one revision measured four
+times, passes 1 and 4 compared against 2 and 3 through the ordinary analyzer
+with `--allow-identical-commits`. Both sides are the same binary, so the
+interval is the host's own spread, and each workload's threshold is its widest
+end rounded up. There is no default threshold, because a declared figure that
+sits inside the host's spread reports movement on changes that did nothing.
+
+The A/A run is also the protocol's canary: an interval that excludes zero when
+nothing changed means the comparison is measuring something other than the code,
+and the calibration refuses to write itself rather than let a wider threshold
+paper over it. Recalibrate whenever the machine changes; adopting a calibration
+is a deliberate commit.
+
+Because the lane reads five workloads at once, it screens at a 99% interval
+rather than 95%: five independent 95% readings give roughly a 23% chance one
+moves on a null change, and more repetitions narrow the intervals without
+changing that rate.
+
+**Untrusted pull requests.** The lane executes the branch's code on the machine
+that produces every published number, which holds persistent cargo roots and
+target directories later runs read. `pr-bench.yml` therefore carries
+`if: github.event.pull_request.head.repo.full_name == github.repository`, pinned
+by `checkPrBench` so it cannot be dropped silently, and fork pull requests get
+correctness CI only. This costs nothing while the repository is private, where
+every author is already trusted; it is in place now because the day it starts to
+matter is the day the repository goes public. Going public should additionally
+split the runner identity — a trusted lane for `main` and the weekly matrix, and
+an `--ephemeral` unprivileged lane for pull requests — and require approval for
+outside collaborators.
 
 ## Freshness model
 

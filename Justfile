@@ -187,6 +187,18 @@ bench-history-fetch replace="":
 bench-history-unlock:
     node tools/run-dedicated-benchmark.js unlock
 
+# Reports only: no row is recorded and nothing is published. CI runs this per
+# pull request; this recipe is the same lane driven by hand.
+# Screen the current branch against its merge base on the owned benchmark host.
+bench-pr out="pr-screening.md":
+    node tools/run-dedicated-benchmark.js pr --out {{ quote(out) }}
+
+# Run it after any change to the machine. Commit the result to adopt it, since
+# it changes what every later pull request is judged against.
+# Set the pull-request screening thresholds from an A/A run on the bench host.
+bench-calibrate out="bench/pr-screening.json":
+    node tools/run-dedicated-benchmark.js calibrate --out {{ quote(out) }}
+
 # Inspect locally owned run state and its corresponding Linode instance.
 bench-linode-status:
     node tools/run-linode-benchmark.js status

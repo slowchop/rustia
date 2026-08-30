@@ -51,7 +51,7 @@ function main() {
   const operationsHtml = operationsStatusSection({
     runner_classes: {
       "general-linux": { environment: "self-hosted-shared", timing_authority: false },
-      "bench-linux": {
+      "bench-solo": {
         environment: "self-hosted-owned-qualified",
         timing_authority: true,
         host: "ci-bench",

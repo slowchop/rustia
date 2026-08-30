@@ -41,6 +41,7 @@
         "measurement-progress",
         "measurement-candidate",
         "measurement-landscape",
+        "measurement-screening",
         "artifact-validation"
       ]
     }

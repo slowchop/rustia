@@ -759,6 +759,55 @@ Where two revisions compile to byte-identical binaries, their independently
 measured timings bound this host's run-to-run variation. That check is free and
 belongs in the evidence.
 
+### Pull-request screening
+
+`.github/workflows/pr-bench.yml` measures a pull request against
+`git merge-base origin/main HEAD` and reports the result in the job summary. It
+records nothing: no row, no published artifact, and no write access to either
+repository. The merge base rather than main's tip, because an unrelated commit
+landing mid-review would otherwise be attributed to the pull request.
+
+Two passes measure both sides, with the order reversed in the second, so the
+sequence is A B B A and drift across the session lands on both sides instead of
+on whichever went second. Each pass is one frozen `--pair` config through the
+same runner the reconstruction uses; the lane adds no second measurement path.
+
+Three cases end the run early, each with a reason rather than a number:
+
+- the merge base is this commit, so there is nothing to compare against;
+- the change edits the measurement protocol itself (`bench/`, `Cargo.lock`,
+  `rust-toolchain.toml`), which the frozen config pins by hash — the run would
+  otherwise fail on a checksum deep inside the host, which says nothing useful;
+- the change builds a byte-identical binary to its merge base.
+
+**Thresholds are measured, not chosen.** `bench/pr-screening.json` comes from
+`just bench-calibrate`, which measures one revision four times and compares
+passes 1 and 4 against 2 and 3 — both sides the same binary, so the interval is
+this host's own spread. Each workload's threshold is the widest end of that
+interval, rounded up. There is no default and no fallback: a guessed figure that
+happens to sit inside the host's spread reports movement on changes that did
+nothing, which is worse than having no lane. The screening lane refuses to run
+until a calibration exists.
+
+The calibration is also the protocol's own canary. Nothing changed between its
+two groups, so an interval that excludes zero means the comparison is measuring
+something other than the code. It refuses to write a calibration in that case,
+because raising the threshold until it passes would hide the one fault worth
+finding.
+
+Recalibrate after any change to the machine — kernel, firmware, isolation, or
+the box itself. Adopting a calibration is a deliberate commit, since it changes
+what every later pull request is judged against.
+
+Screening reads five workloads at once, so the interval level matters: five
+independent 95% readings give roughly a 23% chance that one of them "moves" on a
+change that did nothing. More repetitions do not fix that — they narrow each
+interval without touching the per-test error rate — so the lane screens at 99%
+instead, which costs nothing in wall clock.
+
+A screening result is a reading for a reviewer, not a measurement the project
+stands behind. The acceptance protocol produces those, and it runs far longer.
+
 Freeze only from a clean committed checkout and commit the generated config;
 `just bench-history` does the freeze itself and reuses an already-frozen config
 for the same harness commit rather than silently re-deriving one.
