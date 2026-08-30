@@ -1,0 +1,120 @@
+name: Cross-Engine Matrix (weekly)
+
+# Measures all thirteen engines across the five workloads on the owned benchmark
+# host. This is the only producer of the cross-engine comparison and of the
+# mlua/Luau/JIT reference every published Rustia number is normalised against.
+#
+# It used to run nightly on an ephemeral dedicated Linode, gated on whether main
+# had gained performance-relevant commits since the last cohort. Both of those
+# are gone. The gate asked the Rustia-progress question, which the per-commit
+# series now answers directly and continuously; this lane asks about competitors,
+# and running it unconditionally also gives a host-drift signal -- kernel,
+# microcode, thermal -- that a gated run would hide. The cost is forty minutes of
+# an otherwise idle machine rather than a bill.
+#
+# Timing runs on the qualified owned host and only through
+# run-dedicated-benchmark.js, which attests the machine against the frozen config
+# before it builds anything. This workflow is the single sanctioned holder of
+# contents-write: the cohort belongs in this repository's history, unlike the
+# per-commit series, whose rows grow forever and live in the data repository.
+#
+# Dispatch-only until the first owned-host cohort has been inspected. The weekly
+# schedule is added once a cohort has landed and been looked at, not before.
+"on":
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: rustia-bench-host-serial
+  cancel-in-progress: false
+
+jobs:
+  matrix:
+    name: Cross-engine matrix on the owned host
+    if: github.ref == 'refs/heads/main'
+    runs-on:
+      group: bench-solo
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout trusted main history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          target: wasm32-unknown-unknown
+          cache: false
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Measure and promote the cohort
+        run: |
+          set -euo pipefail
+          benchmark_commit="$(git rev-parse HEAD)"
+          short_commit="${benchmark_commit:0:12}"
+          node tools/run-dedicated-benchmark.js matrix --local
+          printf 'RUSTIA_MATRIX_COMMIT=%s\n' "$short_commit" >> "$GITHUB_ENV"
+          printf 'RUSTIA_BENCHMARK_COMMIT=%s\n' "$benchmark_commit" >> "$GITHUB_ENV"
+
+      - name: Publish the accepted cohort to main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          config="bench/cloud/dedicated-cross-engine-matrix-${RUSTIA_MATRIX_COMMIT}.json"
+          git config user.name "rustia-benchmark"
+          git config user.email "benchmark@rustia.invalid"
+          # Snapshot the promoted artifacts, then rebuild the publication as one
+          # fresh commit on top of a freshly fetched main, so a long measurement
+          # never has to rebase over commits that landed while it ran.
+          git add bench design tools/check-benchmark-results.js
+          git commit -m "Local promotion snapshot ${RUSTIA_MATRIX_COMMIT}"
+          snapshot="$(git rev-parse HEAD)"
+          published=""
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git checkout -B matrix-publish origin/main
+            git checkout "$snapshot" -- \
+              "$config" \
+              bench/history \
+              bench/evidence/matrix \
+              bench/wasm/current-results.json \
+              bench/wasm/dispatch-current-results.json
+            git checkout origin/main -- tools/check-benchmark-results.js
+            node tools/register-matrix-cohort.js --commit "$RUSTIA_BENCHMARK_COMMIT"
+            # Re-derives the report tables from the committed history. This mode
+            # returns before any measurement; it is not a timing.
+            cargo run -p script-bench-harness -- --refresh-results
+            node tools/check-package-files.js
+            node tools/check-publishability.js
+            node tools/render-benchmark-operations-status.js
+            node bench/render-current-results.js
+            node bench/render-claims.js
+            node tools/check-benchmark-results.js
+            git add bench design tools/check-benchmark-results.js
+            git commit -m "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT}"
+            if git push origin HEAD:main; then
+              published=yes
+              break
+            fi
+            echo "push raced with new commits on main; rebuilding publication (attempt $attempt)"
+          done
+          test -n "$published"
+          # A GITHUB_TOKEN push does not trigger downstream workflows, so the
+          # dashboard publication is dispatched explicitly.
+          curl -sSf -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/publish-benchmark-data.yml/dispatches" \
+            -d '{"ref":"main"}'

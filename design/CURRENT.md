@@ -540,16 +540,19 @@ unreachable suspended-coroutine frames.
 6. **Keep the executable conformance corpus green**. The current repo has 712 executable fixtures covering 511
    behavior refs with no pending rows: 694/493 are Luau 0.709 oracle-backed and 18/18 are offline PUC 5.1.5
    oracle-backed. New engine work should add focused fixtures rather than re-opening pending inventory.
-7. **Maintain benchmark operations** — hosted runners never time anything; ephemeral dedicated cloud hosts are
-   the timing authority: dedicated Linode for complete Linux/wasm matrices and qualified DigitalOcean A/B for
-   fixed-work optimization decisions. Both must keep their provenance, completeness, and cleanup gates green.
-   Matrix cohorts now run on an operator-sanctioned nightly schedule:
-   `.github/workflows/nightly-matrix-bench.yml` (18:00 UTC / 04:00 AEST) coordinates one ephemeral dedicated
-   Linode only when `bench/operations-status.json` reports pending performance-relevant commits, freezes the
-   exact-commit protocol with `tools/create-linode-matrix-config.js`, and pushes accepted cohorts to `main`
-   (the repository's single sanctioned CI contents-write grant, shape-pinned by `tools/check-workflows.js`).
-   Failed or unqualified nights publish nothing and retry the next night, capping spend at one Linode
-   (~$0.11) per night.
+7. **Maintain benchmark operations** — one owned, attested machine times everything; the shared pool times
+   nothing. `ci-bench` is the sole timing authority, qualified by properties that are checked rather than
+   asserted: cores held off the scheduler, SMT disabled, timed work pinned to one isolated core, one job on
+   the box at a time, and every run attested against the frozen config before it builds. Four lanes reach it,
+   all through `tools/run-dedicated-benchmark.js`: the reconstruction (`history`), the per-commit series
+   (`main`), pull-request screening (`pr`), and the cross-engine matrix (`matrix`).
+   `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines on the owned host and pushes
+   accepted cohorts to `main` (the repository's single sanctioned CI contents-write grant, shape-pinned by
+   `tools/check-workflows.js`). It is dispatch-only until the first owned-host cohort has been inspected, and
+   it runs unconditionally rather than gated on pending commits: the gate asked the Rustia-progress question,
+   which the per-commit series now answers directly, while an ungated run also makes host drift — kernel,
+   microcode, thermal — visible instead of hiding it. Nothing in this repository can start a billed instance,
+   on a timer or otherwise.
 
 **Pre-release gates:** see the "What's next" section below. Object reclamation/limits and deterministic
 decision reset, maintained live-memory accounting, and the shared native/Node-V8 mixed-heap pressure gate are

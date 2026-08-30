@@ -8,16 +8,17 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
-- Nightly automated cross-engine matrix benchmarking:
-  `.github/workflows/nightly-matrix-bench.yml` runs at 18:00 UTC (04:00 AEST)
-  and, only when performance-relevant commits landed since the last recorded
-  cohort, freezes an exact-commit protocol with the new
-  `tools/create-linode-matrix-config.js`, measures the full matrix on one
-  ephemeral dedicated Linode, and pushes the accepted cohort to `main` so the
-  published history and dashboard update without operator action. Quiet or
-  unqualified nights spend nothing beyond at most one Linode, and the workflow
-  shape — including the repository's only CI contents-write grant — is pinned
-  by `tools/check-workflows.js`.
+- Automated cross-engine matrix benchmarking on the owned host:
+  `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines
+  across the five workloads on `ci-bench` and pushes the accepted cohort to
+  `main`, so the published history and dashboard update without operator
+  action. It replaces a nightly job that created a billed cloud instance and
+  ran only when performance-relevant commits had landed; that gate asked the
+  Rustia-progress question, which the per-commit series now answers directly,
+  and running unconditionally makes host drift visible rather than hiding it.
+  Dispatch-only until the first owned-host cohort has been inspected. The
+  workflow shape — including the repository's only CI contents-write grant —
+  is pinned by `tools/check-workflows.js`.
 
 - VM Core 2 C2.2 replaces the plain-mode per-PC Region/receipt selection
   ladder with one loader-built, whole-function executable tape. Every source

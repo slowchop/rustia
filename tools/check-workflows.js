@@ -9,7 +9,7 @@ const workflowDir = path.join(root, ".github", "workflows");
 const ciPath = path.join(workflowDir, "ci.yml");
 const rustiaMemoryPath = path.join(workflowDir, "linode-rustia-memory.yml");
 const benchmarkPublicationPath = path.join(workflowDir, "publish-benchmark-data.yml");
-const nightlyMatrixPath = path.join(workflowDir, "nightly-matrix-bench.yml");
+const weeklyMatrixPath = path.join(workflowDir, "weekly-matrix-bench.yml");
 const rustToolchainPath = path.join(root, "rust-toolchain.toml");
 const releasePreflightPath = path.join(root, "tools", "run-release-preflight.js");
 
@@ -130,7 +130,7 @@ const RUNNER_CLASSES = new Map([
 // the workflow may only use GitHub-hosted runners.
 const WORKFLOW_RUNNER_CLASS = new Map([
   ["ci.yml", "general-linux"],
-  ["nightly-matrix-bench.yml", "general-linux"],
+  ["weekly-matrix-bench.yml", "bench-solo"],
   ["publish-benchmark-data.yml", "general-linux"],
   ["main-bench.yml", "bench-solo"],
   ["pr-bench.yml", "bench-solo"],
@@ -141,8 +141,10 @@ const WORKFLOW_RUNNER_CLASS = new Map([
 // and the four on-host runners were forbidden nowhere -- a workflow on the
 // shared pool could have invoked any of them and no rule would have stopped it.
 // That was the real hole; the raw-harness ban was the visible part of it.
+const RAW_HARNESS = "cargo run -p script-bench-harness";
+const HARNESS_REFRESH_ONLY = `${RAW_HARNESS} -- --refresh-results`;
 const MEASUREMENT_COMMANDS = Object.freeze([
-  "cargo run -p script-bench-harness",
+  RAW_HARNESS,
   "node tools/run-wasm-gate.js",
   "node tools/run-wasm-dispatch-gate.js",
   "node tools/run-linux-fixed-benchmark.js",
@@ -159,15 +161,14 @@ const ATTESTED_ENTRYPOINT = "node tools/run-dedicated-benchmark.js";
 
 // Cloud coordinators are deliberately absent from MEASUREMENT_COMMANDS. They
 // take no timing themselves: they provision a separate qualified instance and
-// measure there, which is the retired model nightly-matrix-bench.yml still
-// carries. Adding them here would require deleting that workflow, and it is
-// still the only producer of the cross-engine reference every published Rustia
-// number is normalised against. Phase-out happens when the matrix moves to the
-// owned host, not before.
+// measure there. No workflow invokes one any more -- the matrix moved to the
+// owned host -- and weekly-matrix-bench.yml forbids the string by name, so the
+// remaining question is when the coordinators themselves are deleted rather
+// than whether a workflow can reach one.
 
 // contents: write can create a commit on main. Forbidden everywhere except the
 // workflows named here, so a third holder cannot appear by omission.
-const CONTENTS_WRITE_WORKFLOWS = new Set(["nightly-matrix-bench.yml"]);
+const CONTENTS_WRITE_WORKFLOWS = new Set(["weekly-matrix-bench.yml"]);
 
 function checkRunnerLabels(files) {
   const hostedRunners = new Set(["ubuntu-latest", "macos-latest", "windows-latest"]);
@@ -228,7 +229,23 @@ function checkRunnerLabels(files) {
       );
     }
 
-    for (const command of MEASUREMENT_COMMANDS) forbidIncludes(text, command, label);
+    for (const command of MEASUREMENT_COMMANDS) {
+      // The harness has a mode that takes no timing: --refresh-results returns
+      // before any measurement and re-derives the report tables from committed
+      // history. The ban exists to stop a workflow taking a timing, so it has to
+      // name that rather than the binary -- otherwise the rule is worked around
+      // by invoking the same command through `just`, which is what the matrix
+      // lane did for months without any rule noticing.
+      if (command === RAW_HARNESS) {
+        const uses = text.split(RAW_HARNESS).length - 1;
+        const refreshes = text.split(HARNESS_REFRESH_ONLY).length - 1;
+        if (uses > refreshes) {
+          fail(`${label} must not include ${JSON.stringify(RAW_HARNESS)} except as --refresh-results`);
+        }
+        continue;
+      }
+      forbidIncludes(text, command, label);
+    }
     if (runnerClass === null || !runnerClass.timingAuthority) {
       forbidIncludes(text, ATTESTED_ENTRYPOINT, label);
     }
@@ -474,49 +491,43 @@ function checkRustiaMemory(text) {
   checkActionPins(text, label);
 }
 
-function checkNightlyMatrix(text) {
-  const label = ".github/workflows/nightly-matrix-bench.yml";
-  requireIncludes(text, "name: Cross-Engine Matrix (manual)\n", label);
-  // Manual dispatch only. The nightly schedule created a billed Linode
-  // whenever main gained an engine commit; measurement has moved to the owned
-  // host, so nothing in this repository may start a paid instance on a timer.
-  // Restoring a cron here has to change this line too, which is the point.
+function checkWeeklyMatrix(text) {
+  const label = ".github/workflows/weekly-matrix-bench.yml";
+  requireIncludes(text, "name: Cross-Engine Matrix (weekly)\n", label);
+  // Dispatch-only until the first owned-host cohort has been inspected. When a
+  // schedule is added it will be a weekly one, and it will start no billed
+  // instance -- but until a cohort has actually landed from this machine there
+  // is nothing to schedule.
   requireIncludes(text, "\"on\":\n  workflow_dispatch:\n", label);
   forbidIncludes(text, "cron:", label);
-  // The single sanctioned contents-write grant: this workflow may push
-  // accepted matrix cohorts to main and nothing else may.
+  // The single sanctioned contents-write grant: this workflow may push accepted
+  // matrix cohorts to main and nothing else may. The per-commit series writes to
+  // the data repository precisely so that it does not need a second one.
   requireIncludes(text, "permissions:\n  contents: write\n  actions: write\n", label);
   requireIncludes(text, "publish-benchmark-data.yml/dispatches", label);
+  // Shares the host's serialisation group: a cohort takes about forty minutes
+  // and must never overlap another job on the machine it is measuring.
+  requireIncludes(text, "group: rustia-bench-host-serial", label);
   requireIncludes(text, "cancel-in-progress: false\n", label);
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
   requireIncludes(text, "ref: main", label);
-  requireIncludes(
-    text,
-    "runs-on:\n      group: general-linux\n      labels: [self-hosted, Linux, X64, general-linux]",
-    label,
-  );
-  requireIncludes(
-    text,
-    "uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659",
-    label,
-  );
   requireIncludes(text, "toolchain: 1.95.0", label);
+  requireIncludes(text, "target: wasm32-unknown-unknown", label);
   requireIncludes(text, "cache: false", label);
-  requireIncludes(
-    text,
-    "678efc1cfbd5fa5a88375daa7e2f3864a049d6d63a0296df925a2ae5f516cb56",
-    label,
-  );
-  requireIncludes(text, "sha256sum -c -", label);
-  requireIncludes(text, "pending_relevant_commit_count", label);
-  requireIncludes(text, "steps.gate.outputs.pending != '0'", label);
-  requireIncludes(text, "LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}", label);
-  requireIncludes(text, "node tools/create-linode-matrix-config.js", label);
+  // Measurement is reachable only through the driver that attests the machine.
+  requireIncludes(text, "node tools/run-dedicated-benchmark.js matrix --local", label);
   requireIncludes(text, "node tools/register-matrix-cohort.js", label);
-  requireIncludes(text, "node tools/run-linode-benchmark.js bench", label);
   requireIncludes(text, "node tools/check-benchmark-results.js", label);
-  requireIncludes(text, "node tools/run-linode-benchmark.js destroy", label);
-  requireIncludes(text, "rm -f .rustia-benchmark-state/linode/token", label);
+  requireIncludes(text, "node tools/check-package-files.js", label);
+  requireIncludes(text, "node tools/check-publishability.js", label);
+  // Nothing here may start, pay for, or authenticate to a cloud instance. The
+  // lane that did is gone, and these are the strings that would bring it back.
+  forbidIncludes(text, "LINODE_TOKEN", label);
+  forbidIncludes(text, "run-linode-benchmark.js", label);
+  forbidIncludes(text, ".rustia-benchmark-state/linode", label);
+  // The progress gate asked the Rustia question, which the per-commit series
+  // now answers. Running unconditionally is also what makes host drift visible.
+  forbidIncludes(text, "pending_relevant_commit_count", label);
   forbidIncludes(text, "actions/upload-artifact", label);
   forbidIncludes(text, "retention-days:", label);
   forbidIncludes(text, "pull_request_target", label);
@@ -587,7 +598,7 @@ for (const required of [
   "main-bench.yml",
   "pr-bench.yml",
   "linode-rustia-memory.yml",
-  "nightly-matrix-bench.yml",
+  "weekly-matrix-bench.yml",
   "publish-benchmark-data.yml",
 ]) {
   if (!files.includes(required)) {
@@ -600,7 +611,7 @@ if (files.includes("benchmarks.yml")) {
 checkRunnerLabels(files);
 checkCi(readWorkflow(ciPath));
 checkRustiaMemory(readWorkflow(rustiaMemoryPath));
-checkNightlyMatrix(readWorkflow(nightlyMatrixPath));
+checkWeeklyMatrix(readWorkflow(weeklyMatrixPath));
 checkBenchmarkPublication(readWorkflow(benchmarkPublicationPath));
 checkMainBench(readWorkflow(path.join(workflowDir, "main-bench.yml")));
 checkPrBench(readWorkflow(path.join(workflowDir, "pr-bench.yml")));
