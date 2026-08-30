@@ -657,6 +657,9 @@ instead, which costs nothing in wall clock.
 A screening result is a reading for a reviewer, not a measurement the project
 stands behind. The acceptance protocol produces those, and it runs far longer.
 
+The lane was first exercised end to end by a documentation-only pull request,
+which is the case it should decline: same engine bytes, nothing to compare.
+
 Freeze only from a clean committed checkout and commit the generated config;
 `just bench-history` does the freeze itself and reuses an already-frozen config
 for the same harness commit rather than silently re-deriving one.
