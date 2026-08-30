@@ -95,36 +95,101 @@ for (const [sample, shouldMatch] of [
   }
 }
 
+// Runner classes. The distinction that matters is not which file is allowed to
+// name a self-hosted runner, but which machine may produce a timing. The shared
+// pool is busy by design and must never be a timing authority; a qualified owned
+// host is quiet, attested against the kernel before it builds, and takes one job
+// at a time. Encoding that as a property of the machine rather than of a
+// filename is what lets the second kind exist without weakening the first.
+const RUNNER_CLASSES = new Map([
+  [
+    "general-linux",
+    {
+      block: [
+        "    runs-on:",
+        "      group: general-linux",
+        "      labels: [self-hosted, Linux, X64, general-linux]",
+      ].join("\n"),
+      timingAuthority: false,
+    },
+  ],
+]);
+
+// Every workflow must appear here, so adding one is a deliberate act rather than
+// a file that quietly inherits whatever the loop happens to allow. `null` means
+// the workflow may only use GitHub-hosted runners.
+const WORKFLOW_RUNNER_CLASS = new Map([
+  ["ci.yml", "general-linux"],
+  ["nightly-matrix-bench.yml", "general-linux"],
+  ["publish-benchmark-data.yml", "general-linux"],
+  ["linode-rustia-memory.yml", null],
+]);
+
+// Commands that take a timing. Until now only the first three were forbidden,
+// and the four on-host runners were forbidden nowhere -- a workflow on the
+// shared pool could have invoked any of them and no rule would have stopped it.
+// That was the real hole; the raw-harness ban was the visible part of it.
+const MEASUREMENT_COMMANDS = Object.freeze([
+  "cargo run -p script-bench-harness",
+  "node tools/run-wasm-gate.js",
+  "node tools/run-wasm-dispatch-gate.js",
+  "node tools/run-linux-fixed-benchmark.js",
+  "node tools/run-linux-matrix-benchmark.js",
+  "node tools/run-linux-history-backfill.js",
+  "node tools/run-linux-memory-benchmark.js",
+]);
+
+// The single entrypoint a timing-authoritative runner may use. It attests the
+// machine -- CPU model, logical count, SMT, and that every pinned core is in the
+// kernel's isolated set -- before it builds anything, so measurement is
+// reachable only through the code that checks the host is what the config says.
+const ATTESTED_ENTRYPOINT = "node tools/run-dedicated-benchmark.js";
+
+// Cloud coordinators are deliberately absent from MEASUREMENT_COMMANDS. They
+// take no timing themselves: they provision a separate qualified instance and
+// measure there, which is the retired model nightly-matrix-bench.yml still
+// carries. Adding them here would require deleting that workflow, and it is
+// still the only producer of the cross-engine reference every published Rustia
+// number is normalised against. Phase-out happens when the matrix moves to the
+// owned host, not before.
+
+// contents: write can create a commit on main. Forbidden everywhere except the
+// workflows named here, so a third holder cannot appear by omission.
+const CONTENTS_WRITE_WORKFLOWS = new Set(["nightly-matrix-bench.yml"]);
+
 function checkRunnerLabels(files) {
   const hostedRunners = new Set(["ubuntu-latest", "macos-latest", "windows-latest"]);
-  const generalLinuxWorkflows = new Set([
-    "ci.yml",
-    "nightly-matrix-bench.yml",
-    "publish-benchmark-data.yml",
-  ]);
   for (const file of files) {
     const text = readWorkflow(path.join(workflowDir, file));
     const label = `.github/workflows/${file}`;
+    if (!WORKFLOW_RUNNER_CLASS.has(file)) {
+      fail(`${label} is not registered in WORKFLOW_RUNNER_CLASS; a new workflow must name its runner class`);
+    }
+    const className = WORKFLOW_RUNNER_CLASS.get(file);
+    const runnerClass = className === null ? null : RUNNER_CLASSES.get(className);
+    if (className !== null && runnerClass === undefined) {
+      fail(`${label} names unknown runner class ${JSON.stringify(className)}`);
+    }
+
+    // Action pins are checked for every workflow here rather than only inside
+    // the four per-file checkers, where a fifth workflow's pins went unchecked.
+    checkActionPins(text, label);
+
     const lines = text.split(/\r?\n/);
     for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index];
-      const inline = line.match(RUNS_ON_PATTERN);
-      if (!inline) {
-        continue;
-      }
+      const inline = lines[index].match(RUNS_ON_PATTERN);
+      if (!inline) continue;
       const value = inline[1].trim();
       if (value.startsWith("[")) {
         fail(`${label} must use expanded runs-on form so runner labels are reviewable`);
       }
       if (value === "") {
+        if (runnerClass === null) {
+          fail(`${label} may only use GitHub-hosted runners, but declares an expanded runs-on block`);
+        }
         const runnerBlock = lines.slice(index, index + 3).join("\n");
-        const expected = [
-          "    runs-on:",
-          "      group: general-linux",
-          "      labels: [self-hosted, Linux, X64, general-linux]",
-        ].join("\n");
-        if (!generalLinuxWorkflows.has(file) || runnerBlock !== expected) {
-          fail(`${label} expanded runs-on block must select the reviewed general-linux group and labels`);
+        if (runnerBlock !== runnerClass.block) {
+          fail(`${label} expanded runs-on block must match the reviewed ${className} class exactly`);
         }
         continue;
       }
@@ -132,10 +197,32 @@ function checkRunnerLabels(files) {
         fail(`${label} hosted runs-on value must be one of ${[...hostedRunners].join(", ")}, got ${value}`);
       }
     }
-    if (!generalLinuxWorkflows.has(file)) forbidIncludes(text, "self-hosted", label);
-    forbidIncludes(text, "cargo run -p script-bench-harness", label);
-    forbidIncludes(text, "node tools/run-wasm-gate.js", label);
-    forbidIncludes(text, "node tools/run-wasm-dispatch-gate.js", label);
+
+    // A workflow may name exactly the runners its class allows, and no others.
+    // Counting occurrences catches a bench workflow that also names the shared
+    // pool, which a plain allowlist cannot express.
+    const selfHostedMentions = text.split("self-hosted").length - 1;
+    const allowedMentions = runnerClass === null
+      ? 0
+      : text.split(runnerClass.block).length - 1;
+    if (selfHostedMentions !== allowedMentions) {
+      fail(
+        `${label} mentions "self-hosted" ${selfHostedMentions} time(s) but declares the ` +
+          `${className ?? "hosted-only"} runner block ${allowedMentions} time(s); a workflow may name ` +
+          `only its own class`,
+      );
+    }
+
+    for (const command of MEASUREMENT_COMMANDS) forbidIncludes(text, command, label);
+    if (runnerClass === null || !runnerClass.timingAuthority) {
+      forbidIncludes(text, ATTESTED_ENTRYPOINT, label);
+    }
+
+    // No workflow needs either trigger, and workflow_run is the canonical way to
+    // hand a privileged token to a job that ran fork code.
+    forbidIncludes(text, "pull_request_target", label);
+    forbidIncludes(text, "workflow_run", label);
+    if (!CONTENTS_WRITE_WORKFLOWS.has(file)) forbidIncludes(text, "contents: write", label);
   }
 }
 
