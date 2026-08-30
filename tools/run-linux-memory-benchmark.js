@@ -394,9 +394,73 @@ function exportRun(status, config, evidenceDirectory) {
   run("tar", ["--format=ustar", "-czf", EXPORT_ARCHIVE, "-C", EXPORT, "."], { capture: false });
 }
 
+const LOCK_FILE = path.join(ROOT, "lock");
+
+// Every directory keyed to one run's state. The rented model destroyed the
+// machine after each run, so nothing was ever cleared and a second run would
+// find a bare clone and a worktree already in place. The two cargo target
+// directories stay: they are the warm caches that make a repeat run minutes
+// rather than an hour, and every build records its own hashes.
+const WIPE_ON_START = Object.freeze([REPOSITORY, SOURCE, EXPORT, EVIDENCE_ROOT]);
+
+function acquireLock() {
+  fs.mkdirSync(ROOT, { recursive: true });
+  for (;;) {
+    try {
+      const descriptor = fs.openSync(LOCK_FILE, "wx");
+      try {
+        fs.writeSync(descriptor, JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
+      } finally {
+        fs.closeSync(descriptor);
+      }
+      return;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+    const holder = loadJson(LOCK_FILE, "lock file");
+    if (!Number.isSafeInteger(holder.pid)) fail(`${LOCK_FILE} does not name a pid`);
+    let holderAlive = true;
+    try {
+      process.kill(holder.pid, 0);
+    } catch (error) {
+      if (error.code === "ESRCH") holderAlive = false;
+      else if (error.code !== "EPERM") throw error;
+    }
+    if (holderAlive) {
+      fail(
+        `memory runner is already running as pid ${holder.pid} (started ${holder.started_at}); ` +
+          `refusing to share ${ROOT} with a second, concurrent run`,
+      );
+    }
+    log(`lock held by dead pid ${holder.pid} (started ${holder.started_at}); taking it over`);
+    fs.rmSync(LOCK_FILE, { force: true });
+  }
+}
+
+function releaseLock() {
+  fs.rmSync(LOCK_FILE, { force: true });
+}
+
+function resetWorkingState() {
+  // WIPE_ON_START is a fixed list of names joined onto ROOT, so a ROOT of "/" or
+  // the bare home directory would recursively delete real directories that share
+  // those names. ROOT is operator-supplied through an environment variable.
+  const resolved = path.resolve(ROOT);
+  if (resolved === path.parse(resolved).root || resolved === path.resolve(os.homedir())) {
+    fail(
+      `RUSTIA_MEMORY_ROOT resolves to ${resolved}; it must be a directory dedicated to this ` +
+        `runner, because starting a run erases the working state beneath it`,
+    );
+  }
+  for (const directory of WIPE_ON_START) fs.rmSync(directory, { recursive: true, force: true });
+  fs.rmSync(EXPORT_ARCHIVE, { force: true });
+}
+
 async function execute(configFile, providerFile, bundle) {
   if (process.platform !== "linux") fail("memory runner requires Linux");
   fs.mkdirSync(ROOT, { recursive: true });
+  acquireLock();
+  resetWorkingState();
   fs.writeFileSync(RUN_LOG, "", { mode: 0o600 });
   logReady = true;
   const config = validateConfig(loadJson(configFile, "protocol config"));
@@ -478,6 +542,7 @@ async function execute(configFile, providerFile, bundle) {
     log(`failed: ${error.message}`);
   } finally {
     exportRun(status, config, evidenceDirectory);
+    releaseLock();
   }
   return status.status === "memory_complete" ? 0 : 2;
 }
@@ -533,6 +598,14 @@ function selfTest() {
         host_gate: { ...dedicated.host_gate, supervisor_cpu: 0 },
       }),
     /supervisor_cpu 0 is not one of provider\.host\.pinned_cpus/,
+  );
+
+  // The warm cargo target directories must survive a repeat run, or every run
+  // is a cold build.
+  assert.deepEqual(
+    WIPE_ON_START.filter((directory) => directory === TARGET_ALL || directory === TARGET_LUA54),
+    [],
+    "the warm cargo target directories must survive a repeat run",
   );
 
   assert.deepEqual(parseCpuList("4,5"), [4, 5]);
