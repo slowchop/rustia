@@ -5498,6 +5498,14 @@ async function benchLocked(config, configFile = DEFAULT_CONFIG) {
       [
         ...sshOptions(state),
         `root@${state.public_ipv4}`,
+        // The remote runners take their working tree from the environment so
+        // they can also run as an ordinary user on the owned host. This lane
+        // still owns the whole instance and downloads its export from
+        // /opt/rustia below, so it says so rather than relying on a default.
+        "env",
+        "RUSTIA_MATRIX_ROOT=/opt/rustia",
+        "RUSTIA_MEMORY_ROOT=/opt/rustia",
+        "RUSTIA_BACKFILL_ROOT=/opt/rustia",
         "node",
         `/opt/rustia/incoming/${path.basename(selectedRemoteRunner)}`,
         "/opt/rustia/incoming/protocol.json",

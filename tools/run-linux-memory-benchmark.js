@@ -5,10 +5,14 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
-const ROOT = "/opt/rustia";
+// The run's working tree. Was fixed at /opt/rustia, which only a root process on
+// a throwaway instance can write; the owned host runs this as an ordinary user.
+const ROOT = process.env.RUSTIA_MEMORY_ROOT ?? path.join(os.homedir(), ".rustia-memory");
+const DEDICATED_SCHEMA = "rustia.dedicated-memory-benchmark.v1";
 const REPOSITORY = path.join(ROOT, "repo.git");
 const SOURCE = path.join(ROOT, "src-memory");
 const TARGET_ALL = path.join(ROOT, "target-memory-all");
@@ -20,14 +24,6 @@ const EVIDENCE_ROOT = path.join(ROOT, "memory-evidence");
 const PROTOCOL = "cross_engine_memory_v1";
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const PACKAGE_ACTIVITY_UNITS = Object.freeze([
-  "apt-daily.service",
-  "apt-daily-upgrade.service",
-  "apt-daily.timer",
-  "apt-daily-upgrade.timer",
-  "unattended-upgrades.service",
-  "packagekit.service",
-]);
 
 let logReady = false;
 
@@ -93,9 +89,52 @@ function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 }
 
+// "4", "4,5" and "0-1,4" all name CPU sets in the kernel's own notation.
+function parseCpuList(spec) {
+  const text = String(spec).trim();
+  if (!text) fail("CPU list is empty");
+  const cpus = [];
+  for (const entry of text.split(",")) {
+    const range = entry.match(/^(\d+)-(\d+)$/);
+    if (range) {
+      const start = Number(range[1]);
+      const end = Number(range[2]);
+      if (end < start) fail(`invalid CPU range ${entry}`);
+      for (let cpu = start; cpu <= end; cpu += 1) cpus.push(cpu);
+      continue;
+    }
+    if (!/^\d+$/.test(entry)) fail(`invalid CPU list entry ${entry}`);
+    cpus.push(Number(entry));
+  }
+  return cpus;
+}
+
 function validateConfig(config) {
   exactKeys(config, ["schema", "provider", "source", "measurement", "host_gate", "publication"], "config");
-  if (config.schema !== "rustia.linode-fixed-benchmark.v2") fail("memory runner requires Linode v2");
+  // Two lifecycles during the move to the owned host. Only the host description
+  // differs; every measurement rule below is shared.
+  const dedicated = config.schema === DEDICATED_SCHEMA;
+  if (!dedicated && config.schema !== "rustia.linode-fixed-benchmark.v2") {
+    fail(`memory runner requires ${DEDICATED_SCHEMA} or Linode v2`);
+  }
+  if (dedicated) {
+    const host = object(object(config.provider, "provider").host, "provider.host");
+    exactKeys(
+      host,
+      ["name", "cpu_model", "logical_cpus", "physical_cores", "pinned_cpus", "max_runtime_minutes"],
+      "provider.host",
+    );
+    // Two pinned cores, not one: the supervisor samples while the benchmark
+    // runs, and sharing a core would make the supervisor part of what it
+    // measures.
+    const pinned = parseCpuList(host.pinned_cpus);
+    for (const field of ["benchmark_cpu", "supervisor_cpu"]) {
+      const cpu = object(config.host_gate, "host_gate")[field];
+      if (!pinned.includes(cpu)) {
+        fail(`host_gate.${field} ${cpu} is not one of provider.host.pinned_cpus (${pinned.join(",")})`);
+      }
+    }
+  }
   const source = object(config.source, "source");
   exactKeys(source, ["benchmark_commit", "expected_sha256"], "source");
   if (!FULL_COMMIT.test(source.benchmark_commit)) fail("source.benchmark_commit must be a full commit");
@@ -190,7 +229,7 @@ function verifySource(config, bundle) {
 }
 
 function installRust() {
-  if (!fs.existsSync("/root/.cargo/bin/rustup")) {
+  if (spawnSync("rustup", ["--version"], { stdio: "ignore" }).status !== 0) {
     const installer = path.join(ROOT, "rustup-init.sh");
     run("curl", [
       "--proto", "=https", "--tlsv1.2", "--fail", "--silent", "--show-error",
@@ -198,13 +237,13 @@ function installRust() {
     ]);
     run("sh", [installer, "-y", "--profile", "minimal", "--default-toolchain", "none"], { capture: false });
   }
-  run("/root/.cargo/bin/rustup", ["toolchain", "install", "1.95.0", "--profile", "minimal"], {
+  run("rustup", ["toolchain", "install", "1.95.0", "--profile", "minimal"], {
     capture: false,
   });
 }
 
 function build(config) {
-  const cargo = "/root/.cargo/bin/cargo";
+  const cargo = "cargo";
   const rootManifest = path.join(SOURCE, "Cargo.toml");
   const benchManifest = path.join(SOURCE, "bench/Cargo.toml");
   const environment = (target) => ({
@@ -252,8 +291,8 @@ function build(config) {
 
 function validateRustiaWasmQuota(config) {
   if (config.publication.mode !== "rustia_ci_memory") return;
-  const cargo = "/root/.cargo/bin/cargo";
-  run("/root/.cargo/bin/rustup", [
+  const cargo = "cargo";
+  run("rustup", [
     "target", "add", "--toolchain", "1.95.0", "wasm32-unknown-unknown",
   ], { capture: false });
   run(cargo, [
@@ -356,7 +395,7 @@ function exportRun(status, config, evidenceDirectory) {
 }
 
 async function execute(configFile, providerFile, bundle) {
-  if (process.platform !== "linux" || process.getuid() !== 0) fail("memory runner requires root on Linux");
+  if (process.platform !== "linux") fail("memory runner requires Linux");
   fs.mkdirSync(ROOT, { recursive: true });
   fs.writeFileSync(RUN_LOG, "", { mode: 0o600 });
   logReady = true;
@@ -370,17 +409,22 @@ async function execute(configFile, providerFile, bundle) {
     started_at: new Date().toISOString(),
   };
   try {
-    if (config.host_gate.benchmark_cpu >= provider.vcpus || config.host_gate.supervisor_cpu >= provider.vcpus) {
+    // The owned lifecycle already checked both cores against the kernel's
+    // isolated set in validateConfig, which is the stronger statement; the vCPU
+    // count only exists on a rented instance.
+    if (
+      config.schema !== DEDICATED_SCHEMA &&
+      (config.host_gate.benchmark_cpu >= provider.vcpus || config.host_gate.supervisor_cpu >= provider.vcpus)
+    ) {
       fail("configured memory CPU is absent from the Linode");
     }
     verifySource(config, bundle);
     installRust();
     const binaries = build(config);
     validateRustiaWasmQuota(config);
-    for (const unit of PACKAGE_ACTIVITY_UNITS) {
-      run("systemctl", ["stop", unit], { allowFailure: true });
-      run("systemctl", ["mask", unit], { allowFailure: true });
-    }
+    // The rented model stopped and permanently masked the host's package timers,
+    // which needs root and outlives the run. On an owned machine that is an
+    // unrequested change to somebody's box; quiet is asserted by the idle gate.
     fs.rmSync(evidenceDirectory, { recursive: true, force: true });
     const protocolFile = path.join(ROOT, "memory-protocol.json");
     writeJson(protocolFile, memoryProtocol(config));
@@ -418,7 +462,7 @@ async function execute(configFile, providerFile, bundle) {
     writeJson(path.join(evidenceDirectory, "linode-build.json"), {
       all_binary_sha256: binaries.all_sha256,
       lua54_binary_sha256: binaries.lua54_sha256,
-      rustc_vv: runText("/root/.cargo/bin/rustc", ["+1.95.0", "-vV"]),
+      rustc_vv: runText("rustc", ["+1.95.0", "-vV"]),
       cargo_incremental: "0",
       locked: true,
       offline_build_after_fetch: true,
@@ -463,6 +507,11 @@ function selfTest() {
     host_gate: { benchmark_cpu: 3, supervisor_cpu: 2 },
   };
   assert.equal(memoryProtocol(config).host.benchmark_cpu, 3);
+  assert.deepEqual(parseCpuList("4,5"), [4, 5]);
+  assert.deepEqual(parseCpuList("0-1,4"), [0, 1, 4]);
+  assert.throws(() => parseCpuList(""), /empty/);
+  assert.throws(() => parseCpuList("5-4"), /invalid CPU range/);
+
   process.stdout.write("linux memory benchmark runner self-test passed\n");
 }
 
