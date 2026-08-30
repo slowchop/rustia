@@ -396,6 +396,10 @@ function checkPrBench(text) {
   // no write to either repository, nothing that reaches published history, and
   // no secret to write with.
   forbidIncludes(text, "git push", label);
+  // Checkout drops this job's credentials, so any Git command that talks to the
+  // remote fails on a private repository. fetch-depth 0 has already brought the
+  // history down; nothing here needs the network.
+  forbidIncludes(text, "git fetch", label);
   forbidIncludes(text, "bench/history", label);
   forbidIncludes(text, "--history", label);
   forbidIncludes(text, "secrets.", label);

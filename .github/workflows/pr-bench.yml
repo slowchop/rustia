@@ -65,10 +65,15 @@ jobs:
           set -euo pipefail
           work_dir="$(mktemp -d "$RUNNER_TEMP/rustia-screen.XXXXXX")"
           trap 'rm -rf -- "$work_dir"' EXIT
-          git fetch --no-tags origin "+refs/heads/${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
+          # The base comes from the event payload, not from a remote-tracking
+          # ref. This job drops its credentials on checkout, so it cannot fetch
+          # anything -- and it does not need to: fetch-depth 0 already brought
+          # the base branch down, and a commit id needs no ref to resolve. The
+          # first version fetched here and died on "could not read Username",
+          # having asked a credential-less job to talk to a private remote.
           node tools/run-dedicated-benchmark.js pr \
             --local \
-            --base "origin/${{ github.event.pull_request.base.ref }}" \
+            --base "${{ github.event.pull_request.base.sha }}" \
             --out "$work_dir/summary.md" \
             --json "$work_dir/screening.json"
           cat "$work_dir/summary.md" >> "$GITHUB_STEP_SUMMARY"
