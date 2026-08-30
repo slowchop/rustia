@@ -65,17 +65,17 @@
   },
   "progress": {
     "state": "current",
-    "measured_commit": "8f0e7f474f2b895be73aecec2a70a215e8467322",
-    "measured_at_unix": 1787883276,
-    "latest_relevant_commit": "8f0e7f474f2b895be73aecec2a70a215e8467322",
-    "latest_relevant_committed_at_unix": 1787867543,
+    "measured_commit": "f4807587780aec5829b297c037d5dd03ca40d251",
+    "measured_at_unix": 1788130091,
+    "latest_relevant_commit": "f4807587780aec5829b297c037d5dd03ca40d251",
+    "latest_relevant_committed_at_unix": 1788129061,
     "pending_relevant_commit_count": 0,
     "next_action": "No progress measurement is currently required."
   },
   "landscape": {
     "state": "paused",
-    "measured_commit": "8f0e7f474f2b895be73aecec2a70a215e8467322",
-    "measured_at_unix": 1787883276,
+    "measured_commit": "f4807587780aec5829b297c037d5dd03ca40d251",
+    "measured_at_unix": 1788130091,
     "refresh_interval_days": 35,
     "reason": "Immutable latest-stable landscape campaigns and engine-version bridges are not implemented yet.",
     "next_action": "Add version provenance, immutable landscape snapshots, and old/new reference bridge validation before enabling monthly refreshes."
