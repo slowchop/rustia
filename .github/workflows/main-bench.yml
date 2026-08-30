@@ -33,8 +33,7 @@ jobs:
     name: Measure this commit
     if: github.ref == 'refs/heads/main'
     runs-on:
-      group: bench-linux
-      labels: [self-hosted, Linux, X64, ci-bench]
+      group: bench-solo
     timeout-minutes: 30
 
     steps:

@@ -15,7 +15,7 @@
         "artifact-publication"
       ]
     },
-    "bench-linux": {
+    "bench-solo": {
       "environment": "self-hosted-owned-qualified",
       "timing_authority": true,
       "host": "ci-bench",
@@ -47,7 +47,7 @@
   },
   "measurement": {
     "mode": "attested-owned-host",
-    "authoritative_runner_classes": ["bench-linux"],
+    "authoritative_runner_classes": ["bench-solo"],
     "scheduled_billing_allowed": false,
     "billed_host_creation": "operator-dispatch-only",
     "reason": "No timer may start a billed instance. The retired cloud matrix remains reachable by explicit dispatch only, because it is still the sole producer of the cross-engine reference every published Rustia number is normalised against."

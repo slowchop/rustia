@@ -114,13 +114,12 @@ const RUNNER_CLASSES = new Map([
     },
   ],
   [
-    "bench-linux",
+    // The owned benchmark host's runner group. Targeted by group alone: the
+    // group has exactly one runner, so naming labels as well would add a
+    // second thing to keep in sync with the machine for no extra guarantee.
+    "bench-solo",
     {
-      block: [
-        "    runs-on:",
-        "      group: bench-linux",
-        "      labels: [self-hosted, Linux, X64, ci-bench]",
-      ].join("\n"),
+      block: ["    runs-on:", "      group: bench-solo"].join("\n"),
       timingAuthority: true,
     },
   ],
@@ -133,7 +132,7 @@ const WORKFLOW_RUNNER_CLASS = new Map([
   ["ci.yml", "general-linux"],
   ["nightly-matrix-bench.yml", "general-linux"],
   ["publish-benchmark-data.yml", "general-linux"],
-  ["main-bench.yml", "bench-linux"],
+  ["main-bench.yml", "bench-solo"],
   ["linode-rustia-memory.yml", null],
 ]);
 
@@ -199,7 +198,8 @@ function checkRunnerLabels(files) {
         if (runnerClass === null) {
           fail(`${label} may only use GitHub-hosted runners, but declares an expanded runs-on block`);
         }
-        const runnerBlock = lines.slice(index, index + 3).join("\n");
+        const blockLines = runnerClass.block.split("\n").length;
+        const runnerBlock = lines.slice(index, index + blockLines).join("\n");
         if (runnerBlock !== runnerClass.block) {
           fail(`${label} expanded runs-on block must match the reviewed ${className} class exactly`);
         }
@@ -213,15 +213,17 @@ function checkRunnerLabels(files) {
     // A workflow may name exactly the runners its class allows, and no others.
     // Counting occurrences catches a bench workflow that also names the shared
     // pool, which a plain allowlist cannot express.
+    // How many times the file says "self-hosted", against how many times its own
+    // runner block accounts for. A group-only block contains none, so the
+    // permitted count is zero rather than one per block.
     const selfHostedMentions = text.split("self-hosted").length - 1;
-    const allowedMentions = runnerClass === null
-      ? 0
-      : text.split(runnerClass.block).length - 1;
+    const perBlock = runnerClass === null ? 0 : runnerClass.block.split("self-hosted").length - 1;
+    const blockOccurrences = runnerClass === null ? 0 : text.split(runnerClass.block).length - 1;
+    const allowedMentions = perBlock * blockOccurrences;
     if (selfHostedMentions !== allowedMentions) {
       fail(
-        `${label} mentions "self-hosted" ${selfHostedMentions} time(s) but declares the ` +
-          `${className ?? "hosted-only"} runner block ${allowedMentions} time(s); a workflow may name ` +
-          `only its own class`,
+        `${label} mentions "self-hosted" ${selfHostedMentions} time(s); its ${className ?? "hosted-only"} ` +
+          `runner block accounts for ${allowedMentions}. A workflow may name only its own class.`,
       );
     }
 
