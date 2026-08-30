@@ -14,6 +14,13 @@ const DEFAULT_SEED = 0x52555354;
 const MIN_BOOTSTRAP_ITERATIONS = 1_000;
 const MAX_BOOTSTRAP_ITERATIONS = 1_000_000;
 const MAX_EXPECTED_LEGS = 1_000_000;
+const DEFAULT_CONFIDENCE_LEVEL = 0.95;
+const COMPATIBILITY_CONFIDENCE_LEVEL = 0.95;
+// A percentile interval is only as resolved as the number of resamples in its
+// tails. At 99% with 1000 iterations each tail holds five values, so the bound
+// is whichever five the seed happened to draw. Require ten per tail and say so,
+// rather than emitting a confidently-worded interval nobody can rely on.
+const MIN_BOOTSTRAP_TAIL_SAMPLES = 10;
 
 const RAW_PROTOCOL_METADATA = Object.freeze({
   description:
@@ -28,7 +35,8 @@ const USAGE = `Usage:
     --baseline BASELINE-SIDECAR.json [--baseline ...] \\
     --candidate CANDIDATE-SIDECAR.json [--candidate ...] \\
     [--bootstrap-reps 20000] [--seed 1381323604] \\
-    [--material-threshold 5] [--expected-legs N] [--require-full-commits]
+    [--material-threshold 5] [--confidence 0.95] \\
+    [--expected-legs N] [--require-full-commits]
 
 Options:
   --baseline FILE            Add one baseline raw-sample sidecar (repeatable).
@@ -36,6 +44,13 @@ Options:
   --bootstrap-reps N         Bootstrap iterations, 1000..1000000 (default: 20000).
   --seed N                   Unsigned 32-bit bootstrap seed (default: 1381323604).
   --material-threshold PCT   Predeclared material-regression threshold (default: 5).
+  --confidence P             Interval level, 0.5 < P < 1 (default: 0.95). Screening
+                             several workloads at once wants a higher level: five
+                             independent 95% tests give about a 23% chance one of
+                             them moves on a change that did nothing, against
+                             about 5% at 0.99. More repetitions do not fix that --
+                             they narrow each interval, they do not change the
+                             per-test error rate.
   --expected-legs N          Require exactly N baseline and N candidate legs.
   --require-full-commits     Require distinct lowercase 40-hex commit IDs.
   --self-test                Run dependency-free in-memory tests.
@@ -95,6 +110,26 @@ function requireFiniteNumber(value, location) {
 function requireIntegerRange(value, location, minimum, maximum) {
   if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
     fail(`${location} must be a safe integer between ${minimum} and ${maximum}`);
+  }
+  return value;
+}
+
+// A confidence level is only usable if the bootstrap has enough resamples to
+// resolve both of its tails. Checking the pair together is what makes the error
+// actionable: it names the iteration count the requested level needs instead of
+// rejecting the level on its own.
+function requireConfidenceLevel(value, iterations, location) {
+  requireFiniteNumber(value, location);
+  if (!(value > 0.5) || !(value < 1)) {
+    fail(`${location} must be greater than 0.5 and less than 1`);
+  }
+  const tailSamples = (iterations * (1 - value)) / 2;
+  if (tailSamples < MIN_BOOTSTRAP_TAIL_SAMPLES) {
+    const needed = Math.ceil((2 * MIN_BOOTSTRAP_TAIL_SAMPLES) / (1 - value));
+    fail(
+      `${location} ${value} needs at least ${needed} bootstrap iterations to resolve ` +
+        `${MIN_BOOTSTRAP_TAIL_SAMPLES} resamples per tail, but ${iterations} were requested`,
+    );
   }
   return value;
 }
@@ -445,7 +480,25 @@ function medianDeltaPercent(baselineMedian, candidateMedian) {
   return requireFiniteNumber(delta, "derived median delta percent");
 }
 
-function pooledBootstrap(baseline, candidate, iterations, seed) {
+// Both tails of a two-sided percentile interval at the given level. Split out
+// so the operative interval and the retained 95% one come from one sorted array
+// of resamples: two different levels over the same draws, not two experiments.
+function percentileInterval(sortedDeltas, confidence) {
+  const tail = (1 - confidence) / 2;
+  return {
+    lower: quantileSorted(sortedDeltas, tail),
+    upper: quantileSorted(sortedDeltas, 1 - tail),
+  };
+}
+
+function bootstrapIntervals(sortedDeltas, confidence) {
+  return {
+    operative: percentileInterval(sortedDeltas, confidence),
+    compatibility: percentileInterval(sortedDeltas, COMPATIBILITY_CONFIDENCE_LEVEL),
+  };
+}
+
+function pooledBootstrap(baseline, candidate, iterations, seed, confidence = DEFAULT_CONFIDENCE_LEVEL) {
   requireIntegerRange(
     iterations,
     "bootstrap iterations",
@@ -453,6 +506,7 @@ function pooledBootstrap(baseline, candidate, iterations, seed) {
     MAX_BOOTSTRAP_ITERATIONS,
   );
   requireIntegerRange(seed, "bootstrap seed", 0, 0xffff_ffff);
+  requireConfidenceLevel(confidence, iterations, "pooled bootstrap confidence");
   const random = mulberry32(seed);
   const deltas = new Array(iterations);
   for (let iteration = 0; iteration < iterations; iteration += 1) {
@@ -461,10 +515,8 @@ function pooledBootstrap(baseline, candidate, iterations, seed) {
     deltas[iteration] = medianDeltaPercent(baselineMedian, candidateMedian);
   }
   deltas.sort((left, right) => left - right);
-  return {
-    lower: quantileSorted(deltas, 0.025),
-    upper: quantileSorted(deltas, 0.975),
-  };
+  const intervals = bootstrapIntervals(deltas, confidence);
+  return { ...intervals.operative, compatibility: intervals.compatibility };
 }
 
 function resampledHierarchicalMedian(records, random) {
@@ -478,7 +530,13 @@ function resampledHierarchicalMedian(records, random) {
   return quantile(sample, 0.5);
 }
 
-function hierarchicalBootstrap(baseline, candidate, iterations, seed) {
+function hierarchicalBootstrap(
+  baseline,
+  candidate,
+  iterations,
+  seed,
+  confidence = DEFAULT_CONFIDENCE_LEVEL,
+) {
   requireIntegerRange(
     iterations,
     "bootstrap iterations",
@@ -486,6 +544,7 @@ function hierarchicalBootstrap(baseline, candidate, iterations, seed) {
     MAX_BOOTSTRAP_ITERATIONS,
   );
   requireIntegerRange(seed, "bootstrap seed", 0, 0xffff_ffff);
+  requireConfidenceLevel(confidence, iterations, "hierarchical bootstrap confidence");
   const random = mulberry32(seed);
   const deltas = new Array(iterations);
   for (let iteration = 0; iteration < iterations; iteration += 1) {
@@ -494,10 +553,24 @@ function hierarchicalBootstrap(baseline, candidate, iterations, seed) {
     deltas[iteration] = medianDeltaPercent(baselineMedian, candidateMedian);
   }
   deltas.sort((left, right) => left - right);
-  return {
-    lower: quantileSorted(deltas, 0.025),
-    upper: quantileSorted(deltas, 0.975),
-  };
+  const intervals = bootstrapIntervals(deltas, confidence);
+  return { ...intervals.operative, compatibility: intervals.compatibility };
+}
+
+// The verdict answers one question -- "is a regression larger than the declared
+// threshold excluded?" -- and its threshold is one-sided. At a threshold of zero
+// a genuine speedup therefore reports material_regression_excluded, which is
+// true and reads as if nothing happened. The direction is a separate, additive
+// reading of the same interval against zero, so a PR summary can lead with what
+// actually moved without the verdict having to mean two things at once.
+function classifyDirection(lower, upper) {
+  if (upper < 0) {
+    return { status: "faster", rule: "ci_upper_percent < 0" };
+  }
+  if (lower > 0) {
+    return { status: "slower", rule: "ci_lower_percent > 0" };
+  }
+  return { status: "indistinguishable", rule: "confidence_interval_contains_or_touches_zero" };
 }
 
 function classifyVerdict(lower, upper, threshold) {
@@ -559,12 +632,18 @@ function validateAnalysisOptions(value) {
   if (typeof requireFullCommits !== "boolean") {
     fail("analysis options.requireFullCommits must be a boolean");
   }
+  const confidenceLevel = requireConfidenceLevel(
+    options.confidenceLevel ?? DEFAULT_CONFIDENCE_LEVEL,
+    bootstrapIterations,
+    "analysis options.confidenceLevel",
+  );
   return {
     bootstrapIterations,
     seed,
     materialThresholdPercent,
     expectedLegs,
     requireFullCommits,
+    confidenceLevel,
   };
 }
 
@@ -602,35 +681,40 @@ function analyzeRecords(baseline, candidate, options) {
     candidateSamples,
     validatedOptions.bootstrapIterations,
     validatedOptions.seed,
+    validatedOptions.confidenceLevel,
   );
   const hierarchicalInterval = hierarchicalBootstrap(
     baseline,
     candidate,
     validatedOptions.bootstrapIterations,
     validatedOptions.seed,
+    validatedOptions.confidenceLevel,
   );
-  const interval = {
-    lower: Math.min(pooledInterval.lower, hierarchicalInterval.lower),
-    upper: Math.max(pooledInterval.upper, hierarchicalInterval.upper),
-  };
-  const reportedPooledInterval = {
-    lower: cleanNumber(pooledInterval.lower),
-    upper: cleanNumber(pooledInterval.upper),
-  };
-  const reportedHierarchicalInterval = {
-    lower: cleanNumber(hierarchicalInterval.lower),
-    upper: cleanNumber(hierarchicalInterval.upper),
-  };
-  const reportedInterval = {
-    lower: cleanNumber(interval.lower),
-    upper: cleanNumber(interval.upper),
-  };
+  const envelope = (pooled, hierarchical) => ({
+    lower: cleanNumber(Math.min(pooled.lower, hierarchical.lower)),
+    upper: cleanNumber(Math.max(pooled.upper, hierarchical.upper)),
+  });
+  const clean = (value) => ({ lower: cleanNumber(value.lower), upper: cleanNumber(value.upper) });
+  const reportedPooledInterval = clean(pooledInterval);
+  const reportedHierarchicalInterval = clean(hierarchicalInterval);
+  const reportedInterval = envelope(pooledInterval, hierarchicalInterval);
+  // The three *_95_percent fields below are always the 95% interval whatever
+  // --confidence asks for, so their names never lie and every consumer written
+  // before this option keeps reading exactly what it always read. The operative
+  // interval -- the one the verdict is drawn from -- is the unsuffixed field.
+  const compatibilityPooled = clean(pooledInterval.compatibility);
+  const compatibilityHierarchical = clean(hierarchicalInterval.compatibility);
+  const compatibilityInterval = envelope(
+    pooledInterval.compatibility,
+    hierarchicalInterval.compatibility,
+  );
   const reportedThreshold = cleanNumber(validatedOptions.materialThresholdPercent);
   const verdict = classifyVerdict(
     reportedInterval.lower,
     reportedInterval.upper,
     reportedThreshold,
   );
+  const direction = classifyDirection(reportedInterval.lower, reportedInterval.upper);
 
   return {
     schema_version: 1,
@@ -652,14 +736,16 @@ function analyzeRecords(baseline, candidate, options) {
       comparison: "candidate pooled median / baseline pooled median - 1",
       confidence_interval:
         "conservative envelope of seeded pooled and hierarchical percentile intervals",
-      nominal_confidence_level: 0.95,
+      nominal_confidence_level: validatedOptions.confidenceLevel,
       bootstrap_iterations: validatedOptions.bootstrapIterations,
       bootstrap_seed_uint32: validatedOptions.seed,
       pooled_resampling_unit: "samples independently within each pooled group",
       hierarchical_resampling_unit:
         "legs with replacement, then repetitions with replacement within each selected leg",
+      compatibility_intervals:
+        "comparison.*_ci_95_percent are always the 95% interval regardless of --confidence, for consumers written before it existed; comparison.*_ci_percent are at comparison.confidence_level and are what the verdict and direction are drawn from",
       coverage_caveat:
-        "95% is nominal: the pooled interval assumes IID repetitions; the hierarchical sensitivity interval models observed leg clustering but cannot cover unobserved host states",
+        "the stated level is nominal: the pooled interval assumes IID repetitions; the hierarchical sensitivity interval models observed leg clustering but cannot cover unobserved host states",
       expected_legs: validatedOptions.expectedLegs,
       require_full_commits: validatedOptions.requireFullCommits,
     },
@@ -667,10 +753,15 @@ function analyzeRecords(baseline, candidate, options) {
     candidate: groupOutput(candidate, candidateCommit),
     comparison: {
       candidate_delta_percent: cleanNumber(delta),
-      pooled_bootstrap_ci_95_percent: reportedPooledInterval,
-      hierarchical_bootstrap_ci_95_percent: reportedHierarchicalInterval,
-      bootstrap_ci_95_percent: reportedInterval,
+      confidence_level: validatedOptions.confidenceLevel,
+      pooled_bootstrap_ci_percent: reportedPooledInterval,
+      hierarchical_bootstrap_ci_percent: reportedHierarchicalInterval,
+      bootstrap_ci_percent: reportedInterval,
+      pooled_bootstrap_ci_95_percent: compatibilityPooled,
+      hierarchical_bootstrap_ci_95_percent: compatibilityHierarchical,
+      bootstrap_ci_95_percent: compatibilityInterval,
       material_regression_threshold_percent: reportedThreshold,
+      direction,
       verdict,
     },
   };
@@ -693,6 +784,7 @@ function parseArgs(args) {
     candidateFiles: [],
     bootstrapIterations: DEFAULT_BOOTSTRAP_ITERATIONS,
     expectedLegs: null,
+    confidenceLevel: DEFAULT_CONFIDENCE_LEVEL,
     materialThresholdPercent: DEFAULT_MATERIAL_THRESHOLD_PERCENT,
     requireFullCommits: false,
     seed: DEFAULT_SEED,
@@ -742,6 +834,12 @@ function parseArgs(args) {
         fail(`${option} must be a finite number >= 0`);
       }
       config.materialThresholdPercent = parsed;
+    } else if (option === "--confidence" || option === "--confidence-level") {
+      const parsed = Number(value);
+      if (value.trim() === "" || !Number.isFinite(parsed)) {
+        fail(`${option} must be a finite number`);
+      }
+      config.confidenceLevel = parsed;
     } else if (option === "--expected-legs") {
       config.expectedLegs = parseIntegerOption(value, option, 1, MAX_EXPECTED_LEGS);
     } else {
@@ -1088,6 +1186,101 @@ function runSelfTest() {
     /derived median delta percent must be a finite number/,
   );
 
+  // Direction reads the same interval as the verdict but against zero, so a
+  // speedup stops being reported as "no material regression".
+  assert.equal(classifyDirection(-4, -1).status, "faster");
+  assert.equal(classifyDirection(1, 4).status, "slower");
+  assert.equal(classifyDirection(-1, 4).status, "indistinguishable");
+  assert.equal(classifyDirection(-4, 0).status, "indistinguishable");
+  assert.equal(classifyDirection(0, 4).status, "indistinguishable");
+  assert.equal(first.comparison.direction.status, classifyDirection(
+    first.comparison.bootstrap_ci_percent.lower,
+    first.comparison.bootstrap_ci_percent.upper,
+  ).status);
+
+  // A speedup large enough to clear zero must read as faster while the verdict,
+  // which is one-sided against the threshold, still says a regression is
+  // excluded. Both statements are true; only one of them is a headline.
+  const fasterCandidate = [candidate1, candidate2].map((record, index) => ({
+    ...record,
+    samples: [50, 51, 52, 53, 54].map((value) => value + index),
+    reportedMedian: 52 + index,
+  }));
+  const speedup = analyzeRecords([baseline1, baseline2], fasterCandidate, options);
+  assert.equal(speedup.comparison.direction.status, "faster");
+  assert.equal(speedup.comparison.verdict.status, "material_regression_excluded");
+
+  // The retained 95% fields must not move when --confidence does. Run the same
+  // records at both levels and require the 0.99 run's compatibility fields to
+  // equal the 0.95 run's operative fields exactly -- that equality is the whole
+  // promise those field names make to consumers written before the option.
+  const wideOptions = { ...options, bootstrapIterations: 4_000 };
+  const atNinetyFive = analyzeRecords([baseline1, baseline2], [candidate1, candidate2], wideOptions);
+  const atNinetyNine = analyzeRecords([baseline1, baseline2], [candidate1, candidate2], {
+    ...wideOptions,
+    confidenceLevel: 0.99,
+  });
+  assert.equal(atNinetyFive.comparison.confidence_level, 0.95);
+  assert.equal(atNinetyNine.comparison.confidence_level, 0.99);
+  assert.deepEqual(
+    atNinetyNine.comparison.bootstrap_ci_95_percent,
+    atNinetyFive.comparison.bootstrap_ci_percent,
+  );
+  assert.deepEqual(
+    atNinetyNine.comparison.pooled_bootstrap_ci_95_percent,
+    atNinetyFive.comparison.pooled_bootstrap_ci_percent,
+  );
+  assert.deepEqual(
+    atNinetyNine.comparison.hierarchical_bootstrap_ci_95_percent,
+    atNinetyFive.comparison.hierarchical_bootstrap_ci_percent,
+  );
+  // And at the default level the two are the same object value, so nothing
+  // reading either field can disagree with the verdict.
+  assert.deepEqual(
+    atNinetyFive.comparison.bootstrap_ci_95_percent,
+    atNinetyFive.comparison.bootstrap_ci_percent,
+  );
+  // A higher level can only widen the operative interval.
+  assert(
+    atNinetyNine.comparison.bootstrap_ci_percent.lower <=
+      atNinetyFive.comparison.bootstrap_ci_percent.lower,
+  );
+  assert(
+    atNinetyNine.comparison.bootstrap_ci_percent.upper >=
+      atNinetyFive.comparison.bootstrap_ci_percent.upper,
+  );
+  assert.equal(atNinetyNine.method.nominal_confidence_level, 0.99);
+
+  assertThrowsMessage(
+    () => analyzeRecords([baseline1, baseline2], [candidate1, candidate2], {
+      ...options,
+      confidenceLevel: 0.5,
+    }),
+    /confidenceLevel must be greater than 0\.5 and less than 1/,
+  );
+  assertThrowsMessage(
+    () => analyzeRecords([baseline1, baseline2], [candidate1, candidate2], {
+      ...options,
+      confidenceLevel: 1,
+    }),
+    /confidenceLevel must be greater than 0\.5 and less than 1/,
+  );
+  // 0.99 over 1000 iterations leaves five resamples per tail, which is not an
+  // interval so much as a coin flip. It must be refused, and the message must
+  // name the iteration count that would work.
+  assertThrowsMessage(
+    () => analyzeRecords([baseline1, baseline2], [candidate1, candidate2], {
+      ...options,
+      confidenceLevel: 0.99,
+    }),
+    /needs at least 2000 bootstrap iterations to resolve 10 resamples per tail, but 1000 were requested/,
+  );
+  assert.equal(requireConfidenceLevel(0.99, 2_000, "probe"), 0.99);
+
+  assert.equal(parseArgs(["--confidence", "0.99"]).confidenceLevel, 0.99);
+  assert.equal(parseArgs([]).confidenceLevel, 0.95);
+  assertThrowsMessage(() => parseArgs(["--confidence", "nope"]), /--confidence must be a finite number/);
+
   process.stdout.write("analyze-fixed-samples self-test: ok\n");
 }
 
@@ -1125,11 +1318,13 @@ if (require.main === module) {
 
 module.exports = {
   analyzeRecords,
+  classifyDirection,
   classifyVerdict,
   hierarchicalBootstrap,
   parseArgs,
   pooledBootstrap,
   pooledSummary,
+  requireConfidenceLevel,
   validateAnalysisOptions,
   validateComparison,
   validateSidecar,
