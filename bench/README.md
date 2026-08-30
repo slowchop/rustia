@@ -263,91 +263,16 @@ just bench-linode-plan bench/cloud/linode-vm-string-memory-1370d6c.json
 just bench-linode bench/cloud/linode-vm-string-memory-1370d6c.json
 ```
 
-DigitalOcean authentication is a one-time interactive operation. The token is
-entered at `doctl`'s prompt and must never be passed as a recipe argument,
-environment variable, repository file, or chat message:
+The DigitalOcean, Vultr and Scaleway coordinators that ran these comparisons
+have been deleted. Timing now happens on one owned, attested host, so nothing
+in this repository authenticates to, creates, or pays for a cloud instance --
+and the operating instructions for those providers, which named a developer
+machine by host alias, are gone with them.
 
-```bash
-just bench-do-auth
-```
-
-The recipe removes only the locally stored `rustia-bench` context before
-initializing it, so an expired or replaced token always produces a fresh prompt.
-
-When authenticating from another computer, run the prompt on the benchmark
-coordinator host over a TTY-preserving SSH session:
-
-```bash
-ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-do-auth'
-```
-
-The short-lived custom token needs only `droplet:create`, `droplet:read`,
-`droplet:delete`, `regions:read`, `sizes:read`, `actions:read`, `image:read`,
-`ssh_key:create`, `ssh_key:read`, and `ssh_key:delete`. The last three allow the
-workflow to import and remove a unique per-run ED25519 key instead of depending
-on a persistent account key.
-
-The read-only plan resolves the mutable Ubuntu image slug to a numeric image ID
-and requires exactly one currently available 2-vCPU/4-GiB/80-GiB
-`Basic Intel` size in `syd1` at or below the committed hourly-price ceiling.
-It fails rather than silently choosing a regular Basic, dedicated, larger,
-differently priced, or alternate-region VM:
-
-```bash
-just bench-do-plan
-```
-
-Two tracked diagnostic profiles compare useful shared-CPU alternatives:
-regular Basic with 2 vCPUs/4 GiB and the current Intel pool with 4 vCPUs/8 GiB. The
-acceptance config freezes the qualifying cost-aware matrix winner; rerun the
-read-only plans and billable trials by profile name when price, availability,
-or host consistency needs to be reevaluated:
-
-```bash
-just bench-do-trial-plan basic-2c4g
-just bench-do-trial-plan premium-intel-2c4g
-just bench-do-trial basic-2c4g
-just bench-do-trials
-```
-
-`bench-do-trials` intentionally runs the two profiles sequentially so their
-cold setup/build cost can be compared; the two committed 90-minute ceilings
-sum to $0.178560 at current rates. Each trial builds the
-same exact baseline and candidate, runs only the four paired qualification
-rounds, records CPU identity, build time, relative-ratio stability, billable lifetime,
-conservative charge upper bound, and projected full-acceptance charge, then
-confirms destruction. A failed qualification is reported as ineligible, and
-the matrix fails if neither profile qualifies. Diagnostic mode is validated
-independently on the guest and coordinator: it cannot run the
-eight-leg comparison, append history, or promote evidence into the repository.
-The 2-GiB and extra-disk shapes remain excluded because their sub-cent savings
-do not repay the added OOM risk or hourly rate during the protocol's fixed cooldown windows.
-These trials screen one discarded shared host per profile; the eventual
-acceptance command provisions a new host and repeats qualification rather than
-treating a trial as a guarantee about future shared-CPU placement.
-
-The all-in-one billable command creates one uniquely named Droplet, records its
-numeric ID before proceeding, transfers a local Git bundle (so neither frozen
-commit needs to be pushed), keeps equal-length source roots alive for the
-runtime workload lookup, overlays only the candidate `bench/src/main.rs` onto
-the baseline, builds both binaries once with the pinned toolchain, and fetches
-the result archive before destroying the VM:
-
-```bash
-just bench-do
-```
-
-Before creating anything billable, it confirms a positive sentinel ID is absent
-from both account lists, then sends no-op delete-authority probes for that ID.
-A missing Droplet or SSH-key delete scope therefore fails before provisioning
-instead of being discovered during teardown.
-
-The acceptance and diagnostic profiles have a committed 90-minute
-billable-lifecycle limit. The limit starts before Droplet creation, bounds every
-remote phase, and reserves the final eight minutes for cleanup. The plan prints
-the corresponding price-ceiling estimate. A provider or API outage can still
-delay confirmed deletion, so cleanup failure remains a hard command error
-rather than being reported as a stopped bill.
+The frozen configs behind published measurements stay. They are the protocol a
+reader needs to check a number that is still on the dashboard; the tool that
+once executed them being gone does not make the record less true. Configs no
+published evidence referenced were deleted with their coordinator.
 
 Qualification sidecars never enter the accepted A/B analysis. DigitalOcean v6
 admits four counterbalanced baseline/candidate pairs by comparing the repeated
@@ -371,42 +296,14 @@ regressing, unstable, or
 contaminated run leaves diagnostics under `.rustia-benchmark-state/` and does
 not alter public history.
 
-The coordinator confirms destruction through a successful API list, not from
-a failed request or power-off state. Ambiguous create/import responses get a
-bounded unique-name visibility window before absence can be recorded, and an
-exclusive local coordinator lock rejects accidental simultaneous billable
-runs. The ownership journal and recovery artifacts live under the ignored
-`.rustia-benchmark-state/` tree, outside Cargo's disposable `target/` cache, so
-`cargo clean` cannot erase them during a run. They support inspection and
-exact-ID recovery after a client crash:
-
-```bash
-just bench-do-status
-just bench-do-unlock                # only after an ungraceful coordinator crash
-just bench-do-destroy               # when exactly one owned run remains
-just bench-do-destroy RUN_ID        # choose an exact owned run
-just bench-do-sweep                 # wallet backstop; also runs before every bench
-```
-
-`bench-do-destroy` needs a live coordinator to act on, and its confirmation loop
-gives up after four minutes so an interrupted run cannot hold the lock forever.
-A provider outage that outlasts that window therefore leaves a Droplet billing
-with nothing running to stop it: this happened on 2026-08-24, when the
-DigitalOcean API returned 503/504 for roughly twenty minutes and one Droplet
-billed for about 1.4 hours. `bench-do-sweep` closes that gap and runs
-automatically at the start of every `bench`, before anything new is created. It
-destroys a `rustia-bench-` Droplet that any local run state claims — including
-one whose state wrongly recorded destruction, since the coordinator lock proves
-no local run still owns it — and otherwise only one that has outlived any
-legitimate lifetime by a wide margin, so it can never race another machine's
-live run. A creation time it cannot parse is never treated as old, and a failed
-API read is never treated as proof of absence.
-
-Repeated Premium Intel shared-CPU placements passed the idle gate but accrued
-nonzero hypervisor steal or unstable paired ratios during timed legs. Those
-blocks were correctly discarded. DigitalOcean exposes no dedicated-CPU size to
-this account, so v6 uses a fresh shared host, a declared bounded-steal ceiling,
-and an independent paired qualification before any accepted evidence is run.
+Two facts from that lane are worth keeping now that its tooling is gone. A
+provider outage can outlast a coordinator's confirmation window and leave an
+instance billing with nothing running to stop it: this happened on 2026-08-24,
+when the API returned 503/504 for roughly twenty minutes and one instance
+billed for about 1.4 hours. And repeated shared-CPU placements passed the idle
+gate while still accruing hypervisor steal during timed legs, which is why the
+owned host requires steal to be exactly zero rather than merely bounded --
+on bare metal a non-zero reading is a fault, not a tolerance.
 
 Create a short-lived personal access token with only **Linodes: Read/Write** and
 **Account: Read Only**. Account read access lets the coordinator reject an
@@ -415,10 +312,16 @@ token is entered through a private TTY prompt and stored mode `0600` only under
 the ignored `.rustia-benchmark-state/linode/` directory:
 
 ```bash
-ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-linode-auth'
-ssh ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-linode-plan'
-ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-linode'
+just bench-linode-auth
+just bench-linode-plan
+just bench-linode
 ```
+
+Run these from the operator's own checkout. Earlier revisions of this file
+spelled them as `ssh` invocations against a named developer machine; a host
+alias is infra-identifying and does not belong in a public repository, and the
+recipes never needed it -- `-t` for the two that prompt for a token is the only
+part that mattered.
 
 The Linode coordinator passes a unique local ED25519 public key directly in the
 create request, so no persistent account SSH-key resource or additional token
@@ -496,86 +399,6 @@ The candidate residuals were approximately 0, 0, 0, and 7.0781 KiB/VM respective
 records, manifest, and analysis are retained under
 `evidence/vm-string-memory/1370d6ccefba7a1956441247c3139af2a2cf31fa/`; they intentionally do not appear in
 throughput history, `RESULTS.md`, or `CLAIMS.md`.
-
-The physical fallback automation remains available. Vultr uses an actual
-`vbm-4c-32gb` bare-metal server in `sgp`,
-running Ubuntu 24.04 x64. Vultr rounds usage up to a one-hour `$0.164` minimum.
-Because physical provisioning can remain `pending` well beyond fifteen
-minutes, the committed 110-minute lifecycle permits a conservative one-hour
-activation wait and has a two-hour `$0.328` compute ceiling; deletion still
-starts with an eight-minute reserve and normally keeps a prompt deployment
-inside its first billing hour.
-
-Create a service user attached to a role with exactly the Vultr-managed
-policies **Deploy New Servers**, **Manage Servers**, and **View Servers**.
-Allowlist the coordinator host's current public IPv4 address as a `/32` in
-Vultr's API access control. Enter its API key only through the private TTY
-prompt; the coordinator stores it mode `0600` under the ignored
-`.rustia-benchmark-state/vultr/` directory:
-
-```bash
-ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-vultr-auth'
-ssh ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-vultr-plan'
-ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-vultr'
-```
-
-The Vultr coordinator uses a unique ephemeral SSH key only in server user data,
-checks the exact region, plan, Ubuntu image, source identities, clean checkout,
-list/create/delete authority, and rejects any activated host where the runtime
-virtualization gate does not report real bare metal. It retains the same frozen
-qualification, fixed work, repetitions, eight-leg order, cooldowns, bootstrap,
-zero-steal rule, verdict, and conditional three-row publication protocol. The
-unique label is journaled before creation, ambiguous creates are reconciled by
-that label, and API list results must confirm deletion before evidence or
-history can be promoted.
-
-Vultr crash recovery is likewise provider-isolated:
-
-```bash
-just bench-vultr-status
-just bench-vultr-unlock
-just bench-vultr-destroy
-just bench-vultr-destroy RUN_ID
-```
-
-Two Vultr bare-metal orders remained pending through their committed activation
-windows and were deleted without running the benchmark. The next physical-host
-fallback is Scaleway Elastic Metal `EM-A610R-NVMe`: one AMD Ryzen PRO 3600 with
-6 cores/12 threads, 32 GiB ECC DDR4, and two 1 TB NVMe devices. The coordinator
-selects only the frozen Ubuntu 24.04 LTS image and an `available` or `low` stock
-entry in the committed zone order. Its hourly-price ceiling is EUR 0.110 and
-the 110-minute lifecycle has a conservative EUR 0.220 compute ceiling before
-tax while the coordinator and provider API remain reachable, with the final
-eight minutes reserved for cleanup. This is not a provider-side hard cap: a
-coordinator, network, or API outage can extend billing until deletion succeeds.
-
-Create a Scaleway application scoped to the benchmark project with only
-`ElasticMetalFullAccess` and `SSHKeysFullAccess`, then create an API key for that
-application. Enter the project UUID and secret-key half only through the private
-TTY prompt; they are stored mode `0600` under the ignored
-`.rustia-benchmark-state/scaleway/` directory:
-
-```bash
-ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-scaleway-auth'
-ssh ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-scaleway-plan'
-ssh -t ${RUSTIA_COORDINATOR_SSH} 'cd /workspace/src/rustia && just bench-scaleway'
-```
-
-The Scaleway coordinator creates a unique per-run IAM SSH key and embeds a
-separate pinned host key through cloud-init. It journals both resources before
-creation, reconciles ambiguous responses by exact ownership fields, verifies
-the activated machine is physical and matches the frozen CPU topology, and
-confirms server deletion before deleting the IAM key. Neither accepted evidence
-nor history can be promoted until both resources are confirmed absent.
-
-Scaleway crash recovery remains provider-isolated:
-
-```bash
-just bench-scaleway-status
-just bench-scaleway-unlock
-just bench-scaleway-destroy
-just bench-scaleway-destroy RUN_ID
-```
 
 The resulting evidence is Linux/x86_64-specific. macOS and Windows remain
 supported build targets, but neither is an active benchmark target without a

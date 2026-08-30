@@ -423,7 +423,6 @@ function checkReleasePreflight(text) {
     '"design/render-progress.js"',
     '"tools/check-project-status.js"',
     '"bench/analyze-fixed-samples.js"',
-    '"tools/run-digitalocean-benchmark.js"',
     '"tools/run-linode-benchmark.js"',
     '"tools/run-linux-matrix-benchmark.js"',
     // The owned-host lane. Its self-tests carry the rules that keep a source
@@ -437,8 +436,6 @@ function checkReleasePreflight(text) {
     '"bench/run-memory-cohort.js"',
     '"bench/publish-memory-analysis.js"',
     '"tools/run-linux-memory-benchmark.js"',
-    '"tools/run-vultr-benchmark.js"',
-    '"tools/run-scaleway-benchmark.js"',
     '"tools/run-wasm-gate.js"',
     '"tools/run-wasm-dispatch-gate.js"',
     '"tools/merge-rustia-ci-memory-data.js"',
@@ -579,9 +576,6 @@ function checkBenchmarkPublication(text) {
   for (const forbidden of [
     "LINODE_TOKEN",
     "run-linode-benchmark.js bench",
-    "run-digitalocean-benchmark.js bench",
-    "run-vultr-benchmark.js bench",
-    "run-scaleway-benchmark.js bench",
     "workflow_run",
     "pull_request_target",
     "contents: write",

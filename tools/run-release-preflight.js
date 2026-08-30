@@ -42,7 +42,6 @@ node("design/render-progress.js", "--check");
 node("tools/check-project-status.js");
 
 node("bench/analyze-fixed-samples.js", "--self-test");
-node("tools/run-digitalocean-benchmark.js", "self-test");
 node("tools/run-linode-benchmark.js", "self-test");
 node("tools/run-dedicated-benchmark.js", "self-test");
 node("tools/check-benchmark-series.js", "--self-test");
@@ -54,8 +53,6 @@ node("bench/analyze-memory-samples.js", "self-test");
 node("bench/run-memory-cohort.js", "self-test");
 node("bench/publish-memory-analysis.js", "self-test");
 node("tools/run-linux-memory-benchmark.js", "self-test");
-node("tools/run-vultr-benchmark.js", "self-test");
-node("tools/run-scaleway-benchmark.js", "self-test");
 node("tools/run-wasm-gate.js", "self-test");
 node("tools/run-wasm-dispatch-gate.js", "self-test");
 node("tools/merge-rustia-ci-memory-data.js", "self-test");
