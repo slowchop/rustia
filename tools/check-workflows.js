@@ -298,6 +298,11 @@ function checkCi(text) {
     "cargo install wasm-bindgen-cli --version 0.2.126 --locked",
     label,
   );
+  // The install is guarded by a version comparison so it is idempotent on a
+  // runner that already has the binary. That puts the pinned version in the
+  // file twice, and the two copies must agree or the guard silently stops
+  // matching and every run reinstalls. Pin both literals to the same version.
+  requireIncludes(text, '!= "wasm-bindgen 0.2.126"', label);
   requireIncludes(
     text,
     "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner",

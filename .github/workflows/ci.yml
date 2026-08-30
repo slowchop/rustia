@@ -110,8 +110,20 @@ jobs:
         with:
           node-version: "22"
 
+      # The shared pool keeps ~/.cargo/bin between jobs, so a bare `cargo
+      # install` fails as soon as the binary is already there -- which is what
+      # broke this job the first time it was not cancelled by a newer push.
+      # Assert the pin instead of installing blind: reinstall when the runner
+      # has no wasm-bindgen or the wrong one, and skip when it already matches.
+      # If the version string ever stops matching this shape the check simply
+      # reinstalls every run, which is slower but never wrong.
       - name: Install matching wasm-bindgen test runner
-        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+        run: |
+          set -euo pipefail
+          if [ "$(wasm-bindgen --version 2>/dev/null || true)" != "wasm-bindgen 0.2.126" ]; then
+            cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+          fi
+          wasm-bindgen --version
 
       - name: Run bare wasm host-adapter tests
         env:
