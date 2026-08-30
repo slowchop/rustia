@@ -9,7 +9,10 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
-const ROOT = "/opt/rustia";
+// The run's whole working tree. Was hardcoded at /opt/rustia, which only a root
+// process on a throwaway instance can write. The owned host runs this as an
+// ordinary user, so the location is a parameter with a home-directory default.
+const ROOT = process.env.RUSTIA_MATRIX_ROOT ?? path.join(os.homedir(), ".rustia-matrix");
 const REPOSITORY = path.join(ROOT, "repo.git");
 const SOURCE = path.join(ROOT, "src-matrix");
 const TARGET_ALL = path.join(ROOT, "target-matrix-all");
@@ -22,6 +25,7 @@ const WASM_RESULTS = path.join(ROOT, "wasm-current-results.json");
 const DISPATCH_RESULTS = path.join(ROOT, "wasm-dispatch-current-results.json");
 const EVIDENCE_ROOT = path.join(ROOT, "matrix-evidence");
 const PROTOCOL = "cross_engine_matrix_v4";
+const DEDICATED_SCHEMA = "rustia.dedicated-cross-engine-matrix.v1";
 const MAX_TIMED_ATTEMPTS_PER_GROUP = 3;
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -35,15 +39,6 @@ const WORKLOADS = Object.freeze([
 ]);
 const WASM_RUNTIMES = Object.freeze(["node"]);
 const WASM_ADAPTERS = Object.freeze(["rustia", "koto", "rhai"]);
-const PACKAGE_ACTIVITY_UNITS = Object.freeze([
-  "apt-daily.service",
-  "apt-daily-upgrade.service",
-  "apt-daily.timer",
-  "apt-daily-upgrade.timer",
-  "unattended-upgrades.service",
-  "packagekit.service",
-]);
-
 let logReady = false;
 
 function fail(message) {
@@ -99,12 +94,35 @@ function requireFrozenArray(value, expected, location) {
 function validateConfig(value) {
   const config = requireObject(value, "config");
   requireExactKeys(config, ["schema", "provider", "source", "measurement", "host_gate", "publication"], "config");
-  if (config.schema !== "rustia.linode-fixed-benchmark.v2") fail("matrix requires the Linode v2 lifecycle");
+  // Two lifecycles during the move to the owned host: the rented instance this
+  // was written for, and the owned machine that replaces it. They differ only in
+  // how the host is described and how strict the steal ceilings can be, so the
+  // measurement code below is shared rather than forked.
+  const dedicated = config.schema === DEDICATED_SCHEMA;
+  if (!dedicated && config.schema !== "rustia.linode-fixed-benchmark.v2") {
+    fail(`matrix requires ${DEDICATED_SCHEMA} or the Linode v2 lifecycle`);
+  }
   const provider = requireObject(config.provider, "provider");
-  requireExactKeys(provider, ["region", "image", "size", "max_runtime_minutes"], "provider");
-  const size = requireObject(provider.size, "provider.size");
-  requireInteger(size.vcpus, "provider.size.vcpus", 2);
-  requireInteger(size.memory_mib, "provider.size.memory_mib", 1);
+  if (dedicated) {
+    requireExactKeys(provider, ["host"], "provider");
+    const host = requireObject(provider.host, "provider.host");
+    requireExactKeys(
+      host,
+      ["name", "cpu_model", "logical_cpus", "physical_cores", "pinned_cpus", "max_runtime_minutes"],
+      "provider.host",
+    );
+    requireString(host.name, "provider.host.name");
+    requireString(host.cpu_model, "provider.host.cpu_model");
+    requireInteger(host.logical_cpus, "provider.host.logical_cpus", 2);
+    requireInteger(host.physical_cores, "provider.host.physical_cores", 2);
+    requireString(host.pinned_cpus, "provider.host.pinned_cpus");
+    requireInteger(host.max_runtime_minutes, "provider.host.max_runtime_minutes", 1);
+  } else {
+    requireExactKeys(provider, ["region", "image", "size", "max_runtime_minutes"], "provider");
+    const size = requireObject(provider.size, "provider.size");
+    requireInteger(size.vcpus, "provider.size.vcpus", 2);
+    requireInteger(size.memory_mib, "provider.size.memory_mib", 1);
+  }
   const source = requireObject(config.source, "source");
   requireExactKeys(source, ["benchmark_commit", "expected_sha256"], "source");
   if (!FULL_COMMIT.test(source.benchmark_commit)) fail("source.benchmark_commit must be a full commit");
@@ -163,11 +181,23 @@ function validateConfig(value) {
   if (requireInteger(gate.maximum_steal_ticks, "host_gate.maximum_steal_ticks", 0) !== 0) {
     fail("host_gate.maximum_steal_ticks must be zero");
   }
-  if (requireNumber(gate.maximum_timed_steal_percent, "host_gate.maximum_timed_steal_percent", 0) !== 0.1) {
-    fail("host_gate.maximum_timed_steal_percent must be 0.1");
+  // On a rented instance steal is a real quantity and the ceilings are
+  // tolerances. On bare metal it is structurally zero, so a non-zero reading is
+  // a fault rather than something to tolerate; the owned lifecycle therefore
+  // requires exactly zero, which is a strengthening rather than a relaxation.
+  const timedStealPercent = dedicated ? 0 : 0.1;
+  const timedStealTicks = dedicated ? 0 : 1;
+  if (
+    requireNumber(gate.maximum_timed_steal_percent, "host_gate.maximum_timed_steal_percent", 0) !==
+    timedStealPercent
+  ) {
+    fail(`host_gate.maximum_timed_steal_percent must be ${timedStealPercent}`);
   }
-  if (requireInteger(gate.maximum_timed_steal_ticks, "host_gate.maximum_timed_steal_ticks", 0) !== 1) {
-    fail("host_gate.maximum_timed_steal_ticks must be one");
+  if (
+    requireInteger(gate.maximum_timed_steal_ticks, "host_gate.maximum_timed_steal_ticks", 0) !==
+    timedStealTicks
+  ) {
+    fail(`host_gate.maximum_timed_steal_ticks must be ${timedStealTicks}`);
   }
   const maximumTimedAttempts = requireInteger(
     gate.maximum_timed_attempts_per_group,
@@ -189,6 +219,24 @@ function validateConfig(value) {
     fail("publication matrix dimensions are not frozen at 65/15/1");
   }
   return config;
+}
+
+// max_runtime_minutes was a billing ceiling on a rented instance -- the
+// coordinator destroyed the machine when it expired, so nothing here enforced
+// it. On an owned host nothing destroys anything, so the bound has to mean
+// something else or mean nothing: it is a hang detector, checked at the phase
+// boundaries, so a wedged build fails in seconds rather than after another hour.
+function checkRuntimeBudget(config, startedAtMs, phase) {
+  const limit = config.schema === DEDICATED_SCHEMA
+    ? config.provider.host.max_runtime_minutes
+    : config.provider.max_runtime_minutes;
+  const elapsedMinutes = (Date.now() - startedAtMs) / 60_000;
+  if (elapsedMinutes > limit) {
+    fail(
+      `matrix run exceeded provider max_runtime_minutes (${limit}) after ` +
+        `${elapsedMinutes.toFixed(1)} minutes, ${phase}`,
+    );
+  }
 }
 
 function loadJson(file, location) {
@@ -274,14 +322,60 @@ function verifySource(config, bundle) {
   }
 }
 
+// Resolves rustup through PATH rather than at /root/.cargo/bin, and only
+// installs one when the machine has none. An owned host arrives with a toolchain
+// already provisioned; a throwaway instance does not.
 function installRust() {
-  if (!fs.existsSync("/root/.cargo/bin/rustup")) {
+  if (spawnSync("rustup", ["--version"], { stdio: "ignore" }).status !== 0) {
     const installer = path.join(ROOT, "rustup-init.sh");
     run("curl", ["--proto", "=https", "--tlsv1.2", "--fail", "--silent", "--show-error", "https://sh.rustup.rs", "-o", installer]);
     run("sh", [installer, "-y", "--profile", "minimal", "--default-toolchain", "none"], { capture: false });
+    process.env.PATH = `${path.join(os.homedir(), ".cargo/bin")}:${process.env.PATH ?? ""}`;
   }
-  run("/root/.cargo/bin/rustup", ["toolchain", "install", "1.95.0", "--profile", "minimal"], { capture: false });
-  run("/root/.cargo/bin/rustup", ["target", "add", "--toolchain", "1.95.0", "wasm32-unknown-unknown"], { capture: false });
+  run("rustup", ["toolchain", "install", "1.95.0", "--profile", "minimal"], { capture: false });
+  run("rustup", ["target", "add", "--toolchain", "1.95.0", "wasm32-unknown-unknown"], { capture: false });
+}
+
+// The pinned core must be one the kernel actually holds off the scheduler. On a
+// rented instance the only available check was "the vCPU exists"; on the owned
+// host the config names the isolated set, so the stronger statement is
+// available and is the one that matters -- a pinned core the scheduler still
+// uses is the failure this arrangement exists to prevent, and it does not show
+// up in the timings.
+function validateBenchmarkCpu(config, provider) {
+  if (config.schema !== DEDICATED_SCHEMA) {
+    if (config.host_gate.benchmark_cpu >= provider.vcpus) {
+      fail("configured benchmark CPU is absent from the Linode");
+    }
+    return;
+  }
+  const pinned = parseCpuList(config.provider.host.pinned_cpus);
+  if (!pinned.includes(config.host_gate.benchmark_cpu)) {
+    fail(
+      `host_gate.benchmark_cpu ${config.host_gate.benchmark_cpu} is not one of ` +
+        `provider.host.pinned_cpus (${pinned.join(",")})`,
+    );
+  }
+}
+
+// "4", "4,5" and "0-1,4" all name CPU sets in the kernel's own notation.
+function parseCpuList(spec) {
+  const text = String(spec).trim();
+  if (!text) fail("CPU list is empty");
+  const cpus = [];
+  for (const entry of text.split(",")) {
+    const range = entry.match(/^(\d+)-(\d+)$/);
+    if (range) {
+      const start = Number(range[1]);
+      const end = Number(range[2]);
+      if (end < start) fail(`invalid CPU range ${entry}`);
+      for (let cpu = start; cpu <= end; cpu += 1) cpus.push(cpu);
+      continue;
+    }
+    if (!/^\d+$/.test(entry)) fail(`invalid CPU list entry ${entry}`);
+    cpus.push(Number(entry));
+  }
+  return cpus;
 }
 
 function safeArtifactPath(root, relative, runtime) {
@@ -660,9 +754,77 @@ function exportRun(status, config, evidenceDirectory) {
   run("tar", ["--format=ustar", "-czf", EXPORT_ARCHIVE, "-C", EXPORT, "."], { capture: false });
 }
 
-async function execute(configFile, providerFile, bundle) {
-  if (process.platform !== "linux" || process.getuid() !== 0) fail("matrix runner must execute as root on Linux");
+const LOCK_FILE = path.join(ROOT, "lock");
+
+// Every directory keyed to one run's state. The rented-instance model destroyed
+// the machine after each run, so nothing here was ever cleared; on an owned host
+// a second run would find a bare clone and a worktree already in place and fail.
+// The two cargo target directories are deliberately absent: they are the warm
+// caches that make a repeat run minutes rather than an hour, and every build
+// records its own hashes, so a poisoned cache would be visible rather than
+// silent.
+const WIPE_ON_START = Object.freeze([REPOSITORY, SOURCE, EXPORT, EVIDENCE_ROOT]);
+
+function acquireLock() {
   fs.mkdirSync(ROOT, { recursive: true });
+  for (;;) {
+    try {
+      const descriptor = fs.openSync(LOCK_FILE, "wx");
+      try {
+        fs.writeSync(descriptor, JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
+      } finally {
+        fs.closeSync(descriptor);
+      }
+      return;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+    const holder = loadJson(LOCK_FILE, "lock file");
+    if (!Number.isSafeInteger(holder.pid)) fail(`${LOCK_FILE} does not name a pid`);
+    let holderAlive = true;
+    try {
+      process.kill(holder.pid, 0);
+    } catch (error) {
+      if (error.code === "ESRCH") holderAlive = false;
+      else if (error.code !== "EPERM") throw error;
+    }
+    if (holderAlive) {
+      fail(
+        `matrix runner is already running as pid ${holder.pid} (started ${holder.started_at}); ` +
+          `refusing to share ${ROOT} with a second, concurrent run`,
+      );
+    }
+    log(`lock held by dead pid ${holder.pid} (started ${holder.started_at}); taking it over`);
+    fs.rmSync(LOCK_FILE, { force: true });
+  }
+}
+
+function releaseLock() {
+  fs.rmSync(LOCK_FILE, { force: true });
+}
+
+function resetWorkingState() {
+  // WIPE_ON_START is a fixed list of names joined onto ROOT, so a ROOT of "/" or
+  // the bare home directory would recursively delete real directories that share
+  // those names. ROOT is operator-supplied through an environment variable.
+  const resolved = path.resolve(ROOT);
+  if (resolved === path.parse(resolved).root || resolved === path.resolve(os.homedir())) {
+    fail(
+      `RUSTIA_MATRIX_ROOT resolves to ${resolved}; it must be a directory dedicated to this ` +
+        `runner, because starting a run erases the working state beneath it`,
+    );
+  }
+  for (const directory of WIPE_ON_START) {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+  fs.rmSync(EXPORT_ARCHIVE, { force: true });
+}
+
+async function execute(configFile, providerFile, bundle) {
+  if (process.platform !== "linux") fail("matrix runner must execute on Linux");
+  fs.mkdirSync(ROOT, { recursive: true });
+  acquireLock();
+  resetWorkingState();
   fs.writeFileSync(RUN_LOG, "", { mode: 0o600 });
   logReady = true;
   const config = validateConfig(loadJson(configFile, "protocol config"));
@@ -677,18 +839,21 @@ async function execute(configFile, providerFile, bundle) {
     started_at: new Date().toISOString(),
   };
   try {
-    if (config.host_gate.benchmark_cpu >= provider.vcpus) fail("configured benchmark CPU is absent from the Linode");
+    validateBenchmarkCpu(config, provider);
+    const startedAtMs = Date.now();
     log("verifying frozen source and preparing pinned toolchains");
     verifySource(config, bundle);
     installRust();
     const runtimeVersions = installRuntimes(config);
     writeJson(path.join(evidenceDirectory, "runtime-versions.json"), runtimeVersions);
+    checkRuntimeBudget(config, startedAtMs, "before building the adapters");
     log("building all native adapters and the wasm adapter offline");
     const buildInfo = build(config);
-    for (const unit of PACKAGE_ACTIVITY_UNITS) {
-      run("systemctl", ["stop", unit], { allowFailure: true });
-      run("systemctl", ["mask", unit], { allowFailure: true });
-    }
+    checkRuntimeBudget(config, startedAtMs, "before measuring");
+    // The rented-instance model stopped and permanently masked the package
+    // timers, which needs root and outlives the run. On an owned machine that is
+    // an unrequested change to somebody's box; quiet is a property of the host
+    // and is asserted by the pre-window idle gate below, not imposed here.
     fs.copyFileSync(configFile, path.join(evidenceDirectory, "protocol.json"));
     fs.copyFileSync(providerFile, path.join(evidenceDirectory, "provider.json"));
     writeJson(path.join(evidenceDirectory, "host.json"), collectHost(config, buildInfo));
@@ -706,8 +871,36 @@ async function execute(configFile, providerFile, bundle) {
     log(`failed: ${error.message}`);
   } finally {
     exportRun(status, config, evidenceDirectory);
+    releaseLock();
   }
   return status.status === "matrix_complete" ? 0 : 2;
+}
+
+// Turns the committed rented-instance config into the owned-host one, which is
+// exactly the transformation the freezer performs. Deriving the fixture from a
+// real config rather than writing one by hand means the test cannot pass against
+// a shape the repository does not actually contain.
+function dedicatedFixture(linodeConfig) {
+  return {
+    ...linodeConfig,
+    schema: DEDICATED_SCHEMA,
+    provider: {
+      host: {
+        name: "ci-bench",
+        cpu_model: "AMD Ryzen 5 3600X",
+        logical_cpus: 6,
+        physical_cores: 6,
+        pinned_cpus: "4",
+        max_runtime_minutes: 180,
+      },
+    },
+    host_gate: {
+      ...linodeConfig.host_gate,
+      benchmark_cpu: 4,
+      maximum_timed_steal_percent: 0,
+      maximum_timed_steal_ticks: 0,
+    },
+  };
 }
 
 async function selfTest() {
@@ -723,6 +916,84 @@ async function selfTest() {
   assert.equal(timedStealGatePasses(timedGate, { total_ticks: 946, steal_ticks: 2 }), false);
   assert.equal(timedStealGatePasses(timedGate, { total_ticks: 10_000, steal_ticks: 2 }), true);
   assert.throws(() => safeArtifactPath("/tmp/a", "../b", "fixture"));
+
+  assert.deepEqual(parseCpuList("4"), [4]);
+  assert.deepEqual(parseCpuList("4,5"), [4, 5]);
+  assert.deepEqual(parseCpuList("0-1,4"), [0, 1, 4]);
+  assert.throws(() => parseCpuList(""), /empty/);
+  assert.throws(() => parseCpuList("5-4"), /invalid CPU range/);
+  assert.throws(() => parseCpuList("x"), /invalid CPU list entry/);
+
+  // Both lifecycles, against a config the repository actually holds. The rented
+  // one must keep validating unchanged -- adding the owned lifecycle is not
+  // allowed to quietly alter the one still in service.
+  const linodeConfig = loadJson(
+    path.join(__dirname, "../bench/cloud/linode-cross-engine-matrix-8f0e7f474f2b.json"),
+    "committed matrix config",
+  );
+  assert.equal(validateConfig(linodeConfig).schema, "rustia.linode-fixed-benchmark.v2");
+  const dedicated = dedicatedFixture(linodeConfig);
+  assert.equal(validateConfig(dedicated).schema, DEDICATED_SCHEMA);
+
+  // The load-bearing link: what the freezer writes is what this runner accepts.
+  // Asserted against the freezer's own functions rather than a fixture that
+  // merely resembles its output, so the two cannot drift apart silently.
+  const freezer = require("./create-linode-matrix-config.js");
+  // HEAD, because createConfig re-pins every source hash from Git and a
+  // synthetic commit has no tree to read.
+  const frozenCommit = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: path.join(__dirname, ".."),
+    encoding: "utf8",
+  }).stdout.trim();
+  const frozenLinode = freezer.createConfig(frozenCommit);
+  assert.equal(validateConfig(frozenLinode).schema, "rustia.linode-fixed-benchmark.v2");
+  const frozenDedicated = freezer.toDedicated(frozenLinode);
+  assert.equal(validateConfig(frozenDedicated).schema, DEDICATED_SCHEMA);
+  assert.equal(frozenDedicated.provider.host.name, "ci-bench");
+  validateBenchmarkCpu(frozenDedicated, {});
+
+  // Steal is structurally zero on bare metal, so the owned lifecycle requires
+  // exactly zero and must refuse the rented one's tolerances.
+  assert.throws(
+    () => validateConfig({ ...dedicated, host_gate: { ...dedicated.host_gate, maximum_timed_steal_percent: 0.1 } }),
+    /maximum_timed_steal_percent must be 0/,
+  );
+  assert.throws(
+    () => validateConfig({ ...dedicated, host_gate: { ...dedicated.host_gate, maximum_timed_steal_ticks: 1 } }),
+    /maximum_timed_steal_ticks must be 0/,
+  );
+  // A rented config may not smuggle in an owned host block, or the reverse.
+  assert.throws(() => validateConfig({ ...dedicated, schema: "rustia.linode-fixed-benchmark.v2" }), /provider/);
+  assert.throws(() => validateConfig({ ...linodeConfig, schema: DEDICATED_SCHEMA }), /provider/);
+  assert.throws(() => validateConfig({ ...dedicated, schema: "rustia.something-else.v1" }), /matrix requires/);
+
+  // The pinned core must be one the kernel holds off the scheduler.
+  validateBenchmarkCpu(dedicated, {});
+  assert.throws(
+    () => validateBenchmarkCpu({ ...dedicated, host_gate: { ...dedicated.host_gate, benchmark_cpu: 2 } }, {}),
+    /is not one of provider\.host\.pinned_cpus/,
+  );
+  // The rented check is unchanged and still consults the instance's vCPU count.
+  assert.throws(
+    () => validateBenchmarkCpu(linodeConfig, { vcpus: 1 }),
+    /absent from the Linode/,
+  );
+
+  // The budget is a hang detector on an owned host: nothing destroys the
+  // machine when it expires, so the run has to end itself.
+  assert.throws(
+    () => checkRuntimeBudget(dedicated, Date.now() - 200 * 60_000, "in the self-test"),
+    /exceeded provider max_runtime_minutes \(180\)/,
+  );
+  checkRuntimeBudget(dedicated, Date.now(), "in the self-test");
+
+  // Starting a run erases the working state beneath ROOT, so ROOT must never be
+  // a directory somebody else owns.
+  assert.deepEqual(
+    WIPE_ON_START.filter((directory) => directory === TARGET_ALL || directory === TARGET_LUA54),
+    [],
+    "the warm cargo target directories must survive a repeat run",
+  );
 
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-linux-matrix-self-test-"));
   try {

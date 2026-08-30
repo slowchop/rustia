@@ -9,7 +9,12 @@ const { execFileSync } = require("node:child_process");
 
 const ROOT = path.resolve(__dirname, "..");
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
-const SAFE_OUTPUT = /^bench\/cloud\/linode-cross-engine-matrix-[0-9a-f]{7,40}\.json$/;
+const SAFE_OUTPUT = /^bench\/cloud\/(linode|dedicated)-cross-engine-matrix-[0-9a-f]{7,40}\.json$/;
+const DEDICATED_SCHEMA = "rustia.dedicated-cross-engine-matrix.v1";
+// The owned host's identity has exactly one source in the repository. The
+// history lane already reads it from here; the matrix reading it from anywhere
+// else would let the two lanes disagree about which machine they measured on.
+const DEDICATED_HOST_CONFIG = "bench/cloud/dedicated-core2-tape-sparse.json";
 
 function fail(message) {
   throw new Error(message);
@@ -41,16 +46,58 @@ function sourceHash(commit, relative) {
 }
 
 function parseOutput(argv) {
-  if (argv.length !== 2 || argv[0] !== "--output") {
+  const args = [...argv];
+  let dedicated = false;
+  const dedicatedIndex = args.indexOf("--dedicated");
+  if (dedicatedIndex !== -1) {
+    dedicated = true;
+    args.splice(dedicatedIndex, 1);
+  }
+  if (args.length !== 2 || args[0] !== "--output") {
     fail(
-      "usage: create-linode-matrix-config.js --output bench/cloud/linode-cross-engine-matrix-COMMIT.json",
+      "usage: create-linode-matrix-config.js [--dedicated] --output " +
+        "bench/cloud/{linode,dedicated}-cross-engine-matrix-COMMIT.json",
     );
   }
-  const relative = argv[1].replaceAll("\\", "/");
+  const relative = args[1].replaceAll("\\", "/");
   if (!SAFE_OUTPUT.test(relative)) fail("--output must be a safe per-commit bench/cloud JSON path");
+  // The filename says which machine the config is for, so it must agree with
+  // the flag: a dedicated config sitting under a linode- name would be read by
+  // a human as the thing it is not.
+  const named = relative.includes("/dedicated-cross-engine-matrix-");
+  if (named !== dedicated) {
+    fail(`--output name and ${dedicated ? "--dedicated" : "the rented lifecycle"} disagree`);
+  }
   const output = path.resolve(ROOT, relative);
   if (path.relative(ROOT, output).startsWith("..")) fail("--output escapes the repository");
-  return { relative, output };
+  return { relative, output, dedicated };
+}
+
+// The owned-host variant of the same protocol. Everything about the measurement
+// is untouched -- same engines, workloads, repetitions, runtime artifacts and
+// publication dimensions -- so a cohort measured here is comparable with one
+// measured on the rented instance in every respect except the machine. Only the
+// host description and the steal ceilings change, and the ceilings tighten:
+// steal is structurally zero on bare metal, so a non-zero reading is a fault
+// rather than a tolerance.
+function toDedicated(config) {
+  const base = JSON.parse(fs.readFileSync(path.join(ROOT, DEDICATED_HOST_CONFIG), "utf8"));
+  const host = base.provider?.host;
+  if (!host || typeof host.name !== "string") {
+    fail(`${DEDICATED_HOST_CONFIG} does not carry a provider.host block`);
+  }
+  return {
+    ...config,
+    schema: DEDICATED_SCHEMA,
+    provider: { host: { ...host } },
+    host_gate: {
+      ...config.host_gate,
+      benchmark_cpu: base.host_gate.benchmark_cpu,
+      cooldown_seconds: base.host_gate.cooldown_seconds,
+      maximum_timed_steal_percent: 0,
+      maximum_timed_steal_ticks: 0,
+    },
+  };
 }
 
 // The measurement protocol, host gate, and publication contract mirror the
@@ -155,11 +202,11 @@ function createConfig(commit) {
 }
 
 function main() {
-  const { relative, output } = parseOutput(process.argv.slice(2));
+  const { relative, output, dedicated } = parseOutput(process.argv.slice(2));
   const commit = gitText(["rev-parse", "HEAD"]);
   if (!FULL_COMMIT.test(commit)) fail("HEAD did not resolve to a full lowercase commit");
   if (fs.existsSync(output)) fail(`refusing to overwrite ${relative}`);
-  const config = createConfig(commit);
+  const config = dedicated ? toDedicated(createConfig(commit)) : createConfig(commit);
   fs.writeFileSync(output, `${JSON.stringify(config, null, 2)}\n`, {
     flag: "wx",
     mode: 0o600,
@@ -167,9 +214,15 @@ function main() {
   process.stdout.write(`${relative}\n`);
 }
 
-try {
-  main();
-} catch (error) {
-  process.stderr.write(`create-linode-matrix-config: ${error.message}\n`);
-  process.exitCode = 1;
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    process.stderr.write(`create-linode-matrix-config: ${error.message}\n`);
+    process.exitCode = 1;
+  }
 }
+
+// Exported so the runner's self-test can validate exactly what this writes,
+// rather than a hand-built fixture that only resembles it.
+module.exports = { createConfig, toDedicated, parseOutput };
