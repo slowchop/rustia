@@ -568,7 +568,12 @@ unreachable suspended-coroutine frames.
    the published same-run ratios do. Nothing in this repository can start a billed instance, on a timer or
    otherwise. The memory cohort was the last lane that could, and only by explicit dispatch; it now runs on
    the owned host too (`.github/workflows/rustia-memory.yml`), pinning two isolated cores rather than one
-   because the supervisor samples while the benchmark runs. Three cloud coordinators are deleted and the
+   because the supervisor samples while the benchmark runs. That lane is ported but not yet completing:
+   per-VM memory is measured inside a dedicated cgroup and the host's unprivileged CI user has no cgroup-v2
+   subtree it can write to, so it needs either root or a systemd delegated scope (`loginctl enable-linger`
+   plus `Delegate=memory`). The runner checks for that before it clones anything and names what is missing.
+   The check is deliberately not relaxed: the cgroup is what the per-VM figure is measured in, so a run
+   without one would produce numbers that look like measurements and are not. Three cloud coordinators are deleted and the
    eleven Linode lifecycle recipes with them; `tools/run-linode-benchmark.js` survives only as the home of
    the matrix and memory acceptance rules the owned-host coordinator borrows, is documented as retired, and
    is invoked by nothing. Not ported: `tools/run-linux-fixed-benchmark.js`, the A/B acceptance runner, which
