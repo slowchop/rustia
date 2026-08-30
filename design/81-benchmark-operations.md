@@ -63,6 +63,17 @@ The qualification record carries the machine's measured repeatability. Quote it
 per workload: spread scales inversely with per-unit cost, so the same host reads
 0.32% worst on `dense_tables` and 5.74% on `closures_upvalues`.
 
+### Known gap: the A/B acceptance runner
+
+`tools/run-linux-fixed-benchmark.js` still assumes the rented model — root,
+`/root/.cargo`, and permanent masking of the host's package timers. Nothing
+executes it any more: no workflow reaches it, and the only remaining caller is
+`validate`, which reads a frozen config and takes no timing. It therefore has not
+been ported, and porting it is the prerequisite for running a full A/B acceptance
+campaign on the owned host rather than a screening comparison. The three runners
+that do execute there — history, matrix, memory — have had those assumptions
+removed and are checked for their absence.
+
 ### Cost
 
 No timer may start a billed instance. The retired cloud matrix stays reachable
