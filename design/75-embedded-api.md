@@ -1,6 +1,6 @@
 # rustia - embedded API goal and plan
 
-> **Status: [TYPED INVOCATION + LIVE-HANDLE SPINE IMPLEMENTED - advanced ergonomics/serde pending] (updated 2026-07-29).**
+> **Status: [TYPED INVOCATION + LIVE-HANDLE SPINE/CHUNK BUILDER IMPLEMENTED - function construction/live serde pending] (updated 2026-09-02).**
 > This records the public Rust embedding API direction and its honest implementation boundary after comparing
 > rustia's constraints with current Rust scripting/runtime APIs. It refines the locked
 > architecture axis H in [`30-architecture.md`](30-architecture.md) and the grabby bridge contract in
@@ -36,14 +36,18 @@ Object/program reclamation, real VM-owned live/reserved/peak telemetry, and the 
 quota/atomic OOM path are now implemented and validated by the exact-commit `safe-memory-588b541` native Linode
 cohort plus its wasm32 512 KiB quota/recovery probe. The next release-critical slice is not more facade
 decoration: the epoch-safe decision reset and host-owned `require` resolver/cache are now implemented; remaining
-work is transactional installation/reload failures, function/chunk construction, and live serde. The
+work is transactional installation/reload failures, safe host-function construction, and live serde. The
 graph-preserving advanced spine plus its first ergonomic constructors are now implemented:
 VM/epoch-safe rooted `Value`/`Table`/`Function` handles preserve binary strings, buffers, vectors, rich keys,
 shared/cyclic table identity, mutation, raw equality, and ordinary or typed invocation exchange without
 exposing collector lifetimes. `globals()` exposes the real mutable globals table, `create_table()` admits an
 empty rooted table under the logical-live quota, and `Table::set_live()` bridges owned keys to identity-bearing
-live values. Hardened leaves reject both constructor authorities before allocation. `OwnedValue` remains the
-small acyclic snapshot layer. This advanced layer is additive, not a replacement for the existing typed facade.
+live values. The composable `load(source).name(...).environment(...).eval()/exec()` builder now adds borrowed
+text/byte source, named diagnostics, exact rooted lexical environments, typed/live/exports results, and
+side-effect-only execution; custom environments are validated before compilation, nested functions capture
+the selected table, and hardened leaves reject dynamic loading before compilation or VM allocation.
+Hardened leaves reject both table constructor authorities before allocation. `OwnedValue` remains the small
+acyclic snapshot layer. This advanced layer is additive, not a replacement for the existing typed facade.
 The ordered expansion is recorded in
 [Build Order](#build-order).
 
@@ -100,8 +104,8 @@ one engine:
    lookup/mutation/iteration, live function arguments/results, typed-invocation exchange, binary
    string/buffer/vector access, rich keys, raw identity equality, live globals, quota-aware table construction,
    and owned-key/live-value insertion are implemented. A public coroutine `Thread` handle remains conditional
-   on a real host-side scheduling caller. Still planned: function construction, a composable chunk builder,
-   live serde, and later optional `UserData`/`Scope` and async.
+   on a real host-side scheduling caller. Still planned: safe host-function construction, live serde, and later
+   optional `UserData`/`Scope` and async. The composable chunk builder is implemented.
 
 The advanced layer is not a raw Luau C stack API and must not expose internal GC lifetimes. Handles belong to
 one VM, are real GC roots while alive, fail safely when used with another VM, and carry an epoch contract:
@@ -509,10 +513,12 @@ store authoritative state on the GC heap instead of in captured host slots.
     arguments/results, typed-invocation exchange, binary strings, buffers, vectors, rich keys, userdata
     identity, raw equality, and shared/cyclic table graphs do not expose GC lifetimes. A public `Thread` handle
     remains intentionally absent until a concrete host-side scheduling caller defines its contract.
-14. 🔨 **Add the familiar ergonomic entry points:** `globals()`, quota-aware `create_table()`, and
-    owned-key/live-value insertion are implemented. `create_function()` remains deferred until disposable
-    callbacks can be reclaimed safely; the composable
-    `load(source).name(...).environment(...).eval()/exec()` chunk builder remains planned. Keep `run<T>()`,
+14. 🔨 **Add the familiar ergonomic entry points:** `globals()`, quota-aware `create_table()`,
+    owned-key/live-value insertion, and the composable
+    `load(source).name(...).environment(...).eval()/exec()` chunk builder are implemented. The builder borrows
+    text or bytes, preserves named diagnostics, supports typed/live/exports results, executes against globals
+    or an exact rooted lexical environment, and rejects invalid environment handles before compilation.
+    `create_function()` remains deferred until disposable callbacks can be reclaimed safely. Keep `run<T>()`,
     `add_fn`, and the source-named helpers as concise facade sugar rather than breaking them.
 15. ✅ **Add host-owned modules:** script-visible `require`, deterministic module identity where promised,
     execute-once caching, cycle diagnostics, shared caller fuel, reset-aware cache lifetime, and

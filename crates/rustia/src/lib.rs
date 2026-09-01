@@ -1,3 +1,4 @@
+mod chunk;
 mod extension_api;
 mod function;
 mod invocation;
@@ -14,6 +15,7 @@ use rustia_vm::{HardenedLeafProgram, Program, Vm};
 use std::fmt;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
+pub use chunk::Chunk;
 pub use extension_api::{
     ModuleSource, RustiaBuilder, RustiaExecutionProfile, RustiaExtension, RustiaHostFuelPolicy,
     RustiaHostFunctionInfo, ServiceClock, ServiceEntropy, ServiceModuleResolver,
@@ -354,6 +356,18 @@ where
         )))
     }
 
+    fn ensure_dynamic_source_loading_allowed(&self) -> Result<()> {
+        if self.vm.settings().guest_surface.is_hardened_leaf() {
+            return Err(Error::Vm(
+                VmError::new(VmErrorKind::HardenedLeafViolation {
+                    feature: "dynamic source loading",
+                })
+                .without_source_location(),
+            ));
+        }
+        self.ensure_healthy()
+    }
+
     /// Registers a context-free `Fn(A, B, ...) -> R` with an explicit fuel
     /// charge. The registration method fixes the capability to `Pure`;
     /// `Result<R>` creates a fallible host call.
@@ -641,6 +655,21 @@ impl Rustia<()> {
 
     pub fn compile_bytes(source_name: impl Into<String>, source: &[u8]) -> Result<CompiledModule> {
         Self::compile_module_bytes(source_name, source)
+    }
+
+    /// Creates a composable builder for borrowed Luau source text or bytes.
+    ///
+    /// Building the chunk is inert: parsing, compilation, VM allocation, and
+    /// execution begin only when an `eval*` method or [`Chunk::exec`] is
+    /// called.
+    pub fn load<'rustia, 'source, S>(
+        &'rustia mut self,
+        source: &'source S,
+    ) -> Chunk<'rustia, 'source>
+    where
+        S: AsRef<[u8]> + ?Sized,
+    {
+        Chunk::new(self, source.as_ref())
     }
 
     pub fn compile_and_run(&mut self, source: &str) -> Result<Exports> {

@@ -3250,6 +3250,33 @@ impl Vm {
         self.run_with_execution(program, &mut execution)
     }
 
+    /// Runs a program with an explicitly selected lexical global environment.
+    ///
+    /// The caller must keep `environment` rooted for the complete call. This
+    /// is the VM path used by the safe facade's chunk builder; ordinary callers
+    /// should prefer that rooted API.
+    #[doc(hidden)]
+    pub fn run_with_environment(&mut self, program: &Program, environment: Value) -> Result<Value> {
+        let Some(environment) = environment.as_table() else {
+            return Err(
+                Error::new(ErrorKind::TypeError { expected: "table" }).without_source_location()
+            );
+        };
+        if !self.heap.has_table(environment) {
+            return Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "chunk environment table handle is missing",
+            })
+            .without_source_location());
+        }
+        let mut state = self.begin_execution();
+        let mut hosts = RejectHostDispatcher;
+        let mut execution = Execution {
+            state: &mut state,
+            hosts: &mut hosts,
+        };
+        self.run_with_execution_in_environment(program, environment, &mut execution)
+    }
+
     /// Runs a program with a borrowed host dispatcher and an invocation-wide
     /// fuel budget.
     #[doc(hidden)]
@@ -3359,6 +3386,15 @@ impl Vm {
         program: &Program,
         execution: &mut Execution<'_>,
     ) -> Result<Value> {
+        self.run_with_execution_in_environment(program, self.globals, execution)
+    }
+
+    fn run_with_execution_in_environment(
+        &mut self,
+        program: &Program,
+        environment: u32,
+        execution: &mut Execution<'_>,
+    ) -> Result<Value> {
         self.ensure_hardened_transaction(execution.state)?;
         self.prepare_guest_execution(program)?;
         let program_id = self.retain_dynamic_program_ref(program)?;
@@ -3372,7 +3408,7 @@ impl Vm {
                     current_function: None,
                     captures: &[],
                     depth: 0,
-                    environment: self.globals,
+                    environment,
                     call_site: None,
                     prototype: None,
                 },

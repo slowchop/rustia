@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "date": "2026-09-01",
+    "date": "2026-09-02",
     "scope": "Public rustia project readiness, based on the current workspace and canonical design docs.",
     "excludes": [
       "Actual grabby integration work"
@@ -136,17 +136,17 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 91,
-      "confidence": 89,
-      "state": "The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, host-pluggable output/time services, host-owned canonical-identity require resolution/cache, lifetime-safe per-invocation host contexts, bounded transactional effect journals, graph-preserving rooted live Value/Table/Function handles with live globals and quota-aware table construction, CLI, benchmark matrix, private HotIR, closure-call PIC, generation-safe object/program reclamation, VM-owned memory telemetry, maintained logical-live quota accounting and script counters, atomic catchable OOM, epoch-safe decision reset, exact dedicated-Linux native plus wasm quota evidence, and a shared native/Node-V8 mixed-heap pressure gate are in-tree. The remaining release gates are function/chunk construction and live serde, transactional failure semantics, semantic-tail hardening, and packaging.",
-      "future_plan": "Complete function/chunk construction, live serde, and transactional failure semantics; then continue measured optimization and public release work."
+      "complete": 92,
+      "confidence": 90,
+      "state": "The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, host-pluggable output/time services, host-owned canonical-identity require resolution/cache, lifetime-safe per-invocation host contexts, bounded transactional effect journals, graph-preserving rooted live Value/Table/Function handles with live globals, quota-aware table construction, and a composable chunk builder, CLI, benchmark matrix, private HotIR, closure-call PIC, generation-safe object/program reclamation, VM-owned memory telemetry, maintained logical-live quota accounting and script counters, atomic catchable OOM, epoch-safe decision reset, exact dedicated-Linux native plus wasm quota evidence, and a shared native/Node-V8 mixed-heap pressure gate are in-tree. The remaining release gates are safe function construction and live serde, transactional failure semantics, semantic-tail hardening, and packaging.",
+      "future_plan": "Complete safe function construction, live serde, and transactional failure semantics; then continue measured optimization and public release work."
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 96,
-      "confidence": 94,
-      "state": "The facade now includes typed run/compile, owned scalar/table conversions, host-owned canonical-identity require resolution/cache, a lifetime-independent HostSchema with fresh borrowed HostContext values per invocation, capability-specific host views, shared fuel, bounded transactional record publication, usage receipts, rooted live Value/Table/Function handles that preserve rich payloads and graph identity, live globals, quota-aware table construction, owned-key/live-value insertion, retained exports with install-generation and decision-epoch checks, owned-value serde, extensions, hot reload, epoch-safe decision reset, examples, diagnostics, migration guidance, host-pluggable stdout/clock services, VM-owned memory telemetry, maintained logical-live accounting, and configurable quotas. It is not yet a complete rich embedding boundary: function construction, a chunk builder, live serde, and transactional guest-side failure rollback remain.",
-      "future_plan": "Complete function/chunk construction and live serde, transactional failure semantics, diagnostics, and API stabilization."
+      "complete": 97,
+      "confidence": 95,
+      "state": "The facade now includes typed run/compile, a composable named/environment-aware chunk builder, owned scalar/table conversions, host-owned canonical-identity require resolution/cache, a lifetime-independent HostSchema with fresh borrowed HostContext values per invocation, capability-specific host views, shared fuel, bounded transactional record publication, usage receipts, rooted live Value/Table/Function handles that preserve rich payloads and graph identity, live globals, quota-aware table construction, owned-key/live-value insertion, retained exports with install-generation and decision-epoch checks, owned-value serde, extensions, hot reload, epoch-safe decision reset, examples, diagnostics, migration guidance, host-pluggable stdout/clock services, VM-owned memory telemetry, maintained logical-live accounting, and configurable quotas. It is not yet a complete rich embedding boundary: safe function construction, live serde, and transactional guest-side failure rollback remain.",
+      "future_plan": "Complete safe function construction and live serde, transactional failure semantics, diagnostics, and API stabilization."
     },
     {
       "name": "Full public standalone Luau engine release",
@@ -381,10 +381,10 @@
       "entries": [
         {
           "name": "Koto-shaped facade",
-          "complete": 95,
-          "confidence": 93,
-          "state": "Builder, typed run<T>, source-named compile/run helpers, public error diagnostic accessors, global insertion, exports, graph-preserving rooted live Value/Table/Function handles, a live globals handle, quota-aware table construction, owned-key/live-value insertion, host-owned require resolution/cache, a typed HostSchema/HostContext invocation surface, bounded record transactions, usage receipts, an epoch-safe decision reset, environment presets (standard/deterministic/live) with stdout and determinism-labeled service sockets, examples, and a first koto-to-rustia migration guide exist.",
-          "future_plan": "Stabilize names and error types; add safe function construction, a chunk builder, and live serde; then expand migration guidance."
+          "complete": 97,
+          "confidence": 95,
+          "state": "Builder, typed run<T>, source-named compile/run helpers, a composable load/name/environment/eval/exec chunk builder, public error diagnostic accessors, global insertion, exports, graph-preserving rooted live Value/Table/Function handles, a live globals handle, quota-aware table construction, owned-key/live-value insertion, host-owned require resolution/cache, a typed HostSchema/HostContext invocation surface, bounded record transactions, usage receipts, an epoch-safe decision reset, environment presets (standard/deterministic/live) with stdout and determinism-labeled service sockets, examples, and a first koto-to-rustia migration guide exist.",
+          "future_plan": "Stabilize names and error types; add safe function construction and live serde; then expand migration guidance."
         },
         {
           "name": "Owned value firewall",
@@ -395,10 +395,10 @@
         },
         {
           "name": "Live value handles",
-          "complete": 88,
-          "confidence": 92,
-          "state": "Rooted VM/epoch-safe Value, Table, and Function handles preserve binary strings, buffers, vectors, rich identity-bearing keys, shared/cyclic tables, mutation, iteration, and raw equality without exposing collector lifetimes. Live globals, quota-aware table construction, and owned-key/live-value insertion build identity-bearing host graphs; hardened leaves reject those authorities before allocation. Live arguments/results cross ordinary and typed invocations, and focused tests cover collector rooting, cross-VM rejection, reset invalidation, rich payloads, cycles, shared identity, profiles, quotas, and export access.",
-          "future_plan": "Add safe function construction, a composable chunk builder, live serde, and a concrete public userdata registration contract."
+          "complete": 90,
+          "confidence": 94,
+          "state": "Rooted VM/epoch-safe Value, Table, and Function handles preserve binary strings, buffers, vectors, rich identity-bearing keys, shared/cyclic tables, mutation, iteration, and raw equality without exposing collector lifetimes. Live globals, quota-aware table construction, owned-key/live-value insertion, and the composable chunk builder build and execute against identity-bearing host graphs; hardened leaves reject those authorities before allocation or compilation. Live arguments/results cross ordinary and typed invocations, and focused tests cover collector rooting, cross-VM rejection, reset invalidation, rich payloads, cycles, shared identity, profiles, quotas, custom lexical environments, and export access.",
+          "future_plan": "Add safe function construction, live serde, and a concrete public userdata registration contract."
         },
         {
           "name": "Typed host functions",

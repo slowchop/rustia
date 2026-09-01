@@ -259,6 +259,10 @@ impl Table {
         Self { value }
     }
 
+    pub(crate) fn raw(&self, vm: &Vm, label: &str) -> Result<RawValue> {
+        self.value.raw(vm, label)
+    }
+
     /// Clones this table's underlying live value handle.
     pub fn as_value(&self) -> Value {
         self.value.clone()

@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-08-14.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-02.)
 
 ## One-paragraph state
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
@@ -18,7 +18,9 @@ owned values with typed and nested table helpers, source-named run/compile helpe
 fallible `rustia::Result<T>` returns, pre-install host signature/fuel ABI metadata, retained script function
 handles with freshness checks and current-generation accessors, public source-span/runtime-location error
 accessors, owned-value/table serde with symmetric externally tagged enum support (including Serde rename
-rules), deterministic extension registration, hot reload, and macro sugar. The
+rules), deterministic extension registration, hot reload, macro sugar, and a composable chunk builder with
+borrowed text/byte source, named diagnostics, rooted custom lexical environments, and typed/live/exports or
+side-effect-only execution. The
 typed host transaction is now concrete: `HostSchema` keeps registration lifetime-independent while every
 `invoke`/`invoke_into` borrows a fresh, possibly block-local `HostContext`; capability-derived views expose
 input, slots, effects, slot writes, or profile-gated external mutation. Typed VMs execute guest code only through
@@ -325,8 +327,11 @@ facility is finished. The highest-impact gaps are:
    shared/cyclic table graphs, mutation, and raw equality without exposing collector lifetimes. Live values
    can cross ordinary and typed invocations, and `OwnedValue` remains the deliberately small acyclic snapshot
    layer. Live `globals()`, quota-aware `create_table()`, and owned-key/live-value insertion are implemented;
-   hardened leaves reject those mutable constructor authorities before allocation. Before calling this a
-   complete rich embedding boundary, add safe function construction, a composable chunk builder, live serde,
+   the composable `load(source).name(...).environment(...).eval()/exec()` chunk builder is also implemented,
+   with environment-handle validation before compilation and exact environment capture by nested functions.
+   Hardened leaves reject mutable constructor authorities before allocation and dynamic loading before
+   compilation. Before calling this a
+   complete rich embedding boundary, add safe function construction, live serde,
    and a concrete public userdata registration contract. A public
    `Thread` handle remains intentionally absent until a real host-side scheduler caller defines its contract.
    Full mlua-style `UserData`/`Scope`, async callbacks, and any mlua migration shim remain later optional
@@ -366,9 +371,9 @@ linear-memory pages. It also exposed and closed unconditional rooting of
 unreachable suspended-coroutine frames.
 
 1. **Finish the host-facing runtime boundary and ordered advanced API track.** Follow
-   [`75-embedded-api.md`](75-embedded-api.md#build-order): build safe function construction and a composable
-   chunk builder on the implemented graph-preserving live `Value`/`Table`/`Function` spine and its live
-   globals/table constructors, then add live serde and transactional install/hot-reload/stack diagnostics. The worker-local/per-call host
+   [`75-embedded-api.md`](75-embedded-api.md#build-order): the composable chunk builder is now implemented on
+   the graph-preserving live `Value`/`Table`/`Function` spine and its live globals/table constructors. Build
+   safe function construction next, then add live serde and transactional install/hot-reload/stack diagnostics. The worker-local/per-call host
    context is already implemented. Keep the existing typed facade as the simple layer, keep the advanced layer
    available to all builder presets, and do not leak grabby-specific types, internal GC lifetimes, or a raw C
    API. `live()` remains the explicit no-reproducibility-guarantee environment; deterministic policy is
@@ -701,7 +706,7 @@ invocation, and a separately versioned guest ABI.
 | [`56-performance-research.md`](56-performance-research.md) | no-unsafe SotA performance stack, top-10 ordered bets, C++ Luau estimates | current research note |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | typed invocation plus the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative + implemented generic seam** ✅ |
 | [`72-host-services.md`](72-host-services.md) | host services bus: stdout, determinism-labeled clocks and entropy, native/WASI/browser adapters, facade presets, logical `os.clock` | **implemented** ✅ |
-| [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **typed invocation + live-handle spine implemented; advanced ergonomics/serde pending** ✅ |
+| [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **typed invocation + live-handle spine/chunk builder implemented; function construction/live serde pending** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |
 | [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen stateless authoritative guest surface, direct compiled entries, and fast isolated reset | **implemented v1** ✅ |
 | [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/target-first report/package metadata and dedicated Linode lifecycle implemented; standalone split pending** |
@@ -729,9 +734,9 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 
 ## What's next (the genuine remaining public-release gates)
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items, in order:
-1. **Complete the ordered advanced API boundary:** build safe function construction and a composable chunk
-   builder on the graph-preserving live `Value`/`Table`/`Function` spine plus its implemented globals/table
-   constructors; add live-value serde,
+1. **Complete the ordered advanced API boundary:** the composable chunk builder is implemented on the
+   graph-preserving live `Value`/`Table`/`Function` spine plus its globals/table constructors. Build safe
+   function construction and add live-value serde,
    transactional extension/module/hot-reload failure behavior, and stronger traceback diagnostics. The
    worker-local typed invocation seam, hardened stateless leaf, direct compiled-entry path, binary/rich/cyclic
    live values, memory telemetry, and quota enforcement are implemented. Preserve the concise typed facade and
