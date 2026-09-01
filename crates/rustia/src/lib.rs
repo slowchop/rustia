@@ -325,6 +325,35 @@ where
         self.vm.set_global_value(name, value).map_err(Error::Vm)
     }
 
+    /// Returns a rooted live handle to this VM's real globals table.
+    ///
+    /// Reads and writes through [`Table`] preserve identity and are visible to
+    /// subsequently executed guest code. Like ordinary global inputs, these
+    /// mutations are decision-local and are discarded by
+    /// [`reset_decision`](Self::reset_decision). Hardened leaves reject this
+    /// mutable authority.
+    pub fn globals(&mut self) -> Result<Table> {
+        let value = self.vm.retain_globals().map_err(Error::Vm)?;
+        Ok(Table::new(Value::new(
+            value,
+            self.generation,
+            self.vm.decision_epoch(),
+        )))
+    }
+
+    /// Creates an empty rooted live table using this VM's selected layout.
+    ///
+    /// The table and its root participate in the logical-live memory quota as
+    /// one admission. Hardened leaves reject live table construction.
+    pub fn create_table(&mut self) -> Result<Table> {
+        let value = self.vm.create_retained_table().map_err(Error::Vm)?;
+        Ok(Table::new(Value::new(
+            value,
+            self.generation,
+            self.vm.decision_epoch(),
+        )))
+    }
+
     /// Registers a context-free `Fn(A, B, ...) -> R` with an explicit fuel
     /// charge. The registration method fixes the capability to `Pure`;
     /// `Result<R>` creates a fallible host call.
@@ -1081,6 +1110,174 @@ return root
             .unwrap_err()
             .to_string()
             .contains("stale value handle"));
+    }
+
+    #[test]
+    fn constructed_tables_install_into_the_live_globals_graph() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let globals = rustia.globals().unwrap();
+        let root = rustia.create_table().unwrap();
+        root.set(&mut rustia, "answer", 42_i32).unwrap();
+        root.set_live(&mut rustia, "self", &root.as_value())
+            .unwrap();
+        globals
+            .set_live(&mut rustia, "host_graph", &root.as_value())
+            .unwrap();
+
+        let returned = rustia.run_value("return host_graph").unwrap();
+        assert!(root.as_value().raw_equal(&mut rustia, &returned).unwrap());
+        let returned_table = returned.as_table(&rustia).unwrap().unwrap();
+        let returned_self = returned_table.get(&mut rustia, "self").unwrap();
+        assert!(returned.raw_equal(&mut rustia, &returned_self).unwrap());
+
+        // Successful guest installation advances the generation, but ordinary
+        // live handles remain usable unless the caller explicitly asks for a
+        // current-generation assertion.
+        assert!(!root.is_current(&rustia));
+        root.set(&mut rustia, "after_run", 7_i32).unwrap();
+        let sees_mutation: bool = rustia
+            .run("return host_graph.answer == 42 and host_graph.after_run == 7")
+            .unwrap();
+        assert!(sees_mutation);
+
+        let globals_again = rustia.globals().unwrap();
+        assert!(globals
+            .as_value()
+            .raw_equal(&mut rustia, &globals_again.as_value())
+            .unwrap());
+    }
+
+    #[test]
+    fn live_table_constructors_are_available_in_every_standard_surface_profile() {
+        for profile in [
+            Profile::LuauCompat,
+            Profile::ReproducibleStandard,
+            Profile::DeterministicSim,
+            Profile::Puc51Compat,
+        ] {
+            let mut rustia = Rustia::new(profile);
+            let value = rustia.create_table().unwrap();
+            value.set(&mut rustia, "profile_value", 9_i32).unwrap();
+            rustia
+                .globals()
+                .unwrap()
+                .set_live(&mut rustia, "host_value", &value.as_value())
+                .unwrap();
+            let observed: f64 = rustia.run("return host_value.profile_value").unwrap();
+            assert_eq!(observed, 9.0, "profile {profile:?}");
+        }
+    }
+
+    #[test]
+    fn set_live_rejects_foreign_tables_and_values_before_mutation() {
+        let mut first = Rustia::new(Profile::ReproducibleStandard);
+        let mut second = Rustia::new(Profile::ReproducibleStandard);
+        let first_table = first.create_table().unwrap();
+        let second_table = second.create_table().unwrap();
+
+        let foreign_value = first_table
+            .set_live(&mut first, "foreign", &second_table.as_value())
+            .expect_err("a value from another VM must reject");
+        assert!(foreign_value.to_string().contains("different Rustia VM"));
+        assert!(first_table
+            .get(&mut first, "foreign")
+            .unwrap()
+            .is_nil(&first)
+            .unwrap());
+
+        let foreign_table = second_table
+            .set_live(&mut first, "foreign", &first_table.as_value())
+            .expect_err("a table from another VM must reject");
+        assert!(foreign_table.to_string().contains("different Rustia VM"));
+    }
+
+    #[test]
+    fn decision_reset_stales_constructor_handles_and_discards_global_mutations() {
+        let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+        let globals = rustia.globals().unwrap();
+        let table = rustia.create_table().unwrap();
+        globals
+            .set_live(&mut rustia, "decision_local", &table.as_value())
+            .unwrap();
+
+        rustia.reset_decision().unwrap();
+        assert!(globals
+            .get(&mut rustia, "decision_local")
+            .unwrap_err()
+            .to_string()
+            .contains("stale table handle"));
+        assert!(table
+            .set(&mut rustia, "value", 1_i32)
+            .unwrap_err()
+            .to_string()
+            .contains("stale table handle"));
+        let discarded: bool = rustia.run("return decision_local == nil").unwrap();
+        assert!(discarded);
+    }
+
+    #[test]
+    fn hardened_leaves_reject_live_table_authority_without_allocating() {
+        let mut rustia = RustiaBuilder::deterministic_leaf()
+            .memory_limit_bytes(512 * 1024)
+            .build_for_host::<()>()
+            .unwrap();
+        let before = rustia.memory_stats().live_bytes;
+
+        let globals = rustia.globals().expect_err("hardened globals must reject");
+        assert!(matches!(
+            globals,
+            Error::Vm(ref error)
+                if matches!(
+                    &error.kind,
+                    VmErrorKind::HardenedLeafViolation {
+                        feature: "mutable globals handles"
+                    }
+                )
+        ));
+        let table = rustia
+            .create_table()
+            .expect_err("hardened table construction must reject");
+        assert!(matches!(
+            table,
+            Error::Vm(ref error)
+                if matches!(
+                    &error.kind,
+                    VmErrorKind::HardenedLeafViolation {
+                        feature: "live table construction"
+                    }
+                )
+        ));
+        assert_eq!(rustia.memory_stats().live_bytes, before);
+    }
+
+    #[test]
+    fn live_table_constructor_quota_failure_recovers_after_a_root_is_dropped() {
+        let mut baseline = RustiaBuilder::standard().build().unwrap();
+        let limit = baseline.memory_stats().live_bytes.saturating_add(4 * 1024);
+        drop(baseline);
+        let mut rustia = RustiaBuilder::standard()
+            .memory_limit_bytes(limit)
+            .build()
+            .unwrap();
+        let mut retained = Vec::new();
+        let error = loop {
+            match rustia.create_table() {
+                Ok(table) => {
+                    retained.push(table);
+                    assert!(retained.len() < 10_000, "constructor quota did not bind");
+                }
+                Err(error) => break error,
+            }
+        };
+        assert!(matches!(
+            error,
+            Error::Vm(ref error) if matches!(&error.kind, VmErrorKind::OutOfMemory)
+        ));
+
+        retained.pop().expect("at least one table fit before OOM");
+        rustia
+            .create_table()
+            .expect("dropping one root must make one constructor admission recover");
     }
 
     #[test]

@@ -336,6 +336,28 @@ impl Table {
             .map_err(Error::Vm)
     }
 
+    /// Converts an owned key and writes a live value, bypassing `__newindex`.
+    ///
+    /// This is the identity-preserving bridge for installing a constructed or
+    /// returned live object under an ordinary string/number/boolean key.
+    pub fn set_live<K, C>(&self, rustia: &mut Rustia<C>, key: K, value: &Value) -> Result<()>
+    where
+        K: IntoRustia,
+        C: HostSchema,
+    {
+        // Validate both live handles before key conversion can allocate or
+        // mutate VM-owned storage. The retained handles keep these compact raw
+        // values rooted if loading the owned key triggers quota collection.
+        let table = self.value.raw(rustia.vm(), "table handle")?;
+        let value = value.raw(rustia.vm(), "table value handle")?;
+        let key = key.into_rustia()?;
+        let key = load_owned_value(rustia.vm_mut(), &key)?;
+        rustia
+            .vm_mut()
+            .raw_table_set_value(table, key, value)
+            .map_err(Error::Vm)
+    }
+
     /// Converts owned key/value inputs and performs a raw write, bypassing `__newindex`.
     pub fn set<K, V, C>(&self, rustia: &mut Rustia<C>, key: K, value: V) -> Result<()>
     where

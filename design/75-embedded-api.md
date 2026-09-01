@@ -36,12 +36,15 @@ Object/program reclamation, real VM-owned live/reserved/peak telemetry, and the 
 quota/atomic OOM path are now implemented and validated by the exact-commit `safe-memory-588b541` native Linode
 cohort plus its wasm32 512 KiB quota/recovery probe. The next release-critical slice is not more facade
 decoration: the epoch-safe decision reset and host-owned `require` resolver/cache are now implemented; remaining
-work is transactional installation/reload failures, familiar live-object
-constructors/chunk loading, and live serde. The graph-preserving advanced spine is now implemented:
+work is transactional installation/reload failures, function/chunk construction, and live serde. The
+graph-preserving advanced spine plus its first ergonomic constructors are now implemented:
 VM/epoch-safe rooted `Value`/`Table`/`Function` handles preserve binary strings, buffers, vectors, rich keys,
 shared/cyclic table identity, mutation, raw equality, and ordinary or typed invocation exchange without
-exposing collector lifetimes. `OwnedValue` remains the small acyclic snapshot layer. This advanced layer is
-additive, not a replacement for the existing typed facade. The ordered expansion is recorded in
+exposing collector lifetimes. `globals()` exposes the real mutable globals table, `create_table()` admits an
+empty rooted table under the logical-live quota, and `Table::set_live()` bridges owned keys to identity-bearing
+live values. Hardened leaves reject both constructor authorities before allocation. `OwnedValue` remains the
+small acyclic snapshot layer. This advanced layer is additive, not a replacement for the existing typed facade.
+The ordered expansion is recorded in
 [Build Order](#build-order).
 
 ## Non-Negotiable Requirements
@@ -95,10 +98,10 @@ one engine:
 2. **Advanced live-object API (spine implemented; ergonomics/integration continuing).** Identity-safe live
    `Value` and `Table` handles now share the rooted VM/epoch model with `Function`; `run_value`, live table
    lookup/mutation/iteration, live function arguments/results, typed-invocation exchange, binary
-   string/buffer/vector access, rich keys, and raw identity equality are implemented. A public coroutine
-   `Thread` handle remains conditional on a real host-side scheduling caller. Still planned: `globals()`,
-   table/function constructors, a composable chunk builder, live serde, and later optional `UserData`/`Scope`
-   and async.
+   string/buffer/vector access, rich keys, raw identity equality, live globals, quota-aware table construction,
+   and owned-key/live-value insertion are implemented. A public coroutine `Thread` handle remains conditional
+   on a real host-side scheduling caller. Still planned: function construction, a composable chunk builder,
+   live serde, and later optional `UserData`/`Scope` and async.
 
 The advanced layer is not a raw Luau C stack API and must not expose internal GC lifetimes. Handles belong to
 one VM, are real GC roots while alive, fail safely when used with another VM, and carry an epoch contract:
@@ -506,8 +509,10 @@ store authoritative state on the GC heap instead of in captured host slots.
     arguments/results, typed-invocation exchange, binary strings, buffers, vectors, rich keys, userdata
     identity, raw equality, and shared/cyclic table graphs do not expose GC lifetimes. A public `Thread` handle
     remains intentionally absent until a concrete host-side scheduling caller defines its contract.
-14. ⏳ **Add the familiar ergonomic entry points:** `globals()`, `create_table()`, `create_function()`, and a
-    composable `load(source).name(...).environment(...).eval()/exec()` chunk builder. Keep `run<T>()`,
+14. 🔨 **Add the familiar ergonomic entry points:** `globals()`, quota-aware `create_table()`, and
+    owned-key/live-value insertion are implemented. `create_function()` remains deferred until disposable
+    callbacks can be reclaimed safely; the composable
+    `load(source).name(...).environment(...).eval()/exec()` chunk builder remains planned. Keep `run<T>()`,
     `add_fn`, and the source-named helpers as concise facade sugar rather than breaking them.
 15. ✅ **Add host-owned modules:** script-visible `require`, deterministic module identity where promised,
     execute-once caching, cycle diagnostics, shared caller fuel, reset-aware cache lifetime, and
