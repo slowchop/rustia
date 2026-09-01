@@ -10,8 +10,9 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
 > implemented. Maintained live-memory totals now back quotas and script counters without a whole-VM census at
 > ordinary instruction boundaries. Rooted live values/tables/functions now preserve rich payloads and graph
 > identity, with live globals access and quota-aware table construction. A shared native/Node-V8 test now
-> maintains the mixed-heap pressure and reclamation gate. The next release-critical work is function/chunk
-> construction and live serde, plus the remaining transactional-failure boundary.
+> maintains the mixed-heap pressure and reclamation gate. The composable chunk builder is implemented; the
+> next release-critical work is safe host-function construction and live serde, plus the remaining
+> transactional-failure boundary.
 > `spikes/` are throwaway prototypes that validated the design.
 > Read **[`design/CURRENT.md`](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](https://github.com/slowchop/rustia/blob/main/design/README.md) for the full doc map.
@@ -65,9 +66,11 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   stateless decision path with record publication and reset across both success and failure.
   `ServiceModuleResolver` provides host-owned canonical-identity `require` resolution with execute-once caching,
   cycle diagnostics, shared fuel, deterministic labels, and reset-aware lifetime. Transactional installation/hot
-  reload and live zero-copy serde remain planned. Live globals access, quota-aware table construction, and
-  owned-key/live-value insertion are implemented; the next advanced slice adds function construction and a
-  composable chunk builder, followed by optional userdata/scopes, async, and migration compatibility.
+  reload and live zero-copy serde remain planned. Live globals access, quota-aware table construction,
+  owned-key/live-value insertion, and the composable
+  `load(source).name(...).environment(...).eval()/exec()` chunk builder are implemented. The next advanced
+  slice adds safe host-function construction, followed by optional userdata/scopes, async, and migration
+  compatibility.
 - Host services are host-pluggable through the facade: `RustiaBuilder::standard()`/`deterministic()`/`live()`
   environment presets, a `.stdout(...)` print sink with the real Luau composition (`tostring` honoring
   `__tostring`, tab-joined, trailing newline), and `.wall_clock(...)`/`.monotonic_clock(...)` sockets taking a
@@ -143,6 +146,29 @@ remain usable across hot reload unless a caller deliberately requests a current-
 mutations are decision-local and reset with ordinary global inputs. Hardened leaves reject mutable globals
 handles and live table construction.
 
+## Chunk builder
+
+`load` keeps source configuration together without replacing the concise `run<T>()` helpers. A chunk can use
+the VM globals or an exact rooted table as its lexical environment, and can return a typed owned value, a live
+value, retained exports, or no value:
+
+```rust
+let mut rustia = rustia::Rustia::default();
+let environment = rustia.create_table()?;
+environment.set(&mut rustia, "input", 21)?;
+
+let answer: f64 = rustia
+    .load("return input * 2")
+    .name("answer.luau")
+    .environment(&environment)
+    .eval()?;
+assert_eq!(answer, 42.0);
+# Ok::<(), rustia::Error>(())
+```
+
+The environment handle is validated before parsing or compilation. Functions created by the chunk capture
+that same live table. Hardened leaves reject dynamic source loading before compilation or VM allocation.
+
 ## Project Pillars
 The canonical decision filter is [`design/02-pillars.md`](https://github.com/slowchop/rustia/blob/main/design/02-pillars.md). The short version:
 
@@ -158,13 +184,13 @@ The canonical decision filter is [`design/02-pillars.md`](https://github.com/slo
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](https://github.com/slowchop/rustia/blob/main/design/progress.json) into
-[`design/progress.html`](https://github.com/slowchop/rustia/blob/main/design/progress.html). These are rough engineering estimates as of 2026-09-01 for the
+[`design/progress.html`](https://github.com/slowchop/rustia/blob/main/design/progress.html). These are rough engineering estimates as of 2026-09-02 for the
 public rustia project; actual grabby integration work is explicitly out of scope.
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 91% | 89% |
-| Usable embedded scripting crate | 96% | 94% |
+| Whole public rustia project | 92% | 90% |
+| Usable embedded scripting crate | 97% | 95% |
 | Full public standalone Luau engine release | 67% | 88% |
 | Standalone benchmark OSS project | 82% | 88% |
 | Public release readiness | 83% | 91% |
@@ -208,6 +234,8 @@ public rustia project; actual grabby integration work is explicitly out of scope
 
 ## Examples
 - `cargo run -p rustia --example embedding` — globals, fallible typed host functions, deterministic extensions, retained script functions, and serde.
+- `cargo run -p rustia --example chunk_builder` — named source, typed evaluation, a live custom lexical
+  environment, and side-effect-only execution.
 - `cargo run -p rustia --example hot_reload` — compile/install hot reload plus retained-handle survival and freshness checks.
 - `cargo run -p rustia --example module_resolution` — host-owned canonical module identity, source resolution,
   and deterministic script-visible `require`.

@@ -1,7 +1,7 @@
 # Release Readiness Checklist
 
 This checklist tracks what must be true before any public rustia crate flips
-from `publish = false` to publishable. Updated 2026-07-29; the ordered runtime
+from `publish = false` to publishable. Updated 2026-09-02; the ordered runtime
 blockers below take precedence over packaging polish.
 
 These gates protect memory safety, lifecycle, compatibility, and the environment contract selected by the
@@ -24,8 +24,9 @@ overhead across targets.
    graph-preserving rooted `Value`/`Table`/`Function` spine. It already covers
    binary strings, buffers, vectors, non-scalar/identity keys, shared/cyclic
    tables, mutation, raw equality, and ordinary or typed invocation exchange.
-   Add globals/value/function constructors, a composable chunk builder, live
-   serde, and a concrete opaque-userdata registration contract. Preserve the
+   Live globals, quota-aware tables, owned-key/live-value insertion, and the
+   composable chunk builder are implemented. Add safe function construction,
+   live serde, and a concrete opaque-userdata registration contract. Preserve the
    small typed facade as the simple layer. Full mlua-style `UserData`/`Scope`,
    async, and an mlua migration shim remain later optional layers unless a
    concrete release consumer promotes them.

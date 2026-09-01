@@ -8,6 +8,13 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- A composable `Rustia::load` chunk builder with borrowed text/byte source,
+  named diagnostics, rooted custom lexical environments, typed/live/exports
+  evaluation, and side-effect-only execution. Custom environments are checked
+  for VM and decision-epoch ownership before parsing or compilation, functions
+  created by a chunk capture the selected live table, and hardened leaves
+  reject dynamic loading before compilation or VM allocation.
+
 - Pull-request benchmark screening on the owned host.
   `.github/workflows/pr-bench.yml` measures a branch against
   `git merge-base origin/main HEAD` — not main's tip, which would attribute an
