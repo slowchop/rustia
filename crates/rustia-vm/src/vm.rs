@@ -2978,6 +2978,51 @@ impl Vm {
         self.array_table(&[])
     }
 
+    /// Retains the live globals table for an advanced embedder.
+    ///
+    /// Hardened leaves deliberately reject this authority: their guest
+    /// environment is sealed and reset from an immutable configuration
+    /// prefix rather than exposed as ordinary mutable state.
+    pub fn retain_globals(&mut self) -> Result<RetainedValue> {
+        if self.settings.guest_surface.is_hardened_leaf() {
+            return Err(Error::new(ErrorKind::HardenedLeafViolation {
+                feature: "mutable globals handles",
+            })
+            .without_source_location());
+        }
+        self.retain_value(Value::table(self.globals))
+    }
+
+    /// Creates and retains one empty table under the VM logical-live quota.
+    ///
+    /// Table storage and the external root are admitted as one growth check,
+    /// so quota failure cannot publish a partial handle. The selected profile
+    /// still chooses the table layout, including PUC-5.1 layout.
+    pub fn create_retained_table(&mut self) -> Result<RetainedValue> {
+        if self.settings.guest_surface.is_hardened_leaf() {
+            return Err(Error::new(ErrorKind::HardenedLeafViolation {
+                feature: "live table construction",
+            })
+            .without_source_location());
+        }
+        let table_bytes = if self.profile.is_puc51_compat() {
+            VmCell::puc_table_live_bytes(0, 0)
+        } else {
+            VmCell::filled_array_table_live_bytes(0)
+        };
+        self.ensure_memory_growth(
+            table_bytes.saturating_add(external_root_node_live_bytes()),
+            &[],
+        )?;
+        let table = if self.profile.is_puc51_compat() {
+            self.heap.try_alloc_puc_table(0, 0, Value::nil())
+        } else {
+            self.heap.try_alloc_filled_array_table(0, Value::nil())
+        }
+        .ok_or_else(|| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        self.retain_value(Value::table(table))
+    }
+
     pub fn get_global_value(&mut self, name: impl AsRef<str>) -> Result<Value> {
         let key = self.string(name);
         Ok(self

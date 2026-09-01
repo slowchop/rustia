@@ -324,8 +324,10 @@ facility is finished. The highest-impact gaps are:
    `Value`/`Table`/`Function` handles preserve binary strings, buffers, vectors, identity-bearing keys,
    shared/cyclic table graphs, mutation, and raw equality without exposing collector lifetimes. Live values
    can cross ordinary and typed invocations, and `OwnedValue` remains the deliberately small acyclic snapshot
-   layer. Before calling this a complete rich embedding boundary, add `globals()`, value/function constructors,
-   a composable chunk builder, live serde, and a concrete public userdata registration contract. A public
+   layer. Live `globals()`, quota-aware `create_table()`, and owned-key/live-value insertion are implemented;
+   hardened leaves reject those mutable constructor authorities before allocation. Before calling this a
+   complete rich embedding boundary, add safe function construction, a composable chunk builder, live serde,
+   and a concrete public userdata registration contract. A public
    `Thread` handle remains intentionally absent until a real host-side scheduler caller defines its contract.
    Full mlua-style `UserData`/`Scope`, async callbacks, and any mlua migration shim remain later optional
    layers. These APIs serve every builder preset: `deterministic()` enforces replay restrictions, `standard()`
@@ -364,9 +366,9 @@ linear-memory pages. It also exposed and closed unconditional rooting of
 unreachable suspended-coroutine frames.
 
 1. **Finish the host-facing runtime boundary and ordered advanced API track.** Follow
-   [`75-embedded-api.md`](75-embedded-api.md#build-order): build familiar globals/value/function constructors
-   and a composable chunk builder on the implemented graph-preserving live `Value`/`Table`/`Function` spine,
-   then add live serde and transactional install/hot-reload/stack diagnostics. The worker-local/per-call host
+   [`75-embedded-api.md`](75-embedded-api.md#build-order): build safe function construction and a composable
+   chunk builder on the implemented graph-preserving live `Value`/`Table`/`Function` spine and its live
+   globals/table constructors, then add live serde and transactional install/hot-reload/stack diagnostics. The worker-local/per-call host
    context is already implemented. Keep the existing typed facade as the simple layer, keep the advanced layer
    available to all builder presets, and do not leak grabby-specific types, internal GC lifetimes, or a raw C
    API. `live()` remains the explicit no-reproducibility-guarantee environment; deterministic policy is
@@ -727,8 +729,9 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 
 ## What's next (the genuine remaining public-release gates)
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items, in order:
-1. **Complete the ordered advanced API boundary:** build globals, constructors, and a composable chunk builder
-   on the implemented graph-preserving live `Value`/`Table`/`Function` spine; add live-value serde,
+1. **Complete the ordered advanced API boundary:** build safe function construction and a composable chunk
+   builder on the graph-preserving live `Value`/`Table`/`Function` spine plus its implemented globals/table
+   constructors; add live-value serde,
    transactional extension/module/hot-reload failure behavior, and stronger traceback diagnostics. The
    worker-local typed invocation seam, hardened stateless leaf, direct compiled-entry path, binary/rich/cyclic
    live values, memory telemetry, and quota enforcement are implemented. Preserve the concise typed facade and

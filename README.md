@@ -9,9 +9,9 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
 > decision reset, the typed per-invocation host transaction, and the hardened stateless action-leaf surface are
 > implemented. Maintained live-memory totals now back quotas and script counters without a whole-VM census at
 > ordinary instruction boundaries. Rooted live values/tables/functions now preserve rich payloads and graph
-> identity. A shared native/Node-V8 test now maintains the mixed-heap pressure and reclamation gate. The next
-> release-critical work is ergonomic live constructors and serde, plus the remaining transactional-failure
-> boundary.
+> identity, with live globals access and quota-aware table construction. A shared native/Node-V8 test now
+> maintains the mixed-heap pressure and reclamation gate. The next release-critical work is function/chunk
+> construction and live serde, plus the remaining transactional-failure boundary.
 > `spikes/` are throwaway prototypes that validated the design.
 > Read **[`design/CURRENT.md`](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](https://github.com/slowchop/rustia/blob/main/design/README.md) for the full doc map.
@@ -65,9 +65,9 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   stateless decision path with record publication and reset across both success and failure.
   `ServiceModuleResolver` provides host-owned canonical-identity `require` resolution with execute-once caching,
   cycle diagnostics, shared fuel, deterministic labels, and reset-aware lifetime. Transactional installation/hot
-  reload and live zero-copy serde remain planned. The next advanced slice keeps this concise facade while adding
-  globals and constructors, a composable chunk builder, and later optional userdata/scopes, async, and migration
-  compatibility.
+  reload and live zero-copy serde remain planned. Live globals access, quota-aware table construction, and
+  owned-key/live-value insertion are implemented; the next advanced slice adds function construction and a
+  composable chunk builder, followed by optional userdata/scopes, async, and migration compatibility.
 - Host services are host-pluggable through the facade: `RustiaBuilder::standard()`/`deterministic()`/`live()`
   environment presets, a `.stdout(...)` print sink with the real Luau composition (`tostring` honoring
   `__tostring`, tab-joined, trailing newline), and `.wall_clock(...)`/`.monotonic_clock(...)` sockets taking a
@@ -118,28 +118,30 @@ The advanced embedding API is shared by all three: `deterministic()` enforces lo
 
 ## Live values
 
-`run_value` retains a result in its VM and decision epoch. `Table` access stays live, so shared/cyclic graphs
-and rich values do not pass through the smaller `OwnedValue` deep-copy boundary:
+`run_value` retains a guest result in its VM and decision epoch. `create_table` and `globals` provide the same
+live identity for host-built graphs. `Table` access stays live, so shared/cyclic graphs and rich values do not
+pass through the smaller `OwnedValue` deep-copy boundary:
 
 ```rust
 use rustia::{Profile, Rustia};
 
 let mut rustia = Rustia::new(Profile::ReproducibleStandard);
-let root = rustia.run_value(
-    "local t = {}; t.self = t; t.bytes = buffer.fromstring('abc'); return t",
-)?;
-let table = root.as_table(&rustia)?.expect("table");
-let self_value = table.get(&mut rustia, "self")?;
-assert!(root.raw_equal(&mut rustia, &self_value)?);
-assert_eq!(
-    table.get(&mut rustia, "bytes")?.buffer_bytes(&mut rustia)?,
-    Some(b"abc".to_vec()),
-);
+let root = rustia.create_table()?;
+root.set(&mut rustia, "answer", 42_i32)?;
+root.set_live(&mut rustia, "self", &root.as_value())?;
+rustia.globals()?.set_live(&mut rustia, "host_root", &root.as_value())?;
+
+let returned = rustia.run_value("return host_root")?;
+let self_value = root.get(&mut rustia, "self")?;
+assert!(root.as_value().raw_equal(&mut rustia, &returned)?);
+assert!(root.as_value().raw_equal(&mut rustia, &self_value)?);
 # Ok::<(), rustia::Error>(())
 ```
 
 Clones share a collector root lease. Handles reject another VM and become stale after `reset_decision`; they
-remain usable across hot reload unless a caller deliberately requests a current-generation check.
+remain usable across hot reload unless a caller deliberately requests a current-generation check. Global
+mutations are decision-local and reset with ordinary global inputs. Hardened leaves reject mutable globals
+handles and live table construction.
 
 ## Project Pillars
 The canonical decision filter is [`design/02-pillars.md`](https://github.com/slowchop/rustia/blob/main/design/02-pillars.md). The short version:
@@ -156,7 +158,7 @@ The canonical decision filter is [`design/02-pillars.md`](https://github.com/slo
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](https://github.com/slowchop/rustia/blob/main/design/progress.json) into
-[`design/progress.html`](https://github.com/slowchop/rustia/blob/main/design/progress.html). These are rough engineering estimates as of 2026-08-11 for the
+[`design/progress.html`](https://github.com/slowchop/rustia/blob/main/design/progress.html). These are rough engineering estimates as of 2026-09-01 for the
 public rustia project; actual grabby integration work is explicitly out of scope.
 
 | goal | complete | confidence |
