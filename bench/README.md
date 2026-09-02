@@ -565,6 +565,11 @@ holds the protocol at `bench/history/series/ci-bench-main.json`, and
 `tools/check-benchmark-series.js` validates the rows against it before anything
 is pushed. The load-bearing rule is checksum equality — a changed checksum means
 the workload changed, so the points either side are not measuring the same thing.
+The per-commit coordinator also freezes its harness commit, fixed `N` values,
+repetition count and expected checksums from that manifest. It must not inherit
+those fields from the latest acceptance report, because that report may belong
+to a newer benchmark era even while the live series is still extending the old
+one.
 
 A commit that builds a byte-identical binary records nothing. The gate is the
 compiled binary's hash rather than a path heuristic, so documentation and tooling

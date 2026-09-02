@@ -9,6 +9,7 @@ const { execFileSync } = require("node:child_process");
 
 const REPO = path.resolve(__dirname, "..");
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
+const MAIN_SERIES = "bench/history/series/ci-bench-main.json";
 const WORKLOADS = Object.freeze([
   "dense_tables",
   "sparse_tables",
@@ -88,6 +89,66 @@ function loadCurrentRustiaRows() {
         return [workload, checksum];
       }),
     ),
+  };
+}
+
+function loadSeriesProtocol(file) {
+  const resolved = path.resolve(REPO, file);
+  const relative = path.relative(REPO, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    fail("series protocol path must remain inside the repository");
+  }
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(resolved, "utf8"));
+  } catch (error) {
+    fail(`could not read series protocol ${relative}: ${error.message}`);
+  }
+  if (manifest.schema !== "rustia.bench.history-series.v1" || manifest.schema_version !== 1) {
+    fail(`${relative} must declare rustia.bench.history-series.v1`);
+  }
+  if (manifest.protocol !== "rustia_main_series_v1") {
+    fail(`${relative}.protocol must be rustia_main_series_v1`);
+  }
+  if (!FULL_COMMIT.test(manifest.harness_commit ?? "")) {
+    fail(`${relative}.harness_commit must be a full 40-hex commit`);
+  }
+  if (manifest.native_target !== "linux-x86_64") {
+    fail(`${relative}.native_target must be linux-x86_64`);
+  }
+  if (JSON.stringify(manifest.workloads) !== JSON.stringify(WORKLOADS)) {
+    fail(`${relative}.workloads must match the frozen workload order`);
+  }
+  if (!Number.isSafeInteger(manifest.repetitions) || manifest.repetitions < 1) {
+    fail(`${relative}.repetitions must be a positive integer`);
+  }
+  if (typeof manifest.host !== "string" || manifest.host === "") {
+    fail(`${relative}.host must be a non-empty string`);
+  }
+  if (!Number.isSafeInteger(manifest.pinned_core) || manifest.pinned_core < 0) {
+    fail(`${relative}.pinned_core must be a non-negative integer`);
+  }
+  const fixedN = {};
+  const checksums = {};
+  for (const workload of WORKLOADS) {
+    const n = manifest.fixed_n?.[workload];
+    if (!Number.isSafeInteger(n) || n < 1) {
+      fail(`${relative}.fixed_n.${workload} must be a positive integer`);
+    }
+    const checksum = manifest.expected_checksums?.[workload];
+    if (typeof checksum !== "string" || checksum === "") {
+      fail(`${relative}.expected_checksums.${workload} must be a non-empty string`);
+    }
+    fixedN[workload] = n;
+    checksums[workload] = checksum;
+  }
+  return {
+    harness_commit: manifest.harness_commit,
+    host: manifest.host,
+    pinned_core: manifest.pinned_core,
+    repetitions: manifest.repetitions,
+    fixed_n: fixedN,
+    expected_checksums: checksums,
   };
 }
 
@@ -219,10 +280,14 @@ function sourceModifications(selected) {
   }
 }
 
-function freeze(start, outputFile, only, pair, repetitions) {
+function freeze(start, outputFile, only, pair, repetitions, seriesFile) {
   const tracked = git(["status", "--porcelain=v1", "--untracked-files=no"]).trim();
   if (tracked) fail("tracked worktree changes must be committed before freezing a backfill");
-  const harness = git(["rev-parse", "HEAD"]).trim();
+  const head = git(["rev-parse", "HEAD"]).trim();
+  const series = seriesFile ? loadSeriesProtocol(seriesFile) : null;
+  const harness = series
+    ? git(["rev-parse", `${series.harness_commit}^{commit}`]).trim()
+    : head;
   const resolvedStart = start
     ? git(["rev-parse", `${start}^{commit}`]).trim()
     : firstEngineCommit();
@@ -235,10 +300,28 @@ function freeze(start, outputFile, only, pair, repetitions) {
   if (baseConfig.schema !== "rustia.dedicated-fixed-benchmark.v1") {
     fail("dedicated base config must declare schema rustia.dedicated-fixed-benchmark.v1");
   }
-  const measurements = loadCurrentRustiaRows();
-  // `--only` freezes a single revision: the per-commit lane measures one commit
-  // under exactly the protocol the reconstruction used, so the two are one
-  // series rather than two. Everything else about the config is identical.
+  if (series) {
+    try {
+      execFileSync("git", ["merge-base", "--is-ancestor", harness, head], {
+        cwd: REPO,
+        stdio: "ignore",
+      });
+    } catch {
+      fail(`${seriesFile}.harness_commit must be an ancestor of HEAD`);
+    }
+    if (series.host !== baseConfig.provider.host.name) {
+      fail(`${seriesFile}.host does not match the dedicated host config`);
+    }
+    if (series.pinned_core !== baseConfig.host_gate.benchmark_cpu) {
+      fail(`${seriesFile}.pinned_core does not match the dedicated host config`);
+    }
+  }
+  const measurements = series ?? loadCurrentRustiaRows();
+  const frozenRepetitions = series?.repetitions ?? repetitions;
+  // `--only` freezes a single revision. With `--series`, the per-commit lane
+  // takes the harness, fixed sizes, checksums and repetitions from the reviewed
+  // series manifest rather than whichever acceptance report happens to be
+  // current, so the reconstruction and live rows remain one protocol.
   // `--pair` freezes exactly two revisions in the order given. The PR lane runs
   // this twice with the order reversed, so the two sides interleave as A B B A
   // rather than being measured one after the other -- host drift over the run
@@ -298,7 +381,7 @@ function freeze(start, outputFile, only, pair, repetitions) {
       // that is to join that series has to be measured the same way. The PR lane
       // publishes nothing, so it is free to buy a tighter interval with more
       // repetitions -- which is the only reason this is a parameter.
-      repetitions,
+      repetitions: frozenRepetitions,
       expected_checksums: measurements.expected_checksums,
     },
     // The dedicated host's gate, plus the retry bound the backfill protocol
@@ -337,6 +420,7 @@ function usage() {
   process.stdout.write(
     "Usage: node tools/freeze-history-backfill.js [--start COMMIT | --only COMMIT |\n" +
       "                                            --pair BASELINE CANDIDATE]\n" +
+      "                                           [--series FILE.json]\n" +
       "                                           [--repetitions N] [--output FILE.json]\n" +
       "       node tools/freeze-history-backfill.js --self-test\n" +
       "\n" +
@@ -426,6 +510,13 @@ function selfTest() {
   if (args(["--repetitions", "1e6"]) !== null) fail("self-test: non-integer --repetitions must be refused");
   if (args(["--repetitions", "10001"]) !== null) fail("self-test: unbounded --repetitions must be refused");
   if (args([])?.repetitions !== undefined) fail("self-test: --repetitions must default to unset");
+  if (args(["--only", "HEAD", "--series", MAIN_SERIES])?.series !== MAIN_SERIES) {
+    fail("self-test: --series must parse with --only");
+  }
+  if (args(["--series", MAIN_SERIES]) !== null) fail("self-test: --series requires --only");
+  if (args(["--only", "HEAD", "--series", MAIN_SERIES, "--repetitions", "5"]) !== null) {
+    fail("self-test: the series manifest owns repetitions");
+  }
 
   process.stdout.write("freeze-history-backfill self-test ok\n");
 }
@@ -437,6 +528,7 @@ function parseArgs(argv) {
     only: undefined,
     pair: undefined,
     repetitions: undefined,
+    series: undefined,
     selfTest: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -447,12 +539,13 @@ function parseArgs(argv) {
     else if (option === "--only") parsed.only = argv[++index];
     else if (option === "--pair") parsed.pair = [argv[++index], argv[++index]];
     else if (option === "--repetitions") parsed.repetitions = argv[++index];
+    else if (option === "--series") parsed.series = argv[++index];
     else return null;
   }
-  if (parsed.selfTest && (parsed.start || parsed.output || parsed.only || parsed.pair)) return null;
+  if (parsed.selfTest && (parsed.start || parsed.output || parsed.only || parsed.pair || parsed.series)) return null;
   // --only names the whole series; a start commit would be ignored.
   if (parsed.only !== undefined && parsed.start !== undefined) return null;
-  for (const value of [parsed.start, parsed.output, parsed.only]) {
+  for (const value of [parsed.start, parsed.output, parsed.only, parsed.series]) {
     if (value !== undefined && !value) return null;
   }
   if (parsed.pair !== undefined) {
@@ -464,6 +557,10 @@ function parseArgs(argv) {
     parsed.repetitions = Number(parsed.repetitions);
     if (parsed.repetitions > 10_000) return null;
   }
+  if (parsed.series !== undefined) {
+    if (parsed.only === undefined || parsed.start !== undefined || parsed.pair !== undefined) return null;
+    if (parsed.repetitions !== undefined) return null;
+  }
   return parsed;
 }
 
@@ -471,7 +568,7 @@ function parseArgs(argv) {
 // its fixed sizes and expected checksums from. Exported so the screening lane
 // refuses exactly the changes that would break a comparison, rather than a
 // directory that happens to contain them.
-module.exports = { HASH_FILES, CURRENT_RESULTS: "bench/current-results.json" };
+module.exports = { HASH_FILES, CURRENT_RESULTS: "bench/current-results.json", MAIN_SERIES };
 
 if (require.main !== module) {
   // Required for the constants above; nothing else runs.
@@ -483,7 +580,7 @@ if (require.main !== module) {
   } else if (parsed.selfTest) {
     selfTest();
   } else {
-    freeze(parsed.start, parsed.output, parsed.only, parsed.pair, parsed.repetitions ?? 5);
+    freeze(parsed.start, parsed.output, parsed.only, parsed.pair, parsed.repetitions ?? 5, parsed.series);
   }
 } catch (error) {
   process.stderr.write(`freeze-history-backfill: ${error.message}\n`);

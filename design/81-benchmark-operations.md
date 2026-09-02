@@ -234,6 +234,11 @@ The public report must show measurement time, measured commit, newest known
 relevant commit, pending count, and the next operator action. It must never
 look continuously updated when measurement or publication is paused.
 
+Pull requests use merge commits rather than squash or rebase. Freshness is
+derived from reviewed commit identities, so rewriting those identities while
+landing a change makes the generated operations view stale immediately after
+an otherwise green merge.
+
 ## Automation
 
 1. Shared self-hosted CI performs correctness and artifact validation only.
