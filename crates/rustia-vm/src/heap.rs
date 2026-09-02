@@ -1505,6 +1505,19 @@ impl VmCell {
         })
     }
 
+    pub(crate) fn with_string_bytes<R>(
+        &mut self,
+        atom: u32,
+        use_bytes: impl FnOnce(&[u8]) -> R,
+    ) -> Option<R> {
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            root.strings
+                .get(atom)
+                .map(|value| use_bytes(value.as_bytes()))
+        })
+    }
+
     pub fn alloc_array_table(&mut self, values: &[Value]) -> u32 {
         self.insert_table_data(TableData {
             array: values.to_vec(),

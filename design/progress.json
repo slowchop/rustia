@@ -136,23 +136,23 @@
   "overall_goals": [
     {
       "name": "Whole public rustia project",
-      "complete": 92,
+      "complete": 93,
       "confidence": 90,
-      "state": "The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, host-pluggable output/time services, host-owned canonical-identity require resolution/cache, lifetime-safe per-invocation host contexts, bounded transactional effect journals, graph-preserving rooted live Value/Table/Function handles with live globals, quota-aware table construction, and a composable chunk builder, CLI, benchmark matrix, private HotIR, closure-call PIC, generation-safe object/program reclamation, VM-owned memory telemetry, maintained logical-live quota accounting and script counters, atomic catchable OOM, epoch-safe decision reset, exact dedicated-Linux native plus wasm quota evidence, and a shared native/Node-V8 mixed-heap pressure gate are in-tree. The remaining release gates are safe function construction and live serde, transactional failure semantics, semantic-tail hardening, and packaging.",
-      "future_plan": "Complete safe function construction, live serde, and transactional failure semantics; then continue measured optimization and public release work."
+      "state": "The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, host-pluggable output/time services, host-owned canonical-identity require resolution/cache, lifetime-safe per-invocation host contexts, bounded transactional effect journals, graph-preserving rooted live Value/Table/Function handles with live globals, quota-aware table construction, snapshot-free live serde, and a composable chunk builder, CLI, benchmark matrix, private HotIR, closure-call PIC, generation-safe object/program reclamation, VM-owned memory telemetry, maintained logical-live quota accounting and script counters, atomic catchable OOM, epoch-safe decision reset, exact dedicated-Linux native plus wasm quota evidence, and a shared native/Node-V8 mixed-heap pressure gate are in-tree. The remaining release gates are safe function construction, transactional failure semantics, semantic-tail hardening, and packaging.",
+      "future_plan": "Complete safe function construction and transactional failure semantics; then continue measured optimization and public release work."
     },
     {
       "name": "Usable embedded scripting crate",
-      "complete": 97,
+      "complete": 98,
       "confidence": 95,
-      "state": "The facade now includes typed run/compile, a composable named/environment-aware chunk builder, owned scalar/table conversions, host-owned canonical-identity require resolution/cache, a lifetime-independent HostSchema with fresh borrowed HostContext values per invocation, capability-specific host views, shared fuel, bounded transactional record publication, usage receipts, rooted live Value/Table/Function handles that preserve rich payloads and graph identity, live globals, quota-aware table construction, owned-key/live-value insertion, retained exports with install-generation and decision-epoch checks, owned-value serde, extensions, hot reload, epoch-safe decision reset, examples, diagnostics, migration guidance, host-pluggable stdout/clock services, VM-owned memory telemetry, maintained logical-live accounting, and configurable quotas. It is not yet a complete rich embedding boundary: safe function construction, live serde, and transactional guest-side failure rollback remain.",
-      "future_plan": "Complete safe function construction and live serde, transactional failure semantics, diagnostics, and API stabilization."
+      "state": "The facade now includes typed run/compile, a composable named/environment-aware chunk builder, owned scalar/table conversions, host-owned canonical-identity require resolution/cache, a lifetime-independent HostSchema with fresh borrowed HostContext values per invocation, capability-specific host views, shared fuel, bounded transactional record publication, usage receipts, rooted live Value/Table/Function handles that preserve rich payloads and graph identity, live globals, quota-aware table construction, owned-key/live-value insertion, retained exports with install-generation and decision-epoch checks, owned-value serde plus snapshot-free live deserialization, extensions, hot reload, epoch-safe decision reset, examples, diagnostics, migration guidance, host-pluggable stdout/clock services, VM-owned memory telemetry, maintained logical-live accounting, and configurable quotas. It is not yet a complete rich embedding boundary: safe function construction and transactional guest-side failure rollback remain.",
+      "future_plan": "Complete safe function construction, transactional failure semantics, diagnostics, and API stabilization."
     },
     {
       "name": "Full public standalone Luau engine release",
       "complete": 67,
       "confidence": 88,
-      "state": "The Luau 0.709 standalone target and pending-free 511-ref conformance denominator (493 Luau 0.709 plus 18 offline PUC 5.1.5 compatibility refs) are strong. Bounded generation-safe object/program lifetimes, VM-owned live/reserved/peak telemetry, maintained logical-live memory limits and script counters, atomic catchable OOM, host-owned require resolution/cache, lifetime-safe typed invocations with transactional records, graph-preserving rooted live values, versioned deterministic reset/module lifecycles, and the shared native/Node-V8 mixed-heap pressure gate are implemented; native Linode plus wasm quota evidence is exact. Release still requires remaining live-object ergonomics/serde, transactional guest-module failure semantics, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.",
+      "state": "The Luau 0.709 standalone target and pending-free 511-ref conformance denominator (493 Luau 0.709 plus 18 offline PUC 5.1.5 compatibility refs) are strong. Bounded generation-safe object/program lifetimes, VM-owned live/reserved/peak telemetry, maintained logical-live memory limits and script counters, atomic catchable OOM, host-owned require resolution/cache, lifetime-safe typed invocations with transactional records, graph-preserving rooted live values with snapshot-free serde, versioned deterministic reset/module lifecycles, and the shared native/Node-V8 mixed-heap pressure gate are implemented; native Linode plus wasm quota evidence is exact. Release still requires remaining live-object ergonomics, transactional guest-module failure semantics, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.",
       "future_plan": "Close the remaining host-boundary gates, harden the semantic tail and cross-target goldens, then package and publish against the pinned target."
     },
     {
@@ -167,7 +167,7 @@
       "complete": 83,
       "confidence": 91,
       "state": "License, generated crate metadata audit, explicit internal dependency versions, release-preflight-enforced examples, migration guidance, CLI/diagnostics, typed owned values and callbacks, graph-preserving rooted live values, true-root epoch-safe retained handles, host signature/fuel metadata, output/time services, VM memory telemetry, maintained logical-live limits and script counters with atomic OOM, versioned decision reset, a shared native/Node-V8 mixed-heap pressure gate, release-readiness and semver policy, hosted CI, benchmark claim gating, package dry-runs, and publishability auditing are present; crates are still workspace-private and release polish is incomplete.",
-      "future_plan": "Close remaining live-object ergonomics/serde, transactional-install, and semantic-tail gates before removing publish blockers in topological order."
+      "future_plan": "Close remaining live-object ergonomics, transactional-install, and semantic-tail gates before removing publish blockers in topological order."
     }
   ],
   "areas": [
@@ -381,10 +381,10 @@
       "entries": [
         {
           "name": "Koto-shaped facade",
-          "complete": 97,
+          "complete": 98,
           "confidence": 95,
-          "state": "Builder, typed run<T>, source-named compile/run helpers, a composable load/name/environment/eval/exec chunk builder, public error diagnostic accessors, global insertion, exports, graph-preserving rooted live Value/Table/Function handles, a live globals handle, quota-aware table construction, owned-key/live-value insertion, host-owned require resolution/cache, a typed HostSchema/HostContext invocation surface, bounded record transactions, usage receipts, an epoch-safe decision reset, environment presets (standard/deterministic/live) with stdout and determinism-labeled service sockets, examples, and a first koto-to-rustia migration guide exist.",
-          "future_plan": "Stabilize names and error types; add safe function construction and live serde; then expand migration guidance."
+          "state": "Builder, typed run<T>, source-named compile/run helpers, a composable load/name/environment/eval/exec chunk builder, public error diagnostic accessors, global insertion, exports, graph-preserving rooted live Value/Table/Function handles with snapshot-free serde, a live globals handle, quota-aware table construction, owned-key/live-value insertion, host-owned require resolution/cache, a typed HostSchema/HostContext invocation surface, bounded record transactions, usage receipts, an epoch-safe decision reset, environment presets (standard/deterministic/live) with stdout and determinism-labeled service sockets, examples, and a first koto-to-rustia migration guide exist.",
+          "future_plan": "Stabilize names and error types; add safe function construction; then expand migration guidance."
         },
         {
           "name": "Owned value firewall",
@@ -395,10 +395,10 @@
         },
         {
           "name": "Live value handles",
-          "complete": 90,
+          "complete": 93,
           "confidence": 94,
-          "state": "Rooted VM/epoch-safe Value, Table, and Function handles preserve binary strings, buffers, vectors, rich identity-bearing keys, shared/cyclic tables, mutation, iteration, and raw equality without exposing collector lifetimes. Live globals, quota-aware table construction, owned-key/live-value insertion, and the composable chunk builder build and execute against identity-bearing host graphs; hardened leaves reject those authorities before allocation or compilation. Live arguments/results cross ordinary and typed invocations, and focused tests cover collector rooting, cross-VM rejection, reset invalidation, rich payloads, cycles, shared identity, profiles, quotas, custom lexical environments, and export access.",
-          "future_plan": "Add safe function construction, live serde, and a concrete public userdata registration contract."
+          "state": "Rooted VM/epoch-safe Value, Table, and Function handles preserve binary strings, buffers, vectors, rich identity-bearing keys, shared/cyclic tables, mutation, iteration, raw equality, and snapshot-free serde deserialization without exposing collector lifetimes. Live globals, quota-aware table construction, owned-key/live-value insertion, and the composable chunk builder build and execute against identity-bearing host graphs; hardened leaves reject those authorities before allocation or compilation. Live arguments/results cross ordinary and typed invocations, and focused tests cover collector rooting, cross-VM rejection, reset invalidation, rich payloads, cycles, shared identity, profiles, quotas, custom lexical environments, serde, and export access.",
+          "future_plan": "Add safe function construction and a concrete public userdata registration contract."
         },
         {
           "name": "Typed host functions",
@@ -437,17 +437,17 @@
         },
         {
           "name": "Serde bridge",
-          "complete": 62,
-          "confidence": 82,
-          "state": "Owned-value serde paths exist, and OwnedTable can deserialize string-keyed fields plus array slots through serde.",
-          "future_plan": "Keep owned serde as the explicit acyclic snapshot path, then add a lifetime-safe deserializer over the rooted live value surface."
+          "complete": 92,
+          "confidence": 94,
+          "state": "Owned-value serde remains the eager acyclic validation and serialization path. Rooted Value, Table, and Exports handles now deserialize directly into DeserializeOwned targets without a recursive OwnedValue snapshot; VM/epoch/generation checks, cycles, depth, exact numeric conversions, table shape, externally tagged enums, typed host VMs, native memory stability, and both wasm adapter lanes are covered.",
+          "future_plan": "Keep the owned and live formats aligned; add opt-in rich binary/buffer adapters or direct live serialization only when a concrete caller fixes their semantics."
         },
         {
           "name": "Retained handles",
           "complete": 96,
           "confidence": 95,
           "state": "Script Value, Table, Function, and Exports handles are true collector roots. They can be retained, inspected for their install generation and decision epoch, checked for freshness, exchanged across live calls, and accessed through fail-closed current-generation/current-epoch paths. Repeated slot reuse cannot make stale handles alias replacement objects or programs; reset invalidates every clone while ordinary retained access remains valid across hot reload outside reset epochs.",
-          "future_plan": "Keep VM, generation, and epoch failures explicit while live-object constructors and serde are added."
+          "future_plan": "Keep VM, generation, and epoch failures explicit while remaining live-object constructors are added."
         },
         {
           "name": "Hot reload",

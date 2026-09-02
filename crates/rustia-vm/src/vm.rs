@@ -3091,6 +3091,25 @@ impl Vm {
     }
 
     pub fn raw_table_entries_value(&mut self, table: Value) -> Result<Vec<(Value, Value)>> {
+        let mut entries = Vec::new();
+        let mut after = Value::nil();
+        while let Some((key, value)) = self.raw_table_next_value(table, after)? {
+            entries.push((key, value));
+            after = key;
+        }
+        Ok(entries)
+    }
+
+    /// Returns the next raw table pair in deterministic insertion order.
+    ///
+    /// This is a representation-independent inspection primitive for the safe
+    /// embedding layer. It performs no guest execution or metamethod dispatch.
+    #[doc(hidden)]
+    pub fn raw_table_next_value(
+        &mut self,
+        table: Value,
+        after: Value,
+    ) -> Result<Option<(Value, Value)>> {
         let Some(table) = table.as_table() else {
             return Err(Error::new(ErrorKind::TypeError { expected: "table" }));
         };
@@ -3099,28 +3118,42 @@ impl Vm {
                 reason: "table handle is missing",
             }));
         }
-        let mut entries = Vec::new();
-        let mut after = Value::nil();
-        loop {
-            match self
-                .heap
-                .table_next_after(table, after, TableIterationOrder::Insertion)
-            {
-                Some(TableNext::Entry(key, value)) => {
-                    entries.push((key, value));
-                    after = key;
-                }
-                Some(TableNext::End) => return Ok(entries),
-                Some(TableNext::InvalidKey) => {
-                    return Err(Error::new(ErrorKind::InvalidKeyToNext));
-                }
-                None => {
-                    return Err(Error::new(ErrorKind::InvalidProgram {
-                        reason: "table handle is missing",
-                    }));
-                }
-            }
+        match self
+            .heap
+            .table_next_after(table, after, TableIterationOrder::Insertion)
+        {
+            Some(TableNext::Entry(key, value)) => Ok(Some((key, value))),
+            Some(TableNext::End) => Ok(None),
+            Some(TableNext::InvalidKey) => Err(Error::new(ErrorKind::InvalidKeyToNext)),
+            None => Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })),
         }
+    }
+
+    /// Reports a table's dense sequence length when its complete key set is
+    /// exactly the numeric integers `1..=len`.
+    #[doc(hidden)]
+    pub fn raw_table_sequence_len(&mut self, table: Value) -> Result<Option<usize>> {
+        let mut after = Value::nil();
+        let mut count = 0_usize;
+        let mut maximum = 0_usize;
+        while let Some((key, _)) = self.raw_table_next_value(table, after)? {
+            let Some(number) = key.as_number() else {
+                return Ok(None);
+            };
+            if !number.is_finite()
+                || number <= 0.0
+                || number.fract() != 0.0
+                || number > usize::MAX as f64
+            {
+                return Ok(None);
+            }
+            count = count.saturating_add(1);
+            maximum = maximum.max(number as usize);
+            after = key;
+        }
+        Ok((maximum == count).then_some(count))
     }
 
     pub fn call_retained_function(
@@ -7693,6 +7726,32 @@ impl Vm {
             .ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "buffer handle is missing",
+                })
+            })
+    }
+
+    /// Borrows a string value's bytes only for the duration of `use_bytes`.
+    ///
+    /// The callback cannot retain the collector-backed slice. No guest code,
+    /// allocation, or collection occurs while it is borrowed.
+    #[doc(hidden)]
+    pub fn with_string_value_bytes<R>(
+        &mut self,
+        value: Value,
+        use_bytes: impl FnOnce(&[u8]) -> R,
+    ) -> Result<Option<R>> {
+        if let Some(short) = value.as_short_string() {
+            return Ok(Some(use_bytes(short.as_bytes())));
+        }
+        let Some(atom) = value.as_string_atom() else {
+            return Ok(None);
+        };
+        self.heap
+            .with_string_bytes(atom, use_bytes)
+            .map(Some)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "string atom is missing",
                 })
             })
     }
