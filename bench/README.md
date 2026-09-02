@@ -569,7 +569,17 @@ The per-commit coordinator also freezes its harness commit, fixed `N` values,
 repetition count and expected checksums from that manifest. It must not inherit
 those fields from the latest acceptance report, because that report may belong
 to a newer benchmark era even while the live series is still extending the old
-one.
+one. A reconstruction's targets are ancestors of its harness; a live-series
+target is instead a descendant of the fixed harness. Frozen configs record that
+direction explicitly, and the host verifies the declared ancestry before it
+builds anything.
+
+The deploy key does not push the data repository's protected `main` branch.
+Each source workflow pushes a unique `publication/*` branch, then waits until
+the publication commit is present on `main`. A target-repository workflow opens
+and merge-commits the corresponding pull request through the ordinary branch
+rules. A failed or unmerged publication therefore fails the source workflow
+instead of being reported as delivered.
 
 A commit that builds a byte-identical binary records nothing. The gate is the
 compiled binary's hash rather than a path heuristic, so documentation and tooling

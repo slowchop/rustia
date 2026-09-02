@@ -40,6 +40,7 @@ const LOCK_FILE = path.join(ROOT, "lock");
 // /root/.cargo/bin, so cargo/rustc/rustup are resolved through PATH instead.
 const CARGO_BIN = path.join(os.homedir(), ".cargo", "bin");
 const PROTOCOL = "rustia_history_backfill_v1";
+const TARGET_RELATIONS = new Set(["targets_are_ancestors", "harness_is_ancestor"]);
 const WORKLOADS = Object.freeze([
   "dense_tables",
   "sparse_tables",
@@ -208,13 +209,29 @@ function validateConfig(value) {
   }
 
   const source = requireObject(root.source, "config.source");
+  const sourceKeys = [
+    "harness_commit",
+    "revision_selection",
+    "target_commits",
+    "source_modifications",
+    "expected_sha256",
+  ];
+  if (Object.prototype.hasOwnProperty.call(source, "target_relation")) {
+    sourceKeys.push("target_relation");
+  }
   requireExactKeys(
     source,
-    ["harness_commit", "revision_selection", "target_commits", "source_modifications", "expected_sha256"],
+    sourceKeys,
     "config.source",
   );
   if (!FULL_COMMIT.test(requireString(source.harness_commit, "config.source.harness_commit"))) {
     fail("config.source.harness_commit must be a full lowercase commit");
+  }
+  const targetRelation = source.target_relation ?? "targets_are_ancestors";
+  if (!TARGET_RELATIONS.has(targetRelation)) {
+    fail(
+      "config.source.target_relation must be targets_are_ancestors or harness_is_ancestor",
+    );
   }
   const revisionSelection = requireObject(source.revision_selection, "config.source.revision_selection");
   requireExactKeys(
@@ -452,14 +469,23 @@ function verifySource(config, bundle) {
     { capture: false },
   );
   assert.equal(runText("git", ["-C", HARNESS, "rev-parse", "HEAD"]), config.source.harness_commit);
+  const targetRelation = config.source.target_relation ?? "targets_are_ancestors";
   for (const commit of config.source.target_commits) {
     run("git", ["--git-dir", REPOSITORY, "cat-file", "-e", `${commit}^{commit}`]);
+    const ancestry = targetRelation === "harness_is_ancestor"
+      ? [config.source.harness_commit, commit]
+      : [commit, config.source.harness_commit];
     const ancestor = run(
       "git",
-      ["--git-dir", REPOSITORY, "merge-base", "--is-ancestor", commit, config.source.harness_commit],
+      ["--git-dir", REPOSITORY, "merge-base", "--is-ancestor", ...ancestry],
       { allowFailure: true },
     );
-    if (ancestor.status !== 0) fail(`target ${commit} is not an ancestor of the harness commit`);
+    if (ancestor.status !== 0) {
+      if (targetRelation === "harness_is_ancestor") {
+        fail(`harness commit is not an ancestor of target ${commit}`);
+      }
+      fail(`target ${commit} is not an ancestor of the harness commit`);
+    }
   }
   for (const [field, relative] of Object.entries(OVERLAY_FILES)) {
     const actual = sha256File(path.join(HARNESS, relative));
@@ -1300,6 +1326,22 @@ async function selfTest() {
     publication: { mode: "history_backfill", rows: 10 },
   };
   assert.equal(validateConfig(config), config);
+
+  // Existing reconstruction configs omit target_relation and retain their
+  // original target-before-harness interpretation. New configs make the
+  // direction explicit, and the live series uses the opposite direction.
+  for (const target_relation of ["targets_are_ancestors", "harness_is_ancestor"]) {
+    assert.equal(
+      validateConfig({ ...config, source: { ...config.source, target_relation } }).source.target_relation,
+      target_relation,
+    );
+  }
+  assert.throws(() =>
+    validateConfig({
+      ...config,
+      source: { ...config.source, target_relation: "unrelated" },
+    }),
+  );
 
   // The old Linode schema string must now be rejected outright.
   assert.throws(() => validateConfig({ ...config, schema: "rustia.linode-fixed-benchmark.v2" }));

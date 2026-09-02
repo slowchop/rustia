@@ -346,6 +346,10 @@ function freeze(start, outputFile, only, pair, repetitions, seriesFile) {
     provider: baseConfig.provider,
     source: {
       harness_commit: harness,
+      // A reconstruction measures revisions leading up to its harness. The
+      // live series deliberately keeps that reviewed harness fixed while main
+      // advances, so its targets are descendants instead.
+      target_relation: series ? "harness_is_ancestor" : "targets_are_ancestors",
       // What this series is, recorded where a future reader will actually look.
       // Selecting every engine revision rather than the first-parent chain means
       // the list contains commits from parallel branches, so there is no moment

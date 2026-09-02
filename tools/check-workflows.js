@@ -359,7 +359,12 @@ function checkMainBench(text) {
   // Rows are validated against the committed protocol before they are pushed,
   // so a row that does not belong to this series never reaches published data.
   requireIncludes(text, "node tools/check-benchmark-series.js --rows-root", label);
-  requireIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
+  requireIncludes(
+    text,
+    "node tools/push-benchmark-data-publication.js --repo-dir \"$data_dir\" --kind series",
+    label,
+  );
+  forbidIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
   requireIncludes(text, "trap cleanup EXIT", label);
   // The rows live in the data repository; this lane must never write history
   // into this one, and must not become a second contents-write holder.
@@ -442,6 +447,7 @@ function checkReleasePreflight(text) {
     '"tools/retire-cloud-history.js"',
     '"tools/run-linux-history-backfill.js"',
     '"tools/freeze-history-backfill.js"',
+    '"tools/push-benchmark-data-publication.js"',
     '"bench/run-memory-supervisor.js"',
     '"bench/analyze-memory-samples.js"',
     '"bench/run-memory-cohort.js"',
@@ -490,7 +496,12 @@ function checkRustiaMemory(text) {
   requireIncludes(text, "BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
   requireIncludes(text, "git@github.com:slowchop/rustia-bench-data.git", label);
   requireIncludes(text, "node tools/merge-rustia-ci-memory-data.js", label);
-  requireIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
+  requireIncludes(
+    text,
+    "node tools/push-benchmark-data-publication.js --repo-dir \"$data_dir\" --kind memory",
+    label,
+  );
+  forbidIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
   requireIncludes(text, "git -C \"$pages_dir\" push origin HEAD:gh-pages", label);
   // This was the last lane that could create a billed instance. These are the
   // strings that would bring that back.
@@ -588,7 +599,12 @@ function checkBenchmarkPublication(text) {
   requireIncludes(text, "rm -rf -- \"$publish_dir\"", label);
   requireIncludes(text, "trap cleanup EXIT", label);
   requireIncludes(text, "UserKnownHostsFile=$ssh_dir/known_hosts", label);
-  requireIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
+  requireIncludes(
+    text,
+    "node tools/push-benchmark-data-publication.js --repo-dir \"$data_dir\" --kind artifacts",
+    label,
+  );
+  forbidIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
   requireIncludes(text, "git -C \"$pages_dir\" push origin HEAD:gh-pages", label);
   for (const forbidden of [
     "LINODE_TOKEN",
