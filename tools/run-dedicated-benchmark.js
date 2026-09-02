@@ -595,9 +595,19 @@ function commandMain(options) {
   if (!options.out) fail("main requires --out FILE to write the series rows to");
   const configFile = path.join(STATE_ROOT, `main-${git(["rev-parse", "--short", "HEAD"]).trim()}.json`);
   fs.rmSync(configFile, { force: true });
-  local("node", ["tools/freeze-history-backfill.js", "--only", "HEAD", "--output", path.relative(REPO, configFile)], {
-    capture: false,
-  });
+  local(
+    "node",
+    [
+      "tools/freeze-history-backfill.js",
+      "--only",
+      "HEAD",
+      "--series",
+      freezer.MAIN_SERIES,
+      "--output",
+      path.relative(REPO, configFile),
+    ],
+    { capture: false },
+  );
   const config = loadConfig(configFile);
   const commit = config.source.target_commits[0];
   const provider = attestHost(config);
@@ -924,7 +934,11 @@ async function commandMemory(options) {
 // refused as a protocol change. A prefix that is right about the intent and
 // wrong about the set is worse than no rule, because it looks like it worked.
 const freezer = require("./freeze-history-backfill.js");
-const PROTOCOL_PATHS = Object.freeze([...Object.values(freezer.HASH_FILES), freezer.CURRENT_RESULTS]);
+const PROTOCOL_PATHS = Object.freeze([
+  ...Object.values(freezer.HASH_FILES),
+  freezer.CURRENT_RESULTS,
+  freezer.MAIN_SERIES,
+]);
 
 function protocolChanges(paths) {
   const protocol = new Set(PROTOCOL_PATHS);
@@ -1660,6 +1674,7 @@ function selfTest() {
     ["bench/workloads/luau/01_dense_tables.luau"],
   );
   assert.deepEqual(protocolChanges(["bench/current-results.json"]), ["bench/current-results.json"]);
+  assert.deepEqual(protocolChanges([freezer.MAIN_SERIES]), [freezer.MAIN_SERIES]);
   // Files under bench/ that the frozen config does not pin are ordinary changes.
   // Refusing these was the defect the lane's first pull request found.
   assert.deepEqual(protocolChanges(["bench/README.md", "bench/CLAIMS.md", "bench/RESULTS.md"]), []);
@@ -1670,7 +1685,7 @@ function selfTest() {
   for (const file of Object.values(freezer.HASH_FILES)) {
     assert.deepEqual(protocolChanges([file]), [file], `${file} is pinned by the config`);
   }
-  assert.equal(PROTOCOL_PATHS.length, Object.keys(freezer.HASH_FILES).length + 1);
+  assert.equal(PROTOCOL_PATHS.length, Object.keys(freezer.HASH_FILES).length + 2);
 
   // The threshold is the widest end of the A/A interval, rounded up, so it is
   // never narrower than what the host was actually seen doing.
