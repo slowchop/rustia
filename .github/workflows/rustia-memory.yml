@@ -109,7 +109,7 @@ jobs:
           git -C "$data_dir" add bench/memory bench/current-results.html
           if ! git -C "$data_dir" diff --cached --quiet; then
             git -C "$data_dir" commit -m "Record Rustia memory ${BENCHMARK_COMMIT:0:12}"
-            git -C "$data_dir" push origin HEAD:main
+            node tools/push-benchmark-data-publication.js --repo-dir "$data_dir" --kind memory
           fi
           git -C "$data_dir" fetch origin gh-pages
           git -C "$data_dir" worktree add --detach "$pages_dir" origin/gh-pages

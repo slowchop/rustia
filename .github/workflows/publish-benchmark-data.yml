@@ -147,7 +147,7 @@ jobs:
           git -C "$data_dir" add README.md bench
           if ! git -C "$data_dir" diff --cached --quiet; then
             git -C "$data_dir" commit -m "Publish benchmark data ${source_commit:0:12}"
-            git -C "$data_dir" push origin HEAD:main
+            node tools/push-benchmark-data-publication.js --repo-dir "$data_dir" --kind artifacts
           fi
 
           git -C "$data_dir" fetch origin gh-pages

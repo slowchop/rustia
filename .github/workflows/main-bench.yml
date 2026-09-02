@@ -102,7 +102,7 @@ jobs:
           git -C "$data_dir" config user.email "benchmark@rustia.invalid"
           git -C "$data_dir" add bench/history/series/ci-bench-main.jsonl
           git -C "$data_dir" commit -m "Record per-commit series row $(git rev-parse --short HEAD)"
-          git -C "$data_dir" push origin HEAD:main
+          node tools/push-benchmark-data-publication.js --repo-dir "$data_dir" --kind series
 
           {
             echo "## Series row recorded"
