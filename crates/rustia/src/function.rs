@@ -1,4 +1,5 @@
 use crate::live_value::{ensure_current_epoch, ensure_current_generation, Value as LiveValue};
+use crate::serde_value::from_live;
 use crate::value::{
     embed_to_vm_error, load_owned_value, snapshot_value, FromRustia, FromRustiaMulti,
     IntoRustiaMulti, OwnedValue,
@@ -300,15 +301,21 @@ impl Exports {
         self.value_in(invocation)
     }
 
-    pub fn deserialize<T>(&self, rustia: &mut Rustia) -> Result<T>
+    /// Deserializes the returned value directly without building an owned graph snapshot.
+    pub fn deserialize<T>(&self, rustia: &mut Rustia<impl HostSchema>) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
     {
-        let value = self.value(rustia)?;
-        value.deserialize()
+        ensure_current_epoch(
+            "exports handle",
+            self.decision_epoch,
+            rustia.decision_epoch(),
+        )?;
+        let value = self.value.raw(rustia.vm(), "exports handle")?;
+        from_live(rustia.vm_mut(), value)
     }
 
-    pub fn deserialize_current<T>(&self, rustia: &mut Rustia) -> Result<T>
+    pub fn deserialize_current<T>(&self, rustia: &mut Rustia<impl HostSchema>) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
     {

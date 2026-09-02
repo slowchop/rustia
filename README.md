@@ -10,9 +10,9 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
 > implemented. Maintained live-memory totals now back quotas and script counters without a whole-VM census at
 > ordinary instruction boundaries. Rooted live values/tables/functions now preserve rich payloads and graph
 > identity, with live globals access and quota-aware table construction. A shared native/Node-V8 test now
-> maintains the mixed-heap pressure and reclamation gate. The composable chunk builder is implemented; the
-> next release-critical work is safe host-function construction and live serde, plus the remaining
-> transactional-failure boundary.
+> maintains the mixed-heap pressure and reclamation gate. The composable chunk builder and snapshot-free
+> live-value serde deserializer are implemented; the next release-critical work is safe host-function
+> construction plus the remaining transactional-failure boundary.
 > `spikes/` are throwaway prototypes that validated the design.
 > Read **[`design/CURRENT.md`](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](https://github.com/slowchop/rustia/blob/main/design/README.md) for the full doc map.
@@ -56,7 +56,8 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   eight arguments/results, retained script functions, pre-install host signature/fuel ABI metadata,
   retained-handle freshness checks and current-generation accessors, rooted live `Value`/`Table`/`Function`
   handles with graph identity, binary strings, buffers, vectors, rich keys, and raw equality, public source-span/runtime-location error
-  accessors, owned-value/table serde, deterministic extensions, hot reload, and early macro sugar. `HostSchema`
+  accessors, owned-value/table serde plus snapshot-free deserialization from rooted live values, deterministic
+  extensions, hot reload, and early macro sugar. `HostSchema`
   separates persistent function registration from a block-local `HostContext`; capability-specific views expose
   input, slots, ordered effects, slot writes, or profile-gated external mutation. Typed invocations share one
   fuel budget and stage a bounded count/byte record transaction. Ordinary object/program reclamation and the
@@ -66,7 +67,7 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   stateless decision path with record publication and reset across both success and failure.
   `ServiceModuleResolver` provides host-owned canonical-identity `require` resolution with execute-once caching,
   cycle diagnostics, shared fuel, deterministic labels, and reset-aware lifetime. Transactional installation/hot
-  reload and live zero-copy serde remain planned. Live globals access, quota-aware table construction,
+  reload remains planned. Live globals access, quota-aware table construction,
   owned-key/live-value insertion, and the composable
   `load(source).name(...).environment(...).eval()/exec()` chunk builder are implemented. The next advanced
   slice adds safe host-function construction, followed by optional userdata/scopes, async, and migration
@@ -146,6 +147,11 @@ remain usable across hot reload unless a caller deliberately requests a current-
 mutations are decision-local and reset with ordinary global inputs. Hardened leaves reject mutable globals
 handles and live table construction.
 
+Rooted values, tables, and exports can deserialize directly into owned Rust types without first constructing
+an `OwnedValue` graph. This is snapshot-free rather than allocation-free: destination strings and collections
+still allocate, while collector-backed borrows cannot escape. The explicit eager path remains available as
+`exports.value(&mut rustia)?.deserialize()` when callers want a complete acyclic snapshot before conversion.
+
 ## Chunk builder
 
 `load` keeps source configuration together without replacing the concise `run<T>()` helpers. A chunk can use
@@ -189,8 +195,8 @@ public rustia project; actual grabby integration work is explicitly out of scope
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 92% | 90% |
-| Usable embedded scripting crate | 97% | 95% |
+| Whole public rustia project | 93% | 90% |
+| Usable embedded scripting crate | 98% | 95% |
 | Full public standalone Luau engine release | 67% | 88% |
 | Standalone benchmark OSS project | 82% | 88% |
 | Public release readiness | 83% | 91% |

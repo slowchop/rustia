@@ -5,7 +5,14 @@
 ))]
 
 use rustia::{Error, RustiaBuilder, ServiceClock, ServiceEntropy, VmErrorKind};
+use serde::Deserialize;
 use wasm_bindgen_test::wasm_bindgen_test;
+
+#[derive(Debug, Deserialize, PartialEq)]
+struct LiveSerdeProbe {
+    label: String,
+    values: Vec<u32>,
+}
 
 #[wasm_bindgen_test]
 fn bare_wasm_live_accepts_explicit_host_inputs() {
@@ -56,4 +63,19 @@ fn wasm_buffer_float_round_trips_preserve_nan_payload_bits() {
         )
         .unwrap();
     assert!(exact);
+}
+
+#[wasm_bindgen_test]
+fn bare_wasm_deserializes_rooted_live_values() {
+    let mut rustia = RustiaBuilder::deterministic().build().unwrap();
+    let value = rustia
+        .run_value("return { label = 'bare', values = { 1, 2, 3 } }")
+        .unwrap();
+    assert_eq!(
+        value.deserialize::<LiveSerdeProbe>(&mut rustia).unwrap(),
+        LiveSerdeProbe {
+            label: "bare".to_owned(),
+            values: vec![1, 2, 3],
+        }
+    );
 }

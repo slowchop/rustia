@@ -1,6 +1,6 @@
 # rustia - embedded API goal and plan
 
-> **Status: [TYPED INVOCATION + LIVE-HANDLE SPINE/CHUNK BUILDER IMPLEMENTED - function construction/live serde pending] (updated 2026-09-02).**
+> **Status: [TYPED INVOCATION + LIVE-HANDLE SPINE/CHUNK BUILDER/LIVE SERDE IMPLEMENTED - function construction pending] (updated 2026-09-02).**
 > This records the public Rust embedding API direction and its honest implementation boundary after comparing
 > rustia's constraints with current Rust scripting/runtime APIs. It refines the locked
 > architecture axis H in [`30-architecture.md`](30-architecture.md) and the grabby bridge contract in
@@ -36,7 +36,7 @@ Object/program reclamation, real VM-owned live/reserved/peak telemetry, and the 
 quota/atomic OOM path are now implemented and validated by the exact-commit `safe-memory-588b541` native Linode
 cohort plus its wasm32 512 KiB quota/recovery probe. The next release-critical slice is not more facade
 decoration: the epoch-safe decision reset and host-owned `require` resolver/cache are now implemented; remaining
-work is transactional installation/reload failures, safe host-function construction, and live serde. The
+work is transactional installation/reload failures and safe host-function construction. The
 graph-preserving advanced spine plus its first ergonomic constructors are now implemented:
 VM/epoch-safe rooted `Value`/`Table`/`Function` handles preserve binary strings, buffers, vectors, rich keys,
 shared/cyclic table identity, mutation, raw equality, and ordinary or typed invocation exchange without
@@ -104,7 +104,7 @@ one engine:
    lookup/mutation/iteration, live function arguments/results, typed-invocation exchange, binary
    string/buffer/vector access, rich keys, raw identity equality, live globals, quota-aware table construction,
    and owned-key/live-value insertion are implemented. A public coroutine `Thread` handle remains conditional
-   on a real host-side scheduling caller. Still planned: safe host-function construction, live serde, and later
+   on a real host-side scheduling caller. Still planned: safe host-function construction and later
    optional `UserData`/`Scope` and async. The composable chunk builder is implemented.
 
 The advanced layer is not a raw Luau C stack API and must not expose internal GC lifetimes. Handles belong to
@@ -335,10 +335,10 @@ let enemies = root.get_string_table("enemies")?.unwrap();
 let first_enemy: EnemySpec = enemies.get_array_deserialized(0)?.unwrap();
 ```
 
-Start with owned-value serde for correctness and ergonomics; `OwnedValue` plus string-keyed and array-slot
-`OwnedTable` deserialization helpers are the first public slice. Add the zero-copy live-value deserializer after
-the surface is stable, matching the architecture note that zero-copy serde is faster by avoiding the deep-copy
-exports snapshot.
+Owned-value serde remains the explicit eager acyclic validation and serialization path. Rooted `Value`,
+`Table`, and `Exports` handles now also provide snapshot-free deserialization directly over VM values, avoiding
+the recursive `OwnedValue` graph while retaining `DeserializeOwned` so collector-backed borrows cannot escape.
+This is not allocation-free: destination strings and collections still own their storage.
 
 Owned-value serde uses Serde's externally tagged enum model. A unit variant is a string, while a newtype,
 tuple, or struct variant is a single-entry string-keyed table whose value carries the variant content. Derived
@@ -486,7 +486,7 @@ store authoritative state on the GC heap instead of in captured host slots.
 1. ✅ `OwnedValue` plus `FromRustia` / `IntoRustia` and typed/nested `OwnedTable` helpers — first slice landed.
 2. ✅ typed `add_fn` and `Function::call` — landed through tuple arity 8.
 3. ✅ returned-table `Exports` facade — landed with generation-aware accessors.
-4. ✅ owned serde deserialize/serialize — landed; live serde remains.
+4. ✅ owned serde deserialize/serialize plus snapshot-free live-value deserialization — landed.
 5. ✅ extension/linker with capability and fuel metadata — first slice landed.
 6. ✅ hot reload and diagnostics — first slice landed; reclamation and stack traces remain.
 7. ✅ early declarative macro sugar — landed; broader attribute/codegen expansion is deferred.
@@ -524,8 +524,8 @@ store authoritative state on the GC heap instead of in captured host slots.
     execute-once caching, cycle diagnostics, shared caller fuel, reset-aware cache lifetime, and
     host-controlled resolution rather than an ambient core filesystem API. The behavior is versioned by
     `RUSTIA_MODULE_RESOLUTION_ABI_VERSION`; the host must separately bind its resolver content.
-16. ⏳ **Complete rich integration and failure semantics:** lifetime-safe live serde, transactional
-    extension/module/hot-reload installation, stack diagnostics, and explicit behavior for handles across
+16. ⏳ **Complete rich integration and failure semantics:** transactional extension/module/hot-reload
+    installation, stack diagnostics, and explicit behavior for handles across
     reload and reset.
 17. ⏳ **Add mlua-style `UserData`/`Scope` only after the live handle/context layer is stable and a real
     host-object caller fixes the requirements.** Support methods, fields, metamethods, borrowed scoped

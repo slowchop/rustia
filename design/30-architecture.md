@@ -31,7 +31,7 @@
 > Complete object/program reachability and generation-safe reuse, aggregate logical-live quotas with atomic OOM,
 > epoch-safe decision-reset ABI v1, maintained live-memory accounting, and the graph-preserving rooted
 > `Value`/`Table`/`Function` handle spine are implemented. The shared native/Node-V8 96-epoch mixed-heap
-> pressure gate is also implemented; live-object constructors/chunk loading and live serde remain release gates.
+> pressure gate, live-object constructors/chunk loading, and snapshot-free live serde are also implemented.
 
 ## 0. The bet — proven, with honest framing
 
@@ -74,9 +74,9 @@ rustia-compiler   AST → rustia bytecode; constant folding (SAME pinned libm + 
 rustia-vm         16-byte tagged Value, VM heap + profile-specific gc-arena scheduling, big-match→br_table
                   dispatch, per-instruction fuel + recursion cap, stackless trampoline, coroutines, and the
                   math/table/string/bit32/base/coroutine/buffer/vector/utf8/string.pack standard-library surface
-rustia            embedding API: koto-shaped Vm facade + typed FromRustia/IntoRustia core + owned-value serde;
+rustia            embedding API: koto-shaped Vm facade + typed FromRustia/IntoRustia core + owned/live serde;
                   VM/epoch-rooted live Value/Table/Function handles preserve graph identity without leaking the
-                  'gc brand; constructors, chunk loading, and live serde remain planned advanced ergonomics
+                  'gc brand; constructors, chunk loading, and snapshot-free deserialization are implemented
 rustia-cli        REPL / runner
 ```
 
@@ -194,8 +194,8 @@ misses and non-native/reassigned callees use the ordinary call path with the sam
 behavior.
 
 **H. Embedding API — LOCKED direction: koto-SHAPED facade over a typed `FromRustia`/`IntoRustia` core, with
-lifetime-safe per-invocation host contexts, transactional records, an owned bridge first, and a future live
-ZERO-COPY serde layer; defer mlua `UserData`/`Scope`.** Considered:
+lifetime-safe per-invocation host contexts, transactional records, an owned bridge first, and a snapshot-free
+live serde layer; defer mlua `UserData`/`Scope`.** Considered:
 koto-shim [✓ outer]; mlua-style [partial — take the typed core]; both-layered [✓]; trait-objects [defer];
 serde-centric [✓ as a sub-facility]. *Historical vertical-slice evidence:* the spike used
 `Box<dyn Fn(&[OwnedValue]) -> Result<OwnedValue>>` as its `call_indirect` target/GC firewall and covered the
@@ -206,8 +206,10 @@ wrappers snapshot/convert guest values and load owned returns. **Zero-copy serde
 (serde directly over live in-arena values inside `mutate`, behind `vm.deserialize_exports::<T>()`) is **30%
 faster** than the literal `exports().clone()`-then-serde (1.01 vs 1.47 µs; the snapshot deep-copy is the cost,
 not serde at 0.065 µs). **`exports()` = "the table the chunk returns"** (Luau has no `export{…}`). **0 lines of
-embedder-side unsafe** for the spike heap/serde path. Production currently exposes owned-value/table serde;
-live-value zero-copy serde remains a release-roadmap item. Authoritative action leaves use the generic
+embedder-side unsafe** for the spike heap/serde path. Production now exposes owned-value/table serde plus
+snapshot-free deserialization from rooted `Value`, `Table`, and `Exports` handles. `DeserializeOwned` keeps VM
+borrows internal, and the historical speed result remains spike evidence rather than a production claim.
+Authoritative action leaves use the generic
 `GuestSurface::HardenedLeaf` layer plus a borrowed `CompiledEntry`: the top-level decision body runs directly
 without retained exports or loaded-program installation, while inputs/effects remain in the typed invocation
 transaction. `invoke_entry_into` couples successful lane publication with an unconditional decision reset, so
@@ -331,8 +333,8 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
   full grammar + Luau niceties; libs
   math/table/string(+format+patterns)/bit32/coroutine + base globals; metatable OOP; floored `%`. Byte-compat:
   Schubfach `tostring` (high), `string.format` (high), ASCII/C-locale pattern classes (high), PCG32 (low).
-- **P3 — drop into grabby (private fork).** Use the landed typed invocation/effect-transaction core through a
-  koto-shaped shim; add zero-copy serde only where profiling justifies it. Wire behind the `Selector` trait +
+- **P3 — drop into grabby (private fork).** Use the landed typed invocation/effect-transaction core and
+  snapshot-free serde through a koto-shaped shim where profiling justifies it. Wire behind the `Selector` trait +
   the `ai_bakeoff` Criterion harness as a continuous perf/golden gate. Rewrite the `.koto` scenario/console
   scripts → `.luau`. Register grabby's bespoke fused AI op via the typed host-module surface.
 - **P4 — production hardening + public release.** `buffer`, `vector`, `utf8`, `string.pack`, and the major

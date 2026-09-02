@@ -1,9 +1,11 @@
 use crate::{Error, OwnedKey, OwnedTable, OwnedValue, Result};
+use rustia_vm::{Value as RawValue, ValueKind, Vm};
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::ser::{
     self, Serialize, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant,
     SerializeTuple, SerializeTupleStruct, SerializeTupleVariant,
 };
+use std::cell::RefCell;
 use std::fmt;
 
 #[derive(Debug)]
@@ -47,6 +49,20 @@ where
         .map_err(|error| Error::Embed(error.to_string()))
 }
 
+pub(crate) fn from_live<T>(vm: &mut Vm, value: RawValue) -> Result<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let state = LiveTraversalState::default();
+    T::deserialize(LiveDeserializer {
+        vm,
+        value,
+        state: &state,
+        depth: 0,
+    })
+    .map_err(LiveSerdeError::into_rustia)
+}
+
 impl OwnedValue {
     pub fn deserialize<'de, T>(&'de self) -> Result<T>
     where
@@ -82,6 +98,946 @@ impl OwnedTable {
         self.get_array(index)
             .map(OwnedValue::deserialize)
             .transpose()
+    }
+}
+
+const LIVE_SERDE_MAX_ACTIVE_TABLES: usize = 64;
+
+#[derive(Debug)]
+enum LiveSerdeError {
+    Format(String),
+    Vm(rustia_vm::Error),
+}
+
+impl LiveSerdeError {
+    fn format(message: impl Into<String>) -> Self {
+        Self::Format(message.into())
+    }
+
+    fn into_rustia(self) -> Error {
+        match self {
+            Self::Format(message) => Error::Embed(message),
+            Self::Vm(error) => Error::Vm(error),
+        }
+    }
+}
+
+impl fmt::Display for LiveSerdeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Format(message) => formatter.write_str(message),
+            Self::Vm(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for LiveSerdeError {}
+
+impl de::Error for LiveSerdeError {
+    fn custom<T: fmt::Display>(message: T) -> Self {
+        Self::Format(message.to_string())
+    }
+}
+
+impl From<rustia_vm::Error> for LiveSerdeError {
+    fn from(error: rustia_vm::Error) -> Self {
+        Self::Vm(error)
+    }
+}
+
+impl From<SerdeValueError> for LiveSerdeError {
+    fn from(error: SerdeValueError) -> Self {
+        Self::Format(error.to_string())
+    }
+}
+
+type LiveSerdeResult<T> = std::result::Result<T, LiveSerdeError>;
+
+#[derive(Default)]
+struct LiveTraversalState {
+    active_tables: RefCell<Vec<RawValue>>,
+}
+
+struct ActiveTableGuard<'state> {
+    state: &'state LiveTraversalState,
+}
+
+impl Drop for ActiveTableGuard<'_> {
+    fn drop(&mut self) {
+        self.state
+            .active_tables
+            .borrow_mut()
+            .pop()
+            .expect("live serde active-table guard is balanced");
+    }
+}
+
+fn enter_live_table<'state>(
+    vm: &mut Vm,
+    state: &'state LiveTraversalState,
+    table: RawValue,
+) -> LiveSerdeResult<ActiveTableGuard<'state>> {
+    {
+        let active = state.active_tables.borrow();
+        for candidate in active.iter().copied() {
+            if vm.raw_equal_values(candidate, table)? {
+                return Err(LiveSerdeError::format(
+                    "live serde cannot deserialize a cyclic table graph",
+                ));
+            }
+        }
+        if active.len() >= LIVE_SERDE_MAX_ACTIVE_TABLES {
+            return Err(LiveSerdeError::format(format!(
+                "live serde exceeded the maximum table depth of {LIVE_SERDE_MAX_ACTIVE_TABLES}"
+            )));
+        }
+    }
+    state.active_tables.borrow_mut().push(table);
+    Ok(ActiveTableGuard { state })
+}
+
+struct LiveDeserializer<'vm, 'state> {
+    vm: &'vm mut Vm,
+    value: RawValue,
+    state: &'state LiveTraversalState,
+    depth: usize,
+}
+
+impl LiveDeserializer<'_, '_> {
+    fn type_error(&self, expected: &str) -> LiveSerdeError {
+        LiveSerdeError::format(format!(
+            "expected {expected}, got {}",
+            live_kind_name(self.value.kind())
+        ))
+    }
+}
+
+impl<'de> Deserializer<'de> for LiveDeserializer<'_, '_> {
+    type Error = LiveSerdeError;
+
+    fn deserialize_any<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        let Self {
+            vm,
+            value,
+            state,
+            depth,
+        } = self;
+        match value.kind() {
+            ValueKind::Nil => visitor.visit_unit(),
+            ValueKind::Boolean => visitor.visit_bool(value.as_bool().unwrap_or(false)),
+            ValueKind::Number => visitor.visit_f64(value.as_number().unwrap_or(f64::NAN)),
+            ValueKind::String => visit_live_string(vm, value, |text| visitor.visit_str(text)),
+            ValueKind::Table => {
+                let guard = enter_live_table(vm, state, value)?;
+                let sequence_len = vm.raw_table_sequence_len(value)?;
+                let result = match sequence_len {
+                    Some(len) => visitor.visit_seq(LiveSeqAccess {
+                        vm,
+                        table: value,
+                        next_index: 1,
+                        len,
+                        state,
+                        depth: depth + 1,
+                    }),
+                    None => visitor.visit_map(LiveMapAccess::entries(vm, value, state, depth + 1)),
+                };
+                drop(guard);
+                result
+            }
+            kind => Err(unsupported_live_value(kind)),
+        }
+    }
+
+    fn deserialize_bool<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        match self.value.as_bool() {
+            Some(value) => visitor.visit_bool(value),
+            None => Err(self.type_error("boolean")),
+        }
+    }
+
+    fn deserialize_i8<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i8(integer_in_range(number_to_i64(expect_live_number(
+            self.value,
+        )?)?)?)
+    }
+
+    fn deserialize_i16<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i16(integer_in_range(number_to_i64(expect_live_number(
+            self.value,
+        )?)?)?)
+    }
+
+    fn deserialize_i32<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i32(integer_in_range(number_to_i64(expect_live_number(
+            self.value,
+        )?)?)?)
+    }
+
+    fn deserialize_i64<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i64(number_to_i64(expect_live_number(self.value)?)?)
+    }
+
+    fn deserialize_i128<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i128(number_to_i128(expect_live_number(self.value)?)?)
+    }
+
+    fn deserialize_u8<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u8(integer_in_range(number_to_u64(expect_live_number(
+            self.value,
+        )?)?)?)
+    }
+
+    fn deserialize_u16<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u16(integer_in_range(number_to_u64(expect_live_number(
+            self.value,
+        )?)?)?)
+    }
+
+    fn deserialize_u32<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u32(integer_in_range(number_to_u64(expect_live_number(
+            self.value,
+        )?)?)?)
+    }
+
+    fn deserialize_u64<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u64(number_to_u64(expect_live_number(self.value)?)?)
+    }
+
+    fn deserialize_u128<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u128(number_to_u128(expect_live_number(self.value)?)?)
+    }
+
+    fn deserialize_f32<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_f32(expect_live_number(self.value)? as f32)
+    }
+
+    fn deserialize_f64<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_f64(expect_live_number(self.value)?)
+    }
+
+    fn deserialize_option<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        if self.value.kind() == ValueKind::Nil {
+            visitor.visit_none()
+        } else {
+            visitor.visit_some(self)
+        }
+    }
+
+    fn deserialize_str<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        if self.value.kind() != ValueKind::String {
+            return Err(self.type_error("string"));
+        }
+        visit_live_string(self.vm, self.value, |text| visitor.visit_str(text))
+    }
+
+    fn deserialize_string<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_str(visitor)
+    }
+
+    fn deserialize_seq<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        let Self {
+            vm,
+            value,
+            state,
+            depth,
+        } = self;
+        if value.kind() != ValueKind::Table {
+            return Err(LiveSerdeError::format(format!(
+                "expected table sequence, got {}",
+                live_kind_name(value.kind())
+            )));
+        }
+        let guard = enter_live_table(vm, state, value)?;
+        let len = vm.raw_table_sequence_len(value)?.ok_or_else(|| {
+            LiveSerdeError::format("expected dense table sequence, got map-shaped table")
+        })?;
+        let result = visitor.visit_seq(LiveSeqAccess {
+            vm,
+            table: value,
+            next_index: 1,
+            len,
+            state,
+            depth: depth + 1,
+        });
+        drop(guard);
+        result
+    }
+
+    fn deserialize_map<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        let Self {
+            vm,
+            value,
+            state,
+            depth,
+        } = self;
+        if value.kind() != ValueKind::Table {
+            return Err(LiveSerdeError::format(format!(
+                "expected table map, got {}",
+                live_kind_name(value.kind())
+            )));
+        }
+        let guard = enter_live_table(vm, state, value)?;
+        let sequence_len = vm.raw_table_sequence_len(value)?;
+        let access = match sequence_len {
+            Some(len) => LiveMapAccess::sequence(vm, value, len, state, depth + 1),
+            None => LiveMapAccess::entries(vm, value, state, depth + 1),
+        };
+        let result = visitor.visit_map(access);
+        drop(guard);
+        result
+    }
+
+    fn deserialize_struct<V>(
+        self,
+        _name: &'static str,
+        _fields: &'static [&'static str],
+        visitor: V,
+    ) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_map(visitor)
+    }
+
+    fn deserialize_newtype_struct<V>(
+        self,
+        _name: &'static str,
+        visitor: V,
+    ) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_newtype_struct(self)
+    }
+
+    fn deserialize_enum<V>(
+        self,
+        _name: &'static str,
+        _variants: &'static [&'static str],
+        visitor: V,
+    ) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        let Self {
+            vm,
+            value,
+            state,
+            depth,
+        } = self;
+        match value.kind() {
+            ValueKind::String => visitor.visit_enum(LiveEnumAccess {
+                vm,
+                variant: value,
+                content: None,
+                state,
+                depth,
+            }),
+            ValueKind::Table => {
+                let guard = enter_live_table(vm, state, value)?;
+                let Some((variant, content)) = vm.raw_table_next_value(value, RawValue::nil())?
+                else {
+                    return Err(LiveSerdeError::format(
+                        "expected an enum string or single-entry table, got empty table",
+                    ));
+                };
+                if vm.raw_table_next_value(value, variant)?.is_some() {
+                    return Err(LiveSerdeError::format(
+                        "enum content tables must contain exactly one entry",
+                    ));
+                }
+                if variant.kind() != ValueKind::String {
+                    return Err(LiveSerdeError::format(
+                        "an enum variant key must be a string",
+                    ));
+                }
+                let result = visitor.visit_enum(LiveEnumAccess {
+                    vm,
+                    variant,
+                    content: Some(content),
+                    state,
+                    depth: depth + 1,
+                });
+                drop(guard);
+                result
+            }
+            kind => Err(LiveSerdeError::format(format!(
+                "expected an enum string or single-entry table, got {}",
+                live_kind_name(kind)
+            ))),
+        }
+    }
+
+    serde::forward_to_deserialize_any! {
+        char bytes byte_buf unit unit_struct tuple tuple_struct identifier ignored_any
+    }
+}
+
+struct LiveSeqAccess<'vm, 'state> {
+    vm: &'vm mut Vm,
+    table: RawValue,
+    next_index: usize,
+    len: usize,
+    state: &'state LiveTraversalState,
+    depth: usize,
+}
+
+impl<'de> SeqAccess<'de> for LiveSeqAccess<'_, '_> {
+    type Error = LiveSerdeError;
+
+    fn next_element_seed<T>(&mut self, seed: T) -> LiveSerdeResult<Option<T::Value>>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        if self.next_index > self.len {
+            return Ok(None);
+        }
+        let index = self.next_index;
+        self.next_index += 1;
+        let value = self
+            .vm
+            .raw_table_get_value(self.table, RawValue::number(index as f64))?;
+        seed.deserialize(LiveDeserializer {
+            vm: self.vm,
+            value,
+            state: self.state,
+            depth: self.depth,
+        })
+        .map(Some)
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.len.saturating_sub(self.next_index.saturating_sub(1)))
+    }
+}
+
+enum LiveMapMode {
+    Sequence { next_index: usize, len: usize },
+    Entries { after: RawValue },
+}
+
+struct LiveMapAccess<'vm, 'state> {
+    vm: &'vm mut Vm,
+    table: RawValue,
+    mode: LiveMapMode,
+    pending: Option<RawValue>,
+    state: &'state LiveTraversalState,
+    depth: usize,
+}
+
+impl<'vm, 'state> LiveMapAccess<'vm, 'state> {
+    fn sequence(
+        vm: &'vm mut Vm,
+        table: RawValue,
+        len: usize,
+        state: &'state LiveTraversalState,
+        depth: usize,
+    ) -> Self {
+        Self {
+            vm,
+            table,
+            mode: LiveMapMode::Sequence { next_index: 1, len },
+            pending: None,
+            state,
+            depth,
+        }
+    }
+
+    fn entries(
+        vm: &'vm mut Vm,
+        table: RawValue,
+        state: &'state LiveTraversalState,
+        depth: usize,
+    ) -> Self {
+        Self {
+            vm,
+            table,
+            mode: LiveMapMode::Entries {
+                after: RawValue::nil(),
+            },
+            pending: None,
+            state,
+            depth,
+        }
+    }
+}
+
+impl<'de> MapAccess<'de> for LiveMapAccess<'_, '_> {
+    type Error = LiveSerdeError;
+
+    fn next_key_seed<K>(&mut self, seed: K) -> LiveSerdeResult<Option<K::Value>>
+    where
+        K: de::DeserializeSeed<'de>,
+    {
+        if self.pending.is_some() {
+            return Err(LiveSerdeError::format(
+                "map value requested before previous value was consumed",
+            ));
+        }
+        let next = match &mut self.mode {
+            LiveMapMode::Sequence { next_index, len } => {
+                if *next_index > *len {
+                    None
+                } else {
+                    let key = RawValue::number(*next_index as f64);
+                    *next_index += 1;
+                    let value = self.vm.raw_table_get_value(self.table, key)?;
+                    Some((key, value))
+                }
+            }
+            LiveMapMode::Entries { after } => {
+                let next = self.vm.raw_table_next_value(self.table, *after)?;
+                if let Some((key, _)) = next {
+                    *after = key;
+                }
+                next
+            }
+        };
+        let Some((key, value)) = next else {
+            return Ok(None);
+        };
+        self.pending = Some(value);
+        seed.deserialize(LiveMapKeyDeserializer { vm: self.vm, key })
+            .map(Some)
+    }
+
+    fn next_value_seed<V>(&mut self, seed: V) -> LiveSerdeResult<V::Value>
+    where
+        V: de::DeserializeSeed<'de>,
+    {
+        let value = self.pending.take().ok_or_else(|| {
+            LiveSerdeError::format("map value requested before a key was produced")
+        })?;
+        seed.deserialize(LiveDeserializer {
+            vm: self.vm,
+            value,
+            state: self.state,
+            depth: self.depth,
+        })
+    }
+}
+
+struct LiveMapKeyDeserializer<'vm> {
+    vm: &'vm mut Vm,
+    key: RawValue,
+}
+
+impl<'de> Deserializer<'de> for LiveMapKeyDeserializer<'_> {
+    type Error = LiveSerdeError;
+
+    fn deserialize_any<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        match self.key.kind() {
+            ValueKind::Boolean => visitor.visit_bool(self.key.as_bool().unwrap_or(false)),
+            ValueKind::Number => visitor.visit_f64(self.key.as_number().unwrap_or(f64::NAN)),
+            ValueKind::String => {
+                visit_live_string(self.vm, self.key, |text| visitor.visit_str(text))
+            }
+            kind => Err(LiveSerdeError::format(format!(
+                "{} table keys cannot be deserialized through serde",
+                live_kind_name(kind)
+            ))),
+        }
+    }
+
+    fn deserialize_i8<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i8(integer_in_range(number_to_i64(expect_live_number(
+            self.key,
+        )?)?)?)
+    }
+
+    fn deserialize_i16<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i16(integer_in_range(number_to_i64(expect_live_number(
+            self.key,
+        )?)?)?)
+    }
+
+    fn deserialize_i32<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i32(integer_in_range(number_to_i64(expect_live_number(
+            self.key,
+        )?)?)?)
+    }
+
+    fn deserialize_i64<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i64(number_to_i64(expect_live_number(self.key)?)?)
+    }
+
+    fn deserialize_i128<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i128(number_to_i128(expect_live_number(self.key)?)?)
+    }
+
+    fn deserialize_u8<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u8(integer_in_range(number_to_u64(expect_live_number(
+            self.key,
+        )?)?)?)
+    }
+
+    fn deserialize_u16<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u16(integer_in_range(number_to_u64(expect_live_number(
+            self.key,
+        )?)?)?)
+    }
+
+    fn deserialize_u32<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u32(integer_in_range(number_to_u64(expect_live_number(
+            self.key,
+        )?)?)?)
+    }
+
+    fn deserialize_u64<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u64(number_to_u64(expect_live_number(self.key)?)?)
+    }
+
+    fn deserialize_u128<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u128(number_to_u128(expect_live_number(self.key)?)?)
+    }
+
+    fn deserialize_f32<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_f32(expect_live_number(self.key)? as f32)
+    }
+
+    fn deserialize_f64<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_f64(expect_live_number(self.key)?)
+    }
+
+    fn deserialize_identifier<V>(self, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        if self.key.kind() != ValueKind::String {
+            return self.deserialize_any(visitor);
+        }
+        visit_live_string(self.vm, self.key, |text| visitor.visit_str(text))
+    }
+
+    fn deserialize_enum<V>(
+        self,
+        _name: &'static str,
+        _variants: &'static [&'static str],
+        visitor: V,
+    ) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        if self.key.kind() != ValueKind::String {
+            return Err(LiveSerdeError::format("an enum map key must be a string"));
+        }
+        visitor.visit_enum(LiveKeyEnumAccess {
+            vm: self.vm,
+            variant: self.key,
+        })
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool char str string bytes byte_buf option unit unit_struct newtype_struct
+        seq tuple tuple_struct map struct ignored_any
+    }
+}
+
+struct LiveKeyEnumAccess<'vm> {
+    vm: &'vm mut Vm,
+    variant: RawValue,
+}
+
+impl<'de> de::EnumAccess<'de> for LiveKeyEnumAccess<'_> {
+    type Error = LiveSerdeError;
+    type Variant = LiveUnitVariantAccess;
+
+    fn variant_seed<V>(self, seed: V) -> LiveSerdeResult<(V::Value, Self::Variant)>
+    where
+        V: de::DeserializeSeed<'de>,
+    {
+        let variant = seed.deserialize(LiveMapKeyDeserializer {
+            vm: self.vm,
+            key: self.variant,
+        })?;
+        Ok((variant, LiveUnitVariantAccess))
+    }
+}
+
+struct LiveUnitVariantAccess;
+
+impl<'de> de::VariantAccess<'de> for LiveUnitVariantAccess {
+    type Error = LiveSerdeError;
+
+    fn unit_variant(self) -> LiveSerdeResult<()> {
+        Ok(())
+    }
+
+    fn newtype_variant_seed<T>(self, _seed: T) -> LiveSerdeResult<T::Value>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        Err(LiveSerdeError::format(
+            "enum map keys support unit variants only",
+        ))
+    }
+
+    fn tuple_variant<V>(self, _len: usize, _visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        Err(LiveSerdeError::format(
+            "enum map keys support unit variants only",
+        ))
+    }
+
+    fn struct_variant<V>(
+        self,
+        _fields: &'static [&'static str],
+        _visitor: V,
+    ) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        Err(LiveSerdeError::format(
+            "enum map keys support unit variants only",
+        ))
+    }
+}
+
+struct LiveEnumAccess<'vm, 'state> {
+    vm: &'vm mut Vm,
+    variant: RawValue,
+    content: Option<RawValue>,
+    state: &'state LiveTraversalState,
+    depth: usize,
+}
+
+impl<'de, 'vm, 'state> de::EnumAccess<'de> for LiveEnumAccess<'vm, 'state> {
+    type Error = LiveSerdeError;
+    type Variant = LiveVariantAccess<'vm, 'state>;
+
+    fn variant_seed<V>(self, seed: V) -> LiveSerdeResult<(V::Value, Self::Variant)>
+    where
+        V: de::DeserializeSeed<'de>,
+    {
+        let variant = seed.deserialize(LiveMapKeyDeserializer {
+            vm: self.vm,
+            key: self.variant,
+        })?;
+        Ok((
+            variant,
+            LiveVariantAccess {
+                vm: self.vm,
+                content: self.content,
+                state: self.state,
+                depth: self.depth,
+            },
+        ))
+    }
+}
+
+struct LiveVariantAccess<'vm, 'state> {
+    vm: &'vm mut Vm,
+    content: Option<RawValue>,
+    state: &'state LiveTraversalState,
+    depth: usize,
+}
+
+impl<'de> de::VariantAccess<'de> for LiveVariantAccess<'_, '_> {
+    type Error = LiveSerdeError;
+
+    fn unit_variant(self) -> LiveSerdeResult<()> {
+        match self.content {
+            None => Ok(()),
+            Some(_) => Err(LiveSerdeError::format(
+                "unit enum variants must be represented by a string",
+            )),
+        }
+    }
+
+    fn newtype_variant_seed<T>(self, seed: T) -> LiveSerdeResult<T::Value>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        let content = self.content.ok_or_else(|| {
+            LiveSerdeError::format(
+                "newtype enum variants require a single-entry table with content",
+            )
+        })?;
+        seed.deserialize(LiveDeserializer {
+            vm: self.vm,
+            value: content,
+            state: self.state,
+            depth: self.depth,
+        })
+    }
+
+    fn tuple_variant<V>(self, _len: usize, visitor: V) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        let content = self.content.ok_or_else(|| {
+            LiveSerdeError::format("tuple enum variants require a single-entry table with content")
+        })?;
+        LiveDeserializer {
+            vm: self.vm,
+            value: content,
+            state: self.state,
+            depth: self.depth,
+        }
+        .deserialize_seq(visitor)
+    }
+
+    fn struct_variant<V>(
+        self,
+        _fields: &'static [&'static str],
+        visitor: V,
+    ) -> LiveSerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        let content = self.content.ok_or_else(|| {
+            LiveSerdeError::format("struct enum variants require a single-entry table with content")
+        })?;
+        LiveDeserializer {
+            vm: self.vm,
+            value: content,
+            state: self.state,
+            depth: self.depth,
+        }
+        .deserialize_map(visitor)
+    }
+}
+
+fn visit_live_string<R>(
+    vm: &mut Vm,
+    value: RawValue,
+    visit: impl FnOnce(&str) -> LiveSerdeResult<R>,
+) -> LiveSerdeResult<R> {
+    let visited = vm.with_string_value_bytes(value, |bytes| {
+        let text = std::str::from_utf8(bytes).map_err(|_| {
+            LiveSerdeError::format("string value is not valid UTF-8 for serde deserialization")
+        })?;
+        visit(text)
+    })?;
+    visited.ok_or_else(|| LiveSerdeError::format("expected string, got non-string value"))?
+}
+
+fn expect_live_number(value: RawValue) -> LiveSerdeResult<f64> {
+    value.as_number().ok_or_else(|| {
+        LiveSerdeError::format(format!(
+            "expected number, got {}",
+            live_kind_name(value.kind())
+        ))
+    })
+}
+
+fn unsupported_live_value(kind: ValueKind) -> LiveSerdeError {
+    LiveSerdeError::format(format!(
+        "{} values cannot be deserialized through serde",
+        live_kind_name(kind)
+    ))
+}
+
+fn live_kind_name(kind: ValueKind) -> &'static str {
+    match kind {
+        ValueKind::Nil => "nil",
+        ValueKind::Boolean => "boolean",
+        ValueKind::Number => "number",
+        ValueKind::String => "string",
+        ValueKind::Table => "table",
+        ValueKind::Function => "function",
+        ValueKind::Userdata => "userdata",
+        ValueKind::Buffer => "buffer",
+        ValueKind::Vector => "vector",
+        _ => "unknown",
     }
 }
 
@@ -269,9 +1225,14 @@ impl<'de> Deserializer<'de> for OwnedDeserializer<'de> {
         V: Visitor<'de>,
     {
         match self.value {
-            OwnedValue::Table(table) => visitor.visit_seq(TableSeqAccess {
-                values: table.array.iter(),
-            }),
+            OwnedValue::Table(table) if table.entries.is_empty() => {
+                visitor.visit_seq(TableSeqAccess {
+                    values: table.array.iter(),
+                })
+            }
+            OwnedValue::Table(_) => Err(SerdeValueError(
+                "expected dense table sequence, got map-shaped table".to_owned(),
+            )),
             value => Err(SerdeValueError(format!(
                 "expected table sequence, got {}",
                 value.type_name()
@@ -512,6 +1473,19 @@ enum MapKeyDeserializer<'de> {
     Number(f64),
 }
 
+impl MapKeyDeserializer<'_> {
+    fn number(self) -> SerdeResult<f64> {
+        match self {
+            Self::Owned(OwnedKey::Number(value)) => Ok(*value),
+            Self::Number(value) => Ok(value),
+            Self::Owned(key) => Err(SerdeValueError(format!(
+                "expected number, got {} table key",
+                owned_key_type_name(key)
+            ))),
+        }
+    }
+}
+
 impl<'de> Deserializer<'de> for MapKeyDeserializer<'de> {
     type Error = SerdeValueError;
 
@@ -525,6 +1499,90 @@ impl<'de> Deserializer<'de> for MapKeyDeserializer<'de> {
             Self::Number(value) => visitor.visit_f64(value),
             Self::Owned(OwnedKey::String(value)) => visitor.visit_borrowed_str(value),
         }
+    }
+
+    fn deserialize_i8<V>(self, visitor: V) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i8(integer_in_range(number_to_i64(self.number()?)?)?)
+    }
+
+    fn deserialize_i16<V>(self, visitor: V) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i16(integer_in_range(number_to_i64(self.number()?)?)?)
+    }
+
+    fn deserialize_i32<V>(self, visitor: V) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i32(integer_in_range(number_to_i64(self.number()?)?)?)
+    }
+
+    fn deserialize_i64<V>(self, visitor: V) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i64(number_to_i64(self.number()?)?)
+    }
+
+    fn deserialize_i128<V>(self, visitor: V) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_i128(number_to_i128(self.number()?)?)
+    }
+
+    fn deserialize_u8<V>(self, visitor: V) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u8(integer_in_range(number_to_u64(self.number()?)?)?)
+    }
+
+    fn deserialize_u16<V>(self, visitor: V) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u16(integer_in_range(number_to_u64(self.number()?)?)?)
+    }
+
+    fn deserialize_u32<V>(self, visitor: V) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u32(integer_in_range(number_to_u64(self.number()?)?)?)
+    }
+
+    fn deserialize_u64<V>(self, visitor: V) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u64(number_to_u64(self.number()?)?)
+    }
+
+    fn deserialize_u128<V>(self, visitor: V) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_u128(number_to_u128(self.number()?)?)
+    }
+
+    fn deserialize_f32<V>(self, visitor: V) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_f32(self.number()? as f32)
+    }
+
+    fn deserialize_f64<V>(self, visitor: V) -> SerdeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_f64(self.number()?)
     }
 
     fn deserialize_identifier<V>(self, visitor: V) -> SerdeResult<V::Value>
@@ -557,9 +1615,17 @@ impl<'de> Deserializer<'de> for MapKeyDeserializer<'de> {
     }
 
     serde::forward_to_deserialize_any! {
-        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+        bool char str string
         bytes byte_buf option unit unit_struct newtype_struct seq tuple tuple_struct
         map struct ignored_any
+    }
+}
+
+fn owned_key_type_name(key: &OwnedKey) -> &'static str {
+    match key {
+        OwnedKey::Boolean(_) => "boolean",
+        OwnedKey::Number(_) => "number",
+        OwnedKey::String(_) => "string",
     }
 }
 

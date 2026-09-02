@@ -1,4 +1,5 @@
 use crate::function::Function;
+use crate::serde_value::from_live;
 use crate::value::{load_owned_value, snapshot_value};
 use crate::{Error, HostSchema, IntoRustia, OwnedValue, Result, Rustia};
 use rustia_vm::{RetainedValue, Value as RawValue, ValueKind, Vm};
@@ -202,6 +203,37 @@ impl Value {
         snapshot_value(rustia.vm_mut(), value)
     }
 
+    /// Deserializes this rooted value directly without first building an
+    /// [`OwnedValue`] snapshot.
+    ///
+    /// The returned type must own all of its data; VM strings and collector
+    /// values cannot escape the mutable VM borrow.
+    ///
+    /// ```compile_fail
+    /// use rustia::{Rustia, Value};
+    ///
+    /// fn cannot_borrow(value: &Value, rustia: &mut Rustia) {
+    ///     let _: &str = value.deserialize(rustia).unwrap();
+    /// }
+    /// ```
+    pub fn deserialize<T>(&self, rustia: &mut Rustia<impl HostSchema>) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let value = self.raw(rustia.vm(), "value handle")?;
+        from_live(rustia.vm_mut(), value)
+    }
+
+    /// Deserializes this value after additionally requiring its install
+    /// generation to be current.
+    pub fn deserialize_current<T>(&self, rustia: &mut Rustia<impl HostSchema>) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        self.ensure_current(rustia)?;
+        self.deserialize(rustia)
+    }
+
     /// Returns a rooted table view when this value is a table.
     pub fn as_table<C>(&self, rustia: &Rustia<C>) -> Result<Option<Table>>
     where
@@ -266,6 +298,22 @@ impl Table {
     /// Clones this table's underlying live value handle.
     pub fn as_value(&self) -> Value {
         self.value.clone()
+    }
+
+    /// Deserializes this rooted table directly without an owned graph snapshot.
+    pub fn deserialize<T>(&self, rustia: &mut Rustia<impl HostSchema>) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        self.value.deserialize(rustia)
+    }
+
+    /// Deserializes this table after requiring its install generation to be current.
+    pub fn deserialize_current<T>(&self, rustia: &mut Rustia<impl HostSchema>) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        self.value.deserialize_current(rustia)
     }
 
     /// Returns the install generation recorded by this handle.

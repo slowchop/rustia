@@ -244,7 +244,8 @@ function existingBackfills(exceptHarnessCommit) {
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   const known = new Set([
-    "plan", "history", "main", "pr", "calibrate", "matrix", "memory", "fetch", "unlock", "self-test",
+    "plan", "history", "main", "pr", "live-serde", "calibrate", "matrix", "memory", "fetch", "unlock",
+    "self-test",
   ]);
   if (!known.has(command)) return null;
   const parsed = {
@@ -303,9 +304,9 @@ function parseArgs(argv) {
       return null;
     }
   }
-  // --out is shared by the three lanes that write a file; --previous-binary is
+  // --out is shared by the four lanes that write a file; --previous-binary is
   // the per-commit lane's alone.
-  if (parsed.out !== undefined && !["main", "pr", "calibrate"].includes(command)) return null;
+  if (parsed.out !== undefined && !["main", "pr", "live-serde", "calibrate"].includes(command)) return null;
   if (parsed.previousBinary !== undefined && command !== "main") return null;
   // --base and --json describe a comparison; --repetitions and --confidence buy
   // a tighter interval, which only the lanes that publish nothing may do.
@@ -1086,6 +1087,89 @@ function screeningSummary(result) {
   return `${lines.join("\n")}\n`;
 }
 
+function parseLiveSerdeOutput(output) {
+  const read = (label) => {
+    const match = output.match(new RegExp(`^${label}:\\s+([0-9]+(?:\\.[0-9]+)?)`, "m"));
+    const value = match ? Number(match[1]) : Number.NaN;
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error(`live-serde benchmark did not report a positive ${label} value`);
+    }
+    return value;
+  };
+  const liveNs = read("live serde");
+  const ownedNs = read("owned path");
+  return {
+    live_ns: liveNs,
+    owned_ns: ownedNs,
+    owned_over_live: ownedNs / liveNs,
+    live_latency_reduction_percent: (1 - liveNs / ownedNs) * 100,
+  };
+}
+
+function liveSerdeSummary(result) {
+  const reduction = result.live_latency_reduction_percent;
+  const comparison = reduction >= 0
+    ? `live is ${reduction.toFixed(2)}% lower latency`
+    : `live is ${Math.abs(reduction).toFixed(2)}% higher latency`;
+  return (
+    "## Live-value serde microbenchmark\n\n" +
+    `Commit \`${result.commit.slice(0, 8)}\`, measured on \`${result.host}\` pinned to core ` +
+    `${result.pinned_core}. The candidate compares direct live deserialization with its explicit ` +
+    "OwnedValue snapshot path using the example's interleaved A B B A protocol.\n\n" +
+    "| path | ns/deserialization |\n" +
+    "| --- | ---: |\n" +
+    `| live value | ${result.live_ns.toFixed(1)} |\n` +
+    `| owned snapshot | ${result.owned_ns.toFixed(1)} |\n\n` +
+    `Owned/live: **${result.owned_over_live.toFixed(3)}x** (${comparison}). ` +
+    "Equal outputs are asserted before timing. This candidate-only microbenchmark is screening evidence, " +
+    "not a published historical performance claim.\n"
+  );
+}
+
+function commandLiveSerde(options) {
+  if (!options.local) {
+    fail("live-serde runs only inside the ci-bench workflow with --local");
+  }
+  if (!options.out) fail("live-serde requires --out FILE to write its summary");
+
+  const commit = git(["rev-parse", "HEAD"]).trim();
+  const configFile = path.join(STATE_ROOT, `live-serde-${commit.slice(0, 12)}.json`);
+  fs.rmSync(configFile, { force: true });
+  local(
+    "node",
+    [
+      "tools/freeze-history-backfill.js",
+      "--only",
+      commit,
+      "--output",
+      path.relative(REPO, configFile),
+    ],
+    { capture: false },
+  );
+  const config = loadConfig(configFile);
+  const provider = attestHost(config);
+  if (provider.host !== "ci-bench") fail(`live-serde requires ci-bench, got ${provider.host}`);
+
+  local(
+    "cargo",
+    ["build", "--locked", "--release", "-p", "rustia", "--example", "live_serde_bench"],
+    { capture: false },
+  );
+  const binary = path.join(REPO, "target/release/examples/live_serde_bench");
+  if (!fs.existsSync(binary)) fail(`live-serde benchmark binary is missing at ${binary}`);
+  const output = local("taskset", ["-c", String(config.host_gate.benchmark_cpu), binary]);
+  const measured = parseLiveSerdeOutput(output);
+  const result = {
+    commit,
+    host: provider.host,
+    pinned_core: config.host_gate.benchmark_cpu,
+    ...measured,
+  };
+  const summary = liveSerdeSummary(result);
+  fs.writeFileSync(options.out, summary);
+  process.stdout.write(summary);
+}
+
 // A/A calibration. Measures one revision four times and compares two of those
 // passes against the other two, so both sides are the same bytes and every
 // difference is the host. Four passes rather than two because the PR lane uses
@@ -1529,6 +1613,8 @@ function selfTest() {
   assert.equal(parseArgs(["pr", "--out", "s.md"]).out, "s.md");
   assert.equal(parseArgs(["pr", "--out", "s.md", "--base", "origin/main"]).base, "origin/main");
   assert.equal(parseArgs(["pr", "--out", "s.md", "--json", "s.json"]).json, "s.json");
+  assert.equal(parseArgs(["live-serde", "--local", "--out", "s.md"]).out, "s.md");
+  assert.equal(parseArgs(["live-serde", "--base", "main"]), null);
   assert.equal(parseArgs(["main", "--out", "r.jsonl", "--base", "x"]), null, "the series has no merge base");
   assert.equal(parseArgs(["pr", "--repetitions", "25"]), null, "screening must not retune itself");
   assert.equal(parseArgs(["calibrate", "--repetitions", "25"]).repetitions, 25);
@@ -1655,6 +1741,21 @@ function selfTest() {
   assert.match(rendered, /\+9\.00%/);
   assert.match(rendered, /1 workload\(s\) exceeded the calibrated screening threshold/);
 
+  const liveSerde = parseLiveSerdeOutput(
+    "live serde:  1000.0 ns/deserialize\nowned path:  2500.0 ns/deserialize\nowned/live:  2.500x\n",
+  );
+  assert.equal(liveSerde.live_ns, 1000);
+  assert.equal(liveSerde.owned_ns, 2500);
+  assert.equal(liveSerde.owned_over_live, 2.5);
+  assert.equal(liveSerde.live_latency_reduction_percent, 60);
+  assert.match(
+    liveSerdeSummary({
+      commit: "c".repeat(40), host: "ci-bench", pinned_core: 4, ...liveSerde,
+    }),
+    /2\.500x.*60\.00% lower latency/,
+  );
+  assert.throws(() => parseLiveSerdeOutput("live serde:  1.0 ns/deserialize\n"), /owned path/);
+
   process.stdout.write("run-dedicated-benchmark self-test ok\n");
 }
 
@@ -1666,6 +1767,7 @@ function usage() {
       "  history   [--config FILE] [--replace]  measure every revision and promote\n" +
       "  main      --out FILE [--previous-binary SHA]  measure HEAD alone for the live series\n" +
       "  pr        --out FILE [--base REF] [--json FILE]  screen HEAD against its merge base\n" +
+      "  live-serde --local --out FILE             compare live and owned serde on ci-bench\n" +
       "  matrix    [--plan]                     measure 13 engines x 5 workloads and promote\n" +
       "  memory    [--plan]                     measure per-VM memory and promote\n" +
       "  calibrate [--out FILE] [--repetitions N] [--confidence P]\n" +
@@ -1693,6 +1795,7 @@ try {
     else if (parsed.command === "history") commandHistory(parsed);
     else if (parsed.command === "main") commandMain(parsed);
     else if (parsed.command === "pr") commandPr(parsed);
+    else if (parsed.command === "live-serde") commandLiveSerde(parsed);
     else if (parsed.command === "calibrate") commandCalibrate(parsed);
     else if (parsed.command === "matrix") commandMatrix(parsed);
     else if (parsed.command === "memory") {

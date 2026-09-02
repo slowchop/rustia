@@ -246,8 +246,9 @@ hidden behind interior mutability.
 ## Current gaps
 
 - Guest module installation/hot reload is not a general heap transaction.
-- The first serde path snapshots into `OwnedValue`; zero-copy live-value serde
-  remains deferred.
+- Rooted `Value`, `Table`, and `Exports` handles now deserialize directly through
+  snapshot-free live-value serde. `OwnedValue` remains the explicit eager,
+  acyclic validation and serialization path.
 - Userdata/scope APIs remain deferred while the rich-value boundary evolves.
 - Async and reentrant host callbacks are intentionally outside this first
   lexical invocation design.

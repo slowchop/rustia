@@ -8,6 +8,11 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- Snapshot-free Serde deserialization from rooted `Value`, `Table`, and `Exports` handles. The direct path
+  preserves VM/decision-epoch ownership and optional install-generation checks, rejects cycles and unsupported
+  rich values without exposing collector lifetimes, and works with typed `Rustia<H>` VMs. The existing owned
+  serializer and explicit eager snapshot path remain available.
+
 - A composable `Rustia::load` chunk builder with borrowed text/byte source,
   named diagnostics, rooted custom lexical environments, typed/live/exports
   evaluation, and side-effect-only execution. Custom environments are checked
@@ -164,6 +169,9 @@ Current unpublished workspace version: `0.0.1`.
   `design/50-conformance.md`.
 
 ### Changed
+
+- Serde sequence requests now reject sparse or mixed map-shaped tables instead of silently producing an empty
+  sequence, and numeric map keys use the same finite, integral, range-checked conversions as numeric values.
 
 - **Nothing in this repository can create or pay for a cloud instance.** The
   memory cohort — the last lane that could, and only ever by explicit dispatch —
