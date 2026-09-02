@@ -171,6 +171,13 @@ with one. It runs a short protocol, publishes nothing, and holds no write access
 to either repository. A candidate experiment is what settles whether an
 optimisation is adopted.
 
+The same qualified PR job runs the candidate-only live-value serde
+microbenchmark through `run-dedicated-benchmark.js live-serde`. It pins the
+benchmark binary to the attested core and compares direct live deserialization
+with the explicit `OwnedValue` path using the example's A B B A order. The
+summary is review evidence only: it asserts equal decoded values, writes no
+history row, and does not revive the historical 30% claim.
+
 **Thresholds are measured on the host rather than declared.**
 `bench/pr-screening.json` is produced by an A/A run: one revision measured four
 times, passes 1 and 4 compared against 2 and 3 through the ordinary analyzer

@@ -12,6 +12,10 @@ name: Pull Request Benchmark Screening
 # rather than main's tip: an unrelated commit landing mid-review would otherwise
 # be attributed to this pull request.
 #
+# The job also runs the candidate-only live-value serde ABBA microbenchmark.
+# That comparison is screening evidence between the direct and explicit owned
+# paths in one revision; it is not appended to published benchmark history.
+#
 # The thresholds come from bench/pr-screening.json, which is measured on this
 # host by `run-dedicated-benchmark.js calibrate` and committed. There is no
 # default threshold, deliberately -- a guessed figure that happens to sit inside
@@ -76,6 +80,16 @@ jobs:
             --base "${{ github.event.pull_request.base.sha }}" \
             --out "$work_dir/summary.md" \
             --json "$work_dir/screening.json"
+          cat "$work_dir/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compare live and owned serde paths
+        run: |
+          set -euo pipefail
+          work_dir="$(mktemp -d "$RUNNER_TEMP/rustia-live-serde.XXXXXX")"
+          trap 'rm -rf -- "$work_dir"' EXIT
+          node tools/run-dedicated-benchmark.js live-serde \
+            --local \
+            --out "$work_dir/summary.md"
           cat "$work_dir/summary.md" >> "$GITHUB_STEP_SUMMARY"
 
   calibrate:
