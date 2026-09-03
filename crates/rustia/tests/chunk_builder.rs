@@ -6,15 +6,15 @@ fn chunk_builder_evaluates_typed_live_and_exports_results() {
 
     let answer: f64 = rustia
         .load("return 40 + 2")
-        .name("typed-chunk.luau")
+        .source_name("typed-chunk.luau")
         .eval()
         .expect("typed chunk");
     assert_eq!(answer, 42.0);
 
     let live = rustia
         .load("local value = {}; value.self = value; return value")
-        .name("live-chunk.luau")
-        .eval_value()
+        .source_name("live-chunk.luau")
+        .eval_live()
         .expect("live cyclic result");
     let table = live
         .as_table(&rustia)
@@ -27,8 +27,8 @@ fn chunk_builder_evaluates_typed_live_and_exports_results() {
 
     let exports = rustia
         .load("return { answer = 42 }")
-        .name("exports-chunk.luau")
-        .eval_exports()
+        .source_name("exports-chunk.luau")
+        .install()
         .expect("exports chunk");
     assert_eq!(
         exports
@@ -55,7 +55,7 @@ fn chunk_builder_is_available_in_every_ordinary_preset() {
             .expect("environment input");
         let answer: f64 = rustia
             .load("return profile_value")
-            .name(format!("{name}-chunk.luau"))
+            .source_name(format!("{name}-chunk.luau"))
             .environment(environment)
             .eval()
             .expect("profile chunk");
@@ -70,7 +70,7 @@ fn exec_discards_the_result_but_keeps_chunk_global_effects() {
 
     rustia
         .load("chunk_side_effect = 42; return 'discarded'")
-        .name("exec-chunk.luau")
+        .source_name("exec-chunk.luau")
         .exec()
         .expect("execute chunk");
 
@@ -90,9 +90,9 @@ fn custom_environment_is_live_and_captured_by_nested_functions() {
 
     let function = rustia
         .load("return function() answer += 1; return answer end")
-        .name("environment-chunk.luau")
+        .source_name("environment-chunk.luau")
         .environment(&environment)
-        .eval_value()
+        .eval_live()
         .expect("function result")
         .as_function(&rustia)
         .expect("function kind")
@@ -128,7 +128,6 @@ fn custom_environment_is_validated_before_source_compilation() {
     let mut first = Rustia::default();
     let mut second = Rustia::default();
     let foreign = first.create_table().expect("foreign environment");
-    let generation = second.generation();
 
     let error = second
         .load("return {")
@@ -139,8 +138,6 @@ fn custom_environment_is_validated_before_source_compilation() {
         error,
         Error::Embed(ref message) if message.contains("different Rustia VM")
     ));
-    assert_eq!(second.generation(), generation);
-
     let stale = second.create_table().expect("soon-stale environment");
     second.reset_decision().expect("reset");
     let error = second
@@ -160,7 +157,7 @@ fn borrowed_source_bytes_and_name_feed_runtime_diagnostics() {
     let source = b"local t = {}; t[0 / 0] = 1".as_slice();
     let error = rustia
         .load(source)
-        .name("byte-chunk.luau")
+        .source_name("byte-chunk.luau")
         .eval::<OwnedValue>()
         .expect_err("runtime failure");
     let location = error.source_location().expect("runtime source location");
@@ -178,12 +175,11 @@ fn hardened_leaf_rejects_dynamic_loading_without_mutating_the_vm() {
         rustia.vm_settings().guest_surface,
         GuestSurface::HardenedLeaf
     );
-    let generation = rustia.generation();
     let before = rustia.memory_stats();
 
     let error = rustia
         .load("return 42")
-        .name("forbidden-chunk.luau")
+        .source_name("forbidden-chunk.luau")
         .eval::<f64>()
         .expect_err("dynamic loading must reject");
     assert!(matches!(
@@ -196,6 +192,5 @@ fn hardened_leaf_rejects_dynamic_loading_without_mutating_the_vm() {
                 }
             )
     ));
-    assert_eq!(rustia.generation(), generation);
     assert_eq!(rustia.memory_stats(), before);
 }

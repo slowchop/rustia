@@ -25,7 +25,7 @@ fn existing_array_slots_are_written_without_consulting_newindex() {
         // The key is present, so Luau writes the slot directly and never
         // reaches __newindex.
         let report: String = rustia
-            .run(
+            .eval(
                 "local calls = 0 \
                  local t = setmetatable({10, 20, 30}, { \
                      __newindex = function(tbl, key, value) \
@@ -49,7 +49,7 @@ fn missing_and_nil_array_slots_still_defer_to_newindex() {
         // Slot 2 is present-but-nil and slot 9 is absent: both are missing
         // keys, so both must reach __newindex.
         let report: String = rustia
-            .run(
+            .eval(
                 "local seen = {} \
                  local t = setmetatable({10, nil, 30}, { \
                      __newindex = function(tbl, key, value) \
@@ -73,7 +73,7 @@ fn an_existing_array_slot_can_be_replaced_with_nil_in_place() {
         // Clearing a present key is still a present-key write, so __newindex
         // stays out of it and the surrounding slots keep their values.
         let report: String = rustia
-            .run(
+            .eval(
                 "local calls = 0 \
                  local t = setmetatable({10, 20, 30, 40}, { \
                      __newindex = function() calls = calls + 1 end, \
@@ -95,7 +95,7 @@ fn an_existing_array_slot_can_be_replaced_with_nil_in_place() {
 fn readonly_tables_reject_existing_array_slot_writes() {
     for (preset, mut rustia) in presets() {
         let message: String = rustia
-            .run(
+            .eval(
                 "local t = table.freeze({10, 20, 30}) \
                  local ok, err = pcall(function() t[2] = 99 end) \
                  return tostring(ok) .. '|' .. tostring(err) .. '|' .. tostring(t[2])",
@@ -120,7 +120,7 @@ fn readonly_tables_reject_existing_array_slot_writes() {
 fn in_place_slot_writes_preserve_length_iteration_and_sort_visibility() {
     for (preset, mut rustia) in presets() {
         let report: String = rustia
-            .run(
+            .eval(
                 "local t = {5, 4, 3, 2, 1} \
                  t.tag = 'keep' \
                  for i = 1, #t do t[i] = t[i] * 10 end \
@@ -152,7 +152,7 @@ fn repeated_in_place_writes_keep_the_table_sort_mutation_guard_armed() {
         // mutation by watching the table's mutation version. The direct slot
         // lane must keep bumping that version.
         let message: String = rustia
-            .run(
+            .eval(
                 "local t = {3, 1, 2} \
                  local ok, err = pcall(table.sort, t, function(a, b) \
                      t[1] = 42 \

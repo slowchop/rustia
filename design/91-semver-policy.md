@@ -9,6 +9,9 @@ only; grabby-specific integration code remains outside this repository.
 - All public workspace crates are currently `0.0.1` and `publish = false`.
 - `0.0.x` means implementation-preview only. APIs may still change while P1
   engine, conformance, benchmark, and release gates are open.
+- Until Rustia's first public release, prefer the cleanest coherent long-term
+  API over compatibility with controlled clients. Treat necessary completeness
+  as part of the feature and migrate every active client in the same rollout.
 - The public compatibility target is Luau 0.709 until `design/05-luau-target.md`
   is deliberately re-pinned and the conformance oracle is refreshed.
 - The minimum supported Rust version is the workspace `rust-version` in

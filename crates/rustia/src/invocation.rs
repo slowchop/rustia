@@ -1,14 +1,15 @@
 use crate::function::{host_arg_from_raw, host_return_to_raw, IntoHostFunction, IntoHostReturn};
+use crate::serde_value::from_live;
 use crate::value::{
     load_owned_value, snapshot_value, FromRustia, FromRustiaMulti, IntoRustiaMulti,
 };
 use crate::{
     CompiledEntry, CompiledModule, Error, Exports, Result, RustiaHostFuelPolicy,
-    RustiaHostFunctionInfo, Value, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
+    RustiaHostFunctionInfo, Table, Value, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
 };
 use rustia_vm::{
     Error as VmError, ErrorKind as VmErrorKind, HostFunctionOp, OpCapability, Value as RawValue,
-    Vm, VmExecution,
+    Vm, VmExecution, VmHostDispatcher,
 };
 use std::any::type_name;
 use std::convert::Infallible;
@@ -993,6 +994,7 @@ where
     handlers: &'call [ContextHandlerEntry<C>],
     context: &'call mut dyn HostContext<C>,
     journal: EffectJournal<C::Record>,
+    savepoints: Vec<JournalCheckpoint>,
 }
 
 impl<'call, C> TypedHostDispatcher<'call, C>
@@ -1009,6 +1011,7 @@ where
             handlers,
             context,
             journal: EffectJournal::new(records, limits),
+            savepoints: Vec::new(),
         }
     }
 
@@ -1081,6 +1084,42 @@ where
     }
 }
 
+impl<C> VmHostDispatcher for TypedHostDispatcher<'_, C>
+where
+    C: HostSchema,
+{
+    fn invoke(
+        &mut self,
+        vm: &mut Vm,
+        key: u32,
+        args: &[RawValue],
+    ) -> rustia_vm::Result<Vec<RawValue>> {
+        Self::invoke(self, vm, key, args)
+    }
+
+    fn begin_savepoint(&mut self) -> rustia_vm::Result<()> {
+        self.savepoints
+            .try_reserve(1)
+            .map_err(|_| VmError::new(VmErrorKind::OutOfMemory).without_source_location())?;
+        self.savepoints.push(self.journal.checkpoint());
+        Ok(())
+    }
+
+    fn commit_savepoint(&mut self) {
+        self.savepoints
+            .pop()
+            .expect("host journal commit requires an active savepoint");
+    }
+
+    fn rollback_savepoint(&mut self) {
+        let checkpoint = self
+            .savepoints
+            .pop()
+            .expect("host journal rollback requires an active savepoint");
+        self.journal.rollback(checkpoint);
+    }
+}
+
 /// A lexically scoped typed host invocation. It cannot be constructed by
 /// embedders and exposes no VM re-entry handle to host callbacks.
 pub struct Invocation<'call, C>
@@ -1088,9 +1127,9 @@ where
     C: HostSchema,
 {
     pub(crate) vm: &'call mut Vm,
-    pub(crate) generation: &'call mut u64,
-    dispatcher: TypedHostDispatcher<'call, C>,
+    dispatcher: Option<TypedHostDispatcher<'call, C>>,
     execution: VmExecution,
+    installation_transaction_active: bool,
     marker: PhantomData<fn(&mut C)>,
 }
 
@@ -1100,7 +1139,6 @@ where
 {
     pub(crate) fn new(
         vm: &'call mut Vm,
-        generation: &'call mut u64,
         dispatcher: TypedHostDispatcher<'call, C>,
         limits: InvocationLimits,
     ) -> Self {
@@ -1111,9 +1149,9 @@ where
         let execution = vm.begin_transactional_execution_with_fuel(Some(fuel));
         Self {
             vm,
-            generation,
-            dispatcher,
+            dispatcher: Some(dispatcher),
             execution,
+            installation_transaction_active: false,
             marker: PhantomData,
         }
     }
@@ -1127,24 +1165,61 @@ where
         }
     }
 
+    /// Creates a borrowed chunk builder using this invocation's shared fuel
+    /// budget and typed host dispatcher.
+    pub fn load<'chunk, 'source, S>(
+        &'chunk mut self,
+        source: &'source S,
+    ) -> InvocationChunk<'chunk, 'call, 'source, C>
+    where
+        S: AsRef<[u8]> + ?Sized,
+    {
+        InvocationChunk::new(self, source.as_ref())
+    }
+
     pub(crate) fn scoped<T>(
         &mut self,
         operation: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
-        let checkpoint = self.dispatcher.checkpoint();
+        let checkpoint = self
+            .dispatcher
+            .as_ref()
+            .expect("invocation dispatcher is available")
+            .checkpoint();
         let result = operation(self);
         match result {
-            Ok(value) if self.dispatcher.hard_error().is_none() => Ok(value),
+            Ok(value)
+                if self
+                    .dispatcher
+                    .as_ref()
+                    .expect("invocation dispatcher is available")
+                    .hard_error()
+                    .is_none() =>
+            {
+                Ok(value)
+            }
             Ok(_) => {
-                self.dispatcher.rollback(checkpoint);
+                self.dispatcher
+                    .as_mut()
+                    .expect("invocation dispatcher is available")
+                    .rollback(checkpoint);
                 Err(Error::Vm(
-                    self.dispatcher.hard_error().expect("checked above").clone(),
+                    self.dispatcher
+                        .as_ref()
+                        .expect("invocation dispatcher is available")
+                        .hard_error()
+                        .expect("checked above")
+                        .clone(),
                 ))
             }
             Err(error) => {
-                self.dispatcher.rollback(checkpoint);
-                self.dispatcher.latch_if_hard(&error);
-                if let Some(hard_error) = self.dispatcher.hard_error() {
+                let dispatcher = self
+                    .dispatcher
+                    .as_mut()
+                    .expect("invocation dispatcher is available");
+                dispatcher.rollback(checkpoint);
+                dispatcher.latch_if_hard(&error);
+                if let Some(hard_error) = dispatcher.hard_error() {
                     Err(Error::Vm(hard_error.clone()))
                 } else {
                     Err(error)
@@ -1158,34 +1233,84 @@ where
         function: RawValue,
         args: &[RawValue],
     ) -> Result<Vec<RawValue>> {
-        let Self {
-            vm,
-            dispatcher,
-            execution,
-            ..
-        } = self;
-        let mut host = |vm: &mut Vm, key: u32, args: &[RawValue]| dispatcher.invoke(vm, key, args);
-        vm.call_retained_function_in(function, args, execution, &mut host)
+        let vm = &mut *self.vm;
+        let execution = &mut self.execution;
+        let dispatcher = self
+            .dispatcher
+            .as_mut()
+            .expect("invocation dispatcher is available");
+        vm.call_retained_function_in(function, args, execution, dispatcher)
             .map_err(Error::Vm)
     }
 
-    pub fn install(&mut self, module: CompiledModule) -> Result<Exports> {
+    pub fn install(&mut self, module: &CompiledModule) -> Result<Exports> {
+        self.install_with_environment(module, None)
+    }
+
+    fn install_with_environment(
+        &mut self,
+        module: &CompiledModule,
+        environment: Option<RawValue>,
+    ) -> Result<Exports> {
         self.scoped(|invocation| {
-            let Self {
-                vm,
-                dispatcher,
-                execution,
-                generation,
-                ..
-            } = invocation;
-            let mut host =
-                |vm: &mut Vm, key: u32, args: &[RawValue]| dispatcher.invoke(vm, key, args);
-            let value = vm
-                .run_in(&module.program, execution, &mut host)
-                .map_err(Error::Vm)?;
-            **generation = (**generation).saturating_add(1);
-            let value = vm.retain_value(value).map_err(Error::Vm)?;
-            Ok(Exports::new(value, **generation, vm.decision_epoch()))
+            let started_outer = !invocation.installation_transaction_active;
+            if started_outer {
+                invocation.vm.begin_guest_transaction().map_err(Error::Vm)?;
+                invocation.installation_transaction_active = true;
+            }
+            if let Err(error) = invocation.vm.begin_guest_transaction() {
+                if started_outer {
+                    invocation.vm.rollback_guest_transaction();
+                    invocation.installation_transaction_active = false;
+                }
+                return Err(Error::Vm(error));
+            }
+            let vm = &mut *invocation.vm;
+            let execution = &mut invocation.execution;
+            let dispatcher = invocation
+                .dispatcher
+                .as_mut()
+                .expect("invocation dispatcher is available");
+            let outcome = (|| {
+                let module_cohort = vm.create_module_cohort().map_err(Error::Vm)?;
+                let environment = match environment {
+                    Some(environment) => environment,
+                    None => vm.create_module_environment().map_err(Error::Vm)?,
+                };
+                let value = vm
+                    .run_installation_in_environment(
+                        &module.program,
+                        environment,
+                        module_cohort,
+                        execution,
+                        dispatcher,
+                    )
+                    .map_err(Error::Vm)?;
+                let value = vm.retain_value(value).map_err(Error::Vm)?;
+                Ok(Exports::new(value, vm.decision_epoch()))
+            })();
+            match outcome {
+                Ok(exports) => {
+                    if let Err(error) = vm.commit_guest_transaction() {
+                        vm.rollback_guest_transaction();
+                        if started_outer {
+                            vm.rollback_guest_transaction();
+                            invocation.installation_transaction_active = false;
+                        }
+                        Err(Error::Vm(error))
+                    } else {
+                        Ok(exports)
+                    }
+                }
+                Err(error) => {
+                    vm.rollback_guest_transaction();
+                    if started_outer {
+                        vm.rollback_guest_transaction();
+                        invocation.installation_transaction_active = false;
+                    }
+                    Err(error)
+                }
+            }
         })
     }
 
@@ -1207,40 +1332,15 @@ where
                     execution,
                     ..
                 } = invocation;
-                let mut host =
-                    |vm: &mut Vm, key: u32, args: &[RawValue]| dispatcher.invoke(vm, key, args);
-                vm.run_hardened_leaf_entry_in(&entry.program, execution, &mut host)
+                let dispatcher = dispatcher
+                    .as_mut()
+                    .expect("invocation dispatcher is available");
+                vm.run_hardened_leaf_entry_in(&entry.program, execution, dispatcher)
                     .map_err(Error::Vm)?
             };
             let value = snapshot_value(invocation.vm, value)?;
             Return::from_rustia(value)
         })
-    }
-
-    pub fn run<Return>(&mut self, source_name: impl Into<String>, source: &str) -> Result<Return>
-    where
-        Return: FromRustia,
-    {
-        let module = crate::Rustia::<C>::compile_module_with_profile(
-            source_name,
-            source,
-            self.vm.profile(),
-        )?;
-        self.scoped(|invocation| {
-            let exports = invocation.install(module)?;
-            let value = exports.value_in(invocation)?;
-            Return::from_rustia(value)
-        })
-    }
-
-    /// Runs a named chunk and retains its first result without snapshotting it.
-    pub fn run_value(&mut self, source_name: impl Into<String>, source: &str) -> Result<Value> {
-        let module = crate::Rustia::<C>::compile_module_with_profile(
-            source_name,
-            source,
-            self.vm.profile(),
-        )?;
-        self.scoped(|invocation| invocation.install(module).map(|exports| exports.as_value()))
     }
 
     pub(crate) fn convert_call<Args, Return>(
@@ -1267,8 +1367,201 @@ where
         })
     }
 
-    pub(crate) fn finish(self) -> (TypedHostDispatcher<'call, C>, u64) {
-        (self.dispatcher, self.execution.fuel_used())
+    pub(crate) fn finish(
+        mut self,
+        commit_installation: bool,
+    ) -> (TypedHostDispatcher<'call, C>, u64) {
+        if self.installation_transaction_active {
+            if commit_installation {
+                self.vm
+                    .commit_guest_transaction()
+                    .expect("outer installation transaction has no parent journal");
+            } else {
+                self.vm.rollback_guest_transaction();
+            }
+            self.installation_transaction_active = false;
+        }
+        let dispatcher = self
+            .dispatcher
+            .take()
+            .expect("invocation dispatcher is available");
+        (dispatcher, self.execution.fuel_used())
+    }
+
+    pub(crate) fn can_commit_installation(&self) -> bool {
+        self.dispatcher
+            .as_ref()
+            .expect("invocation dispatcher is available")
+            .hard_error()
+            .is_none()
+    }
+}
+
+/// A borrowed source chunk executed through a typed [`Invocation`].
+#[must_use = "an invocation chunk does nothing until eval, eval_live, eval_serde, exec, or install is called"]
+pub struct InvocationChunk<'chunk, 'call, 'source, C>
+where
+    C: HostSchema,
+{
+    invocation: &'chunk mut Invocation<'call, C>,
+    source: &'source [u8],
+    source_name: Option<String>,
+    environment: Option<Table>,
+}
+
+impl<'chunk, 'call, 'source, C> InvocationChunk<'chunk, 'call, 'source, C>
+where
+    C: HostSchema,
+{
+    fn new(invocation: &'chunk mut Invocation<'call, C>, source: &'source [u8]) -> Self {
+        Self {
+            invocation,
+            source,
+            source_name: None,
+            environment: None,
+        }
+    }
+
+    /// Sets the source name used by compile/runtime diagnostics and as the
+    /// referrer passed to the host module resolver for `require` calls.
+    pub fn source_name(mut self, source_name: impl Into<String>) -> Self {
+        self.source_name = Some(source_name.into());
+        self
+    }
+
+    /// Selects the exact rooted lexical environment.
+    pub fn environment(mut self, environment: impl Into<Table>) -> Self {
+        self.environment = Some(environment.into());
+        self
+    }
+
+    /// Evaluates and converts the first result through the owned typed facade.
+    pub fn eval<T>(self) -> Result<T>
+    where
+        T: FromRustia,
+    {
+        self.execute(|invocation, value| {
+            let value = snapshot_value(invocation.vm, value)?;
+            T::from_rustia(value)
+        })
+    }
+
+    /// Evaluates and retains the first result without snapshotting.
+    pub fn eval_live(self) -> Result<Value> {
+        self.execute(|invocation, value| Value::retain(invocation.vm, value))
+    }
+
+    /// Evaluates and deserializes directly from the live VM graph.
+    pub fn eval_serde<T>(self) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        self.execute(|invocation, value| from_live(invocation.vm, value))
+    }
+
+    /// Executes the chunk for side effects.
+    pub fn exec(self) -> Result<()> {
+        self.execute(|_, _| Ok(()))
+    }
+
+    /// Atomically installs the chunk. The result remains provisional until
+    /// the enclosing typed invocation commits its record transaction.
+    pub fn install(self) -> Result<Exports> {
+        let (invocation, module, environment) = self.prepare()?;
+        let raw_environment = environment
+            .as_ref()
+            .map(|environment| environment.raw(invocation.vm, "chunk environment handle"))
+            .transpose()?;
+        invocation.install_with_environment(&module, raw_environment)
+    }
+
+    fn execute<T>(
+        self,
+        convert: impl FnOnce(&mut Invocation<'call, C>, RawValue) -> Result<T>,
+    ) -> Result<T> {
+        let (invocation, module, environment) = self.prepare()?;
+        let raw_environment = environment
+            .as_ref()
+            .map(|environment| environment.raw(invocation.vm, "chunk environment handle"))
+            .transpose()?;
+        invocation.scoped(|invocation| {
+            let value = {
+                let vm = &mut *invocation.vm;
+                let execution = &mut invocation.execution;
+                let dispatcher = invocation
+                    .dispatcher
+                    .as_mut()
+                    .expect("invocation dispatcher is available");
+                match raw_environment {
+                    Some(environment) => vm
+                        .run_in_environment(&module.program, environment, execution, dispatcher)
+                        .map_err(Error::Vm),
+                    None => vm
+                        .run_in(&module.program, execution, dispatcher)
+                        .map_err(Error::Vm),
+                }?
+            };
+            convert(invocation, value)
+        })
+    }
+
+    fn prepare(
+        self,
+    ) -> Result<(
+        &'chunk mut Invocation<'call, C>,
+        CompiledModule,
+        Option<Table>,
+    )> {
+        let Self {
+            invocation,
+            source,
+            source_name,
+            environment,
+        } = self;
+        if invocation.vm.settings().guest_surface.is_hardened_leaf() {
+            return Err(Error::Vm(
+                VmError::new(VmErrorKind::HardenedLeafViolation {
+                    feature: "dynamic source loading",
+                })
+                .without_source_location(),
+            ));
+        }
+        environment
+            .as_ref()
+            .map(|environment| environment.raw(invocation.vm, "chunk environment handle"))
+            .transpose()?;
+        let module = crate::Rustia::compile_module_bytes_with_constructor_order(
+            source_name.unwrap_or_else(|| "chunk".to_owned()),
+            source,
+            invocation.vm.profile() == crate::Profile::Puc51Compat,
+        )?;
+        Ok((invocation, module, environment))
+    }
+}
+
+impl<C> std::fmt::Debug for InvocationChunk<'_, '_, '_, C>
+where
+    C: HostSchema,
+{
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("InvocationChunk")
+            .field("source_bytes", &self.source.len())
+            .field("source_name", &self.source_name)
+            .field("has_environment", &self.environment.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<C> Drop for Invocation<'_, C>
+where
+    C: HostSchema,
+{
+    fn drop(&mut self) {
+        if self.installation_transaction_active {
+            self.vm.rollback_guest_transaction();
+            self.installation_transaction_active = false;
+        }
     }
 }
 

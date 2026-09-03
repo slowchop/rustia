@@ -45,69 +45,39 @@ impl ValueType {
 #[derive(Clone)]
 pub struct Value {
     value: RetainedValue,
-    generation: u64,
     decision_epoch: u64,
 }
 
 impl Value {
-    pub(crate) fn new(value: RetainedValue, generation: u64, decision_epoch: u64) -> Self {
+    pub(crate) fn new(value: RetainedValue, decision_epoch: u64) -> Self {
         Self {
             value,
-            generation,
             decision_epoch,
         }
     }
 
-    pub(crate) fn retain(vm: &mut Vm, value: RawValue, generation: u64) -> Result<Self> {
+    pub(crate) fn retain(vm: &mut Vm, value: RawValue) -> Result<Self> {
         let decision_epoch = vm.decision_epoch();
         vm.retain_value(value)
-            .map(|value| Self::new(value, generation, decision_epoch))
+            .map(|value| Self::new(value, decision_epoch))
             .map_err(Error::Vm)
     }
 
-    pub(crate) fn retain_many(
-        vm: &mut Vm,
-        values: &[RawValue],
-        generation: u64,
-    ) -> Result<Vec<Self>> {
+    pub(crate) fn retain_many(vm: &mut Vm, values: &[RawValue]) -> Result<Vec<Self>> {
         let decision_epoch = vm.decision_epoch();
         vm.retain_values(values)
             .map(|values| {
                 values
                     .into_iter()
-                    .map(|value| Self::new(value, generation, decision_epoch))
+                    .map(|value| Self::new(value, decision_epoch))
                     .collect()
             })
             .map_err(Error::Vm)
     }
 
-    pub const fn generation(&self) -> u64 {
-        self.generation
-    }
-
     /// Returns the decision epoch in which this value was retained.
     pub const fn decision_epoch(&self) -> u64 {
         self.decision_epoch
-    }
-
-    /// Reports whether both this handle's VM/epoch and install generation are current.
-    pub fn is_current<C>(&self, rustia: &Rustia<C>) -> bool
-    where
-        C: HostSchema,
-    {
-        self.decision_epoch == rustia.decision_epoch()
-            && self.generation == rustia.generation()
-            && self.value.belongs_to(rustia.vm())
-    }
-
-    /// Rejects a different VM, a decision reset, or a newer install generation.
-    pub fn ensure_current<C>(&self, rustia: &Rustia<C>) -> Result<()>
-    where
-        C: HostSchema,
-    {
-        ensure_current_epoch("value handle", self.decision_epoch, rustia.decision_epoch())?;
-        ensure_same_vm("value handle", &self.value, rustia.vm())?;
-        ensure_current_generation("value handle", self.generation, rustia.generation())
     }
 
     /// Returns this value's runtime kind.
@@ -224,16 +194,6 @@ impl Value {
         from_live(rustia.vm_mut(), value)
     }
 
-    /// Deserializes this value after additionally requiring its install
-    /// generation to be current.
-    pub fn deserialize_current<T>(&self, rustia: &mut Rustia<impl HostSchema>) -> Result<T>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        self.ensure_current(rustia)?;
-        self.deserialize(rustia)
-    }
-
     /// Returns a rooted table view when this value is a table.
     pub fn as_table<C>(&self, rustia: &Rustia<C>) -> Result<Option<Table>>
     where
@@ -274,7 +234,6 @@ impl fmt::Debug for Value {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("Value")
-            .field("generation", &self.generation)
             .field("decision_epoch", &self.decision_epoch)
             .finish_non_exhaustive()
     }
@@ -308,38 +267,9 @@ impl Table {
         self.value.deserialize(rustia)
     }
 
-    /// Deserializes this table after requiring its install generation to be current.
-    pub fn deserialize_current<T>(&self, rustia: &mut Rustia<impl HostSchema>) -> Result<T>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        self.value.deserialize_current(rustia)
-    }
-
-    /// Returns the install generation recorded by this handle.
-    pub const fn generation(&self) -> u64 {
-        self.value.generation()
-    }
-
     /// Returns the decision epoch in which this handle was retained.
     pub const fn decision_epoch(&self) -> u64 {
         self.value.decision_epoch()
-    }
-
-    /// Reports whether both this handle's VM/epoch and install generation are current.
-    pub fn is_current<C>(&self, rustia: &Rustia<C>) -> bool
-    where
-        C: HostSchema,
-    {
-        self.value.is_current(rustia)
-    }
-
-    /// Rejects a different VM, a decision reset, or a newer install generation.
-    pub fn ensure_current<C>(&self, rustia: &Rustia<C>) -> Result<()>
-    where
-        C: HostSchema,
-    {
-        self.value.ensure_current(rustia)
     }
 
     /// Performs a raw lookup with a live key, bypassing `__index`.
@@ -353,8 +283,7 @@ impl Table {
             .vm_mut()
             .raw_table_get_value(table, key)
             .map_err(Error::Vm)?;
-        let generation = rustia.generation();
-        Value::retain(rustia.vm_mut(), value, generation)
+        Value::retain(rustia.vm_mut(), value)
     }
 
     /// Converts an owned key and performs a raw lookup, bypassing `__index`.
@@ -370,8 +299,7 @@ impl Table {
             .vm_mut()
             .raw_table_get_value(table, key)
             .map_err(Error::Vm)?;
-        let generation = rustia.generation();
-        Value::retain(rustia.vm_mut(), value, generation)
+        Value::retain(rustia.vm_mut(), value)
     }
 
     /// Performs a raw write with live key/value handles, bypassing `__newindex`.
@@ -442,12 +370,11 @@ impl Table {
             .vm_mut()
             .raw_table_entries_value(table)
             .map_err(Error::Vm)?;
-        let generation = rustia.generation();
         let raw_values = entries
             .into_iter()
             .flat_map(|(key, value)| [key, value])
             .collect::<Vec<_>>();
-        let values = Value::retain_many(rustia.vm_mut(), &raw_values, generation)?;
+        let values = Value::retain_many(rustia.vm_mut(), &raw_values)?;
         Ok(values
             .chunks_exact(2)
             .map(|pair| (pair[0].clone(), pair[1].clone()))
@@ -474,19 +401,6 @@ pub(crate) fn ensure_same_vm(label: &str, value: &RetainedValue, vm: &Vm) -> Res
     }
     Err(Error::Embed(format!(
         "{label} belongs to a different Rustia VM"
-    )))
-}
-
-pub(crate) fn ensure_current_generation(
-    label: &str,
-    handle_generation: u64,
-    current_generation: u64,
-) -> Result<()> {
-    if handle_generation == current_generation {
-        return Ok(());
-    }
-    Err(Error::Embed(format!(
-        "stale {label} from generation {handle_generation}; current generation is {current_generation}"
     )))
 }
 

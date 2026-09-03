@@ -137,7 +137,7 @@ fn run_module_decision(
             .with_max_record_bytes(4 * RECORD_BYTES),
         lane,
         |invocation| {
-            let exports = invocation.install(module.clone())?;
+            let exports = invocation.install(module)?;
             let decide = exports.function_in(invocation, "decide")?;
             decide.call_in::<_, _, i32>(invocation, ())
         },
@@ -264,7 +264,7 @@ fn validate_semantics(
 }
 
 fn main() -> Result<()> {
-    let module = Rustia::<LeafSchema>::compile_module(
+    let module = Rustia::compile_module(
         "leaf_lifecycle_module_bench.luau",
         r#"
 return {
@@ -278,7 +278,7 @@ return {
 }
 "#,
     )?;
-    let entry = Rustia::<LeafSchema>::compile_entry(
+    let entry = Rustia::compile_entry(
         "leaf_lifecycle_entry_bench.luau",
         r#"
 local target = leaf.target()

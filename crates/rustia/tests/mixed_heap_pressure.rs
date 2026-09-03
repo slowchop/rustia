@@ -177,8 +177,8 @@ fn wasm_linear_memory_pages() -> usize {
 )]
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
 fn mixed_heap_pressure_plateaus_and_recovers_atomically() {
-    let module =
-        Rustia::compile("mixed-heap-pressure.luau", &pressure_module_source()).expect("module");
+    let module = Rustia::compile_module("mixed-heap-pressure.luau", &pressure_module_source())
+        .expect("module");
     let mut vm = pressure_vm();
     assert_eq!(
         vm.vm_settings().memory_limit_bytes,
@@ -194,7 +194,7 @@ fn mixed_heap_pressure_plateaus_and_recovers_atomically() {
     let mut wasm_page_plateau = None;
 
     for decision in 0..DECISION_COUNT {
-        let exports = vm.install(module.clone()).expect("pressure module install");
+        let exports = vm.install(&module).expect("pressure module install");
         let wave = exports.function(&mut vm, "wave").expect("wave function");
         let collect = exports
             .function(&mut vm, "collect")
@@ -272,7 +272,9 @@ fn mixed_heap_pressure_plateaus_and_recovers_atomically() {
             "return { version = 2, decide = function(value) return value + 19 end }"
         };
         let reloaded = vm
-            .hot_reload("mixed-reload.luau", reload_source)
+            .load(reload_source)
+            .source_name("mixed-reload.luau")
+            .install()
             .expect("hot reload");
         let decide = reloaded
             .function(&mut vm, "decide")

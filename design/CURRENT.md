@@ -14,14 +14,15 @@ opcodes exactly once under bounded input, fuel, recursion, and a 512 KiB logical
 the bare and default web-live wasm adapters on Node 22/V8 as real WebAssembly runtime tests in addition to
 cross-compiling the declared target matrix; Firefox/Safari browser goldens remain open. The public
 embedding facade from [`75-embedded-api.md`](75-embedded-api.md) is implemented at the first useful level:
-owned values with typed and nested table helpers, source-named run/compile helpers, typed host functions with
-fallible `rustia::Result<T>` returns, pre-install host signature/fuel ABI metadata, retained script function
-handles with freshness checks and current-generation accessors, public source-span/runtime-location error
+owned values with typed and nested table helpers, a composable `load(...).source_name(...)` execution surface,
+typed host functions with fallible `rustia::Result<T>` returns, pre-install host signature/fuel ABI metadata,
+VM/decision-epoch-safe retained script function handles, public source-span/runtime-location error
 accessors, owned-value/table serde with symmetric externally tagged enum support (including Serde rename
-rules), snapshot-free deserialization from rooted live values, deterministic extension registration, hot
-reload, macro sugar, and a composable chunk builder with
-borrowed text/byte source, named diagnostics, rooted custom lexical environments, and typed/live/exports or
-side-effect-only execution. The
+rules), snapshot-free deserialization from rooted live values, atomic extension registration, host-owned module
+replacement, macro sugar, and `eval`/`eval_live`/`eval_serde`/`exec`/`install` terminals over borrowed
+text/byte source, diagnostic names, and rooted custom lexical environments. `install` creates a fresh
+globals-inheriting environment by default, uses a fresh lazy `require` cohort, and publishes rooted exports only
+after the complete candidate succeeds. The
 typed host transaction is now concrete: `HostSchema` keeps registration lifetime-independent while every
 `invoke`/`invoke_into` borrows a fresh, possibly block-local `HostContext`; capability-derived views expose
 input, slots, effects, slot writes, or profile-gated external mutation. Typed VMs execute guest code only through
@@ -36,7 +37,7 @@ epoch-checked and becomes stale after reset. Focused tests
 cover active-execution rejection and an exact post-warmup memory plateau across 600 mixed
 table/coroutine/program/retained-export decisions. A shared native/Node-V8 mixed-heap test now runs 96
 decision epochs and 3,072 waves under a 2 MiB logical-live quota. It combines bounded public roots, cyclic
-tables, strings, closures, suspended coroutines, userdata, buffers, vectors, weak tables, hot reload, atomic
+tables, strings, closures, suspended coroutines, userdata, buffers, vectors, weak tables, module replacement, atomic
 OOM recovery, and epoch invalidation; both targets reach the same exact post-reset VM plateau, and warmed wasm
 linear-memory pages remain constant.
 The generic authoritative-leaf layer is now implemented
@@ -71,9 +72,11 @@ invalid boundary yield, a missing typed-host dispatcher, and host panic are hard
 OOM/yield rule does not change ordinary legacy execution. A caught host panic poisons the VM, so every later
 guest execution entry point rejects until decision reset. Containment includes host functions, typed dispatch,
 legacy extension ops, stdout/clocks, and the `loadstring` compiler. Panic containment requires an unwinding
-build; aborting builds terminate or trap, so their callbacks must not panic. Rollback
-covers staged records only—not guest heap writes, `HostMut`, captured callback state, or context interior
-mutation. `invoke` exposes the reusable journal plus fuel/count/byte usage; `invoke_into` pre-reserves and
+build; aborting builds terminate or trap, so their callbacks must not panic. General invocation rollback covers
+staged records only—not guest heap writes, `HostMut`, captured callback state, or context interior mutation.
+Installation adds a nested guest-state savepoint that restores heap/global/coroutine/RNG/logical-time/GC/module
+cache state and provisional roots on failure; external host and resolver effects remain outside it. `invoke`
+exposes the reusable journal plus fuel/count/byte usage; `invoke_into` pre-reserves and
 publishes to a caller lane with no allocation at final append. Callback captures remain a semantic trust
 boundary. Grabby must allow only one successful invoke per `(tick, phase, emitter)`, because the dense sequence
 restarts at every invoke.
@@ -299,7 +302,7 @@ facility is finished. The highest-impact gaps are:
    native samples after confirmed deletion, passed the wasm32 512 KiB quota/recovery probe, tied the 256 KiB
    best shared peak, and reduced the shared retained mean to 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. The
    maintained native/Node-V8 mixed-heap pressure gate now adds 96 epochs, 3,072 allocation waves, exact reset
-   plateaus, weak/cyclic reclamation, hot reload, public roots, and atomic oversized-allocation recovery.
+   plateaus, weak/cyclic reclamation, module replacement, public roots, and atomic oversized-allocation recovery.
    External allocator/page-return and process-RSS history remain measurement work, not missing VM
    reclamation semantics. GC interval tuning follows this landed evidence.
 2. **Host-provided runtime services and modules.** The output/clock/entropy provider slice is implemented
@@ -311,24 +314,26 @@ facility is finished. The highest-impact gaps are:
    capability views, shared fuel, bounded ordered record journal, rollback/`pcall` contract, usage receipts,
    panic poisoning/reset, and atomic typed `HostModule` registration are implemented. Script-visible `require`
    is now backed only when the host installs a `ServiceModuleResolver`: resolution returns a canonical identity
-   and source, modules execute once per decision epoch, cache results remain roots, nested requests receive the
-   referrer's source name, cycles report their identity path, reset clears the cache, and module execution shares
+   and source. Ordinary execution has one decision-wide cache; every installation receives a fresh lazy cohort
+   shared by its dependency graph and selected by function origin. Reachable cache results remain roots, nested requests receive the
+   referrer's source name, cycles report their identity path, reset clears the caches, and module execution shares
    caller fuel. `DeterministicSim` rejects resolvers not explicitly labeled replay-stable, hardened leaves reject
    dynamic modules, the behavior is versioned by `RUSTIA_MODULE_RESOLUTION_ABI_VERSION`, and the core VM never
    reads an ambient filesystem. The separate CLI adapter supplies fixed-order `.luau`/`.lua`/directory-index
    lookup, canonical cache identities, nested relative resolution, and module-source runtime diagnostics in
-   standard and compatibility profiles; deterministic CLI execution leaves `require` absent. Still open:
+   standard and compatibility profiles; deterministic CLI execution leaves `require` absent.
    Host-facing VM memory telemetry and script-visible counters now read the maintained VM-owned logical-live
-   total without a whole-VM census at ordinary instruction boundaries. Guest module/extension installation and
-   hot reload still need documented transactional or isolated failure semantics beyond record-only invocation
-   rollback. Required modules also still cross a non-yieldable native boundary; matching Luau's yieldable
+   total without a whole-VM census at ordinary instruction boundaries. Extension batches and module candidates
+   now install atomically. Each installation owns a fresh lazy dependency-cache cohort selected by function
+   origin; unreachable cohorts are collector-pruned and old rooted functions remain callable. Required modules
+   still cross a non-yieldable native boundary; matching Luau's yieldable
    `require` needs a continuation that preserves the loading stack and commits the cache only after completion.
 3. **Complete public value interop.** The advanced live-handle spine is implemented: VM/epoch-safe rooted
    `Value`/`Table`/`Function` handles preserve binary strings, buffers, vectors, identity-bearing keys,
    shared/cyclic table graphs, mutation, and raw equality without exposing collector lifetimes. Live values
    can cross ordinary and typed invocations, and `OwnedValue` remains the deliberately small acyclic snapshot
    layer. Live `globals()`, quota-aware `create_table()`, and owned-key/live-value insertion are implemented;
-   the composable `load(source).name(...).environment(...).eval()/exec()` chunk builder is also implemented,
+   the composable `load(source).source_name(...).environment(...)` chunk builder is also implemented,
    with environment-handle validation before compilation and exact environment capture by nested functions.
    Hardened leaves reject mutable constructor authorities before allocation and dynamic loading before
    compilation. Snapshot-free serde deserialization now reads rooted `Value`, `Table`, and `Exports` graphs
@@ -342,9 +347,9 @@ facility is finished. The highest-impact gaps are:
    non-reproducible environment rather than a restricted or second-class mode.
 4. **Semantic-tail and diagnostics hardening.** Continue differential parser/compiler testing, keep valid
    runtime errors catchable at runtime rather than prematurely rejecting them at compile time, and finish
-   public stack traces/source diagnostics. Module/extension installation and runtime-failing hot reload also need
-   documented transactional or isolated failure semantics; generation counters alone do not roll back partial
-   global/heap changes. The final audit closed untracked `buffer.readf32`/`readf64` NaN-payload loss by
+   public stack traces/source diagnostics. Module/extension installation failure is now transactional; external
+   host callback and resolver effects remain deliberately outside rollback. The final audit closed untracked
+   `buffer.readf32`/`readf64` NaN-payload loss by
    separating exact buffer-bit ingress from canonicalized arithmetic results and giving f32 NaNs an explicit
    cross-target widening/narrowing rule. New gaps require focused Luau-0.709 oracle fixtures.
 
@@ -367,7 +372,7 @@ silent claims of completion.
 
 **Action queue:**
 The mixed-heap action is closed: one maintained source now executes 96
-native/Node-V8 epochs and 3,072 waves across cyclic graphs, hot reload, retained
+native/Node-V8 epochs and 3,072 waves across cyclic graphs, module replacement, retained
 handles, weak tables, quotas/OOM, exact reset plateaus, and stable warmed wasm
 linear-memory pages. It also exposed and closed unconditional rooting of
 unreachable suspended-coroutine frames.
@@ -375,7 +380,8 @@ unreachable suspended-coroutine frames.
 1. **Finish the host-facing runtime boundary and ordered advanced API track.** Follow
    [`75-embedded-api.md`](75-embedded-api.md#build-order): the composable chunk builder is now implemented on
    the graph-preserving live `Value`/`Table`/`Function` spine and its live globals/table constructors. Build
-   safe function construction next, then add transactional install/hot-reload/stack diagnostics. The worker-local/per-call host
+   safe function construction next, then finish stack diagnostics. Transactional installation and host-owned
+   replacement are implemented. The worker-local/per-call host
    context is already implemented. Keep the existing typed facade as the simple layer, keep the advanced layer
    available to all builder presets, and do not leak grabby-specific types, internal GC lifetimes, or a raw C
    API. `live()` remains the explicit no-reproducibility-guarantee environment; deterministic policy is
@@ -708,7 +714,7 @@ invocation, and a separately versioned guest ABI.
 | [`56-performance-research.md`](56-performance-research.md) | no-unsafe SotA performance stack, top-10 ordered bets, C++ Luau estimates | current research note |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | typed invocation plus the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative + implemented generic seam** ✅ |
 | [`72-host-services.md`](72-host-services.md) | host services bus: stdout, determinism-labeled clocks and entropy, native/WASI/browser adapters, facade presets, logical `os.clock` | **implemented** ✅ |
-| [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **typed invocation + live-handle spine/chunk builder/live serde implemented; function construction pending** ✅ |
+| [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **transactional install + coherent execution API implemented; function construction pending** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |
 | [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen stateless authoritative guest surface, direct compiled entries, and fast isolated reset | **implemented v1** ✅ |
 | [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/target-first report/package metadata and dedicated Linode lifecycle implemented; standalone split pending** |
@@ -737,9 +743,9 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 ## What's next (the genuine remaining public-release gates)
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items, in order:
 1. **Complete the ordered advanced API boundary:** the composable chunk builder is implemented on the
-   graph-preserving live `Value`/`Table`/`Function` spine plus its globals/table constructors. Build safe
-   function construction and add live-value serde,
-   transactional extension/module/hot-reload failure behavior, and stronger traceback diagnostics. The
+   graph-preserving live `Value`/`Table`/`Function` spine plus its globals/table constructors. Atomic
+   installation, fresh dependency cohorts, host-owned replacement, and live-value serde are implemented. Build
+   safe function construction and stronger traceback diagnostics. The
    worker-local typed invocation seam, hardened stateless leaf, direct compiled-entry path, binary/rich/cyclic
    live values, memory telemetry, and quota enforcement are implemented. Preserve the concise typed facade and
    apply determinism restrictions according to the selected builder: `live()` intentionally promises none.

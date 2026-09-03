@@ -41,7 +41,7 @@ docs are design intent.
 | [`65-wasmjit.md`](65-wasmjit.md) | **wasm-emit JIT / AOT-to-wasm spike** (verified) — ~176× the interpreter in V8, crossover ≈ 6 calls; the in-browser near-native path | **[SPIKE]** ✅ |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | typed invocation plus the deterministic effect/slot and decision-reset contract | **[CONTRACT + GENERIC SEAM IMPLEMENTED]** ✅ |
 | [`72-host-services.md`](72-host-services.md) | **host services bus** — stdout sink, determinism-labeled `ServiceClock` providers, `standard()`/`deterministic()`/`live()` presets, logical `os.clock` | **[IMPLEMENTED v1]** ✅ |
-| [`75-embedded-api.md`](75-embedded-api.md) | **Grabby-Compatible Embedded API** — facade, typed schema/context transaction, serde, hot reload, extension/linker | **[TYPED INVOCATION IMPLEMENTED]** ✅ |
+| [`75-embedded-api.md`](75-embedded-api.md) | **Grabby-Compatible Embedded API** — coherent execution facade, typed schema/context transaction, serde, transactional installation/replacement, extension/linker | **[TRANSACTIONAL INSTALLATION IMPLEMENTED]** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public koto-to-rustia migration guide for the implemented embedding facade | **[GUIDE]** |
 | [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen authoritative guest surface, stateless compiled entries, and fast isolated reset | **[IMPLEMENTED v1]** ✅ |
 | [`80-bench-suite.md`](80-bench-suite.md) | 12-adapter Linux/wasm benchmark product, evidence protocol, generated report, and standalone split plan | **[IMPLEMENTED; SPLIT PENDING]** |

@@ -12,9 +12,9 @@ fn main() -> Result<()> {
         .globals()?
         .set_live(&mut rustia, "host_root", &root.as_value())?;
 
-    let returned = rustia.run_value(
-        "host_root.bytes = buffer.fromstring(string.char(1, 0, 254)); return host_root",
-    )?;
+    let returned = rustia
+        .load("host_root.bytes = buffer.fromstring(string.char(1, 0, 254)); return host_root")
+        .eval_live()?;
     let self_value = root.get(&mut rustia, "self")?;
     let left = root.get(&mut rustia, "left")?;
     let right = root.get(&mut rustia, "right")?;

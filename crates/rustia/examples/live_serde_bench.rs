@@ -25,8 +25,9 @@ fn main() -> Result<()> {
     let rounds = 6;
 
     let mut rustia = Rustia::new(Profile::ReproducibleStandard);
-    let exports = rustia.compile_and_run_exports(
-        r#"
+    let exports = rustia
+        .load(
+            r#"
         return {
             name = "arena",
             difficulty = 3,
@@ -37,7 +38,8 @@ fn main() -> Result<()> {
             },
         }
         "#,
-    )?;
+        )
+        .install()?;
 
     let direct: Scenario = exports.deserialize(&mut rustia)?;
     let owned: Scenario = exports.value(&mut rustia)?.deserialize()?;

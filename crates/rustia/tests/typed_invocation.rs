@@ -1,7 +1,7 @@
 use rustia::{
     CompiledModule, Effects, Error, Exports, HostContext, HostModule, HostMut, HostSchema, Input,
-    InvocationLimits, OpCapability, Profile, Result, Rustia, SlotWrites, Slots, VmError,
-    VmErrorKind, VmSettings,
+    InvocationLimits, ModuleSource, OpCapability, Profile, Result, Rustia, ServiceModuleResolver,
+    SlotWrites, Slots, VmError, VmErrorKind, VmSettings,
 };
 use std::cell::Cell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -100,17 +100,17 @@ fn configured_vm() -> Rustia<Host> {
 }
 
 trait TypedTestSetup {
-    fn compile_and_run(&mut self, source: &str) -> Result<Exports>;
-    fn install(&mut self, module: CompiledModule) -> Result<Exports>;
+    fn install_source(&mut self, source: &str) -> Result<Exports>;
+    fn install_typed(&mut self, module: &CompiledModule) -> Result<Exports>;
 }
 
 impl TypedTestSetup for Rustia<Host> {
-    fn compile_and_run(&mut self, source: &str) -> Result<Exports> {
-        let module = Rustia::<Host>::compile_module("typed-test.luau", source)?;
-        self.install(module)
+    fn install_source(&mut self, source: &str) -> Result<Exports> {
+        let module = Rustia::compile_module("typed-test.luau", source)?;
+        self.install_typed(&module)
     }
 
-    fn install(&mut self, module: CompiledModule) -> Result<Exports> {
+    fn install_typed(&mut self, module: &CompiledModule) -> Result<Exports> {
         let mut context = Host {
             input: 0,
             slots: Vec::new(),
@@ -126,7 +126,7 @@ impl TypedTestSetup for Rustia<Host> {
 #[test]
 fn context_is_rebound_and_success_publishes_dense_ordered_records() {
     let mut rustia = configured_vm();
-    let module = Rustia::<Host>::compile_module(
+    let module = Rustia::compile_module(
         "decision.luau",
         r#"
 return {
@@ -140,7 +140,7 @@ return {
 "#,
     )
     .unwrap();
-    let exports = rustia.install(module).unwrap();
+    let exports = rustia.install_typed(&module).unwrap();
     let limits = InvocationLimits::new(10_000)
         .with_max_records(8)
         .with_max_record_bytes(128);
@@ -195,10 +195,12 @@ fn typed_invocations_exchange_rooted_live_values_without_snapshotting() {
 
     let function = rustia
         .invoke(&mut host, limits, |invocation| {
-            invocation.run_value(
-                "live-function.luau",
+            invocation
+                .load(
                 "return function(value) local result = { value = value }; result.self = result; return value, result end",
-            )
+                )
+                .source_name("live-function.luau")
+                .eval_live()
         })
         .unwrap()
         .into_parts()
@@ -208,7 +210,10 @@ fn typed_invocations_exchange_rooted_live_values_without_snapshotting() {
         .unwrap();
     let argument = rustia
         .invoke(&mut host, limits, |invocation| {
-            invocation.run_value("live-argument.luau", "return { answer = 42 }")
+            invocation
+                .load("return { answer = 42 }")
+                .source_name("live-argument.luau")
+                .eval_live()
         })
         .unwrap()
         .into_parts()
@@ -228,6 +233,140 @@ fn typed_invocations_exchange_rooted_live_values_without_snapshotting() {
 }
 
 #[test]
+fn typed_install_remains_provisional_until_the_outer_invocation_commits() {
+    let mut rustia = configured_vm();
+    let shared = rustia.create_table().unwrap();
+    shared.set(&mut rustia, "value", 1_i64).unwrap();
+    rustia
+        .globals()
+        .unwrap()
+        .set_live(&mut rustia, "shared_state", &shared.as_value())
+        .unwrap();
+    let module = Rustia::compile_module(
+        "provisional-install.luau",
+        "shared_state.value = 99; emit(7); return { answer = shared_state.value }",
+    )
+    .unwrap();
+    let mut host = Host {
+        input: 0,
+        slots: Vec::new(),
+    };
+    let limits = InvocationLimits::new(10_000)
+        .with_max_records(2)
+        .with_max_record_bytes(32);
+    let mut lane = Vec::new();
+
+    let error = rustia
+        .invoke_into(&mut host, limits, &mut lane, |invocation| {
+            let _ = invocation.install(&module)?;
+            Err::<(), _>(Error::Embed("reject outer invocation".to_owned()))
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("reject outer invocation"));
+    assert!(lane.is_empty());
+    assert_eq!(
+        shared
+            .get(&mut rustia, "value")
+            .unwrap()
+            .as_number(&rustia)
+            .unwrap(),
+        Some(1.0)
+    );
+
+    let outcome = rustia
+        .invoke(&mut host, limits, |invocation| invocation.install(&module))
+        .unwrap();
+    assert_eq!(outcome.records()[0].kind, RecordKind::Effect(7));
+    let exports = outcome.into_parts().0;
+    assert_eq!(
+        shared
+            .get(&mut rustia, "value")
+            .unwrap()
+            .as_number(&rustia)
+            .unwrap(),
+        Some(99.0)
+    );
+    let answer = rustia
+        .invoke(&mut host, limits, |invocation| {
+            exports.get_in::<_, i64>(invocation, "answer")
+        })
+        .unwrap();
+    assert_eq!(*answer.value(), 99);
+}
+
+#[test]
+fn caught_failed_require_rolls_back_guest_state_and_typed_records() {
+    let resolver = ServiceModuleResolver::from_fn(|requested, _| match requested {
+        "bad" => Ok(ModuleSource::new(
+            "bad",
+            "emit(7); shared_state.value = 99; error('bad module')",
+        )),
+        "good" => Ok(ModuleSource::new("good", "emit(6); return 42")),
+        _ => Err(format!("unknown module {requested}")),
+    });
+    let mut rustia = Rustia::builder()
+        .profile(Profile::DeterministicSim)
+        .module_resolver(resolver)
+        .build_for_host::<Host>()
+        .unwrap();
+    rustia
+        .add_effect(
+            "emit",
+            2,
+            |mut effects: Effects<'_, Host>, value: i64| -> Result<()> { effects.emit(value) },
+        )
+        .unwrap();
+    let shared = rustia.create_table().unwrap();
+    shared.set(&mut rustia, "value", 1_i64).unwrap();
+    rustia
+        .globals()
+        .unwrap()
+        .set_live(&mut rustia, "shared_state", &shared.as_value())
+        .unwrap();
+    let module = Rustia::compile_module(
+        "require-savepoint.luau",
+        r#"
+            local ok = pcall(require, "bad")
+            assert(not ok)
+            local answer = require("good")
+            emit(8)
+            return { answer = answer }
+        "#,
+    )
+    .unwrap();
+    let mut host = Host {
+        input: 0,
+        slots: Vec::new(),
+    };
+    let outcome = rustia
+        .invoke(
+            &mut host,
+            InvocationLimits::new(100_000)
+                .with_max_records(4)
+                .with_max_record_bytes(64),
+            |invocation| invocation.install(&module),
+        )
+        .unwrap();
+
+    assert_eq!(
+        outcome
+            .records()
+            .iter()
+            .map(|record| &record.kind)
+            .collect::<Vec<_>>(),
+        [&RecordKind::Effect(6), &RecordKind::Effect(8)]
+    );
+    assert_eq!(
+        shared
+            .get(&mut rustia, "value")
+            .unwrap()
+            .as_number(&rustia)
+            .unwrap(),
+        Some(1.0)
+    );
+}
+
+#[test]
 fn typed_exports_expose_rooted_live_values() {
     let mut rustia = configured_vm();
     let mut host = Host {
@@ -235,22 +374,22 @@ fn typed_exports_expose_rooted_live_values() {
         slots: vec![0],
     };
     let limits = InvocationLimits::new(100_000);
-    let module = Rustia::<Host>::compile_module(
+    let module = Rustia::compile_module(
         "live-exports.luau",
         "local shared = { answer = 42 }; return { left = shared, right = shared }",
     )
     .unwrap();
 
     let exports = rustia
-        .invoke(&mut host, limits, |invocation| invocation.install(module))
+        .invoke(&mut host, limits, |invocation| invocation.install(&module))
         .unwrap()
         .into_parts()
         .0;
     let (left, right) = rustia
         .invoke(&mut host, limits, |invocation| {
             Ok((
-                exports.get_live_current_in(invocation, "left")?,
-                exports.get_live_current_in(invocation, "right")?,
+                exports.get_live_in(invocation, "left")?,
+                exports.get_live_in(invocation, "right")?,
             ))
         })
         .unwrap()
@@ -274,7 +413,7 @@ fn failed_host_call_rolls_back_its_suffix_but_pcall_keeps_completed_calls() {
         )
         .unwrap();
     let exports = rustia
-        .compile_and_run(
+        .install_source(
             r#"
 return {
     decide = function()
@@ -332,7 +471,7 @@ fn record_limit_is_hard_even_if_callback_and_guest_try_to_swallow_it() {
         )
         .unwrap();
     let exports = rustia
-        .compile_and_run(
+        .install_source(
             r#"
 return {
     decide = function()
@@ -384,7 +523,7 @@ return {
 fn a_completed_effect_inside_guest_pcall_survives_the_caught_guest_error() {
     let mut rustia = configured_vm();
     let exports = rustia
-        .compile_and_run(
+        .install_source(
             r#"
 return {
     decide = function()
@@ -430,7 +569,7 @@ return {
 fn outer_guest_error_and_typed_return_error_publish_nothing() {
     let mut rustia = configured_vm();
     let exports = rustia
-        .compile_and_run(
+        .install_source(
             r#"
 return {
     guest_error = function()
@@ -491,7 +630,7 @@ return {
 fn outer_operation_panic_drops_records_and_leaves_the_vm_reusable() {
     let mut rustia = configured_vm();
     let exports = rustia
-        .compile_and_run("return { decide = function() emit(9) end }")
+        .install_source("return { decide = function() emit(9) end }")
         .unwrap();
     let mut host = Host {
         input: 0,
@@ -532,7 +671,7 @@ fn outer_operation_panic_drops_records_and_leaves_the_vm_reusable() {
 fn byte_budget_is_checked_before_publication() {
     let mut rustia = configured_vm();
     let exports = rustia
-        .compile_and_run("return { decide = function() emit(1); emit(2); return true end }")
+        .install_source("return { decide = function() emit(1); emit(2); return true end }")
         .unwrap();
     let mut host = Host {
         input: 0,
@@ -574,7 +713,7 @@ fn fuel_is_shared_and_uncatchable_across_calls_in_one_invocation() {
         )
         .unwrap();
     let exports = rustia
-        .compile_and_run(
+        .install_source(
             r#"
 return {
     once = function(value)
@@ -622,7 +761,7 @@ fn host_panic_rolls_back_poisons_and_reset_recovers_bindings() {
             },
         )
         .unwrap();
-    let module = Rustia::<Host>::compile_module(
+    let module = Rustia::compile_module(
         "panic.luau",
         r#"
 return {
@@ -632,7 +771,7 @@ return {
 "#,
     )
     .unwrap();
-    let exports = rustia.install(module.clone()).unwrap();
+    let exports = rustia.install_typed(&module).unwrap();
     let mut host = Host {
         input: 0,
         slots: vec![],
@@ -672,7 +811,7 @@ return {
     ));
 
     rustia.reset_decision().unwrap();
-    let exports = rustia.install(module).unwrap();
+    let exports = rustia.install_typed(&module).unwrap();
     let outcome = rustia
         .invoke(
             &mut host,
@@ -693,7 +832,7 @@ return {
 fn suspended_coroutine_uses_the_context_of_the_resume_invocation() {
     let mut rustia = configured_vm();
     let exports = rustia
-        .compile_and_run(
+        .install_source(
             r#"
 local thread = coroutine.create(function()
     coroutine.yield("paused")
@@ -799,7 +938,7 @@ fn context_reaches_metamethods_and_accepts_unrelated_block_local_borrows() {
             *input.get()
         })
         .unwrap();
-    let module = Rustia::<BorrowedSchema>::compile_module(
+    let module = Rustia::compile_module(
         "borrowed-context.luau",
         r#"
 local value = setmetatable({}, {
@@ -818,7 +957,7 @@ return { decide = function() return value + value end }
         };
         let exports = rustia
             .invoke(&mut host, InvocationLimits::new(10_000), |invocation| {
-                invocation.install(module)
+                invocation.install(&module)
             })
             .unwrap()
             .into_parts()
@@ -862,7 +1001,7 @@ fn pure_host_panic_is_caught_rolls_back_and_poisons() {
         .add_pure("pure_panic", 2, || -> i64 { panic!("pure callback panic") })
         .unwrap();
     let exports = rustia
-        .compile_and_run(
+        .install_source(
             r#"
 return {
     decide = function()
@@ -921,12 +1060,12 @@ fn direct_host_panic_poisoning_is_enforced_by_the_vm_core() {
         .add_fn("panic_now", || -> i64 { panic!("direct callback panic") })
         .unwrap();
     assert!(matches!(
-        rustia.run::<()>("panic_now()").unwrap_err(),
+        rustia.eval::<()>("panic_now()").unwrap_err(),
         Error::Vm(ref error)
             if matches!(error.kind, VmErrorKind::HostPanicked { .. })
     ));
     assert!(matches!(
-        rustia.run::<i64>("return 1").unwrap_err(),
+        rustia.eval::<i64>("return 1").unwrap_err(),
         Error::Vm(ref error) if matches!(error.kind, VmErrorKind::VmPoisoned)
     ));
     assert!(matches!(
@@ -936,7 +1075,7 @@ fn direct_host_panic_poisoning_is_enforced_by_the_vm_core() {
         Error::Vm(ref error) if matches!(error.kind, VmErrorKind::VmPoisoned)
     ));
     rustia.reset_decision().unwrap();
-    assert_eq!(rustia.run::<i64>("return 1").unwrap(), 1);
+    assert_eq!(rustia.eval::<i64>("return 1").unwrap(), 1);
     rustia
         .invoke(&mut (), InvocationLimits::new(0), |_invocation| Ok(()))
         .unwrap();
@@ -956,7 +1095,7 @@ fn host_service_panic_rolls_back_records_poisons_and_leaves_reset_usable() {
             |mut effects: Effects<'_, Host>, value: i64| -> Result<()> { effects.emit(value) },
         )
         .unwrap();
-    let module = Rustia::<Host>::compile_module(
+    let module = Rustia::compile_module(
         "service-panic.luau",
         r#"
 return {
@@ -975,7 +1114,7 @@ return {
     };
     let installed = rustia
         .invoke(&mut host, InvocationLimits::new(10_000), |invocation| {
-            invocation.install(module)
+            invocation.install(&module)
         })
         .unwrap();
     let (exports, _, _) = installed.into_parts();
@@ -1074,7 +1213,10 @@ fn invocation_run_compiles_source_with_the_vm_profile() {
 
     let outcome = rustia
         .invoke(&mut host, InvocationLimits::new(10_000), |invocation| {
-            invocation.run::<f64>("puc-invocation.luau", "local t = {1, [1] = 9} return t[1]")
+            invocation
+                .load("local t = {1, [1] = 9} return t[1]")
+                .source_name("puc-invocation.luau")
+                .eval::<f64>()
         })
         .unwrap();
     assert_eq!(*outcome.value(), 1.0);
@@ -1151,7 +1293,7 @@ return {
     end,
 }
 "#;
-    let exports = rustia.compile_and_run(source).unwrap();
+    let exports = rustia.install_source(source).unwrap();
     let mut host = Host {
         input: 21,
         slots: Vec::new(),
@@ -1171,7 +1313,7 @@ return {
     assert_eq!(*outcome.value(), 42);
     assert_eq!(outcome.records()[0].kind, RecordKind::Effect(42));
     rustia.reset_decision().unwrap();
-    let exports = rustia.compile_and_run(source).unwrap();
+    let exports = rustia.install_source(source).unwrap();
     host.input = 7;
     let outcome = rustia
         .invoke(
@@ -1209,7 +1351,7 @@ fn mutable_external_context_is_profile_gated() {
         })
         .unwrap();
     let exports = standard
-        .compile_and_run("return { decide = function() return increment() end }")
+        .install_source("return { decide = function() return increment() end }")
         .unwrap();
     let mut host = Host {
         input: 5,
@@ -1230,7 +1372,7 @@ fn mutable_external_context_is_profile_gated() {
 fn exact_limits_publish_without_growing_a_preallocated_lane_and_report_usage() {
     let mut rustia = configured_vm();
     let exports = rustia
-        .compile_and_run("return { decide = function() emit(1); emit(2); return 7 end }")
+        .install_source("return { decide = function() emit(1); emit(2); return 7 end }")
         .unwrap();
     let mut host = Host {
         input: 0,
@@ -1269,7 +1411,7 @@ fn exact_limits_publish_without_growing_a_preallocated_lane_and_report_usage() {
 fn a_soft_failure_in_a_later_rust_call_rolls_back_only_that_call() {
     let mut rustia = configured_vm();
     let exports = rustia
-        .compile_and_run(
+        .install_source(
             r#"
 return {
     first = function() emit(1) end,
@@ -1324,7 +1466,10 @@ fn invocation_run_conversion_failure_rolls_back_module_main_records() {
                 .with_max_records(4)
                 .with_max_record_bytes(64),
             |invocation| {
-                let conversion = invocation.run::<i64>("bad-main.luau", "emit(9); return {}");
+                let conversion = invocation
+                    .load("emit(9); return {}")
+                    .source_name("bad-main.luau")
+                    .eval::<i64>();
                 assert!(conversion.is_err());
                 Ok(())
             },
@@ -1341,7 +1486,7 @@ fn transactional_resource_errors_are_hard_without_changing_legacy_pcall() {
             Err(Error::Vm(VmError::new(VmErrorKind::OutOfMemory)))
         })
         .unwrap();
-    let caught: bool = legacy.run("local ok = pcall(oom); return ok").unwrap();
+    let caught: bool = legacy.eval("local ok = pcall(oom); return ok").unwrap();
     assert!(!caught);
 
     let mut rustia = configured_vm();
@@ -1351,7 +1496,7 @@ fn transactional_resource_errors_are_hard_without_changing_legacy_pcall() {
         })
         .unwrap();
     let exports = rustia
-        .compile_and_run("return { decide = function() pcall(oom); emit(1) end }")
+        .install_source("return { decide = function() pcall(oom); emit(1) end }")
         .unwrap();
     let mut host = Host {
         input: 0,
@@ -1380,7 +1525,7 @@ fn transactional_resource_errors_are_hard_without_changing_legacy_pcall() {
 fn resumed_protected_coroutine_cannot_swallow_a_hard_yield_boundary() {
     let mut rustia = configured_vm();
     let exports = rustia
-        .compile_and_run(
+        .install_source(
             r#"
 local object = setmetatable({}, {
     __index = function()
@@ -1432,7 +1577,7 @@ return {
 fn resumed_xpcall_coroutine_cannot_swallow_a_hard_yield_boundary() {
     let mut rustia = configured_vm();
     let exports = rustia
-        .compile_and_run(
+        .install_source(
             r#"
 local object = setmetatable({}, {
     __index = function()
@@ -1497,7 +1642,7 @@ fn deterministic_oom_escapes_pcall_and_discards_the_outer_journal() {
         )
         .unwrap();
     let exports = rustia
-        .compile_and_run(
+        .install_source(
             r#"
 return {
     decide = function()
