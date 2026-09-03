@@ -71,6 +71,11 @@ serves them.
 Code is ground truth for "what's BUILT"; `design/` is intent; they must agree. Touch an area → reconcile its
 doc + tests in the same change. `design/CURRENT.md` wins on any disagreement and must be kept current.
 
+Until Rustia's first public release, prefer the cleanest coherent long-term API over compatibility with
+controlled clients. Treat necessary completeness as part of the feature and migrate every active client in the
+same rollout. Existing public-looking names are design candidates during `0.0.x`, not reasons to preserve a
+confusing split API.
+
 ## Where things live (public vs private boundary)
 - **This repo `rustia` (public-bound):** code + `design/` (the spec) + public GitHub Issues. **Nothing secret
   or infra-identifying ever lands here** (no runner hostnames/IPs/config, no credentials).

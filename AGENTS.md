@@ -12,3 +12,7 @@
 
 - Enable auto-merge once a pull request is ready and let required checks and reviews gate it; do not leave a fully green pull request open for separate approval.
 - Use a merge commit, not squash or rebase, because generated benchmark-operations artifacts derive their state from the reviewed commit history and must retain those commit identities on `main`.
+
+## Pre-release API development
+
+- Until Rustia's first public release, prefer the cleanest coherent long-term API over compatibility with controlled clients. Treat necessary completeness as part of the feature and migrate every active client in the same rollout.

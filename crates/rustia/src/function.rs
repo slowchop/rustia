@@ -1,4 +1,4 @@
-use crate::live_value::{ensure_current_epoch, ensure_current_generation, Value as LiveValue};
+use crate::live_value::{ensure_current_epoch, Value as LiveValue};
 use crate::serde_value::from_live;
 use crate::value::{
     embed_to_vm_error, load_owned_value, snapshot_value, FromRustia, FromRustiaMulti,
@@ -12,22 +12,19 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct Function {
     value: LiveValue,
-    generation: u64,
     decision_epoch: u64,
 }
 
 impl Function {
-    pub(crate) fn new(value: RetainedValue, generation: u64, decision_epoch: u64) -> Self {
+    pub(crate) fn new(value: RetainedValue, decision_epoch: u64) -> Self {
         Self {
-            value: LiveValue::new(value, generation, decision_epoch),
-            generation,
+            value: LiveValue::new(value, decision_epoch),
             decision_epoch,
         }
     }
 
     pub(crate) fn from_value(value: LiveValue) -> Self {
         Self {
-            generation: value.generation(),
             decision_epoch: value.decision_epoch(),
             value,
         }
@@ -37,31 +34,8 @@ impl Function {
         self.value.clone()
     }
 
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-
     pub fn decision_epoch(&self) -> u64 {
         self.decision_epoch
-    }
-
-    pub fn is_current<C>(&self, rustia: &Rustia<C>) -> bool
-    where
-        C: HostSchema,
-    {
-        self.decision_epoch == rustia.decision_epoch() && self.generation == rustia.generation()
-    }
-
-    pub fn ensure_current<C>(&self, rustia: &Rustia<C>) -> Result<()>
-    where
-        C: HostSchema,
-    {
-        ensure_current_epoch(
-            "function handle",
-            self.decision_epoch,
-            rustia.decision_epoch(),
-        )?;
-        ensure_current_generation("function handle", self.generation, rustia.generation())
     }
 
     pub fn call<Args, Return>(&self, rustia: &mut Rustia, args: Args) -> Result<Return>
@@ -91,15 +65,6 @@ impl Function {
         Return::from_rustia_multi(results)
     }
 
-    pub fn call_current<Args, Return>(&self, rustia: &mut Rustia, args: Args) -> Result<Return>
-    where
-        Args: IntoRustiaMulti,
-        Return: FromRustiaMulti,
-    {
-        self.ensure_current(rustia)?;
-        self.call(rustia, args)
-    }
-
     /// Calls this function with rooted live values and retains every result.
     pub fn call_values(&self, rustia: &mut Rustia, args: &[LiveValue]) -> Result<Vec<LiveValue>> {
         ensure_current_epoch(
@@ -116,17 +81,7 @@ impl Function {
             .vm_mut()
             .call_retained_function(function, &raw_args)
             .map_err(Error::Vm)?;
-        let generation = rustia.generation();
-        LiveValue::retain_many(rustia.vm_mut(), &results, generation)
-    }
-
-    pub fn call_values_current(
-        &self,
-        rustia: &mut Rustia,
-        args: &[LiveValue],
-    ) -> Result<Vec<LiveValue>> {
-        self.ensure_current(rustia)?;
-        self.call_values(rustia, args)
+        LiveValue::retain_many(rustia.vm_mut(), &results)
     }
 
     /// Calls this guest function inside a typed host invocation. Argument
@@ -151,25 +106,6 @@ impl Function {
         invocation.convert_call(function, args)
     }
 
-    pub fn call_current_in<C, Args, Return>(
-        &self,
-        invocation: &mut Invocation<'_, C>,
-        args: Args,
-    ) -> Result<Return>
-    where
-        C: HostSchema,
-        Args: IntoRustiaMulti,
-        Return: FromRustiaMulti,
-    {
-        ensure_current_epoch(
-            "function handle",
-            self.decision_epoch,
-            invocation.vm.decision_epoch(),
-        )?;
-        ensure_current_generation("function handle", self.generation, *invocation.generation)?;
-        self.call_in(invocation, args)
-    }
-
     /// Calls this function with live values inside a typed host invocation.
     pub fn call_values_in<C>(
         &self,
@@ -191,36 +127,21 @@ impl Function {
                 .map(|value| value.raw(invocation.vm, "function argument handle"))
                 .collect::<Result<Vec<_>>>()?;
             let results = invocation.call_retained_raw(function, &raw_args)?;
-            let generation = *invocation.generation;
-            LiveValue::retain_many(invocation.vm, &results, generation)
+            LiveValue::retain_many(invocation.vm, &results)
         })
-    }
-
-    pub fn call_values_current_in<C>(
-        &self,
-        invocation: &mut Invocation<'_, C>,
-        args: &[LiveValue],
-    ) -> Result<Vec<LiveValue>>
-    where
-        C: HostSchema,
-    {
-        ensure_current_generation("function handle", self.generation, *invocation.generation)?;
-        self.call_values_in(invocation, args)
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct Exports {
     value: LiveValue,
-    generation: u64,
     decision_epoch: u64,
 }
 
 impl Exports {
-    pub(crate) fn new(value: RetainedValue, generation: u64, decision_epoch: u64) -> Self {
+    pub(crate) fn new(value: RetainedValue, decision_epoch: u64) -> Self {
         Self {
-            value: LiveValue::new(value, generation, decision_epoch),
-            generation,
+            value: LiveValue::new(value, decision_epoch),
             decision_epoch,
         }
     }
@@ -236,31 +157,8 @@ impl Exports {
         self.value.as_table(rustia)
     }
 
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-
     pub fn decision_epoch(&self) -> u64 {
         self.decision_epoch
-    }
-
-    pub fn is_current<C>(&self, rustia: &Rustia<C>) -> bool
-    where
-        C: HostSchema,
-    {
-        self.decision_epoch == rustia.decision_epoch() && self.generation == rustia.generation()
-    }
-
-    pub fn ensure_current<C>(&self, rustia: &Rustia<C>) -> Result<()>
-    where
-        C: HostSchema,
-    {
-        ensure_current_epoch(
-            "exports handle",
-            self.decision_epoch,
-            rustia.decision_epoch(),
-        )?;
-        ensure_current_generation("exports handle", self.generation, rustia.generation())
     }
 
     pub fn value(&self, rustia: &mut Rustia) -> Result<OwnedValue> {
@@ -271,11 +169,6 @@ impl Exports {
         )?;
         let value = self.value.raw(rustia.vm(), "exports handle")?;
         snapshot_value(rustia.vm_mut(), value)
-    }
-
-    pub fn value_current(&self, rustia: &mut Rustia) -> Result<OwnedValue> {
-        self.ensure_current(rustia)?;
-        self.value(rustia)
     }
 
     pub fn value_in<C>(&self, invocation: &mut Invocation<'_, C>) -> Result<OwnedValue>
@@ -293,14 +186,6 @@ impl Exports {
         })
     }
 
-    pub fn value_current_in<C>(&self, invocation: &mut Invocation<'_, C>) -> Result<OwnedValue>
-    where
-        C: HostSchema,
-    {
-        ensure_current_generation("exports handle", self.generation, *invocation.generation)?;
-        self.value_in(invocation)
-    }
-
     /// Deserializes the returned value directly without building an owned graph snapshot.
     pub fn deserialize<T>(&self, rustia: &mut Rustia<impl HostSchema>) -> Result<T>
     where
@@ -315,14 +200,6 @@ impl Exports {
         from_live(rustia.vm_mut(), value)
     }
 
-    pub fn deserialize_current<T>(&self, rustia: &mut Rustia<impl HostSchema>) -> Result<T>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        self.ensure_current(rustia)?;
-        self.deserialize(rustia)
-    }
-
     pub fn get<T>(&self, rustia: &mut Rustia, name: &str) -> Result<T>
     where
         T: FromRustia,
@@ -332,24 +209,10 @@ impl Exports {
         T::from_rustia(value)
     }
 
-    pub fn get_current<T>(&self, rustia: &mut Rustia, name: &str) -> Result<T>
-    where
-        T: FromRustia,
-    {
-        self.ensure_current(rustia)?;
-        self.get(rustia, name)
-    }
-
     /// Reads a string-keyed export without snapshotting it.
     pub fn get_live(&self, rustia: &mut Rustia, name: &str) -> Result<LiveValue> {
         let value = self.raw_get(rustia, name)?;
-        let generation = rustia.generation();
-        LiveValue::retain(rustia.vm_mut(), value, generation)
-    }
-
-    pub fn get_live_current(&self, rustia: &mut Rustia, name: &str) -> Result<LiveValue> {
-        self.ensure_current(rustia)?;
-        self.get_live(rustia, name)
+        LiveValue::retain(rustia.vm_mut(), value)
     }
 
     pub fn get_in<C, T>(&self, invocation: &mut Invocation<'_, C>, name: &str) -> Result<T>
@@ -364,15 +227,6 @@ impl Exports {
         })
     }
 
-    pub fn get_current_in<C, T>(&self, invocation: &mut Invocation<'_, C>, name: &str) -> Result<T>
-    where
-        C: HostSchema,
-        T: FromRustia,
-    {
-        ensure_current_generation("exports handle", self.generation, *invocation.generation)?;
-        self.get_in(invocation, name)
-    }
-
     pub fn get_live_in<C>(
         &self,
         invocation: &mut Invocation<'_, C>,
@@ -383,20 +237,8 @@ impl Exports {
     {
         invocation.scoped(|invocation| {
             let value = self.raw_get_in(invocation, name)?;
-            LiveValue::retain(invocation.vm, value, *invocation.generation)
+            LiveValue::retain(invocation.vm, value)
         })
-    }
-
-    pub fn get_live_current_in<C>(
-        &self,
-        invocation: &mut Invocation<'_, C>,
-        name: &str,
-    ) -> Result<LiveValue>
-    where
-        C: HostSchema,
-    {
-        ensure_current_generation("exports handle", self.generation, *invocation.generation)?;
-        self.get_live_in(invocation, name)
     }
 
     pub fn function(&self, rustia: &mut Rustia, name: &str) -> Result<Function> {
@@ -405,12 +247,7 @@ impl Exports {
             return Err(Error::Embed(format!("export `{name}` is not a function")));
         }
         let value = rustia.vm_mut().retain_value(value).map_err(Error::Vm)?;
-        Ok(Function::new(value, self.generation, self.decision_epoch))
-    }
-
-    pub fn function_current(&self, rustia: &mut Rustia, name: &str) -> Result<Function> {
-        self.ensure_current(rustia)?;
-        self.function(rustia, name)
+        Ok(Function::new(value, self.decision_epoch))
     }
 
     pub fn function_in<C>(&self, invocation: &mut Invocation<'_, C>, name: &str) -> Result<Function>
@@ -423,20 +260,8 @@ impl Exports {
                 return Err(Error::Embed(format!("export `{name}` is not a function")));
             }
             let value = invocation.vm.retain_value(value).map_err(Error::Vm)?;
-            Ok(Function::new(value, self.generation, self.decision_epoch))
+            Ok(Function::new(value, self.decision_epoch))
         })
-    }
-
-    pub fn function_current_in<C>(
-        &self,
-        invocation: &mut Invocation<'_, C>,
-        name: &str,
-    ) -> Result<Function>
-    where
-        C: HostSchema,
-    {
-        ensure_current_generation("exports handle", self.generation, *invocation.generation)?;
-        self.function_in(invocation, name)
     }
 
     fn raw_get(&self, rustia: &mut Rustia, name: &str) -> Result<RawValue> {

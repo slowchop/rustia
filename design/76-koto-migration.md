@@ -9,7 +9,7 @@
 Rustia intentionally has two surfaces:
 
 - `Rustia<()>` is the convenient context-free/legacy facade. It supports direct
-  `run`, `Function::call`, `add_fn`, and `RustiaExtension` use.
+  `eval`/`exec`/`load`, `Function::call`, `add_fn`, and `RustiaExtension` use.
 - `Rustia<H>` is the recommended surface for a simulation or other serious
   host. A lifetime-independent `HostSchema` describes authority, while every
   `invoke`/`invoke_into` borrows a fresh `HostContext<H>`. Guest execution is
@@ -28,12 +28,12 @@ bounded transactional records, and allocation-safe lane publication.
 | prelude/config insertion | `insert_global`, `insert_serde` |
 | plain host callback | `add_pure`, `add_input`, `add_slot_read`, `add_effect`, `add_slot_write` |
 | named serious-host API | `HostModule<H>` plus capability-specific builder methods |
-| script module | `Rustia::<H>::compile_module`, then `Invocation::install` |
-| retained script function | `Exports::function_in`, `Function::call_in`, epoch/generation checks |
+| script module | `Rustia::compile_module`, then `Invocation::install` |
+| retained script function | `Exports::function_in`, `Function::call_in`, VM/decision-epoch checks |
 | execution timeout | `InvocationLimits::new(fuel)` |
 | deterministic output | `Effects`/`SlotWrites`, `invoke_into`, caller-owned record lane |
 | config/scenario tables | `OwnedValue`, typed conversion, and serde |
-| simple context-free migration | `Rustia<()>`, direct `run`/`Function::call`, `RustiaExtension` |
+| simple context-free migration | `Rustia<()>`, direct `eval`/`load`/`Function::call`, `RustiaExtension` |
 
 ## Recommended typed port
 
@@ -136,12 +136,12 @@ capabilities, fuel charges, argument/return types, and fallibility.
 ### 4. Compile once; execute inside an invocation
 
 ```rust,ignore
-let module = Rustia::<SimHost>::compile_module("ai.luau", source)?;
+let module = Rustia::compile_module("ai.luau", source)?;
 
 let installed = rustia.invoke(
     &mut initial_context,
     InvocationLimits::new(50_000),
-    |invocation| invocation.install(module),
+    |invocation| invocation.install(&module),
 )?;
 let (exports, _, _) = installed.into_parts();
 ```
@@ -184,9 +184,8 @@ world-application atomicity, and duplicate-decision prevention.
 
 Use `Exports` and `Function` for retained script code and `OwnedValue` for a
 detached data snapshot. On the typed surface, use `value_in`, `get_in`,
-`function_in`, and `call_in`; the `*_current_in` variants also require the
-current install generation. Reset invalidates all retained handles by decision
-epoch.
+`function_in`, and `call_in`. Successful unrelated installations do not stale
+retained handles; reset invalidates all retained handles by decision epoch.
 
 ```rust,ignore
 let scenario: Scenario = rustia.invoke(
@@ -211,7 +210,10 @@ let mut rustia = Rustia::builder()
     .build()?;
 
 rustia.add_fn("clamp", |x: f64, lo: f64, hi: f64| x.clamp(lo, hi))?;
-let result: f64 = rustia.run_named("tool.luau", "return clamp(5, 0, 3)")?;
+let result: f64 = rustia
+    .load("return clamp(5, 0, 3)")
+    .source_name("tool.luau")
+    .eval()?;
 ```
 
 `RustiaExtension` remains the context-free namespaced module helper. Do not use
@@ -229,9 +231,11 @@ dispatch, and host panic are hard typed-transaction aborts. A host panic
 poisons the VM, and every later guest execution entry point rejects until
 `reset_decision()` succeeds.
 
-The transaction covers Rustia's record journal only. It does not roll back
-guest heap/global mutation, `HostMut`, callback captures, or context mutation
-hidden behind interior mutability.
+The general invocation transaction covers Rustia's record journal only. It does
+not roll back guest heap/global mutation from ordinary execution, `HostMut`,
+callback captures, or context mutation hidden behind interior mutability.
+`Invocation::install` additionally wraps the complete candidate in a nested
+guest-state savepoint and returns exports only after that savepoint commits.
 
 ## What not to port directly
 
@@ -245,7 +249,8 @@ hidden behind interior mutability.
 
 ## Current gaps
 
-- Guest module installation/hot reload is not a general heap transaction.
+- Atomic candidate installation is implemented; external callback and resolver
+  effects remain host-owned and cannot be rolled back.
 - Rooted `Value`, `Table`, and `Exports` handles now deserialize directly through
   snapshot-free live-value serde. `OwnedValue` remains the explicit eager,
   acyclic validation and serialization path.

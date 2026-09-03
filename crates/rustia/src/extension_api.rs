@@ -461,8 +461,8 @@ pub struct ModuleSource {
 }
 
 impl ModuleSource {
-    /// Creates a module whose diagnostic source name matches its canonical
-    /// cache identity.
+    /// Creates a module whose diagnostic and resolver-referrer source name
+    /// matches its canonical cache identity.
     pub fn new(identity: impl Into<String>, source: impl AsRef<[u8]>) -> Self {
         let identity = identity.into();
         Self {
@@ -472,9 +472,10 @@ impl ModuleSource {
         }
     }
 
-    /// Creates a module with a separate canonical cache identity and
-    /// diagnostic source name.
-    pub fn named(
+    /// Creates a module with a separate canonical cache identity and source
+    /// name. The source name is used for diagnostics and nested `require`
+    /// resolver referrers.
+    pub fn with_source_name(
         identity: impl Into<String>,
         source_name: impl Into<String>,
         source: impl AsRef<[u8]>,
@@ -987,13 +988,10 @@ impl RustiaExtension {
 
     pub(crate) fn install(self, rustia: &mut Rustia) -> Result<()> {
         let Some(namespace) = self.namespace else {
-            for function in self.functions {
-                rustia
-                    .vm_mut()
-                    .install_host_function(function)
-                    .map_err(Error::Vm)?;
-            }
-            return Ok(());
+            return rustia
+                .vm_mut()
+                .install_host_functions(self.functions)
+                .map_err(Error::Vm);
         };
 
         rustia

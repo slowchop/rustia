@@ -2385,8 +2385,8 @@ mod tests {
         }
 
         let mut vm = crate::Rustia::builder().build().unwrap();
-        let owned = vm
-            .run_owned("return { choice = 'ring', payload = { count = 3 } }")
+        let owned: OwnedValue = vm
+            .eval("return { choice = 'ring', payload = { count = 3 } }")
             .unwrap();
 
         assert_eq!(

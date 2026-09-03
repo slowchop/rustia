@@ -11,8 +11,8 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
 > ordinary instruction boundaries. Rooted live values/tables/functions now preserve rich payloads and graph
 > identity, with live globals access and quota-aware table construction. A shared native/Node-V8 test now
 > maintains the mixed-heap pressure and reclamation gate. The composable chunk builder and snapshot-free
-> live-value serde deserializer are implemented; the next release-critical work is safe host-function
-> construction plus the remaining transactional-failure boundary.
+> live-value serde deserializer and transactional installation boundary are implemented; the next
+> release-critical constructor work is safe host-function construction.
 > `spikes/` are throwaway prototypes that validated the design.
 > Read **[`design/CURRENT.md`](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](https://github.com/slowchop/rustia/blob/main/design/README.md) for the full doc map.
@@ -50,14 +50,14 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   decoder covers all **131 production opcodes** under fuel, recursion, input-size, and 512 KiB memory limits.
   Hosted CI also executes the bare and default web-live wasm adapters on Node 22/V8, while real
   Firefox/Safari goldens remain a release gate.
-- Public embedding API first slice: typed `run<T>()`, owned values with
+- Public embedding API first slice: typed `eval<T>()`, owned values with
   `Option<T>`/`Vec<T>`/`BTreeMap<String, T>`/table conversions plus typed and nested table helpers, source-named
-  run/compile helpers, typed/capability-tagged host functions with fallible `rustia::Result<T>` returns and up to
+  `load(...).source_name(...)` diagnostics and resolver referrers, typed/capability-tagged host functions with fallible `rustia::Result<T>` returns and up to
   eight arguments/results, retained script functions, pre-install host signature/fuel ABI metadata,
-  retained-handle freshness checks and current-generation accessors, rooted live `Value`/`Table`/`Function`
+  VM/decision-epoch-safe retained handles, rooted live `Value`/`Table`/`Function`
   handles with graph identity, binary strings, buffers, vectors, rich keys, and raw equality, public source-span/runtime-location error
   accessors, owned-value/table serde plus snapshot-free deserialization from rooted live values, deterministic
-  extensions, hot reload, and early macro sugar. `HostSchema`
+  extensions, transactional installation with host-owned replacement, and early macro sugar. `HostSchema`
   separates persistent function registration from a block-local `HostContext`; capability-specific views expose
   input, slots, ordered effects, slot writes, or profile-gated external mutation. Typed invocations share one
   fuel budget and stage a bounded count/byte record transaction. Ordinary object/program reclamation and the
@@ -66,10 +66,11 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   byte-stable core profile/surface identity component, while `compile_entry`/`invoke_entry_into` provide a direct
   stateless decision path with record publication and reset across both success and failure.
   `ServiceModuleResolver` provides host-owned canonical-identity `require` resolution with execute-once caching,
-  cycle diagnostics, shared fuel, deterministic labels, and reset-aware lifetime. Transactional installation/hot
-  reload remains planned. Live globals access, quota-aware table construction,
+  cycle diagnostics, shared fuel, deterministic labels, and reset-aware lifetime. Each atomic installation gets
+  a fresh lazy cache cohort while old functions retain their originating cohort. Live globals access, quota-aware table construction,
   owned-key/live-value insertion, and the composable
-  `load(source).name(...).environment(...).eval()/exec()` chunk builder are implemented. The next advanced
+  `load(source).source_name(...).environment(...)` chunk builder with `eval`, `eval_live`, `eval_serde`, `exec`,
+  and `install` terminals is implemented. The next advanced
   slice adds safe host-function construction, followed by optional userdata/scopes, async, and migration
   compatibility.
 - Host services are host-pluggable through the facade: `RustiaBuilder::standard()`/`deterministic()`/`live()`
@@ -122,7 +123,7 @@ The advanced embedding API is shared by all three: `deterministic()` enforces lo
 
 ## Live values
 
-`run_value` retains a guest result in its VM and decision epoch. `create_table` and `globals` provide the same
+`eval_live` retains a guest result in its VM and decision epoch. `create_table` and `globals` provide the same
 live identity for host-built graphs. `Table` access stays live, so shared/cyclic graphs and rich values do not
 pass through the smaller `OwnedValue` deep-copy boundary:
 
@@ -135,7 +136,7 @@ root.set(&mut rustia, "answer", 42_i32)?;
 root.set_live(&mut rustia, "self", &root.as_value())?;
 rustia.globals()?.set_live(&mut rustia, "host_root", &root.as_value())?;
 
-let returned = rustia.run_value("return host_root")?;
+let returned = rustia.load("return host_root").eval_live()?;
 let self_value = root.get(&mut rustia, "self")?;
 assert!(root.as_value().raw_equal(&mut rustia, &returned)?);
 assert!(root.as_value().raw_equal(&mut rustia, &self_value)?);
@@ -143,7 +144,7 @@ assert!(root.as_value().raw_equal(&mut rustia, &self_value)?);
 ```
 
 Clones share a collector root lease. Handles reject another VM and become stale after `reset_decision`; they
-remain usable across hot reload unless a caller deliberately requests a current-generation check. Global
+remain usable across successful module replacement. Global
 mutations are decision-local and reset with ordinary global inputs. Hardened leaves reject mutable globals
 handles and live table construction.
 
@@ -154,7 +155,7 @@ still allocate, while collector-backed borrows cannot escape. The explicit eager
 
 ## Chunk builder
 
-`load` keeps source configuration together without replacing the concise `run<T>()` helpers. A chunk can use
+`load` keeps source configuration together without replacing concise `eval<T>()`. A chunk can use
 the VM globals or an exact rooted table as its lexical environment, and can return a typed owned value, a live
 value, retained exports, or no value:
 
@@ -165,7 +166,7 @@ environment.set(&mut rustia, "input", 21)?;
 
 let answer: f64 = rustia
     .load("return input * 2")
-    .name("answer.luau")
+    .source_name("answer.luau")
     .environment(&environment)
     .eval()?;
 assert_eq!(answer, 42.0);
@@ -174,6 +175,13 @@ assert_eq!(answer, 42.0);
 
 The environment handle is validated before parsing or compilation. Functions created by the chunk capture
 that same live table. Hardened leaves reject dynamic source loading before compilation or VM allocation.
+
+`eval` snapshots the first result into the small owned conversion layer; `eval_serde` deserializes an owned Rust
+type directly from the live graph; `eval_live` retains exact guest identity. `exec` and all three evaluation
+terminals are intentionally stateful. `install` is different: it creates a fresh inheriting environment by
+default and commits guest mutations only after compilation, execution, quota checks, dependency caching, and
+exports retention all succeed. Applications reload by installing a candidate and assigning the returned
+`Exports` only on success. Rustia does not maintain a second named installation registry.
 
 ## Project Pillars
 The canonical decision filter is [`design/02-pillars.md`](https://github.com/slowchop/rustia/blob/main/design/02-pillars.md). The short version:
@@ -195,11 +203,11 @@ public rustia project; actual grabby integration work is explicitly out of scope
 
 | goal | complete | confidence |
 |---|---:|---:|
-| Whole public rustia project | 93% | 90% |
-| Usable embedded scripting crate | 98% | 95% |
-| Full public standalone Luau engine release | 67% | 88% |
+| Whole public rustia project | 94% | 90% |
+| Usable embedded scripting crate | 99% | 95% |
+| Full public standalone Luau engine release | 68% | 88% |
 | Standalone benchmark OSS project | 82% | 88% |
-| Public release readiness | 83% | 91% |
+| Public release readiness | 84% | 91% |
 
 - Current conformance runner: **712 fixtures**, **511 refs**, **0 pending**.
 - The benchmark harness has all 12 requested adapters, an explicit verified `mlua-luau-jit` mode, and a
@@ -219,7 +227,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
   shared peak at 256 KiB and retains 14.4 KiB across the shared set versus mlua/Luau/JIT's 24.8 KiB.
   A separate shared native/Node-V8 pressure test runs 96 decision epochs and 3,072 mixed allocation waves with
   exact post-reset VM-owned-memory plateaus and stable warmed wasm linear-memory pages.
-- Major remaining gates, in order, are live constructors/serde and transactional installation, compiler/runtime semantic-tail
+- Major remaining gates, in order, are safe function construction, compiler/runtime semantic-tail
   hardening, the full cross-target correctness/golden matrix, broader benchmark history, and release packaging.
   Semver policy is tracked in [`design/91-semver-policy.md`](https://github.com/slowchop/rustia/blob/main/design/91-semver-policy.md),
   release notes in [`CHANGELOG.md`](https://github.com/slowchop/rustia/blob/main/CHANGELOG.md), koto migration guidance in
@@ -242,7 +250,7 @@ public rustia project; actual grabby integration work is explicitly out of scope
 - `cargo run -p rustia --example embedding` — globals, fallible typed host functions, deterministic extensions, retained script functions, and serde.
 - `cargo run -p rustia --example chunk_builder` — named source, typed evaluation, a live custom lexical
   environment, and side-effect-only execution.
-- `cargo run -p rustia --example hot_reload` — compile/install hot reload plus retained-handle survival and freshness checks.
+- `cargo run -p rustia --example hot_reload` — atomic candidate installation, host-owned replacement, and old-handle survival.
 - `cargo run -p rustia --example module_resolution` — host-owned canonical module identity, source resolution,
   and deterministic script-visible `require`.
 - `cargo run -p rustia --example live_values` — rooted cyclic/shared tables, identity checks, and live buffer
@@ -268,8 +276,12 @@ Containment covers registered host functions, typed dispatch, legacy extension o
 and the configured `loadstring` compiler. Panic containment requires a
 `panic = "unwind"` build; `panic = "abort"` terminates or traps before Rustia
 can recover, so callbacks in such builds must not panic.
-Rollback covers Rustia's private record journal only—not guest heap
+Rollback normally covers Rustia's private record journal only—not guest heap
 mutations, `HostMut`, callback captures, or context state changed through interior mutability.
+`Invocation::install` deliberately adds a nested guest-state savepoint for its
+module candidate. Its rollback snapshot is charged to the VM memory quota and
+must fit before candidate execution starts; external host effects still remain
+outside rollback.
 
 For grabby, make at most one invocation successful for each `(tick, phase, emitter)` and append hardened
 actions with `invoke_entry_into`; this makes the per-emitter sequence unique before lanes are stably sorted by
@@ -297,7 +309,9 @@ must be rebound for the next decision. Replay protocols should record
 - `cargo run -p rustia-cli -- --repl`
 
 Compile and runtime failures include source-name-aware line snippets and caret markers where rustia has source
-span or runtime-line evidence. In standard and compatibility profiles, file,
+span or runtime-line evidence. The same source name is the referrer supplied to
+the host resolver for nested `require` calls; canonical cache identity still
+comes from the resolver result. In standard and compatibility profiles, file,
 eval, stdin, and REPL execution can use `require`: paths are resolved relative
 to the referring module (or the entry working directory), a fixed
 `.luau`/`.lua`/directory-index order is used, and canonical paths provide cache

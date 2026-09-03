@@ -103,15 +103,21 @@ The outer Rust closure passed to `invoke`/`invoke_into` is caller control flow, 
 caller-side value conversion panics, normal Rust unwinding drops the private journal without publication and
 ends the VM/context borrows; Rustia does not translate or poison on that path. VM stacks are already idle
 between lexical guest calls, so the facade remains reusable. Guest heap/context/service mutations completed
-before the panic remain, matching the record-only transaction rule.
+before the panic remain, matching the normal record-only transaction rule.
+`Invocation::install` is the deliberate guest-state exception; its nested
+savepoint does not make external host effects transactional.
 `invoke_entry_into` is stronger than the general helpers: it catches such an
 unwind, performs the hardened decision reset, and then resumes the original
 panic.
 
-The guarantee is **record-transactional, not a general state transaction**. Rustia does not undo ordinary guest
-heap/global writes, mutation through `HostMut`, captured callback state, or `HostContext` mutation hidden behind
-interior mutability. `DeterministicSim` excludes `HostMut`, and grabby keeps cross-tick authority in captured
-slots plus the record lane, but embedders must still audit callback captures.
+The general invocation guarantee is **record-transactional, not a general state transaction**. Ordinary
+`eval`/`eval_live`/`eval_serde`/`exec` and retained-function calls do not undo guest heap/global writes,
+mutation through `HostMut`, captured callback state, or `HostContext` mutation hidden behind interior
+mutability. `Invocation::install`, however, deliberately adds a nested guest-state savepoint around the module
+candidate: if installation fails, guest heap/global/coroutine/RNG/logical-time/GC/module-cache state and
+provisional retained roots are restored, and the surrounding invocation still publishes no records. External
+host and resolver effects remain outside that savepoint. `DeterministicSim` excludes `HostMut`, and grabby keeps
+cross-tick authority in captured slots plus the record lane, but embedders must still audit callback captures.
 
 On success, `invoke` returns an `InvocationOutcome` containing the value, a slice of Rustia's reusable journal,
 and usage (fuel, record count, logical bytes); the slice lasts until the next mutable VM use. `invoke_into`
@@ -139,11 +145,11 @@ creation epoch and reject every operation after reset; the raw `RetainedValue` r
 lower-level epoch boundary. Reset is idle-only and is rejected from guest/host-callback execution. A
 600-decision native table/coroutine/program/retained-export test remains exactly flat after warm-up, including
 across the compact per-slot generation range. The shared native/Node-V8 mixed-heap test runs 96 further
-decision epochs and checks bounded public roots, rich cyclic graphs, weak collection, hot reload, quota/OOM
+decision epochs and checks bounded public roots, rich cyclic graphs, weak collection, module replacement, quota/OOM
 recovery, stale handles, exact post-reset VM accounting, and stable warmed wasm linear-memory pages.
 Replay/golden protocols must record
 `RUSTIA_DECISION_RESET_ABI_VERSION` (currently 1). Outside an explicit reset epoch, ordinary retained function
-calls retain their documented survival across successful hot reload.
+calls retain their documented survival across successful module replacement.
 (Scenario run-once + console use are separate paths, not this hot loop.)
 
 For `GuestSurface::HardenedLeaf`, the sealed globals and their reachable standard-library/host configuration

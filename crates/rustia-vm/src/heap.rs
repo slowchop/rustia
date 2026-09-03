@@ -1,7 +1,7 @@
 use gc_arena::lock::RefLock;
 use gc_arena::{Arena, Collect, DynamicRootSet, Gc, Rootable, Static};
 use smallvec::SmallVec;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
 
 use crate::bytecode::{stable_bytes_hash, SharedProgramString};
@@ -263,6 +263,22 @@ impl<T> ReusableSlots<T> {
             .count();
     }
 
+    fn rollback_transaction(&mut self, len: usize, free: Vec<u32>) {
+        debug_assert!(len <= self.slots.len());
+        self.slots.truncate(len);
+        for index in &free {
+            if let Some(slot) = self.slots.get_mut(*index as usize) {
+                slot.value = None;
+            }
+        }
+        self.free = free;
+        self.occupied = self
+            .slots
+            .iter()
+            .filter(|slot| slot.value.is_some())
+            .count();
+    }
+
     #[inline]
     fn occupied_len(&self) -> usize {
         self.occupied
@@ -467,10 +483,13 @@ struct FunctionData {
     kind: FunctionKind,
     captures: SmallVec<[FunctionCapture; 2]>,
     environment: u32,
+    module_cohort: u32,
 }
 
-pub(crate) type FunctionDispatchData =
-    (FunctionKind, Option<(SmallVec<[FunctionCapture; 2]>, u32)>);
+pub(crate) type FunctionDispatchData = (
+    FunctionKind,
+    Option<(SmallVec<[FunctionCapture; 2]>, u32, u32)>,
+);
 
 /// A closure capture is either a shared mutable cell or an immutable value
 /// copied into the closure. The compiler only emits `Direct` after proving
@@ -538,6 +557,22 @@ pub(crate) enum UserdataPayload {
 #[collect(no_drop)]
 struct BufferData {
     bytes: Vec<u8>,
+}
+
+struct HeapTransaction {
+    checkpoint: HeapCheckpoint,
+    table_free: Vec<u32>,
+    function_free: Vec<u32>,
+    upvalue_free: Vec<u32>,
+    string_free: Vec<u32>,
+    userdata_free: Vec<u32>,
+    buffer_free: Vec<u32>,
+    vector_free: Vec<u32>,
+    tables: Vec<(u32, TableData)>,
+    functions: Vec<(u32, FunctionData)>,
+    upvalues: Vec<(u32, UpvalueData)>,
+    userdatas: Vec<(u32, UserdataData)>,
+    buffers: Vec<(u32, BufferData)>,
 }
 
 #[derive(Clone, Copy, Collect)]
@@ -909,6 +944,7 @@ pub struct VmCell {
     // Selected once at VM construction from the profile; every table in this
     // cell uses the same hash-part variant.
     table_layout: TableLayout,
+    transactions: Vec<HeapTransaction>,
     #[cfg(any(test, feature = "table-write-diagnostics"))]
     numeric_array_slot_writes: NumericArraySlotWriteCounts,
 }
@@ -971,6 +1007,7 @@ impl VmCell {
             upvalues: ReusableSlots::new(),
             side_usage: HeapMemoryUsage::default(),
             table_layout,
+            transactions: Vec::new(),
             #[cfg(any(test, feature = "table-write-diagnostics"))]
             numeric_array_slot_writes: NumericArraySlotWriteCounts::default(),
         }
@@ -1001,6 +1038,7 @@ impl VmCell {
         handle: u32,
         mutate: impl FnOnce(&mut TableData) -> R,
     ) -> Option<R> {
+        self.journal_table(handle);
         let table = self.tables.get_mut(handle)?;
         let before = table_data_memory_usage(table);
         let result = mutate(table);
@@ -1018,6 +1056,7 @@ impl VmCell {
         handle: u32,
         mutate: impl FnOnce(&RootData<'_>, &mut TableData) -> R,
     ) -> Option<R> {
+        self.journal_table(handle);
         let tables = &mut self.tables;
         let side_usage = &mut self.side_usage;
         self.arena.mutate(|mc, root| {
@@ -1029,6 +1068,182 @@ impl VmCell {
             side_usage.adjust(before, table_data_memory_usage(table));
             Some(result)
         })
+    }
+
+    pub(crate) fn transaction_snapshot_live_bytes(&mut self) -> usize {
+        let mut bytes = size_of::<HeapTransaction>();
+        bytes = bytes
+            .saturating_add(self.tables.free.len().saturating_mul(size_of::<u32>()))
+            .saturating_add(self.functions.free.len().saturating_mul(size_of::<u32>()))
+            .saturating_add(self.upvalues.free.len().saturating_mul(size_of::<u32>()));
+        for table in self.tables.values() {
+            bytes = bytes
+                .saturating_add(size_of::<(u32, TableData)>())
+                .saturating_add(table_data_live_bytes(table));
+        }
+        for function in self.functions.values() {
+            bytes = bytes
+                .saturating_add(size_of::<(u32, FunctionData)>())
+                .saturating_add(function_data_memory_usage(function).live_bytes);
+        }
+        bytes = bytes.saturating_add(
+            self.upvalues
+                .occupied_len()
+                .saturating_mul(size_of::<(u32, UpvalueData)>()),
+        );
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            bytes = bytes
+                .saturating_add(root.strings.free.len().saturating_mul(size_of::<u32>()))
+                .saturating_add(root.userdatas.free.len().saturating_mul(size_of::<u32>()))
+                .saturating_add(root.buffers.free.len().saturating_mul(size_of::<u32>()))
+                .saturating_add(root.vectors.free.len().saturating_mul(size_of::<u32>()))
+                .saturating_add(
+                    root.userdatas
+                        .occupied_len()
+                        .saturating_mul(size_of::<(u32, UserdataData)>()),
+                );
+            for buffer in root.buffers.values() {
+                bytes = bytes
+                    .saturating_add(size_of::<(u32, BufferData)>())
+                    .saturating_add(buffer.bytes.len());
+            }
+        });
+        bytes
+    }
+
+    pub(crate) fn begin_transaction(&mut self) -> Result<(), ()> {
+        self.transactions.try_reserve(1).map_err(|_| ())?;
+        let mut checkpoint = HeapCheckpoint {
+            tables: self.tables.slots.len(),
+            functions: self.functions.slots.len(),
+            upvalues: self.upvalues.slots.len(),
+            strings: 0,
+            userdatas: 0,
+            buffers: 0,
+            vectors: 0,
+        };
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            checkpoint.strings = root.strings.slots.len();
+            checkpoint.userdatas = root.userdatas.slots.len();
+            checkpoint.buffers = root.buffers.slots.len();
+            checkpoint.vectors = root.vectors.slots.len();
+        });
+        let root_snapshot = self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            Ok::<_, ()>((
+                try_clone_copy_vec(&root.strings.free)?,
+                try_clone_copy_vec(&root.userdatas.free)?,
+                try_clone_copy_vec(&root.buffers.free)?,
+                try_clone_copy_vec(&root.vectors.free)?,
+                try_snapshot_copy_slots(&root.userdatas)?,
+                try_snapshot_buffer_slots(&root.buffers)?,
+            ))
+        });
+        let (string_free, userdata_free, buffer_free, vector_free, userdatas, buffers) =
+            root_snapshot?;
+        let tables = try_snapshot_table_slots(&self.tables)?;
+        let functions = try_snapshot_function_slots(&self.functions)?;
+        let upvalues = try_snapshot_copy_slots(&self.upvalues)?;
+        self.transactions.push(HeapTransaction {
+            checkpoint,
+            table_free: try_clone_copy_vec(&self.tables.free)?,
+            function_free: try_clone_copy_vec(&self.functions.free)?,
+            upvalue_free: try_clone_copy_vec(&self.upvalues.free)?,
+            string_free,
+            userdata_free,
+            buffer_free,
+            vector_free,
+            tables,
+            functions,
+            upvalues,
+            userdatas,
+            buffers,
+        });
+        Ok(())
+    }
+
+    pub(crate) fn commit_transaction(&mut self) {
+        let transaction = self
+            .transactions
+            .pop()
+            .expect("heap transaction commit requires an active savepoint");
+        drop(transaction);
+    }
+
+    pub(crate) fn rollback_transaction(&mut self) {
+        let transaction = self
+            .transactions
+            .pop()
+            .expect("heap transaction rollback requires an active savepoint");
+        for (handle, value) in transaction.tables {
+            if let Some(slot) = self.tables.get_mut(handle) {
+                *slot = value;
+            }
+        }
+        for (handle, value) in transaction.functions {
+            if let Some(slot) = self.functions.get_mut(handle) {
+                *slot = value;
+            }
+        }
+        for (handle, value) in transaction.upvalues {
+            if let Some(slot) = self.upvalues.get_mut(handle) {
+                *slot = value;
+            }
+        }
+        self.tables
+            .rollback_transaction(transaction.checkpoint.tables, transaction.table_free);
+        self.functions
+            .rollback_transaction(transaction.checkpoint.functions, transaction.function_free);
+        self.upvalues
+            .rollback_transaction(transaction.checkpoint.upvalues, transaction.upvalue_free);
+        self.arena.mutate(|mc, root| {
+            let mut root = root.unlock(mc).borrow_mut();
+            for (handle, value) in transaction.userdatas {
+                if let Some(slot) = root.userdatas.get_mut(handle) {
+                    *slot = value;
+                }
+            }
+            for (handle, value) in transaction.buffers {
+                if let Some(slot) = root.buffers.get_mut(handle) {
+                    *slot = value;
+                }
+            }
+            root.strings
+                .rollback_transaction(transaction.checkpoint.strings, transaction.string_free);
+            root.userdatas
+                .rollback_transaction(transaction.checkpoint.userdatas, transaction.userdata_free);
+            root.buffers
+                .rollback_transaction(transaction.checkpoint.buffers, transaction.buffer_free);
+            root.vectors
+                .rollback_transaction(transaction.checkpoint.vectors, transaction.vector_free);
+            rebuild_string_index(&mut root, STRING_INDEX_MIN_CAPACITY);
+        });
+        self.arena.finish_cycle();
+        self.arena.finish_cycle();
+        self.allocation_debt_pending = self.arena.metrics().allocation_debt() > 0.0;
+        self.recompute_side_usage();
+    }
+
+    fn journal_table(&mut self, handle: u32) {
+        let _ = handle;
+    }
+
+    fn journal_function(&mut self, handle: u32) {
+        let _ = handle;
+    }
+
+    fn journal_upvalue(&mut self, handle: u32) {
+        let _ = handle;
+    }
+
+    fn journal_userdata(&mut self, handle: u32) {
+        let _ = handle;
+    }
+
+    fn journal_buffer(&mut self, handle: u32) {
+        let _ = handle;
     }
 
     pub fn finish_collection_cycle(&mut self) {
@@ -1133,6 +1348,10 @@ impl VmCell {
             usage.add_slots(&root.buffers);
             usage.add_slots(&root.vectors);
         });
+        usage.add_vec(&self.transactions);
+        for transaction in &self.transactions {
+            add_heap_transaction_memory(transaction, &mut usage);
+        }
         #[cfg(test)]
         assert_eq!(
             usage,
@@ -1177,6 +1396,10 @@ impl VmCell {
                 usage.add_vec(&buffer.bytes);
             }
         });
+        usage.add_vec(&self.transactions);
+        for transaction in &self.transactions {
+            add_heap_transaction_memory(transaction, &mut usage);
+        }
         usage
     }
 
@@ -1216,6 +1439,26 @@ impl VmCell {
     }
 
     pub fn collect_weak_tables_with_roots(&mut self, roots: &[Value]) {
+        self.collect_weak_tables_with_roots_inner(roots, true);
+    }
+
+    pub(crate) fn collect_weak_tables_preserving_transaction_allocations(
+        &mut self,
+        roots: &[Value],
+    ) {
+        self.collect_weak_tables_with_roots_inner(roots, false);
+    }
+
+    fn collect_weak_tables_with_roots_inner(
+        &mut self,
+        roots: &[Value],
+        reclaim_transaction_allocations: bool,
+    ) {
+        let transaction_active = !self.transactions.is_empty();
+        let mut rollback_roots = roots.to_vec();
+        if transaction_active {
+            self.extend_transaction_reclamation_roots(&mut rollback_roots);
+        }
         let tables = &mut self.tables;
         let functions = &mut self.functions;
         let upvalues = &mut self.upvalues;
@@ -1233,14 +1476,94 @@ impl VmCell {
             });
             let live = mark_heap_reachable(&root, tables, functions, upvalues, &modes, roots);
             debug_assert!(live.upvalues.live_len() <= upvalues.occupied_len());
-            for (handle, mode) in modes {
+            for (&handle, &mode) in &modes {
                 if let Some(table) = tables.get_mut(handle) {
                     sweep_weak_table(table, mode, &live);
                 }
             }
-            reclaim_unreachable(&mut root, tables, functions, upvalues, &live);
+            let reclaim_live = if transaction_active && reclaim_transaction_allocations {
+                for transaction in &self.transactions {
+                    for handle in root.strings.handles() {
+                        if slot_handle_parts(handle).0 < transaction.checkpoint.strings {
+                            rollback_roots.push(Value::string_atom(handle));
+                        }
+                    }
+                    for handle in root.vectors.handles() {
+                        if slot_handle_parts(handle).0 < transaction.checkpoint.vectors {
+                            rollback_roots.push(Value::vector(handle));
+                        }
+                    }
+                }
+                Some(mark_heap_reachable(
+                    &root,
+                    tables,
+                    functions,
+                    upvalues,
+                    &modes,
+                    &rollback_roots,
+                ))
+            } else if transaction_active {
+                None
+            } else {
+                Some(live)
+            };
+            if let Some(reclaim_live) = reclaim_live.as_ref() {
+                reclaim_unreachable(&mut root, tables, functions, upvalues, reclaim_live);
+            }
         });
         self.recompute_side_usage();
+    }
+
+    fn extend_transaction_reclamation_roots(&self, roots: &mut Vec<Value>) {
+        for transaction in &self.transactions {
+            for (handle, table) in &transaction.tables {
+                roots.push(Value::table(*handle));
+                if let Some(metatable) = table.metatable {
+                    roots.push(Value::table(metatable));
+                }
+                roots.extend_from_slice(&table.array);
+                match &table.hash {
+                    HashPart::Log { entries, .. } => {
+                        for entry in entries {
+                            roots.push(entry.key_value);
+                            roots.push(entry.value);
+                        }
+                    }
+                    HashPart::Puc(puc) => {
+                        for node in &puc.nodes {
+                            roots.push(node.key_value);
+                            roots.push(node.value);
+                        }
+                    }
+                }
+            }
+            for (handle, function) in &transaction.functions {
+                roots.push(Value::function(*handle));
+                roots.push(Value::table(function.environment));
+                for capture in &function.captures {
+                    roots.push(capture.0);
+                }
+            }
+            for (handle, upvalue) in &transaction.upvalues {
+                roots.push(Value::capture_cell(*handle));
+                roots.push(upvalue.value);
+            }
+            for (handle, userdata) in &transaction.userdatas {
+                roots.push(Value::userdata(*handle));
+                if let Some(metatable) = userdata.metatable {
+                    roots.push(Value::table(metatable));
+                }
+                if let UserdataPayload::ConformanceVertex { pos, normal, uv } = userdata.payload {
+                    roots.extend([pos, normal, uv]);
+                }
+            }
+            roots.extend(
+                transaction
+                    .buffers
+                    .iter()
+                    .map(|(handle, _)| Value::buffer(*handle)),
+            );
+        }
     }
 
     pub(crate) fn reachable_userdata_handles(&mut self, roots: &[Value]) -> Vec<u32> {
@@ -1263,6 +1586,31 @@ impl VmCell {
             root.userdatas
                 .handles()
                 .filter(|handle| live.userdatas.contains(*handle))
+                .collect()
+        })
+    }
+
+    pub(crate) fn reachable_module_cohorts(&mut self, roots: &[Value]) -> BTreeSet<u32> {
+        let tables = &self.tables;
+        let functions = &self.functions;
+        let upvalues = &self.upvalues;
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            let mode_key = b"__mode";
+            let mode_atom = string_index_lookup(&root, mode_key, stable_bytes_hash(mode_key));
+            let modes = mode_atom.map_or_else(BTreeMap::new, |mode_atom| {
+                tables
+                    .handles()
+                    .filter_map(|handle| {
+                        table_weak_mode(&root, tables, handle, mode_atom).map(|mode| (handle, mode))
+                    })
+                    .collect()
+            });
+            let live = mark_heap_reachable(&root, tables, functions, upvalues, &modes, roots);
+            functions
+                .handles()
+                .filter(|handle| live.functions.contains(*handle))
+                .filter_map(|handle| functions.get(handle).map(|function| function.module_cohort))
                 .collect()
         })
     }
@@ -1381,12 +1729,14 @@ impl VmCell {
         if let Some(short) = ShortString::new(value.as_bytes()) {
             return self.intern_inline_string(short, stable_hash);
         }
+        let append_only = !self.transactions.is_empty();
         let (atom, index_before, index_after, owned_removed) = self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
             let index_before = vec_memory_usage(&root.string_index);
             if let Some(atom) = string_index_lookup(&root, value.as_bytes(), stable_hash) {
                 let mut owned_removed = HeapMemoryUsage::default();
-                if matches!(root.strings.get(atom), Some(InternedString::Owned(_))) {
+                if !append_only && matches!(root.strings.get(atom), Some(InternedString::Owned(_)))
+                {
                     if let Some(InternedString::Owned(stored)) = root.strings.get(atom) {
                         owned_removed = vec_memory_usage(&stored.0);
                     }
@@ -1399,9 +1749,10 @@ impl VmCell {
                 return (atom, index_before, index_before, owned_removed);
             }
             ensure_string_index_capacity(&mut root);
+            let stored = InternedString::Shared(Static(value));
             let atom = root
                 .strings
-                .insert(InternedString::Shared(Static(value)))
+                .insert(stored)
                 .expect("string atom table exceeds compact u32 index address space");
             insert_string_index(&mut root, atom);
             (
@@ -1425,9 +1776,10 @@ impl VmCell {
                 return (atom, index_before, index_before);
             }
             ensure_string_index_capacity(&mut root);
+            let stored = InternedString::Inline(value);
             let atom = root
                 .strings
-                .insert(InternedString::Inline(value))
+                .insert(stored)
                 .expect("string atom table exceeds compact u32 index address space");
             insert_string_index(&mut root, atom);
             (atom, index_before, vec_memory_usage(&root.string_index))
@@ -1459,8 +1811,10 @@ impl VmCell {
     }
 
     fn planned_vector_allocation(&mut self) -> Option<(u32, usize)> {
-        self.arena
-            .mutate(|mc, root| root.unlock(mc).borrow().vectors.planned_insert())
+        self.arena.mutate(|mc, root| {
+            let root = root.unlock(mc).borrow();
+            root.vectors.planned_insert()
+        })
     }
 
     #[inline]
@@ -1667,6 +2021,7 @@ impl VmCell {
         })
     }
 
+    #[cfg(test)]
     pub fn alloc_function(
         &mut self,
         program: Option<u32>,
@@ -1674,18 +2029,41 @@ impl VmCell {
         captures: Vec<FunctionCapture>,
         environment: u32,
     ) -> Option<u32> {
+        self.alloc_function_in_cohort(program, prototype, captures, environment, 0)
+    }
+
+    pub(crate) fn alloc_function_in_cohort(
+        &mut self,
+        program: Option<u32>,
+        prototype: u32,
+        captures: Vec<FunctionCapture>,
+        environment: u32,
+        module_cohort: u32,
+    ) -> Option<u32> {
         self.insert_function_data(FunctionData {
             kind: FunctionKind::Bytecode { program, prototype },
             captures: captures.into_iter().collect(),
             environment,
+            module_cohort,
         })
     }
 
+    #[cfg(test)]
     pub fn alloc_dynamic_main_function(&mut self, program: u32, environment: u32) -> Option<u32> {
+        self.alloc_dynamic_main_function_in_cohort(program, environment, 0)
+    }
+
+    pub(crate) fn alloc_dynamic_main_function_in_cohort(
+        &mut self,
+        program: u32,
+        environment: u32,
+        module_cohort: u32,
+    ) -> Option<u32> {
         self.insert_function_data(FunctionData {
             kind: FunctionKind::DynamicMain { program },
             captures: SmallVec::new(),
             environment,
+            module_cohort,
         })
     }
 
@@ -1698,6 +2076,7 @@ impl VmCell {
             kind: FunctionKind::Native(native),
             captures: SmallVec::new(),
             environment,
+            module_cohort: 0,
         })
     }
 
@@ -1707,6 +2086,7 @@ impl VmCell {
             kind: FunctionKind::Host(host),
             captures: SmallVec::new(),
             environment,
+            module_cohort: 0,
         })
     }
 
@@ -1726,6 +2106,7 @@ impl VmCell {
                 .map(FunctionCapture::from_cell)
                 .collect(),
             environment,
+            module_cohort: 0,
         })
     }
 
@@ -1759,9 +2140,11 @@ impl VmCell {
     pub fn function_dispatch_data(&self, handle: u32) -> Option<FunctionDispatchData> {
         let function = self.functions.get(handle)?;
         let bytecode_data = match function.kind {
-            FunctionKind::Bytecode { .. } | FunctionKind::DynamicMain { .. } => {
-                Some((function.captures.clone(), function.environment))
-            }
+            FunctionKind::Bytecode { .. } | FunctionKind::DynamicMain { .. } => Some((
+                function.captures.clone(),
+                function.environment,
+                function.module_cohort,
+            )),
             FunctionKind::Host(_) | FunctionKind::Native(_) => None,
         };
         Some((function.kind, bytecode_data))
@@ -1805,13 +2188,15 @@ impl VmCell {
     }
 
     pub fn set_function_environment(&mut self, handle: u32, environment: u32) -> Option<()> {
+        self.journal_function(handle);
         let function = self.functions.get_mut(handle)?;
         function.environment = environment;
         Some(())
     }
 
     pub fn alloc_upvalue(&mut self, value: Value) -> Option<u32> {
-        self.upvalues.insert(UpvalueData { value })
+        let value = UpvalueData { value };
+        self.upvalues.insert(value)
     }
 
     #[inline]
@@ -1821,6 +2206,7 @@ impl VmCell {
 
     #[inline]
     pub fn upvalue_set(&mut self, handle: u32, value: Value) -> Option<()> {
+        self.journal_upvalue(handle);
         let upvalue = self.upvalues.get_mut(handle)?;
         upvalue.value = value;
         Some(())
@@ -1832,10 +2218,11 @@ impl VmCell {
         }
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
-            root.userdatas.insert(UserdataData {
+            let value = UserdataData {
                 metatable,
                 payload: UserdataPayload::None,
-            })
+            };
+            root.userdatas.insert(value)
         })
     }
 
@@ -1849,7 +2236,8 @@ impl VmCell {
         }
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
-            root.userdatas.insert(UserdataData { metatable, payload })
+            let value = UserdataData { metatable, payload };
+            root.userdatas.insert(value)
         })
     }
 
@@ -1857,7 +2245,8 @@ impl VmCell {
         let usage = vec_memory_usage(&bytes);
         let handle = self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
-            root.buffers.insert(BufferData { bytes })
+            let value = BufferData { bytes };
+            root.buffers.insert(value)
         })?;
         self.side_usage.add(usage.live_bytes, usage.reserved_bytes);
         Some(handle)
@@ -1900,6 +2289,7 @@ impl VmCell {
     }
 
     pub fn buffer_write(&mut self, buffer: u32, offset: usize, bytes: &[u8]) -> Option<()> {
+        self.journal_buffer(buffer);
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
             let buffer = root.buffers.get_mut(buffer)?;
@@ -1919,6 +2309,7 @@ impl VmCell {
         count: usize,
         byte: u8,
     ) -> Option<()> {
+        self.journal_buffer(buffer);
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
             let buffer = root.buffers.get_mut(buffer)?;
@@ -1961,6 +2352,7 @@ impl VmCell {
         userdata: u32,
         payload: UserdataPayload,
     ) -> Option<()> {
+        self.journal_userdata(userdata);
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
             let userdata = root.userdatas.get_mut(userdata)?;
@@ -2118,6 +2510,7 @@ impl VmCell {
         one_based_index: usize,
         value: Value,
     ) -> Option<TableNumericArrayWrite> {
+        self.journal_table(table);
         let table_data = self.tables.get_mut(table)?;
         debug_assert!(
             table_data
@@ -2166,6 +2559,7 @@ impl VmCell {
         table: u32,
         value: Value,
     ) -> Option<TableNumericArrayWrite> {
+        self.journal_table(table);
         let table_data = self.tables.get_mut(table)?;
         debug_assert!(
             !value.is_nil(),
@@ -2390,6 +2784,7 @@ impl VmCell {
         slot: TableStringHashSlot,
         value: Value,
     ) -> Option<TableStringHashWrite> {
+        self.journal_table(table);
         let table = self.tables.get_mut(table)?;
         let HashPart::Log { entries, .. } = &mut table.hash else {
             return Some(TableStringHashWrite::Deferred);
@@ -2587,6 +2982,7 @@ impl VmCell {
                 .expect("validated vector allocation plan remains available");
             debug_assert_eq!(vector, planned_vector);
         }
+        self.journal_table(table);
         *self
             .tables
             .get_mut(table)
@@ -2645,6 +3041,7 @@ impl VmCell {
         if growth > allowed_growth {
             return QuotaTableWrite::WouldExceed;
         }
+        self.journal_table(table);
         *self
             .tables
             .get_mut(table)
@@ -2694,6 +3091,7 @@ impl VmCell {
         if let Some(metatable) = metatable {
             self.tables.get(metatable)?;
         }
+        self.journal_table(table);
         let table = self.tables.get_mut(table)?;
         if table.metatable != metatable {
             table.metatable = metatable;
@@ -2934,6 +3332,7 @@ impl VmCell {
     }
 
     pub fn table_freeze(&mut self, table: u32) -> Option<bool> {
+        self.journal_table(table);
         let table = self.tables.get_mut(table)?;
         let was_readonly = table.readonly;
         if !was_readonly {
@@ -3276,6 +3675,142 @@ fn function_data_memory_usage(function: &FunctionData) -> HeapMemoryUsage {
             .captures
             .capacity()
             .saturating_mul(size_of::<FunctionCapture>()),
+    }
+}
+
+fn try_clone_copy_vec<T: Copy>(values: &[T]) -> Result<Vec<T>, ()> {
+    let mut clone = Vec::new();
+    clone.try_reserve_exact(values.len()).map_err(|_| ())?;
+    clone.extend_from_slice(values);
+    Ok(clone)
+}
+
+fn try_clone_table_data(table: &TableData) -> Result<TableData, ()> {
+    let array = try_clone_copy_vec(&table.array)?;
+    let hash = match &table.hash {
+        HashPart::Log { entries, index } => HashPart::Log {
+            entries: try_clone_copy_vec(entries)?,
+            index: try_clone_copy_vec(index)?,
+        },
+        HashPart::Puc(puc) => HashPart::Puc(PucHashPart {
+            nodes: try_clone_copy_vec(&puc.nodes)?,
+            lastfree: puc.lastfree,
+        }),
+    };
+    Ok(TableData {
+        array,
+        hash,
+        readonly: table.readonly,
+        metatable: table.metatable,
+        shape_version: table.shape_version,
+        mutation_version: table.mutation_version,
+    })
+}
+
+fn try_clone_function_data(function: &FunctionData) -> Result<FunctionData, ()> {
+    let mut captures = SmallVec::new();
+    captures
+        .try_reserve(function.captures.len())
+        .map_err(|_| ())?;
+    captures.extend_from_slice(&function.captures);
+    Ok(FunctionData {
+        kind: function.kind,
+        captures,
+        environment: function.environment,
+        module_cohort: function.module_cohort,
+    })
+}
+
+fn try_clone_buffer_data(buffer: &BufferData) -> Result<BufferData, ()> {
+    Ok(BufferData {
+        bytes: try_clone_copy_vec(&buffer.bytes)?,
+    })
+}
+
+fn try_snapshot_copy_slots<T: Copy>(slots: &ReusableSlots<T>) -> Result<Vec<(u32, T)>, ()> {
+    let mut snapshot = Vec::new();
+    snapshot
+        .try_reserve_exact(slots.occupied_len())
+        .map_err(|_| ())?;
+    for handle in slots.handles() {
+        snapshot.push((handle, *slots.get(handle).expect("live slot handle")));
+    }
+    Ok(snapshot)
+}
+
+fn try_snapshot_table_slots(slots: &ReusableSlots<TableData>) -> Result<Vec<(u32, TableData)>, ()> {
+    let mut snapshot = Vec::new();
+    snapshot
+        .try_reserve_exact(slots.occupied_len())
+        .map_err(|_| ())?;
+    for handle in slots.handles() {
+        snapshot.push((
+            handle,
+            try_clone_table_data(slots.get(handle).expect("live table handle"))?,
+        ));
+    }
+    Ok(snapshot)
+}
+
+fn try_snapshot_function_slots(
+    slots: &ReusableSlots<FunctionData>,
+) -> Result<Vec<(u32, FunctionData)>, ()> {
+    let mut snapshot = Vec::new();
+    snapshot
+        .try_reserve_exact(slots.occupied_len())
+        .map_err(|_| ())?;
+    for handle in slots.handles() {
+        snapshot.push((
+            handle,
+            try_clone_function_data(slots.get(handle).expect("live function handle"))?,
+        ));
+    }
+    Ok(snapshot)
+}
+
+fn try_snapshot_buffer_slots(
+    slots: &ReusableSlots<BufferData>,
+) -> Result<Vec<(u32, BufferData)>, ()> {
+    let mut snapshot = Vec::new();
+    snapshot
+        .try_reserve_exact(slots.occupied_len())
+        .map_err(|_| ())?;
+    for handle in slots.handles() {
+        snapshot.push((
+            handle,
+            try_clone_buffer_data(slots.get(handle).expect("live buffer handle"))?,
+        ));
+    }
+    Ok(snapshot)
+}
+
+fn add_heap_transaction_memory(transaction: &HeapTransaction, usage: &mut HeapMemoryUsage) {
+    for values in [
+        &transaction.table_free,
+        &transaction.function_free,
+        &transaction.upvalue_free,
+        &transaction.string_free,
+        &transaction.userdata_free,
+        &transaction.buffer_free,
+        &transaction.vector_free,
+    ] {
+        usage.add_vec(values);
+    }
+    usage.add_vec(&transaction.tables);
+    for (_, table) in &transaction.tables {
+        let nested = table_data_memory_usage(table);
+        usage.add(nested.live_bytes, nested.reserved_bytes);
+    }
+    usage.add_vec(&transaction.functions);
+    for (_, function) in &transaction.functions {
+        let nested = function_data_memory_usage(function);
+        usage.add(nested.live_bytes, nested.reserved_bytes);
+    }
+    usage.add_vec(&transaction.upvalues);
+    usage.add_vec(&transaction.userdatas);
+    usage.add_vec(&transaction.buffers);
+    for (_, buffer) in &transaction.buffers {
+        usage.add_vec(&buffer.bytes);
     }
 }
 

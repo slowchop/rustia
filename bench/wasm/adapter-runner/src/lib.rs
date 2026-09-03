@@ -267,7 +267,9 @@ fn prepare_rustia(source: &str, memory_limit_bytes: Option<usize>) -> Result<Ben
         None => Rustia::new(Profile::ReproducibleStandard),
     };
     let exports = engine
-        .compile_and_run_exports_named("bench/workload.luau", &wrapped)
+        .load(&wrapped)
+        .source_name("bench/workload.luau")
+        .install()
         .map_err(|error| error.to_string())?;
     let function = exports
         .function(&mut engine, "f")
@@ -287,7 +289,7 @@ fn run_rustia_decision_reset_probe() -> Result<(), String> {
     engine
         .add_pure_fn("bias", || 7.0)
         .map_err(|error| error.to_string())?;
-    let module = Rustia::compile(
+    let module = Rustia::compile_module(
         "wasm-reset-probe.luau",
         "\
 local temporary = {}
@@ -310,7 +312,7 @@ return {
     let mut plateau: Option<VmMemoryStats> = None;
     for decision in 0..DECISIONS {
         let input_is_clear: bool = engine
-            .run("return input == nil")
+            .eval("return input == nil")
             .map_err(|error| error.to_string())?;
         if !input_is_clear {
             return Err(format!(
@@ -321,7 +323,7 @@ return {
             .insert_global("input", 5.0)
             .map_err(|error| error.to_string())?;
         let exports = engine
-            .install(module.clone())
+            .install(&module)
             .map_err(|error| error.to_string())?;
         if exports
             .get::<usize>(&mut engine, "count")
@@ -344,10 +346,8 @@ return {
         }
 
         engine.reset_decision().map_err(|error| error.to_string())?;
-        if exports.is_current(&engine) {
-            return Err(format!(
-                "pre-reset exports remained current after epoch {decision}"
-            ));
+        if exports.get::<usize>(&mut engine, "count").is_ok() {
+            return Err(format!("pre-reset exports survived epoch {decision}"));
         }
         let stats = engine.memory_stats();
         if decision == WARMUP_DECISIONS - 1 {
@@ -394,7 +394,7 @@ fn run_rustia_hardened_leaf_probe() -> Result<(), String> {
                 ),
         )
         .map_err(|error| error.to_string())?;
-    let entry = Rustia::<HardenedProbeSchema>::compile_entry(
+    let entry = Rustia::compile_entry(
         "wasm-hardened-leaf-probe.luau",
         r#"
 local input = leaf.input()
@@ -411,7 +411,7 @@ return scratch[1].value
 "#,
     )
     .map_err(|error| error.to_string())?;
-    let failed_entry = Rustia::<HardenedProbeSchema>::compile_entry(
+    let failed_entry = Rustia::compile_entry(
         "wasm-hardened-leaf-failure.luau",
         "leaf.emit(999)\nerror('expected failure')",
     )

@@ -26,14 +26,15 @@ pub use function::{Exports, Function};
 pub use invocation::{
     Effects, HostContext, HostModule, HostMut, HostSchema, Input, IntoEffectFunction,
     IntoExternalFunction, IntoInputFunction, IntoSlotReadFunction, IntoSlotWriteFunction,
-    Invocation, InvocationLimits, InvocationOutcome, InvocationReceipt, InvocationUsage,
-    SlotWrites, Slots,
+    Invocation, InvocationChunk, InvocationLimits, InvocationOutcome, InvocationReceipt,
+    InvocationUsage, SlotWrites, Slots,
 };
 pub use live_value::{Table, Value, ValueType};
 pub use rustia_vm::{
     Error as VmError, ErrorKind as VmErrorKind, GuestSurface, OpCapability, Profile, VmMemoryStats,
     VmSettings, DECISION_RESET_ABI_VERSION as RUSTIA_DECISION_RESET_ABI_VERSION,
     HARDENED_LEAF_GUEST_ABI_VERSION as RUSTIA_HARDENED_LEAF_GUEST_ABI_VERSION,
+    INSTALL_TRANSACTION_ABI_VERSION as RUSTIA_INSTALL_TRANSACTION_ABI_VERSION,
     MODULE_RESOLUTION_ABI_VERSION as RUSTIA_MODULE_RESOLUTION_ABI_VERSION,
 };
 pub use serde_value::SerdeValueError;
@@ -47,9 +48,29 @@ pub use value::{
 /// only the lifetime-independent [`HostSchema`] and registered callbacks; each
 /// guest execution borrows a fresh [`HostContext<H>`] through
 /// [`invoke`](Self::invoke) or [`invoke_into`](Self::invoke_into).
+///
+/// Typed hosts cannot bypass that authority boundary with the context-free
+/// execution helpers:
+///
+/// ```compile_fail
+/// use rustia::{HostSchema, Rustia};
+///
+/// struct Host;
+/// impl HostSchema for Host {
+///     type Input = ();
+///     type Slots = ();
+///     type External = ();
+///     type Effect = ();
+///     type SlotWrite = ();
+///     type Record = ();
+/// }
+///
+/// fn bypass(mut rustia: Rustia<Host>) {
+///     let _: i32 = rustia.eval("return 42").unwrap();
+/// }
+/// ```
 pub struct Rustia<C: HostSchema = ()> {
     vm: Vm,
-    generation: u64,
     bindings: HostBindings<C>,
     journal: Vec<C::Record>,
 }
@@ -61,7 +82,6 @@ where
     fn from_profile(profile: Profile) -> Self {
         Self {
             vm: Vm::new(profile),
-            generation: 0,
             bindings: HostBindings::default(),
             journal: Vec::new(),
         }
@@ -70,7 +90,6 @@ where
     fn from_settings(profile: Profile, settings: VmSettings) -> Self {
         Self {
             vm: Vm::with_settings(profile, settings),
-            generation: 0,
             bindings: HostBindings::default(),
             journal: Vec::new(),
         }
@@ -230,10 +249,10 @@ where
         let journal = std::mem::take(&mut self.journal);
         let dispatcher =
             TypedHostDispatcher::new(&self.bindings.handlers, context, journal, limits);
-        let mut invocation =
-            Invocation::new(&mut self.vm, &mut self.generation, dispatcher, limits);
+        let mut invocation = Invocation::new(&mut self.vm, dispatcher, limits);
         let result = operation(&mut invocation);
-        let (dispatcher, fuel_used) = invocation.finish();
+        let commit_installation = result.is_ok() && invocation.can_commit_installation();
+        let (dispatcher, fuel_used) = invocation.finish(commit_installation);
         let (journal, record_bytes, hard_error) = dispatcher.finish();
         self.journal = journal;
         if let Some(error) = hard_error {
@@ -267,48 +286,6 @@ where
         }
     }
 
-    pub(crate) fn compile_and_run_raw(&mut self, source: &str) -> Result<rustia_vm::Value> {
-        let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
-        let options = CompileOptions {
-            puc51_constructor_order: self.vm.profile() == Profile::Puc51Compat,
-            ..CompileOptions::default()
-        };
-        let program = compile_with_options(&chunk, options).map_err(Error::Compile)?;
-        let value = self.vm.run(&program).map_err(Error::Vm)?;
-        self.advance_generation();
-        Ok(value)
-    }
-
-    pub(crate) fn compile_and_run_raw_named(
-        &mut self,
-        source_name: impl Into<String>,
-        source: &str,
-    ) -> Result<rustia_vm::Value> {
-        let module = Self::compile_module_bytes_with_constructor_order(
-            source_name,
-            source.as_bytes(),
-            self.vm.profile() == Profile::Puc51Compat,
-        )?;
-        let value = self.vm.run(&module.program).map_err(Error::Vm)?;
-        self.advance_generation();
-        Ok(value)
-    }
-
-    pub(crate) fn compile_and_run_raw_bytes_named(
-        &mut self,
-        source_name: impl Into<String>,
-        source: &[u8],
-    ) -> Result<rustia_vm::Value> {
-        let module = Self::compile_module_bytes_with_constructor_order(
-            source_name,
-            source,
-            self.vm.profile() == Profile::Puc51Compat,
-        )?;
-        let value = self.vm.run(&module.program).map_err(Error::Vm)?;
-        self.advance_generation();
-        Ok(value)
-    }
-
     pub fn insert_global<T>(&mut self, name: impl AsRef<str>, value: T) -> Result<()>
     where
         T: IntoRustia,
@@ -336,11 +313,7 @@ where
     /// mutable authority.
     pub fn globals(&mut self) -> Result<Table> {
         let value = self.vm.retain_globals().map_err(Error::Vm)?;
-        Ok(Table::new(Value::new(
-            value,
-            self.generation,
-            self.vm.decision_epoch(),
-        )))
+        Ok(Table::new(Value::new(value, self.vm.decision_epoch())))
     }
 
     /// Creates an empty rooted live table using this VM's selected layout.
@@ -349,11 +322,7 @@ where
     /// one admission. Hardened leaves reject live table construction.
     pub fn create_table(&mut self) -> Result<Table> {
         let value = self.vm.create_retained_table().map_err(Error::Vm)?;
-        Ok(Table::new(Value::new(
-            value,
-            self.generation,
-            self.vm.decision_epoch(),
-        )))
+        Ok(Table::new(Value::new(value, self.vm.decision_epoch())))
     }
 
     fn ensure_dynamic_source_loading_allowed(&self) -> Result<()> {
@@ -500,13 +469,47 @@ where
         module.install(&mut self.vm, &mut self.bindings)
     }
 
+    #[inline]
+    pub(crate) fn vm_mut(&mut self) -> &mut Vm {
+        &mut self.vm
+    }
+
+    #[inline]
+    pub(crate) fn vm(&self) -> &Vm {
+        &self.vm
+    }
+}
+
+fn finish_entry_lifecycle<T, Record>(
+    records: &mut Vec<Record>,
+    records_checkpoint: usize,
+    outcome: std::thread::Result<Result<T>>,
+    reset: Result<()>,
+) -> Result<T> {
+    match (outcome, reset) {
+        (Ok(outcome), Ok(())) => outcome,
+        (Ok(_), Err(reset_error)) => {
+            records.truncate(records_checkpoint);
+            Err(reset_error)
+        }
+        (Err(payload), _) => {
+            records.truncate(records_checkpoint);
+            resume_unwind(payload)
+        }
+    }
+}
+
+impl Rustia<()> {
+    /// Compiles a reusable module. `source_name` labels diagnostics and is the
+    /// referrer supplied to the host resolver for nested `require` calls.
     pub fn compile_module(source_name: impl Into<String>, source: &str) -> Result<CompiledModule> {
         Self::compile_module_bytes(source_name, source.as_bytes())
     }
 
     /// Compiles a reusable module with code generation appropriate for
     /// `profile`. Use this when the module will be installed into a VM whose
-    /// profile is known ahead of time.
+    /// profile is known ahead of time. `source_name` labels diagnostics and
+    /// nested `require` resolver referrers.
     pub fn compile_module_with_profile(
         source_name: impl Into<String>,
         source: &str,
@@ -515,10 +518,11 @@ where
         Self::compile_module_bytes_with_profile(source_name, source.as_bytes(), profile)
     }
 
-    /// Compiles with the standard (source-order) table-constructor write
-    /// order. `Profile::Puc51Compat` hosts need PUC write order instead;
-    /// compile through the instance run helpers (which read the VM profile) or
-    /// use [`compile_module_bytes_with_profile`](Self::compile_module_bytes_with_profile).
+    /// Compiles bytes with the standard (source-order) table-constructor write
+    /// order. `source_name` labels diagnostics and nested `require` resolver
+    /// referrers. `Profile::Puc51Compat` hosts need PUC write order instead;
+    /// compile through the instance `load` builder (which reads the VM profile)
+    /// or use [`compile_module_bytes_with_profile`](Self::compile_module_bytes_with_profile).
     pub fn compile_module_bytes(
         source_name: impl Into<String>,
         source: &[u8],
@@ -579,45 +583,6 @@ where
         })
     }
 
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-
-    fn advance_generation(&mut self) {
-        self.generation = self.generation.saturating_add(1);
-    }
-
-    #[inline]
-    pub(crate) fn vm_mut(&mut self) -> &mut Vm {
-        &mut self.vm
-    }
-
-    #[inline]
-    pub(crate) fn vm(&self) -> &Vm {
-        &self.vm
-    }
-}
-
-fn finish_entry_lifecycle<T, Record>(
-    records: &mut Vec<Record>,
-    records_checkpoint: usize,
-    outcome: std::thread::Result<Result<T>>,
-    reset: Result<()>,
-) -> Result<T> {
-    match (outcome, reset) {
-        (Ok(outcome), Ok(())) => outcome,
-        (Ok(_), Err(reset_error)) => {
-            records.truncate(records_checkpoint);
-            Err(reset_error)
-        }
-        (Err(payload), _) => {
-            records.truncate(records_checkpoint);
-            resume_unwind(payload)
-        }
-    }
-}
-
-impl Rustia<()> {
     /// Returns the [`standard`](RustiaBuilder::standard) preset:
     /// reproducible-by-default, with a real stdout `print` sink on native
     /// targets.
@@ -649,19 +614,10 @@ impl Rustia<()> {
         Rustia::<H>::from_settings(profile, settings)
     }
 
-    pub fn compile(source_name: impl Into<String>, source: &str) -> Result<CompiledModule> {
-        Self::compile_module(source_name, source)
-    }
-
-    pub fn compile_bytes(source_name: impl Into<String>, source: &[u8]) -> Result<CompiledModule> {
-        Self::compile_module_bytes(source_name, source)
-    }
-
     /// Creates a composable builder for borrowed Luau source text or bytes.
     ///
     /// Building the chunk is inert: parsing, compilation, VM allocation, and
-    /// execution begin only when an `eval*` method or [`Chunk::exec`] is
-    /// called.
+    /// execution begin only when a terminal operation is called.
     pub fn load<'rustia, 'source, S>(
         &'rustia mut self,
         source: &'source S,
@@ -672,121 +628,77 @@ impl Rustia<()> {
         Chunk::new(self, source.as_ref())
     }
 
-    pub fn compile_and_run(&mut self, source: &str) -> Result<Exports> {
-        let value = self.compile_and_run_raw(source)?;
-        let value = self.vm.retain_value(value).map_err(Error::Vm)?;
-        Ok(Exports::new(value, self.generation, self.decision_epoch()))
-    }
-
-    pub fn compile_and_run_named(
-        &mut self,
-        source_name: impl Into<String>,
-        source: &str,
-    ) -> Result<Exports> {
-        let value = self.compile_and_run_raw_named(source_name, source)?;
-        let value = self.vm.retain_value(value).map_err(Error::Vm)?;
-        Ok(Exports::new(value, self.generation, self.decision_epoch()))
-    }
-
-    pub fn compile_and_run_bytes_named(
-        &mut self,
-        source_name: impl Into<String>,
-        source: &[u8],
-    ) -> Result<Exports> {
-        let value = self.compile_and_run_raw_bytes_named(source_name, source)?;
-        let value = self.vm.retain_value(value).map_err(Error::Vm)?;
-        Ok(Exports::new(value, self.generation, self.decision_epoch()))
-    }
-
-    pub fn compile_and_run_exports(&mut self, source: &str) -> Result<Exports> {
-        self.compile_and_run(source)
-    }
-
-    pub fn compile_and_run_exports_named(
-        &mut self,
-        source_name: impl Into<String>,
-        source: &str,
-    ) -> Result<Exports> {
-        self.compile_and_run_named(source_name, source)
-    }
-
-    pub fn run_owned(&mut self, source: &str) -> Result<OwnedValue> {
-        let value = self.compile_and_run_raw(source)?;
-        value::snapshot_value(&mut self.vm, value)
-    }
-
-    /// Runs a chunk and retains its first result as a live VM value.
-    pub fn run_value(&mut self, source: &str) -> Result<Value> {
-        let value = self.compile_and_run_raw(source)?;
-        Value::retain(&mut self.vm, value, self.generation)
-    }
-
-    /// Runs a named chunk and retains its first result as a live VM value.
-    pub fn run_value_named(
-        &mut self,
-        source_name: impl Into<String>,
-        source: &str,
-    ) -> Result<Value> {
-        let value = self.compile_and_run_raw_named(source_name, source)?;
-        Value::retain(&mut self.vm, value, self.generation)
-    }
-
-    /// Runs named source bytes and retains the first result as a live VM value.
-    pub fn run_value_bytes_named(
-        &mut self,
-        source_name: impl Into<String>,
-        source: &[u8],
-    ) -> Result<Value> {
-        let value = self.compile_and_run_raw_bytes_named(source_name, source)?;
-        Value::retain(&mut self.vm, value, self.generation)
-    }
-
-    pub fn run_owned_named(
-        &mut self,
-        source_name: impl Into<String>,
-        source: &str,
-    ) -> Result<OwnedValue> {
-        let value = self.compile_and_run_raw_named(source_name, source)?;
-        value::snapshot_value(&mut self.vm, value)
-    }
-
-    pub fn run_owned_bytes_named(
-        &mut self,
-        source_name: impl Into<String>,
-        source: &[u8],
-    ) -> Result<OwnedValue> {
-        let value = self.compile_and_run_raw_bytes_named(source_name, source)?;
-        value::snapshot_value(&mut self.vm, value)
-    }
-
-    pub fn run<T>(&mut self, source: &str) -> Result<T>
+    /// Evaluates source and converts its first result through [`FromRustia`].
+    pub fn eval<T>(&mut self, source: impl AsRef<[u8]>) -> Result<T>
     where
         T: FromRustia,
     {
-        let value = self.run_owned(source)?;
-        T::from_rustia(value)
+        let source = source;
+        self.load(&source).eval()
     }
 
-    pub fn run_named<T>(&mut self, source_name: impl Into<String>, source: &str) -> Result<T>
+    /// Evaluates source and deserializes its first result directly from the VM.
+    pub fn eval_serde<T>(&mut self, source: impl AsRef<[u8]>) -> Result<T>
     where
-        T: FromRustia,
+        T: serde::de::DeserializeOwned,
     {
-        let value = self.run_owned_named(source_name, source)?;
-        T::from_rustia(value)
+        let source = source;
+        self.load(&source).eval_serde()
     }
 
-    pub fn install(&mut self, module: CompiledModule) -> Result<Exports> {
-        let value = self.vm.run(&module.program).map_err(Error::Vm)?;
-        self.advance_generation();
-        let value = self.vm.retain_value(value).map_err(Error::Vm)?;
-        Ok(Exports::new(value, self.generation, self.decision_epoch()))
+    /// Executes source for side effects and discards its result.
+    pub fn exec(&mut self, source: impl AsRef<[u8]>) -> Result<()> {
+        let source = source;
+        self.load(&source).exec()
     }
 
-    pub fn hot_reload(&mut self, source_name: impl Into<String>, source: &str) -> Result<Exports> {
-        let module = Self::compile_module_with_profile(source_name, source, self.vm.profile())?;
-        self.install(module)
+    /// Atomically installs a reusable compiled module in a fresh environment.
+    pub fn install(&mut self, module: &CompiledModule) -> Result<Exports> {
+        self.install_with_environment(module, None)
     }
+}
 
+impl<C> Rustia<C>
+where
+    C: HostSchema,
+{
+    fn install_with_environment(
+        &mut self,
+        module: &CompiledModule,
+        environment: Option<rustia_vm::Value>,
+    ) -> Result<Exports> {
+        self.vm.begin_guest_transaction().map_err(Error::Vm)?;
+        let outcome = (|| {
+            let module_cohort = self.vm.create_module_cohort().map_err(Error::Vm)?;
+            let environment = match environment {
+                Some(environment) => environment,
+                None => self.vm.create_module_environment().map_err(Error::Vm)?,
+            };
+            let value = self
+                .vm
+                .run_installation_with_environment(&module.program, environment, module_cohort)
+                .map_err(Error::Vm)?;
+            let value = self.vm.retain_value(value).map_err(Error::Vm)?;
+            Ok(Exports::new(value, self.decision_epoch()))
+        })();
+        match outcome {
+            Ok(exports) => {
+                if let Err(error) = self.vm.commit_guest_transaction() {
+                    self.vm.rollback_guest_transaction();
+                    Err(Error::Vm(error))
+                } else {
+                    Ok(exports)
+                }
+            }
+            Err(error) => {
+                self.vm.rollback_guest_transaction();
+                Err(error)
+            }
+        }
+    }
+}
+
+impl Rustia<()> {
     pub fn add_fn<Func, Args, Return>(
         &mut self,
         name: impl Into<String>,
@@ -1015,11 +927,9 @@ mod tests {
     use std::rc::Rc;
 
     #[test]
-    fn compile_and_run_smoke() {
+    fn install_smoke() {
         let mut rustia = Rustia::new(Profile::DeterministicSim);
-        let result = rustia
-            .run_owned("local x: number = 6 * 7; return x")
-            .unwrap();
+        let result = rustia.eval("local x: number = 6 * 7; return x").unwrap();
         assert_eq!(f64::from_rustia(result).unwrap(), 42.0);
     }
 
@@ -1027,7 +937,7 @@ mod tests {
     fn live_values_preserve_identity_cycles_and_rich_payloads() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let root = rustia
-            .run_value(
+            .load(
                 r#"
 local root = {}
 local richKey = {}
@@ -1042,6 +952,7 @@ root[richKey] = shared
 return root
 "#,
             )
+            .eval_live()
             .unwrap();
         assert_eq!(root.kind(&rustia).unwrap(), ValueType::Table);
         let table = root.as_table(&rustia).unwrap().unwrap();
@@ -1094,9 +1005,10 @@ return root
         assert!(left.raw_equal(&mut rustia, &rich_entry.1).unwrap());
 
         let exports = rustia
-            .compile_and_run("local live = { answer = 7 }; return { live = live }")
+            .load("local live = { answer = 7 }; return { live = live }")
+            .install()
             .unwrap();
-        let exported = exports.get_live_current(&mut rustia, "live").unwrap();
+        let exported = exports.get_live(&mut rustia, "live").unwrap();
         assert_eq!(
             exported
                 .as_table(&rustia)
@@ -1109,7 +1021,7 @@ return root
             Some(7.0)
         );
 
-        let _: f64 = rustia.run("collectgarbage('collect'); return 0").unwrap();
+        let _: f64 = rustia.eval("collectgarbage('collect'); return 0").unwrap();
         assert_eq!(
             left.as_table(&rustia)
                 .unwrap()
@@ -1153,19 +1065,16 @@ return root
             .set_live(&mut rustia, "host_graph", &root.as_value())
             .unwrap();
 
-        let returned = rustia.run_value("return host_graph").unwrap();
+        let returned = rustia.load("return host_graph").eval_live().unwrap();
         assert!(root.as_value().raw_equal(&mut rustia, &returned).unwrap());
         let returned_table = returned.as_table(&rustia).unwrap().unwrap();
         let returned_self = returned_table.get(&mut rustia, "self").unwrap();
         assert!(returned.raw_equal(&mut rustia, &returned_self).unwrap());
 
-        // Successful guest installation advances the generation, but ordinary
-        // live handles remain usable unless the caller explicitly asks for a
-        // current-generation assertion.
-        assert!(!root.is_current(&rustia));
+        // Ordinary execution does not invalidate unrelated live handles.
         root.set(&mut rustia, "after_run", 7_i32).unwrap();
         let sees_mutation: bool = rustia
-            .run("return host_graph.answer == 42 and host_graph.after_run == 7")
+            .eval("return host_graph.answer == 42 and host_graph.after_run == 7")
             .unwrap();
         assert!(sees_mutation);
 
@@ -1192,7 +1101,7 @@ return root
                 .unwrap()
                 .set_live(&mut rustia, "host_value", &value.as_value())
                 .unwrap();
-            let observed: f64 = rustia.run("return host_value.profile_value").unwrap();
+            let observed: f64 = rustia.eval("return host_value.profile_value").unwrap();
             assert_eq!(observed, 9.0, "profile {profile:?}");
         }
     }
@@ -1240,7 +1149,7 @@ return root
             .unwrap_err()
             .to_string()
             .contains("stale table handle"));
-        let discarded: bool = rustia.run("return decision_local == nil").unwrap();
+        let discarded: bool = rustia.eval("return decision_local == nil").unwrap();
         assert!(discarded);
     }
 
@@ -1313,14 +1222,15 @@ return root
     fn live_functions_accept_and_return_live_values() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let function = rustia
-            .run_value(
+            .load(
                 "return function(value) local t = { value = value }; t.self = t; return value, t end",
             )
+            .eval_live()
             .unwrap()
             .as_function(&rustia)
             .unwrap()
             .unwrap();
-        let argument = rustia.run_value("return { answer = 42 }").unwrap();
+        let argument = rustia.load("return { answer = 42 }").eval_live().unwrap();
         let results = function
             .call_values(&mut rustia, std::slice::from_ref(&argument))
             .unwrap();
@@ -1351,7 +1261,7 @@ return root
 
     #[test]
     fn compiled_modules_can_be_cloned_across_vms() {
-        let module = Rustia::compile(
+        let module = Rustia::compile_module(
             "shared.luau",
             "local greeting = 'compiled string shared across VMs'; return { greeting = greeting }",
         )
@@ -1359,18 +1269,18 @@ return root
         let mut first = Rustia::new(Profile::ReproducibleStandard);
         let mut second = Rustia::new(Profile::ReproducibleStandard);
 
-        first.install(module.clone()).unwrap();
-        second.install(module).unwrap();
+        first.install(&module).unwrap();
+        second.install(&module).unwrap();
     }
 
     #[test]
     fn typed_run_converts_owned_results() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
 
-        let answer: f64 = rustia.run("return 40 + 2").unwrap();
-        let numbers: Vec<i32> = rustia.run("return { 1, 2, 3 }").unwrap();
-        let missing: Option<String> = rustia.run("return nil").unwrap();
-        let named: BTreeMap<String, i32> = rustia.run("return { scout = 5, brute = 9 }").unwrap();
+        let answer: f64 = rustia.eval("return 40 + 2").unwrap();
+        let numbers: Vec<i32> = rustia.eval("return { 1, 2, 3 }").unwrap();
+        let missing: Option<String> = rustia.eval("return nil").unwrap();
+        let named: BTreeMap<String, i32> = rustia.eval("return { scout = 5, brute = 9 }").unwrap();
 
         assert_eq!(answer, 42.0);
         assert_eq!(numbers, vec![1, 2, 3]);
@@ -1382,11 +1292,11 @@ return root
     #[test]
     fn typed_run_reports_conversion_errors() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
-        let error = rustia.run::<String>("return 42").unwrap_err().to_string();
+        let error = rustia.eval::<String>("return 42").unwrap_err().to_string();
         assert!(error.contains("expected string, got number"), "{error}");
 
         let array_error = rustia
-            .run::<BTreeMap<String, i32>>("return { 1, 2 }")
+            .eval::<BTreeMap<String, i32>>("return { 1, 2 }")
             .unwrap_err()
             .to_string();
         assert!(
@@ -1395,7 +1305,7 @@ return root
         );
 
         let key_error = rustia
-            .run::<BTreeMap<String, i32>>("return { [true] = 1 }")
+            .eval::<BTreeMap<String, i32>>("return { [true] = 1 }")
             .unwrap_err()
             .to_string();
         assert!(
@@ -1408,7 +1318,7 @@ return root
     fn numeric_table_keys_normalize_negative_zero_at_script_boundary() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let result = rustia
-            .run_owned(
+            .eval(
                 "\
 local t = {}
 t[-0] = 11
@@ -1433,7 +1343,7 @@ return t[-0] == 42 and t[0] == 42 and rawget(t, -0) == 42 and rawget(t, 0) == 42
                 ..VmSettings::default()
             };
             let mut rustia = Rustia::with_settings(Profile::DeterministicSim, settings);
-            let Err(Error::Vm(error)) = rustia.run_owned(source) else {
+            let Err(Error::Vm(error)) = rustia.eval::<OwnedValue>(source) else {
                 panic!("expected fuel exhaustion to escape protected call: {source}");
             };
             assert!(matches!(
@@ -1446,8 +1356,8 @@ return t[-0] == 42 and t[0] == 42 and rawget(t, -0) == 42 and rawget(t, 0) == 42
     #[test]
     fn owned_values_snapshot_returned_tables() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
-        let value = rustia
-            .run_owned(
+        let value: OwnedValue = rustia
+            .eval(
                 "\
 return {
     label = 'spawn',
@@ -1553,8 +1463,8 @@ return {
     #[test]
     fn owned_table_helpers_support_nested_typed_access() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
-        let value = rustia
-            .run_owned(
+        let value: OwnedValue = rustia
+            .eval(
                 "\
 return {
     config = {
@@ -1611,8 +1521,8 @@ return {
         }
 
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
-        let value = rustia
-            .run_owned(
+        let value: OwnedValue = rustia
+            .eval(
                 "\
 return {
     config = {
@@ -1686,7 +1596,7 @@ return {
             .unwrap();
 
         let value = rustia
-            .run_owned(
+            .eval(
                 "\
 return maybe == 4
     and missing == nil
@@ -1709,9 +1619,7 @@ return maybe == 4
             .add_fn("clamp", |x: f64, lo: f64, hi: f64| x.clamp(lo, hi))
             .unwrap();
 
-        let result = rustia
-            .run_owned("return clamp(12 + difficulty, 0, 10)")
-            .unwrap();
+        let result = rustia.eval("return clamp(12 + difficulty, 0, 10)").unwrap();
         assert_eq!(f64::from_rustia(result).unwrap(), 10.0);
     }
 
@@ -1727,9 +1635,7 @@ return maybe == 4
             )
             .unwrap();
 
-        let result = rustia
-            .run_owned("return sum8(1, 2, 3, 4, 5, 6, 7, 8)")
-            .unwrap();
+        let result = rustia.eval("return sum8(1, 2, 3, 4, 5, 6, 7, 8)").unwrap();
         assert_eq!(f64::from_rustia(result).unwrap(), 36.0);
     }
 
@@ -1764,7 +1670,7 @@ return maybe == 4
             .unwrap();
 
         let value = rustia
-            .run_owned(
+            .eval(
                 "\
 return sum_vec({ 1, 2, 3 }) == 6
     and maybe_name(true) == 'scout'
@@ -1793,7 +1699,7 @@ return sum_vec({ 1, 2, 3 }) == 6
             .unwrap();
 
         let result = rustia
-            .run_owned("return pure() + input() + slot() + slot_write(1) + effect(3)")
+            .eval("return pure() + input() + slot() + slot_write(1) + effect(3)")
             .unwrap();
         assert_eq!(f64::from_rustia(result).unwrap(), 21.0);
     }
@@ -1820,7 +1726,7 @@ return sum_vec({ 1, 2, 3 }) == 6
         rustia.add_external_state_fn("clock", || 7.0).unwrap();
         rustia.add_nondeterministic_fn("random", || 11.0).unwrap();
 
-        let result = rustia.run_owned("return clock() + random()").unwrap();
+        let result = rustia.eval("return clock() + random()").unwrap();
         assert_eq!(f64::from_rustia(result).unwrap(), 18.0);
     }
 
@@ -1831,14 +1737,16 @@ return sum_vec({ 1, 2, 3 }) == 6
             .add_fn("clamp", |x: f64, lo: f64, hi: f64| x.clamp(lo, hi))
             .unwrap();
 
-        let wrong_type = rustia.run_owned("return clamp('bad', 0, 10)").unwrap_err();
+        let wrong_type = rustia
+            .eval::<OwnedValue>("return clamp('bad', 0, 10)")
+            .unwrap_err();
         let wrong_type = wrong_type.to_string();
         assert!(
             wrong_type.contains("host function `clamp` argument 1: expected number, got string"),
             "{wrong_type}"
         );
 
-        let missing_arg = rustia.run_owned("return clamp(4, 0)").unwrap_err();
+        let missing_arg = rustia.eval::<OwnedValue>("return clamp(4, 0)").unwrap_err();
         let missing_arg = missing_arg.to_string();
         assert!(
             missing_arg.contains("host function `clamp` argument 3: expected number, got nil"),
@@ -1858,11 +1766,11 @@ return sum_vec({ 1, 2, 3 }) == 6
             })
             .unwrap();
 
-        let value: f64 = rustia.run("return checked_div(12, 3)").unwrap();
+        let value: f64 = rustia.eval("return checked_div(12, 3)").unwrap();
         assert_eq!(value, 4.0);
 
         let error = rustia
-            .run_owned("return checked_div(12, 0)")
+            .eval::<OwnedValue>("return checked_div(12, 0)")
             .unwrap_err()
             .to_string();
         assert!(
@@ -1875,7 +1783,7 @@ return sum_vec({ 1, 2, 3 }) == 6
     fn exports_facade_retains_script_functions() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let exports = rustia
-            .compile_and_run_exports(
+            .load(
                 "\
 return {
     label = 'ai',
@@ -1885,6 +1793,7 @@ return {
 }
 ",
             )
+            .install()
             .unwrap();
         assert_eq!(exports.get::<String>(&mut rustia, "label").unwrap(), "ai");
 
@@ -1897,7 +1806,7 @@ return {
     fn retained_script_functions_return_vec_and_option_shapes() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let exports = rustia
-            .compile_and_run_exports(
+            .load(
                 "\
 return {
     values = function()
@@ -1911,6 +1820,7 @@ return {
 }
 ",
             )
+            .install()
             .unwrap();
 
         let values = exports.function(&mut rustia, "values").unwrap();
@@ -1928,7 +1838,7 @@ return {
     fn retained_script_functions_support_eight_arguments_and_results() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let exports = rustia
-            .compile_and_run_exports(
+            .load(
                 "\
 return {
     rotate = function(a, b, c, d, e, f, g, h)
@@ -1937,6 +1847,7 @@ return {
 }
 ",
             )
+            .install()
             .unwrap();
 
         let rotate = exports.function(&mut rustia, "rotate").unwrap();
@@ -1957,9 +1868,7 @@ return {
             .build()
             .unwrap();
 
-        let result = rustia
-            .run_owned("return host.bias() + host.emit(4)")
-            .unwrap();
+        let result = rustia.eval("return host.bias() + host.emit(4)").unwrap();
         assert_eq!(f64::from_rustia(result).unwrap(), 7.0);
     }
 
@@ -2078,110 +1987,70 @@ return {
     }
 
     #[test]
-    fn hot_reload_compile_error_keeps_old_function_callable() {
+    fn failed_replacement_install_keeps_old_function_callable() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let exports = rustia
-            .hot_reload("ai.luau", "return { decide = function() return 1 end }")
+            .load("return { decide = function() return 1 end }")
+            .source_name("ai.luau")
+            .install()
             .unwrap();
         let decide = exports.function(&mut rustia, "decide").unwrap();
-        let generation = rustia.generation();
 
-        assert!(rustia.hot_reload("ai.luau", "return {").is_err());
-        assert_eq!(rustia.generation(), generation);
-        assert_eq!(decide.generation(), generation);
+        assert!(rustia
+            .load("return {")
+            .source_name("ai.luau")
+            .install()
+            .is_err());
         let result: f64 = decide.call(&mut rustia, ()).unwrap();
         assert_eq!(result, 1.0);
     }
 
     #[test]
-    fn retained_handles_are_versioned_across_successful_hot_reload() {
+    fn successful_replacement_install_keeps_both_versions_callable() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let first_exports = rustia
-            .hot_reload(
-                "ai.luau",
-                "return { label = 'old', decide = function() return 1 end }",
-            )
+            .load("return { label = 'old', decide = function() return 1 end }")
+            .source_name("ai.luau")
+            .install()
             .unwrap();
-        let first_generation = first_exports.generation();
         let first_decide = first_exports.function(&mut rustia, "decide").unwrap();
 
         let second_exports = rustia
-            .hot_reload(
-                "ai.luau",
-                "return { label = 'new', decide = function() return 2 end }",
-            )
+            .load("return { label = 'new', decide = function() return 2 end }")
+            .source_name("ai.luau")
+            .install()
             .unwrap();
-        let second_generation = second_exports.generation();
         let second_decide = second_exports.function(&mut rustia, "decide").unwrap();
 
-        assert!(second_generation > first_generation);
-        assert_eq!(rustia.generation(), second_generation);
-        assert_eq!(first_decide.generation(), first_generation);
-        assert_eq!(second_decide.generation(), second_generation);
-        assert!(!first_exports.is_current(&rustia));
-        assert!(!first_decide.is_current(&rustia));
-        assert!(second_exports.is_current(&rustia));
-        assert!(second_decide.is_current(&rustia));
-        let stale_exports = first_exports.ensure_current(&rustia).unwrap_err();
-        assert!(
-            stale_exports
-                .to_string()
-                .contains("stale exports handle from generation"),
-            "{stale_exports}"
-        );
-        assert!(first_exports.value_current(&mut rustia).is_err());
-        assert!(first_exports
-            .get_current::<String>(&mut rustia, "label")
-            .is_err());
-        assert!(first_exports
-            .function_current(&mut rustia, "decide")
-            .is_err());
         assert_eq!(
             first_exports.get::<String>(&mut rustia, "label").unwrap(),
             "old"
         );
         assert_eq!(
-            second_exports
-                .get_current::<String>(&mut rustia, "label")
-                .unwrap(),
+            second_exports.get::<String>(&mut rustia, "label").unwrap(),
             "new"
         );
-        let current_decide = second_exports
-            .function_current(&mut rustia, "decide")
-            .unwrap();
-        assert_eq!(current_decide.generation(), second_generation);
 
         let old_result: f64 = first_decide.call(&mut rustia, ()).unwrap();
         let new_result: f64 = second_decide.call(&mut rustia, ()).unwrap();
         assert_eq!(old_result, 1.0);
         assert_eq!(new_result, 2.0);
-
-        let stale = first_decide
-            .call_current::<_, f64>(&mut rustia, ())
-            .unwrap_err();
-        assert!(
-            stale
-                .to_string()
-                .contains("stale function handle from generation"),
-            "{stale}"
-        );
-        let current: f64 = second_decide.call_current(&mut rustia, ()).unwrap();
-        assert_eq!(current, 2.0);
     }
 
     #[test]
     fn retained_function_root_survives_after_exports_are_dropped() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let exports = rustia
-            .compile_and_run(
+            .load(
                 "local state = { answer = 42 }; \
                  return { read = function() return state.answer end }",
             )
+            .install()
             .unwrap();
         let read = exports.function(&mut rustia, "read").unwrap();
         drop(exports);
 
-        let _: f64 = rustia.run("collectgarbage('collect'); return 0").unwrap();
+        let _: f64 = rustia.eval("collectgarbage('collect'); return 0").unwrap();
         let answer: f64 = read.call(&mut rustia, ()).unwrap();
         assert_eq!(answer, 42.0);
     }
@@ -2190,17 +2059,18 @@ return {
     fn retained_function_root_survives_repeated_slot_reuse() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let exports = rustia
-            .compile_and_run(
+            .load(
                 "local state = { answer = 42 }; \
                  return { read = function() return state.answer end }",
             )
+            .install()
             .unwrap();
         let read = exports.function(&mut rustia, "read").unwrap();
         drop(exports);
 
         for _ in 0..32 {
             let _: f64 = rustia
-                .run(
+                .eval(
                     "for i = 1, 256 do \
                          local state = { answer = i }; \
                          local function read() return state.answer end \
@@ -2219,7 +2089,8 @@ return {
     fn retained_handles_reject_a_different_vm() {
         let mut first = Rustia::new(Profile::ReproducibleStandard);
         let exports = first
-            .compile_and_run("return { read = function() return 42 end }")
+            .load("return { read = function() return 42 end }")
+            .install()
             .unwrap();
         let read = exports.function(&mut first, "read").unwrap();
         let mut second = Rustia::new(Profile::ReproducibleStandard);
@@ -2244,50 +2115,65 @@ return {
     fn named_compile_preserves_source_name_in_runtime_diagnostics() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let error = rustia
-            .hot_reload("bad_ai.luau", "local t = {}; t[0 / 0] = 1")
+            .load("local t = {}; t[0 / 0] = 1")
+            .source_name("bad_ai.luau")
+            .install()
             .unwrap_err();
         assert!(error.to_string().contains("bad_ai.luau:1:"), "{error}");
     }
 
     #[test]
-    fn named_run_helpers_preserve_source_name_in_runtime_diagnostics() {
+    fn chunk_builder_preserves_source_name_in_runtime_diagnostics() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
 
-        let answer: f64 = rustia.run_named("inline.luau", "return 40 + 2").unwrap();
+        let answer: f64 = rustia
+            .load("return 40 + 2")
+            .source_name("inline.luau")
+            .eval()
+            .unwrap();
         assert_eq!(answer, 42.0);
 
-        let owned = rustia.run_owned_named("owned.luau", "return 'ok'").unwrap();
+        let owned = rustia
+            .load("return 'ok'")
+            .source_name("owned.luau")
+            .eval()
+            .unwrap();
         assert_eq!(String::from_rustia(owned).unwrap(), "ok");
 
         let exports = rustia
-            .compile_and_run_exports_named("exports.luau", "return { answer = 42 }")
+            .load("return { answer = 42 }")
+            .source_name("exports.luau")
+            .install()
             .unwrap();
         assert_eq!(exports.get::<i32>(&mut rustia, "answer").unwrap(), 42);
 
-        let generation = rustia.generation();
         let error = rustia
-            .run_named::<f64>("bad_inline.luau", "local t = {}; t[0 / 0] = 1")
+            .load("local t = {}; t[0 / 0] = 1")
+            .source_name("bad_inline.luau")
+            .eval::<f64>()
             .unwrap_err();
         assert!(error.to_string().contains("bad_inline.luau:1:"), "{error}");
-        assert_eq!(rustia.generation(), generation);
     }
 
     #[test]
     fn public_errors_expose_source_span_and_runtime_location() {
-        let Err(error) = Rustia::compile("compile-diag.luau", "break") else {
+        let Err(error) = Rustia::compile_module("compile-diag.luau", "break") else {
             panic!("break outside loop should fail compilation");
         };
         assert_eq!(error.source_span(), Some(SourceSpan { start: 0, end: 5 }));
         assert_eq!(error.source_location(), None);
 
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
-        let Err(error) = rustia.run_owned_named(
-            "runtime-diag.luau",
-            "\
+        let Err(error) = rustia
+            .load(
+                "\
 local t = {}
 t[0 / 0] = 1
 ",
-        ) else {
+            )
+            .source_name("runtime-diag.luau")
+            .eval::<OwnedValue>()
+        else {
             panic!("NaN table key should fail at runtime");
         };
         let location = error
@@ -2315,7 +2201,7 @@ t[0 / 0] = 1
     fn serde_deserializes_exports_and_inserts_globals() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let exports = rustia
-            .compile_and_run_exports(
+            .load(
                 "\
 return {
     name = 'arena',
@@ -2327,6 +2213,7 @@ return {
 }
 ",
             )
+            .install()
             .unwrap();
         let spec: ScenarioSpec = exports.deserialize(&mut rustia).unwrap();
         assert_eq!(
@@ -2346,12 +2233,12 @@ return {
                 ],
             }
         );
-        let current_spec: ScenarioSpec = exports.deserialize_current(&mut rustia).unwrap();
-        assert_eq!(current_spec, spec);
+        let second_spec: ScenarioSpec = exports.deserialize(&mut rustia).unwrap();
+        assert_eq!(second_spec, spec);
 
         rustia.insert_serde("config", &spec).unwrap();
         let value = rustia
-            .run_owned("return config.enemies[2].kind .. ':' .. tostring(config.difficulty)")
+            .eval("return config.enemies[2].kind .. ':' .. tostring(config.difficulty)")
             .unwrap();
         assert_eq!(String::from_rustia(value).unwrap(), "brute:3");
     }
@@ -2374,7 +2261,7 @@ return {
             .unwrap();
 
         let value = rustia
-            .run_owned("return host.fixed_mul(6, 7) + host.emit(1)")
+            .eval("return host.fixed_mul(6, 7) + host.emit(1)")
             .unwrap();
         assert_eq!(f64::from_rustia(value).unwrap(), 53.0);
     }
@@ -2438,7 +2325,7 @@ return testlinedefined()
         };
         let mut rustia = Rustia::with_settings(Profile::ReproducibleStandard, settings);
         let result = rustia
-            .run_owned(
+            .eval(
                 "\
 local v = int64(42)
 v.value = 4
@@ -2457,7 +2344,7 @@ return tostring(v + 2) .. '|' .. tostring(v == int64(4)) .. '|' .. tostring(int6
         };
         let mut rustia = Rustia::with_settings(Profile::ReproducibleStandard, settings);
         let result = rustia
-            .run_owned(
+            .eval(
                 "\
 local s = vec2(5, 4)
 local t = vec2(1, 2)
@@ -2480,7 +2367,7 @@ return x.X == -5 and x.Y == -12 and s:Dot(t) == 13 and m.X == 5 and m.Y == 4 and
         };
         let mut rustia = Rustia::with_settings(Profile::ReproducibleStandard, settings);
         let result = rustia
-            .run_owned(
+            .eval(
                 "\
 local function add(a: number, b: number)
     assert(is_native())
@@ -2499,7 +2386,7 @@ return add(1, 3) == 4 and not ok and checkbuffer(nil) and checkbuffer(buffer.cre
     fn coroutine_resume_arguments_return_from_yield() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let result = rustia
-            .run_owned(
+            .eval(
                 "\
 local co
 local seen
@@ -2533,7 +2420,7 @@ return ok1 and ok2 and ok3 and ok4
     fn coroutine_wrap_resumes_yield_call_results() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let result = rustia
-            .run_owned(
+            .eval(
                 "\
 local f = coroutine.wrap(function()
     local a, b = coroutine.yield('yielded')
@@ -2552,7 +2439,7 @@ return first == 'yielded' and second == 'resume' and third == 42
     fn pcall_can_yield_and_resume_successfully() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let result = rustia
-            .run_owned(
+            .eval(
                 "\
 local co = coroutine.create(function()
     return pcall(function()
@@ -2574,7 +2461,7 @@ return first and done and protected and a == 1 and b == 2 and c == 3
     fn nested_pcall_preserves_protected_results_after_yield() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let result = rustia
-            .run_owned(
+            .eval(
                 "\
 local co = coroutine.create(function()
     return pcall(function()
@@ -2601,7 +2488,7 @@ return first and second and done and outer and inner and value == 3
     fn pcall_catches_error_after_yield() {
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let result = rustia
-            .run_owned(
+            .eval(
                 "\
 local co = coroutine.create(function()
     return pcall(function()
@@ -2627,7 +2514,7 @@ return ok and done and not protected and string.find(err, 'foo', 1, true) ~= nil
             .build()
             .unwrap();
 
-        rustia.run_owned("print('hello', 42)").unwrap();
+        rustia.exec("print('hello', 42)").unwrap();
         assert_eq!(captured.borrow().as_str(), "hello\t42\n");
     }
 
@@ -2738,10 +2625,10 @@ return ok and done and not protected and string.find(err, 'foo', 1, true) ~= nil
             .build()
             .unwrap();
 
-        let time: f64 = rustia.run("return os.time()").unwrap();
+        let time: f64 = rustia.eval("return os.time()").unwrap();
         assert_eq!(time, 1.5);
         let surface: bool = rustia
-            .run(
+            .eval(
                 "\
 return type(os) == 'table'
     and type(os.time) == 'function'
@@ -2790,8 +2677,8 @@ return type(os) == 'table'
                 .build()
                 .unwrap();
             [
-                rustia.run::<f64>("return math.random()").unwrap(),
-                rustia.run::<f64>("return math.random()").unwrap(),
+                rustia.eval::<f64>("return math.random()").unwrap(),
+                rustia.eval::<f64>("return math.random()").unwrap(),
             ]
         };
 
@@ -2800,8 +2687,8 @@ return type(os) == 'table'
         assert_eq!(sequence(0), {
             let mut rustia = RustiaBuilder::standard().build().unwrap();
             [
-                rustia.run::<f64>("return math.random()").unwrap(),
-                rustia.run::<f64>("return math.random()").unwrap(),
+                rustia.eval::<f64>("return math.random()").unwrap(),
+                rustia.eval::<f64>("return math.random()").unwrap(),
             ]
         });
     }
@@ -2810,10 +2697,10 @@ return type(os) == 'table'
     fn standard_preset_keeps_the_pinned_epoch_and_logical_clock_by_default() {
         let mut rustia = Rustia::builder().build().unwrap();
 
-        let time: f64 = rustia.run("return os.time()").unwrap();
+        let time: f64 = rustia.eval("return os.time()").unwrap();
         assert_eq!(time, 1_700_000_000.0);
         let logical: bool = rustia
-            .run(
+            .eval(
                 "\
 local first = os.clock()
 local second = os.clock()
@@ -2827,13 +2714,13 @@ return first >= 0 and second >= first
     #[test]
     fn decision_reset_invalidates_every_retained_facade_handle() {
         assert_eq!(RUSTIA_DECISION_RESET_ABI_VERSION, 1);
-        let module = Rustia::compile(
+        let module = Rustia::compile_module(
             "decision.luau",
             "return { answer = 42, decide = function(x) return x + 1 end }",
         )
         .unwrap();
         let mut rustia = RustiaBuilder::deterministic().build().unwrap();
-        let exports = rustia.install(module.clone()).unwrap();
+        let exports = rustia.install(&module).unwrap();
         let decide = exports.function(&mut rustia, "decide").unwrap();
         let exports_clone = exports.clone();
         let decide_clone = decide.clone();
@@ -2844,8 +2731,6 @@ return first >= 0 and second >= first
 
         rustia.reset_decision().unwrap();
         assert_eq!(rustia.decision_epoch(), 1);
-        assert!(!exports.is_current(&rustia));
-        assert!(!decide.is_current(&rustia));
         for result in [
             exports.get::<f64>(&mut rustia, "answer").map(|_| ()),
             exports_clone.get::<f64>(&mut rustia, "answer").map(|_| ()),
@@ -2859,7 +2744,7 @@ return first >= 0 and second >= first
             );
         }
 
-        let fresh = rustia.install(module).unwrap();
+        let fresh = rustia.install(&module).unwrap();
         let fresh_decide = fresh.function(&mut rustia, "decide").unwrap();
         assert_eq!(fresh.decision_epoch(), 1);
         assert_eq!(
@@ -2888,7 +2773,7 @@ return first >= 0 and second >= first
         rustia.insert_global("input", 5.0).unwrap();
 
         let configured: bool = rustia
-            .run(
+            .eval(
                 "\
 decision_global = (decision_global or 0) + 1
 return input == 5 and decision_global == 1
@@ -2898,7 +2783,7 @@ return input == 5 and decision_global == 1
             .unwrap();
         assert!(configured);
         let first_random: Vec<f64> = rustia
-            .run("return { math.random(), math.random(), math.random() }")
+            .eval("return { math.random(), math.random(), math.random() }")
             .unwrap();
         assert!(rustia.vm().deterministic_collection_count() > 0);
         let peak_before_reset = rustia.memory_stats().peak_live_bytes.unwrap();
@@ -2911,7 +2796,7 @@ return input == 5 and decision_global == 1
             "lifetime peak telemetry must survive a decision reset"
         );
         let clean_and_configured: bool = rustia
-            .run(
+            .eval(
                 "\
 return input == nil and decision_global == nil
     and host.bias() == 7 and double(3) == 6 and os.time() == 1234
@@ -2920,7 +2805,7 @@ return input == nil and decision_global == nil
             .unwrap();
         assert!(clean_and_configured);
         let second_random: Vec<f64> = rustia
-            .run("return { math.random(), math.random(), math.random() }")
+            .eval("return { math.random(), math.random(), math.random() }")
             .unwrap();
         assert_eq!(first_random, second_random);
         assert!(rustia.vm().deterministic_collection_count() > 0);
@@ -2928,7 +2813,7 @@ return input == nil and decision_global == nil
 
     #[test]
     fn decision_reset_reaches_a_many_decision_memory_plateau() {
-        let module = Rustia::compile(
+        let module = Rustia::compile_module(
             "plateau.luau",
             "\
 decision_global = {}
@@ -2947,7 +2832,7 @@ return { count = #decision_global }
         let mut plateau = None;
 
         for decision in 0..600 {
-            let exports = rustia.install(module.clone()).unwrap();
+            let exports = rustia.install(&module).unwrap();
             assert_eq!(exports.get::<usize>(&mut rustia, "count").unwrap(), 64);
             rustia.reset_decision().unwrap();
             let stats = rustia.memory_stats();
@@ -2962,7 +2847,7 @@ return { count = #decision_global }
             }
         }
         assert_eq!(rustia.decision_epoch(), 600);
-        let clean: bool = rustia.run("return decision_global == nil").unwrap();
+        let clean: bool = rustia.eval("return decision_global == nil").unwrap();
         assert!(clean);
     }
 
@@ -2971,17 +2856,17 @@ return { count = #decision_global }
     fn live_preset_installs_system_clocks_and_the_stock_loadstring_compiler() {
         let mut rustia = RustiaBuilder::live().build().unwrap();
 
-        let time: f64 = rustia.run("return os.time()").unwrap();
+        let time: f64 = rustia.eval("return os.time()").unwrap();
         assert!(
             time >= 1_700_000_000.0,
             "live() os.time() should read the real wall clock, got {time}"
         );
-        let clock: f64 = rustia.run("return os.clock()").unwrap();
+        let clock: f64 = rustia.eval("return os.clock()").unwrap();
         assert!(
             clock > 0.0,
             "live() os.clock() should read the real monotonic clock, got {clock}"
         );
-        let answer: f64 = rustia.run("return loadstring('return 40 + 2')()").unwrap();
+        let answer: f64 = rustia.eval("return loadstring('return 40 + 2')()").unwrap();
         assert_eq!(answer, 42.0);
         // print goes to real process stdout via `print!`, which a test cannot read back from
         // inside the process; sink delivery is covered by the VM-level capture tests.

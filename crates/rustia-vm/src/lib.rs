@@ -33,7 +33,7 @@ pub use profile::{GuestSurface, Profile};
 pub use value::{Value, ValueKind};
 pub use vm::{
     ClockProvider, EntropyProvider, HardenedLeafProgram, LoadStringCompiler, ModuleResolver,
-    ResolvedModule, RetainedValue, StdoutSink, Vm, VmExecution, VmMemoryStats, VmServices,
-    VmSettings, DECISION_RESET_ABI_VERSION, HARDENED_LEAF_GUEST_ABI_VERSION, MAX_RECURSION_LIMIT,
-    MODULE_RESOLUTION_ABI_VERSION,
+    ResolvedModule, RetainedValue, StdoutSink, Vm, VmExecution, VmHostDispatcher, VmMemoryStats,
+    VmServices, VmSettings, DECISION_RESET_ABI_VERSION, HARDENED_LEAF_GUEST_ABI_VERSION,
+    INSTALL_TRANSACTION_ABI_VERSION, MAX_RECURSION_LIMIT, MODULE_RESOLUTION_ABI_VERSION,
 };

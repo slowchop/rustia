@@ -1,6 +1,6 @@
 # rustia - embedded API goal and plan
 
-> **Status: [TYPED INVOCATION + LIVE-HANDLE SPINE/CHUNK BUILDER/LIVE SERDE IMPLEMENTED - function construction pending] (updated 2026-09-02).**
+> **Status: [TRANSACTIONAL INSTALLATION + COHERENT EXECUTION API IMPLEMENTED - function construction pending] (updated 2026-09-02).**
 > This records the public Rust embedding API direction and its honest implementation boundary after comparing
 > rustia's constraints with current Rust scripting/runtime APIs. It refines the locked
 > architecture axis H in [`30-architecture.md`](30-architecture.md) and the grabby bridge contract in
@@ -18,8 +18,9 @@ fully non-reproducible environment at construction time.
 
 ## Current boundary
 
-Typed run/compile helpers, owned scalar and table values, typed host functions, extension metadata/capabilities,
-retained `Function`/`Exports` handles with install-generation checks, owned serde, hot reload, diagnostics,
+The composable `load(...).source_name(...).environment(...)` execution API, owned scalar and table values,
+typed host functions, extension metadata/capabilities, VM/epoch-safe `Function`/`Exports` handles, owned serde,
+transactional installation, diagnostics,
 early declarative macro sugar, and the runtime host-services slice (environment presets, stdout,
 determinism-labeled clock/entropy providers, and native/WASI/browser adapters per
 [`72-host-services.md`](72-host-services.md)) are implemented.
@@ -34,16 +35,17 @@ The authoritative-leaf layer from
 specialized hardened reset preserves only the sealed immutable configuration prefix.
 Object/program reclamation, real VM-owned live/reserved/peak telemetry, and the correctness-first logical-live
 quota/atomic OOM path are now implemented and validated by the exact-commit `safe-memory-588b541` native Linode
-cohort plus its wasm32 512 KiB quota/recovery probe. The next release-critical slice is not more facade
-decoration: the epoch-safe decision reset and host-owned `require` resolver/cache are now implemented; remaining
-work is transactional installation/reload failures and safe host-function construction. The
+cohort plus its wasm32 512 KiB quota/recovery probe. The epoch-safe decision reset, host-owned `require`
+resolver, and transactional installation boundary are now implemented; the remaining constructor work is safe
+host-function construction. The
 graph-preserving advanced spine plus its first ergonomic constructors are now implemented:
 VM/epoch-safe rooted `Value`/`Table`/`Function` handles preserve binary strings, buffers, vectors, rich keys,
 shared/cyclic table identity, mutation, raw equality, and ordinary or typed invocation exchange without
 exposing collector lifetimes. `globals()` exposes the real mutable globals table, `create_table()` admits an
 empty rooted table under the logical-live quota, and `Table::set_live()` bridges owned keys to identity-bearing
-live values. The composable `load(source).name(...).environment(...).eval()/exec()` builder now adds borrowed
-text/byte source, named diagnostics, exact rooted lexical environments, typed/live/exports results, and
+live values. The composable `load(source).source_name(...).environment(...)` builder provides borrowed
+text/byte source, diagnostic names, exact rooted lexical environments, `eval`, `eval_live`, `eval_serde`,
+`exec`, and `install` terminals,
 side-effect-only execution; custom environments are validated before compilation, nested functions capture
 the selected table, and hardened leaves reject dynamic loading before compilation or VM allocation.
 Hardened leaves reject both table constructor authorities before allocation. `OwnedValue` remains the small
@@ -96,11 +98,11 @@ Rustia should not force every embedder to pay the conceptual cost of a full live
 not force advanced embedders to treat the VM as a sealed calculator. The target is two additive layers over
 one engine:
 
-1. **Typed command/data facade (existing and retained).** `insert_global`, `add_fn`, `run<T>`, `Exports`,
-   owned serde, extensions, fuel/capabilities, and hot reload remain the shortest route for deterministic
+1. **Typed command/data facade (existing and retained).** `insert_global`, `add_fn`, `eval<T>`, `Exports`,
+   owned serde, extensions, fuel/capabilities, and transactional installation remain the shortest route for deterministic
    decisions, configuration, and simple applications.
 2. **Advanced live-object API (spine implemented; ergonomics/integration continuing).** Identity-safe live
-   `Value` and `Table` handles now share the rooted VM/epoch model with `Function`; `run_value`, live table
+   `Value` and `Table` handles now share the rooted VM/epoch model with `Function`; `eval_live`, live table
    lookup/mutation/iteration, live function arguments/results, typed-invocation exchange, binary
    string/buffer/vector access, rich keys, raw identity equality, live globals, quota-aware table construction,
    and owned-key/live-value insertion are implemented. A public coroutine `Thread` handle remains conditional
@@ -109,7 +111,7 @@ one engine:
 
 The advanced layer is not a raw Luau C stack API and must not expose internal GC lifetimes. Handles belong to
 one VM, are real GC roots while alive, fail safely when used with another VM, and carry an epoch contract:
-ordinary handles survive hot reload where documented, while explicit decision reset may invalidate them.
+ordinary handles survive successful module replacement, while explicit decision reset invalidates them.
 Live tables preserve identity, shared/cyclic graphs, binary data, and mutation; `OwnedValue` remains the
 portable deep-copy boundary for callers that prefer isolation.
 
@@ -140,16 +142,20 @@ let mut vm = Rustia::builder()
 vm.add_fn("clamp", |x: f64, lo: f64, hi: f64| x.clamp(lo, hi))?;
 vm.insert_global("difficulty", 3)?;
 
-let quick: f64 = vm.run("return clamp(difficulty + 9, 0, 10)")?;
-let exports = vm.compile_and_run_exports("return { decide = function(x) return clamp(x, 0, 10) end }")?;
+let quick: f64 = vm.eval("return clamp(difficulty + 9, 0, 10)")?;
+let exports = vm
+    .load("return { decide = function(x) return clamp(x, 0, 10) end }")
+    .source_name("ai.luau")
+    .install()?;
 let decide = exports.function(&mut vm, "decide")?;
 let y: f64 = decide.call(&mut vm, (12.0,))?;
 ```
 
 Core pieces:
 
-- typed `Rustia::run<T>()` for direct single-result conversion.
-- source-named `run_named<T>()`, `run_owned_named()`, and compile/run helpers for host-controlled diagnostics.
+- typed `Rustia::eval<T>()` for concise single-result conversion.
+- `Rustia::load(...).source_name(...)` for host-controlled diagnostics and the
+  `require` resolver referrer across every terminal operation.
 - public error accessors for compile-time byte spans and runtime source/line locations.
 - `OwnedValue` as the public value firewall.
 - `IntoRustia` / `FromRustia`.
@@ -158,7 +164,7 @@ Core pieces:
   values, typed `OwnedTable` helper constructors/getters, and nested table/array access.
 - typed host functions support fallible `rustia::Result<T>` returns.
 - typed host functions and retained script calls support tuple-shaped arguments/results through arity 8.
-- retained `Function` and `Exports` handles with generation freshness checks.
+- retained `Function` and `Exports` handles checked by VM identity and decision epoch.
 - internal gc-arena `Value` remains behind the facade.
 
 Runtime services are part of the same builder (implemented per [`72-host-services.md`](72-host-services.md)):
@@ -270,8 +276,8 @@ logical protocol size charged to the byte budget.
 
 Typed VMs run guest module top-level code and retained functions only through `Invocation<'call, H>`.
 `InvocationLimits::new(fuel).with_max_records(max_records).with_max_record_bytes(max_record_bytes)` names the
-three limits and creates one monotonic budget shared by every `Invocation::install`/`run`,
-`Function::call_in`, nested guest/metamethod call, and host dispatch performed by the outer Rust closure. The
+three limits and creates one monotonic budget shared by every `Invocation::install`, invocation chunk
+execution, `Function::call_in`, nested guest/metamethod call, and host dispatch performed by the outer Rust closure. The
 builder/`VmSettings` initial fuel, when configured, is a VM-wide ceiling; the effective typed budget is the
 lower of that ceiling and `InvocationLimits::fuel()`. The
 output bounds are checked before a record enters the journal; effects and slot writes share a single dense
@@ -300,10 +306,12 @@ guest-invoked host callback are inside the containment boundary and do poison on
 The hardened `invoke_entry_into` lifecycle catches a caller-side conversion
 unwind, resets the decision, and resumes the same panic.
 
-This is intentionally a **record transaction**, not a heap/context transaction. It does not undo guest
+This is intentionally a **record transaction**, not a general heap/context transaction. It does not undo guest
 globals/tables, mutation through profile-gated `HostMut`, callback captures, or `HostContext` state modified
-through interior mutability. Embedders that need a fresh guest-state boundary pair the operation with
-`reset_decision()` and keep authoritative state in host slots.
+through interior mutability. `Invocation::install` is the deliberate exception: it adds a nested guest-state
+savepoint for the module candidate while keeping external host effects outside rollback. Embedders that need a
+fresh boundary for other guest operations pair them with `reset_decision()` and keep authoritative state in
+host slots.
 
 Successful `invoke` returns `InvocationOutcome { value, records, usage }`; its record slice borrows Rustia's
 reusable journal until the next mutable use. `invoke_into` reserves the caller-owned record lane before guest
@@ -321,8 +329,10 @@ struct ScenarioSpec {
     enemies: Vec<EnemySpec>,
 }
 
-let exports = vm.compile_and_run(script)?;
-let spec: ScenarioSpec = exports.deserialize(&mut vm)?;
+let spec: ScenarioSpec = vm
+    .load(script)
+    .source_name("scenario.luau")
+    .eval_serde()?;
 ```
 
 Also support the reverse direction:
@@ -346,21 +356,22 @@ tuple, or struct variant is a single-entry string-keyed table whose value carrie
 produces those shapes and deserialization accepts them symmetrically; other table shapes and non-string variant
 keys fail explicitly.
 
-### 4. Compiled module and hot-reload API
+### 4. Compiled module and transactional replacement API
 
-Hot reload is part of the embedding goal, not tooling polish.
+Hot reload is ordinary host orchestration over one atomic installation primitive. Rustia does not own a named
+active-module registry: the host already owns the reference it wants to replace.
 
 ```rust
-let program = Rustia::compile("ai.luau", source)?;
-vm.install(program)?;
+let program = Rustia::compile_module("ai.luau", source)?;
+let mut active = vm.install(&program)?;
 
-match vm.hot_reload("ai.luau", new_source) {
-    Ok(exports) => {
-        // swap to new exports
-    }
-    Err(error) => {
-        // keep old program/exports alive
-    }
+// Compile and run a complete candidate privately. Assignment is the swap.
+if let Ok(candidate) = vm
+    .load(new_source)
+    .source_name("ai.luau")
+    .install()
+{
+    active = candidate;
 }
 ```
 
@@ -368,20 +379,24 @@ Requirements:
 
 - compiling new source must not mutate the current VM state.
 - source names and spans must survive into diagnostics.
-- old program remains callable on reload failure.
-- retained handles are versioned or explicitly invalidated across reload.
+- compile, runtime, quota, cache-admission, and result-retention failure must roll back guest state.
+- old exports and functions remain callable after both failed and successful replacement until decision reset.
+- every installation receives a fresh lazy `require` cache cohort selected by executing function origin.
 
-Current implementation slice: source-named run/compile helpers preserve host-provided names in runtime
-diagnostics, and `rustia::Error` exposes public source-span/runtime-location accessors for host-side diagnostic
-renderers. `Exports::generation()`, `Function::generation()`, and `Rustia::generation()` report the successful
-install generation. `is_current()` / `ensure_current()` let hosts check retained handle freshness, and
-`Function::call_current()` and `Exports::{value,deserialize,get,function}_current()` give hosts fail-closed
-access paths for stale handles. Failed hot reloads do not advance the generation, and old retained function
-handles remain callable through `Function::call()` because the VM retains prior dynamic programs.
-That is not yet transactional hot reload: a new module that starts executing and then fails can leave partial
-global/heap effects even though the generation does not advance, and extension installation can partially
-register earlier functions before a later validation failure. Public release needs prevalidation plus
-transactional/isolated failure semantics, or an explicit narrower contract with host-visible recovery.
+Current implementation: `install()` runs the candidate in a nested guest-state savepoint. By default it creates
+a fresh environment whose `_G` is itself and whose metatable inherits VM globals; `.environment(&table)` selects
+an exact shared environment when the application deliberately wants one. Failure restores tables, metatables,
+upvalues, buffers, coroutines, RNG, logical time, GC scheduling, module programs/caches, globals, and provisional
+external roots. The complete rollback snapshot is charged to the VM memory quota and must fit before any
+candidate mutation. Transaction-time collection may reclaim newly created unreachable values while retaining
+the pre-savepoint graph needed for rollback; the one exception is the initial hardened-leaf installation,
+which preserves its append-only allocation prefix until the environment is sealed. Successful weak-table
+collection remains observable. Host callbacks and resolver I/O are
+external effects and cannot be undone; typed record output stays provisional until its enclosing invocation
+commits. Required modules share the candidate environment and a fresh lazy cohort. Old functions keep using
+their originating cohort, and collector reachability reclaims cohorts when no strong guest or host path can
+reach them. `RUSTIA_INSTALL_TRANSACTION_ABI_VERSION` and `RUSTIA_MODULE_RESOLUTION_ABI_VERSION` version these
+contracts.
 
 ### 5. Optional macro/codegen sugar
 
@@ -421,7 +436,7 @@ assert_eq!(
     RustiaExecutionProfile::DETERMINISTIC_HARDENED_LEAF,
 );
 vm.install_host_module(bridge)?;
-let decide = Rustia::<GrabbyHost>::compile_entry("decide.luau", source)?;
+let decide = Rustia::compile_entry("decide.luau", source)?;
 ```
 
 The typed execution profile above is also available from the builder. Its
@@ -474,8 +489,7 @@ rustia owns:
 - the hardened guest-surface ABI, frozen allowlisted environment, mandatory memory limit, and rejection of
   guest globals/upvalues/raw access/dynamic authority.
 - stateless compiled-entry execution without an exports table, retained closure, or loaded-program installation.
-- install-generation/freshness checks plus VM/epoch-rooted handle ownership; transactional hot reload remains
-  planned.
+- VM/epoch-rooted handle ownership plus atomic candidate installation and host-owned replacement.
 
 The hot AI leaf remains a per-decision pure function. Coroutines are still valid inside one decision and in
 scenario/console paths, but a coroutine must not persist across ticks in DeterministicSim because that would
@@ -485,10 +499,10 @@ store authoritative state on the GC heap instead of in captured host slots.
 
 1. ✅ `OwnedValue` plus `FromRustia` / `IntoRustia` and typed/nested `OwnedTable` helpers — first slice landed.
 2. ✅ typed `add_fn` and `Function::call` — landed through tuple arity 8.
-3. ✅ returned-table `Exports` facade — landed with generation-aware accessors.
+3. ✅ returned-table `Exports` facade — landed with VM/epoch-safe rooted accessors.
 4. ✅ owned serde deserialize/serialize plus snapshot-free live-value deserialization — landed.
 5. ✅ extension/linker with capability and fuel metadata — first slice landed.
-6. ✅ hot reload and diagnostics — first slice landed; reclamation and stack traces remain.
+6. ✅ host-owned hot replacement and diagnostics — atomic installation and reclamation landed; stack traces remain.
 7. ✅ early declarative macro sugar — landed; broader attribute/codegen expansion is deferred.
 8. ✅ runtime output/time services — landed per [`72-host-services.md`](72-host-services.md): environment
    presets, `ServiceClock`/`ServiceEntropy` provider sockets, real `print` composition, pinned-epoch and
@@ -509,24 +523,24 @@ store authoritative state on the GC heap instead of in captured host slots.
     limit, bytecode policy validation, direct `CompiledEntry` invocation, failure-safe lifecycle helper,
     immutable-prefix decision reset, and native/wasm32 exact-plateau probes.
 13. ✅ **Add the advanced live-handle spine:** identity-safe live `Value` and `Table` handles now share the
-    existing rooted `Function` VM/epoch model. `run_value`, live lookup/mutation/iteration, live function
+    existing rooted `Function` VM/epoch model. `eval_live`, live lookup/mutation/iteration, live function
     arguments/results, typed-invocation exchange, binary strings, buffers, vectors, rich keys, userdata
     identity, raw equality, and shared/cyclic table graphs do not expose GC lifetimes. A public `Thread` handle
     remains intentionally absent until a concrete host-side scheduling caller defines its contract.
 14. 🔨 **Add the familiar ergonomic entry points:** `globals()`, quota-aware `create_table()`,
     owned-key/live-value insertion, and the composable
-    `load(source).name(...).environment(...).eval()/exec()` chunk builder are implemented. The builder borrows
-    text or bytes, preserves named diagnostics, supports typed/live/exports results, executes against globals
+    `load(source).source_name(...).environment(...)` chunk builder is implemented. The builder borrows
+    text or bytes, preserves named diagnostics, supports `eval`/`eval_live`/`eval_serde`/`exec`/`install`, executes against globals
     or an exact rooted lexical environment, and rejects invalid environment handles before compilation.
-    `create_function()` remains deferred until disposable callbacks can be reclaimed safely. Keep `run<T>()`,
-    `add_fn`, and the source-named helpers as concise facade sugar rather than breaking them.
+    `create_function()` remains deferred until disposable callbacks can be reclaimed safely. Keep `eval<T>()`
+    and `add_fn` as concise facade sugar.
 15. ✅ **Add host-owned modules:** script-visible `require`, deterministic module identity where promised,
     execute-once caching, cycle diagnostics, shared caller fuel, reset-aware cache lifetime, and
     host-controlled resolution rather than an ambient core filesystem API. The behavior is versioned by
     `RUSTIA_MODULE_RESOLUTION_ABI_VERSION`; the host must separately bind its resolver content.
-16. ⏳ **Complete rich integration and failure semantics:** transactional extension/module/hot-reload
-    installation, stack diagnostics, and explicit behavior for handles across
-    reload and reset.
+16. 🔨 **Complete rich integration and failure semantics:** transactional extension/module/replacement
+    installation and explicit handle behavior across replacement/reset are implemented. Stack diagnostics and
+    yieldable `require` remain.
 17. ⏳ **Add mlua-style `UserData`/`Scope` only after the live handle/context layer is stable and a real
     host-object caller fixes the requirements.** Support methods, fields, metamethods, borrowed scoped
     callbacks, and safe invalidation without weakening the owned facade.

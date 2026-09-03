@@ -14,16 +14,16 @@ struct LiveSerdeProbe {
 fn default_web_live_adapter_supplies_browser_host_services() {
     let mut rustia = RustiaBuilder::live().build().unwrap();
 
-    let wall: f64 = rustia.run("return os.time()").unwrap();
+    let wall: f64 = rustia.eval("return os.time()").unwrap();
     assert!(wall > 1_700_000_000.0);
 
-    let monotonic: f64 = rustia.run("return os.clock()").unwrap();
+    let monotonic: f64 = rustia.eval("return os.clock()").unwrap();
     assert!(monotonic >= 0.0);
 
-    let random: f64 = rustia.run("return math.random()").unwrap();
+    let random: f64 = rustia.eval("return math.random()").unwrap();
     assert!((0.0..1.0).contains(&random));
 
-    let answer: f64 = rustia.run("return loadstring('return 40 + 2')()").unwrap();
+    let answer: f64 = rustia.eval("return loadstring('return 40 + 2')()").unwrap();
     assert_eq!(answer, 42.0);
 }
 
@@ -31,7 +31,8 @@ fn default_web_live_adapter_supplies_browser_host_services() {
 fn web_live_deserializes_rooted_live_values() {
     let mut rustia = RustiaBuilder::live().build().unwrap();
     let value = rustia
-        .run_value("return { label = 'web', values = { 4, 5, 6 } }")
+        .load("return { label = 'web', values = { 4, 5, 6 } }")
+        .eval_live()
         .unwrap();
     assert_eq!(
         value.deserialize::<LiveSerdeProbe>(&mut rustia).unwrap(),

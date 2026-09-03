@@ -401,11 +401,11 @@
       </div>
       <aside class="facts" aria-label="Current facts">
         <div class="fact">
-          <strong>93%</strong>
+          <strong>94%</strong>
           <span>Whole public rustia project, 90% confidence</span>
         </div>
         <div class="fact">
-          <strong>98%</strong>
+          <strong>99%</strong>
           <span>Usable embedded scripting crate, 95% confidence</span>
         </div>
         <div class="fact">
@@ -417,7 +417,7 @@
           <span>Requested benchmark adapters present</span>
         </div>
         <div class="fact">
-          <strong>83%</strong>
+          <strong>84%</strong>
           <span>Public release readiness, 91% confidence</span>
         </div>
       </aside>
@@ -428,51 +428,51 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Whole public rustia project</h3>
-        <span class="percent">93%</span>
+        <span class="percent">94%</span>
       </div>
 
-    <div class="meter" aria-label="Whole public rustia project: 93% complete">
-      <div class="meter-fill" style="width: 93%"></div>
+    <div class="meter" aria-label="Whole public rustia project: 94% complete">
+      <div class="meter-fill" style="width: 94%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip high">90% confidence</span>
       </div>
-      <p>The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, host-pluggable output/time services, host-owned canonical-identity require resolution/cache, lifetime-safe per-invocation host contexts, bounded transactional effect journals, graph-preserving rooted live Value/Table/Function handles with live globals, quota-aware table construction, snapshot-free live serde, and a composable chunk builder, CLI, benchmark matrix, private HotIR, closure-call PIC, generation-safe object/program reclamation, VM-owned memory telemetry, maintained logical-live quota accounting and script counters, atomic catchable OOM, epoch-safe decision reset, exact dedicated-Linux native plus wasm quota evidence, and a shared native/Node-V8 mixed-heap pressure gate are in-tree. The remaining release gates are safe function construction, transactional failure semantics, semantic-tail hardening, and packaging.</p>
-      <p class="plan"><strong>Next:</strong> Complete safe function construction and transactional failure semantics; then continue measured optimization and public release work.</p>
+      <p>The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, host-pluggable output/time services, host-owned canonical-identity require resolution/cache, lifetime-safe per-invocation host contexts, bounded transactional effect journals, graph-preserving rooted live Value/Table/Function handles with live globals, quota-aware table construction, snapshot-free live serde, a coherent chunk execution API, atomic extension/module installation with fresh lazy dependency cohorts, CLI, benchmark matrix, private HotIR, closure-call PIC, generation-safe object/program reclamation, VM-owned memory telemetry, maintained logical-live quota accounting and script counters, atomic catchable OOM, epoch-safe decision reset, exact dedicated-Linux native plus wasm quota evidence, and a shared native/Node-V8 mixed-heap pressure gate are in-tree. The remaining release gates are safe function construction, semantic-tail hardening, and packaging.</p>
+      <p class="plan"><strong>Next:</strong> Complete safe function construction; then continue semantic-tail hardening, measured optimization, and public release work.</p>
     </article>
 
     <article class="goal-card">
       <div class="card-head">
         <h3>Usable embedded scripting crate</h3>
-        <span class="percent">98%</span>
+        <span class="percent">99%</span>
       </div>
 
-    <div class="meter" aria-label="Usable embedded scripting crate: 98% complete">
-      <div class="meter-fill" style="width: 98%"></div>
+    <div class="meter" aria-label="Usable embedded scripting crate: 99% complete">
+      <div class="meter-fill" style="width: 99%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip high">95% confidence</span>
       </div>
-      <p>The facade now includes typed run/compile, a composable named/environment-aware chunk builder, owned scalar/table conversions, host-owned canonical-identity require resolution/cache, a lifetime-independent HostSchema with fresh borrowed HostContext values per invocation, capability-specific host views, shared fuel, bounded transactional record publication, usage receipts, rooted live Value/Table/Function handles that preserve rich payloads and graph identity, live globals, quota-aware table construction, owned-key/live-value insertion, retained exports with install-generation and decision-epoch checks, owned-value serde plus snapshot-free live deserialization, extensions, hot reload, epoch-safe decision reset, examples, diagnostics, migration guidance, host-pluggable stdout/clock services, VM-owned memory telemetry, maintained logical-live accounting, and configurable quotas. It is not yet a complete rich embedding boundary: safe function construction and transactional guest-side failure rollback remain.</p>
-      <p class="plan"><strong>Next:</strong> Complete safe function construction, transactional failure semantics, diagnostics, and API stabilization.</p>
+      <p>The facade now includes typed eval/exec, a composable load/source_name/environment builder with owned/live/serde/install terminals, owned scalar/table conversions, host-owned canonical-identity require resolution with per-install cohorts, a lifetime-independent HostSchema with fresh borrowed HostContext values per invocation, capability-specific host views, shared fuel, bounded transactional record publication, usage receipts, rooted live Value/Table/Function handles that preserve rich payloads and graph identity, live globals, quota-aware table construction, owned-key/live-value insertion, VM/decision-epoch-safe exports, owned-value serde plus snapshot-free live deserialization, atomic extensions and installation, host-owned replacement, epoch-safe decision reset, examples, diagnostics, migration guidance, host-pluggable stdout/clock services, VM-owned memory telemetry, maintained logical-live accounting, and configurable quotas. Safe function construction remains before this is a complete rich embedding boundary.</p>
+      <p class="plan"><strong>Next:</strong> Complete safe function construction, diagnostics, and API stabilization.</p>
     </article>
 
     <article class="goal-card">
       <div class="card-head">
         <h3>Full public standalone Luau engine release</h3>
-        <span class="percent">67%</span>
+        <span class="percent">68%</span>
       </div>
 
-    <div class="meter" aria-label="Full public standalone Luau engine release: 67% complete">
-      <div class="meter-fill" style="width: 67%"></div>
+    <div class="meter" aria-label="Full public standalone Luau engine release: 68% complete">
+      <div class="meter-fill" style="width: 68%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip high">88% confidence</span>
       </div>
-      <p>The Luau 0.709 standalone target and pending-free 511-ref conformance denominator (493 Luau 0.709 plus 18 offline PUC 5.1.5 compatibility refs) are strong. Bounded generation-safe object/program lifetimes, VM-owned live/reserved/peak telemetry, maintained logical-live memory limits and script counters, atomic catchable OOM, host-owned require resolution/cache, lifetime-safe typed invocations with transactional records, graph-preserving rooted live values with snapshot-free serde, versioned deterministic reset/module lifecycles, and the shared native/Node-V8 mixed-heap pressure gate are implemented; native Linode plus wasm quota evidence is exact. Release still requires remaining live-object ergonomics, transactional guest-module failure semantics, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.</p>
+      <p>The Luau 0.709 standalone target and pending-free 511-ref conformance denominator (493 Luau 0.709 plus 18 offline PUC 5.1.5 compatibility refs) are strong. Bounded generation-safe object/program lifetimes, VM-owned live/reserved/peak telemetry, maintained logical-live memory limits and script counters, atomic catchable OOM, host-owned require resolution with fresh installation cohorts, transactional module installation, lifetime-safe typed invocations with transactional records, graph-preserving rooted live values with snapshot-free serde, versioned deterministic reset/module lifecycles, and the shared native/Node-V8 mixed-heap pressure gate are implemented; native Linode plus wasm quota evidence is exact. Release still requires remaining live-object ergonomics, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.</p>
       <p class="plan"><strong>Next:</strong> Close the remaining host-boundary gates, harden the semantic tail and cross-target goldens, then package and publish against the pinned target.</p>
     </article>
 
@@ -496,24 +496,24 @@
     <article class="goal-card">
       <div class="card-head">
         <h3>Public release readiness</h3>
-        <span class="percent">83%</span>
+        <span class="percent">84%</span>
       </div>
 
-    <div class="meter" aria-label="Public release readiness: 83% complete">
-      <div class="meter-fill" style="width: 83%"></div>
+    <div class="meter" aria-label="Public release readiness: 84% complete">
+      <div class="meter-fill" style="width: 84%"></div>
     </div>
 
       <div class="meta-line">
         <span class="chip high">91% confidence</span>
       </div>
       <p>License, generated crate metadata audit, explicit internal dependency versions, release-preflight-enforced examples, migration guidance, CLI/diagnostics, typed owned values and callbacks, graph-preserving rooted live values, true-root epoch-safe retained handles, host signature/fuel metadata, output/time services, VM memory telemetry, maintained logical-live limits and script counters with atomic OOM, versioned decision reset, a shared native/Node-V8 mixed-heap pressure gate, release-readiness and semver policy, hosted CI, benchmark claim gating, package dry-runs, and publishability auditing are present; crates are still workspace-private and release polish is incomplete.</p>
-      <p class="plan"><strong>Next:</strong> Close remaining live-object ergonomics, transactional-install, and semantic-tail gates before removing publish blockers in topological order.</p>
+      <p class="plan"><strong>Next:</strong> Close remaining live-object ergonomics and semantic-tail gates before removing publish blockers in topological order.</p>
     </article>
 
     </section>
 
     <nav class="area-nav" aria-label="Progress areas">
-      <a href="#design">Design 94%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 79%</a><a href="#vm-runtime">VM/runtime 81%</a><a href="#determinism">Determinism 84%</a><a href="#embedded-api">Embedded API 83%</a><a href="#benchmarks">Benchmarks 88%</a><a href="#wasm-perf">Wasm/perf 63%</a><a href="#tooling">Tooling 68%</a><a href="#packaging">Packaging 62%</a>
+      <a href="#design">Design 94%</a><a href="#luau-target">Luau target 95%</a><a href="#conformance">Conformance 88%</a><a href="#frontend">Frontend 79%</a><a href="#vm-runtime">VM/runtime 81%</a><a href="#determinism">Determinism 84%</a><a href="#embedded-api">Embedded API 86%</a><a href="#benchmarks">Benchmarks 88%</a><a href="#wasm-perf">Wasm/perf 63%</a><a href="#tooling">Tooling 68%</a><a href="#packaging">Packaging 62%</a>
     </nav>
 
 
@@ -883,7 +883,7 @@
       <div class="entry-top">
         <div>
           <h4>Heap and GC</h4>
-          <p>Standard uses paced gc-arena debt collection, DeterministicSim uses instruction-count full cycles, weak tables are swept, and tables/functions/upvalues/runtime strings/userdata/buffers/vectors plus loaded programs use generation-safe reusable slots. Retained host values are true roots, while suspended coroutine frames follow the reachability of their public handle through a fixed-point mark; explicit quiescence reclaims obsolete programs/coroutines and releases spare backing capacity. Reset ABI v1 reuses allocation containers while discarding the complete guest heap and loaded-program state at an idle decision boundary. Maintained heap/program/control live accounting backs logical-live quotas and script counters without a whole-VM census at ordinary instruction boundaries; exact live/reserved telemetry and optional peaks remain available. Forced-collection retry and atomic catchable OOM are implemented. Cohort safe-memory-588b541 supplies 99 native Linode samples and a wasm32 512 KiB quota/recovery pass. A shared native/Node-V8 test covers 96 decision epochs and 3,072 rich mixed-heap waves with bounded roots, weak/cyclic reclamation, hot reload, stale handles, exact reset plateaus, OOM recovery, and stable warmed wasm linear-memory pages.</p>
+          <p>Standard uses paced gc-arena debt collection, DeterministicSim uses instruction-count full cycles, weak tables are swept, and tables/functions/upvalues/runtime strings/userdata/buffers/vectors plus loaded programs use generation-safe reusable slots. Retained host values are true roots, while suspended coroutine frames follow the reachability of their public handle through a fixed-point mark; explicit quiescence reclaims obsolete programs/coroutines and releases spare backing capacity. Reset ABI v1 reuses allocation containers while discarding the complete guest heap and loaded-program state at an idle decision boundary. Maintained heap/program/control live accounting backs logical-live quotas and script counters without a whole-VM census at ordinary instruction boundaries; exact live/reserved telemetry and optional peaks remain available. Forced-collection retry and atomic catchable OOM are implemented. Cohort safe-memory-588b541 supplies 99 native Linode samples and a wasm32 512 KiB quota/recovery pass. A shared native/Node-V8 test covers 96 decision epochs and 3,072 rich mixed-heap waves with bounded roots, weak/cyclic reclamation, module replacement, stale handles, exact reset plateaus, OOM recovery, and stable warmed wasm linear-memory pages.</p>
         </div>
         <div class="entry-score">
           <strong>94%</strong>
@@ -1095,8 +1095,8 @@
           <p>12 tracked items</p>
         </div>
         <div class="area-score">
-          <span>83% avg complete</span>
-          <span>88% avg confidence</span>
+          <span>86% avg complete</span>
+          <span>91% avg confidence</span>
         </div>
       </div>
       <div class="entries">
@@ -1105,7 +1105,7 @@
       <div class="entry-top">
         <div>
           <h4>Koto-shaped facade</h4>
-          <p>Builder, typed run&lt;T&gt;, source-named compile/run helpers, a composable load/name/environment/eval/exec chunk builder, public error diagnostic accessors, global insertion, exports, graph-preserving rooted live Value/Table/Function handles with snapshot-free serde, a live globals handle, quota-aware table construction, owned-key/live-value insertion, host-owned require resolution/cache, a typed HostSchema/HostContext invocation surface, bounded record transactions, usage receipts, an epoch-safe decision reset, environment presets (standard/deterministic/live) with stdout and determinism-labeled service sockets, examples, and a first koto-to-rustia migration guide exist.</p>
+          <p>Builder, typed eval/exec, a composable load/source_name/environment builder with eval/eval_live/eval_serde/exec/install terminals, public error diagnostic accessors, global insertion, exports, graph-preserving rooted live Value/Table/Function handles with snapshot-free serde, a live globals handle, quota-aware table construction, owned-key/live-value insertion, host-owned require resolution with fresh installation cohorts, atomic module installation, a typed HostSchema/HostContext invocation surface, bounded record transactions, usage receipts, an epoch-safe decision reset, environment presets (standard/deterministic/live) with stdout and determinism-labeled service sockets, examples, and a first koto-to-rustia migration guide exist.</p>
         </div>
         <div class="entry-score">
           <strong>98%</strong>
@@ -1181,16 +1181,16 @@
       <div class="entry-top">
         <div>
           <h4>Extension/linker layer</h4>
-          <p>Namespaced extensions, coarse capabilities, pre-install function metadata including host-fuel ABI version, Rust parameter/return type names, fallibility, deterministic registration validation, and explicit external-state helpers exist.</p>
+          <p>Global and namespaced extension batches install atomically after deterministic registration validation. Coarse capabilities, pre-install function metadata including host-fuel ABI version, Rust parameter/return type names, fallibility, and explicit external-state helpers exist.</p>
         </div>
         <div class="entry-score">
-          <strong>73%</strong>
-          <span class="chip medium">70% confidence</span>
+          <strong>82%</strong>
+          <span class="chip high">86% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Extension/linker layer: 73% complete">
-      <div class="meter-fill" style="width: 73%"></div>
+    <div class="meter" aria-label="Extension/linker layer: 82% complete">
+      <div class="meter-fill" style="width: 82%"></div>
     </div>
 
       <p class="plan"><strong>Future plan:</strong> Add migration docs and decide how much internal fuel schedule data should become public.</p>
@@ -1219,26 +1219,26 @@
       <div class="entry-top">
         <div>
           <h4>Module loading and resolution</h4>
-          <p>CompiledModule install/hot reload and script-visible require are implemented. ServiceModuleResolver keeps resolution in host policy with no ambient filesystem; the host supplies canonical identity and source; successful zero-or-one-result modules execute once per decision epoch; cached values are roots; nested referrers, cycles, shared fuel, reset, deterministic labels, panic poisoning, quota admission, and MODULE_RESOLUTION_ABI_VERSION are covered. Required modules still cross a non-yieldable native boundary.</p>
+          <p>Atomic CompiledModule installation, host-owned replacement, and script-visible require are implemented. ServiceModuleResolver keeps resolution in host policy with no ambient filesystem; the host supplies canonical identity and source. Each installation has a fresh lazy cache cohort shared by its dependency graph and selected by function origin; old rooted functions retain old cohorts, and unreachable cohorts are collector-pruned. Failure restores guest heap/global/coroutine/RNG/logical-time/GC/cache state and provisional roots. Nested referrers, cycles, shared fuel, reset, deterministic labels, panic poisoning, quota admission, INSTALL_TRANSACTION_ABI_VERSION, and MODULE_RESOLUTION_ABI_VERSION are covered. Required modules still cross a non-yieldable native boundary.</p>
         </div>
         <div class="entry-score">
-          <strong>82%</strong>
-          <span class="chip high">92% confidence</span>
+          <strong>94%</strong>
+          <span class="chip high">95% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Module loading and resolution: 82% complete">
-      <div class="meter-fill" style="width: 82%"></div>
+    <div class="meter" aria-label="Module loading and resolution: 94% complete">
+      <div class="meter-fill" style="width: 94%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add a yieldable require continuation; define transactional or isolated rollback for arbitrary guest global/heap side effects from runtime-failing module installation and hot reload; then add longer dependency-graph integration evidence.</p>
+      <p class="plan"><strong>Future plan:</strong> Add a yieldable require continuation and longer dependency-graph integration evidence.</p>
     </article>
 
     <article class="entry">
       <div class="entry-top">
         <div>
           <h4>Decision lifecycle and reset</h4>
-          <p>Reset ABI v1 is public at VM and facade layers and is restricted to idle decision boundaries. It preserves configuration, services, extensions, installed host functions/modules, lifetime peaks, and host-owned immutable CompiledModule values; discards all guest globals, heap objects, coroutines, programs, caches, diagnostics, coverage, and roots; restarts RNG, logical time, instruction counters, and deterministic GC scheduling; and epoch-invalidates every Value, Table, Function, Exports, and RetainedValue lease. A focused native mixed table/string/coroutine/program/retained-export workload holds exact VM-owned memory statistics after warmup through 600 decisions. The shared native/Node-V8 mixed-heap test adds 96 decision epochs and checks bounded public roots, weak/cyclic reclamation, hot reload, quota/OOM recovery, stale handles, exact post-reset VM statistics, and stable warmed wasm linear-memory pages.</p>
+          <p>Reset ABI v1 is public at VM and facade layers and is restricted to idle decision boundaries. It preserves configuration, services, extensions, installed host functions/modules, lifetime peaks, and host-owned immutable CompiledModule values; discards all guest globals, heap objects, coroutines, programs, caches, diagnostics, coverage, and roots; restarts RNG, logical time, instruction counters, and deterministic GC scheduling; and epoch-invalidates every Value, Table, Function, Exports, and RetainedValue lease. A focused native mixed table/string/coroutine/program/retained-export workload holds exact VM-owned memory statistics after warmup through 600 decisions. The shared native/Node-V8 mixed-heap test adds 96 decision epochs and checks bounded public roots, weak/cyclic reclamation, module replacement, quota/OOM recovery, stale handles, exact post-reset VM statistics, and stable warmed wasm linear-memory pages.</p>
         </div>
         <div class="entry-score">
           <strong>94%</strong>
@@ -1257,7 +1257,7 @@
       <div class="entry-top">
         <div>
           <h4>Serde bridge</h4>
-          <p>Owned-value serde remains the eager acyclic validation and serialization path. Rooted Value, Table, and Exports handles now deserialize directly into DeserializeOwned targets without a recursive OwnedValue snapshot; VM/epoch/generation checks, cycles, depth, exact numeric conversions, table shape, externally tagged enums, typed host VMs, native memory stability, and both wasm adapter lanes are covered.</p>
+          <p>Owned-value serde remains the eager acyclic validation and serialization path. Rooted Value, Table, and Exports handles now deserialize directly into DeserializeOwned targets without a recursive OwnedValue snapshot; VM/epoch checks, cycles, depth, exact numeric conversions, table shape, externally tagged enums, typed host VMs, native memory stability, and both wasm adapter lanes are covered.</p>
         </div>
         <div class="entry-score">
           <strong>92%</strong>
@@ -1276,7 +1276,7 @@
       <div class="entry-top">
         <div>
           <h4>Retained handles</h4>
-          <p>Script Value, Table, Function, and Exports handles are true collector roots. They can be retained, inspected for their install generation and decision epoch, checked for freshness, exchanged across live calls, and accessed through fail-closed current-generation/current-epoch paths. Repeated slot reuse cannot make stale handles alias replacement objects or programs; reset invalidates every clone while ordinary retained access remains valid across hot reload outside reset epochs.</p>
+          <p>Script Value, Table, Function, and Exports handles are true collector roots. They retain VM identity and decision epoch, can be exchanged across live calls, and fail closed after reset or when used with another VM. Repeated slot reuse cannot make stale handles alias replacement objects or programs; successful module replacement does not invalidate old rooted handles, and old functions keep their originating dependency cohort.</p>
         </div>
         <div class="entry-score">
           <strong>96%</strong>
@@ -1288,26 +1288,26 @@
       <div class="meter-fill" style="width: 96%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Keep VM, generation, and epoch failures explicit while remaining live-object constructors are added.</p>
+      <p class="plan"><strong>Future plan:</strong> Keep VM and epoch failures explicit while remaining live-object constructors are added.</p>
     </article>
 
     <article class="entry">
       <div class="entry-top">
         <div>
-          <h4>Hot reload</h4>
-          <p>Compile/install/hot-reload entry points and source-named run helpers exist; tests cover source-name diagnostics, public runtime-location accessors, failed-reload old-program survival, generation-stamped true-root handles, epoch invalidation on decision reset, stale-handle fail-closed access, and reclamation/reuse of obsolete bytecode, constants, caches, and coverage after the final reachable reference drops. Runtime-failing reload can still leave partial global/heap effects because execution is not transactional.</p>
+          <h4>Transactional module replacement</h4>
+          <p>Compilation is VM-independent, installation is atomic, and the host swaps its active Exports only after success. Tests cover source-name diagnostics, public runtime-location accessors, failed-candidate old-program survival, shared-graph/upvalue/buffer/metatable/RNG/logical-time/GC/weak-table rollback, quota recovery, typed nested savepoints, per-install dependency cohorts, epoch invalidation on decision reset, and reclamation/reuse of obsolete bytecode, constants, caches, and coverage after the final reachable reference drops.</p>
         </div>
         <div class="entry-score">
-          <strong>74%</strong>
-          <span class="chip high">86% confidence</span>
+          <strong>96%</strong>
+          <span class="chip high">95% confidence</span>
         </div>
       </div>
 
-    <div class="meter" aria-label="Hot reload: 74% complete">
-      <div class="meter-fill" style="width: 74%"></div>
+    <div class="meter" aria-label="Transactional module replacement: 96% complete">
+      <div class="meter-fill" style="width: 96%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Add transactional or isolated runtime-failure behavior, module dependencies, migration docs, and broader install-time diagnostics.</p>
+      <p class="plan"><strong>Future plan:</strong> Add broader dependency-graph integration evidence and finish stack diagnostics.</p>
     </article>
 
     <article class="entry">

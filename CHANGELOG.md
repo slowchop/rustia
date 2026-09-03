@@ -8,14 +8,27 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- Transactional module installation through `load(...).install()` and
+  `install(&CompiledModule)`. Each candidate runs in a fresh globals-inheriting
+  environment and fresh lazy `require` cache cohort unless the host supplies an
+  exact environment. Compile, runtime, quota, cache-admission, and retained-root
+  failures restore guest heap/global/coroutine/RNG/logical-time/GC/cache state;
+  old exports remain callable, so the host performs replacement with ordinary
+  Rust assignment. Typed installation is a nested savepoint whose records stay
+  provisional until the enclosing invocation commits. The rollback snapshot is
+  charged to the VM memory quota before candidate execution begins. The contract is
+  versioned by `RUSTIA_INSTALL_TRANSACTION_ABI_VERSION`.
+- Atomic global and namespaced extension installation. A quota or validation
+  failure cannot leave an earlier function from the same batch installed.
+
 - Snapshot-free Serde deserialization from rooted `Value`, `Table`, and `Exports` handles. The direct path
-  preserves VM/decision-epoch ownership and optional install-generation checks, rejects cycles and unsupported
+  preserves VM/decision-epoch ownership, rejects cycles and unsupported
   rich values without exposing collector lifetimes, and works with typed `Rustia<H>` VMs. The existing owned
   serializer and explicit eager snapshot path remain available.
 
 - A composable `Rustia::load` chunk builder with borrowed text/byte source,
-  named diagnostics, rooted custom lexical environments, typed/live/exports
-  evaluation, and side-effect-only execution. Custom environments are checked
+  source names used for diagnostics and `require` resolver referrers, rooted custom lexical environments, and
+  `eval`/`eval_live`/`eval_serde`/`exec`/`install` terminals. Custom environments are checked
   for VM and decision-epoch ownership before parsing or compilation, functions
   created by a chunk capture the selected live table, and hardened leaves
   reject dynamic loading before compilation or VM allocation.
@@ -169,6 +182,16 @@ Current unpublished workspace version: `0.0.1`.
   `design/50-conformance.md`.
 
 ### Changed
+
+- The unpublished `0.0.x` facade now uses one coherent execution vocabulary:
+  `eval`, `eval_live`, `eval_serde`, `exec`, and `install`, configured through
+  `load(...).source_name(...).environment(...)`. The former `run*`, named
+  run/compile variants, `eval_value`, `eval_exports`, and `hot_reload` methods
+  are removed. `ModuleSource::named` becomes `with_source_name`.
+- Install-generation/currentness methods are removed from `Rustia`, `Value`,
+  `Table`, `Function`, and `Exports`. Retained handles are invalidated by a
+  different VM or decision reset, not by a successful unrelated installation.
+  Functions retain their originating lazy dependency cohort.
 
 - Serde sequence requests now reject sparse or mixed map-shaped tables instead of silently producing an empty
   sequence, and numeric map keys use the same finite, integral, range-checked conversions as numeric values.
@@ -349,12 +372,14 @@ Current unpublished workspace version: `0.0.1`.
   and keeps every candidate live across a pressure collection.
 - `ServiceModuleResolver` and `ModuleSource` add host-owned script-visible
   `require` without an ambient filesystem dependency. Resolved canonical
-  identities drive an execute-once per-decision cache; nested referrers, cycle
-  diagnostics, shared caller fuel, GC rooting, decision-reset clearing,
+  identities drive execute-once caches. Ordinary execution uses the
+  decision-wide cohort; each installation uses a fresh lazy cohort selected by
+  function origin and shared by its dependency graph. Nested referrers, cycle
+  diagnostics, shared caller fuel, GC-aware cohort rooting, decision-reset clearing,
   deterministic-profile labels, panic poisoning, and logical-quota admission
   are covered and versioned by `RUSTIA_MODULE_RESOLUTION_ABI_VERSION`. Failed
-  and multi-result modules are not cached; transactional
-  rollback of arbitrary guest side effects remains future work. The CLI
+  and multi-result modules are not cached; installation rollback includes
+  required-module guest state. The CLI
   installs a filesystem-backed resolver in its standard and compatibility
   profiles with fixed `.luau`/`.lua`/directory-index candidate order,
   canonical cache identities, nested relative resolution, and module-source
@@ -400,9 +425,11 @@ Current unpublished workspace version: `0.0.1`.
   point rejects until `reset_decision()` succeeds. Containment includes typed
   and legacy callbacks, extension ops, stdout/clocks, and the `loadstring`
   compiler. Panic containment requires `panic = "unwind"`; aborting builds
-  terminate or trap, so callbacks in those builds must not panic. Rollback is explicitly
+  terminate or trap, so callbacks in those builds must not panic. Rollback is normally
   record-only: it does not undo guest heap mutation, `HostMut`, captured
-  globals, or context interior mutation. Successful `invoke` outcomes expose
+  globals, or context interior mutation. `Invocation::install` deliberately adds a nested
+  guest-state savepoint around its candidate; external host effects remain outside rollback.
+  Successful `invoke` outcomes expose
   usage plus a borrowed reusable journal, while `invoke_into` pre-reserves and
   publishes into a caller lane without allocation during the final append and
   returns a non-borrowing usage receipt.
@@ -708,10 +735,10 @@ Current unpublished workspace version: `0.0.1`.
   `design/crate-metadata.json` and checked in release preflight.
 - Typed host function conversion errors now include the host function name and
   argument or return position.
-- The public `Rustia` facade now has `run<T>()` for typed conversion of a
+- The public `Rustia` facade has `eval<T>()` for typed conversion of a
   script result through `FromRustia`.
-- `Rustia::run_named<T>()`, `run_owned_named()`, and named compile/run helpers
-  preserve host-provided source names in runtime diagnostics.
+- `Rustia::load(...).source_name(...)` preserves host-provided source names in
+  runtime diagnostics for every terminal operation.
 - `rustia::Error` now exposes public source-span and runtime source-location
   accessors for host diagnostic renderers.
 - Typed host functions can return `rustia::Result<T>` to report fallible host
@@ -724,12 +751,9 @@ Current unpublished workspace version: `0.0.1`.
   host functions, and retained calls.
 - Owned tables can deserialize string-keyed fields and array slots directly
   through serde.
-- Retained script functions and export tables now expose the successful install
-  generation they came from, making hot-reload handle semantics explicit.
-- Retained function/export handles now expose freshness checks, and
-  `Function::call_current` rejects stale handles after a successful hot reload.
-- Export tables now have current-generation `value`, `deserialize`, `get`, and
-  `function` accessors for fail-closed hot-reload integrations.
+- Retained script functions and export values are true collector roots checked
+  by VM identity and decision epoch. They survive successful host-owned module
+  replacement and fail closed after reset.
 - The public `Rustia` facade now has capability-specific host function helpers,
   and `RustiaExtension` can mark external mutable-state reads explicitly.
 - `RustiaExtension` exposes namespace plus per-function name, fuel,

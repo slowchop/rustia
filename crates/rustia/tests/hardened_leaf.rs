@@ -142,7 +142,7 @@ fn tx_vm(memory_limit_bytes: usize) -> Rustia<TxSchema> {
 fn invoke_string(vm: &mut Rustia<LeafSchema>, module: &rustia::CompiledModule) -> Result<String> {
     let mut context = ();
     vm.invoke(&mut context, InvocationLimits::new(20_000), |invocation| {
-        let exports = invocation.install(module.clone())?;
+        let exports = invocation.install(module)?;
         let decide = exports.function_in(invocation, "decide")?;
         decide.call_in::<_, _, String>(invocation, ())
     })
@@ -209,8 +209,7 @@ fn hardened_leaf_builder_requires_deterministic_profile_and_memory_limit() {
     };
     let mut unchecked =
         Rustia::for_host_with_settings::<LeafSchema>(Profile::DeterministicSim, unchecked_settings);
-    let entry =
-        Rustia::<LeafSchema>::compile_entry("unchecked-entry.luau", "return 1").expect("entry");
+    let entry = Rustia::compile_entry("unchecked-entry.luau", "return 1").expect("entry");
     let mut context = ();
     let mut lane = Vec::new();
     let error = unchecked
@@ -233,9 +232,32 @@ fn hardened_leaf_builder_requires_deterministic_profile_and_memory_limit() {
 }
 
 #[test]
+fn failed_first_install_rolls_back_the_hardened_seal_checkpoint() {
+    let mut vm = leaf_vm();
+    let bad = Rustia::compile_module("bad-first-install.luau", "error('boom')")
+        .expect("failing module compiles");
+    let mut context = ();
+    let error = vm
+        .invoke(&mut context, InvocationLimits::new(20_000), |invocation| {
+            invocation.install(&bad)
+        })
+        .expect_err("first installation fails");
+    assert!(error.to_string().contains("boom"), "{error}");
+
+    vm.reset_decision()
+        .expect("rollback restores a valid pre-seal checkpoint");
+    let good = Rustia::compile_module(
+        "good-after-failure.luau",
+        "return { decide = function() return 'recovered' end }",
+    )
+    .expect("recovery module compiles");
+    assert_eq!(invoke_string(&mut vm, &good).unwrap(), "recovered");
+}
+
+#[test]
 fn hardened_leaf_surface_is_allowlisted_frozen_and_reset_stable() {
     let mut vm = leaf_vm();
-    let module = Rustia::<LeafSchema>::compile_module(
+    let module = Rustia::compile_module(
         "surface.luau",
         r#"
 return {
@@ -318,12 +340,11 @@ return {
         ("mutate-bit32.luau", "bit32.band = nil; return {}"),
     ] {
         let mut vm = leaf_vm();
-        let module =
-            Rustia::<LeafSchema>::compile_module(source_name, source).expect("mutation module");
+        let module = Rustia::compile_module(source_name, source).expect("mutation module");
         let mut context = ();
         let error = vm
             .invoke(&mut context, InvocationLimits::new(20_000), |invocation| {
-                invocation.install(module)
+                invocation.install(&module)
             })
             .expect_err("standard-library tables must be frozen");
         assert!(
@@ -336,7 +357,7 @@ return {
 #[test]
 fn hardened_leaf_stateless_entry_runs_without_retained_exports() {
     let mut vm = leaf_vm();
-    let entry = Rustia::<LeafSchema>::compile_entry(
+    let entry = Rustia::compile_entry(
         "entry.luau",
         r#"
 local scratch = { 1, 2, 3 }
@@ -362,7 +383,7 @@ return leaf.answer() + scratch[1] + scratch[2] + scratch[3]
         assert_eq!(vm.decision_epoch(), expected_epoch);
     }
 
-    let nested = Rustia::<LeafSchema>::compile_entry(
+    let nested = Rustia::compile_entry(
         "nested-entry.luau",
         "local one = 1\nlocal two = 2\nlocal three = 3\nreturn (function() return one + two + three end)()",
     )
@@ -376,7 +397,7 @@ return leaf.answer() + scratch[1] + scratch[2] + scratch[3]
         "{nested}"
     );
 
-    let located = Rustia::<LeafSchema>::compile_entry(
+    let located = Rustia::compile_entry(
         "located-policy-error.luau",
         "local ok = 1\nforbidden_global = 2\nreturn ok",
     )
@@ -392,8 +413,7 @@ return leaf.answer() + scratch[1] + scratch[2] + scratch[3]
     let mut standard = RustiaBuilder::deterministic()
         .build_for_host::<LeafSchema>()
         .expect("standard typed VM");
-    let standard_entry =
-        Rustia::<LeafSchema>::compile_entry("standard-entry.luau", "return 1").expect("entry");
+    let standard_entry = Rustia::compile_entry("standard-entry.luau", "return 1").expect("entry");
     let mut context = ();
     let mut lane = Vec::new();
     let error = standard
@@ -422,7 +442,7 @@ fn compiled_entry_is_shareable_across_hardened_vms_and_module_handles_go_stale()
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<rustia::CompiledEntry>();
 
-    let entry = Rustia::<LeafSchema>::compile_entry(
+    let entry = Rustia::compile_entry(
         "shared-entry.luau",
         "local scratch = { 1, 2, 3 }\nreturn leaf.answer() + #scratch",
     )
@@ -445,7 +465,7 @@ fn compiled_entry_is_shareable_across_hardened_vms_and_module_handles_go_stale()
     }
 
     let mut vm = leaf_vm();
-    let module = Rustia::<LeafSchema>::compile_module(
+    let module = Rustia::compile_module(
         "hardened-compatibility-module.luau",
         "return { decide = function() return leaf.answer() end }",
     )
@@ -453,7 +473,7 @@ fn compiled_entry_is_shareable_across_hardened_vms_and_module_handles_go_stale()
     let mut context = ();
     let exports = vm
         .invoke(&mut context, InvocationLimits::new(20_000), |invocation| {
-            invocation.install(module)
+            invocation.install(&module)
         })
         .expect("module install")
         .into_parts()
@@ -466,8 +486,6 @@ fn compiled_entry_is_shareable_across_hardened_vms_and_module_handles_go_stale()
         .into_parts()
         .0;
     vm.reset_decision().expect("hardened reset");
-    assert!(!exports.is_current(&vm));
-    assert!(!function.is_current(&vm));
     let error = vm
         .invoke(&mut context, InvocationLimits::new(20_000), |invocation| {
             function.call_in::<_, _, i32>(invocation, ())
@@ -496,12 +514,11 @@ fn hardened_leaf_rejects_global_upvalue_and_host_module_mutation() {
 
     for (feature, name, source) in cases {
         let mut vm = leaf_vm();
-        let module = Rustia::<LeafSchema>::compile_module(name, source)
-            .expect("policy-tested source compiles");
+        let module = Rustia::compile_module(name, source).expect("policy-tested source compiles");
         let mut context = ();
         let error = vm
             .invoke(&mut context, InvocationLimits::new(20_000), |invocation| {
-                invocation.install(module)
+                invocation.install(&module)
             })
             .expect_err("policy violation must reject before guest execution");
         assert!(
@@ -520,7 +537,7 @@ fn hardened_leaf_rejects_global_upvalue_and_host_module_mutation() {
     }
 
     let mut vm = leaf_vm();
-    let module = Rustia::<LeafSchema>::compile_module(
+    let module = Rustia::compile_module(
         "host-module-write.luau",
         "leaf.answer = function() return 0 end; return {}",
     )
@@ -528,7 +545,7 @@ fn hardened_leaf_rejects_global_upvalue_and_host_module_mutation() {
     let mut context = ();
     let error = vm
         .invoke(&mut context, InvocationLimits::new(20_000), |invocation| {
-            invocation.install(module)
+            invocation.install(&module)
         })
         .expect_err("host module table must be frozen");
     assert!(error.to_string().contains("readonly table"), "{error}");
@@ -572,7 +589,7 @@ fn hardened_entry_lifecycle_is_atomic_and_recovers_from_every_failure_class() {
         .with_max_record_bytes(128);
 
     let guest_error =
-        Rustia::<TxSchema>::compile_entry("guest-error-entry.luau", "leaf.emit(1)\nerror('boom')")
+        Rustia::compile_entry("guest-error-entry.luau", "leaf.emit(1)\nerror('boom')")
             .expect("guest-error entry");
     let error = assert_entry_failure_resets(
         &mut vm,
@@ -583,9 +600,8 @@ fn hardened_entry_lifecycle_is_atomic_and_recovers_from_every_failure_class() {
     );
     assert!(error.to_string().contains("boom"), "{error}");
 
-    let wrong_return =
-        Rustia::<TxSchema>::compile_entry("wrong-return-entry.luau", "leaf.emit(2)\nreturn {}")
-            .expect("wrong-return entry");
+    let wrong_return = Rustia::compile_entry("wrong-return-entry.luau", "leaf.emit(2)\nreturn {}")
+        .expect("wrong-return entry");
     let error = assert_entry_failure_resets(
         &mut vm,
         &mut context,
@@ -595,7 +611,7 @@ fn hardened_entry_lifecycle_is_atomic_and_recovers_from_every_failure_class() {
     );
     assert!(error.to_string().contains("expected number"), "{error}");
 
-    let record_overflow = Rustia::<TxSchema>::compile_entry(
+    let record_overflow = Rustia::compile_entry(
         "record-overflow-entry.luau",
         "leaf.emit(3)\nleaf.emit(4)\nreturn 0",
     )
@@ -621,9 +637,8 @@ fn hardened_entry_lifecycle_is_atomic_and_recovers_from_every_failure_class() {
             )
     ));
 
-    let byte_overflow =
-        Rustia::<TxSchema>::compile_entry("byte-overflow-entry.luau", "leaf.emit(5)\nreturn 0")
-            .expect("byte-overflow entry");
+    let byte_overflow = Rustia::compile_entry("byte-overflow-entry.luau", "leaf.emit(5)\nreturn 0")
+        .expect("byte-overflow entry");
     let error = assert_entry_failure_resets(
         &mut vm,
         &mut context,
@@ -645,9 +660,8 @@ fn hardened_entry_lifecycle_is_atomic_and_recovers_from_every_failure_class() {
             )
     ));
 
-    let fuel =
-        Rustia::<TxSchema>::compile_entry("fuel-entry.luau", "leaf.emit(7)\nwhile true do end")
-            .expect("fuel entry");
+    let fuel = Rustia::compile_entry("fuel-entry.luau", "leaf.emit(7)\nwhile true do end")
+        .expect("fuel entry");
     let error = assert_entry_failure_resets(
         &mut vm,
         &mut context,
@@ -663,7 +677,7 @@ fn hardened_entry_lifecycle_is_atomic_and_recovers_from_every_failure_class() {
             if matches!(&error.kind, VmErrorKind::FuelExhausted { limit: 64 })
     ));
 
-    let host_panic = Rustia::<TxSchema>::compile_entry(
+    let host_panic = Rustia::compile_entry(
         "host-panic-entry.luau",
         "leaf.emit(5)\nreturn leaf.panic_now()",
     )
@@ -680,7 +694,7 @@ fn hardened_entry_lifecycle_is_atomic_and_recovers_from_every_failure_class() {
         Error::Vm(ref error) if matches!(&error.kind, VmErrorKind::HostPanicked { .. })
     ));
 
-    let panicking_conversion = Rustia::<TxSchema>::compile_entry(
+    let panicking_conversion = Rustia::compile_entry(
         "panicking-conversion-entry.luau",
         "local scratch = { 1, 2, 3 }\nleaf.emit(6)\nreturn scratch[1]",
     )
@@ -703,7 +717,7 @@ fn hardened_entry_lifecycle_is_atomic_and_recovers_from_every_failure_class() {
         "conversion panic skipped decision reset"
     );
 
-    let out_of_memory = Rustia::<TxSchema>::compile_entry(
+    let out_of_memory = Rustia::compile_entry(
         "oom-entry.luau",
         r#"
 leaf.emit(8)
@@ -729,9 +743,8 @@ return #scratch
         Error::Vm(ref error) if matches!(&error.kind, VmErrorKind::OutOfMemory)
     ));
 
-    let healthy =
-        Rustia::<TxSchema>::compile_entry("healthy-entry.luau", "leaf.emit(9)\nreturn 42")
-            .expect("healthy entry");
+    let healthy = Rustia::compile_entry("healthy-entry.luau", "leaf.emit(9)\nreturn 42")
+        .expect("healthy entry");
     let prior_epoch = vm.decision_epoch();
     let receipt = vm
         .invoke_entry_into::<i64>(&mut context, ordinary_limits, &mut lane, &healthy)
@@ -753,7 +766,7 @@ return #scratch
 #[test]
 fn mixed_hardened_failures_reset_to_an_exact_memory_plateau() {
     let mut vm = tx_vm(MEMORY_LIMIT);
-    let guest_error = Rustia::<TxSchema>::compile_entry(
+    let guest_error = Rustia::compile_entry(
         "mixed-guest-error.luau",
         r#"
 local input = leaf.input()
@@ -766,17 +779,17 @@ error("mixed failure")
 "#,
     )
     .expect("mixed guest error");
-    let wrong_return = Rustia::<TxSchema>::compile_entry(
+    let wrong_return = Rustia::compile_entry(
         "mixed-wrong-return.luau",
         "local scratch = { leaf.input(), string.rep('y', 24) }\nleaf.emit(1)\nreturn scratch",
     )
     .expect("mixed wrong return");
-    let record_overflow = Rustia::<TxSchema>::compile_entry(
+    let record_overflow = Rustia::compile_entry(
         "mixed-record-overflow.luau",
         "leaf.emit(1)\nleaf.emit(2)\nreturn 0",
     )
     .expect("mixed record overflow");
-    let fuel = Rustia::<TxSchema>::compile_entry(
+    let fuel = Rustia::compile_entry(
         "mixed-fuel.luau",
         "local scratch = { leaf.input() }\nleaf.emit(1)\nwhile true do end",
     )
@@ -826,7 +839,7 @@ error("mixed failure")
 #[test]
 fn hardened_checkpoint_reset_reaches_an_exact_heterogeneous_memory_plateau() {
     let mut vm = tx_vm(MEMORY_LIMIT);
-    let entry = Rustia::<TxSchema>::compile_entry(
+    let entry = Rustia::compile_entry(
         "hardened-memory-plateau.luau",
         r#"
 local input = leaf.input()
@@ -886,7 +899,7 @@ fn ordinary_deterministic_surface_remains_compatible() {
         .build()
         .expect("ordinary deterministic VM");
     let result: String = vm
-        .run(
+        .eval(
             r#"
 return table.concat({
     type(debug),

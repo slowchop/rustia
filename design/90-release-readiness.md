@@ -31,7 +31,7 @@ overhead across targets.
    async, and an mlua migration shim remain later optional layers unless a
    concrete release consumer promotes them.
 2. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
-   yieldable `require`, transactional extension/module/hot-reload failure behavior, and
+   yieldable `require` and
    differential/coverage-guided fuzz evidence before stabilizing and publishing
    the API. The stable bounded baseline already mutates 2,048 frontend cases
    and 2,048 VM byte streams while covering all 131 production opcodes. Exact
@@ -45,12 +45,14 @@ are persistent, each typed invocation borrows a fresh `HostContext`, and bounded
 record transactions publish to reusable or caller-owned lanes. Capability-tagged
 output/time providers and VM-owned telemetry are also implemented.
 
-The prior module-resolution blocker is also closed: `ServiceModuleResolver`
+The module-resolution and installation-failure blocker is also closed: `ServiceModuleResolver`
 plugs a host-owned resolver into script-visible `require`; the host returns a
-canonical identity plus source, successful modules execute once per decision
-epoch, cached values remain GC roots, nested requests receive their referrer's
-source name, cycles report the complete identity path, and reset clears guest
-module programs/results while preserving the resolver configuration.
+canonical identity plus source. Ordinary execution has one decision-wide
+execute-once cache, while each installation receives a fresh lazy cohort shared
+by its dependency graph and selected by executing function origin. Cached
+values remain GC roots while their cohort is reachable, nested requests receive
+their referrer's source name, cycles report the complete identity path, and
+reset clears guest module programs/results while preserving resolver configuration.
 `DeterministicSim` admits only a resolver explicitly labeled replay-stable,
 while hardened leaves reject dynamic modules. Resolution and module execution
 share caller fuel; resolver panics poison until reset; failed or multi-result
@@ -60,9 +62,12 @@ quota. The cache/reset contract is versioned by
 the host resolver's content. The CLI's non-deterministic profiles now install a
 fixed-order filesystem adapter with canonical identities, referrer-relative
 nesting, and module-source runtime diagnostics; deterministic CLI execution has no
-ambient loader. Rolling back arbitrary guest global/heap side effects from a
-runtime-failing module and supporting a yieldable `require` continuation remain
-part of the semantic-tail/failure-semantics blocker.
+ambient loader. Atomic `install` gives every candidate a fresh inheriting
+environment and fresh lazy dependency cohort, rolls back guest heap/global/
+coroutine/RNG/logical-time/GC/cache state and provisional roots on failure, and
+is versioned by `RUSTIA_INSTALL_TRANSACTION_ABI_VERSION`. External host and
+resolver effects remain host-owned. Supporting a yieldable `require`
+continuation remains part of the semantic-tail blocker.
 
 ## Current Policy
 
@@ -114,11 +119,11 @@ part of the semantic-tail/failure-semantics blocker.
 ## API Gate
 
 - Public error types, source-span/runtime-location accessors, conversion
-  traits, retained handles, extension APIs, and hot-reload semantics have stable
+  traits, retained handles, extension APIs, and replacement semantics have stable
   names and documented behavior.
-- `Rustia::run<T>()` supports direct typed conversion of single-result scripts.
-- Source-named run/compile helpers preserve host-provided source names in
-  runtime diagnostics.
+- `Rustia::eval<T>()` supports direct typed conversion of single-result scripts.
+- `load(...).source_name(...)` preserves host-provided source names in runtime
+  diagnostics for every terminal operation.
 - Owned-value conversions cover scalar values, `Option<T>`, `Vec<T>`,
   deterministic `BTreeMap<String, T>`, direct `OwnedTable` values, typed
   owned-table builders, typed string-key lookup, and nested table/array access.
@@ -150,9 +155,11 @@ part of the semantic-tail/failure-semantics blocker.
   invalid boundary yield/missing typed-host dispatcher/host panic are hard for
   typed transactional execution, without globally changing legacy OOM/yield
   behavior.
-- The rollback contract is records only, not guest heap/global mutation,
-  profile-gated `HostMut`, callback captures, or host-context interior
-  mutation. Host panic poisons the VM; all later guest execution entry points
+- The general invocation rollback contract is records only, not guest
+  heap/global mutation, profile-gated `HostMut`, callback captures, or
+  host-context interior mutation. `Invocation::install` adds a nested
+  guest-state savepoint whose success stays provisional until the outer record
+  transaction commits. Host panic poisons the VM; all later guest execution entry points
   reject until decision reset. Containment covers registered callbacks,
   extension ops, stdout/clocks, and the configured `loadstring` compiler.
 - `InvocationOutcome` and `InvocationReceipt` expose fuel/count/byte usage;
@@ -162,7 +169,7 @@ part of the semantic-tail/failure-semantics blocker.
   fuel ABI version, fuel cost, capability, parameter-count, parameter type,
   return type, and fallibility metadata before installation.
 - Public examples cover globals, typed functions, serde, extensions, retained
-  functions, and hot reload.
+  functions, and transactional replacement.
 - Owned snapshots expose serde deserialization at the `OwnedValue` level plus
   string-keyed field and array-slot helpers on `OwnedTable`.
 - Rooted live `Value`, `Table`, and `Function` handles preserve VM identity and
@@ -172,21 +179,20 @@ part of the semantic-tail/failure-semantics blocker.
 - The first public koto-to-rustia migration guide is tracked in
   [`76-koto-migration.md`](76-koto-migration.md).
 - Current examples:
-  - `crates/rustia/examples/embedding.rs` covers globals, source-named run
+  - `crates/rustia/examples/embedding.rs` covers globals, source-named execution
     helpers, fallible typed host functions, deterministic extensions, retained
     script functions, and serde.
-  - `crates/rustia/examples/hot_reload.rs` covers compile/install hot reload
-    plus retained-handle survival and freshness checks.
+  - `crates/rustia/examples/hot_reload.rs` covers atomic candidate installation,
+    host-owned replacement, and old retained-handle survival.
   - `crates/rustia/examples/typed_invocation.rs` covers `HostSchema`, a
     block-local `HostContext`, capability views, namespaced typed functions,
     shared limits, dense records, usage receipts, and `invoke_into`.
   - `crates/rustia/examples/live_values.rs` covers graph-preserving live table
     access, mutation, raw identity, and live function arguments/results.
-- Retained `Function` handles and `Exports` expose install generations, and
-  failed hot reloads leave the current generation unchanged. `is_current()` /
-  `ensure_current()` expose freshness checks, while `Function::call_current()`
-  and `Exports::{value,deserialize,get,function}_current()` reject stale
-  handles after a successful hot reload.
+- Retained `Function` handles and `Exports` are checked by VM identity and
+  decision epoch. Successful unrelated installations do not stale them; old
+  functions retain their originating dependency cohort and remain callable
+  until decision reset.
 
 ## Runtime Gate
 
@@ -216,10 +222,10 @@ part of the semantic-tail/failure-semantics blocker.
   boundary yields, missing dispatch, and host panic uncatchable by guest
   `pcall`; record savepoints and outer rollback are tested, and a host panic
   poisons the VM until `reset_decision()`.
-- Module resolution/cache, the remaining live-value ergonomics/serde, error-phase
-  parity, and public stack/source diagnostics satisfy their focused tests;
-  failed extension/module installation and runtime-failing reload cannot leave
-  undocumented partial state.
+- Module resolution/cache, installation rollback, the remaining live-value
+  ergonomics/serde, error-phase parity, and public stack/source diagnostics
+  satisfy their focused tests; failed extension/module installation cannot
+  leave guest partial state.
 - The value-layout and dispatch wasm pre-lock gate is closed with retained V8,
   JavaScriptCore-family, and SpiderMonkey evidence; recurring Node/V8 evidence
   remains current.

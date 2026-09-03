@@ -119,7 +119,7 @@ pub extern "C" fn rustia_bench_run(n: u32) -> f64 {
 fn run_source(source: &str) -> String {
     ENGINE.with(|engine| {
         let mut engine = engine.borrow_mut();
-        match engine.run_owned(source) {
+        match engine.eval::<OwnedValue>(source) {
             Ok(value) => format!("ok\n=> {}", format_value(&value)),
             Err(error) => format!("error\n{error}"),
         }
@@ -129,7 +129,10 @@ fn run_source(source: &str) -> String {
 fn prepare_bench_source(source: &str) -> Result<BenchState, rustia::Error> {
     let wrapped = format!("return {{ f = (function()\n{source}\nend)() }}");
     let mut engine = Rustia::new(Profile::ReproducibleStandard);
-    let exports = engine.compile_and_run_exports_named("bench/workload.luau", &wrapped)?;
+    let exports = engine
+        .load(&wrapped)
+        .source_name("bench/workload.luau")
+        .install()?;
     let function = exports.function(&mut engine, "f")?;
     Ok(BenchState { engine, function })
 }

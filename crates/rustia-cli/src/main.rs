@@ -130,8 +130,9 @@ fn run_source(config: &Config, source_name: &str, source: &[u8]) -> Result<(), C
         .insert(source_name.to_owned(), source.to_vec());
     let executable_source = source_without_shebang(source);
     rustia
-        .compile_and_run_bytes_named(source_name, executable_source.as_ref())
-        .map(|_| ())
+        .load(executable_source.as_ref())
+        .source_name(source_name)
+        .exec()
         .map_err(|error| CliError::Rustia {
             error: Box::new(error),
             source_name: source_name.to_owned(),
@@ -319,11 +320,17 @@ where
             .borrow_mut()
             .insert(source_name.clone(), source.as_bytes().to_vec());
         let result = if display_result {
-            rustia.run_owned_named(&source_name, &source).map(Some)
+            rustia
+                .load(&source)
+                .source_name(&source_name)
+                .eval()
+                .map(Some)
         } else {
             rustia
-                .compile_and_run_named(&source_name, &source)
-                .map(|_| None)
+                .load(&source)
+                .source_name(&source_name)
+                .exec()
+                .map(|()| None)
         };
         match result {
             Ok(Some(value)) => {

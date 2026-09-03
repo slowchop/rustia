@@ -100,7 +100,7 @@ fn main() -> Result<()> {
         );
     vm.install_host_module(host)?;
 
-    let module = Rustia::<AiSchema>::compile_module(
+    let module = Rustia::compile_module(
         "alien_ai.luau",
         r#"
 return {
@@ -129,7 +129,7 @@ return {
             InvocationLimits::new(10_000)
                 .with_max_records(0)
                 .with_max_record_bytes(0),
-            |invocation| invocation.install(module),
+            |invocation| invocation.install(&module),
         )?
         .into_parts()
         .0;

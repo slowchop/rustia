@@ -102,7 +102,7 @@ result directly. `Invocation::call_entry` executes that body without constructin
 an exports table, retaining a closure, or installing a loaded program:
 
 ```rust
-let entry = Rustia::<GameHost>::compile_entry(
+let entry = Rustia::compile_entry(
     "move_leaf.luau",
     r#"
 local target = game.target()

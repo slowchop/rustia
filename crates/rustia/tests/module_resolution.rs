@@ -7,14 +7,14 @@ use std::rc::Rc;
 
 #[test]
 fn require_resolves_by_host_identity_and_executes_once() {
-    assert_eq!(RUSTIA_MODULE_RESOLUTION_ABI_VERSION, 1);
+    assert_eq!(RUSTIA_MODULE_RESOLUTION_ABI_VERSION, 2);
     let resolutions = Rc::new(Cell::new(0_u32));
     let resolutions_for_host = Rc::clone(&resolutions);
     let resolver = ServiceModuleResolver::from_fn(move |requested, referrer| {
         resolutions_for_host.set(resolutions_for_host.get() + 1);
         assert_eq!(referrer, Some("entry.luau"));
         assert!(matches!(requested, "first" | "second"));
-        Ok(ModuleSource::named(
+        Ok(ModuleSource::with_source_name(
             "shared-module",
             "modules/shared.luau",
             br#"
@@ -29,14 +29,15 @@ fn require_resolves_by_host_identity_and_executes_once() {
         .expect("deterministic resolver");
 
     let result: OwnedTable = vm
-        .run_named(
-            "entry.luau",
+        .load(
             r#"
                 local first = require("first")
                 local second = require("second")
                 return { same = first == second, runs = module_runs }
             "#,
         )
+        .source_name("entry.luau")
+        .eval()
         .expect("module result");
 
     assert_eq!(result.get_string_as::<bool>("same").unwrap(), Some(true));
@@ -59,7 +60,7 @@ fn require_compiles_modules_with_the_requesting_profile() {
         .expect("PUC resolver");
 
     let result: f64 = vm
-        .run(r#"return require("puc-constructor")"#)
+        .eval(r#"return require("puc-constructor")"#)
         .expect("module result");
     assert_eq!(result, 1.0);
 }
@@ -73,7 +74,7 @@ fn require_passes_nested_referrers_and_caches_empty_results() {
             .borrow_mut()
             .push((requested.to_owned(), referrer.map(str::to_owned)));
         match requested {
-            "outer" => Ok(ModuleSource::named(
+            "outer" => Ok(ModuleSource::with_source_name(
                 "outer-id",
                 "modules/outer.luau",
                 r#"
@@ -82,7 +83,7 @@ fn require_passes_nested_referrers_and_caches_empty_results() {
                     return 42
                 "#,
             )),
-            "empty" => Ok(ModuleSource::named(
+            "empty" => Ok(ModuleSource::with_source_name(
                 "empty-id",
                 "modules/empty.luau",
                 "_G.empty_runs = (_G.empty_runs or 0) + 1",
@@ -96,10 +97,9 @@ fn require_passes_nested_referrers_and_caches_empty_results() {
         .expect("deterministic resolver");
 
     let result: OwnedTable = vm
-        .run_named(
-            "entry.luau",
-            r#"return { value = require("outer"), runs = empty_runs }"#,
-        )
+        .load(r#"return { value = require("outer"), runs = empty_runs }"#)
+        .source_name("entry.luau")
+        .eval()
         .expect("nested modules");
     assert_eq!(result.get_string_as::<f64>("value").unwrap(), Some(42.0));
     assert_eq!(result.get_string_as::<f64>("runs").unwrap(), Some(1.0));
@@ -133,7 +133,7 @@ fn require_reports_cycles_and_does_not_cache_failures() {
         .expect("deterministic resolver");
 
     let result: OwnedTable = vm
-        .run(
+        .eval(
             r#"
                 local first_ok, first_error = pcall(require, "a")
                 local second_ok = pcall(require, "a")
@@ -148,7 +148,7 @@ fn require_reports_cycles_and_does_not_cache_failures() {
         .expect("cycle is catchable");
     assert_eq!(result.get_string_as::<bool>("first").unwrap(), Some(false));
     assert_eq!(result.get_string_as::<bool>("second").unwrap(), Some(false));
-    assert_eq!(result.get_string_as::<f64>("runs").unwrap(), Some(2.0));
+    assert_eq!(result.get_string_as::<f64>("runs").unwrap(), None);
     assert_eq!(result.get_string_as::<bool>("cycle").unwrap(), Some(true));
 }
 
@@ -167,12 +167,12 @@ fn require_reset_clears_the_execute_once_cache() {
         .expect("deterministic resolver");
 
     let first: OwnedTable = vm
-        .run(r#"return { require("probe"), require("probe") }"#)
+        .eval(r#"return { require("probe"), require("probe") }"#)
         .expect("first epoch");
     assert_eq!(first.get_array_as::<f64>(0).unwrap(), Some(7.0));
     assert_eq!(first.get_array_as::<f64>(1).unwrap(), Some(7.0));
     vm.reset_decision().expect("decision reset");
-    let second: f64 = vm.run(r#"return require("probe")"#).expect("second epoch");
+    let second: f64 = vm.eval(r#"return require("probe")"#).expect("second epoch");
     assert_eq!(second, 7.0);
     assert_eq!(output.borrow().as_str(), "loaded\nloaded\n");
 }
@@ -192,7 +192,7 @@ fn required_values_remain_rooted_and_modules_share_caller_fuel() {
         .build()
         .expect("standard resolver");
     let rooted: bool = vm
-        .run(
+        .eval(
             r#"
                 local first = require("rooted")
                 collectgarbage("collect")
@@ -209,7 +209,7 @@ fn required_values_remain_rooted_and_modules_share_caller_fuel() {
         .build()
         .expect("fuelled resolver");
     let error = fuelled
-        .run::<f64>(r#"return require("expensive")"#)
+        .eval::<f64>(r#"return require("expensive")"#)
         .unwrap_err();
     assert!(matches!(
         error,
@@ -231,7 +231,7 @@ fn multi_result_modules_fail_without_entering_the_cache() {
         .build()
         .expect("deterministic resolver");
     let result: OwnedTable = vm
-        .run(
+        .eval(
             r#"
                 local first_ok, first_error = pcall(require, "multi")
                 local second_ok = pcall(require, "multi")
@@ -246,7 +246,7 @@ fn multi_result_modules_fail_without_entering_the_cache() {
         .expect("module errors are catchable");
     assert_eq!(result.get_string_as::<bool>("first").unwrap(), Some(false));
     assert_eq!(result.get_string_as::<bool>("second").unwrap(), Some(false));
-    assert_eq!(result.get_string_as::<f64>("runs").unwrap(), Some(2.0));
+    assert_eq!(result.get_string_as::<f64>("runs").unwrap(), None);
     assert_eq!(result.get_string_as::<bool>("message").unwrap(), Some(true));
 }
 
@@ -268,7 +268,7 @@ fn module_identity_quota_rejection_is_atomic_and_catchable() {
         .expect("quota VM");
 
     let stayed_atomic: bool = vm
-        .run(
+        .eval(
             r#"
                 local ok, message = pcall(require, "oversized")
                 return not ok
@@ -278,7 +278,10 @@ fn module_identity_quota_rejection_is_atomic_and_catchable() {
         )
         .expect("legacy pcall catches quota error");
     assert!(stayed_atomic);
-    assert_eq!(vm.run::<f64>("return 42").expect("VM remains usable"), 42.0);
+    assert_eq!(
+        vm.eval::<f64>("return 42").expect("VM remains usable"),
+        42.0
+    );
 }
 
 #[test]
@@ -349,20 +352,20 @@ fn resolver_panics_poison_until_decision_reset() {
         .build()
         .expect("deterministic resolver");
 
-    let first = vm.run::<f64>(r#"return require("probe")"#).unwrap_err();
+    let first = vm.eval::<f64>(r#"return require("probe")"#).unwrap_err();
     assert!(matches!(
         first,
         rustia::Error::Vm(ref error)
             if matches!(error.kind, VmErrorKind::HostPanicked { .. })
     ));
     assert!(matches!(
-        vm.run::<f64>("return 1").unwrap_err(),
+        vm.eval::<f64>("return 1").unwrap_err(),
         rustia::Error::Vm(ref error) if matches!(error.kind, VmErrorKind::VmPoisoned)
     ));
 
     vm.reset_decision().expect("reset poisoned VM");
     assert_eq!(
-        vm.run::<f64>(r#"return require("probe")"#)
+        vm.eval::<f64>(r#"return require("probe")"#)
             .expect("resolver recovered"),
         42.0
     );
