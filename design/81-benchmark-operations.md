@@ -72,9 +72,17 @@ host runs its CI as an unprivileged user (`uid 1001`), and that user has no
 cgroup-v2 subtree it can create children in.
 
 Root is one way to have one. The other, which keeps the runner unprivileged, is
-a systemd delegated scope: `loginctl enable-linger` for that user plus a drop-in
-carrying `Delegate=memory`. The runner checks for exactly that before it clones
-anything and names what is missing.
+a systemd-delegated subtree that *contains the job's own process*: on the unit
+that runs the runner, `Delegate=memory` plus `DelegateSubgroup=` (so the
+unit's own cgroup holds no processes and may enable the controller for its
+children) and no `ProtectControlGroups=`. A subtree delegated beside that
+unit — a lingering `user@<uid>.service` — is no use, because cgroup v2 refuses
+to move a process across a common ancestor the mover cannot write. The tools
+find the delegated root by walking up from the process's own cgroup
+(`bench/cgroup-delegation.js`) rather than from a path guessed from the uid,
+check it before anything is cloned, and name which of the four faults — nothing
+delegated, read-only mount, delegated root still holding processes, no memory
+controller — is the one present.
 
 **The check must not be relaxed to make the lane pass.** Without the cgroup there
 is no per-VM figure — the accounting is the cgroup's — so a run that skipped it

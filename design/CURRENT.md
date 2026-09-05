@@ -585,8 +585,10 @@ unreachable suspended-coroutine frames.
    the owned host too (`.github/workflows/rustia-memory.yml`), pinning two isolated cores rather than one
    because the supervisor samples while the benchmark runs. That lane is ported but not yet completing:
    per-VM memory is measured inside a dedicated cgroup and the host's unprivileged CI user has no cgroup-v2
-   subtree it can write to, so it needs either root or a systemd delegated scope (`loginctl enable-linger`
-   plus `Delegate=memory`). The runner checks for that before it clones anything and names what is missing.
+   subtree it can write to, so it needs either root or a systemd-delegated subtree containing the job's own
+   process (`Delegate=memory` plus `DelegateSubgroup=` on the unit that runs the runner, without
+   `ProtectControlGroups=`); the tools find it by walking up from the process's own cgroup, check it before
+   anything is cloned, and name which fault is present.
    The check is deliberately not relaxed: the cgroup is what the per-VM figure is measured in, so a run
    without one would produce numbers that look like measurements and are not. Three cloud coordinators are deleted and the
    eleven Linode lifecycle recipes with them; `tools/run-linode-benchmark.js` survives only as the home of

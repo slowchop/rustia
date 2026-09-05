@@ -8,6 +8,10 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const {
+  cgroupBlockerMessage,
+  delegatedCgroupRoot,
+} = require("../bench/cgroup-delegation.js");
 
 // The run's working tree. Was fixed at /opt/rustia, which only a root process on
 // a throwaway instance can write; the owned host runs this as an ordinary user.
@@ -475,19 +479,9 @@ function resetWorkingState() {
 // that was knowable in milliseconds -- which is how the first two owned-host
 // attempts were spent.
 function assertCgroupCapability() {
-  if (typeof process.getuid !== "function" || process.getuid() === 0) return;
-  const uid = process.getuid();
-  const delegated = `/sys/fs/cgroup/user.slice/user-${uid}.slice/user@${uid}.service`;
-  try {
-    fs.accessSync(path.join(delegated, "cgroup.subtree_control"), fs.constants.W_OK);
-  } catch {
-    fail(
-      `per-VM memory accounting needs a cgroup-v2 subtree this user can write to, and ` +
-        `${delegated} is not one. Either run as root, or give uid ${uid} a delegated scope: ` +
-        `loginctl enable-linger, plus a systemd drop-in with Delegate=memory. Nothing about the ` +
-        `measurement can be salvaged without it -- the cgroup is what the per-VM figure is measured in.`,
-    );
-  }
+  const delegated = delegatedCgroupRoot();
+  if (delegated.root !== null || delegated.reason === "root" || delegated.reason === "unsupported") return;
+  fail(cgroupBlockerMessage(delegated));
 }
 
 async function execute(configFile, providerFile, bundle) {
