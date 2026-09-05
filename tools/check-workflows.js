@@ -532,10 +532,17 @@ function checkWeeklyMatrix(text) {
   // is nothing to schedule.
   requireIncludes(text, "\"on\":\n  workflow_dispatch:\n", label);
   forbidIncludes(text, "cron:", label);
-  // The single sanctioned contents-write grant: this workflow may push accepted
-  // matrix cohorts to main and nothing else may. The per-commit series writes to
-  // the data repository precisely so that it does not need a second one.
-  requireIncludes(text, "permissions:\n  contents: write\n  actions: write\n", label);
+  // The single sanctioned contents-write grant: this workflow may land accepted
+  // matrix cohorts on main and nothing else may. The per-commit series writes to
+  // the data repository precisely so that it does not need a second one. main
+  // accepts changes only through pull requests, with no bypass for this token,
+  // so the cohort goes to a branch and is merged by the landing helper; a direct
+  // push to main is the shape the branch rules reject.
+  requireIncludes(text, "permissions:\n  contents: write\n  actions: write\n  pull-requests: write\n", label);
+  requireIncludes(text, "node tools/land-matrix-publication.js", label);
+  requireIncludes(text, "git push --force origin \"HEAD:refs/heads/$branch\"", label);
+  forbidIncludes(text, "HEAD:main", label);
+  forbidIncludes(text, ":refs/heads/main", label);
   requireIncludes(text, "publish-benchmark-data.yml/dispatches", label);
   // Shares the host's serialisation group: a cohort takes about forty minutes
   // and must never overlap another job on the machine it is measuring.
