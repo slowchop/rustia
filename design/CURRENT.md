@@ -573,7 +573,7 @@ unreachable suspended-coroutine frames.
    `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines on the owned host and lands
    accepted cohorts on `main` through a pull request it opens and merges itself with a merge commit
    (`tools/land-matrix-publication.js`; `main` takes nothing but pull requests, and this is the
-   repository's single sanctioned CI contents-write grant, shape-pinned by `tools/check-workflows.js`). It runs unconditionally rather than gated on pending commits: the gate asked
+   repository's single sanctioned CI contents-write grant, shape-pinned by `tools/check-workflows.js`). It runs weekly (Sunday 15:00 UTC, plus manual dispatch) and unconditionally rather than gated on pending commits: the gate asked
    the Rustia-progress question, which the per-commit series now answers directly, while an ungated run also
    makes host drift — kernel, microcode, thermal — visible instead of hiding it. Its first cohort
    (`f480758`) has landed, so `bench/history/runs.jsonl` now holds exactly one cohort, measured on

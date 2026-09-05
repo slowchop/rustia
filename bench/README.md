@@ -747,7 +747,10 @@ are gone. The gate asked the Rustia-progress question, which the per-commit
 series now answers directly; this lane asks about competitors, and running it
 unconditionally also produces a host-drift signal — kernel, microcode, thermal —
 that a gated run would hide. Its cost is forty minutes of an otherwise idle
-owned machine rather than a bill.
+owned machine rather than a bill. It runs every Sunday at 15:00 UTC, an hour
+the host is idle, and can be dispatched by hand for an out-of-cycle cohort; the
+schedule was added once the first owned-host cohort had landed and been looked
+at.
 
 The runner is the same one the rented instance used, with the assumptions that
 belonged to a throwaway machine removed: it no longer requires root, no longer

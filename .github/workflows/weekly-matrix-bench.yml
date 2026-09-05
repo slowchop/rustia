@@ -24,9 +24,14 @@ name: Cross-Engine Matrix (weekly)
 # request and merges it with a merge commit. That needs pull-requests: write and
 # the repository setting that lets Actions create pull requests.
 #
-# Dispatch-only until the first owned-host cohort has been inspected. The weekly
-# schedule is added once a cohort has landed and been looked at, not before.
+# Weekly on Sunday 15:00 UTC (early Monday morning at the host, when the machine
+# is idle), plus manual dispatch for an out-of-cycle cohort. The schedule was
+# withheld until the first owned-host cohort (f480758, 2026-08-30) had landed and
+# been looked at. A scheduled run sees the default branch as github.ref, so the
+# main-only guard below holds for both triggers.
 "on":
+  schedule:
+    - cron: "0 15 * * 0"
   workflow_dispatch:
 
 permissions:
