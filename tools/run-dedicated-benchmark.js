@@ -52,6 +52,11 @@ const REMOTE_ROOT = LANES.history.root;
 const SSH_ENV = "RUSTIA_BENCH_SSH";
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 
+// Eight legs a side. The calibration measured this host at two and found its
+// spread widened by leg variation, so this is the lever that tightens an
+// acceptance interval; it is even so that A B B A stays balanced.
+const DEFAULT_ACCEPTANCE_PASSES = 8;
+
 // A non-interactive ssh session does not read the login profile, so neither
 // rustup's nor a home-directory node install is on PATH by default. Both are
 // user-local by design (nothing on this host needs root), so the coordinator
@@ -244,8 +249,8 @@ function existingBackfills(exceptHarnessCommit) {
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   const known = new Set([
-    "plan", "history", "main", "pr", "live-serde", "calibrate", "matrix", "memory", "fetch", "unlock",
-    "self-test",
+    "plan", "history", "main", "pr", "accept", "live-serde", "calibrate", "matrix", "memory", "fetch",
+    "unlock", "self-test",
   ]);
   if (!known.has(command)) return null;
   const parsed = {
@@ -260,6 +265,9 @@ function parseArgs(argv) {
     json: undefined,
     repetitions: undefined,
     confidence: undefined,
+    baseline: undefined,
+    candidate: undefined,
+    passes: undefined,
   };
   for (let index = 0; index < rest.length; index += 1) {
     const option = rest[index];
@@ -291,6 +299,22 @@ function parseArgs(argv) {
       const value = rest[++index];
       if (!value) return null;
       parsed.json = value;
+    } else if (option === "--baseline") {
+      const value = rest[++index];
+      if (!value) return null;
+      parsed.baseline = value;
+    } else if (option === "--candidate") {
+      const value = rest[++index];
+      if (!value) return null;
+      parsed.candidate = value;
+    } else if (option === "--passes") {
+      // Even only: an odd pass count leaves one side with an extra early
+      // position, which is the drift the A B B A arrangement exists to cancel.
+      const value = rest[++index];
+      if (!value || !/^[1-9][0-9]*$/.test(value)) return null;
+      const parsedValue = Number(value);
+      if (parsedValue < 2 || parsedValue > 16 || parsedValue % 2 !== 0) return null;
+      parsed.passes = parsedValue;
     } else if (option === "--repetitions") {
       const value = rest[++index];
       if (!value || !/^[1-9][0-9]*$/.test(value) || Number(value) > 10_000) return null;
@@ -306,7 +330,9 @@ function parseArgs(argv) {
   }
   // --out is shared by the four lanes that write a file; --previous-binary is
   // the per-commit lane's alone.
-  if (parsed.out !== undefined && !["main", "pr", "live-serde", "calibrate"].includes(command)) return null;
+  if (parsed.out !== undefined && !["main", "pr", "accept", "live-serde", "calibrate"].includes(command)) {
+    return null;
+  }
   if (parsed.previousBinary !== undefined && command !== "main") return null;
   // --base and --json describe a comparison; --repetitions and --confidence buy
   // a tighter interval, which only the lanes that publish nothing may do.
@@ -314,9 +340,15 @@ function parseArgs(argv) {
   // promotes into this repository has any use for.
   if (parsed.plan && command !== "matrix" && command !== "memory") return null;
   if (parsed.base !== undefined && command !== "pr") return null;
-  if (parsed.json !== undefined && command !== "pr") return null;
+  if (parsed.json !== undefined && command !== "pr" && command !== "accept") return null;
   for (const option of [parsed.repetitions, parsed.confidence]) {
-    if (option !== undefined && command !== "calibrate") return null;
+    if (option !== undefined && command !== "calibrate" && command !== "accept") return null;
+  }
+  // An acceptance run names both sides explicitly and buys legs; no other
+  // lane may, because every other lane derives its sides from the history it
+  // is measuring rather than from an argument.
+  for (const option of [parsed.baseline, parsed.candidate, parsed.passes]) {
+    if (option !== undefined && command !== "accept") return null;
   }
   // `--replace` supersedes an existing artifact, which both the measuring
   // command and the re-promoting one can do; nothing else promotes.
@@ -1515,6 +1547,180 @@ function commandPr(options) {
   process.stdout.write(screeningSummary(result));
 }
 
+// A full acceptance comparison of two commits that are already in history.
+//
+// The screening lane answers "did this pull request move anything" in four
+// minutes at two legs a side. This answers "did this change move THIS workload,
+// and by how much" by buying more legs. The calibration in bench/pr-screening.json
+// is explicit that every workload on this host is widened by leg variation
+// rather than repetition variation -- "more repetitions per leg would not
+// tighten this lane; more passes would" -- so passes are the lever here and
+// repetitions stay at the calibrated value. Raising repetitions buys runtime
+// and no resolution, which is exactly the mistake the rented-host protocol made
+// when it asked for 201 of them.
+//
+// Both commits must already be ancestors of HEAD: the pair config generator
+// requires it, and the bundle shipped to the host is built from HEAD, so an
+// unreachable commit would fail on the host rather than here.
+function commandAccept(options) {
+  if (!options.out) fail("accept requires --out FILE to write the acceptance summary to");
+  if (!options.baseline || !options.candidate) {
+    fail("accept requires --baseline COMMIT and --candidate COMMIT");
+  }
+  const screening = loadScreeningThresholds();
+  const baseline = git(["rev-parse", options.baseline]).trim();
+  const candidate = git(["rev-parse", options.candidate]).trim();
+  if (!FULL_COMMIT.test(baseline) || !FULL_COMMIT.test(candidate)) {
+    fail("could not resolve both --baseline and --candidate to full commits");
+  }
+  if (baseline === candidate) fail("--baseline and --candidate name the same commit");
+  for (const commit of [baseline, candidate]) {
+    if (!isAncestorOfHead(commit)) {
+      fail(
+        `${commit.slice(0, 12)} is not an ancestor of HEAD; an acceptance run measures commits ` +
+          "that are already in this history",
+      );
+    }
+  }
+
+  const passes = options.passes ?? DEFAULT_ACCEPTANCE_PASSES;
+  const repetitions = options.repetitions ?? screening.repetitions;
+  const confidence = options.confidence ?? screening.confidence;
+  const label = `accept-${baseline.slice(0, 12)}-${candidate.slice(0, 12)}`;
+
+  // Pass i measures the pair in AB order when i is even and BA when it is odd,
+  // so the session reads A B B A repeated. Each side therefore sits at both an
+  // early and a late position within every block of four legs, which is the
+  // arrangement the calibration's straddling split is measured in.
+  const extracted = [];
+  for (let index = 0; index < passes; index += 1) {
+    const baselineFirst = index % 2 === 0;
+    const order = baselineFirst ? "ab" : "ba";
+    const passLabel = `${label}-p${index}${order}`;
+    const first = baselineFirst ? baseline : candidate;
+    const second = baselineFirst ? candidate : baseline;
+    extracted.push(
+      runPass(freezePairConfig(first, second, repetitions, passLabel), passLabel, options.local),
+    );
+  }
+
+  // Both sides are built once per pass. If the two commits produce the same
+  // bytes there is no experiment: report that rather than a number, the way the
+  // screening lane does.
+  const builds = passBuilds(extracted[0]);
+  if (binaryOf(builds, baseline) === binaryOf(builds, candidate)) {
+    const identical = {
+      schema: "rustia.bench.acceptance-result.v1",
+      skipped: true,
+      baseline,
+      candidate,
+      reason:
+        `\`${baseline.slice(0, 8)}\` and \`${candidate.slice(0, 8)}\` build a byte-identical ` +
+        `binary (\`${binaryOf(builds, baseline).slice(0, 12)}\`), so there is nothing to measure.`,
+    };
+    fs.writeFileSync(options.out, acceptanceSummary(identical));
+    if (options.json) writeJson(options.json, identical);
+    process.stdout.write(acceptanceSummary(identical));
+    return;
+  }
+
+  const legs = (commit, workload) =>
+    extracted.map((pass) => path.join(passRawDirectory(pass), `${commit}-${workload}-samples.json`));
+
+  const workloads = [];
+  for (const workload of Object.keys(screening.workloads)) {
+    const baselineLegs = legs(baseline, workload);
+    const candidateLegs = legs(candidate, workload);
+    for (const file of [...baselineLegs, ...candidateLegs]) {
+      if (!fs.existsSync(file)) fail(`missing measured leg ${path.relative(STATE_ROOT, file)}`);
+    }
+    const threshold = screening.workloads[workload].material_threshold_percent;
+    const analysis = analyzeWorkload(workload, baselineLegs, candidateLegs, threshold, confidence);
+    const direction = analysis.comparison.direction.status;
+    workloads.push({
+      workload,
+      delta_percent: analysis.comparison.candidate_delta_percent,
+      interval: analysis.comparison.bootstrap_ci_percent,
+      threshold_percent: threshold,
+      direction,
+      verdict: analysis.comparison.verdict.status,
+      reading:
+        direction === "faster" ? "faster" : direction === "slower" ? "slower" : "no change measured",
+    });
+  }
+
+  const config = loadConfig(path.join(STATE_ROOT, `${label}-p0ab.json`));
+  const result = {
+    schema: "rustia.bench.acceptance-result.v1",
+    skipped: false,
+    baseline,
+    candidate,
+    host: config.provider.host.name,
+    pinned_core: config.host_gate.benchmark_cpu,
+    passes,
+    legs_per_side: passes,
+    repetitions,
+    confidence,
+    // The thresholds were calibrated at the screening lane's leg count. More
+    // legs narrow this host's own spread, so carrying that figure here is
+    // conservative: it can only make a real movement harder to call material,
+    // never easier. The interval is the evidence; the threshold is a guard.
+    threshold_calibrated_legs_per_side: screening.legs_per_side,
+    workloads,
+  };
+  fs.writeFileSync(options.out, acceptanceSummary(result));
+  if (options.json) writeJson(options.json, result);
+  process.stdout.write(acceptanceSummary(result));
+}
+
+function acceptanceSummary(result) {
+  const lines = [];
+  lines.push("## Benchmark acceptance");
+  lines.push("");
+  if (result.skipped) {
+    lines.push(result.reason);
+    return `${lines.join("\n")}\n`;
+  }
+  lines.push(
+    `Baseline \`${result.baseline.slice(0, 8)}\` against candidate \`${result.candidate.slice(0, 8)}\`, ` +
+      `measured on \`${result.host}\` pinned to core ${result.pinned_core}, ` +
+      `${result.legs_per_side} legs per side interleaved A B B A, ` +
+      `${result.repetitions} repetitions per leg, ` +
+      `${(result.confidence * 100).toFixed(0)}% intervals.`,
+  );
+  lines.push("");
+  lines.push(
+    `Thresholds are the screening calibration's, measured at ${result.threshold_calibrated_legs_per_side} ` +
+      "legs per side. More legs narrow this host's spread, so a threshold carried from that " +
+      "calibration is conservative here: it can only make a movement harder to call material.",
+  );
+  lines.push("");
+  lines.push("| workload | delta | interval | threshold | reading |");
+  lines.push("| --- | ---: | --- | ---: | --- |");
+  for (const entry of result.workloads) {
+    const interval =
+      entry.interval && Number.isFinite(entry.interval.lower)
+        ? `${entry.interval.lower.toFixed(2)}%..${entry.interval.upper.toFixed(2)}%`
+        : "n/a";
+    lines.push(
+      `| ${entry.workload} | ${entry.delta_percent.toFixed(2)}% | ${interval} | ` +
+        `${entry.threshold_percent.toFixed(2)}% | ${entry.reading} |`,
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+// An acceptance run measures history, so both sides must be reachable from the
+// bundle that is shipped to the host -- and that bundle is built from HEAD.
+function isAncestorOfHead(commit) {
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", commit, "HEAD"], { cwd: REPO, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function commandFetch(options) {
   const lastRunFile = path.join(STATE_ROOT, "last-run");
   const runId = fs.existsSync(lastRunFile) ? fs.readFileSync(lastRunFile, "utf8").trim() : null;
@@ -1603,6 +1809,7 @@ function selfTest() {
   const defaults = {
     replace: false, config: undefined, out: undefined, previousBinary: undefined, local: false,
     plan: false, base: undefined, json: undefined, repetitions: undefined, confidence: undefined,
+    baseline: undefined, candidate: undefined, passes: undefined,
   };
   assert.deepEqual(parseArgs(["plan"]), { command: "plan", ...defaults });
   assert.deepEqual(parseArgs(["history", "--replace"]), {
@@ -1638,6 +1845,32 @@ function selfTest() {
   assert.equal(parseArgs(["calibrate", "--repetitions", "0"]), null);
   assert.equal(parseArgs(["history", "--out", "x"]), null);
   assert.equal(parseArgs(["pr", "--base"]), null);
+
+  // An acceptance run names both sides and buys legs. The pair is explicit
+  // because the commits being compared are already in history and neither is
+  // derivable from HEAD.
+  const accept = parseArgs(["accept", "--baseline", "a1", "--candidate", "b2", "--out", "a.md"]);
+  assert.equal(accept.baseline, "a1");
+  assert.equal(accept.candidate, "b2");
+  assert.equal(accept.passes, undefined, "passes defaults inside the command, not the parser");
+  assert.equal(parseArgs(["accept", "--passes", "8", "--out", "a.md"]).passes, 8);
+  assert.equal(parseArgs(["accept", "--json", "a.json", "--out", "a.md"]).json, "a.json");
+  // Repetitions are permitted here and refused for screening: an acceptance run
+  // publishes nothing, so it may retune itself.
+  assert.equal(parseArgs(["accept", "--repetitions", "25", "--out", "a.md"]).repetitions, 25);
+  // Odd pass counts leave one side an extra early position, which is exactly
+  // the drift A B B A cancels.
+  assert.equal(parseArgs(["accept", "--passes", "7", "--out", "a.md"]), null);
+  assert.equal(parseArgs(["accept", "--passes", "0", "--out", "a.md"]), null);
+  assert.equal(parseArgs(["accept", "--passes", "18", "--out", "a.md"]), null);
+  assert.equal(parseArgs(["accept", "--passes"]), null);
+  assert.equal(parseArgs(["accept", "--baseline"]), null);
+  assert.equal(parseArgs(["accept", "--candidate"]), null);
+  // The pair belongs to this lane alone; every other lane derives its sides
+  // from the history it measures.
+  assert.equal(parseArgs(["pr", "--baseline", "a1", "--out", "s.md"]), null);
+  assert.equal(parseArgs(["main", "--passes", "8", "--out", "r.jsonl"]), null);
+  assert.equal(parseArgs(["history", "--candidate", "b2"]), null);
   assert.equal(parseArgs(["matrix", "--plan"]).plan, true);
   assert.equal(parseArgs(["memory", "--plan"]).plan, true);
   assert.equal(parseArgs(["memory"]).command, "memory");
@@ -1782,6 +2015,8 @@ function usage() {
       "  history   [--config FILE] [--replace]  measure every revision and promote\n" +
       "  main      --out FILE [--previous-binary SHA]  measure HEAD alone for the live series\n" +
       "  pr        --out FILE [--base REF] [--json FILE]  screen HEAD against its merge base\n" +
+      "  accept    --baseline C --candidate C --out FILE [--passes N] [--json FILE]\n" +
+      "                                         full acceptance comparison of two commits\n" +
       "  live-serde --local --out FILE             compare live and owned serde on ci-bench\n" +
       "  matrix    [--plan]                     measure 13 engines x 5 workloads and promote\n" +
       "  memory    [--plan]                     measure per-VM memory and promote\n" +
@@ -1810,6 +2045,7 @@ try {
     else if (parsed.command === "history") commandHistory(parsed);
     else if (parsed.command === "main") commandMain(parsed);
     else if (parsed.command === "pr") commandPr(parsed);
+    else if (parsed.command === "accept") commandAccept(parsed);
     else if (parsed.command === "live-serde") commandLiveSerde(parsed);
     else if (parsed.command === "calibrate") commandCalibrate(parsed);
     else if (parsed.command === "matrix") commandMatrix(parsed);
