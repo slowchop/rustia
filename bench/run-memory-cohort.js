@@ -7,6 +7,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { spawnSync } = require("child_process");
+const { cgroupBlockerMessage, delegatedCgroupRoot } = require("./cgroup-delegation.js");
 
 const PROTOCOL_SCHEMA = "rustia.bench.memory-protocol.v1";
 const MANIFEST_SCHEMA = "rustia.bench.memory-cohort-evidence.v1";
@@ -200,36 +201,15 @@ function collectHost() {
   };
 }
 
-// The delegated cgroup subtree systemd gives an unprivileged user, if there is
-// one. Root gets the mount itself; the benchmark host runs CI unprivileged and
-// needs its own writable subtree instead.
-function delegatedCgroupRoot() {
-  if (typeof process.getuid !== "function") return null;
-  const uid = process.getuid();
-  if (uid === 0) return null;
-  const candidate = `/sys/fs/cgroup/user.slice/user-${uid}.slice/user@${uid}.service`;
-  try {
-    fs.accessSync(path.join(candidate, "cgroup.subtree_control"), fs.constants.W_OK);
-    return candidate;
-  } catch {
-    return null;
-  }
-}
-
 function runCohort(config) {
   if (process.platform !== "linux") fail("memory cohort requires Linux");
   // Root, or a delegated subtree. What the protocol needs is a cgroup it can
   // create children in with the memory controller enabled -- being uid 0 is one
   // way to have that, not the requirement itself.
-  const cgroupRoot = typeof process.getuid === "function" && process.getuid() === 0
-    ? null
-    : delegatedCgroupRoot();
+  const delegated = delegatedCgroupRoot();
+  const cgroupRoot = delegated.root;
   if (typeof process.getuid === "function" && process.getuid() !== 0 && cgroupRoot === null) {
-    fail(
-      "memory cohort needs a writable cgroup-v2 subtree: run as root, or delegate one to this " +
-        `user (systemd: a user@${process.getuid()}.service scope with Delegate=memory). Per-VM ` +
-        "accounting is measured inside a dedicated cgroup, so there is no meaningful run without one.",
-    );
+    fail(cgroupBlockerMessage(process.getuid(), delegated.reason));
   }
   const protocol = validateProtocol(loadJson(config.config, "memory protocol"));
   for (const binary of [config.binaryAll, config.binaryLua54]) {
@@ -388,6 +368,19 @@ function selfTest() {
   assert.deepEqual(roundOrder(fixtures, 1), fixtures);
   assert.deepEqual(roundOrder(fixtures, 2), fixtures);
   assert.throws(() => validateProtocol({ ...protocol, samples: 8 }));
+
+  // Each cause has to send the reader at the host change that fixes it. The
+  // read-only case is the one that cost a run: the subtree was present and
+  // correctly owned, and the message said delegation was missing.
+  assert.match(cgroupBlockerMessage(1001, "absent"), /does not exist/);
+  assert.match(cgroupBlockerMessage(1001, "absent"), /enable-linger/);
+  assert.match(cgroupBlockerMessage(1001, "read-only"), /ProtectControlGroups=yes/);
+  assert.match(cgroupBlockerMessage(1001, "read-only"), /ReadWritePaths=/);
+  assert.doesNotMatch(cgroupBlockerMessage(1001, "read-only"), /enable-linger/);
+  assert.match(cgroupBlockerMessage(1001, "unwritable"), /owned by that user/);
+  for (const reason of ["absent", "read-only", "unwritable"]) {
+    assert.match(cgroupBlockerMessage(1001, reason), /user-1001\.slice\/user@1001\.service/);
+  }
   process.stdout.write("memory cohort self-test passed\n");
 }
 
