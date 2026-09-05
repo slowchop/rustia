@@ -574,12 +574,18 @@ target is instead a descendant of the fixed harness. Frozen configs record that
 direction explicitly, and the host verifies the declared ancestry before it
 builds anything.
 
-The deploy key does not push the data repository's protected `main` branch.
-Each source workflow pushes a unique `publication/*` branch, then waits until
-the publication commit is present on `main`. A target-repository workflow opens
-and merge-commits the corresponding pull request through the ordinary branch
-rules. A failed or unmerged publication therefore fails the source workflow
-instead of being reported as delivered.
+Each source workflow commits its publication onto a fresh clone of the data
+repository's `main` and hands it to `tools/push-benchmark-data-publication.js`,
+which pushes that commit to `main` as a plain fast-forward. The data
+repository's branch ruleset keeps `main` pull-request-only for people and
+lists deploy keys as its bypass, so the writer key is the only thing that
+lands there directly. When another publication has landed since the clone, the
+helper fetches, rebases the single commit and pushes again, a bounded number
+of times; a rebase conflict aborts and fails the source workflow, which a
+re-run rebuilds from the current data. Nothing in the data repository runs
+on GitHub-hosted compute: the earlier `publication/*` branch plus
+merge-workflow scheme needed a hosted runner there, and the source workflow
+waited on it.
 
 A commit that builds a byte-identical binary records nothing. The gate is the
 compiled binary's hash rather than a path heuristic, so documentation and tooling
