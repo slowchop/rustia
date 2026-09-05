@@ -479,9 +479,9 @@ function resetWorkingState() {
 // that was knowable in milliseconds -- which is how the first two owned-host
 // attempts were spent.
 function assertCgroupCapability() {
-  if (typeof process.getuid !== "function" || process.getuid() === 0) return;
-  const { root, reason } = delegatedCgroupRoot();
-  if (root === null) fail(cgroupBlockerMessage(process.getuid(), reason));
+  const delegated = delegatedCgroupRoot();
+  if (delegated.root !== null || delegated.reason === "root" || delegated.reason === "unsupported") return;
+  fail(cgroupBlockerMessage(delegated));
 }
 
 async function execute(configFile, providerFile, bundle) {
