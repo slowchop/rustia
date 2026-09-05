@@ -250,11 +250,12 @@ an otherwise green merge.
 5. Promotion requires a complete cohort, semantic checks, provenance, accepted
    host gates, and confirmed resource deletion.
 6. Artifact-only publication validates committed evidence, renders the report,
-   and pushes Pages directly. Data-repository updates go to unique
-   `publication/*` branches; a workflow in that repository opens and
-   merge-commits an ordinary pull request, while the source workflow waits for
-   its exact commit to reach protected `main`. Publication never invokes a
-   timing harness or cloud-provider create endpoint.
+   and pushes Pages directly. Data-repository updates are one commit on a
+   fresh clone of that repository's `main`, pushed there as a fast-forward by
+   the deploy key through the ruleset's deploy-key bypass, with a bounded
+   fetch-rebase-retry when another publication landed first. Publication
+   never invokes a timing harness, a cloud-provider create endpoint, or a
+   GitHub-hosted runner.
 
 ## Statistics and presentation
 

@@ -365,6 +365,9 @@ function checkMainBench(text) {
     "node tools/push-benchmark-data-publication.js --repo-dir \"$data_dir\" --kind series",
     label,
   );
+  // The data repository's main is written only by the helper, which owns the
+  // fast-forward push and the bounded fetch-rebase-retry; a workflow must not
+  // grow a push of its own.
   forbidIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
   requireIncludes(text, "trap cleanup EXIT", label);
   // The rows live in the data repository; this lane must never write history
@@ -502,6 +505,9 @@ function checkRustiaMemory(text) {
     "node tools/push-benchmark-data-publication.js --repo-dir \"$data_dir\" --kind memory",
     label,
   );
+  // The data repository's main is written only by the helper, which owns the
+  // fast-forward push and the bounded fetch-rebase-retry; a workflow must not
+  // grow a push of its own.
   forbidIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
   requireIncludes(text, "git -C \"$pages_dir\" push origin HEAD:gh-pages", label);
   // This was the last lane that could create a billed instance. These are the
@@ -605,6 +611,9 @@ function checkBenchmarkPublication(text) {
     "node tools/push-benchmark-data-publication.js --repo-dir \"$data_dir\" --kind artifacts",
     label,
   );
+  // The data repository's main is written only by the helper, which owns the
+  // fast-forward push and the bounded fetch-rebase-retry; a workflow must not
+  // grow a push of its own.
   forbidIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
   requireIncludes(text, "git -C \"$pages_dir\" push origin HEAD:gh-pages", label);
   for (const forbidden of [
