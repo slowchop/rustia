@@ -375,9 +375,6 @@ function readMemoryHistory() {
     }
     records.push(record);
   }
-  if (records.length === 0) {
-    fail(`${relative(memoryHistoryPath)} must contain at least one memory cohort`);
-  }
   return records.sort(
     (left, right) => Date.parse(left.created_at) - Date.parse(right.created_at),
   );
@@ -1502,6 +1499,19 @@ function memoryHistoryModel(records) {
 }
 
 function memoryHistorySection(records) {
+  if (records.length === 0) {
+    return `
+      <section class="panel history-axis-panel memory-history-panel" id="memory-history">
+        <div class="section-head">
+          <div>
+            <h2>rustia Memory History</h2>
+            <p>No cohorts.</p>
+          </div>
+        </div>
+        <p class="pending-note"><strong>The series starts again on <code>ci-bench</code>.</strong> Every earlier cohort was measured on a rented cloud host and has been removed, so there is nothing this chart could plot that belongs beside the rest of this page.</p>
+      </section>
+    `;
+  }
   const model = memoryHistoryModel(records);
   const latest = model.points.at(-1);
   return `
@@ -1910,7 +1920,7 @@ function memoryResultsSection(data) {
             <p>Fresh-process cgroup peaks, smaps phase deltas, and epoch growth across engines.</p>
           </div>
         </div>
-        <p class="pending-note"><strong>Pre-reclamation baseline pending.</strong> The supervisor and detector-validation workloads are being implemented; this panel will remain empty rather than showing local or Rustia-only measurements.</p>
+        <p class="pending-note"><strong>No accepted memory cohort.</strong> Every previous row was measured on a rented cloud host between 2026-07-26 and 2026-07-28, carried no host identity, and has been removed. Memory returns when a cohort is measured on <code>ci-bench</code>, the machine every other number on this page comes from.</p>
       </section>
     `;
   }
