@@ -8,10 +8,6 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const {
-  cgroupBlockerMessage,
-  delegatedCgroupRoot,
-} = require("../bench/cgroup-delegation.js");
 
 // The run's working tree. Was fixed at /opt/rustia, which only a root process on
 // a throwaway instance can write; the owned host runs this as an ordinary user.
@@ -474,11 +470,17 @@ function resetWorkingState() {
 }
 
 // The cohort measures inside a dedicated cgroup, so a host that cannot give it
-// one cannot run this protocol at all. Checked here, before the clone and the
+// one cannot run this protocol at all. Checked before the toolchain and the
 // build, because discovering it afterwards costs five minutes to say something
 // that was knowable in milliseconds -- which is how the first two owned-host
-// attempts were spent.
-function assertCgroupCapability() {
+// attempts were spent. The probe is loaded from the verified checkout, not
+// from beside this file: the coordinator ships this runner into the host's
+// inbox on its own, so a module required as a sibling is simply absent there,
+// which is how the third attempt was spent.
+function assertCgroupCapability(source) {
+  const probe = path.join(source, "bench/cgroup-delegation.js");
+  if (!fs.existsSync(probe)) fail(`${probe} is missing; the memory protocol needs the delegation probe`);
+  const { cgroupBlockerMessage, delegatedCgroupRoot } = require(probe);
   const delegated = delegatedCgroupRoot();
   if (delegated.root !== null || delegated.reason === "root" || delegated.reason === "unsupported") return;
   fail(cgroupBlockerMessage(delegated));
@@ -486,7 +488,6 @@ function assertCgroupCapability() {
 
 async function execute(configFile, providerFile, bundle) {
   if (process.platform !== "linux") fail("memory runner requires Linux");
-  assertCgroupCapability();
   fs.mkdirSync(ROOT, { recursive: true });
   acquireLock();
   resetWorkingState();
@@ -512,6 +513,7 @@ async function execute(configFile, providerFile, bundle) {
       fail("configured memory CPU is absent from the Linode");
     }
     verifySource(config, bundle);
+    assertCgroupCapability(SOURCE);
     installRust();
     const binaries = build(config);
     validateRustiaWasmQuota(config);

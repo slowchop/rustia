@@ -1895,6 +1895,24 @@ function selfTest() {
     assert(fs.existsSync(path.join(REPO, lane.runner)), `${lane.runner} must exist`);
   }
 
+  // shipAndRun copies the runner into the host's inbox on its own, beside the
+  // config, the attestation and the bundle; a module required next to the
+  // runner does not exist there. Each runner is started from a directory that
+  // holds nothing else and must reach its usage line rather than "Cannot find
+  // module", which is how the memory lane's third owned-host run ended.
+  const inbox = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-inbox-"));
+  try {
+    for (const lane of Object.values(LANES)) {
+      const shipped = path.join(inbox, path.basename(lane.runner));
+      fs.copyFileSync(path.join(REPO, lane.runner), shipped);
+      const alone = spawnSync(process.execPath, [shipped], { cwd: inbox, encoding: "utf8" });
+      assert.equal(alone.status, 2, `${lane.runner} must load from an inbox holding only itself: ${alone.stderr}`);
+      assert.match(alone.stderr, /^usage: /, `${lane.runner} must print its usage when started without arguments`);
+    }
+  } finally {
+    fs.rmSync(inbox, { recursive: true, force: true });
+  }
+
   // Protocol files define the comparison; a change to one is not comparable
   // under a single frozen config, and the lane has to say so rather than fail
   // on a checksum deep inside the host.
