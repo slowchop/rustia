@@ -17,7 +17,7 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 706,
+      "file_count": 707,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
@@ -34,6 +34,7 @@
         "analyze-fixed-samples.js",
         "analyze-memory-samples.js",
         "analyze-vm-string-memory.js",
+        "cgroup-delegation.js",
         "chart-mockups/cohort-ledger.html",
         "chart-mockups/ranked-bars.html",
         "chart-mockups/workload-heatmap.html",

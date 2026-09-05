@@ -7,6 +7,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { spawnSync } = require("child_process");
+const { cgroupBlockerMessage, delegatedCgroupRoot } = require("./cgroup-delegation.js");
 
 const PROTOCOL_SCHEMA = "rustia.bench.memory-protocol.v1";
 const MANIFEST_SCHEMA = "rustia.bench.memory-cohort-evidence.v1";
@@ -200,37 +201,14 @@ function collectHost() {
   };
 }
 
-// The delegated cgroup subtree systemd gives an unprivileged user, if there is
-// one. Root gets the mount itself; the benchmark host runs CI unprivileged and
-// needs its own writable subtree instead.
-function delegatedCgroupRoot() {
-  if (typeof process.getuid !== "function") return null;
-  const uid = process.getuid();
-  if (uid === 0) return null;
-  const candidate = `/sys/fs/cgroup/user.slice/user-${uid}.slice/user@${uid}.service`;
-  try {
-    fs.accessSync(path.join(candidate, "cgroup.subtree_control"), fs.constants.W_OK);
-    return candidate;
-  } catch {
-    return null;
-  }
-}
-
 function runCohort(config) {
   if (process.platform !== "linux") fail("memory cohort requires Linux");
   // Root, or a delegated subtree. What the protocol needs is a cgroup it can
   // create children in with the memory controller enabled -- being uid 0 is one
   // way to have that, not the requirement itself.
-  const cgroupRoot = typeof process.getuid === "function" && process.getuid() === 0
-    ? null
-    : delegatedCgroupRoot();
-  if (typeof process.getuid === "function" && process.getuid() !== 0 && cgroupRoot === null) {
-    fail(
-      "memory cohort needs a writable cgroup-v2 subtree: run as root, or delegate one to this " +
-        `user (systemd: a user@${process.getuid()}.service scope with Delegate=memory). Per-VM ` +
-        "accounting is measured inside a dedicated cgroup, so there is no meaningful run without one.",
-    );
-  }
+  const delegated = delegatedCgroupRoot();
+  if (delegated.root === null && delegated.reason !== "root") fail(cgroupBlockerMessage(delegated));
+  const cgroupRoot = delegated.root;
   const protocol = validateProtocol(loadJson(config.config, "memory protocol"));
   for (const binary of [config.binaryAll, config.binaryLua54]) {
     if (!fs.existsSync(binary) || !fs.statSync(binary).isFile()) fail(`missing benchmark binary ${binary}`);
@@ -388,6 +366,79 @@ function selfTest() {
   assert.deepEqual(roundOrder(fixtures, 1), fixtures);
   assert.deepEqual(roundOrder(fixtures, 2), fixtures);
   assert.throws(() => validateProtocol({ ...protocol, samples: 8 }));
+
+  // The delegated root is found from the process's own cgroup, never from a
+  // path guessed from the uid: a subtree delegated beside the unit that runs
+  // the job accepts the mkdir and refuses the migration.
+  const fakeIo = (own, entries, uid = 1001) => ({
+    uid: () => uid,
+    readFile: (file) => (file === "/proc/self/cgroup"
+      ? `1:name=systemd:/ignored\n0::${own}\n`
+      : entries[file]?.text ?? null),
+    writeBlocker: (file) => (file in entries ? entries[file].blocker ?? null : "EACCES"),
+  });
+  const service = "/sys/fs/cgroup/user.slice/user-1001.slice/job.service";
+  const delegatedService = {
+    [`${service}/cgroup.subtree_control`]: { text: "" },
+    [`${service}/cgroup.controllers`]: { text: "cpu memory pids" },
+    [`${service}/cgroup.procs`]: { text: "" },
+    [`${service}/runner/cgroup.subtree_control`]: { text: "" },
+  };
+  const inSubgroup = "/user.slice/user-1001.slice/job.service/runner";
+  // The topmost writable ancestor wins over the subgroup the process sits in.
+  assert.deepEqual(delegatedCgroupRoot({ io: fakeIo(inSubgroup, delegatedService) }), {
+    root: service, reason: null, uid: 1001, own: `/sys/fs/cgroup${inSubgroup}`, at: null,
+  });
+  // An interactive session lands on user@<uid>.service by the same walk.
+  const manager = "/sys/fs/cgroup/user.slice/user-1001.slice/user@1001.service";
+  const session = {
+    [`${manager}/cgroup.subtree_control`]: { text: "memory pids" },
+    [`${manager}/cgroup.controllers`]: { text: "cpu memory pids" },
+    [`${manager}/cgroup.procs`]: { text: "" },
+    [`${manager}/app.slice/cgroup.subtree_control`]: { text: "" },
+  };
+  assert.equal(
+    delegatedCgroupRoot({ io: fakeIo("/user.slice/user-1001.slice/user@1001.service/app.slice/run.scope", session) }).root,
+    manager,
+  );
+  assert.deepEqual(delegatedCgroupRoot({ io: fakeIo(inSubgroup, delegatedService, 0) }), {
+    root: null, reason: "root", uid: 0, own: null, at: null,
+  });
+  // Each cause has to send the reader at the host change that fixes it. The
+  // read-only case is the one that cost a run: the subtree was present and
+  // correctly owned, and the message said delegation was missing.
+  const readOnly = delegatedCgroupRoot({
+    io: fakeIo(inSubgroup, {
+      ...delegatedService,
+      [`${service}/cgroup.subtree_control`]: { blocker: "EROFS" },
+      [`${service}/runner/cgroup.subtree_control`]: { blocker: "EROFS" },
+    }),
+  });
+  assert.equal(readOnly.reason, "read-only");
+  assert.equal(readOnly.at, service);
+  assert.match(cgroupBlockerMessage(readOnly), /ProtectControlGroups=no/);
+  assert.doesNotMatch(cgroupBlockerMessage(readOnly), /DelegateSubgroup/);
+  const undelegated = delegatedCgroupRoot({ io: fakeIo(inSubgroup, {}) });
+  assert.equal(undelegated.reason, "undelegated");
+  assert.match(cgroupBlockerMessage(undelegated), /job\.service\/runner/);
+  assert.match(cgroupBlockerMessage(undelegated), /Delegate=memory plus DelegateSubgroup=/);
+  assert.match(cgroupBlockerMessage(undelegated), /user@1001\.service beside that unit, is no use/);
+  const occupied = delegatedCgroupRoot({
+    io: fakeIo(inSubgroup, { ...delegatedService, [`${service}/cgroup.procs`]: { text: "4242\n4243\n" } }),
+  });
+  assert.equal(occupied.reason, "occupied");
+  assert.match(cgroupBlockerMessage(occupied), /still holds processes/);
+  assert.match(cgroupBlockerMessage(occupied), /DelegateSubgroup=/);
+  const noMemory = delegatedCgroupRoot({
+    io: fakeIo(inSubgroup, { ...delegatedService, [`${service}/cgroup.controllers`]: { text: "cpu pids" } }),
+  });
+  assert.equal(noMemory.reason, "no-memory");
+  assert.match(cgroupBlockerMessage(noMemory), /Delegate=memory/);
+  assert.equal(delegatedCgroupRoot({ io: fakeIo("/", {}) }).reason, "undelegated");
+  assert.equal(
+    delegatedCgroupRoot({ io: { ...fakeIo(inSubgroup, {}), readFile: () => null } }).reason,
+    "no-cgroup2",
+  );
   process.stdout.write("memory cohort self-test passed\n");
 }
 

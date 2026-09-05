@@ -18,14 +18,26 @@ name: Cross-Engine Matrix (weekly)
 # contents-write: the cohort belongs in this repository's history, unlike the
 # per-commit series, whose rows grow forever and live in the data repository.
 #
-# Dispatch-only until the first owned-host cohort has been inspected. The weekly
-# schedule is added once a cohort has landed and been looked at, not before.
+# main takes changes only through pull requests -- an organisation rule with no
+# bypass for anyone, this token included -- so the accepted cohort is pushed to
+# a branch and landed by tools/land-matrix-publication.js, which opens the pull
+# request and merges it with a merge commit. That needs pull-requests: write and
+# the repository setting that lets Actions create pull requests.
+#
+# Weekly on Sunday 15:00 UTC (early Monday morning at the host, when the machine
+# is idle), plus manual dispatch for an out-of-cycle cohort. The schedule was
+# withheld until the first owned-host cohort (f480758, 2026-08-30) had landed and
+# been looked at. A scheduled run sees the default branch as github.ref, so the
+# main-only guard below holds for both triggers.
 "on":
+  schedule:
+    - cron: "0 15 * * 0"
   workflow_dispatch:
 
 permissions:
   contents: write
   actions: write
+  pull-requests: write
 
 concurrency:
   group: rustia-bench-host-serial
@@ -81,10 +93,11 @@ jobs:
           git add bench design tools/check-benchmark-results.js
           git commit -m "Local promotion snapshot ${RUSTIA_MATRIX_COMMIT}"
           snapshot="$(git rev-parse HEAD)"
+          branch="matrix-publish/${RUSTIA_MATRIX_COMMIT}"
           published=""
           for attempt in 1 2 3; do
             git fetch origin main
-            git checkout -B matrix-publish origin/main
+            git checkout -B "$branch" origin/main
             git checkout "$snapshot" -- \
               "$config" \
               bench/history \
@@ -104,15 +117,23 @@ jobs:
             node tools/check-benchmark-results.js
             git add bench design tools/check-benchmark-results.js
             git commit -m "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT}"
-            if git push origin HEAD:main; then
+            git push --force origin "HEAD:refs/heads/$branch"
+            # Exit 3 means main moved and the branch no longer merges cleanly;
+            # anything else that is not success is a failure.
+            landing=0
+            node tools/land-matrix-publication.js \
+              --branch "$branch" \
+              --title "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT}" || landing=$?
+            if [ "$landing" -eq 0 ]; then
               published=yes
               break
             fi
-            echo "push raced with new commits on main; rebuilding publication (attempt $attempt)"
+            [ "$landing" -eq 3 ] || exit "$landing"
+            echo "landing raced with new commits on main; rebuilding publication (attempt $attempt)"
           done
           test -n "$published"
-          # A GITHUB_TOKEN push does not trigger downstream workflows, so the
-          # dashboard publication is dispatched explicitly.
+          # A merge performed with GITHUB_TOKEN does not trigger downstream
+          # workflows, so the dashboard publication is dispatched explicitly.
           curl -sSf -X POST \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \

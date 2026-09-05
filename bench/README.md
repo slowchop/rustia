@@ -731,10 +731,15 @@ so the standalone harness shell is not tied to rustia internals.
 ### Cross-engine matrix
 
 `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines across
-the five workloads on the owned host and pushes the accepted cohort to `main`.
+the five workloads on the owned host and lands the accepted cohort on `main`.
 It is this repository's single sanctioned contents-write grant: the cohort
 belongs in source history, unlike the per-commit series, whose rows grow forever
-and live in the data repository.
+and live in the data repository. `main` accepts changes only through pull
+requests — an organisation rule with no bypass for the workflow token — so the
+publication commit goes to a `matrix-publish/<commit>` branch and
+`tools/land-matrix-publication.js` opens the pull request and merges it with a
+merge commit; if `main` moved meanwhile, the publication is rebuilt on top of
+it and landed again, three attempts at most.
 
 It replaced a nightly job that created a billed cloud instance whenever `main`
 had gained performance-relevant commits since the last cohort. Both properties
@@ -742,7 +747,10 @@ are gone. The gate asked the Rustia-progress question, which the per-commit
 series now answers directly; this lane asks about competitors, and running it
 unconditionally also produces a host-drift signal — kernel, microcode, thermal —
 that a gated run would hide. Its cost is forty minutes of an otherwise idle
-owned machine rather than a bill.
+owned machine rather than a bill. It runs every Sunday at 15:00 UTC, an hour
+the host is idle, and can be dispatched by hand for an out-of-cycle cohort; the
+schedule was added once the first owned-host cohort had landed and been looked
+at.
 
 The runner is the same one the rented instance used, with the assumptions that
 belonged to a throwaway machine removed: it no longer requires root, no longer
