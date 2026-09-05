@@ -134,6 +134,7 @@ const WORKFLOW_RUNNER_CLASS = new Map([
   ["publish-benchmark-data.yml", "general-linux"],
   ["main-bench.yml", "bench-solo"],
   ["pr-bench.yml", "bench-solo"],
+  ["acceptance-bench.yml", "bench-solo"],
   ["rustia-memory.yml", "bench-solo"],
 ]);
 

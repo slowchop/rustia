@@ -1,0 +1,85 @@
+name: Benchmark Acceptance
+
+# Compares two commits that are already in history, on the owned host, at more
+# legs than the screening lane buys. Screening answers "did this pull request
+# move anything" against a merge base in a few minutes; this answers "did this
+# change move this workload, and by how much" for a pair named explicitly --
+# the question the retired rented-host lane used to answer.
+#
+# Dispatch only. An acceptance run holds the benchmark host for the length of
+# its passes, so it is never on a timer and never on a push: someone decides a
+# specific comparison is worth the machine's time.
+#
+# It records nothing. The reading lands in the job summary and in an artifact,
+# not in the published history -- promoting a number is the series lane's job,
+# and a comparison of two arbitrary historical commits is evidence for a
+# decision rather than a row in a series.
+"on":
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: Baseline commit (must be an ancestor of the dispatched ref)
+        required: true
+        type: string
+      candidate:
+        description: Candidate commit (must be an ancestor of the dispatched ref)
+        required: true
+        type: string
+      passes:
+        description: Legs per side. Even, 2-16. Legs are what narrow the interval.
+        required: false
+        default: "8"
+        type: string
+
+permissions:
+  contents: read
+
+# The same group every other lane on the bench host uses, so an acceptance run
+# can never overlap the machine it is measuring.
+concurrency:
+  group: rustia-bench-host-serial
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    name: Measure the pair
+    runs-on:
+      group: bench-solo
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout the dispatched ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          cache: false
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Measure the pair
+        env:
+          BASELINE: ${{ inputs.baseline }}
+          CANDIDATE: ${{ inputs.candidate }}
+          PASSES: ${{ inputs.passes }}
+        run: |
+          set -euo pipefail
+          work_dir="$(mktemp -d "$RUNNER_TEMP/rustia-acceptance.XXXXXX")"
+          # --local is what keeps the run on this machine: the runner otherwise
+          # ships the config to a host over ssh, and the host is this one.
+          node tools/run-dedicated-benchmark.js accept \
+            --local \
+            --baseline "$BASELINE" \
+            --candidate "$CANDIDATE" \
+            --passes "$PASSES" \
+            --out "$work_dir/acceptance.md" \
+            --json "$work_dir/acceptance.json"
+          cat "$work_dir/acceptance.md" >> "$GITHUB_STEP_SUMMARY"
