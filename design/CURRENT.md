@@ -570,9 +570,10 @@ unreachable suspended-coroutine frames.
    the box at a time, and every run attested against the frozen config before it builds. Four lanes reach it,
    all through `tools/run-dedicated-benchmark.js`: the reconstruction (`history`), the per-commit series
    (`main`), pull-request screening (`pr`), and the cross-engine matrix (`matrix`).
-   `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines on the owned host and pushes
-   accepted cohorts to `main` (the repository's single sanctioned CI contents-write grant, shape-pinned by
-   `tools/check-workflows.js`). It runs unconditionally rather than gated on pending commits: the gate asked
+   `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines on the owned host and lands
+   accepted cohorts on `main` through a pull request it opens and merges itself with a merge commit
+   (`tools/land-matrix-publication.js`; `main` takes nothing but pull requests, and this is the
+   repository's single sanctioned CI contents-write grant, shape-pinned by `tools/check-workflows.js`). It runs unconditionally rather than gated on pending commits: the gate asked
    the Rustia-progress question, which the per-commit series now answers directly, while an ungated run also
    makes host drift — kernel, microcode, thermal — visible instead of hiding it. Its first cohort
    (`f480758`) has landed, so `bench/history/runs.jsonl` now holds exactly one cohort, measured on
