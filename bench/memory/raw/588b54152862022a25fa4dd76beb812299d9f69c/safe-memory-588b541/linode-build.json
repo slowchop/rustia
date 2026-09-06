@@ -1,8 +1,0 @@
-{
-  "all_binary_sha256": "8353e2981c20208fa873af8e3dd8334abd4bac5c1d94271fe51b556eb313b5d5",
-  "lua54_binary_sha256": "8353e2981c20208fa873af8e3dd8334abd4bac5c1d94271fe51b556eb313b5d5",
-  "rustc_vv": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.95.0\nLLVM version: 22.1.2",
-  "cargo_incremental": "0",
-  "locked": true,
-  "offline_build_after_fetch": true
-}
