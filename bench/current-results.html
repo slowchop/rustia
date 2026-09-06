@@ -1790,25 +1790,166 @@
     </section>
 
 
-      <section class="panel" id="memory">
-        <div class="section-head">
-          <div>
-            <h2>Memory</h2>
-            <p>Fresh-process cgroup peaks, smaps phase deltas, and epoch growth across engines.</p>
-          </div>
+    <section class="panel" id="memory">
+      <div class="section-head">
+        <div>
+          <h2>rustia Memory on ci-bench</h2>
+          <p>Fresh process+cgroup samples on the owned host. Peak catches short spikes; retained uses anonymous memory after quiescence.</p>
         </div>
-        <p class="pending-note"><strong>No accepted memory cohort.</strong> Every previous row was measured on a rented cloud host between 2026-07-26 and 2026-07-28, carried no host identity, and has been removed. Memory returns when a cohort is measured on <code>ci-bench</code>, the machine every other number on this page comes from.</p>
-      </section>
+      </div>
+      <p class="pending-note"><strong>No competitor engines yet.</strong> Every competitor memory row was measured on a rented cloud host between 2026-07-26 and 2026-07-28 and has been removed, so these are absolute figures rather than a comparison. Competitors return when the memory matrix runs on <code>ci-bench</code>.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Implementation · language</th><th>Workload</th><th>Mode</th><th>Idle anon</th><th>Prepared Δ</th><th>Peak Δ</th><th>Retained Δ</th><th>Tail growth</th><th>Signal</th></tr></thead>
+          <tbody>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Closures</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>164 KiB</td>
+                <td>+132 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+20 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Dense tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>164 KiB</td>
+                <td>+148 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+20 KiB</td>
+                <td>+1.333 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Iteration</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>164 KiB</td>
+                <td>+168 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>0 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Memory Burst</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>160 KiB</td>
+                <td>+148 KiB</td>
+                <td><strong>1 MiB</strong></td>
+                <td>+28 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Memory Churn</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>164 KiB</td>
+                <td>+152 KiB</td>
+                <td><strong>1.25 MiB</strong></td>
+                <td>+768 KiB</td>
+                <td>+1.091 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Memory Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>164 KiB</td>
+                <td>+148 KiB</td>
+                <td><strong>3.75 MiB</strong></td>
+                <td>+3.305 MiB</td>
+                <td>+82.9 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Sparse tables</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>164 KiB</td>
+                <td>+140 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+16 KiB</td>
+                <td>+1.657 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Math / table</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>164 KiB</td>
+                <td>+148 KiB</td>
+                <td><strong>256 KiB</strong></td>
+                <td>+8 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Todo History</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>164 KiB</td>
+                <td>+232 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+136 KiB</td>
+                <td>0 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">stable</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Todo Retained Control</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>164 KiB</td>
+                <td>+236 KiB</td>
+                <td><strong>2.25 MiB</strong></td>
+                <td>+1.715 MiB</td>
+                <td>+42.9 KiB/epoch</td>
+                <td><span class="claim-pill claim-ready">expected retention</span></td>
+              </tr>
+
+              <tr>
+                <td><span class="implementation-language"><strong>rustia</strong><span>Luau</span></span></td>
+                <td><strong>Todo Steady</strong></td>
+                <td><span class="mode-badge mode-interpreter">interpreter</span></td>
+                <td>164 KiB</td>
+                <td>+216 KiB</td>
+                <td><strong>512 KiB</strong></td>
+                <td>+108 KiB</td>
+                <td>+0.4 KiB/epoch</td>
+                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+              </tr>
+
+          </tbody>
+        </table>
+      </div>
+    </section>
 
 
       <section class="panel history-axis-panel memory-history-panel" id="memory-history">
         <div class="section-head">
           <div>
             <h2>rustia Memory History</h2>
-            <p>No cohorts.</p>
+            <p>1 cohort(s) on <code>ci-bench</code>; no reference to plot against yet.</p>
           </div>
         </div>
-        <p class="pending-note"><strong>The series starts again on <code>ci-bench</code>.</strong> Every earlier cohort was measured on a rented cloud host and has been removed, so there is nothing this chart could plot that belongs beside the rest of this page.</p>
+        <p class="pending-note"><strong>The chart needs a competitor reference from the same machine.</strong> It plots mlua/Luau/JIT memory divided by Rustia memory, and the only mlua/JIT memory cohort was measured on a rented cloud host, so it has been removed. The line returns once the memory matrix runs on <code>ci-bench</code>. Rustia cohorts recorded so far: <code>rustia-ci-070c387b173c</code>.</p>
       </section>
 
 

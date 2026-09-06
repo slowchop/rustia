@@ -1454,10 +1454,11 @@ function memoryHistoryModel(records) {
     const rows = MEMORY_HISTORY_WORKLOADS.map((workload) => byWorkload.get(workload));
     return rows.every(Boolean) ? rows : null;
   };
+  // The chart is a ratio against mlua/Luau/JIT, so it needs a reference cohort measured
+  // alongside the Rustia points. Returning null lets the section say so rather than fail:
+  // after the cloud cohorts were removed the only reference left would be a different host.
   const referenceRecord = records.find((record) => completeRows(record, "mlua-luau-jit") != null);
-  if (referenceRecord == null) {
-    fail("memory history has no complete mlua-luau-jit reference cohort");
-  }
+  if (referenceRecord == null) return null;
   const referenceRows = completeRows(referenceRecord, "mlua-luau-jit");
   const metricKeys = {
     peak: "peak_delta_kib",
@@ -1486,9 +1487,7 @@ function memoryHistoryModel(records) {
       ...scores,
     }];
   });
-  if (points.length === 0) {
-    fail("memory history has no complete Rustia cohorts");
-  }
+  if (points.length === 0) return null;
   return {
     points,
     reference: {
@@ -1512,7 +1511,21 @@ function memoryHistorySection(records) {
       </section>
     `;
   }
-  const model = memoryHistoryModel(records);
+  const model = records.length === 0 ? null : memoryHistoryModel(records);
+  if (model == null) {
+    const cohorts = records.map((record) => record.cohort_id ?? record.commit.slice(0, 7));
+    return `
+      <section class="panel history-axis-panel memory-history-panel" id="memory-history">
+        <div class="section-head">
+          <div>
+            <h2>rustia Memory History</h2>
+            <p>${formatInteger(cohorts.length)} cohort(s) on <code>ci-bench</code>; no reference to plot against yet.</p>
+          </div>
+        </div>
+        <p class="pending-note"><strong>The chart needs a competitor reference from the same machine.</strong> It plots mlua/Luau/JIT memory divided by Rustia memory, and the only mlua/JIT memory cohort was measured on a rented cloud host, so it has been removed. The line returns once the memory matrix runs on <code>ci-bench</code>. Rustia cohorts recorded so far: ${cohorts.map((cohort) => `<code>${escapeHtml(cohort)}</code>`).join(", ")}.</p>
+      </section>
+    `;
+  }
   const latest = model.points.at(-1);
   return `
     <section class="panel history-axis-panel memory-history-panel" id="memory-history">
@@ -1931,17 +1944,23 @@ function memoryResultsSection(data) {
       left.engine.localeCompare(right.engine),
   );
   const coverage = new Map(data.detector_coverage.map((entry) => [entry.engine, entry.detector_validated === true]));
+  // A best-first ranking needs something to rank against. With one engine the charts collapse to a
+  // row of single bars, so the panel reads that engine's own figures instead of claiming a comparison.
+  const comparative = new Set(rows.map((row) => row.engine)).size > 1;
   return `
     <section class="panel" id="memory">
       <div class="section-head">
         <div>
-          <h2>Linux Memory Comparison</h2>
-          <p>Best-first charts use fresh process+cgroup samples. Peak catches short spikes; retained uses anonymous memory after quiescence.</p>
+          <h2>${comparative ? "Linux Memory Comparison" : "rustia Memory on ci-bench"}</h2>
+          <p>${comparative
+            ? "Best-first charts use fresh process+cgroup samples. Peak catches short spikes; retained uses anonymous memory after quiescence."
+            : "Fresh process+cgroup samples on the owned host. Peak catches short spikes; retained uses anonymous memory after quiescence."}</p>
         </div>
       </div>
-      <div class="memory-cohorts">
+      ${comparative ? "" : `<p class="pending-note"><strong>No competitor engines yet.</strong> Every competitor memory row was measured on a rented cloud host between 2026-07-26 and 2026-07-28 and has been removed, so these are absolute figures rather than a comparison. Competitors return when the memory matrix runs on <code>ci-bench</code>.</p>`}
+      ${comparative ? `<div class="memory-cohorts">
         ${memoryComparisonCharts(rows)}
-      </div>
+      </div>` : ""}
       <div class="table-wrap">
         <table>
           <thead><tr><th>Implementation · language</th><th>Workload</th><th>Mode</th><th>Idle anon</th><th>Prepared Δ</th><th>Peak Δ</th><th>Retained Δ</th><th>Tail growth</th><th>Signal</th></tr></thead>
